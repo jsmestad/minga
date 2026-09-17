@@ -959,8 +959,8 @@ struct NativeRenderResourcesTests {
         #expect(renderer.lastCompletedPresentationGeneration == 4)
     }
 
-    @Test("a fourth native generation is rejected while three are in flight")
-    @MainActor func fourthInFlightGenerationIsRejected() {
+    @Test("a fourth native generation defers without failure until a complete slot releases")
+    @MainActor func fourthInFlightGenerationDefersUntilCompleteSlotRelease() {
         guard let device = MTLCreateSystemDefaultDevice() else {
             Issue.record("Metal device is required for native generation coverage")
             return
@@ -977,6 +977,7 @@ struct NativeRenderResourcesTests {
         typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
         var completions: [Completion] = []
         var reports: [NativePresentationFailure] = []
+        var capacityAvailableCalls = 0
         var factories = nativeTestFactories()
         factories.observeCompletion = { _, completion in completions.append(completion) }
         factories.reportFailure = { reports.append($0) }
@@ -986,25 +987,37 @@ struct NativeRenderResourcesTests {
         }
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         renderer.setupRenderers(fontManager: fontManager)
+        renderer.onPresentationCapacityAvailable = { capacityAvailableCalls += 1 }
         let drawable = NativeTestDrawable(texture: texture)
 
+        var outcomes: [NativeRenderSubmissionOutcome] = []
         for sequence in 1...4 {
-            renderer.render(
+            outcomes.append(renderer.render(
                 frameState: FrameState(cols: 4, rows: 4),
                 fontManager: fontManager,
                 drawableProvider: { drawable },
                 viewportSize: CGSize(width: 64, height: 64),
                 contentScale: 1,
                 presentationInputSeq: UInt32(sequence)
-            )
+            ))
         }
 
+        #expect(outcomes == [.submitted, .submitted, .submitted, .deferredCapacity])
         #expect(completions.count == 3)
-        #expect(reports.count == 1)
-        #expect(reports.first?.phase == .command)
-        #expect(reports.first?.dimension == .submission)
-        #expect(reports.first?.frameSequence == 4)
-        #expect(renderer.lastCompletedPresentationGeneration == 0)
+        #expect(reports.isEmpty)
+        #expect(renderer.capacityDeferralCount == 1)
+        #expect(capacityAvailableCalls == 0)
+        #expect(renderer.inFlightPresentationCount == 3)
+
+        completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(completions.count == 4)
+        #expect(capacityAvailableCalls == 0)
+        #expect(renderer.inFlightPresentationCount == 3)
+
+        completions[3](true, Int(MTLCommandBufferStatus.completed.rawValue))
+        #expect(capacityAvailableCalls == 1)
+        #expect(renderer.inFlightPresentationCount == 2)
+        #expect(renderer.lastCompletedPresentationGeneration == 1)
     }
 
     @Test("failed frame preserves a populated completed frame")

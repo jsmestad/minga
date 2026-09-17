@@ -415,6 +415,67 @@ public struct NativeTranscriptAccountingMeasurement: Codable, Equatable, Sendabl
     }
 }
 
+/// Controlled delayed-completion measurement for native saturation recovery.
+public struct NativeCapacityRecoveryMeasurement: Codable, Equatable, Sendable {
+    /// Simulated display refresh rate that controls completion delay.
+    public let refreshRateHz: Int
+    /// Capacity misses observed while all three presentation slots were occupied.
+    public let slotMissCount: Int
+    /// Largest number of coalesced pending redraw requests retained at once.
+    public let maximumPendingRedrawCount: Int
+    /// Deferred attempts measured without waiting for capacity.
+    public let deferredAttemptCount: Int
+    /// Asynchronous redraw retries scheduled after capacity became available.
+    public let retryScheduleCount: Int
+    /// Deferred snapshots submitted by the scheduled retries.
+    public let submittedRetryCount: Int
+    /// Median CPU duration of the nonblocking deferred render attempt.
+    public let deferredAttemptCPUP50Ms: Double
+    /// P95 CPU duration of the nonblocking deferred render attempt.
+    public let deferredAttemptCPUP95Ms: Double
+    /// P99 CPU duration of the nonblocking deferred render attempt.
+    public let deferredAttemptCPUP99Ms: Double
+    /// Median main-actor wall wait from capacity deferral to retry scheduling.
+    public let mainActorWaitP50Ms: Double
+    /// P95 main-actor wall wait from capacity deferral to retry scheduling.
+    public let mainActorWaitP95Ms: Double
+    /// P99 main-actor wall wait from capacity deferral to retry scheduling.
+    public let mainActorWaitP99Ms: Double
+    /// Source revision supplied by the benchmark driver.
+    public let revision: String
+
+    /// Creates controlled saturation and recovery evidence for one refresh rate.
+    public init(
+        refreshRateHz: Int,
+        slotMissCount: Int,
+        maximumPendingRedrawCount: Int,
+        deferredAttemptCount: Int,
+        retryScheduleCount: Int,
+        submittedRetryCount: Int,
+        deferredAttemptCPUP50Ms: Double,
+        deferredAttemptCPUP95Ms: Double,
+        deferredAttemptCPUP99Ms: Double,
+        mainActorWaitP50Ms: Double,
+        mainActorWaitP95Ms: Double,
+        mainActorWaitP99Ms: Double,
+        revision: String
+    ) {
+        self.refreshRateHz = refreshRateHz
+        self.slotMissCount = slotMissCount
+        self.maximumPendingRedrawCount = maximumPendingRedrawCount
+        self.deferredAttemptCount = deferredAttemptCount
+        self.retryScheduleCount = retryScheduleCount
+        self.submittedRetryCount = submittedRetryCount
+        self.deferredAttemptCPUP50Ms = deferredAttemptCPUP50Ms
+        self.deferredAttemptCPUP95Ms = deferredAttemptCPUP95Ms
+        self.deferredAttemptCPUP99Ms = deferredAttemptCPUP99Ms
+        self.mainActorWaitP50Ms = mainActorWaitP50Ms
+        self.mainActorWaitP95Ms = mainActorWaitP95Ms
+        self.mainActorWaitP99Ms = mainActorWaitP99Ms
+        self.revision = revision
+    }
+}
+
 /// End-to-end Release measurement for one native editor rendering batch.
 public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
     /// Median transaction-freeze plus publication duration.
@@ -449,6 +510,8 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
     public let maximumInFlightGenerations: Int
     /// Cursor-only and unrelated-chrome staging evidence across transcript sizes.
     public let transcriptAccounting: [NativeTranscriptAccountingMeasurement]?
+    /// Controlled delayed-completion evidence for saturation recovery at 60 and 120 Hz.
+    public let capacityRecovery: [NativeCapacityRecoveryMeasurement]?
 
     /// Creates one complete native render measurement.
     public init(
@@ -467,7 +530,8 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
         copyCompletedFrameCount: Int,
         failedOrDiscardedFrameCount: Int,
         maximumInFlightGenerations: Int,
-        transcriptAccounting: [NativeTranscriptAccountingMeasurement]? = nil
+        transcriptAccounting: [NativeTranscriptAccountingMeasurement]? = nil,
+        capacityRecovery: [NativeCapacityRecoveryMeasurement]? = nil
     ) {
         self.freezePublicationP50Ms = freezePublicationP50Ms
         self.freezePublicationP95Ms = freezePublicationP95Ms
@@ -485,6 +549,7 @@ public struct NativeRenderPerformanceMeasurement: Codable, Equatable, Sendable {
         self.failedOrDiscardedFrameCount = failedOrDiscardedFrameCount
         self.maximumInFlightGenerations = maximumInFlightGenerations
         self.transcriptAccounting = transcriptAccounting
+        self.capacityRecovery = capacityRecovery
     }
 }
 
@@ -530,6 +595,7 @@ public enum NativeRenderPerformanceGate {
             failures.append("native presentation retained \(measurement.maximumInFlightGenerations) generations; limit is \(maximumInFlightGenerations)")
         }
         failures.append(contentsOf: transcriptAccountingFailures(measurement))
+        failures.append(contentsOf: capacityRecoveryFailures(measurement))
         return failures
     }
 
@@ -545,6 +611,8 @@ public enum NativeRenderPerformanceGate {
         }
         let transcriptFailures = measurements.flatMap(transcriptAccountingFailures)
         guard transcriptFailures.isEmpty else { return transcriptFailures }
+        let capacityFailures = measurements.flatMap(capacityRecoveryFailures)
+        guard capacityFailures.isEmpty else { return capacityFailures }
         return absoluteFailures(aggregate(measurements))
     }
 
@@ -631,6 +699,45 @@ public enum NativeRenderPerformanceGate {
             }
             if let count = fixture.sequenceNodeAllocations, count != 0 {
                 failures.append("\(fixture.fixture) allocated transcript sequence nodes")
+            }
+        }
+        return failures
+    }
+
+    private static func capacityRecoveryFailures(
+        _ measurement: NativeRenderPerformanceMeasurement
+    ) -> [String] {
+        guard let samples = measurement.capacityRecovery else { return [] }
+        var failures: [String] = []
+        let refreshRates = Set(samples.map(\.refreshRateHz))
+        if refreshRates != Set([60, 120]) || samples.count != 2 {
+            failures.append("native capacity recovery must measure exactly 60 Hz and 120 Hz")
+        }
+        for sample in samples {
+            if sample.slotMissCount <= 0 || sample.deferredAttemptCount != sample.slotMissCount
+                || sample.retryScheduleCount != sample.slotMissCount
+                || sample.submittedRetryCount != sample.slotMissCount {
+                failures.append("native capacity recovery counters are invalid at \(sample.refreshRateHz) Hz")
+            }
+            if sample.maximumPendingRedrawCount != 1 {
+                failures.append("native capacity recovery retained \(sample.maximumPendingRedrawCount) pending redraws at \(sample.refreshRateHz) Hz")
+            }
+            let durations = [
+                sample.deferredAttemptCPUP50Ms,
+                sample.deferredAttemptCPUP95Ms,
+                sample.deferredAttemptCPUP99Ms,
+                sample.mainActorWaitP50Ms,
+                sample.mainActorWaitP95Ms,
+                sample.mainActorWaitP99Ms
+            ]
+            if durations.contains(where: { !$0.isFinite || $0 < 0 }) {
+                failures.append("native capacity recovery durations are invalid at \(sample.refreshRateHz) Hz")
+            }
+            if sample.deferredAttemptCPUP50Ms > sample.deferredAttemptCPUP95Ms
+                || sample.deferredAttemptCPUP95Ms > sample.deferredAttemptCPUP99Ms
+                || sample.mainActorWaitP50Ms > sample.mainActorWaitP95Ms
+                || sample.mainActorWaitP95Ms > sample.mainActorWaitP99Ms {
+                failures.append("native capacity recovery percentiles are unordered at \(sample.refreshRateHz) Hz")
             }
         }
         return failures

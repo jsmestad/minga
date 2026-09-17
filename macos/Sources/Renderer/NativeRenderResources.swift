@@ -68,6 +68,18 @@ public struct NativePresentationFailure: Error, Sendable, Equatable {
     }
 }
 
+/// Immediate result of attempting to submit one committed editor snapshot.
+///
+/// Capacity deferral is not a presentation failure. The caller retains one
+/// coalesced redraw intent and retries after the renderer reports that a slot
+/// became available. `.submitted` means the first Metal command buffer was
+/// committed, so the caller may consume the exact captured input correlation.
+enum NativeRenderSubmissionOutcome: Sendable, Equatable {
+    case submitted
+    case deferredCapacity
+    case failed
+}
+
 /// Exact checked demand derived from already-bounded visible preparation and
 /// native ABI strides. No guessed slot or instance constants are accepted.
 public struct NativeRenderDemand: Sendable, Equatable {

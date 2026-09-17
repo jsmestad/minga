@@ -4175,7 +4175,36 @@ struct CommandDispatcherPresentationSampleTests {
         commit(dispatcher, frameSeq: 2, baseFrameSeq: 1, inputSeq: second)
 
         #expect(dispatcher.latency.snapshot().discardCounts[.superseded] == 1)
-        #expect(dispatcher.takePresentationInputSeq() == second)
+        #expect(dispatcher.capturePresentationInputSeq() == second)
+    }
+
+    @Test("capturing a presentation sequence does not consume it before submission")
+    @MainActor func captureDoesNotConsumeBeforeSubmission() {
+        let dispatcher = makeDispatcher()
+        let seq = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: seq)
+
+        #expect(dispatcher.capturePresentationInputSeq() == seq)
+        #expect(dispatcher.capturePresentationInputSeq() == seq)
+
+        dispatcher.acknowledgePresentationSubmission(inputSeq: seq)
+        #expect(dispatcher.capturePresentationInputSeq() == 0)
+    }
+
+    @Test("an old submitted sequence cannot clear a newer pending correlation")
+    @MainActor func oldSubmissionCannotConsumeNewerCorrelation() {
+        let dispatcher = makeDispatcher()
+        let old = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: old)
+        let capturedOld = dispatcher.capturePresentationInputSeq()
+
+        let newer = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 2, baseFrameSeq: 1, inputSeq: newer)
+        dispatcher.acknowledgePresentationSubmission(inputSeq: capturedOld)
+
+        #expect(dispatcher.capturePresentationInputSeq() == newer)
+        dispatcher.acknowledgePresentationSubmission(inputSeq: newer)
+        #expect(dispatcher.capturePresentationInputSeq() == 0)
     }
 
     @Test("an unavailable surface discards rather than selects the pending sample")
@@ -4186,7 +4215,7 @@ struct CommandDispatcherPresentationSampleTests {
 
         dispatcher.discardPendingPresentation(reason: .occluded)
 
-        #expect(dispatcher.takePresentationInputSeq() == 0)
+        #expect(dispatcher.capturePresentationInputSeq() == 0)
         #expect(dispatcher.latency.snapshot().discardCounts[.occluded] == 1)
     }
 
@@ -4199,7 +4228,7 @@ struct CommandDispatcherPresentationSampleTests {
         let pendingFrame = dispatcher.pendingPresentationFrame()
         dispatcher.deferOccludedPresentation()
 
-        #expect(dispatcher.takePresentationInputSeq() == 0)
+        #expect(dispatcher.capturePresentationInputSeq() == 0)
         #expect(dispatcher.latency.snapshot().discardCounts[.occluded] == 1)
         #expect(dispatcher.pendingPresentationFrame() == pendingFrame)
     }
