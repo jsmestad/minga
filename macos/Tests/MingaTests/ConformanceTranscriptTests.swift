@@ -52,10 +52,13 @@ struct ConformanceTranscriptTests {
     func runsTranscript(_ entry: ConformanceIndexEntry) throws {
         let steps = try Self.loadSteps(entry.file)
         let gui = GUIState()
-        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
-
         var frameReset = false
-        dispatcher.onScrollPresentationReset = { _ in frameReset = true }
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            applicationEffectSink: { effect in
+                if case .scrollPresentationReset = effect { frameReset = true }
+            }
+        )
 
         // Per-window injected local offset (state injection: the point of the
         // input suite is running a transcript against a nonzero local offset).

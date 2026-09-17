@@ -286,7 +286,10 @@ enum PreviewRegistry {
         guard let renderer = CoreTextMetalRenderer() else { return nil }
         renderer.setupRenderers(fontManager: fontManager)
 
-        let dispatcher = CommandDispatcher(cols: 112, rows: 36, guiState: appState.gui)
+        let dispatcher = CommandDispatcher(
+            cols: 112, rows: 36, guiState: appState.gui,
+            applicationEffectSink: { _ in }
+        )
         dispatcher.fontManager = fontManager
         populateEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 
@@ -512,7 +515,10 @@ enum PreviewRegistry {
         guard let renderer = CoreTextMetalRenderer() else { return nil }
         renderer.setupRenderers(fontManager: fontManager)
 
-        let dispatcher = CommandDispatcher(cols: 112, rows: 36, guiState: appState.gui)
+        let dispatcher = CommandDispatcher(
+            cols: 112, rows: 36, guiState: appState.gui,
+            applicationEffectSink: { _ in }
+        )
         dispatcher.fontManager = fontManager
         populateDiagnosticsEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 

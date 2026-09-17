@@ -487,7 +487,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Command dispatcher.
         let disp = CommandDispatcher(
             cols: cols, rows: rows, guiState: appState.gui,
-            resourcePolicy: frameResourcePolicy
+            resourcePolicy: frameResourcePolicy,
+            applicationEffectSink: { [weak self] effect in
+                self?.handleApplicationCommitEffect(effect)
+            }
         )
         disp.fontManager = fm
         disp.replaceConnection(with: connectionID)
@@ -499,9 +502,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         disp.requestPresentationFocus = { [weak self] in
             self?.editorNSView?.focusPolicy.requestPresentationFocus() == true
-        }
-        disp.onFontChanged = { [weak self] family, size, ligatures, weight in
-            self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
         self.dispatcher = disp
 
@@ -549,14 +549,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the editor view.
         let nsView = EditorNSView(encoder: enc, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
-        disp.onScrollPresentationReset = { [weak nsView] windowId in
-            nsView?.resetScrollPresentation(windowId: windowId)
-        }
-        // Go-to-definition link cursor (#2630): the BEAM toggles the pointing-hand
-        // cursor when Cmd+hover lands on a navigable symbol.
-        disp.onLinkCursorChanged = { [weak nsView] active in
-            nsView?.setLinkCursorActive(active)
-        }
         nsView.editorInput = appState.gui.editorInput
         ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
@@ -613,42 +605,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
         }
-        disp.onAgentChatVisibilityChanged = { [weak nsView] visible in
-            nsView?.setAgentChatVisible(visible)
-        }
-        disp.onModeChanged = { [weak nsView] modeName in
-            guard let nsView else { return }
-            nsView.statusBarModeDidChange()
-            NSAccessibility.post(
-                element: nsView,
-                notification: .announcementRequested,
-                userInfo: [.announcement: "\(modeName) mode"]
-            )
-        }
-        disp.onLineSpacingChanged = { [weak nsView] spacing in
-            nsView?.lineSpacingChanged(spacing)
-        }
-        disp.onCursorAnimationChanged = { [weak ctRenderer, weak nsView] enabled in
-            ctRenderer?.setCursorAnimateConfigEnabled(enabled)
-            nsView?.renderFrame()
-        }
-        disp.onTitleChanged = { [weak appState] title in
-            appState?.windowTitle = title
-        }
-        disp.onWindowBgChanged = { [weak appState] color in
-            guard let appState else { return }
-            let r = color.redComponent
-            let g = color.greenComponent
-            let b = color.blueComponent
-            let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
-            appState.windowBgIsDark = isDark
-            let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
-            for window in NSApp.windows where window.identifier?.rawValue != "MingaSettingsWindow" {
-                window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-                window.backgroundColor = bgColor
-            }
-        }
-
         // The ready event is deferred: EditorNSView.setFrameSize sends it
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.
@@ -672,6 +628,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             self.acceptsOpenRequests = true
             self.flushPendingOpenRequests()
+        }
+    }
+
+    /// Delivers every application-owned prepared effect to its existing resource owner.
+    private func handleApplicationCommitEffect(_ effect: ApplicationCommitEffect) {
+        switch effect {
+        case .fontChanged(let family, let size, let ligatures, let weight):
+            handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
+        case .scrollPresentationReset(let windowID):
+            editorNSView?.resetScrollPresentation(windowId: windowID)
+        case .titleChanged(let title):
+            appState.windowTitle = title
+        case .windowBackgroundChanged(let red, let green, let blue):
+            let r = CGFloat(red) / 255.0
+            let g = CGFloat(green) / 255.0
+            let b = CGFloat(blue) / 255.0
+            let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
+            appState.windowBgIsDark = isDark
+            let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
+            for window in NSApp.windows where window.identifier?.rawValue != "MingaSettingsWindow" {
+                window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+                window.backgroundColor = bgColor
+            }
+        case .linkCursorChanged(let active):
+            editorNSView?.setLinkCursorActive(active)
+        case .lineSpacingChanged(let spacing):
+            editorNSView?.lineSpacingChanged(spacing)
+        case .cursorAnimationChanged(let enabled):
+            editorNSView?.coreTextRenderer.setCursorAnimateConfigEnabled(enabled)
+            editorNSView?.renderFrame()
+        case .accessibilityModeChanged(let modeName):
+            guard let editorNSView else { return }
+            editorNSView.statusBarModeDidChange()
+            NSAccessibility.post(
+                element: editorNSView,
+                notification: .announcementRequested,
+                userInfo: [.announcement: "\(modeName) mode"]
+            )
+        case .agentChatVisibilityChanged(let visible):
+            editorNSView?.setAgentChatVisible(visible)
         }
     }
 

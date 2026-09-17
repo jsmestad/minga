@@ -59,7 +59,11 @@ private enum CompletionNavigationCodepoints {
     static let ctrlModifier: UInt8 = 0x02
 }
 
-private enum CommitEffect {
+/// Application-owned work emitted by the dispatcher after state publication.
+///
+/// The dispatcher preserves these values until the app boundary so adding a case
+/// requires one explicit handling decision in `AppDelegate`.
+enum ApplicationCommitEffect: Equatable {
     case fontChanged(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case scrollPresentationReset(windowID: UInt16)
     case titleChanged(String)
@@ -67,8 +71,12 @@ private enum CommitEffect {
     case linkCursorChanged(Bool)
     case lineSpacingChanged(Float)
     case cursorAnimationChanged(Bool)
-    case modeChanged(String)
+    case accessibilityModeChanged(String)
     case agentChatVisibilityChanged(Bool)
+}
+
+private enum CommitEffect {
+    case application(ApplicationCommitEffect)
     case clipboardWrite(target: UInt8, text: String)
     case extensionRuntime(FrontendExtensionRuntimeMessage)
     case applicationQuitResponse(ApplicationQuitResponse)
@@ -80,6 +88,8 @@ private enum CommitEffect {
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
+    typealias ApplicationEffectSink = @MainActor (ApplicationCommitEffect) -> Void
+
     /// Per-frame metadata for the Metal render pass.
     var frameState: FrameState
 
@@ -108,38 +118,6 @@ final class CommandDispatcher {
     /// Presents one correlated BEAM-owned native file-dialog request.
     var onFileDialogRequest: ((NativeFileDialogRequest) -> Void)?
 
-    /// Called when the window title should change.
-    var onTitleChanged: ((String) -> Void)?
-
-    /// Called when the BEAM sends a window background color (RGB).
-    var onWindowBgChanged: ((NSColor) -> Void)?
-
-    /// Called when the BEAM toggles the go-to-definition link cursor (#2630).
-    /// `true` shows the pointing-hand cursor for a navigable Cmd+hover symbol.
-    var onLinkCursorChanged: ((Bool) -> Void)?
-
-    /// Called when the BEAM sends a font configuration change.
-    /// Parameters: family, size, ligatures, weight byte.
-    var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
-
-    /// Called when the editor mode changes (for accessibility announcements).
-    /// Parameter: mode name string (e.g., "NORMAL", "INSERT", "VISUAL").
-    var onModeChanged: ((String) -> Void)?
-
-    /// Called when agent chat visibility changes. Used to install/remove
-    /// the keyboard event monitor on EditorNSView since SwiftUI onChange
-    /// can miss updates during animated transitions.
-    var onAgentChatVisibilityChanged: ((Bool) -> Void)?
-
-    /// Called when line_spacing changes, so EditorNSView can trigger a resize.
-    var onLineSpacingChanged: ((Float) -> Void)?
-
-    /// Called for a pane whose committed scroll authority invalidates local prediction.
-    var onScrollPresentationReset: ((UInt16) -> Void)?
-
-    /// Called when the BEAM changes the GUI cursor animation preference.
-    var onCursorAnimationChanged: ((Bool) -> Void)?
-
     /// Called once after the first `commit_frame` is received from the BEAM.
     /// Used in bundle mode to flush pending file URLs after the BEAM is ready.
     var onFirstRender: (() -> Void)?
@@ -158,6 +136,7 @@ final class CommandDispatcher {
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
     private let resourcePolicy: FrameResourcePolicy
+    private let applicationEffectSink: ApplicationEffectSink
 
     /// Local identity of the BEAM connection whose decoded work may mutate this dispatcher.
     private(set) var connectionID: UInt64 = 0
@@ -370,11 +349,13 @@ final class CommandDispatcher {
 
     init(
         cols: UInt16, rows: UInt16, guiState: GUIState,
-        resourcePolicy: FrameResourcePolicy = .default
+        resourcePolicy: FrameResourcePolicy = .default,
+        applicationEffectSink: @escaping ApplicationEffectSink
     ) {
         self.frameState = FrameState(cols: cols, rows: rows)
         self.guiState = guiState
         self.resourcePolicy = resourcePolicy
+        self.applicationEffectSink = applicationEffectSink
     }
 
     /// Installs a replacement BEAM connection and clears every identity-bound protocol authority.
@@ -414,8 +395,8 @@ final class CommandDispatcher {
 
         fontManager?.resetProtocolRegistrations()
         guiState.resetProtocolConnection()
-        onLinkCursorChanged?(false)
-        onAgentChatVisibilityChanged?(false)
+        applicationEffectSink(.linkCursorChanged(false))
+        applicationEffectSink(.agentChatVisibilityChanged(false))
     }
 
     /// Returns true when a queued delivery or asynchronous callback belongs to the live connection.
@@ -762,7 +743,7 @@ final class CommandDispatcher {
         for surface in snapshot.surfaces where changedWindowIds.contains(surface.windowId) {
             let previousScroll = priorSnapshot?.content(for: surface.windowId)?.scrollPresentation
             if shouldResetScrollPresentation(previous: previousScroll, next: surface.content.scrollPresentation) {
-                effects.append(.scrollPresentationReset(windowID: surface.windowId))
+                effects.append(.application(.scrollPresentationReset(windowID: surface.windowId)))
             }
         }
         guiState.windowContents = snapshot.windowContents
@@ -1056,16 +1037,16 @@ final class CommandDispatcher {
             PortLogger.warn("Frame marker reached apply(_:); transaction routing bug")
 
         case .setTitle(let title):
-            effects.append(.titleChanged(title))
+            effects.append(.application(.titleChanged(title)))
 
         case .setWindowBg(let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             frameState.defaultBg = rgb
-            effects.append(.windowBackgroundChanged(red: r, green: g, blue: b))
+            effects.append(.application(.windowBackgroundChanged(red: r, green: g, blue: b)))
             effects.append(.infoLog("Window bg received: r=\(r) g=\(g) b=\(b)"))
 
         case .setLinkCursor(let active):
-            effects.append(.linkCursorChanged(active))
+            effects.append(.application(.linkCursorChanged(active)))
 
         case .protocolError(let message):
             // The BEAM rejected this frontend's handshake protocol_version, so
@@ -1081,9 +1062,9 @@ final class CommandDispatcher {
             break
 
         case .setFont(let family, let size, let ligatures, let weight):
-            effects.append(.fontChanged(
+            effects.append(.application(.fontChanged(
                 family: family, size: size, ligatures: ligatures, weight: weight
-            ))
+            )))
 
         case .setFontFallback(let families):
             fontManager?.setFallbackFonts(families)
@@ -1148,11 +1129,11 @@ final class CommandDispatcher {
             frameState.lineSpacing = newSpacing
             if lastLineSpacing != newSpacing {
                 lastLineSpacing = newSpacing
-                effects.append(.lineSpacingChanged(newSpacing))
+                effects.append(.application(.lineSpacingChanged(newSpacing)))
             }
 
         case .guiCursorAnimation(let enabled):
-            effects.append(.cursorAnimationChanged(enabled))
+            effects.append(.application(.cursorAnimationChanged(enabled)))
 
         case .clipboardWrite(let target, let text):
             effects.append(.clipboardWrite(target: target, text: text))
@@ -1195,7 +1176,7 @@ final class CommandDispatcher {
             frameState.totalLineCount = update.lineCount
             if update.mode != lastMode {
                 lastMode = update.mode
-                effects.append(.modeChanged(guiState.statusBarState.modeName))
+                effects.append(.application(.accessibilityModeChanged(guiState.statusBarState.modeName)))
             }
 
         case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration):
@@ -1223,7 +1204,7 @@ final class CommandDispatcher {
                 guiState.agentChatState.hide()
             }
             if guiState.agentChatState.visible != wasVisible {
-                effects.append(.agentChatVisibilityChanged(guiState.agentChatState.visible))
+                effects.append(.application(.agentChatVisibilityChanged(guiState.agentChatState.visible)))
             }
 
         case .guiAgentTranscript:
@@ -1253,7 +1234,7 @@ final class CommandDispatcher {
             let previousScroll = guiState.windowContents[data.windowId]?.scrollPresentation
             guiState.windowContents[data.windowId] = data
             if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
-                effects.append(.scrollPresentationReset(windowID: data.windowId))
+                effects.append(.application(.scrollPresentationReset(windowID: data.windowId)))
             }
 
         case .guiWindowOverlayDelta(let delta):
@@ -1271,7 +1252,7 @@ final class CommandDispatcher {
             let previousScroll = current.scrollPresentation
             guiState.windowContents[delta.windowId] = updated
             if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
-                effects.append(.scrollPresentationReset(windowID: delta.windowId))
+                effects.append(.application(.scrollPresentationReset(windowID: delta.windowId)))
             }
 
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
@@ -1449,7 +1430,7 @@ final class CommandDispatcher {
     func discardLocalPresentation(_ kind: TransformKind, windowId: UInt16 = 0) {
         switch kind {
         case .offset:
-            replay([.scrollPresentationReset(windowID: windowId)])
+            replay([.application(.scrollPresentationReset(windowID: windowId))])
         case .identity:
             break
         }
@@ -1458,29 +1439,8 @@ final class CommandDispatcher {
     private func replay(_ effects: [CommitEffect]) {
         for effect in effects {
             switch effect {
-            case .fontChanged(let family, let size, let ligatures, let weight):
-                onFontChanged?(family, size, ligatures, weight)
-            case .scrollPresentationReset(let windowID):
-                onScrollPresentationReset?(windowID)
-            case .titleChanged(let title):
-                onTitleChanged?(title)
-            case .windowBackgroundChanged(let red, let green, let blue):
-                onWindowBgChanged?(NSColor(
-                    red: CGFloat(red) / 255.0,
-                    green: CGFloat(green) / 255.0,
-                    blue: CGFloat(blue) / 255.0,
-                    alpha: 1.0
-                ))
-            case .linkCursorChanged(let active):
-                onLinkCursorChanged?(active)
-            case .lineSpacingChanged(let spacing):
-                onLineSpacingChanged?(spacing)
-            case .cursorAnimationChanged(let enabled):
-                onCursorAnimationChanged?(enabled)
-            case .modeChanged(let mode):
-                onModeChanged?(mode)
-            case .agentChatVisibilityChanged(let visible):
-                onAgentChatVisibilityChanged?(visible)
+            case .application(let applicationEffect):
+                applicationEffectSink(applicationEffect)
             case .clipboardWrite(let target, let text):
                 handleClipboardWrite(target: target, text: text)
             case .extensionRuntime(let message):
