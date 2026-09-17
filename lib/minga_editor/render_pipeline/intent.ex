@@ -53,6 +53,14 @@ defmodule MingaEditor.RenderPipeline.Intent do
 
   defp active_cursor(_buffer), do: {0, 0}
 
+  @doc "Replaces bulk highlight data when packing or restoring a renderer submission."
+  @spec with_highlight_payload(t(), %{pid() => MingaEditor.UI.Highlight.t()}, map()) :: t()
+  def with_highlight_payload(%__MODULE__{} = intent, highlights, semantic_tokens),
+    do: %{
+      intent
+      | frame: FrameIntent.with_highlight_payload(intent.frame, highlights, semantic_tokens)
+    }
+
   @doc "Marks semantic frame state for a recovery keyframe without adding cache state."
   @spec force_keyframe(t()) :: t()
   def force_keyframe(%__MODULE__{} = intent),

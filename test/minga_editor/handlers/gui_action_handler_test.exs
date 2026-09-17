@@ -75,8 +75,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert rendered.render.render_correlation.latest_intent_revision == revision + 1
 
-    assert_receive {:"$gen_cast",
-                    {:render, %MingaEditor.RenderPipeline.Intent{}, _seq, _pushed_at}}
+    assert_receive {:"$gen_cast", {:render, %MingaEditor.Renderer.Submission{}, _seq, _pushed_at}}
 
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
   end
@@ -133,8 +132,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert rendered.render.render_correlation.latest_intent_revision == revision + 1
 
-    assert_receive {:"$gen_cast",
-                    {:render, %MingaEditor.RenderPipeline.Intent{}, _seq, _pushed_at}}
+    assert_receive {:"$gen_cast", {:render, %MingaEditor.Renderer.Submission{}, _seq, _pushed_at}}
 
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
   end
@@ -944,7 +942,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   defp renderer_probe(owner) do
     receive do
-      {:"$gen_call", from, {:reset_connection, intent, _seq, _pushed_at}} ->
+      {:"$gen_call", from, {:reset_connection, submission, _seq, _pushed_at}} ->
+        {intent, _, _} = MingaEditor.Renderer.Submission.materialize(submission, %{}, %{})
         GenServer.reply(from, :ok)
         send(owner, {:renderer_reset, intent})
         renderer_probe(owner)

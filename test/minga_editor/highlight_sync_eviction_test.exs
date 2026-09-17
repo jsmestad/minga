@@ -31,9 +31,10 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
           %{
             state
             | parser:
-                MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
-                  highlights: %{stale => Highlight.new()}
-                })
+                MingaEditor.State.Parser.accept_highlighting(
+                  state.parser,
+                  Highlighting.set_highlights(%Highlighting{}, %{stale => Highlight.new()})
+                )
           }
         end)
         |> then(fn state ->
@@ -92,7 +93,7 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
       assert Manager.buffer_id(buffer, manager()) == id
 
       assert state.parser.highlighting |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
-               [:highlights, :syntax_overrides]
+               [:highlights, :revisions, :syntax_overrides]
     end
 
     test "registrations allocate stable monotonic IDs" do
@@ -116,9 +117,10 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
           %{
             state
             | parser:
-                MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
-                  highlights: %{buffer_pid => Highlight.new()}
-                })
+                MingaEditor.State.Parser.accept_highlighting(
+                  state.parser,
+                  Highlighting.set_highlights(%Highlighting{}, %{buffer_pid => Highlight.new()})
+                )
           }
         end)
         |> then(fn state ->
@@ -148,9 +150,10 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
           %{
             state
             | parser:
-                MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
-                  highlights: %{buffer_pid => Highlight.new()}
-                })
+                MingaEditor.State.Parser.accept_highlighting(
+                  state.parser,
+                  Highlighting.set_highlights(%Highlighting{}, %{buffer_pid => Highlight.new()})
+                )
           }
         end)
         |> then(fn state ->

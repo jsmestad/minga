@@ -18,6 +18,7 @@ defmodule Minga.Conformance.ProductionRenderCorpusTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
+  alias MingaEditor.Renderer.Submission
 
   import MingaEditor.RenderPipeline.TestHelpers, only: [gui_state: 1]
 
@@ -215,7 +216,11 @@ defmodule Minga.Conformance.ProductionRenderCorpusTest do
   end
 
   defp render_and_ack(renderer, frontend, port, intent, frame_seq) do
-    RendererServer.cast_snapshot(renderer, intent, frame_seq)
+    RendererServer.cast_snapshot(
+      renderer,
+      Submission.full(intent),
+      frame_seq
+    )
 
     assert_receive {:frontend_commands, ^frontend,
                     [

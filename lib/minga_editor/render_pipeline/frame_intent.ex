@@ -103,6 +103,17 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
     }
   end
 
+  @doc "Replaces only the bulk highlight payload while preserving frame metadata."
+  @spec with_highlight_payload(t(), %{pid() => MingaEditor.UI.Highlight.t()}, map()) :: t()
+  def with_highlight_payload(%__MODULE__{} = frame, highlights, semantic_tokens) do
+    %{
+      frame
+      | highlighting:
+          MingaEditor.State.Highlighting.restore_render_payload(frame.highlighting, highlights),
+        semantic_tokens: semantic_tokens
+    }
+  end
+
   @spec force_keyframe(t()) :: t()
   def force_keyframe(%__MODULE__{} = frame), do: %{frame | force_keyframe?: true}
 

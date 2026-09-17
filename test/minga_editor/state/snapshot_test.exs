@@ -69,7 +69,7 @@ defmodule MingaEditor.State.SnapshotTest do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
 
-      highlighting = %Highlighting{highlights: %{buf => Highlight.new()}}
+      highlighting = Highlighting.set_highlights(%Highlighting{}, %{buf => Highlight.new()})
 
       state = %{
         state

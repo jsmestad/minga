@@ -10,6 +10,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.StaleBufferError
   alias MingaEditor.Renderer.State
+  alias MingaEditor.Renderer.Submission
 
   @type result :: {:noreply, State.t()}
 
@@ -213,7 +214,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
   defp receipt(output, seq, intent) do
     receipt = RenderReceipt.from_output(output, seq, monotonic_now(), intent.revision)
 
-    emit_boundary_sizes(intent, receipt)
+    emit_boundary_size(:receipt_bytes, receipt, seq)
     receipt
   end
 
@@ -242,8 +243,12 @@ defmodule MingaEditor.Renderer.FrameHandler do
     )
   end
 
-  @spec emit_boundary_sizes(Intent.t(), RenderReceipt.t()) :: :ok
-  defp emit_boundary_sizes(intent, receipt) do
+  @doc "Measures the transmitted request before restoring renderer-local highlight data."
+  @spec observe_submission(Submission.t(), non_neg_integer()) :: :ok
+  def observe_submission(submission, seq), do: emit_boundary_size(:request_bytes, submission, seq)
+
+  @spec emit_boundary_size(:request_bytes | :receipt_bytes, term(), non_neg_integer()) :: :ok
+  defp emit_boundary_size(measurement, value, seq) do
     event = [:minga, :render, :boundary]
 
     case :telemetry.list_handlers(event) do
@@ -251,14 +256,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
         :ok
 
       _handlers ->
-        Telemetry.execute(
-          event,
-          %{
-            request_bytes: :erlang.external_size(intent),
-            receipt_bytes: :erlang.external_size(receipt)
-          },
-          %{}
-        )
+        Telemetry.execute(event, %{measurement => :erlang.external_size(value)}, %{frame_seq: seq})
     end
   end
 

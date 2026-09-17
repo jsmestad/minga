@@ -399,6 +399,7 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
   @value_modules [
     "MingaEditor.Renderer.ReceiptProjection",
     "MingaEditor.Renderer.RenderReceipt",
+    "MingaEditor.Renderer.Submission",
     "Minga.Keymap.Scope",
     "MingaAgent.Branch",
     "MingaAgent.Changeset.BudgetExhaustedEvent",

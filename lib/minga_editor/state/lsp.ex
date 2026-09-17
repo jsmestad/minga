@@ -52,6 +52,7 @@ defmodule MingaEditor.State.LSP do
           selection_range_index: non_neg_integer(),
           pending_requests: PendingRequests.t(),
           semantic_tokens: %{pid() => semantic_layer()},
+          semantic_token_revisions: %{pid() => reference()},
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil
@@ -65,6 +66,7 @@ defmodule MingaEditor.State.LSP do
             selection_range_index: 0,
             pending_requests: PendingRequests.new(),
             semantic_tokens: %{},
+            semantic_token_revisions: %{},
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil
@@ -370,13 +372,18 @@ defmodule MingaEditor.State.LSP do
             lsp.semantic_tokens,
             buffer,
             {version, List.to_tuple(names), List.to_tuple(spans)}
-          )
+          ),
+        semantic_token_revisions: Map.put(lsp.semantic_token_revisions, buffer, make_ref())
     }
   end
 
   @spec clear_semantic_tokens(t(), pid()) :: t()
   def clear_semantic_tokens(%__MODULE__{} = lsp, buffer) when is_pid(buffer),
-    do: %{lsp | semantic_tokens: Map.delete(lsp.semantic_tokens, buffer)}
+    do: %{
+      lsp
+      | semantic_tokens: Map.delete(lsp.semantic_tokens, buffer),
+        semantic_token_revisions: Map.delete(lsp.semantic_token_revisions, buffer)
+    }
 
   @spec retire_buffer(t(), pid()) :: t()
   def retire_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer) do

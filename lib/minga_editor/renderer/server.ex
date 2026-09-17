@@ -11,7 +11,7 @@ defmodule MingaEditor.Renderer.Server do
 
   alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.Frontend.Manager, as: FrontendManager
-  alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.FrameHandler
   alias MingaEditor.Renderer.RecoveryHandler
   alias MingaEditor.Renderer.RenderReceipt
@@ -24,31 +24,31 @@ defmodule MingaEditor.Renderer.Server do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
-  @doc "Queues the latest semantic frame intent for asynchronous rendering."
-  @spec cast_snapshot(GenServer.server(), Intent.t(), non_neg_integer()) :: :ok
-  def cast_snapshot(server \\ __MODULE__, intent, frame_seq)
+  @doc "Queues the latest semantic frame submission for asynchronous rendering."
+  @spec cast_snapshot(GenServer.server(), Submission.t(), non_neg_integer()) :: :ok
+  def cast_snapshot(server \\ __MODULE__, submission, frame_seq)
 
-  def cast_snapshot(server, %Intent{} = intent, frame_seq)
+  def cast_snapshot(server, %Submission{} = submission, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
-    GenServer.cast(server, {:render, intent, frame_seq, monotonic_now()})
+    GenServer.cast(server, {:render, submission, frame_seq, monotonic_now()})
   end
 
   @doc "Runs one frame synchronously inside this renderer process."
-  @spec render_sync(GenServer.server(), Intent.t(), non_neg_integer()) ::
+  @spec render_sync(GenServer.server(), Submission.t(), non_neg_integer()) ::
           {:ok, RenderReceipt.t()} | {:error, Exception.t()}
-  def render_sync(server, intent, frame_seq)
+  def render_sync(server, submission, frame_seq)
 
-  def render_sync(server, %Intent{} = intent, frame_seq)
+  def render_sync(server, %Submission{} = submission, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
-    GenServer.call(server, {:render_sync, intent, frame_seq, monotonic_now()}, :infinity)
+    GenServer.call(server, {:render_sync, submission, frame_seq, monotonic_now()}, :infinity)
   end
 
   @doc "Resets frontend state and renders a synchronous recovery keyframe."
-  @spec reset_sync(GenServer.server(), Intent.t(), non_neg_integer()) ::
+  @spec reset_sync(GenServer.server(), Submission.t(), non_neg_integer()) ::
           {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()}
-  def reset_sync(server, %Intent{} = intent, frame_seq)
+  def reset_sync(server, %Submission{} = submission, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
-    GenServer.call(server, {:reset_sync, intent, frame_seq, monotonic_now()}, :infinity)
+    GenServer.call(server, {:reset_sync, submission, frame_seq, monotonic_now()}, :infinity)
   end
 
   @doc "Returns true while rendering or awaiting frontend credit."
@@ -65,7 +65,7 @@ defmodule MingaEditor.Renderer.Server do
           MingaEditor.Renderer.RejectionState.terminal() | nil
   def terminal_failure(server \\ __MODULE__), do: GenServer.call(server, :terminal_failure)
 
-  @doc "Records one-shot adaptation evidence bound to an outstanding rejected transaction."
+  @doc "Records one-shot adaptation evidence without changing the retained source presentation."
   @spec record_adaptation(
           GenServer.server(),
           non_neg_integer(),
@@ -73,7 +73,7 @@ defmodule MingaEditor.Renderer.Server do
           ResourcePolicy.dimension(),
           integer(),
           integer(),
-          Intent.t()
+          Submission.t()
         ) :: :ok | :error
   def record_adaptation(
         server \\ __MODULE__,
@@ -82,12 +82,12 @@ defmodule MingaEditor.Renderer.Server do
         dimension,
         rejected_value,
         adapted_value,
-        %Intent{} = adapted_intent
+        %Submission{} = adapted_submission
       ) do
     GenServer.call(
       server,
       {:record_adaptation, generation, frame_seq, dimension, rejected_value, adapted_value,
-       adapted_intent}
+       adapted_submission}
     )
   end
 
@@ -111,12 +111,12 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   @doc "Abandons the old frontend connection and renders a fresh keyframe."
-  @spec reset_connection(GenServer.server(), Intent.t(), non_neg_integer()) :: :ok
-  def reset_connection(server \\ __MODULE__, intent, frame_seq)
+  @spec reset_connection(GenServer.server(), Submission.t(), non_neg_integer()) :: :ok
+  def reset_connection(server \\ __MODULE__, submission, frame_seq)
 
-  def reset_connection(server, %Intent{} = intent, frame_seq)
+  def reset_connection(server, %Submission{} = submission, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0,
-      do: GenServer.call(server, {:reset_connection, intent, frame_seq, monotonic_now()})
+      do: GenServer.call(server, {:reset_connection, submission, frame_seq, monotonic_now()})
 
   @impl true
   @spec init(keyword()) :: {:ok, t()}
@@ -149,10 +149,15 @@ defmodule MingaEditor.Renderer.Server do
 
   def handle_call(
         {:record_adaptation, generation, frame_seq, dimension, rejected_value, adapted_value,
-         adapted_intent},
+         adapted_submission},
         _from,
         state
       ) do
+    FrameHandler.observe_submission(adapted_submission, frame_seq)
+
+    {adapted_intent, _highlights, _semantic_tokens} =
+      Submission.materialize(adapted_submission, state.highlights, state.semantic_tokens)
+
     with {:ok, descriptor} <- ResourcePolicy.adaptation(dimension, rejected_value, adapted_value),
          {:ok, adapted_state} <-
            State.record_adaptation(state, generation, frame_seq, descriptor, adapted_intent) do
@@ -163,21 +168,36 @@ defmodule MingaEditor.Renderer.Server do
     end
   end
 
-  def handle_call({:reset_connection, intent, seq, pushed_at}, _from, state),
-    do: RecoveryHandler.reset(state, intent, seq, pushed_at)
+  def handle_call({:reset_connection, submission, seq, pushed_at}, _from, state) do
+    {state, intent} = receive_submission(state, submission, seq)
+    RecoveryHandler.reset(state, intent, seq, pushed_at)
+  end
 
-  def handle_call({:reset_sync, intent, seq, pushed_at}, _from, state),
-    do: RecoveryHandler.reset_sync(state, intent, seq, pushed_at)
+  def handle_call({:reset_sync, submission, seq, pushed_at}, _from, state) do
+    {state, intent} = receive_submission(state, submission, seq)
+    RecoveryHandler.reset_sync(state, intent, seq, pushed_at)
+  end
 
-  def handle_call({:render_sync, intent, seq, pushed_at}, _from, state),
-    do: FrameHandler.render_sync(state, intent, seq, pushed_at)
+  def handle_call({:render_sync, submission, seq, pushed_at}, _from, state) do
+    {state, intent} = receive_submission(state, submission, seq)
+    FrameHandler.render_sync(state, intent, seq, pushed_at)
+  end
 
   @impl true
-  def handle_cast({:render, intent, seq, pushed_at}, state),
-    do: FrameHandler.enqueue(state, intent, seq, pushed_at)
+  def handle_cast({:render, submission, seq, pushed_at}, state) do
+    {state, intent} = receive_submission(state, submission, seq)
+    FrameHandler.enqueue(state, intent, seq, pushed_at)
+  end
 
   @impl true
   def handle_info(message, state), do: FrameHandler.dispatch(message, state)
+
+  @spec receive_submission(t(), Submission.t(), non_neg_integer()) ::
+          {t(), MingaEditor.RenderPipeline.Intent.t()}
+  defp receive_submission(state, submission, seq) do
+    FrameHandler.observe_submission(submission, seq)
+    State.receive_submission(state, submission)
+  end
 
   @spec monotonic_now() :: integer()
   defp monotonic_now, do: System.monotonic_time(:microsecond)

@@ -755,11 +755,13 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       hl_data = Highlight.new()
 
-      live_highlight = %Highlighting{
-        highlights: %{buf1 => hl_data, buf2 => Highlight.put_spans(hl_data, 5, [])}
-      }
+      live_highlight =
+        Highlighting.set_highlights(%Highlighting{}, %{
+          buf1 => hl_data,
+          buf2 => Highlight.put_spans(hl_data, 5, [])
+        })
 
-      stale_highlight = %Highlighting{highlights: %{buf2 => Highlight.new()}}
+      stale_highlight = Highlighting.set_highlights(%Highlighting{}, %{buf2 => Highlight.new()})
 
       state = %{
         state
