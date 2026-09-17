@@ -60,6 +60,7 @@ public final class TabBarState {
     public var workspaceMode: UInt8 = 0
     public var workspaceFlags: UInt8 = 0
     public var hasCanonicalWorkspaceTabs: Bool = false
+    public private(set) var workspacePresentationRevision: UInt64 = 0
 
     /// Whether any agent workspaces exist (controls visibility of group UI).
     public var hasWorkspaces: Bool {
@@ -95,12 +96,19 @@ public final class TabBarState {
 
     /// Install workspace presentation without changing tab-bar-owned derived behavior.
     public func install(_ snapshot: WorkspacePresentationSnapshot) {
+        workspacePresentationRevision += 1
         activeWorkspaceId = snapshot.activeWorkspaceId
         workspaceMode = snapshot.mode
         workspaceFlags = snapshot.flags
         hasCanonicalWorkspaceTabs = true
         workspaces = snapshot.workspaces
         workspaceTabs = snapshot.visibleTabs
+    }
+
+    public func isCurrentWorkspace(_ workspace: WorkspacePresentationEntry, presentationRevision: UInt64) -> Bool {
+        workspacePresentationRevision == presentationRevision &&
+            activeWorkspaceId == workspace.id &&
+            workspaces.contains { $0.id == workspace.id }
     }
 
     // MARK: - Display tabs

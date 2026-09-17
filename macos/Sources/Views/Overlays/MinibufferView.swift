@@ -23,6 +23,7 @@ public struct MinibufferView: View {
     public let encoder: InputEncoder?
 
     @State private var hoveredIndex: Int? = nil
+    @AccessibilityFocusState private var accessibilityFocus: Int?
 
     private let barHeight: CGFloat = 32
     private let candidateHeight: CGFloat = 26
@@ -63,10 +64,17 @@ public struct MinibufferView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Minibuffer")
         .onChange(of: state.visible) { _, visible in
+            updateAccessibilityFocus()
             NSAccessibility.post(
                 element: NSApp.mainWindow as Any,
                 notification: visible ? .layoutChanged : .layoutChanged
             )
+        }
+        .onChange(of: state.selectedIndex) { _, _ in
+            updateAccessibilityFocus()
+        }
+        .onAppear {
+            updateAccessibilityFocus()
         }
     }
 
@@ -194,57 +202,63 @@ public struct MinibufferView: View {
                 }
             }
         }
-        .accessibilityLabel("\(state.candidates.count) results")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Minibuffer choices")
+        .accessibilityValue("\(state.candidates.count) of \(max(state.candidates.count, Int(state.totalCandidates))) choices")
     }
 
     @ViewBuilder
     private func candidateRow(_ candidate: MinibufferCandidate) -> some View {
         let isSelected = candidate.id == Int(state.selectedIndex)
         let isHovered = hoveredIndex == candidate.id
+        let offeredInputVersion = state.inputVersion
 
-        HStack(spacing: 8) {
-            // Command name with fuzzy match highlighting
-            highlightedLabel(candidate, isSelected: isSelected)
+        Button {
+            activate(candidate, offeredInputVersion: offeredInputVersion)
+        } label: {
+            HStack(spacing: 8) {
+                // Command name with fuzzy match highlighting
+                highlightedLabel(candidate, isSelected: isSelected)
 
-            // Description (dimmed)
-            if !candidate.description.isEmpty {
-                Text(candidate.description)
-                    .font(.system(size: 12))
-                    .foregroundStyle(isSelected
-                        ? theme.popupSelFg.opacity(0.75)
-                        : theme.popupFg.opacity(0.4))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                // Description (dimmed)
+                if !candidate.description.isEmpty {
+                    Text(candidate.description)
+                        .font(.system(size: 12))
+                        .foregroundStyle(isSelected
+                            ? theme.popupSelFg.opacity(0.75)
+                            : theme.popupFg.opacity(0.4))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                Spacer(minLength: 0)
+
+                // Keybinding annotation (right-aligned)
+                if !candidate.annotation.isEmpty {
+                    Text(candidate.annotation)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(isSelected
+                            ? theme.popupSelFg.opacity(0.65)
+                            : theme.popupFg.opacity(0.3))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(isSelected
+                                    ? theme.popupSelFg.opacity(0.08)
+                                    : theme.popupFg.opacity(0.06))
+                        )
+                }
             }
-
-            Spacer(minLength: 0)
-
-            // Keybinding annotation (right-aligned)
-            if !candidate.annotation.isEmpty {
-                Text(candidate.annotation)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(isSelected
-                        ? theme.popupSelFg.opacity(0.65)
-                        : theme.popupFg.opacity(0.3))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(isSelected
-                                ? theme.popupSelFg.opacity(0.08)
-                                : theme.popupFg.opacity(0.06))
-                    )
-            }
+            .padding(.horizontal, 12)
+            .frame(height: candidateHeight)
+            .background(candidateBackground(isSelected: isSelected, isHovered: isHovered))
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12)
-        .frame(height: candidateHeight)
-        .background(candidateBackground(isSelected: isSelected, isHovered: isHovered))
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .focusable(false)
         .onHover { hovering in
             hoveredIndex = hovering ? candidate.id : nil
-        }
-        .onTapGesture {
-            encoder?.sendMinibufferSelect(index: UInt16(candidate.id))
         }
         .id(candidate.id)
         .transition(.opacity)
@@ -255,9 +269,38 @@ public struct MinibufferView: View {
             value: state.inputVersion
         )
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("minibuffer-choice-\(offeredInputVersion)-\(candidate.id)")
         .accessibilityLabel(candidate.label)
-        .accessibilityValue(candidate.description)
+        .accessibilityValue(candidateAccessibilityValue(candidate, isSelected: isSelected))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityFocused($accessibilityFocus, equals: candidate.id)
+    }
+
+    private func candidateAccessibilityValue(_ candidate: MinibufferCandidate, isSelected: Bool) -> String {
+        let selection = isSelected ? "selected" : "available"
+        return candidate.description.isEmpty ? selection : "\(selection), \(candidate.description)"
+    }
+
+    private func activate(_ offeredCandidate: MinibufferCandidate, offeredInputVersion: Int) {
+        guard state.visible,
+              state.inputVersion == offeredInputVersion,
+              let currentCandidate = state.candidates.first(where: { $0.id == offeredCandidate.id }),
+              candidatesMatch(currentCandidate, offeredCandidate) else { return }
+        encoder?.sendMinibufferSelect(index: UInt16(currentCandidate.id))
+    }
+
+    private func candidatesMatch(_ lhs: MinibufferCandidate, _ rhs: MinibufferCandidate) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.matchScore == rhs.matchScore &&
+            lhs.label == rhs.label &&
+            lhs.description == rhs.description &&
+            lhs.annotation == rhs.annotation &&
+            lhs.matchPositions == rhs.matchPositions
+    }
+
+    private func updateAccessibilityFocus() {
+        let selected = Int(state.selectedIndex)
+        accessibilityFocus = state.visible && state.candidates.contains(where: { $0.id == selected }) ? selected : nil
     }
 
     @ViewBuilder

@@ -18,7 +18,8 @@ public struct CompletionItem: Identifiable {
 
 /// Complete presentation value for one visible completion popup.
 public struct CompletionContent {
-    fileprivate init(anchorRow: Int, anchorCol: Int, selectedIndex: Int, previewSelectedIndex: Int? = nil, items: [CompletionItem], documentation: String) {
+    fileprivate init(presentationRevision: UInt64, anchorRow: Int, anchorCol: Int, selectedIndex: Int, previewSelectedIndex: Int? = nil, items: [CompletionItem], documentation: String) {
+        self.presentationRevision = presentationRevision
         self.anchorRow = anchorRow
         self.anchorCol = anchorCol
         self.selectedIndex = selectedIndex
@@ -27,6 +28,7 @@ public struct CompletionContent {
         self.documentation = documentation
     }
 
+    public let presentationRevision: UInt64
     public let anchorRow: Int
     public let anchorCol: Int
     public let selectedIndex: Int
@@ -50,6 +52,7 @@ public final class CompletionState {
 
     /// The complete visible presentation, or `nil` when hidden.
     public private(set) var content: CompletionContent?
+    public private(set) var presentationRevision: UInt64 = 0
 
     public func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem], documentation: String) {
         guard visible else {
@@ -60,7 +63,9 @@ public final class CompletionState {
         let items = rawItems.enumerated().map { i, item in
             CompletionItem(id: i, kind: item.kind, label: item.label, detail: item.detail)
         }
+        presentationRevision += 1
         content = CompletionContent(
+            presentationRevision: presentationRevision,
             anchorRow: Int(anchorRow), anchorCol: Int(anchorCol),
             selectedIndex: Int(selectedIndex), items: items,
             documentation: documentation

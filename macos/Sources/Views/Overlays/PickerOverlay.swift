@@ -21,6 +21,7 @@ public struct PickerOverlay: View {
     private let itemHeight: CGFloat = 24
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AccessibilityFocusState private var accessibilityFocus: PickerAccessibilityFocus?
 
     private var animDuration: Double {
         reduceMotion ? 0 : 0.1
@@ -63,6 +64,21 @@ public struct PickerOverlay: View {
                 .frame(maxWidth: .infinity)
             }
             .transition(.opacity.animation(.easeInOut(duration: animDuration)))
+            .onAppear {
+                updateAccessibilityFocus()
+            }
+            .onChange(of: state.visible) { _, _ in
+                updateAccessibilityFocus()
+            }
+            .onChange(of: state.effectiveSelectedIndex) { _, _ in
+                updateAccessibilityFocus()
+            }
+            .onChange(of: currentActivationGeneration) { _, _ in
+                updateAccessibilityFocus()
+            }
+            .onChange(of: currentActionSelection) { _, _ in
+                updateAccessibilityFocus()
+            }
         }
     }
 
@@ -135,67 +151,79 @@ public struct PickerOverlay: View {
 
     @ViewBuilder
     private func resultsList(maxListHeight: CGFloat) -> some View {
-        if case .loading = state.loadStatus {
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                Text(state.title.isEmpty ? "Loading..." : "\(state.title)...")
+        Group {
+            if case .loading = state.loadStatus {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(state.title.isEmpty ? "Loading..." : "\(state.title)...")
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.popupFg.opacity(0.35))
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(maxHeight: maxListHeight)
+                .frame(minHeight: 48)
+            } else if case .error(let message) = state.loadStatus {
+                Text(message)
                     .font(.system(size: 13))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .frame(maxHeight: maxListHeight)
-            .frame(minHeight: 48)
-        } else if case .error(let message) = state.loadStatus {
-            Text(message)
-                .font(.system(size: 13))
-                .foregroundStyle(theme.popupFg.opacity(0.35))
-                .frame(maxWidth: .infinity, alignment: .center)
-                .frame(maxHeight: maxListHeight)
-                .frame(minHeight: 48)
-        } else if state.items.isEmpty && !state.query.isEmpty {
-            Text("No matches")
-                .font(.system(size: 13))
-                .foregroundStyle(theme.popupFg.opacity(0.35))
-                .frame(maxWidth: .infinity, alignment: .center)
-                .frame(maxHeight: maxListHeight)
-                .frame(minHeight: 48)
-        } else {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: true) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(state.items) { item in
-                            Button {
-                                guard item.activation.isAvailable else { return }
-                                encoder?.sendPickerItemActivate(generation: item.activation.generation, activationID: item.activation.activationID)
-                            } label: {
-                                PickerItemRow(
-                                    item: item,
-                                    isSelected: item.id == state.effectiveSelectedIndex,
-                                    query: state.query,
-                                    itemHeight: itemHeight
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxHeight: maxListHeight)
+                    .frame(minHeight: 48)
+            } else if state.items.isEmpty && !state.query.isEmpty {
+                Text("No matches")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.popupFg.opacity(0.35))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxHeight: maxListHeight)
+                    .frame(minHeight: 48)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(state.items) { item in
+                                Button {
+                                    activate(item)
+                                } label: {
+                                    PickerItemRow(
+                                        item: item,
+                                        isSelected: item.id == state.effectiveSelectedIndex,
+                                        query: state.query,
+                                        itemHeight: itemHeight
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .focusable(false)
+                                .disabled(!item.activation.isAvailable)
+                                .accessibilityIdentifier("picker-choice-\(item.activation.generation)-\(item.activation.activationID)")
+                                .accessibilityLabel(Text(item.displayLabel))
+                                .accessibilityValue(pickerItemAccessibilityValue(item))
+                                .accessibilityAddTraits(item.id == state.effectiveSelectedIndex ? .isSelected : [])
+                                .accessibilityFocused(
+                                    $accessibilityFocus,
+                                    equals: .item(item.activation.generation, item.activation.activationID)
                                 )
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-                            .focusable(false)
-                            .accessibilityLabel(Text(item.displayLabel))
                         }
                     }
-                }
-                .frame(maxHeight: maxListHeight)
-                .onChange(of: state.effectiveSelectedIndex) { _, newIndex in
-                    withAnimation(nil) {
-                        proxy.scrollTo(newIndex, anchor: .center)
+                    .frame(maxHeight: maxListHeight)
+                    .onChange(of: state.effectiveSelectedIndex) { _, newIndex in
+                        withAnimation(nil) {
+                            proxy.scrollTo(newIndex, anchor: .center)
+                        }
                     }
-                }
-                .onChange(of: state.items.count) { _, _ in
-                    withAnimation(nil) {
-                        proxy.scrollTo(state.effectiveSelectedIndex, anchor: .center)
+                    .onChange(of: state.items.count) { _, _ in
+                        withAnimation(nil) {
+                            proxy.scrollTo(state.effectiveSelectedIndex, anchor: .center)
+                        }
                     }
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(pickerTitle) choices")
+        .accessibilityValue(resultsAccessibilityValue)
     }
 
     // MARK: - Action menu (C-o)
@@ -223,8 +251,7 @@ public struct PickerOverlay: View {
                 let isSelected = entry.id == menu.selectedIndex
 
                 Button {
-                    guard entry.activation.isAvailable else { return }
-                    encoder?.sendPickerActionActivate(generation: entry.activation.generation, activationID: entry.activation.activationID)
+                    activate(entry)
                 } label: {
                     HStack {
                         Text(entry.label)
@@ -243,7 +270,15 @@ public struct PickerOverlay: View {
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
+                .disabled(!entry.activation.isAvailable)
+                .accessibilityIdentifier("picker-action-\(entry.activation.generation)-\(entry.activation.activationID)")
                 .accessibilityLabel(Text(entry.label))
+                .accessibilityValue(entry.activation.isAvailable ? (isSelected ? "selected" : "available") : "unavailable")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityFocused(
+                    $accessibilityFocus,
+                    equals: .action(entry.activation.generation, entry.activation.activationID)
+                )
             }
         }
         .frame(width: 200)
@@ -256,8 +291,84 @@ public struct PickerOverlay: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Actions choices")
+        .accessibilityValue("\(menu.entries.count) actions")
     }
 
+    private var pickerTitle: String {
+        state.title.isEmpty ? "Picker" : state.title
+    }
+
+    private var currentActivationGeneration: UInt32 {
+        state.items.first?.activation.generation ?? state.actionMenu?.entries.first?.activation.generation ?? 0
+    }
+
+    private var currentActionSelection: String? {
+        guard let menu = state.actionMenu else { return nil }
+        return "\(currentActivationGeneration):\(menu.selectedIndex)"
+    }
+
+    private var resultsAccessibilityValue: String {
+        switch state.loadStatus {
+        case .loading:
+            return "Loading"
+        case .error(let message):
+            return "Error: \(message)"
+        case .ready:
+            return state.items.isEmpty ? "No choices" : "\(state.items.count) choices"
+        }
+    }
+
+    private func pickerItemAccessibilityValue(_ item: PickerItem) -> String {
+        var values: [String] = []
+        values.append(item.id == state.effectiveSelectedIndex ? "selected" : "available")
+        if item.isMarked {
+            values.append("marked")
+        }
+        if !item.activation.isAvailable {
+            values.append("unavailable")
+        }
+        if !item.description.isEmpty {
+            values.append(item.description)
+        }
+        return values.joined(separator: ", ")
+    }
+
+    private func activate(_ item: PickerItem) {
+        guard item.activation.isAvailable else { return }
+        encoder?.sendPickerItemActivate(generation: item.activation.generation, activationID: item.activation.activationID)
+    }
+
+    private func activate(_ entry: PickerActionEntry) {
+        guard entry.activation.isAvailable else { return }
+        encoder?.sendPickerActionActivate(generation: entry.activation.generation, activationID: entry.activation.activationID)
+    }
+
+    private func updateAccessibilityFocus() {
+        guard state.visible else {
+            accessibilityFocus = nil
+            return
+        }
+        if let menu = state.actionMenu,
+           let entry = menu.entries.first(where: { $0.id == menu.selectedIndex }),
+           entry.activation.isAvailable {
+            accessibilityFocus = .action(entry.activation.generation, entry.activation.activationID)
+            return
+        }
+        guard let item = state.items.first(where: { $0.id == state.effectiveSelectedIndex }),
+              item.activation.isAvailable else {
+            accessibilityFocus = nil
+            return
+        }
+        accessibilityFocus = .item(item.activation.generation, item.activation.activationID)
+    }
+
+}
+
+private enum PickerAccessibilityFocus: Hashable {
+    case item(UInt32, UInt32)
+    case action(UInt32, UInt32)
 }
 
 // MARK: - Picker item row (separate View for observation isolation)

@@ -225,11 +225,16 @@ public struct GitStatusView: View {
         .frame(height: sectionHeaderHeight)
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint(state.session.collapsedSections.contains(section) ? "Double tap to expand" : "Double tap to collapse")
+        .accessibilityIdentifier("git-section-\(section.rawValue)")
+        .accessibilityLabel(section.label)
+        .accessibilityValue("\(count) files, \(isCollapsed ? "collapsed" : "expanded")")
+        .accessibilityHint(isCollapsed ? "Activate to expand" : "Activate to collapse")
+        .accessibilityAction {
+            toggleSection(section)
+        }
+        .modifier(GitSectionAccessibilityActions(section: section, perform: performSectionBulkAction))
         .onTapGesture {
-            withAnimation(.easeInOut(duration: animDuration)) {
-                state.toggleSection(section)
-            }
+            toggleSection(section)
         }
         .onHover { isHovered in
             hoveredSection = isHovered ? section : nil
@@ -242,15 +247,15 @@ public struct GitStatusView: View {
             switch section {
             case .staged:
                 actionButton(systemName: "minus", tooltip: "Unstage All") {
-                    encoder?.sendGitUnstageAll()
+                    performSectionBulkAction(.staged)
                 }
             case .changed:
                 actionButton(systemName: "plus", tooltip: "Stage All") {
-                    encoder?.sendGitStageAll()
+                    performSectionBulkAction(.changed)
                 }
             case .untracked:
                 actionButton(systemName: "plus", tooltip: "Stage All") {
-                    encoder?.sendGitStageAll()
+                    performSectionBulkAction(.untracked)
                 }
             case .conflicted:
                 EmptyView()
@@ -320,11 +325,17 @@ public struct GitStatusView: View {
         }
         .matchedGeometryEffect(id: state.animationID(for: entry), in: fileMoveNamespace)
         .onTapGesture {
-            encoder?.sendGitOpenFile(path: entry.path)
+            performEntryAction(.open, for: entry)
         }
         .contextMenu { fileContextMenu(entry) }
         .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("git-file-\(entry.id)")
         .accessibilityLabel("\(statusAccessibilityLabel(entry.status)) file: \(entry.filename)")
+        .accessibilityValue("\(entry.section.label), \(entry.path)")
+        .accessibilityAction {
+            performEntryAction(.open, for: entry)
+        }
+        .modifier(GitEntryAccessibilityActions(entry: entry, perform: performEntryAction))
     }
 
     @ViewBuilder
@@ -333,22 +344,22 @@ public struct GitStatusView: View {
             switch entry.section {
             case .staged:
                 actionButton(systemName: "minus", tooltip: "Unstage") {
-                    encoder?.sendGitUnstageFile(path: entry.path)
+                    performEntryAction(.unstage, for: entry)
                 }
             case .changed:
                 actionButton(systemName: "arrow.uturn.backward", tooltip: "Discard Changes") {
-                    fileToDiscard = entry
+                    performEntryAction(.discard, for: entry)
                 }
                 actionButton(systemName: "plus", tooltip: "Stage") {
-                    encoder?.sendGitStageFile(path: entry.path)
+                    performEntryAction(.stage, for: entry)
                 }
             case .untracked:
                 actionButton(systemName: "plus", tooltip: "Stage") {
-                    encoder?.sendGitStageFile(path: entry.path)
+                    performEntryAction(.stage, for: entry)
                 }
             case .conflicted:
                 actionButton(systemName: "plus", tooltip: "Stage (mark resolved)") {
-                    encoder?.sendGitStageFile(path: entry.path)
+                    performEntryAction(.stage, for: entry)
                 }
             }
         }
@@ -357,10 +368,10 @@ public struct GitStatusView: View {
     @ViewBuilder
     private func fileContextMenu(_ entry: GitStatusEntry) -> some View {
         Button("Open File") {
-            encoder?.sendGitOpenFile(path: entry.path)
+            performEntryAction(.open, for: entry)
         }
         Button("Open Diff") {
-            encoder?.sendGitOpenDiff(path: entry.path, section: entry.section.rawValue)
+            performEntryAction(.openDiff, for: entry)
         }
 
         Divider()
@@ -368,14 +379,14 @@ public struct GitStatusView: View {
         switch entry.section {
         case .staged:
             Button("Unstage") {
-                encoder?.sendGitUnstageFile(path: entry.path)
+                performEntryAction(.unstage, for: entry)
             }
         case .changed, .untracked, .conflicted:
             Button(entry.section == .conflicted ? "Stage (Mark Resolved)" : "Stage") {
-                encoder?.sendGitStageFile(path: entry.path)
+                performEntryAction(.stage, for: entry)
             }
             Button(role: .destructive) {
-                fileToDiscard = entry
+                performEntryAction(.discard, for: entry)
             } label: {
                 Text("Discard Changes")
             }
@@ -384,11 +395,54 @@ public struct GitStatusView: View {
         Divider()
 
         Button("Copy Path") {
-            copyToClipboard(entry.path)
+            performEntryAction(.copyPath, for: entry)
         }
         Button("Reveal in Finder") {
+            performEntryAction(.revealInFinder, for: entry)
+        }
+    }
+
+    private func toggleSection(_ section: GitStatusSection) {
+        guard !state.entries(for: section).isEmpty else { return }
+        withAnimation(.easeInOut(duration: animDuration)) {
+            state.toggleSection(section)
+        }
+    }
+
+    private func performSectionBulkAction(_ section: GitStatusSection) {
+        guard !state.entries(for: section).isEmpty else { return }
+        switch section {
+        case .staged:
+            encoder?.sendGitUnstageAll()
+        case .changed, .untracked:
+            encoder?.sendGitStageAll()
+        case .conflicted:
+            break
+        }
+    }
+
+    private func performEntryAction(_ action: GitEntryAccessibilityAction, for offeredEntry: GitStatusEntry) {
+        guard let entry = currentEntry(matching: offeredEntry) else { return }
+        switch action {
+        case .open:
+            encoder?.sendGitOpenFile(path: entry.path)
+        case .openDiff:
+            encoder?.sendGitOpenDiff(path: entry.path, section: entry.section.rawValue)
+        case .stage:
+            encoder?.sendGitStageFile(path: entry.path)
+        case .unstage:
+            encoder?.sendGitUnstageFile(path: entry.path)
+        case .discard:
+            fileToDiscard = entry
+        case .copyPath:
+            copyToClipboard(entry.path)
+        case .revealInFinder:
             revealInFinder(entry)
         }
+    }
+
+    private func currentEntry(matching offeredEntry: GitStatusEntry) -> GitStatusEntry? {
+        state.entries(for: offeredEntry.section).first { $0.id == offeredEntry.id && $0 == offeredEntry }
     }
 
     private func copyToClipboard(_ string: String) {
@@ -682,6 +736,63 @@ public struct GitStatusView: View {
         case .copied: "Copied"
         case .untracked: "Untracked"
         case .conflicted: "Conflicted"
+        }
+    }
+}
+
+private enum GitEntryAccessibilityAction {
+    case open
+    case openDiff
+    case stage
+    case unstage
+    case discard
+    case copyPath
+    case revealInFinder
+}
+
+private struct GitSectionAccessibilityActions: ViewModifier {
+    let section: GitStatusSection
+    let perform: (GitStatusSection) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch section {
+        case .staged:
+            content.accessibilityAction(named: Text("Unstage All")) { perform(section) }
+        case .changed, .untracked:
+            content.accessibilityAction(named: Text("Stage All")) { perform(section) }
+        case .conflicted:
+            content
+        }
+    }
+}
+
+private struct GitEntryAccessibilityActions: ViewModifier {
+    let entry: GitStatusEntry
+    let perform: (GitEntryAccessibilityAction, GitStatusEntry) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let commonActions = content
+            .accessibilityAction(named: Text("Open Diff")) { perform(.openDiff, entry) }
+            .accessibilityAction(named: Text("Copy Path")) { perform(.copyPath, entry) }
+            .accessibilityAction(named: Text("Reveal in Finder")) { perform(.revealInFinder, entry) }
+
+        switch entry.section {
+        case .staged:
+            commonActions.accessibilityAction(named: Text("Unstage")) { perform(.unstage, entry) }
+        case .changed:
+            commonActions
+                .accessibilityAction(named: Text("Stage")) { perform(.stage, entry) }
+                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard, entry) }
+        case .untracked:
+            commonActions
+                .accessibilityAction(named: Text("Stage")) { perform(.stage, entry) }
+                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard, entry) }
+        case .conflicted:
+            commonActions
+                .accessibilityAction(named: Text("Stage (Mark Resolved)")) { perform(.stage, entry) }
+                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard, entry) }
         }
     }
 }
