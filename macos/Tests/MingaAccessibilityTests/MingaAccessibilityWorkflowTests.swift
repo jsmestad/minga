@@ -56,8 +56,6 @@ private extension MingaAccessibilityWorkflowTests {
                 query: alphaQuery
             ) {
                 $0.focused == true && $0.value?.contains("ALPHA PANE λ🙂") == true
-                    && $0.selectedTextRange == NSRange(location: 0, length: 0)
-                    && $0.selectedText == nil
             }
         }
         try require(
@@ -65,26 +63,39 @@ private extension MingaAccessibilityWorkflowTests {
             "Alpha pane lacks its stable accessibility identity"
         )
         try require(alpha.focused == true, "Alpha pane is not the actual AX-focused editor after launch")
+        try client.requireRawAccessibilityAccess()
+        let initialSelection = try client.waitForEditorNode(
+            "the initial insertion position",
+            timeout: timeout,
+            query: alphaQuery
+        ) {
+            $0.focused == true && $0.selectedTextRange == NSRange(location: 0, length: 0)
+                && $0.selectedText == nil
+        }
         try require(
-            alpha.selectedTextRange == NSRange(location: 0, length: 0),
+            initialSelection.selectedTextRange == NSRange(location: 0, length: 0),
             "Alpha pane does not expose the initial insertion position"
         )
 
         app.typeText("$")
-        _ = try client.waitForNode(
+        _ = try client.waitForEditorNode(
             "the insertion position before the Unicode emoji", timeout: timeout, query: alphaQuery
         ) {
             $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
         }
 
         app.typeText("v")
-        _ = try client.waitForNode("the visual selection of the Unicode emoji", timeout: timeout, query: alphaQuery) {
+        _ = try client.waitForEditorNode(
+            "the visual selection of the Unicode emoji", timeout: timeout, query: alphaQuery
+        ) {
             $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 2) && $0.selectedText == "🙂"
         }
 
         app.typeKey(.escape, modifierFlags: [])
         _ = try timed("focus-after-mode-cycle") {
-            try client.waitForNode("the restored alpha editor insertion state", timeout: timeout, query: alphaQuery) {
+            try client.waitForEditorNode(
+                "the restored alpha editor insertion state", timeout: timeout, query: alphaQuery
+            ) {
                 $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
             }
         }

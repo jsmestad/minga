@@ -14,11 +14,14 @@ struct AccessibilityNode {
 }
 
 enum AccessibilityClientError: Error, CustomStringConvertible {
+    case api(String, AXError)
     case condition(String)
     case timeout(String, TimeInterval)
 
     var description: String {
         switch self {
+        case .api(let operation, let error):
+            return "AX API failed during \(operation): AXError \(error.rawValue)"
         case .condition(let message):
             return message
         case .timeout(let condition, let seconds):
@@ -68,12 +71,59 @@ final class AccessibilityClient {
         query: XCUIElementQuery,
         matching predicate: (AccessibilityNode) -> Bool
     ) throws -> AccessibilityNode {
+        try waitForNode(
+            description,
+            timeout: timeout,
+            query: query,
+            includeTextSelection: false,
+            matching: predicate
+        )
+    }
+
+    func waitForEditorNode(
+        _ description: String,
+        timeout: TimeInterval = 12,
+        query: XCUIElementQuery,
+        matching predicate: (AccessibilityNode) -> Bool
+    ) throws -> AccessibilityNode {
+        try waitForNode(
+            description,
+            timeout: timeout,
+            query: query,
+            includeTextSelection: true,
+            matching: predicate
+        )
+    }
+
+    func requireRawAccessibilityAccess() throws {
+        let trusted = AXIsProcessTrusted()
+        var role: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            accessibilityApplication,
+            kAXRoleAttribute as CFString,
+            &role
+        )
+        guard trusted, result == .success else {
+            throw AccessibilityClientError.condition(
+                "INFRASTRUCTURE: launched text-range verification requires raw macOS Accessibility access; AXIsProcessTrusted=\(trusted), reading AXRole returned AXError \(result.rawValue)"
+            )
+        }
+    }
+
+    private func waitForNode(
+        _ description: String,
+        timeout: TimeInterval,
+        query: XCUIElementQuery,
+        includeTextSelection: Bool,
+        matching predicate: (AccessibilityNode) -> Bool
+    ) throws -> AccessibilityNode {
         let element = query.firstMatch
         var lastObservedNode: AccessibilityNode?
 
         do {
             return try wait(description, timeout: timeout, waitingFor: element) {
-                guard element.exists, let node = try? self.snapshot(element) else { return nil }
+                guard element.exists else { return nil }
+                let node = try self.snapshot(element, includeTextSelection: includeTextSelection)
                 lastObservedNode = node
                 return predicate(node) ? node : nil
             }
@@ -93,7 +143,7 @@ final class AccessibilityClient {
     ) throws -> [AccessibilityNode] {
         try wait(description, timeout: timeout, waitingFor: query.firstMatch) {
             guard query.firstMatch.exists else { return nil }
-            let matches = try query.allElementsBoundByIndex.map(self.snapshot)
+            let matches = try query.allElementsBoundByIndex.map { try self.snapshot($0) }
             return accepted(matches) ? matches : nil
         }
     }
@@ -129,7 +179,7 @@ final class AccessibilityClient {
     func focus(_ node: AccessibilityNode) throws {
         guard node.role == .textView,
               let identifier = node.identifier,
-              let element = accessibilityElement(identifier: identifier)
+              let element = try accessibilityElement(identifier: identifier)
         else {
             throw AccessibilityClientError.condition(
                 "Required text-area focus action is missing from \(summary(node))"
@@ -150,7 +200,7 @@ final class AccessibilityClient {
     func boundedTreeDump() -> String {
         do {
             let elements = application.descendants(matching: .any).allElementsBoundByIndex
-            let snapshots = try elements.prefix(maximumFailureElements).map(snapshot)
+            let snapshots = try elements.prefix(maximumFailureElements).map { try snapshot($0) }
             let lines = snapshots.enumerated().map { index, node in
                 [
                     "\(index): role=\(node.role)",
@@ -171,11 +221,18 @@ final class AccessibilityClient {
         }
     }
 
-    private func snapshot(_ element: XCUIElement) throws -> AccessibilityNode {
+    private func snapshot(
+        _ element: XCUIElement,
+        includeTextSelection: Bool = false
+    ) throws -> AccessibilityNode {
         let snapshot = try element.snapshot()
         let representation = snapshot.dictionaryRepresentation
         let identifier = emptyAsNil(snapshot.identifier)
-        let textSelection = identifier.flatMap(editorTextSelection)
+        let textSelection: (range: NSRange, text: String?)? = if includeTextSelection, let identifier {
+            try editorTextSelection(identifier: identifier)
+        } else {
+            nil
+        }
         return AccessibilityNode(
             element: element,
             role: snapshot.elementType,
@@ -188,39 +245,46 @@ final class AccessibilityClient {
         )
     }
 
-    private func editorTextSelection(identifier: String) -> (range: NSRange, text: String?)? {
+    private func editorTextSelection(identifier: String) throws -> (range: NSRange, text: String?)? {
         guard identifier.hasPrefix("minga.editor."),
-              let element = accessibilityElement(identifier: identifier),
-              let rawRangeValue = attribute(kAXSelectedTextRangeAttribute as CFString, from: element),
+              let element = try accessibilityElement(identifier: identifier),
+              let rawRangeValue = try attribute(kAXSelectedTextRangeAttribute as CFString, from: element),
               CFGetTypeID(rawRangeValue) == AXValueGetTypeID() else { return nil }
         let rangeValue = unsafeDowncast(rawRangeValue, to: AXValue.self)
         guard AXValueGetType(rangeValue) == .cfRange else { return nil }
         var range = CFRange()
         guard AXValueGetValue(rangeValue, .cfRange, &range) else { return nil }
-        let selectedText = attribute(kAXSelectedTextAttribute as CFString, from: element) as? String
+        let selectedText = try attribute(kAXSelectedTextAttribute as CFString, from: element) as? String
         return (NSRange(location: range.location, length: range.length), emptyAsNil(selectedText ?? ""))
     }
 
-    private func accessibilityElement(identifier: String) -> AXUIElement? {
+    private func accessibilityElement(identifier: String) throws -> AXUIElement? {
         if let cached = accessibilityElementsByIdentifier[identifier] { return cached }
 
         var pending = [accessibilityApplication]
         while let element = pending.popLast() {
-            if attribute(kAXIdentifierAttribute as CFString, from: element) as? String == identifier {
+            if try attribute(kAXIdentifierAttribute as CFString, from: element) as? String == identifier {
                 accessibilityElementsByIdentifier[identifier] = element
                 return element
             }
-            if let children = attribute(kAXChildrenAttribute as CFString, from: element) as? [AXUIElement] {
+            if let children = try attribute(kAXChildrenAttribute as CFString, from: element) as? [AXUIElement] {
                 pending.append(contentsOf: children)
             }
         }
         return nil
     }
 
-    private func attribute(_ name: CFString, from element: AXUIElement) -> CFTypeRef? {
+    private func attribute(_ name: CFString, from element: AXUIElement) throws -> CFTypeRef? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name, &value) == .success else { return nil }
-        return value
+        let result = AXUIElementCopyAttributeValue(element, name, &value)
+        switch result {
+        case .success:
+            return value
+        case .noValue, .attributeUnsupported:
+            return nil
+        default:
+            throw AccessibilityClientError.api("reading \(name)", result)
+        }
     }
 
     private func wait<T>(
@@ -232,7 +296,11 @@ final class AccessibilityClient {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             try throwIfConnectionFailed()
-            if let value = try predicate() { return value }
+            do {
+                if let value = try predicate() { return value }
+            } catch AccessibilityClientError.api(_, .cannotComplete) {
+                // A live application's AX hierarchy can be briefly unavailable while AppKit commits a frame.
+            }
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else { break }
             let interval = min(pollInterval, remaining)

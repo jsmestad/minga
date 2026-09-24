@@ -119,7 +119,12 @@ record_xctest_infrastructure_failure() {
   local log_path=$1
   local marker_path=$2
 
-  if grep -Eq 'INFRASTRUCTURE:|Timed out while enabling automation mode|failed to initialize for UI testing|not authorized to perform UI testing|not permitted to perform UI testing' "$log_path"; then
+  if grep -Eq 'INFRASTRUCTURE:' "$log_path"; then
+    grep -E 'INFRASTRUCTURE:' "$log_path" | tail -n 1 > "$marker_path"
+    return 0
+  fi
+
+  if grep -Eq 'Timed out while enabling automation mode|failed to initialize for UI testing|not authorized to perform UI testing|not permitted to perform UI testing' "$log_path"; then
     printf '%s\n' 'INFRASTRUCTURE: Xcode could not initialize macOS UI automation. Confirm that the interactive GUI session allows Xcode UI testing, then rerun the command.' > "$marker_path"
     return 0
   fi
