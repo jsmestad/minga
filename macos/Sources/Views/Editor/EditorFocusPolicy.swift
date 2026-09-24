@@ -4,8 +4,11 @@ import Combine
 /// Owns AppKit focus reclamation and overlay key-routing lifetime for one editor view.
 @MainActor
 final class EditorFocusPolicy {
+    private static let maximumLoggedFirstResponderEvents = 32
+
     private weak var editorView: EditorNSView?
     private weak var attachedWindow: NSWindow?
+    private let focusDiagnosticLog = EditorFocusDiagnosticLog()
     private var firstResponderTask: Task<Void, Never>?
     private var windowUpdateTask: Task<Void, Never>?
     private var applicationActivationTask: Task<Void, Never>?
@@ -13,6 +16,7 @@ final class EditorFocusPolicy {
     private var agentKeyMonitor: Any?
     private var nativeModalDepth = 0
     private var presentationFocusRequested = false
+    private var firstResponderEventCount = 0
 
     private(set) var agentOverlayVisible = false
 
@@ -42,6 +46,7 @@ final class EditorFocusPolicy {
             guard let window else { return }
             for await _ in window.publisher(for: \.firstResponder, options: [.new]).values {
                 guard let self else { return }
+                self.recordFirstResponderEvent()
                 self.windowFirstResponderDidChange()
             }
         }
@@ -88,8 +93,14 @@ final class EditorFocusPolicy {
         scheduleDeferredReclaim()
     }
 
+    /// Records native state when the first render frame reaches the application.
+    func firstFrameDidRender() {
+        recordFocusDiagnostic(point: "first-frame")
+    }
+
     /// Reclaims editor focus after the attached window becomes key.
     func windowDidBecomeKey() {
+        recordFocusDiagnostic(point: "window-did-become-key")
         reconcileRequestedPresentationFocus()
         scheduleDeferredReclaim()
     }
@@ -158,11 +169,18 @@ final class EditorFocusPolicy {
 
     /// Activates the app and returns whether the requested editor focus postcondition now holds.
     func requestPresentationFocus() -> Bool {
-        guard nativeModalDepth == 0 else { return false }
+        recordFocusDiagnostic(point: "presentation-focus-request")
+        guard nativeModalDepth == 0 else {
+            recordFocusDiagnostic(point: "presentation-focus-result", requestResult: false)
+            return false
+        }
         guard let window = attachedWindow,
               let editorView,
               editorView.window === window
-        else { return false }
+        else {
+            recordFocusDiagnostic(point: "presentation-focus-result", requestResult: false)
+            return false
+        }
         presentationFocusRequested = true
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -170,7 +188,9 @@ final class EditorFocusPolicy {
             window.makeFirstResponder(editorView)
         }
         reconcileRequestedPresentationFocus()
-        return presentationFocusReady()
+        let result = presentationFocusReady()
+        recordFocusDiagnostic(point: "presentation-focus-result", requestResult: result)
+        return result
     }
 
     /// Reclaims and verifies the AppKit responder state required by a native open receipt.
@@ -264,7 +284,29 @@ final class EditorFocusPolicy {
     }
 
     private func applicationDidBecomeActive() {
+        recordFocusDiagnostic(point: "application-did-become-active")
         reconcileRequestedPresentationFocus()
+    }
+
+    private func recordFirstResponderEvent() {
+        if firstResponderEventCount < Self.maximumLoggedFirstResponderEvents + 1 {
+            firstResponderEventCount += 1
+        }
+        guard firstResponderEventCount <= Self.maximumLoggedFirstResponderEvents else { return }
+        recordFocusDiagnostic(point: "first-responder-publisher-event")
+    }
+
+    private func recordFocusDiagnostic(point: String, requestResult: Bool? = nil) {
+        focusDiagnosticLog.record(
+            point: point,
+            applicationIsActive: NSApp.isActive,
+            window: attachedWindow,
+            editorView: editorView,
+            nativeModalDepth: nativeModalDepth,
+            presentationFocusRequested: presentationFocusRequested,
+            firstResponderEventCount: firstResponderEventCount,
+            requestResult: requestResult
+        )
     }
 
     private func windowFirstResponderDidChange() {
@@ -315,5 +357,87 @@ final class EditorFocusPolicy {
         guard let agentKeyMonitor else { return }
         NSEvent.removeMonitor(agentKeyMonitor)
         self.agentKeyMonitor = nil
+    }
+}
+
+@MainActor
+private final class EditorFocusDiagnosticLog {
+    private static let environmentKey = "MINGA_AX_FOCUS_LOG"
+    private static let maximumRecords = 64
+
+    private let outputURL: URL?
+    private var records: [Record] = []
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+        guard environment["MINGA_AX_ISOLATED_RUN"] == "1",
+              let path = environment[Self.environmentKey],
+              path.hasPrefix("/")
+        else {
+            outputURL = nil
+            return
+        }
+        outputURL = URL(fileURLWithPath: path)
+    }
+
+    func record(
+        point: String,
+        applicationIsActive: Bool,
+        window: NSWindow?,
+        editorView: EditorNSView?,
+        nativeModalDepth: Int,
+        presentationFocusRequested: Bool,
+        firstResponderEventCount: Int,
+        requestResult: Bool?
+    ) {
+        guard let outputURL, records.count < Self.maximumRecords else { return }
+        let responder = window?.firstResponder
+        records.append(
+            Record(
+                sequence: records.count + 1,
+                point: point,
+                applicationIsActive: applicationIsActive,
+                windowAttached: window != nil,
+                windowMatchesEditor: editorView?.window === window,
+                windowIsVisible: window?.isVisible,
+                windowIsMiniaturized: window?.isMiniaturized,
+                windowIsKey: window?.isKeyWindow,
+                responderType: responder.map { String(reflecting: type(of: $0)) },
+                responderIdentity: responder.map { String(describing: ObjectIdentifier($0)) },
+                editorIdentity: editorView.map { String(describing: ObjectIdentifier($0)) },
+                responderIsEditor: responder === editorView,
+                responderIsNativeText: responder is NSText,
+                nativeModalDepth: nativeModalDepth,
+                presentationFocusRequested: presentationFocusRequested,
+                firstResponderEventCount: firstResponderEventCount,
+                requestResult: requestResult
+            )
+        )
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(records).write(to: outputURL, options: .atomic)
+        } catch {
+            NSLog("Accessibility focus diagnostic write failed: %@", String(describing: error))
+        }
+    }
+
+    private struct Record: Encodable {
+        let sequence: Int
+        let point: String
+        let applicationIsActive: Bool
+        let windowAttached: Bool
+        let windowMatchesEditor: Bool
+        let windowIsVisible: Bool?
+        let windowIsMiniaturized: Bool?
+        let windowIsKey: Bool?
+        let responderType: String?
+        let responderIdentity: String?
+        let editorIdentity: String?
+        let responderIsEditor: Bool
+        let responderIsNativeText: Bool
+        let nativeModalDepth: Int
+        let presentationFocusRequested: Bool
+        let firstResponderEventCount: Int
+        let requestResult: Bool?
     }
 }
