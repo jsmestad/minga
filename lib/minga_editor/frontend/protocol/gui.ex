@@ -219,6 +219,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_focus Opcodes.gui_action_search_focus()
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
   @gui_action_file_dialog_result Opcodes.gui_action_file_dialog_result()
+  @gui_action_semantic_item_activate Opcodes.gui_action_semantic_item_activate()
 
   @search_flag_replace_mode 0x01
   @search_flag_case_sensitive 0x02
@@ -337,6 +338,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              activation_id :: non_neg_integer()}
           | {:picker_action_activate, generation :: non_neg_integer(),
              activation_id :: non_neg_integer()}
+          | {:semantic_item_activate, surface :: atom(), intent :: atom(),
+             generation :: non_neg_integer(), item_id :: binary()}
           | {:search_query, session_id :: non_neg_integer(), edit_seq :: non_neg_integer(),
              query :: String.t(), flags :: non_neg_integer()}
           | {:search_focus, replace_mode :: boolean()}
@@ -896,6 +899,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_focus_window, <<window_id::16, generation::64>>),
     do: {:ok, {:focus_window, window_id, generation}}
 
+  def decode_gui_action(
+        @gui_action_semantic_item_activate,
+        <<surface::8, intent::8, generation::32, item_id_len::16,
+          item_id::binary-size(item_id_len)>>
+      ) do
+    with {:ok, surface_name} <- decode_semantic_surface(surface),
+         {:ok, intent_name} <- decode_semantic_intent(surface_name, intent) do
+      {:ok, {:semantic_item_activate, surface_name, intent_name, generation, item_id}}
+    end
+  end
+
   def decode_gui_action(@gui_action_system_will_sleep, <<>>),
     do: {:ok, :system_will_sleep}
 
@@ -1053,6 +1067,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_semantic_surface(non_neg_integer()) :: {:ok, atom()} | :error
+  defp decode_semantic_surface(1), do: {:ok, :completion}
+  defp decode_semantic_surface(2), do: {:ok, :picker}
+  defp decode_semantic_surface(3), do: {:ok, :file_tree}
+  defp decode_semantic_surface(_surface), do: :error
+
+  @spec decode_semantic_intent(atom(), non_neg_integer()) :: {:ok, atom()} | :error
+  defp decode_semantic_intent(:completion, 1), do: {:ok, :accept}
+  defp decode_semantic_intent(:picker, 1), do: {:ok, :activate_item}
+  defp decode_semantic_intent(:picker, 2), do: {:ok, :activate_action}
+  defp decode_semantic_intent(:file_tree, 1), do: {:ok, :primary}
+  defp decode_semantic_intent(:file_tree, 2), do: {:ok, :toggle}
+  defp decode_semantic_intent(:file_tree, 3), do: {:ok, :open_in_split}
+  defp decode_semantic_intent(:file_tree, 4), do: {:ok, :delete}
+  defp decode_semantic_intent(:file_tree, 5), do: {:ok, :rename}
+  defp decode_semantic_intent(:file_tree, 6), do: {:ok, :duplicate}
+  defp decode_semantic_intent(_surface, _intent), do: :error
 
   @spec decode_file_dialog_result(
           non_neg_integer(),

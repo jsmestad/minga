@@ -10,6 +10,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
 
   @op_gui_picker Opcodes.gui_picker()
   @op_gui_picker_preview Opcodes.gui_picker_preview()
+  @op_gui_picker_selection Opcodes.gui_picker_selection()
   @section_picker_header 0x01
   @section_picker_query 0x02
   @section_picker_items 0x03
@@ -21,11 +22,24 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   def encode(%Picker{} = model, %Caches{} = caches) do
     fp = fingerprint(model)
 
-    if fp != caches.last_picker_fp do
-      {encode_command(model), %{caches | last_picker_fp: fp}}
-    else
-      {nil, caches}
-    end
+    command =
+      case {caches.last_picker_fp, fp} do
+        {^fp, ^fp} ->
+          nil
+
+        {{:open, structural, old_selection, old_preview}, {:open, structural, selection, preview}} ->
+          [
+            if(old_selection == selection, do: nil, else: encode_selection_command(model)),
+            if(old_preview == preview, do: nil, else: encode_preview(model.preview_lines))
+          ]
+          |> Enum.reject(&is_nil/1)
+          |> IO.iodata_to_binary()
+
+        {_previous, _next} ->
+          encode_command(model)
+      end
+
+    {command, %{caches | last_picker_fp: fp}}
   end
 
   @spec encode_command(Picker.t()) :: binary()
@@ -37,27 +51,51 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     IO.iodata_to_binary([encode_picker(model), encode_preview(model.preview_lines)])
   end
 
-  @spec fingerprint(Picker.t()) :: integer() | :closed
+  @spec fingerprint(Picker.t()) :: term()
   defp fingerprint(%Picker{visible?: false}), do: :closed
 
   defp fingerprint(%Picker{} = model) do
-    :erlang.phash2({
-      model.title,
-      model.query,
-      model.query_generation,
-      model.acknowledged_query_edit_seq,
-      model.mode_prefix,
-      model.selected_index,
-      model.filtered_count,
-      model.total_count,
-      model.marked_count,
-      model.activation_generation,
-      model.has_preview?,
-      model.items,
-      model.action_menu,
-      model.load_status,
-      model.preview_lines
-    })
+    structural =
+      :erlang.phash2({
+        model.title,
+        model.query,
+        model.query_generation,
+        model.acknowledged_query_edit_seq,
+        model.mode_prefix,
+        model.filtered_count,
+        model.total_count,
+        model.marked_count,
+        model.activation_generation,
+        model.has_preview?,
+        model.items,
+        action_menu_structure(model.action_menu),
+        model.load_status
+      })
+
+    selection = {model.selected_item_id, model.selected_action_id}
+    preview = :erlang.phash2(model.preview_lines)
+    {:open, structural, selection, preview}
+  end
+
+  @spec action_menu_structure(ActionMenu.t() | nil) :: term()
+  defp action_menu_structure(nil), do: nil
+  defp action_menu_structure(%ActionMenu{} = menu), do: {menu.actions, menu.activation_ids}
+
+  @spec encode_selection_command(Picker.t()) :: binary()
+  defp encode_selection_command(%Picker{} = model) do
+    payload =
+      :gui_picker_selection
+      |> Writer.new()
+      |> Writer.uint32(:generation, model.activation_generation)
+      |> Writer.uint32(:selected_item_id, model.selected_item_id)
+      |> Writer.uint32(:selected_action_id, model.selected_action_id)
+      |> Writer.finish()
+
+    :gui_picker_selection
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_picker_selection>>)
+    |> Writer.payload16(:payload, payload)
+    |> Writer.finish()
   end
 
   @spec encode_picker_hidden() :: binary()

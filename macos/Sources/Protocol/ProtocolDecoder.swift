@@ -84,14 +84,16 @@ enum RenderCommand: Sendable {
     case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
-    case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
-    case guiFileTreeSelection(selectedId: String, focused: Bool)
+    case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, generation: UInt32, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
+    case guiFileTreeSelection(generation: UInt32, selectedId: String, focused: Bool)
     case guiObservatory(visible: Bool, nodeCount: UInt16, nodes: [Wire.ObservatoryNode])
-    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, selectedItemID: String, items: [Wire.CompletionItem], documentation: String, totalCount: UInt32, matchedCount: UInt32, incomplete: Bool)
+    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, selectedItemID: String, items: [Wire.CompletionItem], documentation: String, totalCount: UInt32, matchedCount: UInt32, incomplete: Bool, generation: UInt32)
+    case guiCompletionSelection(generation: UInt32, selectedItemID: String, documentation: String)
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32)
+    case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
@@ -146,10 +148,22 @@ extension RenderCommand {
         .guiGutter(data: Wire.WindowGutterUpdate(replacing: data))
     }
 
+    static func guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry]) -> RenderCommand {
+        .guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, generation: 0, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries)
+    }
+
+    static func guiFileTreeSelection(selectedId: String, focused: Bool) -> RenderCommand {
+        .guiFileTreeSelection(generation: 0, selectedId: selectedId, focused: focused)
+    }
+
+    static func guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, selectedItemID: String, items: [Wire.CompletionItem], documentation: String, totalCount: UInt32, matchedCount: UInt32, incomplete: Bool) -> RenderCommand {
+        .guiCompletion(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, items: items, documentation: documentation, totalCount: totalCount, matchedCount: matchedCount, incomplete: incomplete, generation: 0)
+    }
+
     /// Compatibility constructor for callers that do not provide completion metadata.
     static func guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem], documentation: String) -> RenderCommand {
         let selectedItemID = items.indices.contains(Int(selectedIndex)) ? items[Int(selectedIndex)].id : ""
-        return .guiCompletion(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, items: items, documentation: documentation, totalCount: UInt32(items.count), matchedCount: UInt32(items.count), incomplete: false)
+        return .guiCompletion(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, items: items, documentation: documentation, totalCount: UInt32(items.count), matchedCount: UInt32(items.count), incomplete: false, generation: 0)
     }
 }
 
@@ -754,6 +768,15 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             treeState = legacyFileTreeState(treeFlags: treeFlags)
         }
 
+        let generation: UInt32
+        if version >= 4 {
+            guard pos + 4 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            generation = try readU32(data, pos)
+            pos += 4
+        } else {
+            generation = 0
+        }
+
         guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let selectedIdLen = Int(try readU16(data, pos)); pos += 2
         guard pos + selectedIdLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
@@ -888,7 +911,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
         guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
-        return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
+        return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, generation: generation, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
 
     case OP_GUI_OBSERVATORY:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
@@ -982,13 +1005,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
         guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
-        guard payloadLen >= 3 else { throw ProtocolDecodeError.malformed }
+        guard payloadLen >= 7 else { throw ProtocolDecodeError.malformed }
         let flags = data[payloadStart]
         var pos = payloadStart + 1
+        let generation = try readU32(data, pos); pos += 4
         let selectedIdLen = Int(try readU16(data, pos)); pos += 2
         guard pos + selectedIdLen == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let selectedId = try decodeUTF8(data[pos..<(pos + selectedIdLen)]) ?? ""
-        return (.guiFileTreeSelection(selectedId: selectedId, focused: flags & 0x01 != 0), 3 + payloadLen)
+        return (.guiFileTreeSelection(generation: generation, selectedId: selectedId, focused: flags & 0x01 != 0), 3 + payloadLen)
 
     case OP_GUI_TAB_BAR:
         // active_index:1 (255 means the active tab is hidden from the visible tab list), tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label, tint_color_rgb:4
@@ -1069,13 +1093,27 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 documentation: fields.documentation,
                 totalCount: fields.totalCount,
                 matchedCount: fields.matchedCount,
-                incomplete: fields.incomplete != 0
+                incomplete: fields.incomplete != 0,
+                generation: fields.generation
             ), nextPos - offset)
         } catch let error as FrameResourceError {
             throw error
         } catch {
             throw ProtocolDecodeError.malformed
         }
+
+    case OP_GUI_COMPLETION_SELECTION:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(try readU16(data, rest))
+        let payloadStart = rest + 2
+        let payloadEnd = payloadStart + payloadLen
+        guard payloadEnd <= data.count, payloadLen >= 7 else { throw ProtocolDecodeError.malformed }
+        var pos = payloadStart
+        let generation = try readU32(data, pos); pos += 4
+        let selectedItemID = try readString8(data: data, pos: &pos, end: payloadEnd)
+        let documentation = try readString16(data: data, pos: &pos, end: payloadEnd)
+        guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }
+        return (.guiCompletionSelection(generation: generation, selectedItemID: selectedItemID, documentation: documentation), 3 + payloadLen)
 
     case OP_GUI_WHICH_KEY:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -1500,6 +1538,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
         return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration), pickerPos - offset)
+
+    case OP_GUI_PICKER_SELECTION:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(try readU16(data, rest))
+        let payloadStart = rest + 2
+        guard payloadLen == 12, payloadStart + payloadLen <= data.count else { throw ProtocolDecodeError.malformed }
+        let generation = try readU32(data, payloadStart)
+        let selectedItemID = try readU32(data, payloadStart + 4)
+        let selectedActionID = try readU32(data, payloadStart + 8)
+        return (.guiPickerSelection(generation: generation, selectedItemID: selectedItemID, selectedActionID: selectedActionID), 3 + payloadLen)
 
     case OP_GUI_PICKER_PREVIEW:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

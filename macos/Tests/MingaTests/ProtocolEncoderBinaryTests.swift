@@ -578,6 +578,22 @@ struct EncoderGUIActionTests {
         #expect(String(decoding: payload[3...], as: UTF8.self) == "item-3")
     }
 
+    @Test("semantic item activation encodes surface intent generation and opaque item ID")
+    func semanticItemActivationLayout() {
+        let payload = captureFrame {
+            $0.send(.semanticItemActivate(surface: .fileTree, intent: 4, generation: 0x0102_0304, itemID: Data("row-7".utf8)))
+        }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_SEMANTIC_ITEM_ACTIVATE)
+        #expect(payload[2] == SemanticItemSurface.fileTree.rawValue)
+        #expect(payload[3] == 4)
+        #expect(readU32(payload, 4) == 0x0102_0304)
+        let (itemID, end) = readString16(payload, 8)
+        #expect(itemID == "row-7")
+        #expect(end == payload.count)
+    }
+
 
     @Test("toggle_panel encodes panel ID")
     func togglePanelLayout() {

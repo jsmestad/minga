@@ -139,20 +139,20 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_tab_bar", "active_index": Int(activeIndex), "tabs": tabArray]
 
-    case .guiFileTree(let version, let treeFlags, let treeState, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
+    case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
         let entryArray = entries.map { e -> [String: Any] in
             ["id": e.id, "path": e.path, "name": e.name, "relative_path": e.relPath, "depth": Int(e.depth),
              "is_dir": e.isDir, "is_expanded": e.isExpanded, "is_selected": e.isSelected, "is_focused": e.isFocused,
              "is_active": e.isActive, "is_dirty": e.isDirty, "is_editing": e.isEditing,
              "editing_token": Int(e.editingToken), "git_status": Int(e.gitStatus), "icon": e.icon]
         }
-        return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
+        return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "generation": Int(generation), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
 
-    case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete):
+    case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete, let generation):
         let itemArray = items.map { i -> [String: Any] in
             ["id": i.id, "source": i.source, "label": i.label, "detail": i.detail, "kind": Int(i.kind.rawValue), "match_ranges": i.matchRanges.map { ["start": Int($0.start), "length": Int($0.length)] }]
         }
-        return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "selected_item_id": selectedItemID, "items": itemArray, "documentation": documentation, "total_count": Int(totalCount), "matched_count": Int(matchedCount), "incomplete": incomplete]
+        return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "selected_item_id": selectedItemID, "items": itemArray, "documentation": documentation, "total_count": Int(totalCount), "matched_count": Int(matchedCount), "incomplete": incomplete, "generation": Int(generation)]
 
     case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
         let bindingArray = bindings.map { b -> [String: Any] in

@@ -143,6 +143,10 @@ func opcodeName(opcode byte) string {
 		return "line spacing"
 	case generated.OPGuiFileTreeSelection:
 		return "file tree selection"
+	case generated.OPGuiCompletionSelection:
+		return "completion selection"
+	case generated.OPGuiPickerSelection:
+		return "picker selection"
 	case generated.OPGuiCursorAnimation:
 		return "cursor animation"
 	case generated.OPGuiConfigState:

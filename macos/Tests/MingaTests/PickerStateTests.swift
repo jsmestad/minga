@@ -8,12 +8,12 @@ import MingaProtocol
 struct PickerStateTests {
     private func makeItems(_ count: Int) -> [Wire.PickerItem] {
         (0..<count).map { i in
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "item\(i)", description: "", annotation: "", matchPositions: [])
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "item\(i)", description: "", annotation: "", matchPositions: [], activationID: UInt32(i + 1))
         }
     }
 
     private func populateState(_ state: PickerState, selected: UInt16 = 0, count: Int = 5) {
-        state.update(visible: true, selectedIndex: selected, filteredCount: UInt16(count), totalCount: UInt16(count), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(count), actionMenu: nil)
+        state.update(visible: true, selectedIndex: selected, filteredCount: UInt16(count), totalCount: UInt16(count), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(count), actionMenu: nil, activationGeneration: 7)
     }
 
     @Test("previewNavigation increments without mutating selectedIndex")
@@ -64,7 +64,7 @@ struct PickerStateTests {
         _ = state.previewNavigation(delta: 1)
         #expect(state.previewSelectedIndex != nil)
 
-        populateState(state, selected: 1)
+        state.updateSelection(generation: 7, selectedItemID: 2, selectedActionID: 0)
         #expect(state.previewSelectedIndex == nil)
     }
 
@@ -109,14 +109,29 @@ struct PickerStateTests {
         #expect(state.selectedIndex == 0)
     }
 
-    @Test("items change discards preview")
-    func itemsChangeDiscardsPreview() {
+    @Test("same-generation refilter retains preview by activation ID")
+    func itemsChangeRetainsPreview() {
         let state = PickerState()
         populateState(state, selected: 0)
         _ = state.previewNavigation(delta: 2)
         #expect(state.previewSelectedIndex != nil)
 
         populateState(state, selected: 0, count: 3)
+        #expect(state.previewSelectedIndex == 2)
+    }
+
+    @Test("generation change and retained-item miss discard preview")
+    func stalePreviewDiscard() {
+        let state = PickerState()
+        populateState(state, selected: 0)
+        _ = state.previewNavigation(delta: 2)
+
+        let items = makeItems(5)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: items, actionMenu: nil, activationGeneration: 8)
+        #expect(state.previewSelectedIndex == nil)
+
+        _ = state.previewNavigation(delta: 2)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: [items[0], items[1]], actionMenu: nil, activationGeneration: 8)
         #expect(state.previewSelectedIndex == nil)
     }
 }

@@ -251,6 +251,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.toggleHUD(msg) {
 			break
 		}
+		if packet, handled := m.localPreviewActivationPacket(msg); handled {
+			m.send(packet)
+			break
+		}
 		if chat, ok := m.agentChat(); ok {
 			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(), msg); handled {
 				m.send(packet)
@@ -1025,14 +1029,17 @@ func (m *Model) applyMutation(command protocol.Command) {
 		case generated.OPGuiIndentGuides:
 			m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
 		case generated.OPGuiFileTree:
-			m.localPresentation.reconcileFileTree()
+			m.reconcileFileTree(command.Chrome.Tree)
 		case generated.OPGuiFileTreeSelection:
 			m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
-			m.localPresentation.reconcileFileTree()
 		case generated.OPGuiCompletion:
-			m.localPresentation.reconcileCompletion()
+			m.reconcileCompletion(command.Chrome.Complete)
+		case generated.OPGuiCompletionSelection:
+			m.applyCompletionSelection(command.Chrome.CompletionSelection)
 		case generated.OPGuiPicker:
-			m.localPresentation.reconcilePicker()
+			m.reconcilePicker(command.Chrome.Picker)
+		case generated.OPGuiPickerSelection:
+			m.applyPickerSelection(command.Chrome.PickerSelection)
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
 		case generated.OPGuiEmptyState:

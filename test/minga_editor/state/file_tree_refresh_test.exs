@@ -112,6 +112,32 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
              FileTreeState.accept_refresh_result(accepted, root, request, refreshed)
   end
 
+  test "same-root refresh and metadata frames preserve presentation generation" do
+    root = "/tmp/minga-refresh-presentation-generation"
+    opened = open_tree(root)
+    generation = FileTreeState.presentation_generation(opened)
+    assert generation > 0
+
+    replaced = FileTreeState.replace_tree(opened, tree(root, [entry(root, "new.ex")]))
+    metadata = FileTreeState.replace_tree_metadata(replaced, tree(root, [entry(root, "new.ex")]))
+
+    assert FileTreeState.presentation_generation(replaced) == generation
+    assert FileTreeState.presentation_generation(metadata) == generation
+  end
+
+  test "root replacement and close-reopen mint new presentation generations" do
+    root = "/tmp/minga-refresh-presentation-root"
+    other = "/tmp/minga-refresh-presentation-other"
+    opened = open_tree(root)
+    first_generation = FileTreeState.presentation_generation(opened)
+
+    rerooted = FileTreeState.replace_tree(opened, tree(other, []))
+    refute FileTreeState.presentation_generation(rerooted) == first_generation
+
+    reopened = opened |> FileTreeState.close() |> FileTreeState.open(tree(root, []), nil)
+    refute FileTreeState.presentation_generation(reopened) == first_generation
+  end
+
   test "a stale result cannot consume or replace the semantic current request" do
     root = "/tmp/minga-refresh-stale"
     current = make_ref()

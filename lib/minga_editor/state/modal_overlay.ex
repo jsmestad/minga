@@ -104,6 +104,13 @@ defmodule MingaEditor.State.ModalOverlay do
   def completion({:command_completion, %CommandCompletionPayload{}}), do: nil
   def completion({:conflict, %ConflictPayload{}}), do: nil
 
+  @doc "Returns the source-owned generation for the active completion presentation."
+  @spec completion_generation(t()) :: non_neg_integer()
+  def completion_generation({:completion, %CompletionPayload{} = payload}),
+    do: CompletionPayload.presentation_generation(payload)
+
+  def completion_generation(_modal), do: 0
+
   @doc "Returns the active completion trigger or a fresh trigger."
   @spec completion_trigger(t()) :: CompletionTrigger.t()
   def completion_trigger({:completion, %CompletionPayload{trigger: trigger}}),
@@ -153,47 +160,72 @@ defmodule MingaEditor.State.ModalOverlay do
   def navigate_completion(modal, fun) when is_function(fun, 1), do: modal
 
   @doc "Records completion-trigger lifecycle using explicit active-tab context."
-  @spec put_completion_trigger(t(), CompletionTrigger.t(), Tab.id() | nil) :: t()
+  @spec put_completion_trigger(t(), CompletionTrigger.t(), Tab.id() | nil, pos_integer()) :: t()
   def put_completion_trigger(
         modal,
         %CompletionTrigger{} = trigger,
-        active_tab_id
+        active_tab_id,
+        presentation_generation
       )
-      when (is_integer(active_tab_id) and active_tab_id > 0) or is_nil(active_tab_id),
-      do: do_put_completion_trigger(modal, trigger, active_tab_id)
+      when ((is_integer(active_tab_id) and active_tab_id > 0) or is_nil(active_tab_id)) and
+             presentation_generation > 0,
+      do: do_put_completion_trigger(modal, trigger, active_tab_id, presentation_generation)
 
-  @spec do_put_completion_trigger(t(), CompletionTrigger.t(), Tab.id() | nil) :: t()
+  @spec do_put_completion_trigger(t(), CompletionTrigger.t(), Tab.id() | nil, pos_integer()) ::
+          t()
   defp do_put_completion_trigger(
          {:completion, %CompletionPayload{} = payload},
          trigger,
-         _active_tab_id
+         _active_tab_id,
+         _presentation_generation
        ),
        do: {:completion, CompletionPayload.put_trigger(payload, trigger)}
 
-  defp do_put_completion_trigger(:none, %CompletionTrigger{phase: :idle}, _active_tab_id),
-    do: :none
+  defp do_put_completion_trigger(
+         :none,
+         %CompletionTrigger{phase: :idle},
+         _active_tab_id,
+         _presentation_generation
+       ),
+       do: :none
 
-  defp do_put_completion_trigger(:none, trigger, active_tab_id) do
-    {:completion, CompletionPayload.new(active_tab_id, trigger: trigger)}
+  defp do_put_completion_trigger(:none, trigger, active_tab_id, presentation_generation) do
+    {:completion,
+     CompletionPayload.new(active_tab_id,
+       trigger: trigger,
+       presentation_generation: presentation_generation
+     )}
   end
 
-  defp do_put_completion_trigger({:picker, %PickerPayload{}} = modal, _trigger, _active_tab_id),
-    do: modal
+  defp do_put_completion_trigger(
+         {:picker, %PickerPayload{}} = modal,
+         _trigger,
+         _active_tab_id,
+         _presentation_generation
+       ),
+       do: modal
 
-  defp do_put_completion_trigger({:prompt, %PromptPayload{}} = modal, _trigger, _active_tab_id),
-    do: modal
+  defp do_put_completion_trigger(
+         {:prompt, %PromptPayload{}} = modal,
+         _trigger,
+         _active_tab_id,
+         _presentation_generation
+       ),
+       do: modal
 
   defp do_put_completion_trigger(
          {:command_completion, %CommandCompletionPayload{}} = modal,
          _trigger,
-         _active_tab_id
+         _active_tab_id,
+         _presentation_generation
        ),
        do: modal
 
   defp do_put_completion_trigger(
          {:conflict, %ConflictPayload{}} = modal,
          _trigger,
-         _active_tab_id
+         _active_tab_id,
+         _presentation_generation
        ),
        do: modal
 

@@ -253,11 +253,12 @@ struct GUICompletionDecoderTests {
         appendU32(&data, 200)
         appendU32(&data, 2)
         data.append(1)
+        appendU32(&data, 9)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, _, let items, let documentation, _, _, _) = cmd else {
+        guard case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, _, let items, let documentation, _, _, _, let generation) = cmd else {
             Issue.record("Expected .guiCompletion"); return
         }
 
@@ -275,6 +276,7 @@ struct GUICompletionDecoderTests {
         #expect(items[1].label == "my_var")
         #expect(items[1].detail == "String.t()")
         #expect(documentation == "Defines a function.")
+        #expect(generation == 9)
     }
 
     @Test("Decode gui_completion hidden")
@@ -284,7 +286,7 @@ struct GUICompletionDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiCompletion(let visible, _, _, _, _, let items, let documentation, _, _, _) = cmd else {
+        guard case .guiCompletion(let visible, _, _, _, _, let items, let documentation, _, _, _, _) = cmd else {
             Issue.record("Expected .guiCompletion"); return
         }
         #expect(visible == false)
@@ -1359,7 +1361,7 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(let version, let treeFlags, let treeState, let selectedId, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+        guard case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
 
@@ -1367,6 +1369,7 @@ struct GUIFileTreeDecoderTests {
         #expect(treeFlags & 0x01 != 0)
         #expect(treeFlags & 0x02 != 0)
         #expect(treeState == 3)
+        #expect(generation == 0)
         #expect(selectedId == "/home/user/project/lib")
         #expect(treeWidth == 30)
         #expect(rootPath == "/home/user/project")
@@ -1403,6 +1406,7 @@ struct GUIFileTreeDecoderTests {
     func decodeSelectionUpdate() throws {
         var payload = Data()
         payload.append(0x01)
+        appendU32(&payload, 7)
         appendString16(&payload, "/home/user/project/lib/editor.ex")
 
         var data = Data()
@@ -1413,10 +1417,11 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTreeSelection(let selectedId, let focused) = cmd else {
+        guard case .guiFileTreeSelection(let generation, let selectedId, let focused) = cmd else {
             Issue.record("Expected .guiFileTreeSelection"); return
         }
 
+        #expect(generation == 7)
         #expect(selectedId == "/home/user/project/lib/editor.ex")
         #expect(focused == true)
     }
@@ -1441,7 +1446,7 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(_, let treeFlags, let treeState, _, let treeWidth, let rootPath, _, let entries) = cmd else {
+        guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, _, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(treeFlags & 0x01 == 0)
@@ -1473,7 +1478,7 @@ struct GUIFileTreeDecoderTests {
             let (cmd, size) = try decodeCommand(data: data, offset: 0)
             #expect(size == data.count)
 
-            guard case .guiFileTree(_, let treeFlags, let treeState, _, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+            guard case .guiFileTree(_, let treeFlags, let treeState, _, _, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
                 Issue.record("Expected .guiFileTree"); return
             }
             #expect(treeFlags == flags)
@@ -1519,7 +1524,7 @@ struct GUIFileTreeDecoderTests {
         data.append(payload)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiFileTree(_, _, _, _, _, _, _, let entries) = cmd else {
+        guard case .guiFileTree(_, _, _, _, _, _, _, _, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(entries.count == 1)

@@ -163,6 +163,7 @@ defmodule Minga.Test.ProtocolGolden do
 
     typical = %Completion{
       visible?: true,
+      generation: 7,
       cursor_row: 3,
       cursor_col: 7,
       selected_offset: 1,
@@ -186,6 +187,7 @@ defmodule Minga.Test.ProtocolGolden do
 
     unicode = %Completion{
       visible?: true,
+      generation: 8,
       cursor_row: 0,
       cursor_col: 0,
       selected_offset: 0,
@@ -193,7 +195,13 @@ defmodule Minga.Test.ProtocolGolden do
       documentation: "Café λ docs → ✓"
     }
 
-    empty_items = %Completion{visible?: true, cursor_row: 1, cursor_col: 2, items: []}
+    empty_items = %Completion{
+      visible?: true,
+      generation: 9,
+      cursor_row: 1,
+      cursor_col: 2,
+      items: []
+    }
 
     [
       %{
@@ -210,7 +218,8 @@ defmodule Minga.Test.ProtocolGolden do
           selected_item_id: "",
           total_count: 0,
           matched_count: 0,
-          incomplete: 0
+          incomplete: 0,
+          generation: 0
         }
       },
       %{
@@ -237,7 +246,8 @@ defmodule Minga.Test.ProtocolGolden do
           selected_item_id: "baz-id",
           total_count: 12,
           matched_count: 4,
-          incomplete: 1
+          incomplete: 1,
+          generation: 7
         }
       },
       %{
@@ -256,7 +266,8 @@ defmodule Minga.Test.ProtocolGolden do
           selected_item_id: "",
           total_count: 0,
           matched_count: 0,
-          incomplete: 0
+          incomplete: 0,
+          generation: 8
         }
       },
       %{
@@ -273,7 +284,8 @@ defmodule Minga.Test.ProtocolGolden do
           selected_item_id: "",
           total_count: 0,
           matched_count: 0,
-          incomplete: 0
+          incomplete: 0,
+          generation: 9
         }
       }
     ]

@@ -28,6 +28,10 @@ public final class GUIState {
 
     public init(windowContents: [UInt16: GUIWindowContent] = [:]) {
         windowContentBacking = GUIWindowContentBacking(windowContents)
+        localPresentationStore = LocalPresentationStore()
+        fileTreeState = FileTreeState(localPresentationStore: localPresentationStore)
+        completionState = CompletionState(localPresentationStore: localPresentationStore)
+        pickerState = PickerState(localPresentationStore: localPresentationStore)
     }
 
     /// Stable shell-scoped input created and owned by this GUI state.
@@ -131,12 +135,13 @@ public final class GUIState {
     public let sidebarHostState = SidebarHostState()
 
     /// Rich sidebar payload state.
-    public let fileTreeState = FileTreeState()
+    public let localPresentationStore: LocalPresentationStore
+    public let fileTreeState: FileTreeState
     public let gitStatusState = GitStatusState()
     public let observatoryState = ObservatoryState()
 
     /// Completion popup state.
-    public let completionState = CompletionState()
+    public let completionState: CompletionState
 
     /// Which-key popup state.
     public let whichKeyState = WhichKeyState()
@@ -151,7 +156,7 @@ public final class GUIState {
     public let feedbackState = FeedbackState()
 
     /// Picker (command palette) state.
-    public let pickerState = PickerState()
+    public let pickerState: PickerState
 
     /// Agent chat state.
     public let agentChatState = AgentChatState()

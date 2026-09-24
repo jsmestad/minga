@@ -557,6 +557,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       model = %Completion{
         visible?: true,
+        generation: 42,
         cursor_row: 5,
         cursor_col: 0,
         selected_offset: selected_offset,
@@ -597,6 +598,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["total_count"] == 12
       assert decoded["matched_count"] == 2
       assert decoded["incomplete"] == true
+      assert decoded["generation"] == 42
     end
   end
 
@@ -788,6 +790,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       command =
         FileTreeEncoder.encode_command(%FileTree{
+          generation: 17,
           root_path: root,
           tree_width: 30,
           status: :ready,
@@ -799,7 +802,8 @@ defmodule Minga.Integration.GUIProtocolTest do
       decoded = round_trip(harness, command, "gui_file_tree")
 
       assert decoded["type"] == "gui_file_tree"
-      assert decoded["version"] == 3
+      assert decoded["version"] == 4
+      assert decoded["generation"] == 17
       assert decoded["tree_state"] == 3
       assert decoded["error_reason"] == ""
       assert Bitwise.band(decoded["tree_flags"], 0x01) != 0

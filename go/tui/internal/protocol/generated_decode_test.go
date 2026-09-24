@@ -68,6 +68,7 @@ func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	bytes = appendWireU32(bytes, 120)
 	bytes = appendWireU32(bytes, 42)
 	bytes = append(bytes, 1)
+	bytes = appendWireU32(bytes, 7)
 	f, consumed, err := generated.DecodeGuiCompletionFields(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
@@ -87,7 +88,7 @@ func TestDecodeGuiCompletionFieldsWithItems(t *testing.T) {
 	if f.Documentation != "doc" {
 		t.Fatalf("documentation = %q, want \"doc\"", f.Documentation)
 	}
-	if f.SelectedItemID != "stable-id" || f.TotalCount != 120 || f.MatchedCount != 42 || f.Incomplete != 1 {
+	if f.SelectedItemID != "stable-id" || f.TotalCount != 120 || f.MatchedCount != 42 || f.Incomplete != 1 || f.Generation != 7 {
 		t.Fatalf("snapshot metadata mismatch: %+v", f)
 	}
 }

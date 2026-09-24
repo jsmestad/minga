@@ -1016,6 +1016,8 @@ struct FrontendActionCompositionTests {
         #expect(FrontendActionComposition.outbound(GitStatusView.Action.openDiff(path: "lib/a.ex", section: 2)) == .gitOpenDiff(path: "lib/a.ex", section: 2))
         #expect(FrontendActionComposition.outbound(SettingsView.Action.update(key: "editor.font_size", value: .int(15))) == .configUpdate(key: "editor.font_size", value: .int(15)))
         #expect(FrontendActionComposition.outbound(FrontendExtensionViewContext.Action.invoke(extensionID: "outline", action: "open", payload: Data([1, 2]))) == .extensionAction(extensionID: "outline", action: "open", payload: Data([1, 2])))
+        #expect(FrontendActionComposition.outbound(CompletionOverlay.Action.select(generation: 7, itemID: "cmp-1")) == .semanticItemActivate(surface: .completion, intent: 1, generation: 7, itemID: Data("cmp-1".utf8)))
+        #expect(FrontendActionComposition.outbound(PickerOverlay.Action.activateItem(generation: 8, activationID: 42)) == .semanticItemActivate(surface: .picker, intent: 1, generation: 8, itemID: Data([0, 0, 0, 42])))
     }
 
     @Test("settings handler is absent without a transport")

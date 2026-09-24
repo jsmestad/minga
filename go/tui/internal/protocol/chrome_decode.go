@@ -73,6 +73,10 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.LineSpacing, chrome.Summary, chrome.Bytes = decodeLineSpacing(payload)
 	case generated.OPGuiFileTreeSelection:
 		chrome.FileTreeSelection, chrome.Summary, chrome.Bytes = decodeFileTreeSelection(payload)
+	case generated.OPGuiCompletionSelection:
+		chrome.CompletionSelection, chrome.Summary, chrome.Bytes = decodeCompletionSelection(payload)
+	case generated.OPGuiPickerSelection:
+		chrome.PickerSelection, chrome.Summary, chrome.Bytes = decodePickerSelection(payload)
 	case generated.OPGuiCursorAnimation:
 		chrome.CursorAnimation, chrome.Summary, chrome.Bytes = decodeCursorAnimation(payload)
 	case generated.OPGuiConfigState:

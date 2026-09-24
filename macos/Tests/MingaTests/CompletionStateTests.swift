@@ -13,7 +13,7 @@ struct CompletionStateTests {
     @Test("previewNavigation increments without mutating selectedIndex")
     func previewNavigationDown() {
         let state = CompletionState()
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(5), documentation: "")
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(5), documentation: "", generation: 7)
 
         let handled = state.previewNavigation(delta: 1)
 
@@ -25,7 +25,7 @@ struct CompletionStateTests {
     @Test("previewNavigation decrements from committed index")
     func previewNavigationUp() {
         let state = CompletionState()
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 3, rawItems: makeItems(5), documentation: "")
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 3, rawItems: makeItems(5), documentation: "", generation: 7)
 
         let handled = state.previewNavigation(delta: -1)
 
@@ -37,13 +37,13 @@ struct CompletionStateTests {
     @Test("previewNavigation clamps at list boundaries")
     func previewNavigationClamps() {
         let state = CompletionState()
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(3), documentation: "")
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(3), documentation: "", generation: 7)
 
         let handledUp = state.previewNavigation(delta: -1)
         #expect(handledUp == false)
         #expect(state.content?.previewSelectedIndex == nil)
 
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 2, rawItems: makeItems(3), documentation: "")
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 2, rawItems: makeItems(3), documentation: "", generation: 7)
 
         let handledDown = state.previewNavigation(delta: 1)
         #expect(handledDown == false)
@@ -53,30 +53,59 @@ struct CompletionStateTests {
     @Test("update clears preview index")
     func updateClearsPreview() {
         let state = CompletionState()
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(5), documentation: "")
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(5), documentation: "", generation: 7)
 
         _ = state.previewNavigation(delta: 1)
         #expect(state.content?.previewSelectedIndex != nil)
 
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 1, rawItems: makeItems(5), documentation: "")
+        state.updateSelection(generation: 7, selectedItemID: "item-1", documentation: "item 1 docs")
         #expect(state.content?.previewSelectedIndex == nil)
+        #expect(state.content?.documentation == "item 1 docs")
     }
 
     @Test("update retains preview by stable ID when ranking changes")
     func updateRetainsPreviewByStableID() {
         let state = CompletionState()
         let items = makeItems(5)
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: items, documentation: "")
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: items, documentation: "", generation: 7)
 
         _ = state.previewNavigation(delta: 1)
         let reordered = [items[4], items[1], items[0]]
-        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 2, selectedItemID: "item-0", rawItems: reordered, documentation: "", totalCount: 50_000, matchedCount: 3, incomplete: true)
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 2, selectedItemID: "item-0", rawItems: reordered, documentation: "", totalCount: 50_000, matchedCount: 3, incomplete: true, generation: 7)
 
         #expect(state.content?.effectiveSelectedItemID == "item-1")
         #expect(state.content?.effectiveSelectedIndex == 1)
         #expect(state.content?.totalCount == 50_000)
         #expect(state.content?.matchedCount == 3)
         #expect(state.content?.incomplete == true)
+    }
+
+    @Test("selection-only documentation frame retains a different local preview")
+    func selectionOnlyDocumentationRetainsPreview() {
+        let state = CompletionState()
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: makeItems(3), documentation: "old", generation: 7)
+        _ = state.previewNavigation(delta: 2)
+
+        state.updateSelection(generation: 7, selectedItemID: "item-1", documentation: "new")
+
+        #expect(state.content?.selectedItemID == "item-1")
+        #expect(state.content?.effectiveSelectedItemID == "item-2")
+        #expect(state.content?.documentation == "new")
+    }
+
+    @Test("generation change and retained-item miss discard preview")
+    func stalePreviewDiscard() {
+        let state = CompletionState()
+        let items = makeItems(3)
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: items, documentation: "", generation: 7)
+        _ = state.previewNavigation(delta: 1)
+
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: items, documentation: "", generation: 8)
+        #expect(state.content?.previewSelectedIndex == nil)
+
+        _ = state.previewNavigation(delta: 1)
+        state.update(visible: true, anchorRow: 0, anchorCol: 0, selectedIndex: 0, rawItems: [items[0], items[2]], documentation: "", generation: 8)
+        #expect(state.content?.previewSelectedIndex == nil)
     }
 
     @Test("hide clears preview index")

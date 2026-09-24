@@ -120,6 +120,7 @@
 		4ADE54090FEEF5AA2A6C86A0 /* WindowContentRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */; };
 		4BC82E5D7B75A3365DFFC323 /* OperationReceiptTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41827D81991F10BAE2D88FF /* OperationReceiptTypes.swift */; };
 		4D276F4F3C0C19A3E184D09B /* GUIFrameSwiftUIInvalidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510D1033E87B077777E8FD64 /* GUIFrameSwiftUIInvalidationTests.swift */; };
+		4DC3AEACCB976600A7E4125D /* LocalPresentationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66039B0164FB7071A5C0F7D8 /* LocalPresentationStore.swift */; };
 		4E1EEFA65935DCE58528E02B /* PipelineCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321E4E28F5F49F089CCE2E1D /* PipelineCacheTests.swift */; };
 		4E4B8BDBAEF50E45C26C0057 /* LatencyHUDOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E1059DF5F524F5FC2B697EC /* LatencyHUDOverlay.swift */; };
 		4ECF7F97FFFD5B2A74914AAB /* NotificationCenterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DCCEC5865DAE0AAF754F2E2 /* NotificationCenterState.swift */; };
@@ -406,6 +407,7 @@
 		E8DAC5BD5013095E550BF4E8 /* CompletionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124E376C3B8F6EC62765F5C1 /* CompletionState.swift */; };
 		E986DB2DA0989A52D16B1E69 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60980E90FDD864409144BA5B /* PickerState.swift */; };
 		EB7FEB894A1499C8F63EAB27 /* MenuSnapshotProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B81375947A9D7F9FCA85C91 /* MenuSnapshotProbe.swift */; };
+		EC0DB310814080693C5162E5 /* TextHighlightingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F080E3BF9A53CC0B7586E63E /* TextHighlightingTests.swift */; };
 		ECE46C17B78255F1761E8DB0 /* ProtocolCommandSize.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762CD389E04B0DE6A86CDBF2 /* ProtocolCommandSize.generated.swift */; };
 		ED38366E0817156651AC8EA6 /* ProtocolConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C04E36E000E9D7450F374B /* ProtocolConnection.swift */; };
 		ED8592B57E8A2A3EAAE24295 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB822E0C8D06C7B45D329F /* EditorNSView.swift */; };
@@ -668,6 +670,7 @@
 		644384B6B8FE5F11CD0DB713 /* GUIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIState.swift; sourceTree = "<group>"; };
 		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		65B982679577E3DBD4E7A69D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		66039B0164FB7071A5C0F7D8 /* LocalPresentationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPresentationStore.swift; sourceTree = "<group>"; };
 		671A222860B90E08D7975099 /* WorkspaceIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceIconPicker.swift; sourceTree = "<group>"; };
 		6725FA389D1B96B14892C684 /* SearchQueryField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchQueryField.swift; sourceTree = "<group>"; };
 		67B23834E6FEB75E891AAFE2 /* ObservatoryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservatoryState.swift; sourceTree = "<group>"; };
@@ -792,6 +795,7 @@
 		EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTimelineView.swift; sourceTree = "<group>"; };
 		EF185FF7AFC2D9E5430B6B65 /* FeedbackState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackState.swift; sourceTree = "<group>"; };
 		F0584599FD3264B1C8F85A90 /* OperationReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationReadiness.swift; sourceTree = "<group>"; };
+		F080E3BF9A53CC0B7586E63E /* TextHighlightingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextHighlightingTests.swift; sourceTree = "<group>"; };
 		F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColorsTests.swift; sourceTree = "<group>"; };
 		F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BEAMProcessManager.swift; sourceTree = "<group>"; };
 		F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabIconColors.swift; sourceTree = "<group>"; };
@@ -1087,6 +1091,7 @@
 				4A9C41D4B8B3DCF4A06CDF44 /* GUIFrameCorrelation.swift */,
 				18683C638D0F417500DAF924 /* GUIFramePresentationMetrics.swift */,
 				644384B6B8FE5F11CD0DB713 /* GUIState.swift */,
+				66039B0164FB7071A5C0F7D8 /* LocalPresentationStore.swift */,
 				9D721181E284AD8BA34F0354 /* SparklineView.swift */,
 				A87246A39436BB38B41100F9 /* TextHighlighting.swift */,
 				748AE6791D99D594FBD4A1A1 /* ThemeColors.swift */,
@@ -1324,6 +1329,7 @@
 				86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */,
 				56B00002D020FED57D265C74 /* SystemColorTests.swift */,
 				51F0B55F4608ACA6BDB7CB3E /* TemporalOffscreenMetalTests.swift */,
+				F080E3BF9A53CC0B7586E63E /* TextHighlightingTests.swift */,
 				F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */,
 				22420E1CC772DAFB9A5043C2 /* ViewModelComputedTests.swift */,
 				620F7F967502D4F1F7AE8F03 /* WindowContentRendererTests.swift */,
@@ -1954,6 +1960,7 @@
 				66FAAD91BF8CF5B72C187D02 /* KeybindingsSettingsView.swift in Sources */,
 				4E4B8BDBAEF50E45C26C0057 /* LatencyHUDOverlay.swift in Sources */,
 				0E41F92F8E0358C4847E871E /* LatencyHUDState.swift in Sources */,
+				4DC3AEACCB976600A7E4125D /* LocalPresentationStore.swift in Sources */,
 				8950511FEBB383E5D73B17DA /* MessagesContentState.swift in Sources */,
 				D5F45455932847E76CA9A4E4 /* MessagesContentView.swift in Sources */,
 				CA07A054C4AD25FADA35DAF7 /* MinibufferState.swift in Sources */,
@@ -2127,6 +2134,7 @@
 				9758BF46BB0EC7FEEB14FBA3 /* SwiftUIViewTests.swift in Sources */,
 				FEFCEFCDC21C5AA5456036D0 /* SystemColorTests.swift in Sources */,
 				3CA33261F251A71830F618AA /* TemporalOffscreenMetalTests.swift in Sources */,
+				EC0DB310814080693C5162E5 /* TextHighlightingTests.swift in Sources */,
 				61CF67858355FFF4962D9D99 /* ThemeColorsTests.swift in Sources */,
 				4400C2DBBACCF83790714235 /* ThumbDragSession.swift in Sources */,
 				DD0B958D8ACEFFEF3C1A50AE /* ViewModelComputedTests.swift in Sources */,

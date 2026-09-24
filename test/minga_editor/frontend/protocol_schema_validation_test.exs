@@ -465,7 +465,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       # Schema command_fields: visible(u8), then a visible==1 tail of
       # cursor_row(u16) + cursor_col(u16) + selected_offset(u16) +
       # items(u16-counted completion_item) + documentation(string16) +
-      # selected_item_id(string8) + total_count(u32) + matched_count(u32) + incomplete(u8).
+      # selected_item_id(string8) + total_count(u32) + matched_count(u32) + incomplete(u8) + generation(u32).
       <<_opcode, visible::8, cursor_row::16, cursor_col::16, selected_offset::16, item_count::16,
         rest::binary>> = CompletionEncoder.encode_command(model)
 
@@ -474,7 +474,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       # The model defaults exercise the empty metadata encodings after the visible fields.
       assert rest ==
                <<1::8, 3::16, "foo", 3::16, "bar", 0::8, 0::16, 0::8, 3::16, "doc", 0::8, 0::32,
-                 0::32, 0::8>>
+                 0::32, 0::8, 0::32>>
     end
 
     test "hidden completion encodes only the visible byte" do

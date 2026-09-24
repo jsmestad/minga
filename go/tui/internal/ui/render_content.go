@@ -1035,7 +1035,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int, ski
 		}
 	}
 	guides := computeFileTreeGuides(tree.Rows)
-	previewIdx := m.localPresentation.previewFileTreeIndex
+	effectiveSelectedIndex := m.effectiveFileTreeIndex(tree)
 
 	scrollOffset := 0
 	if needsScrollbar {
@@ -1053,9 +1053,9 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int, ski
 	for i := 0; i < visibleRows && scrollOffset+i < totalRows; i++ {
 		rowIndex := scrollOffset + i
 		row := tree.Rows[rowIndex]
-		if previewIdx != nil {
-			row.Selected = rowIndex == *previewIdx
-			row.Focused = rowIndex == *previewIdx
+		if effectiveSelectedIndex >= 0 {
+			row.Selected = rowIndex == effectiveSelectedIndex
+			row.Focused = rowIndex == effectiveSelectedIndex && tree.Focused
 		}
 		rendered := m.renderFileTreeRow(row, contentWidth, guides[rowIndex])
 		line := m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered)

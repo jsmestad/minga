@@ -225,6 +225,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(id, limit: Int(UInt16.max))
         case .notificationAction(let id, let actionID):
             return firstOversizedString(in: [id, actionID], limit: Int(UInt16.max))
+        case .semanticItemActivate(_, _, _, let itemID):
+            return itemID.count > Int(UInt16.max) ? .payloadTooLarge(limitBytes: Int(UInt16.max), attemptedBytes: itemID.count) : nil
         case .observatoryInspect(let pid):
             return oversizedString(pid, limit: Int(UInt16.max))
         case .searchQuery(_, _, let query, _):
@@ -317,6 +319,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .fileTreeCollapseAll: encodeFileTreeCollapseAll()
         case .fileTreeRefresh: encodeFileTreeRefresh()
         case .completionSelect(let itemID): encodeCompletionSelect(itemID: itemID)
+        case .semanticItemActivate(let surface, let intent, let generation, let itemID): encodeSemanticItemActivate(surface: surface, intent: intent, generation: generation, itemID: itemID)
         case .togglePanel(let panel): encodeTogglePanel(panel: panel)
         case .sidebarAction(let sidebarID, let kind, let action): encodeSidebarAction(sidebarId: sidebarID, kind: kind, action: action)
         case .extensionAction(let extensionID, let action, let payload): encodeExtensionAction(extensionID: extensionID, action: action, payload: payload)
@@ -936,6 +939,14 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf[1] = GUI_ACTION_COMPLETION_SELECT
         buf[2] = UInt8(idBytes.count)
         buf.replaceSubrange(3..<(3 + idBytes.count), with: idBytes)
+        writeFrame(buf)
+    }
+
+    private func encodeSemanticItemActivate(surface: SemanticItemSurface, intent: UInt8, generation: UInt32, itemID: Data) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_SEMANTIC_ITEM_ACTIVATE, surface.rawValue, intent])
+        appendU32(&buf, generation)
+        appendU16(&buf, UInt16(itemID.count))
+        buf.append(itemID)
         writeFrame(buf)
     }
 

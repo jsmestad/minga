@@ -241,6 +241,22 @@ func EncodeGUICompletionSelect(index uint16) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionCompletionSelect, byte(index >> 8), byte(index)}
 }
 
+// EncodeGUISemanticItemActivate activates one exact BEAM-authored item identity.
+// The frontend treats itemID as opaque bytes and echoes it with the surface,
+// intent, and generation captured from the committed semantic model.
+func EncodeGUISemanticItemActivate(surface, intent byte, generation uint32, itemID []byte) []byte {
+	if len(itemID) > 0xFFFF {
+		return nil
+	}
+	out := []byte{
+		generated.OPGuiAction, generated.GUIActionSemanticItemActivate,
+		surface, intent,
+		byte(generation >> 24), byte(generation >> 16), byte(generation >> 8), byte(generation),
+		byte(len(itemID) >> 8), byte(len(itemID)),
+	}
+	return append(out, itemID...)
+}
+
 // EncodeGUIHoverOpenAction encodes a hover_open_action. Wire format:
 // <gui_action, 0x3F> with an empty payload, matching the GUI accept gesture
 // (HoverPopupOverlay.swift:123).

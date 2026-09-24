@@ -25,8 +25,12 @@ defmodule MingaEditor.State.ModalOverlayTest do
     )
   end
 
-  defp completion_payload(owner \\ 1) do
-    CompletionPayload.new(owner, completion: Completion.new([], {0, 0}), opened_at: 1_003)
+  defp completion_payload(owner \\ 1, generation \\ 1) do
+    CompletionPayload.new(owner,
+      completion: Completion.new([], {0, 0}),
+      opened_at: 1_003,
+      presentation_generation: generation
+    )
   end
 
   defp conflict_payload(buffer \\ self()) do
@@ -121,24 +125,36 @@ defmodule MingaEditor.State.ModalOverlayTest do
     assert ModalOverlay.completion({:picker, picker_payload()}) == nil
   end
 
+  test "completion generation is stable within one modal lifecycle and changes on replacement" do
+    payload = completion_payload(7)
+    generation = CompletionPayload.presentation_generation(payload)
+    assert generation > 0
+
+    updated = CompletionPayload.put_completion(payload, Completion.new([], {1, 2}))
+    assert CompletionPayload.presentation_generation(updated) == generation
+
+    replacement = completion_payload(7, generation + 1)
+    refute CompletionPayload.presentation_generation(replacement) == generation
+  end
+
   test "completion trigger bookkeeping receives active-tab context explicitly" do
-    assert ModalOverlay.put_completion_trigger(:none, CompletionTrigger.new(), 42) == :none
+    assert ModalOverlay.put_completion_trigger(:none, CompletionTrigger.new(), 42, 11) == :none
 
     debounced = %CompletionTrigger{phase: {:debounced, make_ref(), {0, 0}}}
 
     assert {:completion, %CompletionPayload{owner: 42, trigger: ^debounced}} =
-             ModalOverlay.put_completion_trigger(:none, debounced, 42)
+             ModalOverlay.put_completion_trigger(:none, debounced, 42, 11)
 
     ref = make_ref()
     trigger = %CompletionTrigger{phase: {:pending, %{ref => :primary}, {0, 0}}}
-    modal = ModalOverlay.put_completion_trigger(:none, trigger, 42)
+    modal = ModalOverlay.put_completion_trigger(:none, trigger, 42, 11)
     assert {:completion, %CompletionPayload{owner: 42, trigger: ^trigger}} = modal
 
     replacement = %CompletionTrigger{phase: {:debounced, make_ref(), {0, 0}}}
-    updated = ModalOverlay.put_completion_trigger(modal, replacement, 99)
+    updated = ModalOverlay.put_completion_trigger(modal, replacement, 99, 12)
     assert ModalOverlay.completion_trigger(updated) == replacement
 
-    assert ModalOverlay.put_completion_trigger({:picker, picker_payload()}, trigger, 42) ==
+    assert ModalOverlay.put_completion_trigger({:picker, picker_payload()}, trigger, 42, 11) ==
              {:picker, picker_payload()}
   end
 

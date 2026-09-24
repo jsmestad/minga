@@ -525,10 +525,16 @@ func TestDecodeWorkspacesChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	item := append([]byte{1}, string16("map")...)
 	item = append(item, string16("Enum.map/2")...)
+	item = append(item, string8("completion-map")...)
+	item = append(item, string16("lsp:elixir")...)
+	item = append(item, 0)
 	packet := []byte{generated.OPGuiCompletion, 1, 0, 9, 0, 4, 0, 0, 0, 1}
 	packet = append(packet, item...)
 	// documentation string16 (selected item's doc preview) trails the item list.
 	packet = append(packet, string16("Applies fun to each element.")...)
+	packet = append(packet, string8("completion-map")...)
+	packet = append(packet, 0, 0, 0, 1, 0, 0, 0, 1, 0)
+	packet = append(packet, 0, 0, 0, 7)
 	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
@@ -542,11 +548,14 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	if !completion.Visible || completion.Row != 9 || completion.Col != 4 || len(completion.Items) != 1 {
 		t.Fatalf("completion decoded incorrectly: %+v", completion)
 	}
-	if got := completion.Items[0]; got.Kind != 1 || got.Label != "map" || got.Detail != "Enum.map/2" {
+	if got := completion.Items[0]; got.Kind != 1 || got.Label != "map" || got.Detail != "Enum.map/2" || got.ID != "completion-map" {
 		t.Fatalf("completion item decoded incorrectly: %+v", got)
 	}
 	if completion.Documentation != "Applies fun to each element." {
 		t.Fatalf("completion documentation = %q, want preview text", completion.Documentation)
+	}
+	if completion.Generation != 7 || completion.SelectedID != "completion-map" {
+		t.Fatalf("completion identity decoded incorrectly: %+v", completion)
 	}
 
 	second, err := DecodeCommand(packet[first.Size:])
@@ -727,32 +736,40 @@ const (
 )
 
 func TestDecodeFileTreeChromeRows(t *testing.T) {
-	row := []byte{
-		0, 0, 0, 1,
-		0, 0x05,
-		1,
-		0,
-		0, 0,
-		0, 0,
-		0, 0,
-		0, 0,
-		0,
+	encodeRow := func(pathHash uint32, flags uint16, depth byte, id, path, name, icon string, token uint32, color uint32) []byte {
+		row := append(u32Bytes(pathHash), byte(flags>>8), byte(flags))
+		row = append(row,
+			depth,
+			0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0, 0,
+			0,
+		)
+		row = append(row, string16(id)...)
+		row = append(row, string16(path)...)
+		row = append(row, string16(name)...)
+		row = append(row, string16(name)...)
+		row = append(row, byte(len(icon)))
+		row = append(row, icon...)
+		row = append(row, 0xFF)
+		row = append(row, u32Bytes(token)...)
+		row = append(row, 0, 0)
+		row = append(row, byte(color>>16), byte(color>>8), byte(color))
+		row = append(row, 0xFF)
+		return row
 	}
-	row = append(row, string16("/repo/lib")...)
-	row = append(row, string16("/repo/lib")...)
-	row = append(row, string16("lib")...)
-	row = append(row, string16("lib")...)
-	row = append(row, 1, 'd')
-	row = append(row, 0xFF)
-	row = append(row, 0, 0)
-	row = append(row, 0x6D, 0x80, 0x86) // icon color (R,G,B) follows editing payload
-	row = append(row, 0xFF)             // heat level (0xFF = none) trails the row
-	body := []byte{2, fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, fileTreeReadyStatus}
+	firstRow := encodeRow(1, 0x05, 1, "/repo/lib", "/repo/lib", "lib", "d", 0x01020304, 0x6D8086)
+	secondRow := encodeRow(2, 0, 2, "/repo/lib/minga.ex", "/repo/lib/minga.ex", "minga.ex", "f", 0x05060708, 0xAABBCC)
+	body := []byte{4, fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, fileTreeReadyStatus}
+	body = append(body, 0, 0, 0, 7)
 	body = append(body, string16("/repo/lib")...)
 	body = append(body, string16("/repo")...)
-	body = append(body, 0, 30, 0, 1)
+	body = append(body, 0, 30, 0, 2)
 	body = append(body, 0, 0)
-	body = append(body, row...)
+	body = append(body, firstRow...)
+	body = append(body, secondRow...)
 	packet := append([]byte{generated.OPGuiFileTree, 0, 0, 0, byte(len(body))}, body...)
 
 	command, err := DecodeCommand(packet)
@@ -760,11 +777,14 @@ func TestDecodeFileTreeChromeRows(t *testing.T) {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
 	tree := command.Chrome.Tree
-	if !tree.Visible || !tree.Focused || tree.Flags&fileTreeLocalNavigationFlag == 0 || tree.Status != fileTreeReadyStatus || tree.Root != "/repo" || len(tree.Rows) != 1 {
+	if !tree.Visible || !tree.Focused || tree.Generation != 7 || tree.Flags&fileTreeLocalNavigationFlag == 0 || tree.Status != fileTreeReadyStatus || tree.Root != "/repo" || len(tree.Rows) != 2 {
 		t.Fatalf("file tree decoded incorrectly: %+v", tree)
 	}
-	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.Name != "lib" || got.Depth != 1 || got.IconColor != 0x6D8086 {
+	if got := tree.Rows[0]; !got.Directory || !got.Selected || got.ID != "/repo/lib" || got.Name != "lib" || got.Depth != 1 || got.IconColor != 0x6D8086 {
 		t.Fatalf("file tree row decoded incorrectly: %+v", got)
+	}
+	if got := tree.Rows[1]; got.Directory || got.Selected || got.ID != "/repo/lib/minga.ex" || got.Name != "minga.ex" || got.Depth != 2 || got.IconColor != 0xAABBCC {
+		t.Fatalf("second file tree row decoded incorrectly: %+v", got)
 	}
 }
 
@@ -1085,14 +1105,34 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 		t.Fatalf("empty indent guides decoded incorrectly: %+v", command.Chrome.IndentGuides)
 	}
 
-	selectionPayload := append([]byte{1}, string16("row-1")...)
+	selectionPayload := append([]byte{1, 0, 0, 0, 7}, string16("row-1")...)
 	selection := append([]byte{generated.OPGuiFileTreeSelection, 0, byte(len(selectionPayload))}, selectionPayload...)
 	command, err = DecodeCommand(selection)
 	if err != nil {
 		t.Fatalf("DecodeCommand file tree selection returned error: %v", err)
 	}
-	if !command.Chrome.FileTreeSelection.Focused || command.Chrome.FileTreeSelection.SelectedID != "row-1" {
+	if command.Chrome.FileTreeSelection.Generation != 7 || !command.Chrome.FileTreeSelection.Focused || command.Chrome.FileTreeSelection.SelectedID != "row-1" {
 		t.Fatalf("file tree selection decoded incorrectly: %+v", command.Chrome.FileTreeSelection)
+	}
+
+	completionSelectionPayload := append([]byte{0, 0, 0, 8, 6, 'c', 'm', 'p', '-', '4', '2'}, string16("docs")...)
+	completionSelection := append([]byte{generated.OPGuiCompletionSelection, 0, byte(len(completionSelectionPayload))}, completionSelectionPayload...)
+	command, err = DecodeCommand(completionSelection)
+	if err != nil {
+		t.Fatalf("DecodeCommand completion selection returned error: %v", err)
+	}
+	if command.Chrome.CompletionSelection.Generation != 8 || command.Chrome.CompletionSelection.SelectedID != "cmp-42" || command.Chrome.CompletionSelection.Documentation != "docs" {
+		t.Fatalf("completion selection decoded incorrectly: %+v", command.Chrome.CompletionSelection)
+	}
+
+	pickerSelectionPayload := []byte{0, 0, 0, 9, 0, 0, 0, 12, 0, 0, 0, 13}
+	pickerSelection := append([]byte{generated.OPGuiPickerSelection, 0, byte(len(pickerSelectionPayload))}, pickerSelectionPayload...)
+	command, err = DecodeCommand(pickerSelection)
+	if err != nil {
+		t.Fatalf("DecodeCommand picker selection returned error: %v", err)
+	}
+	if command.Chrome.PickerSelection.Generation != 9 || command.Chrome.PickerSelection.SelectedID != 12 || command.Chrome.PickerSelection.SelectedActionID != 13 {
+		t.Fatalf("picker selection decoded incorrectly: %+v", command.Chrome.PickerSelection)
 	}
 
 	lineSpacing := []byte{generated.OPGuiLineSpacing, 0, 2, 0, 120}

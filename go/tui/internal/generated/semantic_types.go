@@ -617,6 +617,7 @@ type GuiCompletionFields struct {
 	TotalCount     uint32
 	MatchedCount   uint32
 	Incomplete     uint8
+	Generation     uint32
 }
 
 type GuiWhichKeyFields struct {

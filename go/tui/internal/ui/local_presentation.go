@@ -9,6 +9,19 @@ const (
 	transformIdentity
 )
 
+type presentationSurface byte
+
+const (
+	presentationCompletion presentationSurface = 1
+	presentationPicker     presentationSurface = 2
+	presentationFileTree   presentationSurface = 3
+)
+
+type presentationIdentity struct {
+	generation uint32
+	itemID     string
+}
+
 type presentationScroll struct {
 	anchorTop        uint32
 	anchorLeft       uint16
@@ -33,10 +46,8 @@ func (s presentationScroll) keysMatch(scroll protocol.ScrollPresentation) bool {
 }
 
 type localPresentation struct {
-	scrolls                map[uint16]presentationScroll
-	previewFileTreeIndex   *int
-	previewCompletionIndex *int
-	previewPickerIndex     *int
+	scrolls          map[uint16]presentationScroll
+	identityPreviews map[presentationSurface]presentationIdentity
 	// previewEmptyStateIndex is the locally-echoed launchpad focus row (#2689):
 	// an index into the ordered focusable items. It lets j/k/arrows move the
 	// highlight with zero latency; the next gui_empty_state frame's focused_id
@@ -46,7 +57,8 @@ type localPresentation struct {
 
 func newLocalPresentation() localPresentation {
 	return localPresentation{
-		scrolls: make(map[uint16]presentationScroll),
+		scrolls:          make(map[uint16]presentationScroll),
+		identityPreviews: make(map[presentationSurface]presentationIdentity),
 	}
 }
 
@@ -82,16 +94,34 @@ func (lp *localPresentation) reconcileScroll(window protocol.WindowContent) {
 	}
 }
 
-func (lp *localPresentation) reconcileFileTree() {
-	lp.previewFileTreeIndex = nil
+func (lp *localPresentation) setIdentityPreview(surface presentationSurface, generation uint32, itemID string) {
+	if generation == 0 || itemID == "" {
+		delete(lp.identityPreviews, surface)
+		return
+	}
+	lp.identityPreviews[surface] = presentationIdentity{generation: generation, itemID: itemID}
 }
 
-func (lp *localPresentation) reconcileCompletion() {
-	lp.previewCompletionIndex = nil
+func (lp localPresentation) identityPreview(surface presentationSurface) (presentationIdentity, bool) {
+	identity, ok := lp.identityPreviews[surface]
+	return identity, ok
 }
 
-func (lp *localPresentation) reconcilePicker() {
-	lp.previewPickerIndex = nil
+func (lp *localPresentation) reconcileIdentity(surface presentationSurface, generation uint32, committedItemID string, retainedItemIDs map[string]struct{}, visible bool) string {
+	preview, ok := lp.identityPreviews[surface]
+	if !visible || generation == 0 || !ok || preview.generation != generation || preview.itemID == committedItemID {
+		delete(lp.identityPreviews, surface)
+		return committedItemID
+	}
+	if _, retained := retainedItemIDs[preview.itemID]; !retained {
+		delete(lp.identityPreviews, surface)
+		return committedItemID
+	}
+	return preview.itemID
+}
+
+func (lp *localPresentation) discardIdentity(surface presentationSurface) {
+	delete(lp.identityPreviews, surface)
 }
 
 // reconcileEmptyState drops the locally-echoed launchpad focus when a fresh
@@ -106,9 +136,7 @@ func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 	case transformOffset:
 		delete(lp.scrolls, windowID)
 	case transformIdentity:
-		lp.previewFileTreeIndex = nil
-		lp.previewCompletionIndex = nil
-		lp.previewPickerIndex = nil
+		clear(lp.identityPreviews)
 		lp.previewEmptyStateIndex = nil
 	}
 }

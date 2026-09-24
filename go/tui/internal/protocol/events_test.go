@@ -73,6 +73,19 @@ func TestEncodeGUICompletionSelect(t *testing.T) {
 	}
 }
 
+func TestEncodeGUISemanticItemActivate(t *testing.T) {
+	got := EncodeGUISemanticItemActivate(2, 1, 0x01020304, []byte("row-1"))
+	want := []byte{
+		generated.OPGuiAction, generated.GUIActionSemanticItemActivate,
+		2, 1,
+		0x01, 0x02, 0x03, 0x04,
+		0, 5, 'r', 'o', 'w', '-', '1',
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("semantic item activation packet = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUIHoverOpenAction(t *testing.T) {
 	got := EncodeGUIHoverOpenAction()
 	want := []byte{generated.OPGuiAction, generated.GUIActionHoverOpenAction}

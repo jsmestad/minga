@@ -32,6 +32,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.GitRepositoryResolver
   alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
+  alias MingaEditor.FileTree.Row, as: FileTreeRow
   alias MingaEditor.Commands
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
@@ -329,6 +330,51 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:empty_state_activate, item_id}) do
     Commands.Launchpad.activate(state, item_id)
   end
+
+  defp dispatch_action(
+         state,
+         {:semantic_item_activate, :completion, :accept, generation, item_id}
+       ) do
+    modal_workflow = MingaEditor.Shell.Traditional.ModalWorkflow
+
+    case {modal_workflow.completion_generation(state), modal_workflow.completion(state)} do
+      {^generation, %Completion{} = completion} when generation != 0 ->
+        accept_completion_item(state, completion, item_id)
+
+      _stale ->
+        reject_semantic_activation(state, :completion, generation, item_id)
+    end
+  end
+
+  defp dispatch_action(
+         state,
+         {:semantic_item_activate, :picker, intent, generation, <<activation_id::32>>}
+       )
+       when intent in [:activate_item, :activate_action] do
+    case intent do
+      :activate_item ->
+        dispatch_action(state, {:picker_item_activate, generation, activation_id})
+
+      :activate_action ->
+        dispatch_action(state, {:picker_action_activate, generation, activation_id})
+    end
+  end
+
+  defp dispatch_action(
+         state,
+         {:semantic_item_activate, :file_tree, intent, generation, item_id}
+       ) do
+    case resolve_file_tree_item(state.workspace.file_tree, generation, item_id) do
+      {:ok, index} -> dispatch_file_tree_identity(state, intent, index)
+      :stale -> reject_semantic_activation(state, :file_tree, generation, item_id)
+    end
+  end
+
+  defp dispatch_action(
+         state,
+         {:semantic_item_activate, surface, _intent, generation, item_id}
+       ),
+       do: reject_semantic_activation(state, surface, generation, item_id)
 
   defp dispatch_action(state, {:file_tree_click, index}) do
     gui_tree_action(state, index, :click)
@@ -1248,7 +1294,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp accept_completion_item(state, comp, item_id) do
     case Completion.select_wire_id(comp, item_id) do
       :stale ->
-        state
+        reject_semantic_activation(state, :completion, 0, item_id)
 
       {:ok, updated} ->
         next =
@@ -1256,6 +1302,55 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
         MingaEditor.do_accept_completion(next, updated)
     end
+  end
+
+  @spec resolve_file_tree_item(FileTreeState.t(), non_neg_integer(), binary()) ::
+          {:ok, non_neg_integer()} | :stale
+  defp resolve_file_tree_item(%FileTreeState{} = file_tree, generation, item_id) do
+    with ^generation when generation != 0 <- FileTreeState.presentation_generation(file_tree),
+         %FileTree{} = tree <- FileTreeState.tree(file_tree),
+         %FileTree{entries: entries} <- FileTree.ensure_entries(tree),
+         index when is_integer(index) <-
+           Enum.find_index(entries, &(FileTreeRow.id_for(&1) == item_id)) do
+      {:ok, index}
+    else
+      _stale -> :stale
+    end
+  end
+
+  @spec dispatch_file_tree_identity(state(), atom(), non_neg_integer()) :: state()
+  defp dispatch_file_tree_identity(state, :primary, index),
+    do: gui_tree_action(state, index, :click)
+
+  defp dispatch_file_tree_identity(state, :toggle, index),
+    do: gui_tree_action(state, index, :toggle)
+
+  defp dispatch_file_tree_identity(state, :open_in_split, index),
+    do: open_file_tree_entry_in_split(state, index)
+
+  defp dispatch_file_tree_identity(state, :delete, index) do
+    state |> move_tree_cursor(index) |> Commands.FileTree.delete()
+  end
+
+  defp dispatch_file_tree_identity(state, :rename, index) do
+    state |> move_tree_cursor(index) |> Commands.FileTree.rename()
+  end
+
+  defp dispatch_file_tree_identity(state, :duplicate, index) do
+    state |> move_tree_cursor(index) |> Commands.FileTree.duplicate()
+  end
+
+  defp dispatch_file_tree_identity(state, _intent, _index),
+    do: reject_semantic_activation(state, :file_tree, 0, <<>>)
+
+  @spec reject_semantic_activation(state(), atom(), non_neg_integer(), binary()) :: state()
+  defp reject_semantic_activation(state, surface, generation, item_id) do
+    Minga.Log.warning(
+      :editor,
+      "Rejected stale semantic activation surface=#{surface} generation=#{generation} item=#{inspect(item_id)}"
+    )
+
+    EditorState.reset_frontend_render_state(state)
   end
 
   # ── File tree helpers ──────────────────────────────────────────────

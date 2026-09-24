@@ -1,6 +1,12 @@
 import Foundation
 import MingaProtocol
 
+public enum SemanticItemSurface: UInt8, Equatable, Sendable {
+    case completion = 1
+    case picker = 2
+    case fileTree = 3
+}
+
 /// Every event the native frontend can send to the BEAM.
 ///
 /// This is the only production outbound action hierarchy. `ProtocolEncoder`
@@ -50,6 +56,7 @@ public enum OutboundAction: Equatable, Sendable {
     case fileTreeCollapseAll
     case fileTreeRefresh
     case completionSelect(itemID: String)
+    case semanticItemActivate(surface: SemanticItemSurface, intent: UInt8, generation: UInt32, itemID: Data)
     case togglePanel(panel: UInt8)
     case sidebarAction(sidebarID: String, kind: String, action: String)
     case extensionAction(extensionID: String, action: String, payload: Data)

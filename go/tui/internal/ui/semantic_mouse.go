@@ -499,7 +499,7 @@ func (m Model) completionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	for index := range completion.Items {
 		zoneInfo := m.zones.Get(zoneIDCompletionItem(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
-			return protocol.EncodeGUICompletionSelect(uint16(index)), true
+			return protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, completion.Generation, []byte(completion.Items[index].ID)), true
 		}
 	}
 	return nil, false
@@ -581,7 +581,7 @@ func (m Model) fileTreeMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	for index := range tree.Rows {
 		zoneInfo := m.zones.Get(zoneIDFileTreeRow(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
-			return protocol.EncodeGUIFileTreeClick(uint16(index)), true
+			return protocol.EncodeGUISemanticItemActivate(byte(presentationFileTree), 1, tree.Generation, []byte(tree.Rows[index].ID)), true
 		}
 	}
 	return nil, false

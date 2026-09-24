@@ -9,7 +9,7 @@ import MingaProtocol
 
 public struct CompletionOverlay: View {
     public enum Action: Equatable, Sendable {
-        case select(itemID: String)
+        case select(generation: UInt32, itemID: String)
     }
 
     public init(state: CompletionState, sendAction: ViewActionHandler<Action>?) {
@@ -183,7 +183,7 @@ public struct CompletionOverlay: View {
               currentItem.kind == offeredItem.kind,
               currentItem.label == offeredItem.label,
               currentItem.detail == offeredItem.detail else { return }
-        sendAction?(.select(itemID: currentItem.id))
+        sendAction?(.select(generation: currentContent.generation, itemID: currentItem.id))
     }
 
     private func updateAccessibilityFocus() {

@@ -7,12 +7,12 @@ defmodule MingaEditor.State.PickerTest do
   alias MingaEditor.UI.Theme
 
   describe "semantic activation offers" do
-    test "resolves only the exact item offered by the current snapshot" do
+    test "retains exact item identities across same-generation reorder" do
       first = %Item{id: :first, label: "First"}
       second = %Item{id: :second, label: "Second"}
 
       state =
-        %PickerState{picker: Picker.new([first, second], title: "Choose")}
+        %PickerState{picker: Picker.new([first, second], title: "Choose"), query_generation: 7}
         |> PickerState.refresh_activation_offer()
 
       generation = state.activation_offer.generation
@@ -21,7 +21,7 @@ defmodule MingaEditor.State.PickerTest do
       assert :error = PickerState.resolve_item_activation(state, generation, 99)
 
       reordered = PickerState.update_picker(state, Picker.new([second, first], title: "Choose"))
-      assert :error = PickerState.resolve_item_activation(reordered, generation, 2)
+      assert {:ok, 0, ^second} = PickerState.resolve_item_activation(reordered, generation, 2)
     end
 
     test "action offer captures the item and invalidates after the menu changes" do
@@ -29,22 +29,22 @@ defmodule MingaEditor.State.PickerTest do
       picker = Picker.new([first], title: "Choose")
 
       state =
-        %PickerState{picker: picker}
+        %PickerState{picker: picker, query_generation: 7}
         |> PickerState.open_action_menu([{"Open", :open}], first)
 
       generation = state.activation_offer.generation
 
       assert {:ok, {"Open", :open}, ^first} =
-               PickerState.resolve_action_activation(state, generation, 1)
+               PickerState.resolve_action_activation(state, generation, 2)
 
       closed = PickerState.close_action_menu(state)
-      assert :error = PickerState.resolve_action_activation(closed, generation, 1)
+      assert :error = PickerState.resolve_action_activation(closed, generation, 2)
     end
 
     test "action-menu transitions own open, movement, and close across menu states" do
       item = %Item{id: :first, label: "First"}
       actions = [{"Open", :open}, {"Delete", :delete}]
-      closed = %PickerState{picker: Picker.new([item], title: "Choose")}
+      closed = %PickerState{picker: Picker.new([item], title: "Choose"), query_generation: 7}
 
       assert PickerState.open_action_menu(closed, [], item) == closed
       assert PickerState.move_action_menu_selection(closed, :next) == closed
@@ -58,7 +58,8 @@ defmodule MingaEditor.State.PickerTest do
         moved = PickerState.move_action_menu_selection(opened, direction)
 
         assert moved.action_menu == {actions, expected_index, item}
-        refute moved.activation_offer.generation == opened.activation_offer.generation
+        assert moved.activation_offer.generation == opened.activation_offer.generation
+        assert moved.activation_offer.actions == opened.activation_offer.actions
       end
 
       reopened =
@@ -70,14 +71,15 @@ defmodule MingaEditor.State.PickerTest do
 
       closed_again = PickerState.close_action_menu(opened)
       assert closed_again.action_menu == nil
-      refute closed_again.activation_offer.generation == opened.activation_offer.generation
+      assert closed_again.activation_offer.generation == opened.activation_offer.generation
+      assert closed_again.activation_offer.actions == []
     end
 
     test "offers at most the rendered result window" do
       items = for id <- 1..150, do: %Item{id: id, label: Integer.to_string(id)}
 
       state =
-        %PickerState{picker: Picker.new(items, title: "Bounded")}
+        %PickerState{picker: Picker.new(items, title: "Bounded"), query_generation: 7}
         |> PickerState.refresh_activation_offer()
 
       assert Enum.count_until(state.activation_offer.items, 101) == 100
@@ -110,17 +112,20 @@ defmodule MingaEditor.State.PickerTest do
       assert PickerState.current_fetch?(ps, second)
     end
 
-    test "starting a refresh invalidates identities captured from the old result set" do
+    test "same-generation refresh retains ids until the replacement removes the item" do
       item = %Item{id: :old, label: "Old"}
 
       state =
-        %PickerState{picker: Picker.new([item], title: "Async")}
+        %PickerState{picker: Picker.new([item], title: "Async"), query_generation: 7}
         |> PickerState.refresh_activation_offer()
 
       generation = state.activation_offer.generation
       {loading, _revision} = PickerState.begin_fetch(state)
 
-      assert :error = PickerState.resolve_item_activation(loading, generation, 1)
+      assert {:ok, 0, ^item} = PickerState.resolve_item_activation(loading, generation, 1)
+
+      replaced = PickerState.complete_fetch(loading, Picker.new([], title: "Async"))
+      assert :error = PickerState.resolve_item_activation(replaced, generation, 1)
     end
 
     test "nil revisions never match, including a picker with no active fetch" do

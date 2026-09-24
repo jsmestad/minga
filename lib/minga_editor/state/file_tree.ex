@@ -74,7 +74,8 @@ defmodule MingaEditor.State.FileTree do
           refresh: Refresh.t(),
           clipboard_mark: clipboard_mark() | nil,
           filter_request: filter_request() | nil,
-          watchers: Watchers.t()
+          watchers: Watchers.t(),
+          presentation_generation: non_neg_integer()
         }
 
   defstruct content: :closed,
@@ -87,7 +88,8 @@ defmodule MingaEditor.State.FileTree do
             refresh: %Refresh{},
             clipboard_mark: nil,
             filter_request: nil,
-            watchers: %Watchers{}
+            watchers: %Watchers{},
+            presentation_generation: 0
 
   @spec content(t()) :: content()
   def content(%__MODULE__{content: content}), do: content
@@ -172,6 +174,7 @@ defmodule MingaEditor.State.FileTree do
   @spec open(t(), FileTree.t(), pid() | nil) :: t()
   def open(%__MODULE__{} = ft, tree, buffer) do
     watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
+    presentation_generation = generation_for_root(ft, tree.root)
 
     %{
       ft
@@ -184,7 +187,8 @@ defmodule MingaEditor.State.FileTree do
         tree_width: tree.width,
         refresh: refresh_for_tree(ft, tree.root),
         filter_request: nil,
-        watchers: watchers
+        watchers: watchers,
+        presentation_generation: presentation_generation
     }
   end
 
@@ -192,6 +196,7 @@ defmodule MingaEditor.State.FileTree do
   def replace_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
     refresh = refresh_for_tree(ft, tree.root)
     watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
+    presentation_generation = generation_for_root(ft, tree.root)
 
     %{
       ft
@@ -200,7 +205,8 @@ defmodule MingaEditor.State.FileTree do
         tree_width: tree.width,
         refresh: refresh,
         filter_request: nil,
-        watchers: watchers
+        watchers: watchers,
+        presentation_generation: presentation_generation
     }
   end
 
@@ -223,11 +229,18 @@ defmodule MingaEditor.State.FileTree do
 
   @doc "Updates the project root associated with the file tree."
   @spec set_project_root(t(), String.t() | nil) :: t()
-  def set_project_root(%__MODULE__{} = ft, nil), do: %{ft | project_root: nil, original_root: nil}
+  def set_project_root(%__MODULE__{} = ft, nil),
+    do: %{ft | project_root: nil, original_root: nil}
 
   def set_project_root(%__MODULE__{} = ft, root) when is_binary(root) do
     expanded = Path.expand(root)
-    %{ft | project_root: expanded, original_root: expanded}
+
+    %{
+      ft
+      | project_root: expanded,
+        original_root: expanded,
+        presentation_generation: generation_for_root(ft, expanded)
+    }
   end
 
   @doc "Publishes an immediate loading tree for a root scan without resolving entries."
@@ -237,6 +250,7 @@ defmodule MingaEditor.State.FileTree do
     expanded_root = Path.expand(tree.root)
     original_root = if kind == :project, do: expanded_root, else: ft.original_root
     watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
+    presentation_generation = generation_for_root(ft, expanded_root)
 
     %{
       ft
@@ -247,7 +261,8 @@ defmodule MingaEditor.State.FileTree do
         interaction: :browse,
         filter_request: nil,
         refresh: Refresh.invalidate(ft.refresh),
-        watchers: watchers
+        watchers: watchers,
+        presentation_generation: presentation_generation
     }
   end
 
@@ -255,9 +270,9 @@ defmodule MingaEditor.State.FileTree do
   @spec watcher_intent(t()) :: Watchers.t()
   def watcher_intent(%__MODULE__{} = ft), do: ft.watchers
 
-  @doc "Returns the monotonic generation of the current root and watcher lineage."
-  @spec root_generation(t()) :: non_neg_integer()
-  def root_generation(%__MODULE__{} = ft), do: ft.watchers.generation
+  @doc "Returns the opaque generation of the current file-tree presentation lifecycle."
+  @spec presentation_generation(t()) :: non_neg_integer()
+  def presentation_generation(%__MODULE__{presentation_generation: generation}), do: generation
 
   @doc "Correlates the latest admitted watcher synchronization request."
   @spec track_watcher_request(t(), reference()) :: t()
@@ -838,6 +853,31 @@ defmodule MingaEditor.State.FileTree do
   @spec classify_entries([FileTree.entry()]) :: status()
   defp classify_entries([]), do: :empty
   defp classify_entries(_entries), do: :ready
+
+  @spec generation_for_root(t(), String.t()) :: pos_integer()
+  defp generation_for_root(%__MODULE__{} = ft, root) do
+    expanded_root = Path.expand(root)
+
+    case {ft.content, ft.project_root, ft.presentation_generation} do
+      {content, current_root, generation}
+      when content != :closed and is_binary(current_root) and generation > 0 ->
+        generation_for_expanded_root(current_root, expanded_root, generation)
+
+      {_content, _different_root, generation} ->
+        next_presentation_generation(generation)
+    end
+  end
+
+  @spec generation_for_expanded_root(String.t(), String.t(), pos_integer()) :: pos_integer()
+  defp generation_for_expanded_root(current_root, expanded_root, generation) do
+    if Path.expand(current_root) == expanded_root,
+      do: generation,
+      else: next_presentation_generation(generation)
+  end
+
+  @spec next_presentation_generation(non_neg_integer()) :: pos_integer()
+  defp next_presentation_generation(4_294_967_295), do: 1
+  defp next_presentation_generation(generation), do: generation + 1
 
   @spec format_error_reason(term()) :: String.t()
   defp format_error_reason(reason) when is_atom(reason),

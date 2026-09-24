@@ -82,6 +82,21 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   def completion(%EditorState{}), do: nil
   def completion(%Input{}), do: nil
 
+  @doc "Returns the source-owned generation of the active completion presentation."
+  @spec completion_generation(EditorState.t() | Input.t()) :: non_neg_integer()
+  def completion_generation(%EditorState{
+        shell_runtime: %Runtime{state: %ShellState{} = shell_state}
+      }),
+      do: shell_state |> ShellState.modal() |> ModalOverlay.completion_generation()
+
+  def completion_generation(%Input{
+        intent: %{frame: %{shell_state: %ShellState{} = shell_state}}
+      }),
+      do: shell_state |> ShellState.modal() |> ModalOverlay.completion_generation()
+
+  def completion_generation(%EditorState{}), do: 0
+  def completion_generation(%Input{}), do: 0
+
   @doc "Returns the active completion trigger or a fresh trigger."
   @spec completion_trigger(EditorState.t() | Input.t()) :: MingaEditor.CompletionTrigger.t()
   def completion_trigger(%EditorState{
@@ -131,11 +146,29 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
 
     update_shell_state(
       state,
-      &ShellState.put_modal_completion_trigger(&1, trigger, active_tab_id)
+      &ShellState.put_modal_completion_trigger(
+        &1,
+        trigger,
+        active_tab_id,
+        next_completion_generation()
+      )
     )
   end
 
   def put_completion_trigger(%EditorState{} = state, _trigger), do: state
+
+  @doc "Builds a new completion presentation with a source-owned generation."
+  @spec new_completion_payload(Tab.id() | nil, keyword()) :: CompletionPayload.t()
+  def new_completion_payload(active_tab_id, opts \\ []) do
+    CompletionPayload.new(
+      active_tab_id,
+      Keyword.put(opts, :presentation_generation, next_completion_generation())
+    )
+  end
+
+  @spec next_completion_generation() :: pos_integer()
+  defp next_completion_generation,
+    do: Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1
 
   @doc "Returns the active command-completion payload."
   @spec command_completion(EditorState.t() | Input.t()) ::

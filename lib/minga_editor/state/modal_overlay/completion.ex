@@ -42,7 +42,8 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
           completion: completion_or_nil(),
           trigger: CompletionTrigger.t(),
           owner: owner(),
-          opened_at: integer()
+          opened_at: integer(),
+          presentation_generation: pos_integer()
         }
 
   @enforce_keys [:owner]
@@ -50,7 +51,8 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
     :owner,
     completion: nil,
     trigger: nil,
-    opened_at: 0
+    opened_at: 0,
+    presentation_generation: 1
   ]
 
   @doc """
@@ -68,9 +70,14 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
       completion: Keyword.get(opts, :completion),
       trigger: trigger,
       owner: owner,
-      opened_at: Keyword.get(opts, :opened_at, 0)
+      opened_at: Keyword.get(opts, :opened_at, 0),
+      presentation_generation: Keyword.get(opts, :presentation_generation, 1)
     }
   end
+
+  @doc "Returns the opaque generation of this completion presentation lifecycle."
+  @spec presentation_generation(t()) :: pos_integer()
+  def presentation_generation(%__MODULE__{presentation_generation: generation}), do: generation
 
   @doc """
   Replaces the inner `Completion.t()` on the payload while preserving lifecycle ownership.

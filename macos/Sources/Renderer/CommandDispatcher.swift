@@ -1148,20 +1148,23 @@ final class CommandDispatcher {
                 guiState.observatoryState.hide()
             }
 
-        case .guiFileTree(let version, let treeFlags, let treeState, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
+        case .guiFileTree(let version, let treeFlags, let treeState, let generation, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
             let visible = treeState != FileTreeVisibilityState.hidden.rawValue
             let focused = treeFlags & 0x02 != 0
             if visible {
-                guiState.fileTreeState.update(version: version, treeFlags: treeFlags, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries, treeState: treeState, errorReason: errorReason)
+                guiState.fileTreeState.update(version: version, generation: generation, treeFlags: treeFlags, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries, treeState: treeState, errorReason: errorReason)
             } else {
                 guiState.fileTreeState.hide(rootPath: rootPath)
             }
 
-        case .guiFileTreeSelection(let selectedId, let focused):
-            guiState.fileTreeState.updateSelection(selectedId: selectedId, focused: focused)
+        case .guiFileTreeSelection(let generation, let selectedId, let focused):
+            guiState.fileTreeState.updateSelection(generation: generation, selectedId: selectedId, focused: focused)
 
-        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete):
-            guiState.completionState.update(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, rawItems: items, documentation: documentation, totalCount: totalCount, matchedCount: matchedCount, incomplete: incomplete)
+        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let selectedItemID, let items, let documentation, let totalCount, let matchedCount, let incomplete, let generation):
+            guiState.completionState.update(visible: visible, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, selectedItemID: selectedItemID, rawItems: items, documentation: documentation, totalCount: totalCount, matchedCount: matchedCount, incomplete: incomplete, generation: generation)
+
+        case .guiCompletionSelection(let generation, let selectedItemID, let documentation):
+            guiState.completionState.updateSelection(generation: generation, selectedItemID: selectedItemID, documentation: documentation)
 
         case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
             if visible {
@@ -1188,6 +1191,9 @@ final class CommandDispatcher {
             } else {
                 guiState.pickerState.hide()
             }
+
+        case .guiPickerSelection(let generation, let selectedItemID, let selectedActionID):
+            guiState.pickerState.updateSelection(generation: generation, selectedItemID: selectedItemID, selectedActionID: selectedActionID)
 
         case .guiPickerPreview(let visible, let lines):
             if visible {

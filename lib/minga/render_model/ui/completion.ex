@@ -7,6 +7,7 @@ defmodule Minga.RenderModel.UI.Completion do
 
   @type t :: %__MODULE__{
           visible?: boolean(),
+          generation: non_neg_integer(),
           cursor_row: non_neg_integer(),
           cursor_col: non_neg_integer(),
           selected_offset: non_neg_integer(),
@@ -19,6 +20,7 @@ defmodule Minga.RenderModel.UI.Completion do
         }
 
   defstruct visible?: false,
+            generation: 0,
             cursor_row: 0,
             cursor_col: 0,
             selected_offset: 0,

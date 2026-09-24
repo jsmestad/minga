@@ -68,6 +68,8 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x9B | gui_edit_timeline | Agent edit timeline overlay with per-file summaries appended after the per-entry list. Uses a 16-bit payload length. |
 | 0x9F | gui_sidebars | Semantic sidebar host metadata. Uses a 32-bit payload length so future sidebar lists can grow without changing the envelope. |
 | 0xA3 | gui_extension_runtime | Generic frontend-extension runtime envelope. Uses a 32-bit payload length so extension-owned payloads can grow without changing the shared envelope. |
+| 0xA6 | gui_completion_selection | Narrow completion selection and documentation update. |
+| 0xA7 | gui_picker_selection | Narrow picker item and action selection update. |
 
 ### 0xA3 — gui_extension_runtime
 
@@ -133,15 +135,15 @@ When `visible == 0`, the frontend should hide the Observatory and clear selected
 
 The native file tree receives the same semantic row model that the TUI renderer uses. The BEAM remains the source of truth for row identity, depth, expansion state, git status, diagnostics, guide columns, icons, labels, focus context, inline editing state, and committed file actions. Semantic frontends are not dumb terminals: they may own zero-latency local interaction state, such as transient row selection while the user navigates the already committed row model. On activation, toggle, rename, delete, drag/drop, or another committed intent, the frontend sends a semantic action with stable row identity and the BEAM validates it against the current model.
 
-Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hidden state from an empty entry list. New frontends must ignore that sentinel behavior. `0x93` v3 is the canonical file-tree protocol, and `tree_state` is the only source of truth for hidden, loading, empty, ready, and error states.
+Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hidden state from an empty entry list. New frontends must ignore that sentinel behavior. `0x93` v4 is the canonical file-tree protocol, and `tree_state` is the only source of truth for hidden, loading, empty, ready, and error states.
 
 ```
 opcode(1) + payload_len(4) + payload(payload_len)
 
-Payload v3:
-  version(1) + tree_flags(1) + tree_state(1) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows...
+Payload v4:
+  version(1) + tree_flags(1) + tree_state(1) + generation(4) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows...
 
-Payload v2 omitted the per-row `editing_token`. Payload v1 also omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v3.
+Payload v3 omitted `generation`. Payload v2 also omitted the per-row `editing_token`. Payload v1 omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v4.
 
 Per row:
   path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_token(4) + editing_text_len(2) + editing_text(editing_text_len) + icon_color(3) + heat_level(1)
@@ -184,7 +186,7 @@ When `tree_state == 0`, the frontend should hide the file tree. Hidden payloads 
 
 When `tree_state == 4`, `error_reason` contains a short user-displayable reason. For all other states, `error_reason` is an empty string.
 
-When tree flag bit 5 is set, a semantic frontend may apply zero-latency local row navigation over the last committed row model while still forwarding the key to the BEAM. This is an **identity transform** in the local-presentation taxonomy (see ARCHITECTURE.md "Frontend-local interaction state"): the frontend stores a preview index in its local-presentation container, renders the effective selection as `previewIndex ?? committedIndex`, and discards the preview when the next `gui_file_tree` or `gui_file_tree_selection` payload arrives (BEAM update is authoritative) or when the previewed row's stable ID is absent from the committed model (`retained_row_miss`). The BEAM clears this bit for modes where row navigation is not safe to predict, such as inline editing, filtering, or help. Cursor motion and selection extension are out of bounds for local presentation; they are operands the BEAM hit-tests and encodes, not client-decided.
+When tree flag bit 5 is set, a semantic frontend may apply zero-latency local row navigation over the last committed row model while still forwarding the key to the BEAM. This is an **identity transform** in the local-presentation taxonomy (see ARCHITECTURE.md "Frontend-local interaction state"): the frontend stores the previewed `{generation, item_id}` in its local-presentation container and resolves the effective selection by stable ID. A same-generation full frame or selection echo preserves the preview when that ID remains in the model, even if the row moved. A generation change or retained-item miss discards it. The BEAM clears this bit for modes where row navigation is not safe to predict, such as inline editing, filtering, or help. Cursor motion and selection extension are out of bounds for local presentation; they are operands the BEAM hit-tests and encodes, not client-decided.
 
 ### 0x94 — gui_file_tree_selection
 
@@ -194,13 +196,13 @@ Selection and focus changes can still originate from the BEAM, for example after
 opcode(1) + payload_len(2) + payload(payload_len)
 
 Payload:
-  flags(1) + selected_id_len(2) + selected_id(selected_id_len)
+  flags(1) + generation(4) + selected_id_len(2) + selected_id(selected_id_len)
 ```
 
 Flag bits:
   bit 0: focused
 
-Frontends should apply this only to the current file-tree model. If no full `gui_file_tree` payload has been received yet, the update is safe to ignore.
+Frontends should apply this only when `generation` matches the current file-tree model. If no full `gui_file_tree` payload has been received yet, or the generation is stale, the update is safe to ignore.
 
 ### 0x71 — gui_tab_bar
 
@@ -255,10 +257,10 @@ Completion popup with LSP/buffer completion items.
 
 ```
 When visible:
-  opcode(1) + 1(1) + anchor_row(2) + anchor_col(2) + selected_index(2) + item_count(2) + items...
+  opcode(1) + 1(1) + anchor_row(2) + anchor_col(2) + selected_offset(2) + item_count(2) + items... + documentation_len(2) + documentation(documentation_len) + selected_item_id_len(1) + selected_item_id(selected_item_id_len) + total_count(4) + matched_count(4) + incomplete(1) + generation(4)
 
 Per item:
-  kind(1) + label_len(2) + label(label_len) + detail_len(2) + detail(detail_len)
+  kind(1) + label_len(2) + label(label_len) + detail_len(2) + detail(detail_len) + item_id_len(1) + item_id(item_id_len) + source_len(2) + source(source_len) + match_range_count(1) + match_ranges(match_range_count * 4)
 
 Kind values:
   0 = unknown, 1 = function, 2 = method, 3 = variable, 4 = field,
@@ -268,7 +270,17 @@ When hidden:
   opcode(1) + 0(1)
 ```
 
-`anchor_row` and `anchor_col` are the screen coordinates of the cursor at the time of completion, for positioning the popup.
+`anchor_row` and `anchor_col` are the screen coordinates of the cursor at the time of completion, for positioning the popup. `generation` and each opaque `item_id` are authored by the completion owner. Frontends keep local preview as `{generation, item_id}`, resolve it after same-generation reorder, and discard it on a generation change or retained-item miss. Activation uses `semantic_item_activate`; row offsets are not activation authority.
+
+### 0xA6 — gui_completion_selection
+
+Selection-only completion updates do not resend labels, details, sources, or match ranges.
+
+```
+opcode(1) + payload_len(2) + generation(4) + selected_item_id_len(1) + selected_item_id(selected_item_id_len) + documentation_len(2) + documentation(documentation_len)
+```
+
+Apply the update only to the matching completion generation. A frontend may retain a different local preview when its item ID remains in the committed same-generation item set.
 
 ### 0x74 — gui_theme
 
@@ -420,7 +432,7 @@ has_preview indicates whether the picker source supports preview (triggers split
 filtered_count and total_count enable "X/Y" display in the search field.
 marked_count is authoritative across the full picker item set, including marked items hidden by the current filter or item limit.
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
-activation_generation and activation IDs form opaque identities for the exact bounded result and action set in this picker snapshot. Native frontends must return those values unchanged and must not derive authority from row positions, labels, paths, or source action names.
+activation_generation and activation IDs form opaque source-owned identities. Retained semantic items keep their IDs across reorder and refilter within the same activation generation. Native frontends must return those values unchanged and must not derive authority from row positions, labels, paths, or source action names.
 mode prefix badges show switched picker sources like command, buffer, or project search.
 
 Native frontends may optimistically edit the query with a platform text control so caret movement, selection, paste, cut, copy, undo, and IME composition remain local and immediate. Query semantics remain BEAM-owned. The frontend sends each complete field value with the current `generation` and a monotonically increasing edit sequence. The BEAM echoes the accepted sequence as `acknowledged_edit_seq`; the frontend must not replace a newer unacknowledged local value with an older echo. A new generation replaces all pending local edits.
@@ -428,6 +440,16 @@ Native frontends may optimistically edit the query with a platform text control 
 When hidden:
   opcode(1) + 0(1)
 ```
+
+### 0xA7 — gui_picker_selection
+
+Selection-only picker updates do not resend the result or action lists.
+
+```
+opcode(1) + payload_len(2) + activation_generation(4) + selected_item_id(4) + selected_action_id(4)
+```
+
+Apply the update only to the matching activation generation. Resolve the selected item and action by opaque ID, not by their previous positions.
 
 ### 0x7D — gui_picker_preview
 
@@ -1205,6 +1227,7 @@ opcode(1) + action_type(1) + payload...
 | 0x62 | search_focus | replace_mode(1) | Open or focus the native search toolbar |
 | 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
 | 0x64 | focus_window | window_id(2) + generation(8) | Request semantic activation of the exact accessible pane; the BEAM ignores a stale pane generation |
+| 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate the exact source-owned item identity for completion, picker, or file tree |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1218,6 +1241,8 @@ opcode(1) + action_type(1) + payload...
 | 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
 | 0x42 | git_open_diff | path_len(2) + path(path_len) + section(1) | Open a diff view for a git status file in the selected section |
+
+`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, and `3 = file_tree`. Completion intent `1` accepts the item. Picker intents are `1 = activate item` and `2 = activate action`. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, and `6 = duplicate`. The BEAM accepts the action only when the generation and item ID still belong to the named surface. A stale generation or missing item cannot activate a replacement; the owner rejects it and requests or emits an authoritative resync where needed.
 
 Older path-only `git_open_diff` payloads are accepted as a compatibility fallback only when the path is unambiguous. Native frontends should always send the section-aware form.
 
