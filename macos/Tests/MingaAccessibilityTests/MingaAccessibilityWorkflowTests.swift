@@ -55,7 +55,8 @@ private extension MingaAccessibilityWorkflowTests {
                 timeout: timeout,
                 query: alphaQuery
             ) {
-                $0.value?.contains("ALPHA PANE λ🙂") == true && $0.selectedTextRange == NSRange(location: 0, length: 0)
+                $0.focused == true && $0.value?.contains("ALPHA PANE λ🙂") == true
+                    && $0.selectedTextRange == NSRange(location: 0, length: 0)
                     && $0.selectedText == nil
             }
         }
