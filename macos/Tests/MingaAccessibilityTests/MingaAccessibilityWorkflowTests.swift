@@ -4,6 +4,8 @@ import XCTest
 @MainActor
 final class MingaAccessibilityWorkflowTests: XCTestCase {
     private let timeout: TimeInterval = 15
+    // A clean hosted runner can take more than 15 seconds to publish the embedded release's first semantic frame. This remains a predicate wait; all later operations keep the tighter deadline.
+    private let firstFrameTimeout: TimeInterval = 30
     private var accessibilityClient: AccessibilityClient?
     private var launchedApplication: XCUIApplication?
     private var timings: [OperationTiming] = []
@@ -52,7 +54,7 @@ private extension MingaAccessibilityWorkflowTests {
         let alpha = try timed("first-frame") {
             try client.waitForNode(
                 "the first fixture editor pane",
-                timeout: timeout,
+                timeout: firstFrameTimeout,
                 query: alphaQuery
             ) {
                 $0.focused == true && $0.value?.contains("ALPHA PANE λ🙂") == true
