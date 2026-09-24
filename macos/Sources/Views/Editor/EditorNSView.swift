@@ -235,6 +235,7 @@ final class EditorNSView: MTKView {
 
     /// Stable virtual accessibility elements keyed by core, pane, and buffer lifetime.
     private var accessibilityPaneCache: [EditorAccessibilityIdentity: EditorPaneAccessibilityElement] = [:]
+    private let accessibilityFocusedElementSnapshot = AccessibilityFocusedElementSnapshot()
     private var accessibilityProjections: [EditorAccessibilityProjection] = []
     private var accessibilityProjectionKey: AccessibilityProjectionKey?
     private var lastAccessibilityIdentities: Set<EditorAccessibilityIdentity> = []
@@ -3718,6 +3719,24 @@ private struct AccessibilityProjectionKey: Equatable {
     let cellHeight: CGFloat
 }
 
+/// Bridges the main-actor pane projection to AppKit's nonisolated focused-element getter.
+private final class AccessibilityFocusedElementSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var element: EditorPaneAccessibilityElement?
+
+    func read() -> EditorPaneAccessibilityElement? {
+        lock.lock()
+        defer { lock.unlock() }
+        return element
+    }
+
+    func write(_ element: EditorPaneAccessibilityElement?) {
+        lock.lock()
+        self.element = element
+        lock.unlock()
+    }
+}
+
 extension EditorNSView {
     override func accessibilityRole() -> NSAccessibility.Role? {
         return .group
@@ -3751,11 +3770,8 @@ extension EditorNSView {
         accessibilityPaneElements()
     }
 
-    override var accessibilityFocusedUIElement: Any? {
-        guard accessibilityHasNativeKeyboardFocus else { return nil }
-        let paneElements = accessibilityPaneElements()
-        guard let activeIdentity = accessibilityProjections.first(where: \.isActivePane)?.identity else { return nil }
-        return paneElements.first(where: { $0.identity == activeIdentity })
+    nonisolated override var accessibilityFocusedUIElement: Any? {
+        accessibilityFocusedElementSnapshot.read()
     }
 
     override func isAccessibilityElement() -> Bool {
@@ -3806,7 +3822,7 @@ extension EditorNSView {
             element.invalidate()
         }
         accessibilityPaneCache = accessibilityPaneCache.filter { identities.contains($0.key) }
-        return projections.map { projection in
+        let paneElements = projections.map { projection in
             if let existing = accessibilityPaneCache[projection.identity] {
                 existing.update(projection: projection, owner: self)
                 return existing
@@ -3815,6 +3831,8 @@ extension EditorNSView {
             accessibilityPaneCache[projection.identity] = element
             return element
         }
+        updateAccessibilityFocusedElement(paneElements)
+        return paneElements
     }
 
     private func buildAccessibilityProjections() -> [EditorAccessibilityProjection] {
@@ -3863,6 +3881,19 @@ extension EditorNSView {
         for element in accessibilityPaneCache.values {
             element.updateNativeKeyboardFocus(focused)
         }
+        _ = accessibilityPaneElements()
+    }
+
+    private func updateAccessibilityFocusedElement(_ paneElements: [EditorPaneAccessibilityElement]) {
+        guard accessibilityHasNativeKeyboardFocus,
+              let activeIdentity = accessibilityProjections.first(where: \.isActivePane)?.identity
+        else {
+            accessibilityFocusedElementSnapshot.write(nil)
+            return
+        }
+        accessibilityFocusedElementSnapshot.write(
+            paneElements.first(where: { $0.identity == activeIdentity })
+        )
     }
 
     private func invalidateAccessibilityConnection() {
@@ -3872,6 +3903,7 @@ extension EditorNSView {
         accessibilityPaneCache.removeAll(keepingCapacity: true)
         accessibilityProjections.removeAll(keepingCapacity: true)
         accessibilityProjectionKey = nil
+        accessibilityFocusedElementSnapshot.write(nil)
         lastAccessibilityIdentities.removeAll(keepingCapacity: true)
         lastAccessibilitySelections.removeAll(keepingCapacity: true)
         lastAccessibilityActiveIdentity = nil
