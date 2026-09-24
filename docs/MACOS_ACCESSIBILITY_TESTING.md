@@ -24,9 +24,9 @@ export PATH="$TMPDIR/minga-xcodegen:$PATH"
 
 Xcode can ask you to authenticate to Enable UI Automation on the first run. Approve that request while the command is running. This enables XCTest interaction, but does not grant raw Accessibility access to the test runner.
 
-The command prints an `Accessibility grant target` path after the build. To enable raw Accessibility access, open System Settings, select Privacy & Security, then Accessibility, click Add, and select `MingaAccessibilityTests-Runner.app` at that printed path. In the file chooser, press Command-Shift-G to enter the path. Turn on its switch and rerun the command if the first attempt has already exited. The local test waits up to 90 seconds for the grant; CI fails immediately when the grant is absent. macOS does not present a permission prompt for this runner, and the command never grants access or changes system security settings itself.
+The command prints an `Accessibility grant target` path after the build. To enable raw Accessibility access, open System Settings, select Privacy & Security, then Accessibility, click Add, and select `MingaAccessibilityTests-Runner.app` at that printed path. In the file chooser, press Command-Shift-G to enter the path. Turn on its switch and rerun the command if the first attempt has already exited. The local test waits up to 90 seconds for the grant. macOS does not present a permission prompt for this runner, and the command never grants access or changes system security settings itself.
 
-The build stays at `_build/macos-accessibility/DerivedData` so the runner has a stable path across runs. The runner is ad-hoc signed by the local Xcode build, so macOS may require a new grant after the test binary changes. A repeatable unattended CI lane needs a trusted macOS GUI runner with a stable signing identity and an approved Accessibility grant. GitHub's untrusted hosted macOS runner reports an infrastructure failure rather than passing or skipping this check.
+The build stays at `_build/macos-accessibility/DerivedData` so the runner has a stable path across runs. The runner is ad-hoc signed by the local Xcode build, so macOS may require a new grant after the test binary changes. GitHub-hosted CI does not run this workflow because it cannot provide the required Accessibility grant. Run the command on a trusted interactive Mac and retain successful cold and warm evidence before merging an accessibility change.
 
 ## Isolation and cleanup
 
@@ -50,4 +50,4 @@ Set `MINGA_AX_ARTIFACT_ROOT` to retain evidence elsewhere:
 MINGA_AX_ARTIFACT_ROOT="$PWD/accessibility-evidence" scripts/test_macos_accessibility
 ```
 
-CI runs the same command in the `macOS Accessibility` job and uploads the evidence directory even when the workflow fails.
+Hosted CI checks the Swift app and protocol separately. It does not verify launched-app accessibility behavior. The local command and its retained evidence are the validation gate for that behavior.

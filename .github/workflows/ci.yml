@@ -439,52 +439,6 @@ jobs:
       - name: Run BEAM-to-Swift protocol integration tests
         run: mix test test/minga_editor/integration/gui_protocol_test.exs --include swift_harness
 
-  macos-accessibility:
-    name: macOS Accessibility
-    runs-on: macos-15
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go/tui/go.mod
-          cache-dependency-path: go/tui/go.sum
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: accessibility-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
-          restore-keys: accessibility-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
-
-      - name: Install pinned XcodeGen
-        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
-
-      - name: Run launched-app accessibility workflow
-        env:
-          MINGA_AX_ARTIFACT_ROOT: ${{ runner.temp }}/minga-accessibility
-        run: scripts/test_macos_accessibility
-
-      - name: Upload accessibility evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-accessibility
-          path: ${{ runner.temp }}/minga-accessibility
-          if-no-files-found: error
-
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
