@@ -38,6 +38,7 @@ defmodule MingaEditor.Frontend.Protocol do
   alias MingaEditor.NativeIPC.OperationReceipt
   alias MingaEditor.NativeIPC.OperationReceipt.Evidence
   alias MingaEditor.PresentationTarget
+  alias MingaEditor.Mouse.TextEvent
 
   @op_key_press Opcodes.key_press()
   @op_resize Opcodes.resize()
@@ -68,6 +69,8 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_native_presentation_observation Opcodes.native_presentation_observation()
   @op_presentation_target Opcodes.presentation_target()
   @op_presentation_operation Opcodes.presentation_operation()
+  @op_editor_text_event Opcodes.editor_text_event()
+  @op_text_presentation_state Opcodes.text_presentation_state()
 
   alias Minga.Parser.StructuralNavResult
   alias MingaEditor.Frontend.Capabilities
@@ -138,6 +141,9 @@ defmodule MingaEditor.Frontend.Protocol do
   @typedoc "Mouse event type."
   @type mouse_event_type :: :press | :release | :motion | :drag | {:unknown, non_neg_integer()}
 
+  @typedoc "Frontend lifecycle state for one immutable text presentation."
+  @type text_presentation_state :: :discarded | :active
+
   @typedoc """
   A frontend-originated input correlation sequence (u32).
 
@@ -192,6 +198,9 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:paste_event, text :: String.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type(), click_count :: pos_integer()}
+          | {:editor_text_event, TextEvent.t()}
+          | {:text_presentation_state, window_id :: non_neg_integer(),
+             presentation_id :: non_neg_integer(), text_presentation_state()}
           | {:highlight_spans, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              [highlight_span()]}
           | {:highlight_names, buffer_id :: non_neg_integer(), [String.t()]}
@@ -617,6 +626,41 @@ defmodule MingaEditor.Frontend.Protocol do
       decode_mouse_event_type(event_type), click_count}}
   end
 
+  def decode_event(
+        <<@op_editor_text_event, window_id::16, presentation_id::unsigned-64, row_index::32,
+          row_id::unsigned-64, utf16_offset::32, button::8, mods::8, event_type::8,
+          click_count::8, scroll_x::8-signed, scroll_y::8-signed>>
+      )
+      when scroll_x in -1..1 and scroll_y in -1..1 and click_count > 0 do
+    {:ok,
+     {:editor_text_event,
+      TextEvent.new(%{
+        window_id: window_id,
+        presentation_id: presentation_id,
+        row_index: row_index,
+        row_id: row_id,
+        utf16_offset: utf16_offset,
+        button: decode_mouse_button(button),
+        mods: mods,
+        event_type: decode_mouse_event_type(event_type),
+        click_count: click_count,
+        scroll_x: scroll_x,
+        scroll_y: scroll_y
+      })}}
+  end
+
+  def decode_event(
+        <<@op_text_presentation_state, window_id::16, presentation_id::unsigned-64, state::8>>
+      ) do
+    case decode_text_presentation_state(state) do
+      {:ok, lifecycle} ->
+        {:ok, {:text_presentation_state, window_id, presentation_id, lifecycle}}
+
+      :error ->
+        {:error, :malformed}
+    end
+  end
+
   # Paste event: opcode(1) + text_len(2, big-endian) + text(text_len)
   def decode_event(<<@op_paste_event, text_len::16, text::binary-size(text_len)>>) do
     {:ok, {:paste_event, text}}
@@ -755,6 +799,8 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_resize,
              @op_ready,
              @op_mouse_event,
+             @op_editor_text_event,
+             @op_text_presentation_state,
              @op_capabilities_updated,
              @op_request_keyframe,
              @op_frame_applied,
@@ -913,4 +959,10 @@ defmodule MingaEditor.Frontend.Protocol do
   defp decode_mouse_event_type(@mouse_motion), do: :motion
   defp decode_mouse_event_type(@mouse_drag), do: :drag
   defp decode_mouse_event_type(other), do: {:unknown, other}
+
+  @spec decode_text_presentation_state(non_neg_integer()) ::
+          {:ok, text_presentation_state()} | :error
+  defp decode_text_presentation_state(0), do: {:ok, :discarded}
+  defp decode_text_presentation_state(1), do: {:ok, :active}
+  defp decode_text_presentation_state(_state), do: :error
 end

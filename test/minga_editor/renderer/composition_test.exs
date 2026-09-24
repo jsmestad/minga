@@ -164,4 +164,35 @@ defmodule MingaEditor.Renderer.CompositionTest do
       assert result == [seg("x"), {"→  ", @ws_face}]
     end
   end
+
+  describe "present_whitespace/4" do
+    @text_face Face.new(fg: :white)
+    @ws_face Face.new(fg: :bright_black)
+
+    test "expands tabs to spaces with the source face when invisibles are hidden" do
+      segments = [{"a\tb\t", @text_face}]
+
+      assert Composition.present_whitespace(segments, 4, false, @ws_face) == [
+               {"a", @text_face},
+               {"   ", @text_face},
+               {"b", @text_face},
+               {"   ", @text_face}
+             ]
+    end
+
+    test "uses the composed column across styled and virtual-looking segments" do
+      virtual_face = Face.new(fg: :cyan)
+
+      assert Composition.present_whitespace(
+               [{"xx", virtual_face}, {"\tvalue", @text_face}],
+               4,
+               true,
+               @ws_face
+             ) == [
+               {"xx", virtual_face},
+               {"→ ", @ws_face},
+               {"value", @text_face}
+             ]
+    end
+  end
 end

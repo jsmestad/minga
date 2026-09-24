@@ -395,18 +395,24 @@ final class CoreTextMetalRenderer {
                 latencyRecorder: LatencyRecorder? = nil,
                 connectionID: UInt64 = 0,
                 isPresentationCurrent: @escaping @MainActor () -> Bool = { true },
-                onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in }) -> NativeRenderSubmissionOutcome {
+                onAttemptFinished: @escaping @MainActor () -> Void = {},
+                onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in },
+                onTextPresented: @escaping @MainActor (CommittedEditorSnapshot, PresentedTextLayout) -> Void = { _, _ in }) -> NativeRenderSubmissionOutcome {
         guard let reservation = presentationGeneration.issue(slotCount: Self.nativeFrameSlotCount) else {
             capacityDeferralCount += 1
             os_signpost(.event, log: renderLog, name: "NativeSlotMiss",
                         "input=%{public}u pending_redraw_count=1", presentationInputSeq)
+            onAttemptFinished()
             return .deferredCapacity
         }
         let generation = reservation.generation
         let nativeFrameSlot = reservation.slot
         var submitted = false
         defer {
-            if !submitted { retirePresentationGeneration(generation) }
+            if !submitted {
+                retirePresentationGeneration(generation)
+                onAttemptFinished()
+            }
         }
 
         let frameState = snapshot.frameState
@@ -572,7 +578,7 @@ final class CoreTextMetalRenderer {
             }
         }
 
-        let resolvedCursor = CoreTextMetalRenderer.resolveCursor(
+        var resolvedCursor = CoreTextMetalRenderer.resolveCursor(
             surfaces: surfaces,
             activeWindowId: snapshot.activeSurface?.windowId,
             cellW: cellW,
@@ -581,11 +587,7 @@ final class CoreTextMetalRenderer {
             gutterLeftMarginPx: gutterLeftMarginPx,
             gutterPaddingPx: gutterPaddingPx
         )
-        let renderCursor = animatedCursor(for: resolvedCursor, teleportLineThresholdPx: displayCellH * scale * 50.0)
-        // The cursor names exactly one window; select its complete surface once.
-        // This is a single-window lookup, not fragmented per-window joining.
-        let cursorSurface: PresentedWindowSurface? = renderCursor?.windowId
-            .flatMap { id in surfaces.first { $0.windowId == id } }
+        var textPanes: [PresentedTextLayout.Pane] = []
         let activeSurface = snapshot.activeSurface
 
         // Build background quads and line texture instances.
@@ -709,7 +711,7 @@ final class CoreTextMetalRenderer {
                 )
 
                 // Selection overlay quads (drawn before text).
-                if let sel = content.selection {
+                if let sel = content.selection, content.accessibilitySelectionRanges.isEmpty || sel.type == .line {
                     appendSelectionQuads(
                         selection: sel,
                         rowOffset: scrollableWindowRowOffset,
@@ -789,6 +791,7 @@ final class CoreTextMetalRenderer {
                 // at the start of this frame.
                 let preparedRows = preparedSurface.prepared
                 var visibleRowWidths: [UInt16: Int] = [:]
+                var textRows: [PresentedTextLayout.Row] = []
                 for command in preparedRows.commands {
                     let displayRow = command.displayRow
                     let presentationRow = command.presentationRow
@@ -796,6 +799,31 @@ final class CoreTextMetalRenderer {
                     let textYOffset = (displayCellH - cellH) * scale * 0.5
                     let rawLineY = yPos + textYOffset
                     guard CoreTextMetalRenderer.clipVerticalQuad(y: rawLineY, height: Float(wcr.linePixelHeight), top: contentTopPx, bottom: contentBottomPx) != nil else { continue }
+
+                    let ctLine = wcr.textLayout(row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch)
+                    let textRow = PresentedTextLayout.Row(
+                        rowIndex: command.rowIndex, rowID: command.row.rowId,
+                        presentationRow: presentationRow,
+                        composedUTF16Start: command.composedUTF16Start,
+                        composedUTF16End: command.composedUTF16End,
+                        line: ctLine,
+                        origin: CGPoint(x: CGFloat((contentColOffset - localClipXOffset - scrollableWindowColOffset) / scale), y: CGFloat(yPos / scale)),
+                        rect: CGRect(x: CGFloat(contentColOffset / scale), y: CGFloat(yPos / scale), width: CGFloat((contentRightPx - contentColOffset) / scale), height: CGFloat(displayCellH))
+                    )
+                    textRows.append(textRow)
+                    for selection in content.accessibilitySelectionRanges where Int(selection.row) == presentationRow && content.selection?.type != .line {
+                        let x = max(Float(textRow.x(at: selection.startUTF16)) * scale, contentColOffset)
+                        let includesNewline = content.selection.map { $0.type == .char && presentationRow < Int($0.endRow) } ?? false
+                        let right = includesNewline ? contentRightPx : min(Float(textRow.x(at: selection.endUTF16)) * scale, contentRightPx)
+                        if right > x, let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) {
+                            var quad = QuadGPU()
+                            quad.position = SIMD2<Float>(x, clipped.y)
+                            quad.size = SIMD2<Float>(right - x, clipped.height)
+                            quad.color = currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
+                            quad.alpha = 1
+                            semanticOverlayQuads.append(quad)
+                        }
+                    }
 
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
                         if presentationRow >= 0 && presentationRow < committedVisibleRows {
@@ -822,6 +850,15 @@ final class CoreTextMetalRenderer {
                         lineGPU.uvSize = SIMD2<Float>(visibleUVWidth, visibleUVHeight)
                         lineInstances.append(lineGPU)
                     }
+                }
+
+                if let presentationID = metadata.textPresentations[content.windowId] {
+                    textPanes.append(PresentedTextLayout.Pane(
+                        windowID: content.windowId, presentationID: presentationID,
+                        rect: CGRect(x: CGFloat(contentColOffset / scale), y: CGFloat(contentTopPx / scale), width: CGFloat((contentRightPx - contentColOffset) / scale), height: CGFloat((contentBottomPx - contentTopPx) / scale)),
+                        scrollOffset: CGPoint(x: CGFloat(presentationScrollOffsetPx.x / scale), y: CGFloat(presentationScrollOffsetPx.y / scale)),
+                        rows: textRows
+                    ))
                 }
 
                 // Line annotation pills/text (drawn after line content).
@@ -1247,6 +1284,17 @@ final class CoreTextMetalRenderer {
         // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
+        let candidateTextLayout = PresentedTextLayout(panes: textPanes)
+        if let surface = snapshot.activeSurface, let cursor = surface.content.accessibilityCursor,
+           let point = candidateTextLayout.cursor(windowID: surface.windowId, row: cursor.row, utf16: cursor.utf16),
+           surface.content.cursorVisible {
+            resolvedCursor = RenderCursor(x: Float(point.x) * scale, y: Float(point.y) * scale, shape: surface.content.cursorShape, windowId: surface.windowId)
+        }
+        let renderCursor = animatedCursor(for: resolvedCursor, teleportLineThresholdPx: displayCellH * scale * 50.0)
+        // The cursor names exactly one window; select its complete surface once.
+        // This is a single-window lookup, not fragmented per-window joining.
+        let cursorSurface: PresentedWindowSurface? = renderCursor?.windowId
+            .flatMap { id in surfaces.first { $0.windowId == id } }
         if let renderCursor, cursorBlinkVisible, renderCursor.shape == .block {
             let cursorScrollLeft = cursorSurface?.content.scrollLeft ?? 0
             let cursorScrollOffsetPx = CoreTextMetalRenderer.presentationScrollOffset(
@@ -1594,11 +1642,14 @@ final class CoreTextMetalRenderer {
         let candidateInstanceSlots = lineInstances.count
         let candidateQuadCapacity = bufferDemand.quadBytesPerBuffer / MemoryLayout<QuadGPU>.stride
         factories.observeCompletion(cmdBuf) { [weak self] completed, status in
-            guard let self else { return }
             var presentationSubmitted = false
             defer {
-                if !presentationSubmitted { self.retirePresentationGeneration(generation) }
+                if !presentationSubmitted {
+                    self?.retirePresentationGeneration(generation)
+                    onAttemptFinished()
+                }
             }
+            guard let self else { return }
             guard isPresentationCurrent() else { return }
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
             os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID,
@@ -1686,8 +1737,11 @@ final class CoreTextMetalRenderer {
             }
 
             self.factories.observeCompletion(presentationBuffer) { [weak self] copied, _ in
+                defer {
+                    self?.retirePresentationGeneration(generation)
+                    onAttemptFinished()
+                }
                 guard let self else { return }
-                defer { self.retirePresentationGeneration(generation) }
                 guard isPresentationCurrent() else { return }
                 guard copied else {
                     self.recordNativeFailure(NativePresentationFailure(
@@ -1734,6 +1788,7 @@ final class CoreTextMetalRenderer {
                 latencyRecorder?.markPresented(seq: presentationInputSeq)
                 self.presentationMetrics?.recordMetalPresented(presentationFrame: presentationFrame)
                 onPresented(presentedSnapshot)
+                onTextPresented(presentedSnapshot, candidateTextLayout)
                 os_signpost(.event, log: renderLog, name: "PresentationComplete",
                             signpostID: renderSignpostID,
                             "input=%{public}u", presentationInputSeq)

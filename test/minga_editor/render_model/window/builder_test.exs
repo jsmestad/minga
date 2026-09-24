@@ -7,9 +7,12 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Core.Face
+  alias Minga.Diagnostics
+  alias Minga.Diagnostics.Diagnostic
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editing.Search.Match
   alias Minga.Language.Highlight.Span, as: HighlightSpan
+  alias Minga.LSP.SyncServer
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
   alias MingaEditor.RenderModel.Window.BuildResult
@@ -590,7 +593,69 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.cursor_col == 12
     end
 
-    test "accessibility offsets retain a selected zero-width tab as UTF-16" do
+    test "wrapped cursor projection uses source bytes across a multibyte boundary" do
+      content = String.duplicate("é", 14) <> "z"
+      state = gui_state(cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      :ok = BufferProcess.move_to(buffer, {0, 28})
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+
+      assert Enum.map(model.rows, & &1.text) == [String.duplicate("é", 14), "z"]
+      assert model.cursor_row == 1
+      assert model.cursor_col == 0
+      assert model.accessibility_cursor == {1, 0}
+    end
+
+    test "wrapped cursor projection follows a tab presentation split across rows" do
+      content = String.duplicate("a", 13) <> "\tb"
+      state = gui_state(cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, 4} = BufferProcess.set_option(buffer, :tab_width, 4)
+      :ok = BufferProcess.move_to(buffer, {0, 14})
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+
+      assert Enum.map(model.rows, & &1.text) == [String.duplicate("a", 13) <> " ", "  b"]
+      assert model.cursor_row == 1
+      assert model.cursor_col == 2
+      assert model.accessibility_cursor == {1, 2}
+    end
+
+    test "wrapped selection projects one source tab across both visual rows" do
+      content = String.duplicate("a", 13) <> "\tb"
+      state = gui_state(cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, 4} = BufferProcess.set_option(buffer, :tab_width, 4)
+      :ok = BufferProcess.move_to(buffer, {0, 13})
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :visual, %Minga.Mode.VisualState{
+          visual_type: :char,
+          visual_anchor: {0, 13}
+        })
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      model = wf.window_model
+
+      assert model.selection == %Window.Selection{
+               type: :char,
+               start_row: 0,
+               start_col: 13,
+               end_row: 1,
+               end_col: 2
+             }
+    end
+
+    test "accessibility offsets include the selected tab presentation as UTF-16" do
       state = gui_state(content: "\ta🙂b")
       buffer = state.workspace.buffers.active
       :ok = BufferProcess.move_to(buffer, {0, 0})
@@ -604,7 +669,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
       model = wf.window_model
 
-      assert hd(model.rows).text == "\ta🙂b"
+      assert hd(model.rows).text == "  a🙂b"
 
       assert model.selection == %Window.Selection{
                type: :char,
@@ -615,7 +680,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
              }
 
       assert model.accessibility_cursor == {0, 0}
-      assert model.accessibility_selection_ranges == [{0, 0, 1}]
+      assert model.accessibility_selection_ranges == [{0, 0, 2}]
     end
 
     test "accessibility offsets map buffer bytes past inline virtual text" do
@@ -660,7 +725,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       {[wf], _cursor, _state} = build_content(state)
       model = wf.window_model
 
-      assert hd(model.rows).text == "X\tab"
+      assert hd(model.rows).text == "X ab"
       assert model.accessibility_cursor == {0, 2}
     end
 
@@ -1156,7 +1221,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(model.rows, & &1.text) == ["EFGHIJklmnopqr", "stKLMNOPQRST", "tail"]
       assert Enum.map(model.rows, & &1.visual_index) == [1, 2, 0]
       assert model.geometry.viewport.visual_row_offset == 1
-      assert presentation.anchor_visual_row_offset == 1
+      assert presentation.anchor_visual_row_offset == 0
       assert presentation.visible_start_line == 0
       assert presentation.overscan_start_line == 0
       assert presentation.visible_end_line == 2
@@ -1236,6 +1301,66 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.selection.start_row == 2
       assert model.selection.end_row == 2
       assert model.selection.end_col == 7
+    end
+
+    test "wrapped search coordinates follow tabs and inline virtual text" do
+      state = gui_state(cols: 20, content: "\tfoo tail")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+      assert {:ok, 4} = BufferProcess.set_option(buffer, :tab_width, 4)
+
+      BufferProcess.add_virtual_text(buffer, {0, 1},
+        segments: [{"VV", Face.new()}],
+        placement: :inline
+      )
+
+      model =
+        build_window_model(state,
+          search_matches: [Match.new(0, 1, 3)],
+          decorations: BufferProcess.decorations(buffer),
+          tab_width: 4
+        )
+
+      assert hd(model.rows).text == "    fVVoo tail"
+      assert [%{row: 0, start_col: 4, end_col: 9}] = model.search_matches
+    end
+
+    @tag :tmp_dir
+    test "wrapped diagnostic coordinates follow tabs after concealed source", %{tmp_dir: tmp_dir} do
+      state = gui_state(cols: 20, content: "xx\tfoo\ncursor")
+      buffer = state.workspace.buffers.active
+      path = Path.join(tmp_dir, "wrapped-diagnostic.txt")
+      :ok = Buffer.save_as(buffer, path)
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+      assert {:ok, 4} = BufferProcess.set_option(buffer, :tab_width, 4)
+      :ok = BufferProcess.move_to(buffer, {1, 0})
+
+      BufferProcess.batch_decorations(buffer, fn decorations ->
+        add_conceal(decorations, {0, 0}, {0, 2})
+      end)
+
+      uri = SyncServer.path_to_uri(path)
+
+      Diagnostics.publish(:builder_test, uri, [
+        %Diagnostic{
+          range: %{start_line: 0, start_col: 3, end_line: 0, end_col: 6},
+          severity: :warning,
+          message: "wrapped diagnostic"
+        }
+      ])
+
+      on_exit(fn -> Diagnostics.clear(:builder_test, uri) end)
+
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+
+      assert hd(model.rows).text == "    foo"
+
+      assert [
+               %{start_row: 0, start_col: 4, end_row: 0, end_col: 7, severity: :warning}
+             ] = model.diagnostic_ranges
     end
 
     test "scrolled simple window keeps overscan rows and matching scroll presentation metadata" do

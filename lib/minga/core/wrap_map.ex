@@ -131,8 +131,17 @@ defmodule Minga.Core.WrapMap do
   end
 
   defp do_wrap(graphemes, row_width, byte_off, acc, config) do
+    row_start_col = if byte_off == 0, do: 0, else: config.indent_width
+
     {source_text, rest, bytes_consumed} =
-      take_row(graphemes, row_width, config.linebreak, config.oracle)
+      take_row(
+        graphemes,
+        row_width,
+        config.linebreak,
+        config.oracle,
+        config.tab_width,
+        row_start_col
+      )
 
     entry = visual_row(source_text, byte_off, config.indent_width)
     next_byte_off = byte_off + bytes_consumed
@@ -175,10 +184,17 @@ defmodule Minga.Core.WrapMap do
 
   # Takes graphemes for one visual row, breaking at word boundaries.
   # Returns {row_text, remaining_graphemes, bytes_consumed}.
-  @spec take_row([String.t()], pos_integer(), boolean(), WidthOracle.t()) ::
+  @spec take_row(
+          [String.t()],
+          pos_integer(),
+          boolean(),
+          WidthOracle.t(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
           {String.t(), [String.t()], non_neg_integer()}
-  defp take_row(graphemes, max_width, linebreak, oracle) do
-    {taken, rest} = scan_row(graphemes, max_width, oracle, 0, [])
+  defp take_row(graphemes, max_width, linebreak, oracle, tab_width, row_start_col) do
+    {taken, rest} = scan_row(graphemes, max_width, oracle, tab_width, row_start_col, 0, [])
 
     case rest do
       [] ->
@@ -195,19 +211,35 @@ defmodule Minga.Core.WrapMap do
   end
 
   # Scans graphemes until the next one would exceed max_width.
-  @spec scan_row([String.t()], pos_integer(), WidthOracle.t(), non_neg_integer(), [String.t()]) ::
+  @spec scan_row(
+          [String.t()],
+          pos_integer(),
+          WidthOracle.t(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [String.t()]
+        ) ::
           {[String.t()], [String.t()]}
-  defp scan_row([], _max, _oracle, _col, acc), do: {Enum.reverse(acc), []}
+  defp scan_row([], _max, _oracle, _tab_width, _row_start_col, _col, acc),
+    do: {Enum.reverse(acc), []}
 
-  defp scan_row([g | rest] = remaining, max, oracle, col, acc) do
-    w = WidthOracle.grapheme_width(oracle, g)
+  defp scan_row([g | rest] = remaining, max, oracle, tab_width, row_start_col, col, acc) do
+    width = grapheme_advance(g, oracle, row_start_col + col, tab_width)
 
-    if col + w > max do
+    if col + width > max do
       finish_overflow_row(g, rest, remaining, acc)
     else
-      scan_row(rest, max, oracle, col + w, [g | acc])
+      scan_row(rest, max, oracle, tab_width, row_start_col, col + width, [g | acc])
     end
   end
+
+  @spec grapheme_advance(String.t(), WidthOracle.t(), non_neg_integer(), pos_integer()) ::
+          non_neg_integer()
+  defp grapheme_advance("\t", _oracle, col, tab_width), do: tab_stop_width(col, tab_width)
+
+  defp grapheme_advance(grapheme, oracle, _col, _tab_width),
+    do: WidthOracle.grapheme_width(oracle, grapheme)
 
   @spec finish_overflow_row(String.t(), [String.t()], [String.t()], [String.t()]) ::
           {[String.t()], [String.t()]}

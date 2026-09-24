@@ -197,6 +197,16 @@ defmodule Minga.Buffer do
   @spec move_to(t(), position()) :: :ok
   defdelegate move_to(server, pos), to: BufferProcess
 
+  @doc "Moves to an exact byte position only while the expected content revision is current."
+  @spec move_to_if_version(t(), non_neg_integer(), position()) ::
+          {:ok, position()} | {:error, :stale | :position_out_of_range}
+  defdelegate move_to_if_version(server, version, position), to: BufferProcess
+
+  @doc "Validates an exact byte position without moving the cursor."
+  @spec resolve_position_if_version(t(), non_neg_integer(), position()) ::
+          {:ok, position()} | {:error, :stale | :position_out_of_range}
+  defdelegate resolve_position_if_version(server, version, position), to: BufferProcess
+
   @doc "Moves to an exact one-based line and zero-based UTF-16 column only at the expected buffer revision."
   @spec move_to_utf16_if_version(t(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
           {:ok, position()}

@@ -858,8 +858,7 @@ defmodule MingaEditor.Commands.Movement do
       content_w = content_width(state)
       opts = wrap_opts(buf, width_oracle(state))
       wrap_entry = WrapMap.compute([line_text], content_w, opts) |> hd()
-      display_col = Unicode.display_col(line_text, col)
-      {_vrow_idx, vrow_col} = VisualLine.display_col_to_visual(wrap_entry, display_col)
+      {_vrow_idx, vrow_col} = VisualLine.source_byte_to_visual(wrap_entry, col, opts)
       vrow_col
     else
       Unicode.display_col(line_text, col)

@@ -1,11 +1,20 @@
 defmodule MingaEditor.Renderer.StateTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Decorations
+  alias Minga.RenderModel.Window.Row
+  alias MingaEditor.Mouse.TextEvent
+  alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
+  alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Renderer.AckLease
   alias MingaEditor.Renderer.FrameAttempt
+  alias MingaEditor.Renderer.RecoveryHandler
   alias MingaEditor.Renderer.State
+  alias MingaEditor.Renderer.TextPresentation
+  alias MingaEditor.Renderer.TextPresentations
 
   test "new state starts with idle frame credit" do
     assert State.new([]).frame_credit == :idle
@@ -86,6 +95,79 @@ defmodule MingaEditor.Renderer.StateTest do
     refreshed = State.latest_successor(State.new([]), fallback)
     assert refreshed.seq > fallback.seq
     assert %{refreshed | seq: fallback.seq} == fallback
+  end
+
+  test "rejection recovery preserves the visible lease until recovered activation" do
+    old = presentation(1, 101, 3, "old")
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [old])
+    assert {:ok, registry} = TextPresentations.activate(registry, 1, old.presentation_id)
+
+    state =
+      %{State.new(generation_reserver: fn -> 2 end) | text_presentations: registry}
+
+    assert {:noreply, recovered} = RecoveryHandler.transaction(state, attempt(10))
+
+    assert {:ok, %TextTarget{line: 3}} = State.resolve_text_target(recovered, event(old))
+
+    replacement = presentation(1, 102, 4, "recovered")
+
+    admitted =
+      TextPresentations.acknowledge(recovered.text_presentations, [replacement])
+
+    recovered = %{recovered | text_presentations: admitted}
+
+    assert {:ok, recovered} =
+             State.text_presentation_state(
+               recovered,
+               1,
+               replacement.presentation_id,
+               :active
+             )
+
+    assert {:ok, %TextTarget{line: 4}} = State.resolve_text_target(recovered, event(replacement))
+
+    reset = State.reset_connection(recovered, 3)
+    assert {:error, :inactive} = State.resolve_text_target(reset, event(replacement))
+  end
+
+  defp presentation(window_id, row_id, line, text) do
+    row = %Row{
+      row_id: row_id,
+      row_type: :normal,
+      buf_line: line,
+      text: text,
+      spans: [],
+      content_hash: Row.compute_hash(text, [])
+    }
+
+    visual =
+      VisualRow.new(
+        row,
+        SourceOffsetMap.new(text, text, Decorations.new(), line),
+        0,
+        byte_size(text),
+        0
+      )
+
+    TextPresentation.new(window_id, self(), 7, {:identity, row_id}, {:windowed, {visual}})
+  end
+
+  defp event(presentation) do
+    {%VisualRow{row: row}} = elem(presentation.rows, 1)
+
+    TextEvent.new(%{
+      window_id: presentation.window_id,
+      presentation_id: presentation.presentation_id,
+      row_index: 0,
+      row_id: row.row_id,
+      utf16_offset: 1,
+      button: :left,
+      mods: 0,
+      event_type: :press,
+      click_count: 1,
+      scroll_x: 0,
+      scroll_y: 0
+    })
   end
 
   defp attempt(seq), do: FrameAttempt.new(intent(), seq, 0)

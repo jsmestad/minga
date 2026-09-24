@@ -4,6 +4,9 @@ import Foundation
 /// It contains the viewport-clipped text/styles and the gutter source line needed
 /// before any atlas lookup or Metal buffer allocation occurs.
 public struct ResidentPreparedRowCommand: Sendable, Equatable {
+    public let rowIndex: UInt32
+    public let composedUTF16Start: Int
+    public let composedUTF16End: Int
     public let displayRow: UInt16
     public let presentationRow: Int
     public let gutterBufferLine: UInt32
@@ -62,11 +65,15 @@ public enum ResidentRenderPreparation {
         let clipStart = max(scrollLeft, 0)
         let clipWidth = max(viewportCols, 0)
         let commands = result.rows.enumerated().map { index, row in
-            ResidentPreparedRowCommand(
+            let slice = clipped(row: row, scrollLeft: clipStart, viewportCols: clipWidth)
+            return ResidentPreparedRowCommand(
+                rowIndex: UInt32(lower + index),
+                composedUTF16Start: slice.startUTF16,
+                composedUTF16End: slice.startUTF16 + slice.row.text.utf16.count,
                 displayRow: UInt16(clamping: index),
                 presentationRow: index - (visibleStart - lower),
                 gutterBufferLine: row.bufLine,
-                row: clip(row: row, scrollLeft: clipStart, viewportCols: clipWidth)
+                row: slice.row
             )
         }
 
@@ -83,8 +90,12 @@ public enum ResidentRenderPreparation {
 
     /// Shipping viewport clipping for CoreText rows and their style spans.
     public static func clip(row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> GUIVisualRow {
+        clipped(row: row, scrollLeft: scrollLeft, viewportCols: viewportCols).row
+    }
+
+    private static func clipped(row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> (row: GUIVisualRow, startUTF16: Int) {
         let text = row.text
-        guard !text.isEmpty else { return row }
+        guard !text.isEmpty else { return (row, 0) }
         let clipStart = max(scrollLeft, 0)
         let clipLimit = clipStart + max(viewportCols, 0)
         var column = 0
@@ -109,7 +120,7 @@ public enum ResidentRenderPreparation {
         }
         let clipEnd = min(clipLimit, column)
         guard clipStart < clipEnd else {
-            return rebuilt(row, text: "", spans: [], scrollLeft: scrollLeft)
+            return (rebuilt(row, text: "", spans: [], scrollLeft: scrollLeft), text.utf16.count)
         }
         let clippedText = String(text[start..<end])
         let clippedSpans = row.spans.compactMap { span -> GUIHighlightSpan? in
@@ -122,7 +133,7 @@ public enum ResidentRenderPreparation {
             return GUIHighlightSpan(startCol: newStart, endCol: newEnd, fg: span.fg, bg: span.bg,
                                     attrs: span.attrs, fontWeight: span.fontWeight, fontId: span.fontId)
         }
-        return rebuilt(row, text: clippedText, spans: clippedSpans, scrollLeft: scrollLeft)
+        return (rebuilt(row, text: clippedText, spans: clippedSpans, scrollLeft: scrollLeft), start.utf16Offset(in: text))
     }
 
     private static func rebuilt(_ row: GUIVisualRow, text: String,

@@ -7,6 +7,28 @@ public enum SemanticItemSurface: UInt8, Equatable, Sendable {
     case fileTree = 3
 }
 
+/// A position in the immutable composed row that the frontend displayed.
+public struct EditorTextTarget: Equatable, Sendable {
+    public let windowID: UInt16
+    public let presentationID: UInt64
+    public let rowIndex: UInt32
+    public let rowID: UInt64
+    public let utf16Offset: UInt32
+
+    public init(windowID: UInt16, presentationID: UInt64, rowIndex: UInt32, rowID: UInt64, utf16Offset: UInt32) {
+        self.windowID = windowID
+        self.presentationID = presentationID
+        self.rowIndex = rowIndex
+        self.rowID = rowID
+        self.utf16Offset = utf16Offset
+    }
+}
+
+public enum TextPresentationState: UInt8, Equatable, Sendable {
+    case discarded = 0
+    case active = 1
+}
+
 /// Every event the native frontend can send to the BEAM.
 ///
 /// This is the only production outbound action hierarchy. `ProtocolEncoder`
@@ -25,6 +47,8 @@ public enum OutboundAction: Equatable, Sendable {
     case applicationQuitDecision(requestID: UInt32, decision: UInt8)
     case fileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String])
     case mouse(row: Int16, column: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
+    case editorText(target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8)
+    case textPresentationState(windowID: UInt16, presentationID: UInt64, state: TextPresentationState)
     case scrollBatch(windowID: UInt16, deltaLines: Int16, direction: UInt8)
     case paste(String)
     case log(level: UInt8, message: String)

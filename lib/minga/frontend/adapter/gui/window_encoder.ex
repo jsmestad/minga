@@ -90,6 +90,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @op_gui_window_rows_delta Opcodes.gui_window_rows_delta()
   @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_indent_guides Opcodes.gui_indent_guides()
+  @op_gui_text_presentation Opcodes.gui_text_presentation()
 
   # Sectioned format section IDs
   @section_wc_header 0x01
@@ -192,13 +193,41 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_frame_metadata_with_metrics(RenderWindow.t(), boolean()) :: {[binary()], metrics()}
   def encode_frame_metadata_with_metrics(%RenderWindow{} = window, retain_gutter? \\ false) do
     gutter = encode_gutter(window.gutter, retain_gutter?)
-    metadata = encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
+
+    text_presentation =
+      case encode_text_presentation(window) do
+        nil -> []
+        command -> [command]
+      end
+
+    metadata =
+      text_presentation ++
+        encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
 
     {gutter ++ metadata,
      empty_metrics()
      |> Map.put(:gutter_bytes, IO.iodata_length(gutter))
      |> Map.put(:metadata_bytes, IO.iodata_length(metadata))}
   end
+
+  @doc "Encodes the immutable text-presentation identity used by frontend pointer events."
+  @spec encode_text_presentation(RenderWindow.t()) :: binary() | nil
+  def encode_text_presentation(
+        %RenderWindow{
+          content_kind: :buffer,
+          text_presentation_id: presentation_id
+        } = window
+      )
+      when presentation_id > 0 do
+    :gui_text_presentation
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_text_presentation>>)
+    |> Writer.uint16(:window_id, window.window_id)
+    |> Writer.uint64(:presentation_id, presentation_id)
+    |> Writer.finish()
+  end
+
+  def encode_text_presentation(%RenderWindow{}), do: nil
 
   @spec encode_window_content(RenderWindow.t()) :: binary()
   def encode_window_content(%RenderWindow{} = sw) do

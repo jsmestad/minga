@@ -110,6 +110,7 @@ enum RenderCommand: Sendable {
     case guiBottomPanel(visible: Bool, activeTabIndex: UInt8, heightPercent: UInt8,
                          filterPreset: UInt8, tabs: [Wire.BottomPanelTab],
                          entries: [Wire.MessageEntry])
+    case guiTextPresentation(windowID: UInt16, presentationID: UInt64)
     case guiWindowContent(data: GUIWindowContent)
     case guiWindowOverlayDelta(data: GUIWindowOverlayDelta)
     case guiWindowViewportDelta(data: GUIWindowRowsDelta)
@@ -1988,6 +1989,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
                                  heightPercent: heightPercent, filterPreset: filterPreset,
                                  tabs: tabs, entries: entries), pos - offset)
+
+    case OP_GUI_TEXT_PRESENTATION:
+        guard data.count >= offset + 11 else { throw ProtocolDecodeError.malformed }
+        return (.guiTextPresentation(windowID: try readU16(data, rest), presentationID: try readU64(data, rest + 2)), 11)
 
     case OP_GUI_WINDOW_CONTENT:
         // len32 command framing plus u32 section lengths:

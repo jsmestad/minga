@@ -1448,6 +1448,14 @@ Fields:
 
 The frontend uses this to compute `displayCellH = cellH * (spacing_x100 / 100.0)` for all row positioning. Line spacing is a **draw-time rendering hint only**: it has zero influence on BEAM-side layout, viewport, or scroll math. When the spacing changes at runtime the frontend recomputes its own rows-that-fit (`floor(content_pixels / (cell_height × line_spacing))`, one floor, where the pixels live) and sends an ordinary `resize` (0x02) carrying the new content row count. The BEAM lays out in exactly those rows and never divides by the multiplier itself. This resize does not re-trigger `0x92` (the emit is fingerprint-gated on the spacing value), so there is no feedback loop. See `docs/adr/0001-frontend-owns-row-fit.md`.
 
+## Editor Text Presentation (0xA8)
+
+`gui_text_presentation` binds a window's committed row store to an immutable input presentation. Fixed 11 bytes: `opcode:u8 = 0xA8, window_id:u16, presentation_id:u64`, all integers big endian. The command is staged inside a frame transaction after window data. Each frame supplies the current ID for every source-backed editor window; unchanged interaction data may reuse its ID.
+
+A client reports text hits using that presentation ID, the absolute row-store rank, the row ID, and row-local composed UTF-16 offset. See `editor_text_event` and `text_presentation_state` in [PROTOCOL.md](PROTOCOL.md). Native drawing must publish its row hit geometry together with the exact snapshot that produced the displayed pixels. Committing a newer snapshot does not replace the input geometry of an older visible snapshot.
+
+For a windowed wrapped payload, `ScrollPresentation.anchor_visual_row_offset` counts continuation rows retained before the visible anchor in that payload. Rows already trimmed from the payload are not counted again. The document viewport's visual-row offset can therefore differ from the payload-relative offset.
+
 ## Behavioral Contract
 
 A GUI frontend must satisfy these requirements:

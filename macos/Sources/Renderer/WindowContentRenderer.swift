@@ -53,6 +53,12 @@ final class WindowContentRenderer {
 
     /// Per-row texture cache keyed by BEAM-authored row identity.
     private var lineCache: [UInt64: CachedLineTexture] = [:]
+    private struct CachedLayout {
+        let contentHash: Int
+        let line: CTLine
+        var lastUsedFrame: UInt64
+    }
+    private var lineLayoutCache: [AtlasKey: CachedLayout] = [:]
 
     /// Frame counter for LRU eviction.
     private var frameCounter: UInt64 = 0
@@ -146,6 +152,7 @@ final class WindowContentRenderer {
             resourcePolicy: resourcePolicy, makeTexture: makeTexture
         )
         candidate.lineCache = lineCache
+        candidate.lineLayoutCache = lineLayoutCache
         candidate.frameCounter = frameCounter
         candidate.maxLinePixelWidth = maxLinePixelWidth
         candidate.defaultFgRGB = defaultFgRGB
@@ -179,10 +186,12 @@ final class WindowContentRenderer {
         frameCounter += 1
         let threshold = frameCounter > evictionThreshold ? frameCounter - evictionThreshold : 0
         lineCache = lineCache.filter { $0.value.lastUsedFrame >= threshold }
+        lineLayoutCache = lineLayoutCache.filter { $0.value.lastUsedFrame >= threshold }
     }
 
     /// Clear all cached textures.
     func invalidateAll() {
+        lineLayoutCache.removeAll(keepingCapacity: true)
         lineCache.removeAll(keepingCapacity: true)
     }
 
@@ -264,23 +273,34 @@ final class WindowContentRenderer {
         return cached
     }
 
-    /// Render a visual row into an atlas slot.
-    ///
-    /// Checks the atlas cache first using a window-scoped stable row key. On miss, rasterizes and uploads.
+    /// The text layout is retained beside the raster cache so input never reshapes a displayed line.
+    func textLayout(row: GUIVisualRow, windowId: UInt16, contentEpoch: UInt32) -> CTLine {
+        let key = AtlasKey.bufferRow(windowId: windowId, rowId: row.rowId)
+        let hash = epochContentHash(row.contentHash, contentEpoch)
+        if var cached = lineLayoutCache[key], cached.contentHash == hash {
+            cached.lastUsedFrame = frameCounter
+            lineLayoutCache[key] = cached
+            return cached.line
+        }
+        let line = CTLineCreateWithAttributedString(buildAttributedString(text: row.text, spans: row.spans))
+        lineLayoutCache[key] = CachedLayout(contentHash: hash, line: line, lastUsedFrame: frameCounter)
+        return line
+    }
+
+    /// Rasterization and pointer mapping consume the same shaped line.
     func renderRowToAtlas(displayRow _: UInt16, row: GUIVisualRow, windowId: UInt16, contentEpoch: UInt32 = 0,
                           atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
+        let ctLine = textLayout(row: row, windowId: windowId, contentEpoch: contentEpoch)
         let hash = epochContentHash(row.contentHash, contentEpoch)
         let key = AtlasKey.bufferRow(windowId: windowId, rowId: row.rowId)
-
         guard !row.text.isEmpty else { return nil }
         guard let lookup = atlas.lookupOrReserve(key: key, contentHash: hash) else { return nil }
-
         switch lookup {
         case .hit(let entry):
             metrics.bufferRowsReused += 1
             return entry
         case .reserved(let reservation):
-            return rasterizeRowToAtlas(row: row, reservation: reservation, atlas: atlas, metrics: &metrics)
+            return rasterizeRowToAtlas(row: row, ctLine: ctLine, reservation: reservation, atlas: atlas, metrics: &metrics)
         }
     }
 
@@ -288,15 +308,9 @@ final class WindowContentRenderer {
         Int(contentHash) &* 31 &+ Int(contentEpoch)
     }
 
-    private func rasterizeRowToAtlas(row: GUIVisualRow, reservation: Reservation,
+    private func rasterizeRowToAtlas(row: GUIVisualRow, ctLine: CTLine, reservation: Reservation,
                                      atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
-        let attributedString = buildAttributedString(text: row.text, spans: row.spans)
-        let ctLine = CTLineCreateWithAttributedString(attributedString)
-
-        let lineWidth =
-            row.text.utf8.allSatisfy({ $0 < 0x80 })
-            ? CGFloat(row.text.utf8.count) * cellWidth
-            : CTLineGetTypographicBounds(ctLine, nil, nil, nil)
+        let lineWidth = CTLineGetTypographicBounds(ctLine, nil, nil, nil)
 
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }

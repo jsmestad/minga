@@ -108,6 +108,23 @@ defmodule MingaEditor.Renderer.Composition do
           styled_segment()
         ]
   def apply_invisible_chars(segments, tab_width, whitespace_face) do
+    present_whitespace(segments, tab_width, true, whitespace_face)
+  end
+
+  @doc """
+  Expands tabs to deterministic tab-stop text and optionally shows invisibles.
+
+  With `show_invisible` disabled, each tab becomes spaces using its source face.
+  With it enabled, the first cell is `→`, fill cells remain spaces, and the
+  marker uses `whitespace_face`. Trailing spaces become `·` only when visible.
+  """
+  @spec present_whitespace(
+          [styled_segment()],
+          pos_integer(),
+          boolean(),
+          Face.t() | nil
+        ) :: [styled_segment()]
+  def present_whitespace(segments, tab_width, show_invisible, whitespace_face) do
     face = marker_face(whitespace_face)
     full_text = Enum.map_join(segments, fn {text, _} -> text end)
     trailing_idx = trailing_ws_start_index(full_text)
@@ -115,7 +132,16 @@ defmodule MingaEditor.Renderer.Composition do
     {result, _col, _idx} =
       Enum.reduce(segments, {[], 0, 0}, fn {text, segment_face}, {acc, col, idx} ->
         {segment_parts, new_col, new_idx} =
-          transform_segment_text(text, segment_face, col, idx, tab_width, trailing_idx, face)
+          transform_segment_text(
+            text,
+            segment_face,
+            col,
+            idx,
+            tab_width,
+            trailing_idx,
+            show_invisible,
+            face
+          )
 
         {segment_parts ++ acc, new_col, new_idx}
       end)
@@ -175,9 +201,19 @@ defmodule MingaEditor.Renderer.Composition do
           non_neg_integer(),
           pos_integer(),
           non_neg_integer(),
+          boolean(),
           Face.t()
         ) :: {[styled_segment()], non_neg_integer(), non_neg_integer()}
-  defp transform_segment_text(text, face, col, idx, tab_width, trailing_idx, ws_face) do
+  defp transform_segment_text(
+         text,
+         face,
+         col,
+         idx,
+         tab_width,
+         trailing_idx,
+         show_invisible,
+         ws_face
+       ) do
     graphemes = String.graphemes(text)
 
     {parts, current_run, current_face, new_col, new_idx} =
@@ -185,11 +221,12 @@ defmodule MingaEditor.Renderer.Composition do
         case g do
           "\t" ->
             fill = tab_fill(c, tab_width)
-            tab_text = "→" <> String.duplicate(" ", fill - 1)
+            tab_text = tab_presentation(fill, show_invisible)
+            tab_face = tab_face(show_invisible, face, ws_face)
             parts = flush_run(parts, run, run_face)
-            {[{tab_text, ws_face} | parts], "", face, c + fill, i + 1}
+            {[{tab_text, tab_face} | parts], "", face, c + fill, i + 1}
 
-          " " when i >= trailing_idx ->
+          " " when show_invisible and i >= trailing_idx ->
             parts = flush_run(parts, run, run_face)
             {[{"·", ws_face} | parts], "", face, c + 1, i + 1}
 
@@ -203,6 +240,14 @@ defmodule MingaEditor.Renderer.Composition do
     parts = flush_run(parts, current_run, current_face)
     {parts, new_col, new_idx}
   end
+
+  @spec tab_face(boolean(), Face.t(), Face.t()) :: Face.t()
+  defp tab_face(true, _source_face, whitespace_face), do: whitespace_face
+  defp tab_face(false, source_face, _whitespace_face), do: source_face
+
+  @spec tab_presentation(pos_integer(), boolean()) :: String.t()
+  defp tab_presentation(fill, true), do: "→" <> String.duplicate(" ", fill - 1)
+  defp tab_presentation(fill, false), do: String.duplicate(" ", fill)
 
   @spec flush_run([styled_segment()], String.t(), Face.t()) :: [styled_segment()]
   defp flush_run(parts, "", _face), do: parts

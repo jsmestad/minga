@@ -39,6 +39,8 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
+  alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -77,6 +79,404 @@ defmodule MingaEditor.Mouse do
            {Window.id(), Window.t(), pid(), integer(), integer(), pos_integer(), pos_integer()}
   @typep tab_command ::
            atom() | {:workspace_goto, non_neg_integer()} | {:tab_goto_id, pos_integer()}
+  @typep text_target :: BufferTarget.t() | TextTarget.t()
+  @typep text_position :: {non_neg_integer(), non_neg_integer()}
+  @typep target_move :: (text_position() -> {:ok, text_position()} | {:error, atom()})
+
+  @doc "Applies a frontend text-pointer event whose source target was resolved by the renderer."
+  @spec handle_text_event(state(), TextEvent.t(), TextTarget.t() | nil) :: state()
+  def handle_text_event(state, %TextEvent{button: :left, event_type: :release}, _target) do
+    handle(state, 0, 0, :left, 0, :release, 1)
+  end
+
+  def handle_text_event(state, %TextEvent{}, nil), do: state
+
+  def handle_text_event(state, %TextEvent{event_type: :drag} = event, %TextTarget{} = target),
+    do: handle_text_drag(state, event, target)
+
+  def handle_text_event(state, %TextEvent{event_type: :motion} = event, %TextTarget{} = target),
+    do: handle_text_motion(state, event, target)
+
+  def handle_text_event(state, %TextEvent{button: :middle, event_type: :press}, target),
+    do: apply_middle_press(state, target)
+
+  def handle_text_event(state, %TextEvent{button: :right, event_type: :press}, target),
+    do: apply_context_press(state, target)
+
+  def handle_text_event(state, %TextEvent{button: :left, event_type: :press} = event, target),
+    do: handle_text_left_press(state, event, target)
+
+  def handle_text_event(state, %TextEvent{}, %TextTarget{}), do: state
+
+  @spec handle_text_left_press(state(), TextEvent.t(), TextTarget.t()) :: state()
+  defp handle_text_left_press(original, event, target) do
+    case validate_target(target) do
+      {:ok, _position} -> record_and_apply_text_press(original, event, target)
+      {:error, _reason} -> original
+    end
+  catch
+    :exit, _reason -> original
+  end
+
+  @spec record_and_apply_text_press(state(), TextEvent.t(), TextTarget.t()) :: state()
+  defp record_and_apply_text_press(original, event, target) do
+    mouse =
+      MouseState.record_text_press_at(
+        original.workspace.mouse,
+        event.window_id,
+        target.buffer,
+        target.source_version,
+        event.row_id,
+        event.utf16_offset,
+        event.click_count,
+        System.monotonic_time(:millisecond)
+      )
+
+    state = %{
+      original
+      | workspace: MingaEditor.Session.State.set_mouse(original.workspace, mouse)
+    }
+
+    handle_text_left_press_kind(
+      original,
+      state,
+      target,
+      event.mods,
+      MouseState.click_count(mouse)
+    )
+  end
+
+  @spec handle_text_left_press_kind(
+          state(),
+          state(),
+          TextTarget.t(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: state()
+  defp handle_text_left_press_kind(_original, state, target, mods, _click_count)
+       when band(mods, @mod_shift) != 0,
+       do: apply_shift_click(state, target)
+
+  defp handle_text_left_press_kind(original, state, target, mods, _click_count)
+       when band(mods, @mod_super) != 0,
+       do: apply_goto_definition(original, state, target)
+
+  defp handle_text_left_press_kind(
+         _original,
+         %{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}} = state,
+         target,
+         mods,
+         _click_count
+       )
+       when band(mods, @mod_ctrl) != 0,
+       do: apply_context_press(state, target)
+
+  defp handle_text_left_press_kind(original, state, target, mods, _click_count)
+       when band(mods, @mod_ctrl) != 0,
+       do: apply_goto_definition(original, state, target)
+
+  defp handle_text_left_press_kind(_original, state, target, _mods, 2),
+    do: apply_double_click(state, target)
+
+  defp handle_text_left_press_kind(_original, state, target, _mods, 3),
+    do: apply_triple_click(state, target)
+
+  defp handle_text_left_press_kind(_original, state, target, _mods, _click_count),
+    do: apply_plain_click(state, target)
+
+  @spec apply_plain_click(state(), text_target()) :: state()
+  defp apply_plain_click(state, target) do
+    case focus_and_move_target(state, target, target_position(target)) do
+      {:ok, focused, position} ->
+        focused
+        |> normalize_mode_for_targeted_gesture()
+        |> update_mouse(&start_target_drag(&1, position, target))
+
+      _ ->
+        state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec apply_double_click(state(), text_target()) :: state()
+  defp apply_double_click(state, target) do
+    {line, byte} = target_position(target)
+
+    with {{start_line, start_byte}, {end_line, end_byte}} <-
+           word_boundaries_at(target_buffer(target), line, byte),
+         {:ok, focused, _position} <-
+           focus_and_move_target(state, target, {end_line, end_byte}) do
+      workspace =
+        MingaEditor.Session.State.transition_mode(
+          focused.workspace,
+          :visual,
+          %VisualState{visual_anchor: {start_line, start_byte}, visual_type: :char}
+        )
+
+      %{focused | workspace: workspace}
+      |> update_mouse(&start_target_drag(&1, {start_line, start_byte}, target))
+    else
+      _ -> state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec apply_triple_click(state(), text_target()) :: state()
+  defp apply_triple_click(state, target) do
+    {line, _byte} = target_position(target)
+    line_text = cursor_line_text(target_buffer(target), line)
+    end_position = {line, max(byte_size(line_text) - 1, 0)}
+
+    case focus_and_move_target(state, target, end_position) do
+      {:ok, focused, _position} ->
+        workspace =
+          MingaEditor.Session.State.transition_mode(
+            focused.workspace,
+            :visual,
+            %VisualState{visual_anchor: {line, 0}, visual_type: :line}
+          )
+
+        %{focused | workspace: workspace}
+        |> update_mouse(&start_target_drag(&1, {line, 0}, target))
+
+      _ ->
+        state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec apply_shift_click(state(), text_target()) :: state()
+  defp apply_shift_click(state, target) do
+    buffer = target_buffer(target)
+
+    anchor =
+      case {state.workspace.buffers.active, Minga.Editing.mode(state)} do
+        {^buffer, :visual} -> MingaEditor.Editing.visual_anchor(state)
+        _ -> Buffer.cursor(buffer)
+      end
+
+    case focus_and_move_target(state, target, target_position(target)) do
+      {:ok, focused, _position} ->
+        workspace =
+          MingaEditor.Session.State.transition_mode(
+            focused.workspace,
+            :visual,
+            %VisualState{visual_anchor: anchor, visual_type: :char}
+          )
+
+        %{focused | workspace: workspace}
+
+      _ ->
+        state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec apply_middle_press(state(), text_target()) :: state()
+  defp apply_middle_press(state, target) do
+    case focus_and_move_target(state, target, target_position(target)) do
+      {:ok, focused, _position} ->
+        focused
+        |> normalize_mode_for_targeted_gesture()
+        |> MingaEditor.dispatch_command(:paste_after)
+
+      _ ->
+        state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec apply_goto_definition(state(), state(), text_target()) :: state()
+  defp apply_goto_definition(original, state, target) do
+    case focus_and_move_target(state, target, target_position(target)) do
+      {:ok, focused, _position} ->
+        focused
+        |> clear_cmd_hover_link_for_targeted_gesture()
+        |> normalize_mode_for_targeted_gesture()
+        |> MingaEditor.dispatch_command(:goto_definition)
+
+      _ ->
+        original
+    end
+  catch
+    :exit, _reason -> original
+  end
+
+  @spec apply_context_press(state(), text_target()) :: state()
+  defp apply_context_press(state, target) do
+    with {:ok, position} <- validate_target(target),
+         {:ok, focused} <- focus_target(state, target) do
+      preserve? =
+        state.workspace.buffers.active == target_buffer(target) and
+          click_inside_visual_selection?(state, elem(position, 0), elem(position, 1))
+
+      apply_context_position(state, focused, target, preserve?)
+    else
+      _ -> state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec apply_context_position(state(), state(), text_target(), boolean()) :: state()
+  defp apply_context_position(_original, focused, _target, true), do: focused
+
+  defp apply_context_position(original, focused, target, false) do
+    case move_target(target, target_position(target)) do
+      {:ok, _position} -> normalize_mode_for_targeted_gesture(focused)
+      {:error, _reason} -> original
+    end
+  end
+
+  @spec handle_text_drag(state(), TextEvent.t(), TextTarget.t()) :: state()
+  defp handle_text_drag(state, event, %TextTarget{} = target) do
+    case MouseState.active_text_drag(state.workspace.mouse) do
+      {:active, anchor, origin_window, buffer, source_version, click_count}
+      when origin_window == target.window_id and buffer == target.buffer and
+             source_version == target.source_version ->
+        case validate_target(target) do
+          {:ok, position} ->
+            state
+            |> text_drag_auto_scroll(origin_window, event.scroll_x, event.scroll_y)
+            |> update_drag_selection(
+              target.buffer,
+              anchor,
+              click_count,
+              position,
+              &move_target(target, &1)
+            )
+
+          {:error, _reason} ->
+            state
+        end
+
+      _inactive_or_different_source ->
+        state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec text_drag_auto_scroll(state(), Window.id(), -1 | 0 | 1, -1 | 0 | 1) :: state()
+  defp text_drag_auto_scroll(state, window_id, scroll_x, scroll_y) do
+    state =
+      case scroll_y do
+        -1 -> scroll_window_vertical(state, window_id, -1)
+        1 -> scroll_window_vertical(state, window_id, 1)
+        0 -> state
+      end
+
+    case scroll_x do
+      -1 -> scroll_window_horizontal(state, window_id, -scroll_cols(state))
+      1 -> scroll_window_horizontal(state, window_id, scroll_cols(state))
+      0 -> state
+    end
+  end
+
+  @spec handle_text_motion(state(), TextEvent.t(), TextTarget.t()) :: state()
+  defp handle_text_motion(state, event, %TextTarget{} = target) do
+    case validate_target(target) do
+      {:ok, _position} -> handle_text_motion_modifiers(state, event, target)
+      {:error, _reason} -> state
+    end
+  catch
+    :exit, _reason -> state
+  end
+
+  @spec handle_text_motion_modifiers(state(), TextEvent.t(), TextTarget.t()) :: state()
+  defp handle_text_motion_modifiers(state, %{mods: mods}, target)
+       when band(mods, @mod_super) != 0 do
+    set_cmd_hover_link_if_changed(state, navigable_link_at_text_target(state, target))
+  end
+
+  defp handle_text_motion_modifiers(
+         %{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}} = state,
+         %{mods: mods},
+         _target
+       )
+       when band(mods, @mod_ctrl) != 0,
+       do: clear_cmd_hover_link_for_targeted_gesture(state)
+
+  defp handle_text_motion_modifiers(state, %{mods: mods}, target)
+       when band(mods, @mod_ctrl) != 0 do
+    set_cmd_hover_link_if_changed(state, navigable_link_at_text_target(state, target))
+  end
+
+  defp handle_text_motion_modifiers(state, _event, _target),
+    do: clear_cmd_hover_link_for_targeted_gesture(state)
+
+  @spec navigable_link_at_text_target(state(), TextTarget.t()) :: EditorState.cmd_hover_link()
+  defp navigable_link_at_text_target(
+         %{workspace: %{buffers: %{active: buffer}}} = state,
+         %TextTarget{buffer: buffer, line: line, byte: byte}
+       ),
+       do: navigable_link_at_pos(state, line, byte)
+
+  defp navigable_link_at_text_target(_state, _target), do: nil
+
+  @spec start_target_drag(MouseState.t(), text_position(), text_target()) :: MouseState.t()
+  defp start_target_drag(mouse, anchor, %BufferTarget{} = target),
+    do: MouseState.start_drag(mouse, anchor, target.window_id)
+
+  defp start_target_drag(mouse, anchor, %TextTarget{} = target),
+    do:
+      MouseState.start_text_drag(
+        mouse,
+        anchor,
+        target.window_id,
+        target.buffer,
+        target.source_version
+      )
+
+  @spec target_position(text_target()) :: text_position()
+  defp target_position(%BufferTarget{} = target), do: BufferTarget.position(target)
+  defp target_position(%TextTarget{} = target), do: TextTarget.position(target)
+
+  @spec target_buffer(text_target()) :: pid()
+  defp target_buffer(%{buffer: buffer}), do: buffer
+
+  @spec target_window_id(text_target()) :: Window.id()
+  defp target_window_id(%{window_id: window_id}), do: window_id
+
+  @spec focus_target(state(), text_target()) :: {:ok, state()} | {:error, atom()}
+  defp focus_target(state, target),
+    do: WindowFocus.focus_buffer_result(state, target_window_id(target), target_buffer(target))
+
+  @spec focus_and_move_target(state(), text_target(), text_position()) ::
+          {:ok, state(), text_position()} | {:error, atom()}
+  defp focus_and_move_target(state, target, position) do
+    with {:ok, _position} <- validate_target(target),
+         {:ok, focused} <- focus_target(state, target),
+         {:ok, moved_position} <- move_target(target, position) do
+      {:ok, focused, moved_position}
+    end
+  end
+
+  @spec move_target(text_target(), text_position()) ::
+          {:ok, text_position()} | {:error, atom()}
+  defp move_target(%BufferTarget{buffer: buffer}, position) do
+    :ok = Buffer.move_to(buffer, position)
+    {:ok, position}
+  end
+
+  defp move_target(%TextTarget{} = target, position),
+    do: Buffer.move_to_if_version(target.buffer, target.source_version, position)
+
+  @spec validate_target(text_target()) :: {:ok, text_position()} | {:error, atom()}
+  defp validate_target(%BufferTarget{} = target), do: {:ok, BufferTarget.position(target)}
+
+  defp validate_target(%TextTarget{} = target),
+    do:
+      Buffer.resolve_position_if_version(
+        target.buffer,
+        target.source_version,
+        TextTarget.position(target)
+      )
 
   @doc "Dispatches a mouse event routed to a focus-tree node."
   @spec handle_at_node(
@@ -298,12 +698,9 @@ defmodule MingaEditor.Mouse do
         close_tab_at(state, row, col)
 
       :not_tab_bar ->
-        case resolve_and_focus_buffer_target(state, row, col) do
-          {:ok, focused, target} ->
-            paste_at_buffer_target(state, focused, target)
-
-          :error ->
-            state
+        case HitTest.resolve_buffer(state, row, col) do
+          {:buffer, %BufferTarget{} = target} -> apply_middle_press(state, target)
+          _command_or_miss -> state
         end
     end
   end
@@ -616,28 +1013,46 @@ defmodule MingaEditor.Mouse do
       nil ->
         state
 
-      {line, c} ->
-        update_drag_selection(state, anchor, dcc, {line, c})
+      {line, byte} ->
+        buffer = drag_selection_buffer(state)
+
+        update_drag_selection(
+          state,
+          buffer,
+          anchor,
+          dcc,
+          {line, byte},
+          &move_buffer_position(buffer, &1)
+        )
     end
   end
 
   @spec update_drag_selection(
           state(),
-          {non_neg_integer(), non_neg_integer()},
+          pid(),
+          text_position(),
           pos_integer(),
-          {non_neg_integer(), non_neg_integer()}
+          text_position(),
+          target_move()
         ) :: state()
-  defp update_drag_selection(state, anchor, 2, target),
-    do: snap_selection_to_words(state, anchor, target)
+  defp update_drag_selection(state, buffer, anchor, 2, target, move),
+    do: snap_selection_to_words(state, buffer, anchor, target, move)
 
-  defp update_drag_selection(state, anchor, 3, target) do
-    move_drag_cursor(state, target)
-    snap_selection_to_lines(state, anchor)
+  defp update_drag_selection(state, buffer, anchor, 3, target, move),
+    do: snap_selection_to_lines(state, buffer, anchor, target, move)
+
+  defp update_drag_selection(state, _buffer, anchor, _click_count, target, move) do
+    case move.(target) do
+      {:ok, _position} -> enter_visual_if_needed(state, anchor)
+      {:error, _reason} -> state
+    end
   end
 
-  defp update_drag_selection(state, anchor, _dcc, target) do
-    move_drag_cursor(state, target)
-    enter_visual_if_needed(state, anchor)
+  @spec move_buffer_position(pid(), text_position()) ::
+          {:ok, text_position()} | {:error, atom()}
+  defp move_buffer_position(buffer, position) do
+    :ok = Buffer.move_to(buffer, position)
+    {:ok, position}
   end
 
   @spec handle_buffer_scroll_at_window(
@@ -839,43 +1254,9 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_double_click(state(), integer(), integer()) :: state()
   defp handle_double_click(state, row, col) do
-    state = maybe_focus_window_at(state, row, col)
-    origin_window = origin_window_id_at(state, row, col)
-
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
-
-      {line, buf_col} ->
-        buf = state.workspace.buffers.active
-
-        case word_boundaries_at(buf, line, buf_col) do
-          {{word_start_line, word_start}, {word_end_line, word_end}} ->
-            Buffer.move_to(buf, {word_end_line, word_end})
-
-            visual_state = %VisualState{
-              visual_anchor: {word_start_line, word_start},
-              visual_type: :char
-            }
-
-            state = %{
-              state
-              | workspace:
-                  MingaEditor.Session.State.transition_mode(
-                    state.workspace,
-                    :visual,
-                    visual_state
-                  )
-            }
-
-            update_mouse(
-              state,
-              &MouseState.start_drag(&1, {word_start_line, word_start}, origin_window)
-            )
-
-          nil ->
-            state
-        end
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} -> apply_double_click(state, target)
+      _command_or_miss -> state
     end
   end
 
@@ -883,37 +1264,9 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_triple_click(state(), integer(), integer()) :: state()
   defp handle_triple_click(state, row, col) do
-    state = maybe_focus_window_at(state, row, col)
-
     case HitTest.resolve_buffer(state, row, col) do
-      {:buffer, %BufferTarget{} = target} ->
-        line = target.line
-        buf = target.buffer
-
-        line_text =
-          case Buffer.lines(buf, line, 1) do
-            [text] -> text
-            _ -> ""
-          end
-
-        line_len = max(byte_size(line_text) - 1, 0)
-        Buffer.move_to(buf, {line, line_len})
-
-        visual_state = %VisualState{
-          visual_anchor: {line, 0},
-          visual_type: :line
-        }
-
-        state = %{
-          state
-          | workspace:
-              MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
-        }
-
-        update_mouse(state, &MouseState.start_drag(&1, {line, 0}, target.window_id))
-
-      _command_or_miss ->
-        state
+      {:buffer, %BufferTarget{} = target} -> apply_triple_click(state, target)
+      _command_or_miss -> state
     end
   end
 
@@ -921,35 +1274,9 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_shift_click(state(), integer(), integer()) :: state()
   defp handle_shift_click(state, row, col) do
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
-
-      {target_line, target_col} ->
-        buf = state.workspace.buffers.active
-
-        # Get current cursor as anchor if not already in visual mode
-        anchor =
-          case Minga.Editing.mode(state) do
-            :visual ->
-              MingaEditor.Editing.visual_anchor(state)
-
-            _ ->
-              Buffer.cursor(buf)
-          end
-
-        Buffer.move_to(buf, {target_line, target_col})
-
-        visual_state = %VisualState{
-          visual_anchor: anchor,
-          visual_type: :char
-        }
-
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
-        }
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} -> apply_shift_click(state, target)
+      _command_or_miss -> state
     end
   end
 
@@ -957,39 +1284,10 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_goto_definition_click(state(), state(), integer(), integer()) :: state()
   defp handle_goto_definition_click(original, state, row, col) do
-    case resolve_and_focus_buffer_target(state, row, col) do
-      {:ok, focused, target} ->
-        goto_definition_at_buffer_target(original, focused, target)
-
-      :error ->
-        original
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} -> apply_goto_definition(original, state, target)
+      _command_or_miss -> original
     end
-  end
-
-  @spec paste_at_buffer_target(state(), state(), BufferTarget.t()) :: state()
-  defp paste_at_buffer_target(original, focused, target) do
-    Buffer.move_to(target.buffer, BufferTarget.position(target))
-
-    focused
-    |> normalize_mode_for_targeted_gesture()
-    |> MingaEditor.dispatch_command(:paste_after)
-  catch
-    :exit, _reason -> original
-  end
-
-  @spec goto_definition_at_buffer_target(state(), state(), BufferTarget.t()) :: state()
-  defp goto_definition_at_buffer_target(original, focused, target) do
-    Buffer.move_to(target.buffer, BufferTarget.position(target))
-
-    # Navigation may open or switch to a different buffer, so drop the link
-    # preview now; otherwise its underline would draw against the new buffer
-    # until the next mouse motion (#2630).
-    focused
-    |> clear_cmd_hover_link_for_targeted_gesture()
-    |> normalize_mode_for_targeted_gesture()
-    |> MingaEditor.dispatch_command(:goto_definition)
-  catch
-    :exit, _reason -> original
   end
 
   @spec clear_cmd_hover_link_for_targeted_gesture(state()) :: state()
@@ -1010,106 +1308,111 @@ defmodule MingaEditor.Mouse do
     }
   end
 
-  @spec resolve_and_focus_buffer_target(state(), integer(), integer()) ::
-          {:ok, state(), BufferTarget.t()} | :error
-  defp resolve_and_focus_buffer_target(state, row, col) do
-    case HitTest.resolve_buffer(state, row, col) do
-      {:buffer, %BufferTarget{} = target} ->
-        case WindowFocus.focus_buffer_result(state, target.window_id, target.buffer) do
-          {:ok, focused} -> {:ok, focused, target}
-          {:error, _reason} -> :error
-        end
-
-      _command_or_miss ->
-        :error
-    end
-  end
-
   # ── Word-by-word drag snapping ─────────────────────────────────────────────
 
   @spec snap_selection_to_words(
           state(),
-          {non_neg_integer(), non_neg_integer()},
-          {non_neg_integer(), non_neg_integer()}
+          pid(),
+          text_position(),
+          text_position(),
+          target_move()
         ) :: state()
-  defp snap_selection_to_words(state, anchor, {cursor_line, cursor_col} = target) do
-    buf = state.workspace.buffers.active
-    {anchor_line, anchor_col} = anchor
-    target_bounds = word_boundaries_at(buf, cursor_line, cursor_col)
-    anchor_bounds = word_boundaries_at(buf, anchor_line, anchor_col)
+  defp snap_selection_to_words(state, buffer, anchor, {line, byte} = target, move) do
+    {anchor_line, anchor_byte} = anchor
+    target_bounds = word_boundaries_at(buffer, line, byte)
+    anchor_bounds = word_boundaries_at(buffer, anchor_line, anchor_byte)
 
-    case {target_bounds, anchor_bounds} do
-      {{{target_start_line, target_start}, {target_end_line, target_end}}, anchor_bounds} ->
-        if target >= anchor do
-          Buffer.move_to(buf, {target_end_line, target_end})
-        else
-          Buffer.move_to(buf, {target_start_line, target_start})
-        end
+    apply_word_drag(state, anchor, target, target_bounds, anchor_bounds, move)
+  end
 
+  @spec apply_word_drag(
+          state(),
+          text_position(),
+          text_position(),
+          {text_position(), text_position()} | nil,
+          {text_position(), text_position()} | nil,
+          target_move()
+        ) :: state()
+  defp apply_word_drag(
+         state,
+         anchor,
+         target,
+         {target_start, target_end},
+         anchor_bounds,
+         move
+       ) do
+    endpoint = if target >= anchor, do: target_end, else: target_start
+
+    case move.(endpoint) do
+      {:ok, _position} ->
         set_char_visual_selection(state, word_drag_anchor(target, anchor, anchor_bounds))
 
-      {nil,
-       anchor_bounds = {{_anchor_start_line, _anchor_start}, {_anchor_end_line, _anchor_end}}} ->
-        move_drag_cursor(state, target)
-        set_char_visual_selection(state, word_drag_anchor(target, anchor, anchor_bounds))
+      {:error, _reason} ->
+        state
+    end
+  end
 
-      _ ->
-        move_drag_cursor(state, target)
-        enter_visual_if_needed(state, anchor)
+  defp apply_word_drag(state, anchor, target, nil, {anchor_start, anchor_end}, move) do
+    case move.(target) do
+      {:ok, _position} ->
+        set_char_visual_selection(
+          state,
+          word_drag_anchor(target, anchor, {anchor_start, anchor_end})
+        )
+
+      {:error, _reason} ->
+        state
+    end
+  end
+
+  defp apply_word_drag(state, anchor, target, _target_bounds, _anchor_bounds, move) do
+    case move.(target) do
+      {:ok, _position} -> enter_visual_if_needed(state, anchor)
+      {:error, _reason} -> state
     end
   end
 
   @spec word_drag_anchor(
-          {non_neg_integer(), non_neg_integer()},
-          {non_neg_integer(), non_neg_integer()},
-          {Minga.Editing.TextObject.position(), Minga.Editing.TextObject.position()}
-        ) :: Minga.Editing.TextObject.position()
-  defp word_drag_anchor(
-         target,
-         anchor,
-         {{anchor_start_line, anchor_start}, {_anchor_end_line, _anchor_end}}
-       )
-       when target >= anchor do
-    {anchor_start_line, anchor_start}
-  end
+          text_position(),
+          text_position(),
+          {text_position(), text_position()} | nil
+        ) :: text_position()
+  defp word_drag_anchor(target, anchor, {anchor_start, _anchor_end}) when target >= anchor,
+    do: anchor_start
 
-  defp word_drag_anchor(
-         _target,
-         _anchor,
-         {{_anchor_start_line, _anchor_start}, {anchor_end_line, anchor_end}}
-       ) do
-    {anchor_end_line, anchor_end}
-  end
+  defp word_drag_anchor(_target, _anchor, {_anchor_start, anchor_end}), do: anchor_end
+  defp word_drag_anchor(_target, anchor, nil), do: anchor
 
   # ── Line-by-line drag snapping ─────────────────────────────────────────────
 
   @spec snap_selection_to_lines(
           state(),
-          {non_neg_integer(), non_neg_integer()}
+          pid(),
+          text_position(),
+          text_position(),
+          target_move()
         ) :: state()
-  defp snap_selection_to_lines(state, {anchor_line, _anchor_col}) do
-    buf = state.workspace.buffers.active
-    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+  defp snap_selection_to_lines(state, buffer, {anchor_line, _anchor_byte}, target, move) do
+    endpoint = line_drag_endpoint(buffer, anchor_line, target)
 
-    # Extend selection to full lines
-    if cursor_line >= anchor_line do
-      # Dragging down: cursor at end of current line
-      line_text =
-        case Buffer.lines(buf, cursor_line, 1) do
-          [text] -> text
-          _ -> ""
-        end
-
-      Buffer.move_to(buf, {cursor_line, max(byte_size(line_text) - 1, 0)})
-    else
-      # Dragging up: cursor at start of current line
-      Buffer.move_to(buf, {cursor_line, 0})
+    case move.(endpoint) do
+      {:ok, _position} -> set_line_visual_selection(state, {anchor_line, 0})
+      {:error, _reason} -> state
     end
+  end
 
-    visual_state = %VisualState{
-      visual_anchor: {anchor_line, 0},
-      visual_type: :line
-    }
+  @spec line_drag_endpoint(pid(), non_neg_integer(), text_position()) :: text_position()
+  defp line_drag_endpoint(_buffer, anchor_line, {line, _byte}) when line < anchor_line,
+    do: {line, 0}
+
+  defp line_drag_endpoint(buffer, _anchor_line, {line, _byte}) do
+    line_text = cursor_line_text(buffer, line)
+    {line, max(byte_size(line_text) - 1, 0)}
+  end
+
+  @spec set_line_visual_selection(state(), text_position()) :: state()
+  defp set_line_visual_selection(state, anchor) do
+    visual_state = %VisualState{visual_anchor: anchor, visual_type: :line}
 
     %{
       state
@@ -1266,70 +1569,10 @@ defmodule MingaEditor.Mouse do
   @spec handle_context_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_context_click(state, row, col) do
     state = maybe_unfocus_file_tree_for_content_click(state)
-    target = mouse_to_buffer_pos(state, row, col)
-    preserve_selection? = context_click_preserves_visual_selection?(state, row, col, target)
-    state = maybe_focus_window_at(state, row, col)
 
-    case target do
-      nil ->
-        state
-
-      {target_line, target_col} ->
-        handle_context_click_at_buffer_pos(state, target_line, target_col, preserve_selection?)
-    end
-  end
-
-  @spec context_click_preserves_visual_selection?(
-          state(),
-          non_neg_integer(),
-          non_neg_integer(),
-          {non_neg_integer(), non_neg_integer()} | nil
-        ) ::
-          boolean()
-  defp context_click_preserves_visual_selection?(_state, _row, _col, nil), do: false
-
-  defp context_click_preserves_visual_selection?(state, row, col, {target_line, target_col}) do
-    context_click_targets_active_buffer?(state, row, col) and
-      click_inside_visual_selection?(state, target_line, target_col)
-  end
-
-  @spec handle_context_click_at_buffer_pos(
-          state(),
-          non_neg_integer(),
-          non_neg_integer(),
-          boolean()
-        ) :: state()
-  defp handle_context_click_at_buffer_pos(state, _target_line, _target_col, true), do: state
-
-  defp handle_context_click_at_buffer_pos(state, target_line, target_col, false) do
-    Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
-
-    state = cancel_mode_for_mouse(state)
-    workspace = MingaEditor.Session.State.transition_mode(state.workspace, :normal)
-    %{state | workspace: workspace}
-  end
-
-  @spec context_click_targets_active_buffer?(state(), non_neg_integer(), non_neg_integer()) ::
-          boolean()
-  defp context_click_targets_active_buffer?(%{workspace: %{windows: %{tree: nil}}}, _row, _col),
-    do: true
-
-  defp context_click_targets_active_buffer?(
-         %{workspace: %{buffers: %{active: active}}} = state,
-         row,
-         col
-       ) do
-    screen = Layout.get(state).editor_area
-
-    case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
-      {:ok, id, _rect} ->
-        case Map.fetch(state.workspace.windows.map, id) do
-          {:ok, %Window{content: {:buffer, ^active}}} -> true
-          _ -> false
-        end
-
-      :error ->
-        false
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} -> apply_context_press(state, target)
+      _command_or_miss -> state
     end
   end
 
@@ -1396,22 +1639,9 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_buffer_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_buffer_content_click(state, row, col) do
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
-
-      {target_line, target_col} ->
-        Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
-
-        state = cancel_mode_for_mouse(state)
-
-        state = %{
-          state
-          | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
-        }
-
-        origin_window = state.workspace.windows.active
-        update_mouse(state, &MouseState.start_drag(&1, {target_line, target_col}, origin_window))
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, %BufferTarget{} = target} -> apply_plain_click(state, target)
+      _command_or_miss -> state
     end
   end
 
@@ -1603,19 +1833,6 @@ defmodule MingaEditor.Mouse do
     case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
       {:ok, id, _rect} -> MingaEditor.WindowFocus.focus(state, id)
       :error -> state
-    end
-  end
-
-  @spec origin_window_id_at(state(), integer(), integer()) :: Window.id() | nil
-  defp origin_window_id_at(%{workspace: %{windows: %{tree: nil, active: active}}}, _row, _col),
-    do: active
-
-  defp origin_window_id_at(state, row, col) do
-    screen = Layout.get(state).editor_area
-
-    case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
-      {:ok, id, _rect} -> id
-      :error -> state.workspace.windows.active
     end
   end
 
@@ -1908,14 +2125,12 @@ defmodule MingaEditor.Mouse do
 
   defp maybe_auto_scroll_horizontal(state, _context, _col), do: state
 
-  @spec move_drag_cursor(state(), {non_neg_integer(), non_neg_integer()}) :: state()
-  defp move_drag_cursor(state, {line, c}) do
+  @spec drag_selection_buffer(state()) :: pid()
+  defp drag_selection_buffer(state) do
     case drag_window_context(state) do
-      {_win_id, _window, buf, _row, _col, _w, _h} -> Buffer.move_to(buf, {line, c})
-      nil -> Buffer.move_to(state.workspace.buffers.active, {line, c})
+      {_window_id, _window, buffer, _row, _col, _width, _height} -> buffer
+      nil -> state.workspace.buffers.active
     end
-
-    state
   end
 
   @spec enter_visual_if_needed(state(), {non_neg_integer(), non_neg_integer()}) :: state()

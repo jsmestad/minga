@@ -17,6 +17,23 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
     state =
       state
+      |> State.reset_connection(generation, :renderer_restart)
+      |> State.clear_rejection()
+
+    token = schedule_render()
+    attempt = FrameAttempt.new(Intent.force_keyframe(intent), seq, pushed_at)
+
+    {:reply, :ok, State.schedule_frame(state, attempt, token)}
+  end
+
+  @doc "Forces a same-connection keyframe while retaining acknowledged presentation leases."
+  @spec keyframe(State.t(), Intent.t(), non_neg_integer(), integer()) :: {:reply, :ok, State.t()}
+  def keyframe(state, intent, seq, pushed_at) do
+    state |> State.awaiting_lease() |> AckLease.cancel_timer()
+    generation = State.reserve_recovery_generation(state)
+
+    state =
+      state
       |> State.reset_frontend(generation, :renderer_restart)
       |> State.clear_rejection()
 
@@ -31,6 +48,20 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
           {:reply, {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()},
            State.t()}
   def reset_sync(state, intent, seq, pushed_at) do
+    state |> State.awaiting_lease() |> AckLease.cancel_timer()
+    generation = State.reserve_recovery_generation(state)
+
+    state
+    |> State.reset_connection(generation, :renderer_restart)
+    |> State.clear_rejection()
+    |> FrameHandler.render_sync(Intent.force_keyframe(intent), seq, pushed_at)
+  end
+
+  @doc "Renders a synchronous same-connection keyframe without abandoning presentation leases."
+  @spec keyframe_sync(State.t(), Intent.t(), non_neg_integer(), integer()) ::
+          {:reply, {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()},
+           State.t()}
+  def keyframe_sync(state, intent, seq, pushed_at) do
     state |> State.awaiting_lease() |> AckLease.cancel_timer()
     generation = State.reserve_recovery_generation(state)
 

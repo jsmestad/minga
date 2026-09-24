@@ -336,6 +336,17 @@ defmodule MingaEditor.Renderer.RenderWindow do
     %{window | render_cache: RenderCache.put_resident_build(cache, state)}
   end
 
+  @doc "Returns the renderer-owned immutable text presentation for this window."
+  @spec text_presentation(t()) :: MingaEditor.Renderer.TextPresentation.t() | nil
+  def text_presentation(%__MODULE__{render_cache: cache}),
+    do: RenderCache.text_presentation(cache)
+
+  @doc "Stores the immutable text presentation produced by the semantic content build."
+  @spec put_text_presentation(t(), MingaEditor.Renderer.TextPresentation.t()) :: t()
+  def put_text_presentation(%__MODULE__{render_cache: cache} = window, presentation) do
+    %{window | render_cache: RenderCache.put_text_presentation(cache, presentation)}
+  end
+
   @doc """
   Checks current frame parameters against last-frame tracking fields
   and returns the window with `dirty_lines: :all` if anything that

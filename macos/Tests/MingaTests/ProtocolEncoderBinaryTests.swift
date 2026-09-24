@@ -912,3 +912,28 @@ struct EncoderFrameHeaderTests {
         #expect(raw.count == 4 + declaredLen)
     }
 }
+
+@Suite("Encoder Binary: Displayed Text")
+struct EncoderDisplayedTextTests {
+    @Test("text event preserves wide identities, UTF16 offset, modifiers and signed drag edges")
+    func targetLayout() {
+        let target = EditorTextTarget(windowID: 512, presentationID: 0x0102030405060708, rowIndex: 70_000, rowID: 0x1122334455667788, utf16Offset: 120_000)
+        let payload = captureFrame {
+            $0.send(.editorText(target: target, button: 2, modifiers: 7, eventType: 3, clickCount: 2, scrollX: -1, scrollY: 1))
+        }
+        #expect(payload.count == 33)
+        #expect(payload[0] == OP_EDITOR_TEXT_EVENT)
+        #expect(readU16(payload, 1) == target.windowID)
+        #expect(readU64(payload, 3) == target.presentationID)
+        #expect(readU32(payload, 11) == target.rowIndex)
+        #expect(readU64(payload, 15) == target.rowID)
+        #expect(readU32(payload, 23) == target.utf16Offset)
+        #expect(Array(payload[27...]) == [2, 7, 3, 2, 255, 1])
+    }
+
+    @Test("presentation lifecycle has an ordered explicit state")
+    func lifecycleLayout() {
+        let payload = captureFrame { $0.send(.textPresentationState(windowID: 512, presentationID: 0x0102030405060708, state: .active)) }
+        #expect(payload == Data([OP_TEXT_PRESENTATION_STATE, 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1]))
+    }
+}

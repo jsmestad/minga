@@ -1043,7 +1043,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   defp renderer_probe(owner) do
     receive do
-      {:"$gen_call", from, {:reset_connection, submission, _seq, _pushed_at}} ->
+      {:"$gen_call", from, {:reset_keyframe, submission, _seq, _pushed_at}} ->
         {intent, _, _} = MingaEditor.Renderer.Submission.materialize(submission, %{}, %{})
         GenServer.reply(from, :ok)
         send(owner, {:renderer_reset, intent})

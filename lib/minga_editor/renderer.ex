@@ -61,7 +61,7 @@ defmodule MingaEditor.Renderer do
       seq = System.unique_integer([:positive, :monotonic])
 
       if keyframe? do
-        :ok = RendererServer.reset_connection(pid, submission, seq)
+        :ok = RendererServer.reset_keyframe(pid, submission, seq)
       else
         RendererServer.cast_snapshot(pid, submission, seq)
       end
@@ -124,7 +124,7 @@ defmodule MingaEditor.Renderer do
         {state, revision} = EditorState.submit_render_intent(state)
         {state, submission} = prepare_submission(state, revision)
         seq = System.unique_integer([:positive, :monotonic])
-        :ok = RendererServer.reset_connection(renderer, submission, seq)
+        :ok = RendererServer.reset_keyframe(renderer, submission, seq)
         state
     end
   end
@@ -181,10 +181,10 @@ defmodule MingaEditor.Renderer do
           | {:ok, MingaEditor.Renderer.RenderReceipt.t()}
           | {:error, Exception.t()}
   defp dispatch_render_buffer(renderer, submission, seq, true, :headless),
-    do: RendererServer.reset_sync(renderer, submission, seq)
+    do: RendererServer.reset_keyframe_sync(renderer, submission, seq)
 
   defp dispatch_render_buffer(renderer, submission, seq, true, _backend) do
-    :ok = RendererServer.reset_connection(renderer, submission, seq)
+    :ok = RendererServer.reset_keyframe(renderer, submission, seq)
     :async
   end
 

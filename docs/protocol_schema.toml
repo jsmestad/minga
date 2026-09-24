@@ -56,7 +56,8 @@ version = "2.0.0"
 # protocol_version 25 adds source-owned local-presentation generations, narrow
 # completion/picker selection echoes, and one semantic activation action whose
 # opaque item identity is validated by the owning BEAM surface.
-protocol_version = 25
+# protocol_version 26 binds editor text input to retained presentation rows and adds an ordered input-presentation lifecycle.
+protocol_version = 26
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -185,6 +186,24 @@ name = "native_presentation_observation"
 value = 0x1D
 direction = "frontend_to_beam"
 framing = "fixed:24"
+
+# Editor text input names the immutable presentation and row used by the client.
+# The row index is an absolute payload-store rank, verified against row_id.
+[[opcodes]]
+category = "input"
+name = "editor_text_event"
+value = 0x1E
+direction = "frontend_to_beam"
+framing = "fixed:33"
+
+# Durable, ordered lifetime signal: state 0 discards an unused candidate; state 1
+# activates the presentation used by subsequent editor text input.
+[[opcodes]]
+category = "input"
+name = "text_presentation_state"
+value = 0x1F
+direction = "frontend_to_beam"
+framing = "fixed:12"
 
 [[opcodes]]
 category = "input"
@@ -907,6 +926,14 @@ name = "gui_picker_selection"
 value = 0xA7
 direction = "beam_to_frontend"
 framing = "len16"
+
+# Per-window immutable input snapshot, published inside its frame transaction.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_text_presentation"
+value = 0xA8
+direction = "beam_to_frontend"
+framing = "fixed:11"
 
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]

@@ -156,6 +156,7 @@ final class CommandDispatcher {
 
     /// The exact editor presentation associated with the last successful Metal presentation.
     private(set) var visibleEditorPresentation: VisibleEditorPresentation?
+    let textPresentationLeases = TextPresentationLeases()
 
     /// Backward-compatible view of the visible semantic snapshot.
     var visibleEditorSnapshot: CommittedEditorSnapshot? { visibleEditorPresentation?.snapshot }
@@ -199,6 +200,7 @@ final class CommandDispatcher {
     func promoteVisibleEditorPresentation(
         snapshot: CommittedEditorSnapshot,
         localTransform: EditorLocalPresentationTransform?,
+        textLayout: PresentedTextLayout? = nil,
         connectionID: UInt64
     ) {
         guard self.connectionID == connectionID else { return }
@@ -208,7 +210,8 @@ final class CommandDispatcher {
             return
         }
 
-        visibleEditorPresentation = VisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform)
+        visibleEditorPresentation = VisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform, textLayout: textLayout)
+        textPresentationLeases.present(snapshot)
         if pendingEditorPresentationFrame == presentedFrame {
             pendingEditorPresentationFrame = nil
         }
@@ -375,6 +378,7 @@ final class CommandDispatcher {
         lastMode = .normal
         lastLineSpacing = 1.0
         pendingPresentationInputSeq = 0
+        textPresentationLeases.replaceConnection()
         committedEditorSnapshot = nil
         visibleEditorPresentation = nil
         pendingEditorPresentationFrame = nil
@@ -665,6 +669,7 @@ final class CommandDispatcher {
         if let snapshot = transaction.editorSnapshot {
             frameState = snapshot.frameState
             committedEditorSnapshot = snapshot
+            textPresentationLeases.commit(snapshot)
             operationReadiness.observeCommitted(snapshot)
             if finalImpact.contains(.editor) {
                 pendingEditorPresentationFrame = committed
@@ -1233,7 +1238,7 @@ final class CommandDispatcher {
             frameState.cursorlineRow = row
             frameState.cursorlineBg = rgb
 
-        case .guiGutter:
+        case .guiGutter, .guiTextPresentation:
             // Gutter geometry and the active window are owned by the committed
             // snapshot's surfaces and metadata; publication never mirrors them
             // back into FrameState (#2999 AC6).

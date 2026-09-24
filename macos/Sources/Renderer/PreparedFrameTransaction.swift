@@ -20,7 +20,7 @@ extension GUIFrameImpact {
              .registerFont:
             return [.editor, .editorOverlay]
 
-        case .setCursorShape, .setLinkCursor, .presentationTarget,
+        case .setCursorShape, .setLinkCursor, .presentationTarget, .guiTextPresentation,
              .guiGutterSeparator, .guiCursorline,
              .guiGutter, .guiIndentGuides, .guiCursorAnimation,
              .guiSplitSeparators, .guiAgentTranscript:
@@ -280,6 +280,7 @@ struct PreparedFrameTransaction {
 private enum PreparedWindowCommandKind: Hashable {
     case gutter
     case indentGuides
+    case textPresentation
 }
 
 private enum PreparedCoalescingKey: Hashable {
@@ -459,6 +460,10 @@ struct PreparedFrameTransactionBuilder {
                 command, key: .window(kind: .gutter, id: data.windowId),
                 weight: resourceWeight, domain: .window
             )
+
+        case .guiTextPresentation(let windowID, _):
+            referencedWindowIds.insert(windowID)
+            stageReplacing(command, key: .window(kind: .textPresentation, id: windowID), weight: resourceWeight, domain: .metadata)
 
         case .guiIndentGuides(let data):
             referencedWindowIds.insert(data.windowId)
@@ -681,6 +686,7 @@ struct PreparedFrameTransactionBuilder {
         // The BEAM emits a target only when this frame has one. Never inherit a
         // file identity into an untitled or non-buffer delta frame.
         metadata.presentationTarget = nil
+        metadata.textPresentations = [:]
         if baseFrameSeq == 0 {
             metadata.gutterCol = 0
             metadata.splitBorderColor = 0
@@ -701,6 +707,8 @@ struct PreparedFrameTransactionBuilder {
                 metadata.splitBorderColor = borderColor
                 metadata.verticalSeparators = verticals
                 metadata.horizontalSeparators = horizontals
+            case .guiTextPresentation(let windowID, let presentationID):
+                metadata.textPresentations[windowID] = presentationID
             case .presentationTarget(let target):
                 metadata.presentationTarget = target
             default:
@@ -1006,6 +1014,7 @@ private extension RenderCommand {
         case .guiRequest: 59
         case .guiCompletionSelection: 60
         case .guiPickerSelection: 61
+        case .guiTextPresentation: 62
         }
     }
 }

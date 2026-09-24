@@ -134,10 +134,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
     (`tab_bar_click_regions`, `modeline_click_regions`) are authored at render
     time as text-property spans, not rects. The registry places the tab_bar and
     status_bar surfaces; the per-segment command lookup stays where it is.
-  * Intra-window buffer geometry (gutter width, fold column, scroll position to
-    buffer line) stays in `MingaEditor.Mouse.HitTest`. The registry places the
-    window content rect; translating a cell to a buffer position is window
-    interpretation, not surface placement.
+  * The registry places the window content rect. Each frontend resolves editor text hits against its displayed row geometry and sends an immutable presentation ID, row identity, and composed UTF-16 offset. The renderer resolves that offset through its retained source map; the editor owns cursor and selection transitions. Legacy gutter and divider targets remain in `MingaEditor.Mouse.HitTest`.
 
   These are left intentionally. The registry's job in this slice is to be the
   one authority for surface *rects and z-order*, not to absorb every handler's

@@ -112,6 +112,8 @@ final class EditorNSView: MTKView {
 
     /// Text-selection drag tracking. AppKit can report tiny drags during a normal click, so buffer drags only start after the pointer crosses a small native threshold.
     private var leftMouseDownPoint: NSPoint?
+    private var textGestureWindows: [UInt8: UInt16] = [:]
+    private var lastTextHover: EditorTextTarget?
     private var leftMouseDragStarted: Bool = false
     private let textDragThreshold: CGFloat = 4.0
 
@@ -574,6 +576,8 @@ final class EditorNSView: MTKView {
         self.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
         inputEnabled = false
         inputConnectionGeneration &+= 1
+        textGestureWindows = [:]
+        lastTextHover = nil
         invalidateAccessibilityConnection()
         consumeLeftGestureTail = consumeLeftGestureTail || leftMousePressActive || leftMouseDownPoint != nil || isDraggingScrollIndicator
         consumeRightGestureTail = consumeRightGestureTail || rightMousePressActive || contextMenuShownForRightClick
@@ -661,6 +665,7 @@ final class EditorNSView: MTKView {
         let presentationInputSeq = dispatcher.capturePresentationInputSeq()
         let connectionID = dispatcher.connectionID
         let presentationAvailabilityEpoch = presentationAvailabilityEpoch
+        let textAttempt = dispatcher.textPresentationLeases.beginAttempt(committedSnapshot)
         let submissionOutcome = coreTextRenderer.render(
             snapshot: committedSnapshot,
             fontManager: fontManager,
@@ -691,10 +696,15 @@ final class EditorNSView: MTKView {
                     self.presentationAvailabilityEpoch == presentationAvailabilityEpoch &&
                     self.presentationPreflightDiscardReason() == nil
             },
-            onPresented: { [weak self, localScrollPresentation] snapshot in
+            onAttemptFinished: { [weak dispatcher] in
+                guard let dispatcher, dispatcher.isCurrentConnection(connectionID) else { return }
+                dispatcher.textPresentationLeases.finishAttempt(textAttempt)
+            },
+            onTextPresented: { [weak self, localScrollPresentation] snapshot, textLayout in
                 self?.promotePresentedSnapshot(
                     snapshot,
                     localScrollPresentation: localScrollPresentation,
+                    textLayout: textLayout,
                     connectionID: connectionID
                 )
             }
@@ -771,12 +781,14 @@ final class EditorNSView: MTKView {
     private func promotePresentedSnapshot(
         _ snapshot: CommittedEditorSnapshot,
         localScrollPresentation: LocalScrollPresentation?,
+        textLayout: PresentedTextLayout,
         connectionID: UInt64
     ) {
         guard dispatcher.isCurrentConnection(connectionID) else { return }
         dispatcher.promoteVisibleEditorPresentation(
             snapshot: snapshot,
             localTransform: localScrollPresentation,
+            textLayout: textLayout,
             connectionID: connectionID
         )
         cancelIMECompositionIfTargetChanged()
@@ -1173,7 +1185,9 @@ final class EditorNSView: MTKView {
         if leftMouseDownPoint != nil {
             let point = leftMouseDownPoint ?? .zero
             let (row, col) = rawCellPosition(at: point)
-            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: 0, eventType: MOUSE_RELEASE, clickCount: 1))
+            if !sendPresentedText(at: point, button: MOUSE_BUTTON_LEFT, modifiers: 0, eventType: MOUSE_RELEASE, clickCount: 1) {
+                encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: 0, eventType: MOUSE_RELEASE, clickCount: 1))
+            }
         }
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
@@ -1749,6 +1763,32 @@ final class EditorNSView: MTKView {
         return 0
     }
 
+    /// Buffer input uses only the immutable native layout that reached the display.
+    private func sendPresentedText(event: NSEvent, button: UInt8, eventType: UInt8, clickCount: UInt8) -> Bool {
+        sendPresentedText(at: convert(event.locationInWindow, from: nil), button: button, modifiers: modifierBits(from: event.modifierFlags), eventType: eventType, clickCount: clickCount)
+    }
+
+    private func sendPresentedText(at point: CGPoint, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8) -> Bool {
+        let capturedWindow = textGestureWindows[button]
+        let hit = dispatcher.visibleEditorPresentation?.textLayout?.hit(at: point, capturedWindowID: capturedWindow)
+        if eventType == MOUSE_RELEASE { textGestureWindows.removeValue(forKey: button) }
+        guard let hit else {
+            guard let capturedWindow else { return false }
+            if eventType == MOUSE_RELEASE {
+                let target = EditorTextTarget(windowID: capturedWindow, presentationID: 0, rowIndex: 0, rowID: 0, utf16Offset: 0)
+                encoder.send(.editorText(target: target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: 0, scrollY: 0))
+            }
+            return true
+        }
+        if eventType == MOUSE_PRESS { textGestureWindows[button] = hit.target.windowID }
+        if eventType == MOUSE_MOTION {
+            guard lastTextHover != hit.target else { return true }
+            lastTextHover = hit.target
+        }
+        encoder.send(.editorText(target: hit.target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: eventType == MOUSE_DRAG ? hit.scrollX : 0, scrollY: eventType == MOUSE_DRAG ? hit.scrollY : 0))
+        return true
+    }
+
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
@@ -1789,7 +1829,9 @@ final class EditorNSView: MTKView {
         }
         let (row, col) = dividerDragState == .none ? cellPosition(from: event) : dividerPressCellPosition(at: point, state: dividerDragState)
         let cc = UInt8(clamping: event.clickCount)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
+        if !(dividerDragState == .none && sendPresentedText(event: event, button: MOUSE_BUTTON_LEFT, eventType: MOUSE_PRESS, clickCount: cc)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1810,7 +1852,9 @@ final class EditorNSView: MTKView {
 
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = dividerDragState == .none ? cellPosition(from: event) : rawCellPosition(at: point)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
+        if !(dividerDragState == .none && sendPresentedText(event: event, button: MOUSE_BUTTON_LEFT, eventType: MOUSE_RELEASE, clickCount: 1)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
+        }
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
         if dividerDragState != .none {
@@ -1829,7 +1873,9 @@ final class EditorNSView: MTKView {
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
+        if !(sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_PRESS, clickCount: cc)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
+        }
         contextMenuShownForRightClick = true
         let menu = buildEditorContextMenu(connectionGeneration: inputConnectionGeneration)
         activeContextMenu = menu
@@ -1847,12 +1893,15 @@ final class EditorNSView: MTKView {
         }
         rightMousePressActive = false
         if contextMenuShownForRightClick {
+            _ = sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_RELEASE, clickCount: 1)
             contextMenuShownForRightClick = false
             return
         }
 
         let (row, col) = cellPosition(from: event)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
+        if !(sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_RELEASE, clickCount: 1)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
+        }
     }
 
     private struct EditorContextMenuAction {
@@ -1928,7 +1977,9 @@ final class EditorNSView: MTKView {
         middleMousePressActive = true
         focusPolicy.pointerReturnedToEditor()
         let (row, col) = cellPosition(from: event)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_MIDDLE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: 1))
+        if !(sendPresentedText(event: event, button: MOUSE_BUTTON_MIDDLE, eventType: MOUSE_PRESS, clickCount: 1)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_MIDDLE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: 1))
+        }
     }
 
     override func otherMouseUp(with event: NSEvent) {
@@ -1939,7 +1990,9 @@ final class EditorNSView: MTKView {
         }
         middleMousePressActive = false
         let (row, col) = cellPosition(from: event)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_MIDDLE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
+        if !(sendPresentedText(event: event, button: MOUSE_BUTTON_MIDDLE, eventType: MOUSE_RELEASE, clickCount: 1)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_MIDDLE, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1959,7 +2012,9 @@ final class EditorNSView: MTKView {
             return
         }
         let (row, col) = dividerDragState == .none ? cellPosition(from: event) : rawCellPosition(at: point)
-        encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_DRAG, clickCount: 1))
+        if !(dividerDragState == .none && sendPresentedText(event: event, button: MOUSE_BUTTON_LEFT, eventType: MOUSE_DRAG, clickCount: 1)) {
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_LEFT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_DRAG, clickCount: 1))
+        }
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -1969,6 +2024,8 @@ final class EditorNSView: MTKView {
         updateGutterHover(at: point)
         let (row, col) = cellPosition(from: event)
         clearSmoothScrollOffsetIfPointerLeftTarget(row: row, col: col)
+        if sendPresentedText(event: event, button: MOUSE_BUTTON_NONE, eventType: MOUSE_MOTION, clickCount: 1) { return }
+        lastTextHover = nil
         guard row != lastMoveRow || col != lastMoveCol else { return }
         lastMoveRow = row
         lastMoveCol = col

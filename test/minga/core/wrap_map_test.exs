@@ -61,6 +61,19 @@ defmodule Minga.Core.WrapMapTest do
       [entry] = WrapMap.compute(["hello world foobar"], 10, linebreak: false)
       assert WrapMap.display_text(Enum.at(entry, 0)) == "hello worl"
     end
+
+    test "advances raw tabs to the configured tab stop" do
+      [entry] = WrapMap.compute(["a\tb"], 4, linebreak: false, tab_width: 4)
+
+      assert Enum.map(entry, & &1.source_text) == ["a\t", "b"]
+      assert Enum.map(entry, & &1.byte_offset) == [0, 2]
+    end
+
+    test "a tab on a stop boundary advances by a full tab width" do
+      [entry] = WrapMap.compute(["abcd\t"], 4, linebreak: false, tab_width: 4)
+
+      assert Enum.map(entry, & &1.source_text) == ["abcd", "\t"]
+    end
   end
 
   describe "byte_offset tracking" do

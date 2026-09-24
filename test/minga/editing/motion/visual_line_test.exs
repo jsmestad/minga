@@ -123,6 +123,17 @@ defmodule Minga.Editing.Motion.VisualLineTest do
     end
   end
 
+  describe "tab-aware visual columns" do
+    test "preserves the rendered column across wrapped rows after a tab" do
+      doc = Document.new("\t" <> String.duplicate("a", 30))
+      opts = [breakindent: true, linebreak: false, tab_width: 4]
+
+      down = VisualLine.visual_down(doc, {0, 2}, 7, opts)
+      assert down == {0, 5}
+      assert VisualLine.visual_up(doc, down, 7, opts) == {0, 2}
+    end
+  end
+
   describe "desired_col opt" do
     test "visual_down with desired_col: 0 stays at column 0 across logical lines" do
       doc = Document.new("first line\nsecond line\nthird line")

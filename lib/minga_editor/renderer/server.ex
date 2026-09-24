@@ -16,6 +16,9 @@ defmodule MingaEditor.Renderer.Server do
   alias MingaEditor.Renderer.RecoveryHandler
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.State
+  alias MingaEditor.Mouse.TextEvent
+  alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.Window
 
   @type t :: State.t()
 
@@ -49,6 +52,18 @@ defmodule MingaEditor.Renderer.Server do
   def reset_sync(server, %Submission{} = submission, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
     GenServer.call(server, {:reset_sync, submission, frame_seq, monotonic_now()}, :infinity)
+  end
+
+  @doc "Renders a synchronous same-connection keyframe while retaining presentation leases."
+  @spec reset_keyframe_sync(GenServer.server(), Submission.t(), non_neg_integer()) ::
+          {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()}
+  def reset_keyframe_sync(server, %Submission{} = submission, frame_seq)
+      when is_integer(frame_seq) and frame_seq >= 0 do
+    GenServer.call(
+      server,
+      {:reset_keyframe_sync, submission, frame_seq, monotonic_now()},
+      :infinity
+    )
   end
 
   @doc "Returns true while rendering or awaiting frontend credit."
@@ -98,6 +113,24 @@ defmodule MingaEditor.Renderer.Server do
     :ok
   end
 
+  @doc "Applies one ordered frontend text-presentation lifecycle event."
+  @spec text_presentation_state(
+          GenServer.server(),
+          Window.id(),
+          non_neg_integer(),
+          :active | :discarded
+        ) :: :ok | {:error, :unknown}
+  def text_presentation_state(server \\ __MODULE__, window_id, presentation_id, lifecycle) do
+    GenServer.call(server, {:text_presentation_state, window_id, presentation_id, lifecycle})
+  end
+
+  @doc "Resolves one text-pointer event against the exact active presentation lease."
+  @spec resolve_text_target(GenServer.server(), TextEvent.t()) ::
+          {:ok, TextTarget.t()} | {:error, atom()}
+  def resolve_text_target(server \\ __MODULE__, %TextEvent{} = event) do
+    GenServer.call(server, {:resolve_text_target, event})
+  end
+
   @doc "Requests recovery only when the failed generation and committed base still match."
   @spec request_recovery(
           GenServer.server(),
@@ -109,6 +142,14 @@ defmodule MingaEditor.Renderer.Server do
              is_integer(last_applied_frame_seq) and last_applied_frame_seq >= 0 do
     GenServer.call(server, {:request_recovery, failed_generation, last_applied_frame_seq})
   end
+
+  @doc "Renders a same-connection keyframe while retaining presentation leases."
+  @spec reset_keyframe(GenServer.server(), Submission.t(), non_neg_integer()) :: :ok
+  def reset_keyframe(server \\ __MODULE__, submission, frame_seq)
+
+  def reset_keyframe(server, %Submission{} = submission, frame_seq)
+      when is_integer(frame_seq) and frame_seq >= 0,
+      do: GenServer.call(server, {:reset_keyframe, submission, frame_seq, monotonic_now()})
 
   @doc "Abandons the old frontend connection and renders a fresh keyframe."
   @spec reset_connection(GenServer.server(), Submission.t(), non_neg_integer()) :: :ok
@@ -144,6 +185,21 @@ defmodule MingaEditor.Renderer.Server do
   def handle_call(:terminal_failure, _from, state),
     do: {:reply, State.terminal_failure(state), state}
 
+  def handle_call(
+        {:text_presentation_state, window_id, presentation_id, lifecycle},
+        _from,
+        state
+      ) do
+    case State.text_presentation_state(state, window_id, presentation_id, lifecycle) do
+      {:ok, updated} -> {:reply, :ok, updated}
+      {:error, :unknown, unchanged} -> {:reply, {:error, :unknown}, unchanged}
+    end
+  end
+
+  def handle_call({:resolve_text_target, %TextEvent{} = event}, _from, state) do
+    {:reply, State.resolve_text_target(state, event), state}
+  end
+
   def handle_call({:request_recovery, failed_generation, last_applied_frame_seq}, _from, state),
     do: RecoveryHandler.request(state, failed_generation, last_applied_frame_seq)
 
@@ -166,6 +222,16 @@ defmodule MingaEditor.Renderer.Server do
       :error -> {:reply, :error, state}
       {:error, unchanged} -> {:reply, :error, unchanged}
     end
+  end
+
+  def handle_call({:reset_keyframe, submission, seq, pushed_at}, _from, state) do
+    {state, intent} = receive_submission(state, submission, seq)
+    RecoveryHandler.keyframe(state, intent, seq, pushed_at)
+  end
+
+  def handle_call({:reset_keyframe_sync, submission, seq, pushed_at}, _from, state) do
+    {state, intent} = receive_submission(state, submission, seq)
+    RecoveryHandler.keyframe_sync(state, intent, seq, pushed_at)
   end
 
   def handle_call({:reset_connection, submission, seq, pushed_at}, _from, state) do

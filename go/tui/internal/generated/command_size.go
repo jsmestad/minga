@@ -32,6 +32,8 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 6)
 	case OPCommitFrame:
 		return fixedCommandSize(payload, 9)
+	case OPGuiTextPresentation:
+		return fixedCommandSize(payload, 11)
 	case OPBeginFrame:
 		return fixedCommandSize(payload, 13)
 	case OPPresentationTarget:

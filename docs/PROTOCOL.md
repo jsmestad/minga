@@ -27,7 +27,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 25). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 25 adds stable local-presentation identities and narrow selection echoes. See "Protocol Version Negotiation" below.
+**Protocol version:** The schema carries a `protocol_version` integer (currently 26). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 26 adds displayed editor text targets and their explicit presentation lifetime. See "Protocol Version Negotiation" below.
 
 ---
 
@@ -82,7 +82,9 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x01` | key_press | 10 | A key was pressed with an input correlation sequence |
 | `0x02` | resize | 5 | Terminal/window was resized |
 | `0x03` | ready | 29 | Frontend is initialized and ready (capability format 2 plus exact protocol version) |
-| `0x04` | mouse_event | 9 | Mouse button, wheel, or motion |
+| `0x04` | mouse_event | 9 | Legacy non-text pointer events and wheel input |
+| `0x1E` | editor_text_event | 33 | Pointer target in an immutable displayed text row |
+| `0x1F` | text_presentation_state | 12 | Ordered active/discarded text presentation lifetime |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
@@ -225,7 +227,7 @@ commit_frame         (triggers the actual present; carries frame_seq + the laten
 
 The BEAM sends the entire frame as a single batched message. The frontend processes commands in order and only presents on `commit_frame`. Cursor position and shape are embedded per window inside `gui_window_content`, not carried by standalone cell opcodes.
 
-Between frames, the frontend must not mutate committed editor state or present new semantic content. The only exception is ephemeral presentation scroll driven by `gui_window_content` section 0x0A (`ScrollPresentation`): a frontend may transform already committed or retained rows inside the BEAM-provided clip rect and overscan bounds while waiting for the next committed frame. The BEAM still owns the committed viewport, cursor, selection, layout, row identity, and hit-test state.
+Between frames, the frontend must not mutate committed editor state or present new semantic content. The only exception is ephemeral presentation scroll driven by `gui_window_content` section 0x0A (`ScrollPresentation`): a frontend may transform already committed or retained rows inside the BEAM-provided clip rect and overscan bounds while waiting for the next committed frame. The BEAM still owns the committed viewport, cursor, selection, layout, row identity, and source mapping. The frontend resolves pointer locations against the transformed presentation and reports its immutable text target.
 
 ---
 
@@ -359,11 +361,11 @@ caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" 
 protocol_version: u16           exact wire-contract version the frontend was generated against
 ```
 
-**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 25. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
+**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 26. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
 
 ### `0x04` mouse_event
 
-A mouse button, wheel, or motion event.
+A legacy non-text mouse button, wheel, or motion event. Editor text click, drag, and hover use `editor_text_event`.
 
 ```
 opcode:      u8  = 0x04
@@ -399,6 +401,31 @@ Total size: 9 bytes.
 | `0x01` | Release |
 | `0x02` | Motion (no button held) |
 | `0x03` | Drag (button held during motion) |
+
+### `0x1E` editor_text_event
+
+A frontend-resolved position in an immutable displayed text row. All integers are big endian; size includes the opcode.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| opcode | u8 | `0x1E` |
+| window_id | u16 | Source editor window |
+| presentation_id | u64 | ID received through `gui_text_presentation` |
+| row_index | u32 | Absolute rank in that presentation's payload row store |
+| row_id | u64 | Identity at the specified rank |
+| utf16_offset | u32 | Boundary in the composed row text, including wrap indentation |
+| button | u8 | Left, middle, right, or none, as above |
+| modifiers | u8 | Modifier flags, as in `key_press` |
+| event_type | u8 | Press, release, motion, or drag, as above |
+| click_count | u8 | Native click count |
+| scroll_x | i8 | Drag edge direction: -1, 0, or 1 |
+| scroll_y | i8 | Drag edge direction: -1, 0, or 1 |
+
+Total size: 33 bytes. The row index is not viewport-local. A wrapped windowed payload uses its retained payload rank; a resident document uses its document-store rank. The renderer checks the row ID at that rank and resolves the offset through its retained source map. The editor checks the buffer version before applying cursor or selection state. Stale or non-source-backed endpoints do not fall back to current screen geometry. Release always ends the gesture, including a release with zero presentation and row fields.
+
+### `0x1F` text_presentation_state
+
+Fixed 12 bytes: `opcode:u8, window_id:u16, presentation_id:u64, state:u8`. State 1 activates the presentation used for subsequent text input; state 0 discards a presentation that the frontend can no longer use. These messages are durable and ordered with pointer input. They are distinct from `frame_applied`, which acknowledges semantic publication before native drawing completes. A client must retain a presentation while its committed candidate, native drawing attempts, or visible input model can still use it.
 
 ### Frame recovery status (`0x08`, `0x0A`–`0x0C`)
 
@@ -792,7 +819,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 25). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, protocol_version 10 widens clipboard and retained-window delta framing, protocol_version 11 makes `begin_frame` generation-aware and adds explicit frame status/retry events, protocol_version 12 appends frame rejection disposition and frontend resource policy, protocol_version 13 changes `agent_tool_toggle` to stable message ids, protocol_version 14 retires the native Tool Manager wire surface, protocol_version 15 retires the Change Summary command, entry shape, and click action while retaining display-only breadcrumbs and legacy `breadcrumb_click` compatibility, protocol_version 16 adds the correlated native application-quit handshake, protocol_version 17 correlates file-tree inline edit confirmations with the admitted BEAM edit token, protocol_version 18 adds opaque picker item and action activation identities, protocol_version 19 adds correlated local-operation presentation targets and native readiness results, protocol_version 20 adds continuous native presentation observations for semantic inspection, protocol_version 21 widens native search counts and adds search correlation state, protocol_version 22 adds correlated native file-dialog requests and results, protocol_version 23 adds stable completion identities and semantic result metadata, protocol_version 24 adds resident gutter snapshots and retained overrides, and protocol_version 25 adds source-owned local-presentation generations, narrow completion and picker selection echoes, and one semantic activation action. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 26). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, protocol_version 10 widens clipboard and retained-window delta framing, protocol_version 11 makes `begin_frame` generation-aware and adds explicit frame status/retry events, protocol_version 12 appends frame rejection disposition and frontend resource policy, protocol_version 13 changes `agent_tool_toggle` to stable message ids, protocol_version 14 retires the native Tool Manager wire surface, protocol_version 15 retires the Change Summary command, entry shape, and click action while retaining display-only breadcrumbs and legacy `breadcrumb_click` compatibility, protocol_version 16 adds the correlated native application-quit handshake, protocol_version 17 correlates file-tree inline edit confirmations with the admitted BEAM edit token, protocol_version 18 adds opaque picker item and action activation identities, protocol_version 19 adds correlated local-operation presentation targets and native readiness results, protocol_version 20 adds continuous native presentation observations for semantic inspection, protocol_version 21 widens native search counts and adds search correlation state, protocol_version 22 adds correlated native file-dialog requests and results, protocol_version 23 adds stable completion identities and semantic result metadata, protocol_version 24 adds resident gutter snapshots and retained overrides, and protocol_version 25 adds source-owned local-presentation generations, narrow completion and picker selection echoes, and one semantic activation action. Protocol version 26 adds displayed editor text targets and their explicit presentation lifetime. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 

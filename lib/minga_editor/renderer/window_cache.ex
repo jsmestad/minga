@@ -69,6 +69,7 @@ defmodule MingaEditor.Renderer.WindowCache do
   alias Minga.RenderModel.Window.LineIdentity
   alias Minga.RenderModel.Window.RowSlotAllocator
   alias MingaEditor.Renderer.ContentEpoch
+  alias MingaEditor.Renderer.TextPresentation
 
   @type t :: %__MODULE__{
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
@@ -91,6 +92,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           applied_change_sequence: non_neg_integer(),
           row_slot_allocator: RowSlotAllocator.t(),
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
+          text_presentation: TextPresentation.t() | nil,
           pending_edit_deltas: [Minga.Buffer.EditDelta.t()],
           changed_snapshot: RenderSnapshot.t() | nil,
           hydration_reason: atom() | nil,
@@ -121,6 +123,7 @@ defmodule MingaEditor.Renderer.WindowCache do
             applied_change_sequence: 0,
             row_slot_allocator: RowSlotAllocator.new(),
             resident_build: nil,
+            text_presentation: nil,
             pending_edit_deltas: [],
             changed_snapshot: nil,
             hydration_reason: nil,
@@ -166,6 +169,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         retained_rows: %{},
         retained_wrap_lines: %{},
         resident_build: nil,
+        text_presentation: nil,
         pending_edit_deltas: [],
         changed_snapshot: nil,
         residence_armed: false
@@ -667,6 +671,15 @@ defmodule MingaEditor.Renderer.WindowCache do
         hydration_reason: nil
     }
   end
+
+  @doc "Returns the immutable text presentation produced by the current cache state."
+  @spec text_presentation(t()) :: TextPresentation.t() | nil
+  def text_presentation(%__MODULE__{text_presentation: presentation}), do: presentation
+
+  @doc "Stores the immutable text presentation produced by the current semantic build."
+  @spec put_text_presentation(t(), TextPresentation.t()) :: t()
+  def put_text_presentation(%__MODULE__{} = cache, %TextPresentation{} = presentation),
+    do: %{cache | text_presentation: presentation}
 
   @doc "Returns the explicit reason for the next full resident hydration."
   @spec hydration_reason(t()) :: atom() | nil
