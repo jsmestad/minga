@@ -1405,19 +1405,24 @@ struct ContentViewTests {
         #expect((initialChildren[0].accessibilityValue() as? String)?.contains("left row 0") == true)
         #expect((initialChildren[1].accessibilityValue() as? String)?.contains("right row 0") == true)
         #expect(!initialChildren[0].isAccessibilityFocused())
-        #expect(editorView.accessibilityFocusedUIElement() == nil)
+        #expect(editorView.accessibilityFocusedUIElement == nil)
+        let focusedElementSelector = NSSelectorFromString("accessibilityFocusedUIElement")
+        #expect(editorView.responds(to: focusedElementSelector))
+        #expect(editorView.perform(focusedElementSelector) == nil)
 
         #expect(window.makeFirstResponder(editorView))
         #expect(initialChildren[0].isAccessibilityFocused() == (NSApp.isActive && window.isKeyWindow))
         #expect(!initialChildren[1].isAccessibilityFocused())
         if NSApp.isActive && window.isKeyWindow {
-            #expect(editorView.accessibilityFocusedUIElement() as? EditorPaneAccessibilityElement === initialChildren[0])
+            #expect(editorView.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === initialChildren[0])
+            let selectorFocusedElement = editorView.perform(focusedElementSelector)?.takeUnretainedValue()
+            #expect(selectorFocusedElement as? EditorPaneAccessibilityElement === initialChildren[0])
         } else {
-            #expect(editorView.accessibilityFocusedUIElement() == nil)
+            #expect(editorView.accessibilityFocusedUIElement == nil)
         }
         window.orderOut(nil)
         #expect(!initialChildren[0].isAccessibilityFocused())
-        #expect(editorView.accessibilityFocusedUIElement() == nil)
+        #expect(editorView.accessibilityFocusedUIElement == nil)
         let focusActionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
         await Task.yield()
@@ -1448,9 +1453,9 @@ struct ContentViewTests {
         #expect(switchedChildren[0] === initialChildren[0])
         #expect(switchedChildren[1] === initialChildren[1])
         if NSApp.isActive && window.isKeyWindow {
-            #expect(editorView.accessibilityFocusedUIElement() as? EditorPaneAccessibilityElement === initialChildren[1])
+            #expect(editorView.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === initialChildren[1])
         } else {
-            #expect(editorView.accessibilityFocusedUIElement() == nil)
+            #expect(editorView.accessibilityFocusedUIElement == nil)
         }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
@@ -1464,9 +1469,9 @@ struct ContentViewTests {
         #expect(replacement !== initialChildren[1])
         #expect(initialChildren[1].accessibilityValue() == nil)
         if NSApp.isActive && window.isKeyWindow {
-            #expect(editorView.accessibilityFocusedUIElement() as? EditorPaneAccessibilityElement === replacement)
+            #expect(editorView.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === replacement)
         } else {
-            #expect(editorView.accessibilityFocusedUIElement() == nil)
+            #expect(editorView.accessibilityFocusedUIElement == nil)
         }
         let actionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)

@@ -3751,7 +3751,7 @@ extension EditorNSView {
         accessibilityPaneElements()
     }
 
-    func accessibilityFocusedUIElement() -> Any? {
+    override var accessibilityFocusedUIElement: Any? {
         guard accessibilityHasNativeKeyboardFocus else { return nil }
         let paneElements = accessibilityPaneElements()
         guard let activeIdentity = accessibilityProjections.first(where: \.isActivePane)?.identity else { return nil }
@@ -3794,7 +3794,7 @@ extension EditorNSView {
 
     func nativeApplicationFocusDidSettle() {
         refreshAccessibilityNativeFocus()
-        guard let focusedPane = accessibilityFocusedUIElement() else { return }
+        guard let focusedPane = accessibilityFocusedUIElement else { return }
         NSAccessibility.post(element: focusedPane, notification: .focusedUIElementChanged)
     }
 
@@ -3901,7 +3901,7 @@ extension EditorNSView {
         let activeIdentity = projections.first(where: \.isActivePane)?.identity
         if activeIdentity != lastAccessibilityActiveIdentity {
             lastAccessibilityActiveIdentity = activeIdentity
-            if let focusedPane = accessibilityFocusedUIElement() {
+            if let focusedPane = accessibilityFocusedUIElement {
                 NSAccessibility.post(element: focusedPane, notification: .focusedUIElementChanged)
             }
         }
