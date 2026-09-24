@@ -309,6 +309,17 @@ struct MouseInputTests {
         await Task.yield()
         await Task.yield()
         #expect(window.firstResponder === view)
+
+        #expect(window.makeFirstResponder(focusStealer))
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === view)
+
+        #expect(window.makeFirstResponder(textField))
+        let restoredFieldEditor = try #require(window.firstResponder as? NSTextView)
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === restoredFieldEditor)
     }
 
     @Test("native modal close restoration is immediate for an attached editor and a no-op while detached")

@@ -268,7 +268,9 @@ final class EditorFocusPolicy {
     }
 
     private func windowFirstResponderDidChange() {
-        reconcileRequestedPresentationFocus()
+        guard presentationFocusReady(), let editorView else { return }
+        presentationFocusRequested = false
+        editorView.nativeApplicationFocusDidSettle()
     }
 
     private func reconcileRequestedPresentationFocus() {
