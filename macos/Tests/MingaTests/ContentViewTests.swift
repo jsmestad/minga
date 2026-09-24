@@ -1405,12 +1405,19 @@ struct ContentViewTests {
         #expect((initialChildren[0].accessibilityValue() as? String)?.contains("left row 0") == true)
         #expect((initialChildren[1].accessibilityValue() as? String)?.contains("right row 0") == true)
         #expect(!initialChildren[0].isAccessibilityFocused())
+        #expect(editorView.accessibilityFocusedUIElement() == nil)
 
         #expect(window.makeFirstResponder(editorView))
         #expect(initialChildren[0].isAccessibilityFocused() == (NSApp.isActive && window.isKeyWindow))
         #expect(!initialChildren[1].isAccessibilityFocused())
+        if NSApp.isActive && window.isKeyWindow {
+            #expect(editorView.accessibilityFocusedUIElement() as? EditorPaneAccessibilityElement === initialChildren[0])
+        } else {
+            #expect(editorView.accessibilityFocusedUIElement() == nil)
+        }
         window.orderOut(nil)
         #expect(!initialChildren[0].isAccessibilityFocused())
+        #expect(editorView.accessibilityFocusedUIElement() == nil)
         let focusActionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
         await Task.yield()
@@ -1430,14 +1437,37 @@ struct ContentViewTests {
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "left", foldLine: 10, contentEpoch: 1, windowId: 1, paneCol: 0, paneWidth: 40)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 10, windowId: 1, paneCol: 0, paneWidth: 40, isActive: false)))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "right", foldLine: 20, contentEpoch: 2, windowId: 2, paneCol: 40, paneWidth: 40)))
+        dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 20, windowId: 2, paneCol: 40, paneWidth: 40, isActive: true)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+
+        let switchedChildren = try #require(editorView.accessibilityChildren() as? [EditorPaneAccessibilityElement])
+        #expect(switchedChildren[0] === initialChildren[0])
+        #expect(switchedChildren[1] === initialChildren[1])
+        if NSApp.isActive && window.isKeyWindow {
+            #expect(editorView.accessibilityFocusedUIElement() as? EditorPaneAccessibilityElement === initialChildren[1])
+        } else {
+            #expect(editorView.accessibilityFocusedUIElement() == nil)
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiWindowContent(data: try nativeFoldInteractionContent(prefix: "replacement", foldLine: 30, contentEpoch: 3, windowId: 2, paneCol: 0, paneWidth: 80)))
         dispatcher.dispatch(.guiGutter(data: nativeFoldGutter(foldLine: 30, windowId: 2, paneCol: 0, paneWidth: 80, isActive: true)))
-        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
         dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
 
         let replacement = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
         #expect(replacement !== initialChildren[1])
         #expect(initialChildren[1].accessibilityValue() == nil)
+        if NSApp.isActive && window.isKeyWindow {
+            #expect(editorView.accessibilityFocusedUIElement() as? EditorPaneAccessibilityElement === replacement)
+        } else {
+            #expect(editorView.accessibilityFocusedUIElement() == nil)
+        }
         let actionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
         #expect(spy.actions.count == actionCount)
