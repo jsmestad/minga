@@ -1476,6 +1476,11 @@ struct ContentViewTests {
         let actionCount = spy.actions.count
         initialChildren[1].setAccessibilityFocused(true)
         #expect(spy.actions.count == actionCount)
+
+        editorView.invalidateConnection()
+        #expect(editorView.accessibilityFocusedUIElement == nil)
+        window.contentView = nil
+        #expect(editorView.accessibilityFocusedUIElement == nil)
     }
 
     @Test(

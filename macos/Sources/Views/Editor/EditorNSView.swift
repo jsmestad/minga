@@ -312,6 +312,7 @@ final class EditorNSView: MTKView {
         setDividerCursorState(.none)
         removeWindowObservers()
         focusPolicy.detach()
+        accessibilityFocusedElementSnapshot.write(nil)
     }
 
     override var acceptsFirstResponder: Bool { true }
