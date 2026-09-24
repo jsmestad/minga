@@ -33,6 +33,7 @@ final class EditorFocusPolicy {
 
         detach()
         attachedWindow = window
+        window.initialFirstResponder = editorView
         windowUpdateTask = Task { @MainActor [weak self, weak window] in
             guard let window else { return }
             for await _ in NotificationCenter.default.notifications(named: NSWindow.didUpdateNotification, object: window) {
@@ -55,6 +56,9 @@ final class EditorFocusPolicy {
 
     /// Detaches all focus hooks and invalidates work queued for the old window.
     func detach() {
+        if attachedWindow?.initialFirstResponder === editorView {
+            attachedWindow?.initialFirstResponder = nil
+        }
         windowUpdateTask?.cancel()
         windowUpdateTask = nil
         applicationActivationTask?.cancel()
