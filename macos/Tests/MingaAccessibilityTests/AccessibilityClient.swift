@@ -67,6 +67,26 @@ final class AccessibilityClient {
         accessibilityApplication = AXUIElementCreateApplication(processID)
     }
 
+    static func requireProcessTrust(waitForTrust: Bool) throws {
+        if AXIsProcessTrusted() { return }
+
+        guard waitForTrust else {
+            throw AccessibilityClientError.condition(
+                "INFRASTRUCTURE: MingaAccessibilityTests-Runner needs macOS Accessibility permission"
+            )
+        }
+
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in AXIsProcessTrusted() },
+            object: nil
+        )
+        guard XCTWaiter.wait(for: [expectation], timeout: 90) == .completed else {
+            throw AccessibilityClientError.condition(
+                "INFRASTRUCTURE: MingaAccessibilityTests-Runner still lacks macOS Accessibility permission after the 90-second setup window; add it in System Settings > Privacy & Security > Accessibility, then rerun"
+            )
+        }
+    }
+
     func elements(
         ofType type: XCUIElement.ElementType,
         identifierPrefix: String? = nil,

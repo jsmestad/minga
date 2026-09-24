@@ -324,6 +324,7 @@
 		BC17E62E0B2B1CC5C5882DB4 /* EditorAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1853926D4D2E146BD66ED498 /* EditorAccessibility.swift */; };
 		BC7E4A33AC8A2DA8D861FB64 /* ThumbDragSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11AEAD1E631064BE3B13E42C /* ThumbDragSession.swift */; };
 		BCCC8F959EDD3B7C8525BA61 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB822E0C8D06C7B45D329F /* EditorNSView.swift */; };
+		BCDDCCE45F1A5697D22AFA23 /* RawAccessibilityAccessDispositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF88C789F51E0AB39AC03E1 /* RawAccessibilityAccessDispositionTests.swift */; };
 		BEEF842411279AB7C445726F /* BEAMLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CFD7FB5483CCC2DD1208CA /* BEAMLaunchConfiguration.swift */; };
 		BF41C04B7AF7C400A4DC1474 /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
 		BF4E98B0BE647893CB5DA85C /* PipelineCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE75BA15B74A84B77B5B911 /* PipelineCache.swift */; };
@@ -827,6 +828,7 @@
 		FA4E6DE435D18BF410FFA386 /* ApplicationQuitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationQuitCoordinator.swift; sourceTree = "<group>"; };
 		FA51F390E49935563AB0AEB6 /* PointingHandModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointingHandModifier.swift; sourceTree = "<group>"; };
 		FCA8938E70ED0123ACECD921 /* CompletionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionOverlay.swift; sourceTree = "<group>"; };
+		FCF88C789F51E0AB39AC03E1 /* RawAccessibilityAccessDispositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawAccessibilityAccessDispositionTests.swift; sourceTree = "<group>"; };
 		FCFB66F7BCD7E565FACECF70 /* ResyncOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResyncOverlay.swift; sourceTree = "<group>"; };
 		FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SymbolsNerdFontMono-Regular.ttf"; sourceTree = "<group>"; };
 		FD7FC26DB745A436D50E3AA6 /* WindowContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentTests.swift; sourceTree = "<group>"; };
@@ -1363,6 +1365,7 @@
 				DF91AF0F9C9069644555108E /* AccessibilityClient.swift */,
 				29B1B8E7DB6EBD5518F1CE39 /* AccessibilityTestSupport.swift */,
 				0BA45C1637C0437758F83585 /* MingaAccessibilityWorkflowTests.swift */,
+				FCF88C789F51E0AB39AC03E1 /* RawAccessibilityAccessDispositionTests.swift */,
 			);
 			path = MingaAccessibilityTests;
 			sourceTree = "<group>";
@@ -1933,6 +1936,7 @@
 				0D996C53CF6D7F9EAB548A2E /* AccessibilityClient.swift in Sources */,
 				2E26B3C8E2C5BAB1D954F2DF /* AccessibilityTestSupport.swift in Sources */,
 				1D9A6FDB56CB7F1171752686 /* MingaAccessibilityWorkflowTests.swift in Sources */,
+				BCDDCCE45F1A5697D22AFA23 /* RawAccessibilityAccessDispositionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

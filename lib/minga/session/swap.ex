@@ -35,7 +35,6 @@ defmodule Minga.Session.Swap do
 
   alias Minga.Session.Swap.Prepared
 
-  @default_swap_dir Path.expand("~/.local/share/minga/swap")
   @magic "MINGA_SWAP_V1\n"
   @temporary_name_regex ~r/\A[0-9a-v]{52}\.(\d+)\.swap\.\d+\.\d+\.tmp\z/
 
@@ -50,7 +49,9 @@ defmodule Minga.Session.Swap do
   @doc "Returns the swap directory path."
   @spec swap_dir(keyword()) :: String.t()
   def swap_dir(opts \\ []) do
-    Keyword.get(opts, :swap_dir, @default_swap_dir)
+    Keyword.get_lazy(opts, :swap_dir, fn ->
+      Path.join(System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"), "minga/swap")
+    end)
   end
 
   @doc """

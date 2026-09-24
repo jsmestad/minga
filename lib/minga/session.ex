@@ -19,7 +19,6 @@ defmodule Minga.Session do
 
   alias Minga.Buffer
 
-  @default_session_dir Path.expand("~/.local/share/minga/sessions")
   @session_filename "session.json"
   @current_version 1
 
@@ -35,7 +34,14 @@ defmodule Minga.Session do
   @doc "Returns the session file path."
   @spec session_file(keyword()) :: String.t()
   def session_file(opts \\ []) do
-    dir = Keyword.get(opts, :session_dir, @default_session_dir)
+    dir =
+      Keyword.get_lazy(opts, :session_dir, fn ->
+        Path.join(
+          System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"),
+          "minga/sessions"
+        )
+      end)
+
     Path.join(dir, @session_filename)
   end
 

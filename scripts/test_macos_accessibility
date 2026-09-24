@@ -8,12 +8,14 @@ artifact_dir="$artifact_root/$run_id"
 state_root=$(mktemp -d "${TMPDIR:-/tmp}/minga-accessibility.XXXXXX")
 # Darwin limits AF_UNIX paths to 103 bytes. Keep the harness-owned IPC parent short and outside XCTest's sandbox-rewritten temporary directory.
 ipc_root=$(mktemp -d /private/tmp/ma.XXXXXX)
-derived_data="$state_root/DerivedData"
+derived_data="$artifact_root/DerivedData"
 test_bundle_id="com.minga.editor.accessibility-runner.r${run_id//-/}"
 app_path="$derived_data/Build/Products/Debug/Minga.app"
 app_executable="$app_path/Contents/MacOS/Minga"
+test_runner_path="$derived_data/Build/Products/Debug/MingaAccessibilityTests-Runner.app"
 
 mkdir -p "$artifact_dir"
+mkdir -p "$derived_data"
 chmod 700 "$state_root"
 chmod 700 "$ipc_root"
 
@@ -107,6 +109,8 @@ printf 'Artifacts: %s\n' "$artifact_dir"
 ) 2>&1 | tee "$artifact_dir/xcode-build.log"
 
 [[ -d "$app_path" ]] || infrastructure_failure "Xcode did not produce the isolated Minga test app at $app_path"
+[[ -d "$test_runner_path" ]] || infrastructure_failure "Xcode did not produce the UI test runner at $test_runner_path"
+printf 'Accessibility grant target: %s\n' "$test_runner_path"
 release_path="$repo_root/_build/prod/rel/minga_macos"
 [[ -x "$release_path/bin/minga_macos" ]] || infrastructure_failure "the embedded BEAM release was not built"
 
@@ -134,6 +138,10 @@ record_xctest_infrastructure_failure() {
 
 run_variant() {
   local variant=$1
+  local wait_for_trust=${MINGA_AX_WAIT_FOR_TRUST:-YES}
+  if [[ -n ${CI:-} ]]; then
+    wait_for_trust=NO
+  fi
   local variant_root="$state_root/$variant"
   local variant_artifacts="$artifact_dir/$variant"
   local runtime_parent="$ipc_root/$variant"
@@ -163,8 +171,8 @@ run_variant() {
     "$xdg_cache_home" \
     "$project" \
     "$runtime_parent"
-  : > "$project/.minga"
-  printf '%s\n' 'use Minga.Config' > "$config"
+  mkdir -p "$project/.minga"
+  printf '%s\n' 'use Minga.Config' 'set :lsp_auto_start, false' > "$config"
   printf '%s\n' 'ALPHA PANE λ🙂' 'second alpha line' > "$source"
   printf '%s\n' 'BETA PANE é🙂' 'second beta line' > "$project/beta_target.ex"
   : > "$debug_log"
@@ -181,11 +189,12 @@ run_variant() {
         -derivedDataPath "$derived_data" \
         -resultBundlePath "$variant_artifacts/MingaAccessibility.xcresult" \
         -test-timeouts-enabled YES \
-        -maximum-test-execution-time-allowance 120 \
+        -maximum-test-execution-time-allowance 180 \
         -only-testing:MingaAccessibilityTests/MingaAccessibilityWorkflowTests/testRealApplicationAccessibilityNavigationAndFocus \
         -only-testing:MingaAccessibilityTests/RawAccessibilityAccessDispositionTests \
         MINGA_APP_BUNDLE_IDENTIFIER="$test_bundle_id" \
         MINGA_AX_VARIANT="$variant" \
+        MINGA_AX_WAIT_FOR_TRUST="$wait_for_trust" \
         MINGA_AX_APP_BUNDLE_ID="$test_bundle_id" \
         MINGA_AX_APP_EXECUTABLE="$app_executable" \
         MINGA_AX_RUNTIME_PARENT="$runtime_parent" \

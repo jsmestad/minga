@@ -109,6 +109,11 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "MINGA_AX_WAIT_FOR_TRUST"
+            value = "$(MINGA_AX_WAIT_FOR_TRUST)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "MINGA_AX_XDG_CACHE_HOME"
             value = "$(MINGA_AX_XDG_CACHE_HOME)"
             isEnabled = "YES">

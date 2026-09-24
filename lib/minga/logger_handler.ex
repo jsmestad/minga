@@ -35,7 +35,6 @@ defmodule Minga.LoggerHandler do
 
   @handler_id :minga_messages
   @file_handler_id :minga_file
-  @log_dir Path.expand("~/.local/share/minga")
   @log_file "minga.log"
   @buffer_table :minga_log_buffer
   @max_buffered 50
@@ -93,8 +92,9 @@ defmodule Minga.LoggerHandler do
   """
   @spec install() :: String.t()
   def install do
-    log_path = Path.join(@log_dir, @log_file)
-    File.mkdir_p!(@log_dir)
+    log_dir = Path.join(System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"), "minga")
+    log_path = Path.join(log_dir, @log_file)
+    File.mkdir_p!(log_dir)
     ensure_buffer_table()
 
     # 1. Replace the default handler with a file-based one.

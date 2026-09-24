@@ -591,6 +591,7 @@ schemes:
         - MingaAccessibilityTests
       environmentVariables:
         MINGA_AX_VARIANT: "$(MINGA_AX_VARIANT)"
+        MINGA_AX_WAIT_FOR_TRUST: "$(MINGA_AX_WAIT_FOR_TRUST)"
         MINGA_AX_APP_BUNDLE_ID: "$(MINGA_AX_APP_BUNDLE_ID)"
         MINGA_AX_APP_EXECUTABLE: "$(MINGA_AX_APP_EXECUTABLE)"
         MINGA_AX_RUNTIME_PARENT: "$(MINGA_AX_RUNTIME_PARENT)"

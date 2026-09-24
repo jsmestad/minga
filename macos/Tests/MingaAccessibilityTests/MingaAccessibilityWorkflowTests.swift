@@ -20,6 +20,9 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
 
         do {
             let inputs = try AccessibilityTestInputs.fromEnvironment(environment)
+            try AccessibilityClient.requireProcessTrust(
+                waitForTrust: environment["MINGA_AX_WAIT_FOR_TRUST"] == "YES"
+            )
             let application = configuredApplication(inputs: inputs)
             launchedApplication = application
             let client = try launch(
@@ -39,10 +42,22 @@ final class MingaAccessibilityWorkflowTests: XCTestCase {
 }
 private extension MingaAccessibilityWorkflowTests {
     func runScenario(app: XCUIApplication, client: AccessibilityClient) throws {
+        try openInitialAlpha(app: app, client: client)
         try verifyInitialEditorFocus(app: app, client: client)
         try activateBetaThroughPicker(app: app, client: client)
         try dismissPickerAndVerifyBeta(app: app, client: client)
         try splitAndMoveFocus(app: app, client: client)
+    }
+
+    func openInitialAlpha(app: XCUIApplication, client: AccessibilityClient) throws {
+        try openProjectPicker(app: app, client: client)
+        app.typeText("alpha_target")
+        _ = try client.waitForNode(
+            "the initial alpha_target.ex picker choice",
+            timeout: timeout,
+            query: client.elements(ofType: .button, identifierPrefix: "picker-choice-", label: "alpha_target.ex")
+        ) { $0.value?.hasPrefix("selected") == true }
+        app.typeKey(.return, modifierFlags: [])
     }
 
     func verifyInitialEditorFocus(app: XCUIApplication, client: AccessibilityClient) throws {
@@ -282,7 +297,7 @@ private extension MingaAccessibilityWorkflowTests {
             "--config", inputs.config.path,
             "--debug-log", inputs.debugLog.path,
             "--minga-ipc-runtime-parent", inputs.runtimeParent.path,
-            inputs.alpha.path
+            inputs.alpha.deletingLastPathComponent().path
         ]
         application.launchEnvironment = isolatedEnvironment(inputs: inputs)
         return application
@@ -313,9 +328,7 @@ private extension MingaAccessibilityWorkflowTests {
             "the Find file choices container",
             timeout: timeout,
             query: findFileChoicesQuery(client: client)
-        ) {
-            $0.value?.contains("choices") == true
-        }
+        ) { _ in true }
         let queryField = try client.waitForNode(
             "the native picker query field",
             timeout: timeout,

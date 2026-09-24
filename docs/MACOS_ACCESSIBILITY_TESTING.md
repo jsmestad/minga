@@ -13,7 +13,7 @@ The command builds an isolated Minga app with its embedded BEAM release, creates
 - macOS 15 or later with an interactive GUI login session
 - the repository-pinned Erlang, Elixir, Zig, Go, and Xcode toolchains
 - the XcodeGen version in `.xcodegen-version`
-- macOS Accessibility permission for the process that runs the UI test, because XCTest does not expose selected-text range attributes
+- macOS Accessibility permission for `MingaAccessibilityTests-Runner`, because XCTest does not expose selected-text range attributes
 
 Install the pinned XcodeGen version when needed:
 
@@ -22,11 +22,15 @@ scripts/install_xcodegen "$TMPDIR/minga-xcodegen"
 export PATH="$TMPDIR/minga-xcodegen:$PATH"
 ```
 
-macOS can ask for Accessibility permission on the first run. Open System Settings, select Privacy & Security, then Accessibility, and allow the test runner shown by macOS. This is normally Xcode for an Xcode launch or the terminal application that started `xcodebuild`. The runner reports missing trust as an infrastructure failure and never attempts to grant permission or change macOS security settings.
+Xcode can ask you to authenticate to Enable UI Automation on the first run. Approve that request while the command is running. This enables XCTest interaction, but does not grant raw Accessibility access to the test runner.
+
+The command prints an `Accessibility grant target` path after the build. To enable raw Accessibility access, open System Settings, select Privacy & Security, then Accessibility, click Add, and select `MingaAccessibilityTests-Runner.app` at that printed path. In the file chooser, press Command-Shift-G to enter the path. Turn on its switch and rerun the command if the first attempt has already exited. The local test waits up to 90 seconds for the grant; CI fails immediately when the grant is absent. macOS does not present a permission prompt for this runner, and the command never grants access or changes system security settings itself.
+
+The build stays at `_build/macos-accessibility/DerivedData` so the runner has a stable path across runs. The runner is ad-hoc signed by the local Xcode build, so macOS may require a new grant after the test binary changes. A repeatable unattended CI lane needs a trusted macOS GUI runner with a stable signing identity and an approved Accessibility grant. GitHub's untrusted hosted macOS runner reports an infrastructure failure rather than passing or skipping this check.
 
 ## Isolation and cleanup
 
-The runner gives the test app a dedicated bundle identifier, private `HOME` and XDG directories, a private native IPC parent, a fixture project, and an explicit config file. The UI test launches only that app identity. Success, assertion failure, application crash, and test timeout all terminate the owned app and remove the temporary state. The runner also removes an orphaned embedded core whose executable path belongs to that exact temporary app bundle.
+The runner gives the test app a dedicated bundle identifier, private `HOME` and XDG directories, a private native IPC parent, a fixture project, and an explicit config file. The UI test launches only that app identity. Success, assertion failure, application crash, and test timeout all terminate the owned app and remove the temporary fixture state. The runner also removes an orphaned embedded core whose executable path belongs to that exact test app bundle. DerivedData is a retained build artifact, not fixture state.
 
 ## Results and evidence
 
