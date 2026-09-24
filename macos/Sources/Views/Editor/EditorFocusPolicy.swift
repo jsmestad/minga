@@ -5,6 +5,7 @@ import AppKit
 final class EditorFocusPolicy {
     private weak var editorView: EditorNSView?
     private weak var attachedWindow: NSWindow?
+    private var firstResponderObservation: NSKeyValueObservation?
     private var windowUpdateTask: Task<Void, Never>?
     private var applicationActivationTask: Task<Void, Never>?
     private var deferredReclaimTask: Task<Void, Never>?
@@ -34,6 +35,11 @@ final class EditorFocusPolicy {
         detach()
         attachedWindow = window
         window.initialFirstResponder = editorView
+        firstResponderObservation = window.observe(\.firstResponder, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.windowFirstResponderDidChange()
+            }
+        }
         windowUpdateTask = Task { @MainActor [weak self, weak window] in
             guard let window else { return }
             for await _ in NotificationCenter.default.notifications(named: NSWindow.didUpdateNotification, object: window) {
@@ -59,6 +65,8 @@ final class EditorFocusPolicy {
         if attachedWindow?.initialFirstResponder === editorView {
             attachedWindow?.initialFirstResponder = nil
         }
+        firstResponderObservation?.invalidate()
+        firstResponderObservation = nil
         windowUpdateTask?.cancel()
         windowUpdateTask = nil
         applicationActivationTask?.cancel()
@@ -67,6 +75,7 @@ final class EditorFocusPolicy {
         deferredReclaimTask = nil
         removeAgentKeyMonitor()
         attachedWindow = nil
+        presentationFocusRequested = false
     }
 
     /// Rechecks editor focus after SwiftUI updates its hosted AppKit hierarchy.
@@ -76,6 +85,7 @@ final class EditorFocusPolicy {
 
     /// Reclaims editor focus after the attached window becomes key.
     func windowDidBecomeKey() {
+        reconcileRequestedPresentationFocus()
         scheduleDeferredReclaim()
     }
 
@@ -154,9 +164,8 @@ final class EditorFocusPolicy {
         if !nativeTextEditingIsActive(), window.firstResponder !== editorView {
             window.makeFirstResponder(editorView)
         }
-        let ready = presentationFocusReady()
-        if ready { editorView.nativeApplicationFocusDidSettle() }
-        return ready
+        reconcileRequestedPresentationFocus()
+        return presentationFocusReady()
     }
 
     /// Reclaims and verifies the AppKit responder state required by a native open receipt.
@@ -250,10 +259,20 @@ final class EditorFocusPolicy {
     }
 
     private func applicationDidBecomeActive() {
-        guard presentationFocusRequested, let window = attachedWindow else { return }
-        reclaimEditorIfNeeded(in: window, respectingNativeTextInput: true)
-        guard presentationFocusReady() else { return }
-        editorView?.nativeApplicationFocusDidSettle()
+        reconcileRequestedPresentationFocus()
+    }
+
+    private func windowFirstResponderDidChange() {
+        reconcileRequestedPresentationFocus()
+    }
+
+    private func reconcileRequestedPresentationFocus() {
+        guard presentationFocusRequested,
+              presentationFocusReady(),
+              let editorView
+        else { return }
+        presentationFocusRequested = false
+        editorView.nativeApplicationFocusDidSettle()
     }
 
     private func reclaimEditorIfNeeded(in window: NSWindow, respectingNativeTextInput: Bool) {
