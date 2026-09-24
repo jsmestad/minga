@@ -184,7 +184,7 @@ private struct WindowOverlayHost<Content: View>: View {
 
 private enum EditorOverlayAction: Equatable, Sendable {
     case openHover
-    case selectCompletion(itemID: String)
+    case selectCompletion(generation: UInt32, itemID: String)
 }
 
 private struct EditorOverlayHost<ExtensionContent: View>: View {
@@ -219,7 +219,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
                 anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
                     CompletionOverlay(state: input.completionState, sendAction: translatedAction { action in
                         switch action {
-                        case .select(let itemID): .selectCompletion(itemID: itemID)
+                        case .select(let generation, let itemID): .selectCompletion(generation: generation, itemID: itemID)
                         }
                     })
                         .background {
@@ -954,7 +954,7 @@ public struct ContentView<EditorSurface: View>: View {
                 sendAction: translatedAction { (action: EditorOverlayAction) in
                     switch action {
                     case .openHover: .hoverOpen
-                    case .selectCompletion(let itemID): .completionSelect(itemID: itemID)
+                    case .selectCompletion(let generation, let itemID): .semanticItemActivate(surface: .completion, intent: 1, generation: generation, itemID: Data(itemID.utf8))
                     }
                 },
                 frameProbe: frameProbe

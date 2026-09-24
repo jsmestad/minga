@@ -170,7 +170,7 @@ struct CompletionOverlayViewTests {
                 Wire.CompletionItem(kind: 1, label: "def", detail: "keyword", id: "def"),
                 Wire.CompletionItem(kind: 2, label: "defmodule", detail: "module", id: "defmodule"),
             ],
-            documentation: ""
+            documentation: "", generation: 7
         )
         let recorder = LocalActionRecorder<CompletionOverlay.Action>()
         let sut = CompletionOverlay(state: state, sendAction: recorder.handler)
@@ -180,7 +180,7 @@ struct CompletionOverlayViewTests {
 
         #expect(try selected.accessibilityValue().string() == "selected, module")
         try selected.tap()
-        #expect(recorder.actions == [.select(itemID: "defmodule")])
+        #expect(recorder.actions == [.select(generation: 7, itemID: "defmodule")])
     }
 
     @Test("Retained completion choice cannot activate a replacement item")
@@ -212,7 +212,7 @@ struct CompletionOverlayViewTests {
         let item = Wire.CompletionItem(kind: 1, label: "same label", detail: "same detail", id: "stable-item")
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
-            rawItems: [item], documentation: ""
+            rawItems: [item], documentation: "", generation: 9
         )
         let recorder = LocalActionRecorder<CompletionOverlay.Action>()
         let sut = CompletionOverlay(state: state, sendAction: recorder.handler)
@@ -221,11 +221,11 @@ struct CompletionOverlayViewTests {
 
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
-            rawItems: [item], documentation: ""
+            rawItems: [item], documentation: "", generation: 9
         )
         try retained.tap()
 
-        #expect(recorder.actions == [.select(itemID: "stable-item")])
+        #expect(recorder.actions == [.select(generation: 9, itemID: "stable-item")])
     }
 }
 
@@ -1902,7 +1902,7 @@ struct PickerOverlayActivationTests {
         )
         try second.tap()
 
-        #expect(spy.actions == [.pickerItemActivate(generation: 99, activationID: 73)])
+        #expect(spy.actions == [.semanticItemActivate(surface: .picker, intent: 1, generation: 99, itemID: Data([0, 0, 0, 73]))])
     }
 
     @Test("a retained Actions entry reports its original offered identity")
@@ -1929,7 +1929,7 @@ struct PickerOverlayActivationTests {
         )
         try delete.tap()
 
-        #expect(spy.actions == [.pickerActionActivate(generation: 101, activationID: 27)])
+        #expect(spy.actions == [.semanticItemActivate(surface: .picker, intent: 2, generation: 101, itemID: Data([0, 0, 0, 27]))])
     }
 }
 

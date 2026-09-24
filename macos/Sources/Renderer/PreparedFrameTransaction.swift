@@ -26,12 +26,12 @@ extension GUIFrameImpact {
              .guiSplitSeparators, .guiAgentTranscript:
             return .editor
 
-        case .guiCompletion, .guiHoverPopup, .guiHoverAction, .guiSignatureHelp,
-             .guiExtensionOverlay:
+        case .guiCompletion, .guiCompletionSelection, .guiHoverPopup, .guiHoverAction,
+             .guiSignatureHelp, .guiExtensionOverlay:
             return .editorOverlay
 
-        case .guiWhichKey, .guiPicker, .guiPickerPreview, .guiFloatPopup,
-             .guiNotifications, .guiExtensionRuntime, .protocolError:
+        case .guiWhichKey, .guiPicker, .guiPickerSelection, .guiPickerPreview,
+             .guiFloatPopup, .guiNotifications, .guiExtensionRuntime, .protocolError:
             return .windowOverlay
 
         case .guiTabBar, .guiFileTree, .guiFileTreeSelection, .guiObservatory,
@@ -485,7 +485,8 @@ struct PreparedFrameTransactionBuilder {
                 weight: resourceWeight, domain: .focus
             )
 
-        case .guiCompletion, .guiWhichKey, .guiPicker, .guiPickerPreview,
+        case .guiCompletion, .guiCompletionSelection, .guiWhichKey, .guiPicker,
+             .guiPickerSelection, .guiPickerPreview,
              .guiAgentChat, .guiMinibuffer, .guiHoverPopup, .guiHoverAction,
              .guiSignatureHelp, .guiFloatPopup, .guiExtensionOverlay,
              .guiSearchState, .guiEmptyState, .protocolError:
@@ -1003,6 +1004,8 @@ private extension RenderCommand {
         case .presentationTarget: 57
         case .presentationOperation: 58
         case .guiRequest: 59
+        case .guiCompletionSelection: 60
+        case .guiPickerSelection: 61
         }
     }
 }

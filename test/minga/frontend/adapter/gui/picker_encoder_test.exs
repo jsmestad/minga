@@ -9,6 +9,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
 
   @op_gui_picker Minga.Protocol.Opcodes.gui_picker()
   @op_gui_picker_preview Minga.Protocol.Opcodes.gui_picker_preview()
+  @op_gui_picker_selection Minga.Protocol.Opcodes.gui_picker_selection()
 
   describe "encode/2" do
     test "encodes closed picker and hidden preview" do
@@ -148,6 +149,43 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
 
       assert cmd1 != nil
       assert cmd2 == nil
+    end
+
+    test "selection changes do not echo the picker item list" do
+      first = %Picker{
+        visible?: true,
+        activation_generation: 7,
+        selected_item_id: 1,
+        items: [
+          %{
+            icon_color: 0,
+            flags: 0,
+            label: "One",
+            description: "",
+            annotation: "",
+            match_positions: [],
+            activation_id: 1
+          },
+          %{
+            icon_color: 0,
+            flags: 0,
+            label: "Two",
+            description: "",
+            annotation: "",
+            match_positions: [],
+            activation_id: 2
+          }
+        ]
+      }
+
+      {_, caches} = PickerEncoder.encode(first, Caches.new())
+
+      {command, _caches} =
+        PickerEncoder.encode(%{first | selected_index: 1, selected_item_id: 2}, caches)
+
+      assert <<@op_gui_picker_selection, 12::16, 7::32, 2::32, 0::32>> = command
+      refute command =~ "One"
+      refute command =~ "Two"
     end
 
     test "rejects oversized picker header coordinates and counts" do

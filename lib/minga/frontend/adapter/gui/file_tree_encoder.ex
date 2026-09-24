@@ -14,7 +14,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @type ready_fingerprint :: {:ready, non_neg_integer(), non_neg_integer()}
   @type fingerprint ::
           ready_fingerprint()
-          | {:file_tree_state, String.t(), non_neg_integer(), term()}
+          | {:file_tree_state, non_neg_integer(), String.t(), non_neg_integer(), term()}
 
   @spec encode(FileTree.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%FileTree{status: status} = model, %Caches{} = caches)
@@ -52,12 +52,13 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     writer =
       :gui_file_tree
       |> Writer.new()
-      |> Writer.append(<<3::8>>)
+      |> Writer.append(<<4::8>>)
       |> Writer.uint8(
         :flags,
         file_tree_flags(model.status, model.focused?, model.local_navigation?)
       )
       |> Writer.uint8(:status, encode_file_tree_status(model.status))
+      |> Writer.uint32(:generation, model.generation)
       |> Writer.string16(:selected_id, model.selected_id)
       |> Writer.string16(:root_path, root)
       |> Writer.uint16(:tree_width, model.tree_width)
@@ -82,6 +83,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
       :gui_file_tree_selection
       |> Writer.new()
       |> Writer.uint8(:flags, file_tree_selection_flags(model.focused?))
+      |> Writer.uint32(:generation, model.generation)
       |> Writer.string16(:selected_id, model.selected_id)
       |> Writer.finish()
 
@@ -96,7 +98,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   # hidden trees both carry rows and use the structural fingerprint path above.
   @spec fingerprint(FileTree.t()) :: fingerprint()
   defp fingerprint(%FileTree{} = model) do
-    {:file_tree_state, model.root_path || "", model.tree_width, model.status}
+    {:file_tree_state, model.generation, model.root_path || "", model.tree_width, model.status}
   end
 
   @spec ready_structural_fingerprint(FileTree.t()) :: non_neg_integer()
@@ -104,13 +106,14 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     rows = Enum.map(model.rows, &structural_row/1)
 
     :erlang.phash2(
-      {model.root_path, model.tree_width, model.status, model.local_navigation?, rows}
+      {model.generation, model.root_path, model.tree_width, model.status, model.local_navigation?,
+       rows}
     )
   end
 
   @spec selection_fingerprint(FileTree.t()) :: non_neg_integer()
   defp selection_fingerprint(%FileTree{} = model) do
-    :erlang.phash2({model.selected_id, model.focused?})
+    :erlang.phash2({model.generation, model.selected_id, model.focused?})
   end
 
   @spec structural_row(Row.t()) :: Row.t()

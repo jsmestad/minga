@@ -1087,10 +1087,11 @@ defmodule MingaEditor.PickerUI do
 
   @spec stale_activation(state()) :: state()
   defp stale_activation(state) do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-      state,
+    state
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       "Picker choice changed; select it again"
     )
+    |> EditorState.reset_frontend_render_state()
   end
 
   @spec run_source_action_and_close(EditorState.t(), module(), term(), Picker.item()) ::

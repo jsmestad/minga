@@ -8,6 +8,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   import ExUnit.CaptureLog
 
   alias Minga.Events
+  alias Minga.Editing.Completion
+  alias Minga.Editing.Completion.Item, as: CompletionItem
   alias Minga.Extension.CodeLease
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
   alias MingaEditor.BottomPanel
@@ -26,10 +28,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Test.SidebarActionProbe
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Window
   alias MingaEditor.State.ExtensionSurfaces
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.Session.State, as: SessionState
@@ -135,6 +139,39 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert_receive {:"$gen_cast", {:render, %MingaEditor.Renderer.Submission{}, _seq, _pushed_at}}
 
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+  end
+
+  test "stale and unknown completion identities cannot mutate the active completion", %{
+    sidebar_registry: table
+  } do
+    item = CompletionItem.from_fields(:test, %{label: "candidate"})
+    completion = Completion.new([item], {0, 0})
+    payload = CompletionPayload.new(1, completion: completion)
+    generation = CompletionPayload.presentation_generation(payload)
+
+    state = table |> base_state() |> ModalWorkflow.open({:completion, payload})
+    original_text = Minga.Buffer.content(state.workspace.buffers.active)
+
+    stale =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :completion, :accept, generation + 1,
+         CompletionItem.wire_id(item)}
+      )
+
+    assert ModalWorkflow.completion(stale) == completion
+    assert Minga.Buffer.content(stale.workspace.buffers.active) == original_text
+    assert stale.render.render_correlation.keyframe_pending?
+
+    unknown =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :completion, :accept, generation, "unknown-item"}
+      )
+
+    assert ModalWorkflow.completion(unknown) == completion
+    assert Minga.Buffer.content(unknown.workspace.buffers.active) == original_text
+    assert unknown.render.render_correlation.keyframe_pending?
   end
 
   test "notification dismiss removes only the selected notification", %{sidebar_registry: table} do
@@ -481,6 +518,70 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert %{active_id: "", sidebars: [%{visible?: false, focused?: false}]} =
              SidebarsBuilder.build(Context.from_editor_state(hidden))
+  end
+
+  @tag :tmp_dir
+  test "stale and unknown file-tree identities cannot move the current selection", %{
+    sidebar_registry: table,
+    tmp_dir: tmp_dir
+  } do
+    entries = [
+      %{
+        name: "a.ex",
+        path: Path.join(tmp_dir, "a.ex"),
+        dir?: false,
+        depth: 0,
+        last_child?: false,
+        guides: []
+      },
+      %{
+        name: "b.ex",
+        path: Path.join(tmp_dir, "b.ex"),
+        dir?: false,
+        depth: 0,
+        last_child?: true,
+        guides: []
+      }
+    ]
+
+    file_tree =
+      %FileTreeState{}
+      |> FileTreeState.open(
+        ProjectFileTree.new(tmp_dir) |> ProjectFileTree.put_entries(entries),
+        nil
+      )
+
+    generation = FileTreeState.presentation_generation(file_tree)
+    state = base_state(table)
+    state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
+
+    stale =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :file_tree, :primary, generation + 1,
+         Path.expand(Path.join(tmp_dir, "b.ex"))}
+      )
+
+    assert FileTreeState.tree(stale.workspace.file_tree).cursor == 0
+    assert stale.render.render_correlation.keyframe_pending?
+
+    unknown =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :file_tree, :primary, generation, "missing-row"}
+      )
+
+    assert FileTreeState.tree(unknown.workspace.file_tree).cursor == 0
+    assert unknown.render.render_correlation.keyframe_pending?
+
+    resolved =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :file_tree, :toggle, generation,
+         Path.expand(Path.join(tmp_dir, "b.ex"))}
+      )
+
+    assert FileTreeState.tree(resolved.workspace.file_tree).cursor == 1
   end
 
   test "optional GUI commands report scheduling failures instead of no-op", %{

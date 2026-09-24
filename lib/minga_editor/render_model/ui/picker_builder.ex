@@ -75,6 +75,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       total_count: length(picker.items),
       marked_count: Picker.marked_count(picker),
       activation_generation: activation_offer.generation,
+      selected_item_id: selected_activation_id(offered_items, picker.selected),
+      selected_action_id: selected_action_activation_id(action_menu, activation_offer),
       has_preview?: has_preview,
       items: items,
       action_menu: action_menu_model(action_menu, activation_offer),
@@ -83,6 +85,27 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       preview_lines: preview_lines
     }
   end
+
+  @spec selected_activation_id([ActivationOffer.item_entry()], non_neg_integer()) ::
+          non_neg_integer()
+  defp selected_activation_id(offered_items, selected_index) do
+    case Enum.find(offered_items, fn {_id, index, _item} -> index == selected_index end) do
+      {activation_id, _index, _item} -> activation_id
+      nil -> 0
+    end
+  end
+
+  @spec selected_action_activation_id(term(), ActivationOffer.t()) :: non_neg_integer()
+  defp selected_action_activation_id(nil, _offer), do: 0
+
+  defp selected_action_activation_id({_actions, selected, _item}, offer) do
+    case Enum.at(ActivationOffer.offered_actions(offer), selected) do
+      {activation_id, _action, _item} -> activation_id
+      nil -> 0
+    end
+  end
+
+  defp selected_action_activation_id(_action_menu, _offer), do: 0
 
   # Builds the deferred display fields (icon, color, two-line description, status
   # annotation) for just the visible window, then recomputes match positions

@@ -117,7 +117,7 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: CompletionOverlay.Action) -> OutboundAction {
         switch action {
-        case .select(let itemID): .completionSelect(itemID: itemID)
+        case .select(let generation, let itemID): .semanticItemActivate(surface: .completion, intent: 1, generation: generation, itemID: Data(itemID.utf8))
         }
     }
 
@@ -125,8 +125,8 @@ public enum FrontendActionComposition {
         switch action {
         case .queryChanged(let generation, let editSequence, let text): .pickerQueryChanged(generation: generation, editSequence: editSequence, text: text)
         case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
-        case .activateItem(let generation, let activationID): .pickerItemActivate(generation: generation, activationID: activationID)
-        case .activateAction(let generation, let activationID): .pickerActionActivate(generation: generation, activationID: activationID)
+        case .activateItem(let generation, let activationID): .semanticItemActivate(surface: .picker, intent: 1, generation: generation, itemID: activationID.bigEndianData)
+        case .activateAction(let generation, let activationID): .semanticItemActivate(surface: .picker, intent: 2, generation: generation, itemID: activationID.bigEndianData)
         }
     }
 
@@ -175,6 +175,7 @@ public enum FrontendActionComposition {
         case .duplicate(let index): .fileTreeDuplicate(index: index)
         case .drop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers): .fileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetID: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDirectory: targetIsDirectory, modifiers: modifiers)
         case .refresh: .fileTreeRefresh
+        case .semantic(let intent, let generation, let itemID): .semanticItemActivate(surface: .fileTree, intent: intent.rawValue, generation: generation, itemID: Data(itemID.utf8))
         }
     }
 
@@ -221,5 +222,16 @@ public enum FrontendActionComposition {
         switch action {
         case .invoke(let extensionID, let action, let payload): .extensionAction(extensionID: extensionID, action: action, payload: payload)
         }
+    }
+}
+
+private extension UInt32 {
+    var bigEndianData: Data {
+        Data([
+            UInt8((self >> 24) & 0xFF),
+            UInt8((self >> 16) & 0xFF),
+            UInt8((self >> 8) & 0xFF),
+            UInt8(self & 0xFF)
+        ])
     }
 }

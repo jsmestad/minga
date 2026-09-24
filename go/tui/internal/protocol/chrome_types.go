@@ -76,17 +76,25 @@ type Minibuffer struct {
 
 type Completion struct {
 	Visible       bool
+	Generation    uint32
 	Row           uint16
 	Col           uint16
 	Selected      uint16
+	SelectedID    string
 	Items         []CompletionItem
 	Documentation string
+	Total         uint32
+	Matched       uint32
+	Incomplete    bool
 }
 
 type CompletionItem struct {
-	Kind   byte
-	Label  string
-	Detail string
+	Kind        byte
+	Label       string
+	Detail      string
+	ID          string
+	Source      string
+	MatchRanges []generated.CompletionMatchRange
 }
 
 type WhichKey struct {
@@ -105,31 +113,36 @@ type WhichKeyBinding struct {
 }
 
 type Picker struct {
-	Visible       bool
-	Selected      uint16
-	Filtered      uint16
-	Total         uint16
-	Marked        uint16
-	HasPreview    bool
-	Title         string
-	Query         string
-	ModePrefix    string
-	LoadStatus    byte
-	LoadError     string
-	Actions       []string
-	ActionIndex   byte
-	ActionVisible bool
-	Items         []PickerItem
+	Visible             bool
+	Generation          uint32
+	Selected            uint16
+	SelectedID          uint32
+	SelectedActionID    uint32
+	Filtered            uint16
+	Total               uint16
+	Marked              uint16
+	HasPreview          bool
+	Title               string
+	Query               string
+	ModePrefix          string
+	LoadStatus          byte
+	LoadError           string
+	Actions             []string
+	ActionActivationIDs []uint32
+	ActionIndex         byte
+	ActionVisible       bool
+	Items               []PickerItem
 }
 
 type PickerItem struct {
-	IconColor   uint32
-	Flags       byte
-	Label       string
-	Description string
-	Annotation  string
-	TwoLine     bool
-	Marked      bool
+	ActivationID uint32
+	IconColor    uint32
+	Flags        byte
+	Label        string
+	Description  string
+	Annotation   string
+	TwoLine      bool
+	Marked       bool
 }
 
 type PickerPreview struct {
@@ -148,15 +161,16 @@ type PreviewSegment struct {
 }
 
 type FileTree struct {
-	Visible  bool
-	Focused  bool
-	Flags    byte
-	Status   byte
-	Selected string
-	Root     string
-	Width    uint16
-	Error    string
-	Rows     []FileTreeRow
+	Visible    bool
+	Focused    bool
+	Generation uint32
+	Flags      byte
+	Status     byte
+	Selected   string
+	Root       string
+	Width      uint16
+	Error      string
+	Rows       []FileTreeRow
 }
 
 type FileTreeRow struct {

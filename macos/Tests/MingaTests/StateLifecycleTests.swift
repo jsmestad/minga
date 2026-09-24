@@ -361,6 +361,24 @@ struct FileTreeStateLifecycleTests {
         #expect(state.entries.isEmpty)
         #expect(state.projectRoot == "")
     }
+
+    @Test("same-generation reorder retains preview by file-tree item ID")
+    @MainActor func reorderRetainsPreviewByID() {
+        let localNavigationFlag: UInt8 = 0x20
+        let state = FileTreeState()
+        let a = stateWireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")
+        let b = stateWireFileTreeEntry(pathHash: 2, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        state.update(version: 4, generation: 7, treeFlags: localNavigationFlag, selectedId: "/project/a", focused: true, treeWidth: 30, rootPath: "/project", rawEntries: [a, b])
+        #expect(state.previewNavigation(delta: 1))
+
+        state.update(version: 4, generation: 7, treeFlags: localNavigationFlag, selectedId: "/project/a", focused: true, treeWidth: 30, rootPath: "/project", rawEntries: [b, a])
+        #expect(state.selectedId == "/project/b")
+        #expect(state.selectedIndex == 0)
+
+        state.update(version: 4, generation: 8, treeFlags: localNavigationFlag, selectedId: "/project/a", focused: true, treeWidth: 30, rootPath: "/project", rawEntries: [b, a])
+        #expect(state.selectedId == "/project/a")
+        #expect(state.selectedIndex == 1)
+    }
 }
 
 private func stateWireFileTreeEntry(

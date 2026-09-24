@@ -113,23 +113,40 @@ func TestReconcileScrollSeqOrderVsAnchorKey(t *testing.T) {
 	}
 }
 
-func TestReconcileFileTreeClearsPreview(t *testing.T) {
+func TestReconcileIdentityRetainsSameGenerationItemAcrossReorder(t *testing.T) {
 	lp := newLocalPresentation()
-	idx := 2
-	lp.previewFileTreeIndex = &idx
+	lp.setIdentityPreview(presentationFileTree, 7, "b")
 
-	lp.reconcileFileTree()
+	effective := lp.reconcileIdentity(presentationFileTree, 7, "a", map[string]struct{}{"b": {}, "a": {}}, true)
 
-	if lp.previewFileTreeIndex != nil {
-		t.Fatal("file-tree preview should be cleared on BEAM update")
+	if effective != "b" {
+		t.Fatalf("same-generation retained preview = %q, want b", effective)
+	}
+	if preview, ok := lp.identityPreview(presentationFileTree); !ok || preview.itemID != "b" {
+		t.Fatalf("retained preview = %+v, %v", preview, ok)
 	}
 }
 
-func TestReconcileFileTreeNoopWhenNoPreview(t *testing.T) {
-	lp := newLocalPresentation()
-	lp.reconcileFileTree()
-	if lp.previewFileTreeIndex != nil {
-		t.Fatal("reconcileFileTree should be safe to call with no preview set")
+func TestReconcileIdentityDiscardsGenerationChangeAndRetainedMiss(t *testing.T) {
+	tests := []struct {
+		name       string
+		generation uint32
+		retained   map[string]struct{}
+	}{
+		{"generation change", 8, map[string]struct{}{"b": {}}},
+		{"retained item miss", 7, map[string]struct{}{"a": {}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lp := newLocalPresentation()
+			lp.setIdentityPreview(presentationCompletion, 7, "b")
+			if effective := lp.reconcileIdentity(presentationCompletion, tt.generation, "a", tt.retained, true); effective != "a" {
+				t.Fatalf("effective identity = %q, want committed a", effective)
+			}
+			if _, ok := lp.identityPreview(presentationCompletion); ok {
+				t.Fatal("stale identity preview should be discarded")
+			}
+		})
 	}
 }
 
@@ -150,62 +167,13 @@ func TestDiscardOffset(t *testing.T) {
 
 func TestDiscardIdentity(t *testing.T) {
 	lp := newLocalPresentation()
-	idx := 2
-	lp.previewFileTreeIndex = &idx
-	cIdx := 3
-	lp.previewCompletionIndex = &cIdx
+	lp.setIdentityPreview(presentationFileTree, 1, "tree")
+	lp.setIdentityPreview(presentationCompletion, 2, "completion")
 
 	lp.discard(transformIdentity, 0)
 
-	if lp.previewFileTreeIndex != nil {
-		t.Fatal("discard(identity) should clear file-tree preview")
-	}
-	if lp.previewCompletionIndex != nil {
-		t.Fatal("discard(identity) should clear completion preview")
-	}
-}
-
-func TestReconcileCompletionClearsPreview(t *testing.T) {
-	lp := newLocalPresentation()
-	idx := 5
-	lp.previewCompletionIndex = &idx
-
-	lp.reconcileCompletion()
-
-	if lp.previewCompletionIndex != nil {
-		t.Fatal("completion preview should be cleared on BEAM update")
-	}
-}
-
-func TestReconcileCompletionNoopWhenNoPreview(t *testing.T) {
-	lp := newLocalPresentation()
-	lp.reconcileCompletion()
-	if lp.previewCompletionIndex != nil {
-		t.Fatal("reconcileCompletion should be safe to call with no preview set")
-	}
-}
-
-func TestReconcilePickerClearsPreview(t *testing.T) {
-	lp := newLocalPresentation()
-	idx := 3
-	lp.previewPickerIndex = &idx
-
-	lp.reconcilePicker()
-
-	if lp.previewPickerIndex != nil {
-		t.Fatal("picker preview should be cleared on BEAM update")
-	}
-}
-
-func TestDiscardIdentityClearsPickerPreview(t *testing.T) {
-	lp := newLocalPresentation()
-	idx := 2
-	lp.previewPickerIndex = &idx
-
-	lp.discard(transformIdentity, 0)
-
-	if lp.previewPickerIndex != nil {
-		t.Fatal("discard(identity) should clear picker preview")
+	if len(lp.identityPreviews) != 0 {
+		t.Fatalf("discard(identity) left previews: %+v", lp.identityPreviews)
 	}
 }
 

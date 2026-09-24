@@ -62,7 +62,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.mode_prefix == ">"
       assert model.load_status == :loading
       assert model.action_menu.actions == ["Open"]
-      assert model.action_menu.activation_ids == [1]
+      assert model.action_menu.activation_ids == [2]
       assert model.action_menu.selected_index == 0
       # The builder emits wire-shaped item maps: flags packs two_line (bit 0)
       # and marked (bit 1), description/annotation default to "", icon_color

@@ -15,8 +15,21 @@ type IndentGuides struct {
 }
 
 type FileTreeSelection struct {
+	Generation uint32
 	Focused    bool
 	SelectedID string
+}
+
+type CompletionSelection struct {
+	Generation    uint32
+	SelectedID    string
+	Documentation string
+}
+
+type PickerSelection struct {
+	Generation       uint32
+	SelectedID       uint32
+	SelectedActionID uint32
 }
 
 type CursorAnimation struct {
@@ -71,15 +84,47 @@ func decodeIndentGuides(payload []byte) (IndentGuides, string, int) {
 
 func decodeFileTreeSelection(payload []byte) (FileTreeSelection, string, int) {
 	size := payloadLen16Size(payload)
-	if size == 0 || len(payload) < 6 {
+	if size == 0 || len(payload) < 10 {
 		return FileTreeSelection{}, "", len(payload)
 	}
-	selection := FileTreeSelection{Focused: payload[3]&0x01 != 0}
-	selected, _, ok := readString16(payload, 4)
+	selection := FileTreeSelection{Focused: payload[3]&0x01 != 0, Generation: u32(payload, 4)}
+	selected, _, ok := readString16(payload, 8)
 	if ok {
 		selection.SelectedID = selected
 	}
 	return selection, selected, size
+}
+
+func decodeCompletionSelection(payload []byte) (CompletionSelection, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 || len(payload) < 10 {
+		return CompletionSelection{}, "", len(payload)
+	}
+	selection := CompletionSelection{Generation: u32(payload, 3)}
+	selected, offset, ok := readString8(payload, 7)
+	if !ok {
+		return CompletionSelection{}, "", size
+	}
+	documentation, _, ok := readString16(payload, offset)
+	if !ok {
+		return CompletionSelection{}, "", size
+	}
+	selection.SelectedID = selected
+	selection.Documentation = documentation
+	return selection, selected, size
+}
+
+func decodePickerSelection(payload []byte) (PickerSelection, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 || len(payload) < 15 {
+		return PickerSelection{}, "", len(payload)
+	}
+	selection := PickerSelection{
+		Generation:       u32(payload, 3),
+		SelectedID:       u32(payload, 7),
+		SelectedActionID: u32(payload, 11),
+	}
+	return selection, "picker selection", size
 }
 
 func decodeCursorAnimation(payload []byte) (CursorAnimation, string, int) {

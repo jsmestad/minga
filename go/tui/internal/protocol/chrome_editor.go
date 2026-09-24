@@ -204,14 +204,14 @@ func decodeFileTree(payload []byte) (FileTree, string, int) {
 		return FileTree{}, "", len(payload)
 	}
 	body := payload[5:size]
-	if len(body) < 3 {
+	if len(body) < 7 {
 		return FileTree{}, "", size
 	}
 
 	flags := body[1]
 	status := body[2]
-	tree := FileTree{Visible: flags&0x01 != 0, Focused: flags&0x02 != 0, Flags: flags, Status: status}
-	offset := 3
+	tree := FileTree{Visible: flags&0x01 != 0, Focused: flags&0x02 != 0, Flags: flags, Status: status, Generation: u32(body, 3)}
+	offset := 7
 	selected, next, ok := readString16(body, offset)
 	if !ok {
 		return tree, "", size
@@ -276,10 +276,11 @@ func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
 			break
 		}
 		row.Icon, offset, ok = readString8(body, offset)
-		if !ok || len(body) < offset+1 {
+		if !ok || len(body) < offset+5 {
 			break
 		}
-		offset++
+		offset++    // editing_type
+		offset += 4 // editing_token
 		_, offset, ok = readString16(body, offset)
 		if !ok || len(body) < offset+4 {
 			break

@@ -67,6 +67,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
 
     %FileTreeModel{
       root_path: tree.root,
+      generation: FileTreeState.presentation_generation(file_tree),
       tree_width: tree.width,
       status: status,
       focused?: FileTreeState.focused?(file_tree),
@@ -80,6 +81,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   defp build_state(%FileTreeState{} = file_tree, status) do
     %FileTreeModel{
       root_path: file_tree.project_root,
+      generation: FileTreeState.presentation_generation(file_tree),
       tree_width: FileTreeState.width(file_tree),
       status: status,
       focused?: false,

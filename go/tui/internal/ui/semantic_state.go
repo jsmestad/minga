@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,9 +19,40 @@ const (
 	fileTreeLocalNavigationUpKey   rune = 'k'
 )
 
+func (m *Model) reconcileFileTree(tree protocol.FileTree) {
+	retained := make(map[string]struct{}, len(tree.Rows))
+	for _, row := range tree.Rows {
+		retained[row.ID] = struct{}{}
+	}
+	m.localPresentation.reconcileIdentity(presentationFileTree, tree.Generation, tree.Selected, retained, tree.Visible)
+}
+
+func (m *Model) reconcileCompletion(completion protocol.Completion) {
+	retained := make(map[string]struct{}, len(completion.Items))
+	for _, item := range completion.Items {
+		retained[item.ID] = struct{}{}
+	}
+	m.localPresentation.reconcileIdentity(presentationCompletion, completion.Generation, completion.SelectedID, retained, completion.Visible)
+}
+
+func (m *Model) reconcilePicker(picker protocol.Picker) {
+	retained := make(map[string]struct{}, len(picker.Items))
+	for _, item := range picker.Items {
+		retained[pickerItemID(item)] = struct{}{}
+	}
+	committedID := ""
+	if picker.SelectedID != 0 {
+		committedID = fmt.Sprintf("%d", picker.SelectedID)
+	} else if int(picker.Selected) < len(picker.Items) {
+		committedID = pickerItemID(picker.Items[picker.Selected])
+	}
+	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible)
+}
+
 func (m *Model) applyFileTreeSelection(selection protocol.FileTreeSelection) {
 	payload, ok := m.chrome[generated.OPGuiFileTree]
-	if !ok || len(payload.Tree.Rows) == 0 {
+	if !ok || len(payload.Tree.Rows) == 0 || selection.Generation != payload.Tree.Generation {
+		m.localPresentation.discardIdentity(presentationFileTree)
 		return
 	}
 	payload.Tree.Focused = selection.Focused
@@ -31,6 +63,43 @@ func (m *Model) applyFileTreeSelection(selection protocol.FileTreeSelection) {
 		payload.Tree.Rows[i].Focused = selected && selection.Focused
 	}
 	m.chrome[generated.OPGuiFileTree] = payload
+	m.reconcileFileTree(payload.Tree)
+}
+
+func (m *Model) applyCompletionSelection(selection protocol.CompletionSelection) {
+	payload, ok := m.chrome[generated.OPGuiCompletion]
+	if !ok || selection.Generation != payload.Complete.Generation || completionItemIndex(payload.Complete, selection.SelectedID) < 0 {
+		m.localPresentation.discardIdentity(presentationCompletion)
+		return
+	}
+	payload.Complete.SelectedID = selection.SelectedID
+	payload.Complete.Selected = uint16(completionItemIndex(payload.Complete, selection.SelectedID))
+	payload.Complete.Documentation = selection.Documentation
+	m.chrome[generated.OPGuiCompletion] = payload
+	m.reconcileCompletion(payload.Complete)
+}
+
+func (m *Model) applyPickerSelection(selection protocol.PickerSelection) {
+	payload, ok := m.chrome[generated.OPGuiPicker]
+	if !ok || selection.Generation != payload.Picker.Generation {
+		m.localPresentation.discardIdentity(presentationPicker)
+		return
+	}
+	if index := pickerItemIndex(payload.Picker, selection.SelectedID); index >= 0 {
+		payload.Picker.Selected = uint16(index)
+		payload.Picker.SelectedID = selection.SelectedID
+	} else {
+		m.localPresentation.discardIdentity(presentationPicker)
+	}
+	payload.Picker.SelectedActionID = selection.SelectedActionID
+	for index, activationID := range payload.Picker.ActionActivationIDs {
+		if activationID == selection.SelectedActionID {
+			payload.Picker.ActionIndex = byte(index)
+			break
+		}
+	}
+	m.chrome[generated.OPGuiPicker] = payload
+	m.reconcilePicker(payload.Picker)
 }
 
 func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
@@ -49,10 +118,7 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	selectedIndex := fileTreeSelectedIndex(payload)
-	if m.localPresentation.previewFileTreeIndex != nil {
-		selectedIndex = *m.localPresentation.previewFileTreeIndex
-	}
+	selectedIndex := m.effectiveFileTreeIndex(payload)
 	if selectedIndex < 0 {
 		return false
 	}
@@ -67,7 +133,7 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	m.localPresentation.previewFileTreeIndex = &nextIndex
+	m.localPresentation.setIdentityPreview(presentationFileTree, payload.Generation, payload.Rows[nextIndex].ID)
 	return true
 }
 
@@ -96,6 +162,26 @@ func fileTreeSelectedIndex(tree protocol.FileTree) int {
 		}
 	}
 	return -1
+}
+
+func fileTreeItemIndex(tree protocol.FileTree, itemID string) int {
+	for index, row := range tree.Rows {
+		if row.ID == itemID {
+			return index
+		}
+	}
+	return -1
+}
+
+func (m Model) effectiveFileTreeIndex(tree protocol.FileTree) int {
+	if preview, ok := m.localPresentation.identityPreview(presentationFileTree); ok && preview.generation == tree.Generation {
+		for index, row := range tree.Rows {
+			if row.ID == preview.itemID {
+				return index
+			}
+		}
+	}
+	return fileTreeSelectedIndex(tree)
 }
 
 func (m *Model) previewCompletionNavigation(msg tea.KeyPressMsg) bool {
@@ -129,10 +215,7 @@ func (m *Model) previewCompletionNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	current := int(payload.Complete.Selected)
-	if m.localPresentation.previewCompletionIndex != nil {
-		current = *m.localPresentation.previewCompletionIndex
-	}
+	current := m.effectiveCompletionIndex(payload.Complete)
 
 	next := current + delta
 	if next < 0 {
@@ -144,18 +227,53 @@ func (m *Model) previewCompletionNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	m.localPresentation.previewCompletionIndex = &next
+	m.localPresentation.setIdentityPreview(presentationCompletion, payload.Complete.Generation, payload.Complete.Items[next].ID)
 	return true
 }
 
 func (m Model) effectiveCompletionIndex(completion protocol.Completion) int {
-	if m.localPresentation.previewCompletionIndex != nil {
-		idx := *m.localPresentation.previewCompletionIndex
-		if idx >= 0 && idx < len(completion.Items) {
-			return idx
+	if preview, ok := m.localPresentation.identityPreview(presentationCompletion); ok && preview.generation == completion.Generation {
+		if index := completionItemIndex(completion, preview.itemID); index >= 0 {
+			return index
 		}
 	}
+	if index := completionItemIndex(completion, completion.SelectedID); index >= 0 {
+		return index
+	}
 	return min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
+}
+
+func (m Model) localPreviewActivationPacket(msg tea.KeyPressMsg) ([]byte, bool) {
+	key := msg.Key()
+	if key.Code != tea.KeyEnter && key.Code != tea.KeyKpEnter {
+		return nil, false
+	}
+	if key.Mod.Contains(tea.ModCtrl) || key.Mod.Contains(tea.ModShift) || key.Mod.Contains(tea.ModAlt) || key.Mod.Contains(tea.ModSuper) {
+		return nil, false
+	}
+	if preview, ok := m.localPresentation.identityPreview(presentationCompletion); ok {
+		if completion, present := m.completion(); present && completion.Visible && preview.generation == completion.Generation && completionItemIndex(completion, preview.itemID) >= 0 {
+			return protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, preview.generation, []byte(preview.itemID)), true
+		}
+	}
+	if preview, ok := m.localPresentation.identityPreview(presentationPicker); ok {
+		if picker, present := m.picker(); present && picker.Visible && preview.generation == picker.Generation {
+			index := pickerItemIndexByID(picker, preview.itemID)
+			if index >= 0 {
+				activationID := picker.Items[index].ActivationID
+				itemID := []byte{byte(activationID >> 24), byte(activationID >> 16), byte(activationID >> 8), byte(activationID)}
+				return protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 1, preview.generation, itemID), true
+			}
+		}
+	}
+	if !m.modalOverlayActive() {
+		if preview, ok := m.localPresentation.identityPreview(presentationFileTree); ok {
+			if tree, present := m.fileTree(); present && tree.Visible && preview.generation == tree.Generation && fileTreeItemIndex(tree, preview.itemID) >= 0 {
+				return protocol.EncodeGUISemanticItemActivate(byte(presentationFileTree), 1, preview.generation, []byte(preview.itemID)), true
+			}
+		}
+	}
+	return nil, false
 }
 
 func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
@@ -174,10 +292,7 @@ func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	current := int(payload.Picker.Selected)
-	if m.localPresentation.previewPickerIndex != nil {
-		current = *m.localPresentation.previewPickerIndex
-	}
+	current := m.effectivePickerIndex(payload.Picker)
 
 	next := current + delta
 	if next < 0 {
@@ -189,7 +304,7 @@ func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	m.localPresentation.previewPickerIndex = &next
+	m.localPresentation.setIdentityPreview(presentationPicker, payload.Picker.Generation, pickerItemID(payload.Picker.Items[next]))
 	return true
 }
 
@@ -265,13 +380,46 @@ func emptyStateNavigationDelta(key tea.Key) (int, bool) {
 }
 
 func (m Model) effectivePickerIndex(picker protocol.Picker) int {
-	if m.localPresentation.previewPickerIndex != nil {
-		idx := *m.localPresentation.previewPickerIndex
-		if idx >= 0 && idx < len(picker.Items) {
-			return idx
+	if preview, ok := m.localPresentation.identityPreview(presentationPicker); ok && preview.generation == picker.Generation {
+		if index := pickerItemIndexByID(picker, preview.itemID); index >= 0 {
+			return index
 		}
 	}
+	if index := pickerItemIndex(picker, picker.SelectedID); index >= 0 {
+		return index
+	}
 	return min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
+}
+
+func completionItemIndex(completion protocol.Completion, itemID string) int {
+	for index, item := range completion.Items {
+		if item.ID == itemID {
+			return index
+		}
+	}
+	return -1
+}
+
+func pickerItemID(item protocol.PickerItem) string {
+	return fmt.Sprintf("%d", item.ActivationID)
+}
+
+func pickerItemIndex(picker protocol.Picker, activationID uint32) int {
+	for index, item := range picker.Items {
+		if item.ActivationID == activationID {
+			return index
+		}
+	}
+	return -1
+}
+
+func pickerItemIndexByID(picker protocol.Picker, itemID string) int {
+	for index, item := range picker.Items {
+		if pickerItemID(item) == itemID {
+			return index
+		}
+	}
+	return -1
 }
 
 func (m Model) applyIndentGuide(window protocol.WindowContent, style lipgloss.Style, rowIndex int, col int, text string) (lipgloss.Style, string) {

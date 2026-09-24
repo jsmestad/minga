@@ -749,7 +749,7 @@ defmodule MingaEditor.PickerUITest do
           source: MingaEditor.UI.Picker.CommandSource,
           restore: 0
         }
-        |> PickerState.refresh_activation_offer()
+        |> PickerState.begin_query_session()
 
       state =
         TestHelpers.base_state(content: "initial")
@@ -787,7 +787,7 @@ defmodule MingaEditor.PickerUITest do
 
       picker_state =
         %PickerState{picker: picker, source: FileSource, restore: 0}
-        |> PickerState.refresh_activation_offer()
+        |> PickerState.begin_query_session()
 
       state =
         TestHelpers.base_state(content: "initial")
@@ -808,7 +808,7 @@ defmodule MingaEditor.PickerUITest do
 
       picker_state =
         %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
-        |> PickerState.refresh_activation_offer()
+        |> PickerState.begin_query_session()
 
       state =
         TestHelpers.base_state(content: "initial")
@@ -828,28 +828,29 @@ defmodule MingaEditor.PickerUITest do
 
       assert repeated.shell_runtime.state.notice.message ==
                "Picker choice changed; select it again"
+
+      assert repeated.render.render_correlation.keyframe_pending?
     end
 
-    test "stale item activation remains visible and preserves the current query" do
-      picker = Picker.new([%Item{id: :first, label: "first"}], title: "Test")
+    test "stale-generation item activation remains visible and preserves the current query" do
+      picker =
+        Picker.new([%Item{id: :first, label: "first"}], title: "Test") |> Picker.filter("f")
 
       picker_state =
         %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
-        |> PickerState.refresh_activation_offer()
+        |> PickerState.begin_query_session()
 
       state =
         TestHelpers.base_state(content: "initial")
         |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
 
       generation = picker_state.activation_offer.generation
-      edited = PickerUI.handle_key(state, ?f, 0)
-      {:picker, %{picker_ui: replaced_picker}} = edited.shell_runtime.state.modal
-      refute replaced_picker.activation_offer.generation == generation
-      result = GuiActionHandler.dispatch(edited, {:picker_item_activate, generation, 1})
+      result = GuiActionHandler.dispatch(state, {:picker_item_activate, generation + 1, 1})
 
       assert {:picker, %{picker_ui: %{picker: current}}} = result.shell_runtime.state.modal
       assert current.query == "f"
       assert result.shell_runtime.state.notice.message == "Picker choice changed; select it again"
+      assert result.render.render_correlation.keyframe_pending?
       refute Map.has_key?(result, :selected_item_id)
     end
 
@@ -859,7 +860,7 @@ defmodule MingaEditor.PickerUITest do
 
       picker_state =
         %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
-        |> PickerState.refresh_activation_offer()
+        |> PickerState.begin_query_session()
 
       state =
         TestHelpers.base_state(content: "initial")
@@ -868,7 +869,11 @@ defmodule MingaEditor.PickerUITest do
 
       {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
       generation = live_picker.activation_offer.generation
-      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, 2})
+
+      {delete_id, _, _} =
+        Enum.find(live_picker.activation_offer.actions, &(elem(&1, 1) == {"Delete", :delete}))
+
+      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, delete_id})
 
       assert result.shell_runtime.state.modal == :none
       assert Map.get(result, :action_item_id) == {:delete, :first}
@@ -885,7 +890,7 @@ defmodule MingaEditor.PickerUITest do
           {:picker,
            PickerPayload.new(
              %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
-             |> PickerState.refresh_activation_offer()
+             |> PickerState.begin_query_session()
            )}
         )
         |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
@@ -895,7 +900,11 @@ defmodule MingaEditor.PickerUITest do
 
       {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
       generation = live_picker.activation_offer.generation
-      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, 2})
+
+      {delete_id, _, _} =
+        Enum.find(live_picker.activation_offer.actions, &(elem(&1, 1) == {"Delete", :delete}))
+
+      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, delete_id})
 
       assert result.shell_runtime.state.modal == :none
       assert Map.get(result, :action_item_id) == {:delete, :first}
@@ -911,14 +920,15 @@ defmodule MingaEditor.PickerUITest do
           {:picker,
            PickerPayload.new(
              %PickerState{picker: picker, source: FailingActionSource, restore: 0}
-             |> PickerState.refresh_activation_offer()
+             |> PickerState.begin_query_session()
            )}
         )
         |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
 
       {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
       generation = live_picker.activation_offer.generation
-      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, 1})
+      [{action_id, _action, _item}] = live_picker.activation_offer.actions
+      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, action_id})
 
       assert result.shell_runtime.state.modal == :none
       assert result.shell_runtime.state.notice.message == "Action failed for first"

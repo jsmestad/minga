@@ -7,47 +7,25 @@ import (
 )
 
 func decodeCompletion(payload []byte) (Completion, string, int) {
-	if len(payload) < 2 || payload[1] == 0 {
-		return Completion{}, "", min(len(payload), 2)
+	fields, offset, err := generated.DecodeGuiCompletionFields(payload, 1, len(payload))
+	if err != nil {
+		return Completion{}, "", len(payload)
 	}
-	if len(payload) < 10 {
-		return Completion{Visible: true}, "", len(payload)
-	}
-	completion := Completion{
-		Visible:  true,
-		Row:      u16(payload, 2),
-		Col:      u16(payload, 4),
-		Selected: u16(payload, 6),
-	}
-	count := int(u16(payload, 8))
-	completion.Items = make([]CompletionItem, 0, count)
-	offset := 10
-	labels := make([]string, 0, count)
-	for i := 0; i < count && len(payload) >= offset+5; i++ {
-		item := CompletionItem{Kind: payload[offset]}
-		offset++
-		var ok bool
-		item.Label, offset, ok = readString16(payload, offset)
-		if !ok {
-			break
-		}
-		item.Detail, offset, ok = readString16(payload, offset)
-		if !ok {
-			break
-		}
-		completion.Items = append(completion.Items, item)
+	items := make([]CompletionItem, 0, len(fields.Items))
+	labels := make([]string, 0, len(fields.Items))
+	for _, item := range fields.Items {
+		items = append(items, CompletionItem{
+			Kind: byte(item.Kind), Label: item.Label, Detail: item.Detail,
+			ID: item.ID, Source: item.Source, MatchRanges: item.MatchRanges,
+		})
 		labels = append(labels, item.Label)
 	}
-	// The selected item's documentation preview trails the item list as a
-	// string16 (schema: gui_completion conditional_tail). A conformant BEAM
-	// always emits it when visible==1 (empty string for items without docs), so
-	// consume it as part of this command's bytes. A short/legacy packet that
-	// omits it leaves Documentation empty and does not advance the offset.
-	if doc, next, ok := readString16(payload, offset); ok {
-		completion.Documentation = doc
-		offset = next
-	}
-	return completion, stringsJoin(labels, "  "), offset
+	return Completion{
+		Visible: fields.Visible != 0, Generation: fields.Generation,
+		Row: fields.CursorRow, Col: fields.CursorCol, Selected: fields.SelectedOffset,
+		SelectedID: fields.SelectedItemID, Items: items, Documentation: fields.Documentation,
+		Total: fields.TotalCount, Matched: fields.MatchedCount, Incomplete: fields.Incomplete != 0,
+	}, stringsJoin(labels, "  "), offset
 }
 
 func decodeWhichKey(payload []byte) (WhichKey, string, int) {
@@ -121,6 +99,7 @@ func decodePicker(payload []byte) (Picker, string, int) {
 		case 0x01: // Header
 			if h, _, err := generated.DecodeGuiPickerHeader(payload, sectionStart, sectionEnd); err == nil {
 				picker.Visible = h.Visible != 0
+				picker.Generation = h.ActivationGeneration
 				picker.Selected = h.SelectedIndex
 				picker.Filtered = h.FilteredCount
 				picker.Total = h.TotalCount
@@ -141,6 +120,7 @@ func decodePicker(payload []byte) (Picker, string, int) {
 				picker.ActionVisible = m.Visible != 0
 				picker.ActionIndex = m.SelectedIndex
 				picker.Actions = m.Actions
+				picker.ActionActivationIDs = m.ActivationIds
 			}
 		case 0x05: // Mode prefix
 			if m, _, err := generated.DecodeGuiPickerModePrefix(payload, sectionStart, sectionEnd); err == nil {
@@ -172,13 +152,14 @@ func mapPickerItems(items []generated.PickerItem) []PickerItem {
 	out := make([]PickerItem, 0, len(items))
 	for _, item := range items {
 		out = append(out, PickerItem{
-			IconColor:   item.IconColor,
-			Flags:       item.Flags,
-			Label:       item.Label,
-			Description: item.Description,
-			Annotation:  item.Annotation,
-			TwoLine:     item.Flags&0x01 != 0,
-			Marked:      item.Flags&0x02 != 0,
+			IconColor:    item.IconColor,
+			ActivationID: item.ActivationID,
+			Flags:        item.Flags,
+			Label:        item.Label,
+			Description:  item.Description,
+			Annotation:   item.Annotation,
+			TwoLine:      item.Flags&0x01 != 0,
+			Marked:       item.Flags&0x02 != 0,
 		})
 	}
 	return out

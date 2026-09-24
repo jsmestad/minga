@@ -2358,8 +2358,8 @@ func TestApplyCommandsStoresIndentGuidesByWindow(t *testing.T) {
 
 func TestFileTreeSelectionUpdatesExistingTree(t *testing.T) {
 	model := New(30, 6, nil, nil)
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b"}}}}}
-	model.applyFileTreeSelection(protocol.FileTreeSelection{Focused: true, SelectedID: "b"})
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Generation: 7, Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b"}}}}}
+	model.applyFileTreeSelection(protocol.FileTreeSelection{Generation: 7, Focused: true, SelectedID: "b"})
 
 	tree := model.chrome[generated.OPGuiFileTree].Tree
 	if tree.Selected != "b" || !tree.Focused || tree.Rows[0].Selected || !tree.Rows[1].Selected || !tree.Rows[1].Focused {
@@ -2371,13 +2371,13 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 	t.Run("j advances locally while still forwarding to BEAM", func(t *testing.T) {
 		out := make(chan []byte, 1)
 		model := New(30, 6, out, nil)
-		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
+		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
 		model = updated.(Model)
 
-		if model.localPresentation.previewFileTreeIndex == nil || *model.localPresentation.previewFileTreeIndex != 1 {
-			t.Fatalf("eligible j press should set preview file-tree index to 1, got %v", model.localPresentation.previewFileTreeIndex)
+		if got := model.effectiveFileTreeIndex(model.chrome[generated.OPGuiFileTree].Tree); got != 1 {
+			t.Fatalf("eligible j press should preview file-tree item b, got index %d", got)
 		}
 		packets := drainOutboundPackets(out)
 		if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != fileTreeLocalNavigationDownKey || packets[0][5] != 0 {
@@ -2388,13 +2388,13 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 	t.Run("up arrow retreats locally while still forwarding to BEAM", func(t *testing.T) {
 		out := make(chan []byte, 1)
 		model := New(30, 6, out, nil)
-		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "b", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b", Selected: true, Focused: true}}}}}
+		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "b", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b", Selected: true, Focused: true}}}}}
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
 		model = updated.(Model)
 
-		if model.localPresentation.previewFileTreeIndex == nil || *model.localPresentation.previewFileTreeIndex != 0 {
-			t.Fatalf("eligible up-arrow press should set preview file-tree index to 0, got %v", model.localPresentation.previewFileTreeIndex)
+		if got := model.effectiveFileTreeIndex(model.chrome[generated.OPGuiFileTree].Tree); got != 0 {
+			t.Fatalf("eligible up-arrow press should preview file-tree item a, got index %d", got)
 		}
 		packets := drainOutboundPackets(out)
 		if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != arrowUp || packets[0][5] != 0 {
@@ -2406,13 +2406,13 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(30, 6, out, nil)
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewFileTreeIndex != nil {
-		t.Fatalf("file tree should not set preview index when the local-navigation flag is clear, got %v", *model.localPresentation.previewFileTreeIndex)
+	if _, ok := model.localPresentation.identityPreview(presentationFileTree); ok {
+		t.Fatal("file tree should not set a preview when the local-navigation flag is clear")
 	}
 	packets := drainOutboundPackets(out)
 	if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != fileTreeLocalNavigationDownKey || packets[0][5] != 0 {
@@ -2642,7 +2642,7 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {Status: protocol.StatusBar{Left: []protocol.StatusSegment{{Text: " save ", Command: "save"}}, Right: []protocol.StatusSegment{{Text: " quit", Command: "quit"}}}},
 		generated.OPGuiTabBar:    {Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 41, Icon: "󰈙", Label: "one.ex"}, {ID: 42, Icon: "󰈙", Label: "two.ex", Active: true}}}},
-		generated.OPGuiFileTree:  {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}, {ID: "row-1", Name: "row-1"}}}},
+		generated.OPGuiFileTree:  {Tree: protocol.FileTree{Visible: true, Generation: 9, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}, {ID: "row-1", Name: "row-1"}}}},
 	}
 	model.layout = model.computeLayout()
 	model.viewport.SetHeight(model.layout.body.Height)
@@ -2666,8 +2666,8 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 
 	rowZone := waitForZone(t, model, zoneIDFileTreeRow(0))
 	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.StartX + 1, Y: rowZone.StartY}))
-	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIFileTreeClick(0)) {
-		t.Fatalf("file-tree click should route file-tree packet, ok=%v packet=%v", ok, cmd)
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISemanticItemActivate(byte(presentationFileTree), 1, 9, []byte("row-0"))) {
+		t.Fatalf("file-tree click should route semantic activation, ok=%v packet=%v", ok, cmd)
 	}
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: rowZone.EndX + 10, Y: rowZone.EndY + 10})); ok {
 		t.Fatalf("out-of-bounds clicks should fall back")
@@ -2688,9 +2688,9 @@ func TestSemanticMouseBodyClickFallsThrough(t *testing.T) {
 func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 	model := New(60, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiCompletion: {Complete: protocol.Completion{Visible: true, Selected: 0, Items: []protocol.CompletionItem{
-			{Label: "alpha", Detail: "fn"},
-			{Label: "beta", Detail: "fn"},
+		generated.OPGuiCompletion: {Complete: protocol.Completion{Visible: true, Generation: 11, Selected: 0, SelectedID: "alpha", Items: []protocol.CompletionItem{
+			{ID: "alpha", Label: "alpha", Detail: "fn"},
+			{ID: "beta", Label: "beta", Detail: "fn"},
 		}}},
 	}
 	// The completion overlay is registry-placed now (#2281): it renders at its
@@ -2704,8 +2704,8 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 
 	zone := waitForZone(t, model, zoneIDCompletionItem(1))
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
-	if !ok || !bytes.Equal(cmd, protocol.EncodeGUICompletionSelect(1)) {
-		t.Fatalf("completion row click should route completion_select index 1, ok=%v packet=%v", ok, cmd)
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, 11, []byte("beta"))) {
+		t.Fatalf("completion row click should route semantic activation, ok=%v packet=%v", ok, cmd)
 	}
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX + 50, Y: zone.EndY + 50})); ok {
 		t.Fatalf("out-of-bounds completion clicks should fall back")
@@ -3235,9 +3235,13 @@ func waitForZone(t *testing.T, model Model, id string) *zoneInfo {
 func completionChrome(items int, selected uint16) protocol.ChromePayload {
 	cItems := make([]protocol.CompletionItem, items)
 	for i := range cItems {
-		cItems[i] = protocol.CompletionItem{Kind: 1, Label: fmt.Sprintf("item%d", i)}
+		cItems[i] = protocol.CompletionItem{ID: fmt.Sprintf("completion-%d", i), Kind: 1, Label: fmt.Sprintf("item%d", i)}
 	}
-	return protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Selected: selected, Items: cItems}}
+	selectedID := ""
+	if int(selected) < len(cItems) {
+		selectedID = cItems[selected].ID
+	}
+	return protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Generation: 7, Selected: selected, SelectedID: selectedID, Items: cItems}}
 }
 
 func TestCompletionLocalNavigationCtrlNAdvancesPreview(t *testing.T) {
@@ -3248,12 +3252,28 @@ func TestCompletionLocalNavigationCtrlNAdvancesPreview(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewCompletionIndex == nil || *model.localPresentation.previewCompletionIndex != 1 {
-		t.Fatalf("C-n should set preview completion index to 1, got %v", model.localPresentation.previewCompletionIndex)
+	if got := model.effectiveCompletionIndex(model.chrome[generated.OPGuiCompletion].Complete); got != 1 {
+		t.Fatalf("C-n should preview completion item 1, got index %d", got)
 	}
 	packets := drainOutboundPackets(out)
 	if len(packets) != 1 {
 		t.Fatalf("C-n should still forward the key packet, got %d packets", len(packets))
+	}
+}
+
+func TestCompletionLocalPreviewEnterActivatesExactIdentity(t *testing.T) {
+	out := make(chan []byte, 2)
+	model := New(30, 10, out, nil)
+	model.chrome[generated.OPGuiCompletion] = completionChrome(3, 0)
+	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "completion-2")
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	model = updated.(Model)
+
+	packets := drainOutboundPackets(out)
+	want := protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, 7, []byte("completion-2"))
+	if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("Enter packet = %v, want exact semantic activation %v", packets, want)
 	}
 }
 
@@ -3265,8 +3285,8 @@ func TestCompletionLocalNavigationCtrlPRetreatsPreview(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewCompletionIndex == nil || *model.localPresentation.previewCompletionIndex != 2 {
-		t.Fatalf("C-p should set preview completion index to 2, got %v", model.localPresentation.previewCompletionIndex)
+	if got := model.effectiveCompletionIndex(model.chrome[generated.OPGuiCompletion].Complete); got != 2 {
+		t.Fatalf("C-p should preview completion item 2, got index %d", got)
 	}
 }
 
@@ -3278,8 +3298,8 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 		model = updated.(Model)
 
-		if model.localPresentation.previewCompletionIndex != nil {
-			t.Fatalf("C-n at last item should not set preview (no movement), got %v", *model.localPresentation.previewCompletionIndex)
+		if _, ok := model.localPresentation.identityPreview(presentationCompletion); ok {
+			t.Fatal("C-n at last item should not set preview")
 		}
 	})
 
@@ -3290,8 +3310,8 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
 		model = updated.(Model)
 
-		if model.localPresentation.previewCompletionIndex != nil {
-			t.Fatalf("C-p at first item should not set preview (no movement), got %v", *model.localPresentation.previewCompletionIndex)
+		if _, ok := model.localPresentation.identityPreview(presentationCompletion); ok {
+			t.Fatal("C-p at first item should not set preview")
 		}
 	})
 }
@@ -3315,37 +3335,37 @@ func TestCompletionLocalNavigationIgnoredWhenPopupHidden(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewCompletionIndex != nil {
+	if _, ok := model.localPresentation.identityPreview(presentationCompletion); ok {
 		t.Fatalf("C-n should be ignored when popup is hidden")
 	}
 }
 
 func TestCompletionEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
 	model := New(30, 10, nil, nil)
-	completion := protocol.Completion{Visible: true, Selected: 1, Items: []protocol.CompletionItem{{Kind: 1, Label: "a"}, {Kind: 1, Label: "b"}, {Kind: 1, Label: "c"}}}
+	completion := protocol.Completion{Visible: true, Generation: 7, Selected: 1, SelectedID: "b", Items: []protocol.CompletionItem{{ID: "a", Kind: 1, Label: "a"}, {ID: "b", Kind: 1, Label: "b"}, {ID: "c", Kind: 1, Label: "c"}}}
 
 	if got := model.effectiveCompletionIndex(completion); got != 1 {
 		t.Fatalf("effective index with no preview should be committed, got %d", got)
 	}
 
-	idx := 2
-	model.localPresentation.previewCompletionIndex = &idx
+	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "c")
 	if got := model.effectiveCompletionIndex(completion); got != 2 {
 		t.Fatalf("effective index with preview should be preview index, got %d", got)
 	}
 }
 
-func TestCompletionReconcileClearsPreviewOnBEAMUpdate(t *testing.T) {
+func TestCompletionReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing.T) {
 	model := New(30, 10, nil, nil)
-	idx := 2
-	model.localPresentation.previewCompletionIndex = &idx
+	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "completion-2")
+	payload := completionChrome(3, 1)
+	payload.Complete.Items[0], payload.Complete.Items[2] = payload.Complete.Items[2], payload.Complete.Items[0]
 
 	_ = model.applyCommands(frame(
-		protocol.Command{Kind: protocol.CommandChrome, Chrome: completionChrome(3, 1)},
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: payload},
 	))
 
-	if model.localPresentation.previewCompletionIndex != nil {
-		t.Fatalf("BEAM completion update should clear the preview index")
+	if got := model.effectiveCompletionIndex(model.chrome[generated.OPGuiCompletion].Complete); got != 0 {
+		t.Fatalf("same-generation reorder should retain preview by ID at index 0, got %d", got)
 	}
 }
 
@@ -3353,10 +3373,9 @@ func TestCompletionTwoIndexRenderingSplit(t *testing.T) {
 	model := New(80, 20, nil, nil)
 	model.activePalette = paletteFromTheme(testThemeCommand().Chrome.Theme)
 	model.themeApplied = true
-	items := []protocol.CompletionItem{{Kind: 1, Label: "foo"}, {Kind: 1, Label: "bar"}, {Kind: 1, Label: "baz"}}
-	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Selected: 0, Items: items, Documentation: "foo docs"}}
-	idx := 2
-	model.localPresentation.previewCompletionIndex = &idx
+	items := []protocol.CompletionItem{{ID: "foo", Kind: 1, Label: "foo"}, {ID: "bar", Kind: 1, Label: "bar"}, {ID: "baz", Kind: 1, Label: "baz"}}
+	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Generation: 7, Selected: 0, SelectedID: "foo", Items: items, Documentation: "foo docs"}}
+	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "baz")
 
 	lines := model.renderCompletion(model.chrome[generated.OPGuiCompletion].Complete)
 
@@ -3369,9 +3388,13 @@ func TestCompletionTwoIndexRenderingSplit(t *testing.T) {
 func pickerChrome(items int, selected uint16) protocol.ChromePayload {
 	pItems := make([]protocol.PickerItem, items)
 	for i := range pItems {
-		pItems[i] = protocol.PickerItem{Label: fmt.Sprintf("item%d", i)}
+		pItems[i] = protocol.PickerItem{ActivationID: uint32(i + 1), Label: fmt.Sprintf("item%d", i)}
 	}
-	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Selected: selected, Items: pItems}}
+	selectedID := uint32(0)
+	if int(selected) < len(pItems) {
+		selectedID = pItems[selected].ActivationID
+	}
+	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Generation: 7, Selected: selected, SelectedID: selectedID, Items: pItems}}
 }
 
 func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
@@ -3382,8 +3405,8 @@ func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewPickerIndex == nil || *model.localPresentation.previewPickerIndex != 1 {
-		t.Fatalf("j should set preview picker index to 1, got %v", model.localPresentation.previewPickerIndex)
+	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 1 {
+		t.Fatalf("j should preview picker item 1, got index %d", got)
 	}
 	packets := drainOutboundPackets(out)
 	if len(packets) != 1 {
@@ -3399,8 +3422,8 @@ func TestPickerLocalNavigationKRetreatsPreview(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewPickerIndex == nil || *model.localPresentation.previewPickerIndex != 2 {
-		t.Fatalf("k should set preview picker index to 2, got %v", model.localPresentation.previewPickerIndex)
+	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 2 {
+		t.Fatalf("k should preview picker item 2, got index %d", got)
 	}
 }
 
@@ -3412,8 +3435,8 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 		model = updated.(Model)
 
-		if model.localPresentation.previewPickerIndex != nil {
-			t.Fatalf("j at last item should not set preview, got %v", *model.localPresentation.previewPickerIndex)
+		if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
+			t.Fatal("j at last item should not set preview")
 		}
 	})
 
@@ -3424,8 +3447,8 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
 		model = updated.(Model)
 
-		if model.localPresentation.previewPickerIndex != nil {
-			t.Fatalf("k at first item should not set preview, got %v", *model.localPresentation.previewPickerIndex)
+		if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
+			t.Fatal("k at first item should not set preview")
 		}
 	})
 }
@@ -3449,36 +3472,36 @@ func TestPickerLocalNavigationIgnoredWhenHidden(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	model = updated.(Model)
 
-	if model.localPresentation.previewPickerIndex != nil {
+	if _, ok := model.localPresentation.identityPreview(presentationPicker); ok {
 		t.Fatalf("j should be ignored when picker is hidden")
 	}
 }
 
 func TestPickerEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
 	model := New(30, 10, nil, nil)
-	picker := protocol.Picker{Visible: true, Selected: 1, Items: []protocol.PickerItem{{Label: "a"}, {Label: "b"}, {Label: "c"}}}
+	picker := protocol.Picker{Visible: true, Generation: 7, Selected: 1, SelectedID: 2, Items: []protocol.PickerItem{{ActivationID: 1, Label: "a"}, {ActivationID: 2, Label: "b"}, {ActivationID: 3, Label: "c"}}}
 
 	if got := model.effectivePickerIndex(picker); got != 1 {
 		t.Fatalf("effective index with no preview should be committed, got %d", got)
 	}
 
-	idx := 2
-	model.localPresentation.previewPickerIndex = &idx
+	model.localPresentation.setIdentityPreview(presentationPicker, 7, "3")
 	if got := model.effectivePickerIndex(picker); got != 2 {
 		t.Fatalf("effective index with preview should be preview index, got %d", got)
 	}
 }
 
-func TestPickerReconcileClearsPreviewOnBEAMUpdate(t *testing.T) {
+func TestPickerReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing.T) {
 	model := New(30, 10, nil, nil)
-	idx := 2
-	model.localPresentation.previewPickerIndex = &idx
+	model.localPresentation.setIdentityPreview(presentationPicker, 7, "3")
+	payload := pickerChrome(3, 1)
+	payload.Picker.Items[0], payload.Picker.Items[2] = payload.Picker.Items[2], payload.Picker.Items[0]
 
 	_ = model.applyCommands(frame(
-		protocol.Command{Kind: protocol.CommandChrome, Chrome: pickerChrome(3, 1)},
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: payload},
 	))
 
-	if model.localPresentation.previewPickerIndex != nil {
-		t.Fatalf("BEAM picker update should clear the preview index")
+	if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != 0 {
+		t.Fatalf("same-generation reorder should retain preview by ID at index 0, got %d", got)
 	}
 }

@@ -11,6 +11,7 @@ defmodule Minga.RenderModel.UI.FileTree do
 
   @type t :: %__MODULE__{
           root_path: String.t() | nil,
+          generation: non_neg_integer(),
           tree_width: non_neg_integer(),
           status: status(),
           focused?: boolean(),
@@ -20,6 +21,7 @@ defmodule Minga.RenderModel.UI.FileTree do
         }
 
   defstruct root_path: nil,
+            generation: 0,
             tree_width: 0,
             status: :hidden,
             focused?: false,

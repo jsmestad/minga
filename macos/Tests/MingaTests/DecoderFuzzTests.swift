@@ -167,6 +167,7 @@ private func randomGuiCompletion() -> Data {
     appendRandomU32(&data)  // total count
     appendRandomU32(&data)  // matched count
     data.append(Bool.random() ? 1 : 0)  // incomplete
+    appendRandomU32(&data)  // generation
     return data
 }
 

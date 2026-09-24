@@ -55,6 +55,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/Shared/GUIState.swift#GUIThemeBacking": "observable theme backing",
         "Sources/Views/Shared/GUIState.swift#GUIWindowContentBacking": "observable resident-window backing",
         "Sources/Views/Shared/GUIState.swift#GUIState": "aggregate observable state",
+        "Sources/Views/Shared/LocalPresentationStore.swift#LocalPresentationStore": "local presentation identity owner",
         "Sources/Views/Shared/ThemeColors.swift#ThemeColors": "observable theme slots",
         "Sources/Views/Sidebar/FileTreeState.swift#FileTreeState": "protocol presentation owner",
         "Sources/Views/Sidebar/GitStatusState.swift#GitStatusState": "protocol presentation owner",
@@ -70,12 +71,15 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var lastMessage = \"\"": "feedback timing cache; rendered fields remain observed",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var showTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var spinnerOnTime: ContinuousClock.Instant?": "timing bookkeeping, not rendered state",
+        "Sources/Views/Overlays/CompletionState.swift: @ObservationIgnored private let localPresentationStore: LocalPresentationStore": "stable local presentation dependency; owned preview fields remain observed",
+        "Sources/Views/Overlays/PickerState.swift: @ObservationIgnored private let localPresentationStore: LocalPresentationStore": "stable local presentation dependency; owned preview fields remain observed",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored private let themeBacking = GUIThemeBacking()": "stable dependency reference; backing fields are observed",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored private let windowContentBacking: GUIWindowContentBacking": "stable dependency reference; backing fields are observed",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored public lazy private(set) var editorInput = EditorHostInput(": "stable host dependency bundle, not rendered state",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored public lazy private(set) var editorOverlayInput = EditorOverlayHostInput(": "stable host dependency bundle, not rendered state",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored public lazy private(set) var shellInput = ShellHostInput(": "stable host dependency bundle, not rendered state",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored public lazy private(set) var windowOverlayInput = WindowOverlayHostInput(": "stable host dependency bundle, not rendered state",
+        "Sources/Views/Sidebar/FileTreeState.swift: @ObservationIgnored private let localPresentationStore: LocalPresentationStore": "stable local presentation dependency; owned preview fields remain observed",
         "Sources/Views/Sidebar/SidebarHostState.swift: @ObservationIgnored private var warnedUnknownKinds: Set<String> = []": "diagnostic de-duplication cache, not rendered state",
     ]
 
@@ -155,7 +159,7 @@ struct GUIObservationGuardrailTests {
         let sources = try productionSources()
         let actualObservable = try Set(sources.flatMap(observableDeclarations(in:)))
         #expect(actualObservable == Set(Self.observationTypeAllowlist.keys))
-        #expect(Self.observationTypeAllowlist.count == 36)
+        #expect(Self.observationTypeAllowlist.count == 37)
 
         let actualIgnored = occurrenceCounts(sources.flatMap(ignoredDeclarations(in:)))
         let expectedIgnored = Dictionary(uniqueKeysWithValues: Self.ignoredDeclarationAllowlist.keys.map { ($0, 1) })

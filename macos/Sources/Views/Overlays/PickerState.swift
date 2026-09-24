@@ -124,7 +124,8 @@ public struct PreviewSegment: Identifiable {
 @MainActor
 @Observable
 public final class PickerState {
-    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0) {
+    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, localPresentationStore: LocalPresentationStore = LocalPresentationStore()) {
+        self.localPresentationStore = localPresentationStore
         self.visible = visible
         self.selectedIndex = selectedIndex
         self.previewSelectedIndex = previewSelectedIndex
@@ -141,7 +142,9 @@ public final class PickerState {
         self.items = items
         self.previewLines = previewLines
         self.actionMenu = actionMenu
+        self.activationGeneration = items.first?.activation.generation ?? 0
     }
+    @ObservationIgnored private let localPresentationStore: LocalPresentationStore
     public var visible: Bool = false
     public var selectedIndex: Int = 0
     public var previewSelectedIndex: Int?
@@ -159,6 +162,7 @@ public final class PickerState {
     public var query: String = ""
     public var queryGeneration: UInt32 = 0
     public var acknowledgedQueryEditSeq: UInt32 = 0
+    public var activationGeneration: UInt32 = 0
     public var modePrefix: String = ""
     public var hasPreview: Bool = false
     public var loadStatus: Wire.PickerLoadStatus = .ready
@@ -168,8 +172,6 @@ public final class PickerState {
 
     public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0) {
         self.visible = visible
-        self.selectedIndex = Int(selectedIndex)
-        self.previewSelectedIndex = nil
         self.filteredCount = Int(filteredCount)
         self.totalCount = Int(totalCount)
         self.markedCount = Int(markedCount)
@@ -180,7 +182,7 @@ public final class PickerState {
         self.modePrefix = modePrefix
         self.hasPreview = hasPreview
         self.loadStatus = loadStatus
-        self.items = rawItems.enumerated().map { i, item in
+        let nextItems = rawItems.enumerated().map { i, item in
             PickerItem(
                 id: i,
                 activation: PickerActivationIdentity(
@@ -196,6 +198,13 @@ public final class PickerState {
                 isMarked: item.isMarked
             )
         }
+        self.items = nextItems
+        self.activationGeneration = activationGeneration
+        self.selectedIndex = min(Int(selectedIndex), max(nextItems.count - 1, 0))
+        let selectedActivationID = nextItems[safe: self.selectedIndex]?.activation.activationID ?? 0
+        let retainedIDs = Set(nextItems.map { String($0.activation.activationID) })
+        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible)
+        self.previewSelectedIndex = nextItems.firstIndex(where: { String($0.activation.activationID) == effectiveID }).flatMap { $0 == self.selectedIndex ? nil : $0 }
         if let am = actionMenu {
             self.actionMenu = PickerActionMenu(
                 selectedIndex: Int(am.selectedIndex),
@@ -212,6 +221,27 @@ public final class PickerState {
             )
         } else {
             self.actionMenu = nil
+        }
+    }
+
+    public func updateSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32) {
+        guard generation == activationGeneration else {
+            localPresentationStore.discard(.picker)
+            previewSelectedIndex = nil
+            return
+        }
+        if let committedIndex = items.firstIndex(where: { $0.activation.activationID == selectedItemID }) {
+            selectedIndex = committedIndex
+            let retainedIDs = Set(items.map { String($0.activation.activationID) })
+            let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: generation, committedItemID: String(selectedItemID), retainedItemIDs: retainedIDs)
+            previewSelectedIndex = items.firstIndex(where: { String($0.activation.activationID) == effectiveID }).flatMap { $0 == committedIndex ? nil : $0 }
+        } else {
+            localPresentationStore.discard(.picker)
+            previewSelectedIndex = nil
+        }
+        if let menu = actionMenu,
+           let actionIndex = menu.entries.firstIndex(where: { $0.activation.activationID == selectedActionID }) {
+            actionMenu = PickerActionMenu(selectedIndex: actionIndex, entries: menu.entries)
         }
     }
 
@@ -240,11 +270,13 @@ public final class PickerState {
         let current = previewSelectedIndex ?? selectedIndex
         let next = min(max(current + delta, 0), items.count - 1)
         guard next != current else { return false }
+        localPresentationStore.setPreview(LocalPresentationIdentity(generation: activationGeneration, itemID: String(items[next].activation.activationID)), for: .picker)
         previewSelectedIndex = next
         return true
     }
 
     public func hide() {
+        localPresentationStore.discard(.picker)
         visible = false
         markedCount = 0
         items = []
@@ -252,10 +284,17 @@ public final class PickerState {
         previewSelectedIndex = nil
         queryGeneration = 0
         acknowledgedQueryEditSeq = 0
+        activationGeneration = 0
         modePrefix = ""
         hasPreview = false
         loadStatus = .ready
         actionMenu = nil
+    }
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

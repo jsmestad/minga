@@ -220,8 +220,15 @@ defmodule MingaEditor.State.Picker do
 
   @doc "Replaces the activation offer after any result or action-menu transition."
   @spec refresh_activation_offer(t()) :: t()
-  def refresh_activation_offer(%__MODULE__{picker: picker, action_menu: action_menu} = ps) do
-    %{ps | activation_offer: ActivationOffer.new(picker, action_menu)}
+  def refresh_activation_offer(
+        %__MODULE__{
+          picker: picker,
+          action_menu: action_menu,
+          query_generation: generation,
+          activation_offer: offer
+        } = ps
+      ) do
+    %{ps | activation_offer: ActivationOffer.refresh(offer, picker, action_menu, generation)}
   end
 
   @doc "Resolves an exact item identity from the current activation offer."

@@ -227,10 +227,13 @@ extension FileTreeEntry {
 @MainActor
 @Observable
 public final class FileTreeState {
-    public init(entries: [FileTreeEntry] = [], version: UInt8 = 1, selectedId: String = "", selectedIndex: Int = 0, treeWidth: Int = 30, visible: Bool = false, focused: Bool = false, localNavigationEnabled: Bool = false, treeState: FileTreeVisibilityState = .hidden, errorReason: String = "", projectRoot: String = "", editingIndex: Int? = nil) {
+    public init(entries: [FileTreeEntry] = [], version: UInt8 = 1, generation: UInt32 = 0, selectedId: String = "", selectedIndex: Int = 0, treeWidth: Int = 30, visible: Bool = false, focused: Bool = false, localNavigationEnabled: Bool = false, treeState: FileTreeVisibilityState = .hidden, errorReason: String = "", projectRoot: String = "", editingIndex: Int? = nil, localPresentationStore: LocalPresentationStore = LocalPresentationStore()) {
+        self.localPresentationStore = localPresentationStore
         self.entries = entries
         self.version = version
+        self.generation = generation
         self.selectedId = selectedId
+        self.committedSelectedId = selectedId
         self.selectedIndex = selectedIndex
         self.treeWidth = treeWidth
         self.visible = visible
@@ -241,9 +244,12 @@ public final class FileTreeState {
         self.projectRoot = projectRoot
         self.editingIndex = editingIndex
     }
+    @ObservationIgnored private let localPresentationStore: LocalPresentationStore
     public var entries: [FileTreeEntry] = []
     public var version: UInt8 = 1
+    public var generation: UInt32 = 0
     public var selectedId: String = ""
+    private var committedSelectedId: String = ""
     public var selectedIndex: Int = 0
     public var treeWidth: Int = 30
     public var visible: Bool = false
@@ -265,6 +271,7 @@ public final class FileTreeState {
     /// can change entry content without changing count or selection).
     public func update(
         version: UInt8,
+        generation: UInt32 = 0,
         treeFlags: UInt8 = 0,
         selectedId: String,
         focused: Bool,
@@ -276,8 +283,8 @@ public final class FileTreeState {
     ) {
         let decodedState = FileTreeVisibilityState(rawValue: treeState) ?? .ready
         self.version = version
-        self.selectedId = selectedId
-        self.selectedIndex = rawEntries.firstIndex(where: { $0.id == selectedId }) ?? 0
+        self.generation = generation
+        self.committedSelectedId = selectedId
         self.treeWidth = Int(treeWidth)
         self.projectRoot = rootPath
         self.visible = decodedState != .hidden
@@ -320,13 +327,25 @@ public final class FileTreeState {
                 heatLevel: entry.heatLevel
             )
         }
+        let effectiveID = localPresentationStore.reconcile(surface: .fileTree, generation: generation, committedItemID: selectedId, retainedItemIDs: Set(self.entries.map(\.id)), visible: decodedState != .hidden)
+        self.selectedId = effectiveID
+        self.selectedIndex = self.entries.firstIndex(where: { $0.id == effectiveID }) ?? 0
+        self.entries = self.entries.map { entry in
+            entry.withSelection(isSelected: entry.id == effectiveID, isFocused: focused)
+        }
         // Track which entry is being edited for quick lookup
         self.editingIndex = rawEntries.firstIndex(where: { $0.isEditing })
     }
 
     /// Updates selection and focus without replacing the full tree payload.
-    public func updateSelection(selectedId: String, focused: Bool) {
+    public func updateSelection(generation: UInt32 = 0, selectedId: String, focused: Bool) {
+        guard generation == self.generation else {
+            localPresentationStore.discard(.fileTree)
+            return
+        }
+        committedSelectedId = selectedId
         guard let selectedIndex = entries.firstIndex(where: { $0.id == selectedId }) else {
+            localPresentationStore.discard(.fileTree)
             self.focused = focused
             self.entries = entries.map { entry in
                 entry.withSelection(isSelected: entry.isSelected, isFocused: focused)
@@ -334,7 +353,8 @@ public final class FileTreeState {
             return
         }
 
-        applySelection(selectedIndex: selectedIndex, focused: focused)
+        let effectiveID = localPresentationStore.reconcile(surface: .fileTree, generation: generation, committedItemID: selectedId, retainedItemIDs: Set(entries.map(\.id)))
+        applySelection(selectedIndex: entries.firstIndex(where: { $0.id == effectiveID }) ?? selectedIndex, focused: focused)
     }
 
     /// Applies a frontend-local row navigation preview over the last committed tree model.
@@ -348,6 +368,7 @@ public final class FileTreeState {
         let nextIndex = min(max(selectedIndex + delta, 0), entries.count - 1)
         guard nextIndex != selectedIndex else { return false }
 
+        localPresentationStore.setPreview(LocalPresentationIdentity(generation: generation, itemID: entries[nextIndex].id), for: .fileTree)
         applySelection(selectedIndex: nextIndex, focused: focused)
         return true
     }
@@ -392,6 +413,7 @@ public final class FileTreeState {
 
     /// Hide the file tree (BEAM toggled it off) and keep the shared window chrome in sync with the latest project root.
     public func hide(rootPath: String = "") {
+        localPresentationStore.discard(.fileTree)
         visible = false
         focused = false
         localNavigationEnabled = false
@@ -399,6 +421,8 @@ public final class FileTreeState {
         errorReason = ""
         entries = []
         selectedId = ""
+        committedSelectedId = ""
+        generation = 0
         editingIndex = nil
         projectRoot = rootPath
     }

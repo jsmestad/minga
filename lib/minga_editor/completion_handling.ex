@@ -736,7 +736,7 @@ defmodule MingaEditor.CompletionHandling do
     active_tab_id = if match?(%Tab{}, active_tab), do: active_tab.id, else: nil
 
     payload =
-      MingaEditor.State.ModalOverlay.Completion.new(active_tab_id,
+      ModalWorkflow.new_completion_payload(active_tab_id,
         completion: completion,
         trigger: ModalWorkflow.completion_trigger(state)
       )

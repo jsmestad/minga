@@ -53,7 +53,10 @@ version = "2.0.0"
 # match ranges, and semantic result counts, and changes completion activation
 # from a visible row offset to the stable item identity.
 # protocol_version 24 marks sequential resident row stores with gui_window_content header flag 0x04 and adds explicit resident gutter snapshots and retained overrides scoped to the window content epoch and row count.
-protocol_version = 24
+# protocol_version 25 adds source-owned local-presentation generations, narrow
+# completion/picker selection echoes, and one semantic activation action whose
+# opaque item identity is validated by the owning BEAM surface.
+protocol_version = 25
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -891,6 +894,20 @@ value = 0xA5
 direction = "beam_to_frontend"
 framing = "len16"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_completion_selection"
+value = 0xA6
+direction = "beam_to_frontend"
+framing = "len16"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_picker_selection"
+value = 0xA7
+direction = "beam_to_frontend"
+framing = "len16"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1283,6 +1300,13 @@ value = 0x63
 [[gui_actions]]
 name = "focus_window"
 value = 0x64
+
+# Activates one exact item from a frontend-local presentation. Payload:
+# surface(u8) + intent(u8) + generation(u32) + item_id(string16). `item_id` is
+# opaque bytes authored by the owning BEAM surface; frontends only echo it.
+[[gui_actions]]
+name = "semantic_item_activate"
+value = 0x65
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
@@ -2337,6 +2361,7 @@ conditional_tail = { guard = "visible == 1", fields = [
   { name = "total_count", type = "u32" },
   { name = "matched_count", type = "u32" },
   { name = "incomplete", type = "u8" },
+  { name = "generation", type = "u32" },
 ] }
 
 [[command_fields]]

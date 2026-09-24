@@ -13,7 +13,7 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
   @max_items 100
   @max_u32 4_294_967_295
 
-  @type generation :: pos_integer()
+  @type generation :: non_neg_integer()
   @type activation_id :: pos_integer()
   @type item_entry :: {activation_id(), non_neg_integer(), Item.t()}
   @type action_entry :: {activation_id(), Source.action_entry(), Item.t()}
@@ -21,19 +21,31 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
   @type t :: %__MODULE__{
           generation: generation(),
           items: [item_entry()],
-          actions: [action_entry()]
+          actions: [action_entry()],
+          next_activation_id: activation_id()
         }
 
   @enforce_keys [:generation]
-  defstruct generation: 1, items: [], actions: []
+  defstruct generation: 1, items: [], actions: [], next_activation_id: 1
 
-  @doc "Builds a fresh activation offer for the picker's currently rendered result window."
-  @spec new(Picker.t() | nil, MingaEditor.State.Picker.action_menu()) :: t()
-  def new(picker, action_menu) do
+  @doc "Reconciles a picker offer while preserving opaque ids for retained semantic items."
+  @spec refresh(t(), Picker.t() | nil, MingaEditor.State.Picker.action_menu(), generation()) ::
+          t()
+  def refresh(%__MODULE__{generation: generation} = offer, picker, action_menu, generation) do
+    {items, next_id} = build_item_entries(picker, offer.items, offer.next_activation_id)
+    {actions, next_id} = action_entries(action_menu, offer.actions, next_id)
+    %{offer | items: items, actions: actions, next_activation_id: next_id}
+  end
+
+  def refresh(%__MODULE__{}, picker, action_menu, generation) do
+    {items, next_id} = build_item_entries(picker, [], 1)
+    {actions, next_id} = action_entries(action_menu, [], next_id)
+
     %__MODULE__{
-      generation: next_generation(),
-      items: build_item_entries(picker),
-      actions: action_entries(action_menu)
+      generation: generation,
+      items: items,
+      actions: actions,
+      next_activation_id: next_id
     }
   end
 
@@ -79,29 +91,49 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
 
   def resolve_action(%__MODULE__{}, _generation, _activation_id), do: :error
 
-  @spec build_item_entries(Picker.t() | nil) :: [item_entry()]
-  defp build_item_entries(nil), do: []
+  @spec build_item_entries(Picker.t() | nil, [item_entry()], activation_id()) ::
+          {[item_entry()], activation_id()}
+  defp build_item_entries(nil, _previous, next_id), do: {[], next_id}
 
-  defp build_item_entries(%Picker{filtered: filtered}) do
+  defp build_item_entries(%Picker{filtered: filtered}, previous, next_id) do
+    prior_ids =
+      Map.new(previous, fn {activation_id, _index, item} -> {item.id, activation_id} end)
+
     filtered
     |> Enum.take(@max_items)
-    |> Enum.with_index(1)
-    |> Enum.map(fn {item, activation_id} -> {activation_id, activation_id - 1, item} end)
+    |> Enum.with_index()
+    |> Enum.map_reduce(next_id, fn {item, index}, candidate_id ->
+      case Map.fetch(prior_ids, item.id) do
+        {:ok, activation_id} -> {{activation_id, index, item}, candidate_id}
+        :error -> {{candidate_id, index, item}, advance(candidate_id)}
+      end
+    end)
   end
 
-  @spec action_entries(MingaEditor.State.Picker.action_menu()) :: [action_entry()]
-  defp action_entries(nil), do: []
+  @spec action_entries(
+          MingaEditor.State.Picker.action_menu(),
+          [action_entry()],
+          activation_id()
+        ) :: {[action_entry()], activation_id()}
+  defp action_entries(nil, _previous, next_id), do: {[], next_id}
 
-  defp action_entries({actions, _selected_index, item}) do
-    actions
-    |> Enum.with_index(1)
-    |> Enum.map(fn {action, activation_id} -> {activation_id, action, item} end)
+  defp action_entries({actions, _selected_index, item}, previous, next_id) do
+    prior_ids =
+      Map.new(previous, fn {activation_id, {_name, action_id}, prior_item} ->
+        {{prior_item.id, action_id}, activation_id}
+      end)
+
+    Enum.map_reduce(actions, next_id, fn {_name, action_id} = action, candidate_id ->
+      case Map.fetch(prior_ids, {item.id, action_id}) do
+        {:ok, activation_id} -> {{activation_id, action, item}, candidate_id}
+        :error -> {{candidate_id, action, item}, advance(candidate_id)}
+      end
+    end)
   end
 
-  defp action_entries({_actions, _selected_index}), do: []
+  defp action_entries({_actions, _selected_index}, _previous, next_id), do: {[], next_id}
 
-  @spec next_generation() :: generation()
-  defp next_generation do
-    Integer.mod(System.unique_integer([:positive, :monotonic]), @max_u32) + 1
-  end
+  @spec advance(activation_id()) :: activation_id()
+  defp advance(@max_u32), do: 1
+  defp advance(id), do: id + 1
 end

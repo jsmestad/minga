@@ -8,6 +8,7 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
   alias Minga.RenderModel.UI.Completion.Item
 
   @op_gui_completion Minga.Protocol.Opcodes.gui_completion()
+  @op_gui_completion_selection Minga.Protocol.Opcodes.gui_completion_selection()
 
   describe "encode/2" do
     test "encodes hidden completion" do
@@ -48,12 +49,14 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       assert cmd2 == CompletionEncoder.encode_command(model2)
     end
 
-    test "re-encodes when only the documentation changes" do
+    test "encodes only selection identity and documentation when the list is unchanged" do
       base = %Completion{
         visible?: true,
+        generation: 7,
         cursor_row: 5,
         cursor_col: 0,
-        items: [%Item{kind: :function, label: "map", detail: "Enum.map/2"}],
+        selected_item_id: "map-id",
+        items: [%Item{id: "map-id", kind: :function, label: "map", detail: "Enum.map/2"}],
         documentation: "First doc"
       }
 
@@ -63,11 +66,17 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       {cmd1, caches} = CompletionEncoder.encode(base, caches)
       assert cmd1 != nil
 
-      # A selection move re-emits completion with the newly-selected item's docs;
-      # the fingerprint includes documentation, so the encoder must re-fire.
       {cmd2, _caches} = CompletionEncoder.encode(moved, caches)
-      assert cmd2 != nil
-      assert cmd2 == CompletionEncoder.encode_command(moved)
+      assert <<@op_gui_completion_selection, len::16, payload::binary-size(len)>> = cmd2
+
+      assert <<7::32, id_len::8, item_id::binary-size(id_len), doc_len::16,
+               documentation::binary-size(doc_len)>> = payload
+
+      assert item_id == "map-id"
+      assert documentation == "Second doc"
+
+      refute cmd2 =~ "Enum.map/2"
+      refute cmd2 =~ <<@op_gui_completion>>
     end
 
     test "encodes the documentation tail after the items" do

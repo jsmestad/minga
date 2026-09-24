@@ -181,7 +181,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_window_rows_delta: 0xA2,
       gui_extension_runtime: 0xA3,
       gui_surface_layout: 0xA4,
-      gui_empty_state: 0xA5
+      gui_empty_state: 0xA5,
+      gui_completion_selection: 0xA6,
+      gui_picker_selection: 0xA7
     )
   end
 
@@ -276,7 +278,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       picker_action_activate: 0x61,
       search_focus: 0x62,
       file_dialog_result: 0x63,
-      focus_window: 0x64
+      focus_window: 0x64,
+      semantic_item_activate: 0x65
     )
   end
 

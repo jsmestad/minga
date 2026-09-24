@@ -29,6 +29,29 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for semantic item activation" do
+    test "decodes exact source identity for each local presentation surface" do
+      opcode = Minga.Protocol.Opcodes.gui_action_semantic_item_activate()
+
+      assert {:ok, {:semantic_item_activate, :completion, :accept, 7, "completion-2"}} ==
+               ProtocolGUI.decode_gui_action(opcode, <<1, 1, 7::32, 12::16, "completion-2">>)
+
+      assert {:ok, {:semantic_item_activate, :picker, :activate_action, 8, <<42::32>>}} ==
+               ProtocolGUI.decode_gui_action(opcode, <<2, 2, 8::32, 4::16, 42::32>>)
+
+      assert {:ok, {:semantic_item_activate, :file_tree, :rename, 9, "row-id"}} ==
+               ProtocolGUI.decode_gui_action(opcode, <<3, 5, 9::32, 6::16, "row-id">>)
+    end
+
+    test "rejects unknown surface or intent and malformed identity payloads" do
+      opcode = Minga.Protocol.Opcodes.gui_action_semantic_item_activate()
+
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<9, 1, 7::32, 1::16, "x">>)
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 9, 7::32, 1::16, "x">>)
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 1, 7::32, 4::16, "x">>)
+    end
+  end
+
   describe "decode_gui_action for retired tool manager actions" do
     test "rejects old native panel action slots" do
       assert :error == ProtocolGUI.decode_gui_action(0x11, <<0::16>>)

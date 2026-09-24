@@ -948,18 +948,24 @@ struct GUIFrameSwiftUIInvalidationTests {
             ("TabBarState", "Sources/Views/EditorChrome/TabBarState.swift", []),
             ("WorkspaceState", "Sources/Views/EditorChrome/WorkspaceState.swift", []),
             ("BreadcrumbState", "Sources/Views/EditorChrome/BreadcrumbBar.swift", []),
-            ("FileTreeState", "Sources/Views/Sidebar/FileTreeState.swift", []),
+            ("FileTreeState", "Sources/Views/Sidebar/FileTreeState.swift", [
+                "@ObservationIgnored private let localPresentationStore: LocalPresentationStore",
+            ]),
             ("SidebarHostState", "Sources/Views/Sidebar/SidebarHostState.swift", [
                 "@ObservationIgnored private var warnedUnknownKinds: Set<String> = []",
             ]),
             ("ObservatoryState", "Sources/Views/Sidebar/ObservatoryState.swift", []),
             ("GitStatusState", "Sources/Views/Sidebar/GitStatusState.swift", []),
             ("EditTimelineState", "Sources/Views/Shared/EditTimelineState.swift", []),
-            ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", []),
+            ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", [
+                "@ObservationIgnored private let localPresentationStore: LocalPresentationStore",
+            ]),
             ("HoverPopupState", "Sources/Views/Overlays/HoverPopupState.swift", []),
             ("SignatureHelpState", "Sources/Views/Overlays/SignatureHelpState.swift", []),
             ("MinibufferState", "Sources/Views/Overlays/MinibufferState.swift", []),
-            ("PickerState", "Sources/Views/Overlays/PickerState.swift", []),
+            ("PickerState", "Sources/Views/Overlays/PickerState.swift", [
+                "@ObservationIgnored private let localPresentationStore: LocalPresentationStore",
+            ]),
             ("WhichKeyState", "Sources/Views/Overlays/WhichKeyState.swift", []),
             ("FloatPopupState", "Sources/Views/Overlays/FloatPopupState.swift", []),
             ("NotificationCenterState", "Sources/Views/Overlays/NotificationCenterState.swift", []),
@@ -987,8 +993,9 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var lastMessage = \"\"": "cache",
             "@ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder",
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
+            "@ObservationIgnored private let localPresentationStore: LocalPresentationStore": "dependency",
         ]
-        let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder"]
+        let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder", "dependency"]
         #expect(owners.count == 29)
         #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
         #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))

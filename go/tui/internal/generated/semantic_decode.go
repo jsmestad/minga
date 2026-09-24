@@ -2388,6 +2388,7 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 	var totalCount uint32
 	var matchedCount uint32
 	var incomplete uint8
+	var generation uint32
 	if visible == 1 {
 		var err error
 		if err := decodeRequireWindow(windowEnd, pos+2, "cursor_row"); err != nil {
@@ -2442,6 +2443,11 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 		}
 		incomplete = data[pos]
 		pos++
+		if err := decodeRequireWindow(windowEnd, pos+4, "generation"); err != nil {
+			return GuiCompletionFields{}, offset, err
+		}
+		generation = decodeU32(data, pos)
+		pos += 4
 	}
 	return GuiCompletionFields{
 		Visible:        visible,
@@ -2454,6 +2460,7 @@ func DecodeGuiCompletionFields(data []byte, offset int, windowEnd int) (GuiCompl
 		TotalCount:     totalCount,
 		MatchedCount:   matchedCount,
 		Incomplete:     incomplete,
+		Generation:     generation,
 	}, pos, nil
 }
 

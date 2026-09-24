@@ -459,13 +459,28 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | modal: ModalOverlay.navigate_completion(state.modal, update)}
 
   @doc "Records completion trigger lifecycle with explicit active-tab context."
-  @spec put_modal_completion_trigger(t(), MingaEditor.CompletionTrigger.t(), Tab.id() | nil) ::
-          t()
-  def put_modal_completion_trigger(%__MODULE__{} = state, trigger, active_tab_id),
-    do: %{
-      state
-      | modal: ModalOverlay.put_completion_trigger(state.modal, trigger, active_tab_id)
-    }
+  @spec put_modal_completion_trigger(
+          t(),
+          MingaEditor.CompletionTrigger.t(),
+          Tab.id() | nil,
+          pos_integer()
+        ) :: t()
+  def put_modal_completion_trigger(
+        %__MODULE__{} = state,
+        trigger,
+        active_tab_id,
+        presentation_generation
+      ),
+      do: %{
+        state
+        | modal:
+            ModalOverlay.put_completion_trigger(
+              state.modal,
+              trigger,
+              active_tab_id,
+              presentation_generation
+            )
+      }
 
   @doc "Dismisses stale completion using the now-active tab id."
   @spec dismiss_stale_modal_completion(t(), Tab.id() | nil) :: t()
