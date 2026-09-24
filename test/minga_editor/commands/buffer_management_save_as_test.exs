@@ -4,13 +4,23 @@ defmodule MingaEditor.Commands.BufferManagementSaveAsTest do
   use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Buffer
+  alias Minga.Config.Options
 
   @moduletag :tmp_dir
 
-  test ":w with the current filename preserves external changes", %{tmp_dir: root} do
+  setup do
+    options_server = start_supervised!({Options, name: nil})
+    assert {:ok, 0} = Options.set(options_server, :auto_save_delay_ms, 0)
+    %{options_server: options_server}
+  end
+
+  test ":w with the current filename preserves external changes", %{
+    tmp_dir: root,
+    options_server: options_server
+  } do
     path = Path.join(root, "current-write.txt")
     File.write!(path, "original")
-    ctx = start_editor("original", file_path: path)
+    ctx = start_editor("original", file_path: path, options_server: options_server)
     assert :ok = Buffer.insert_text(ctx.buffer, "local ")
     File.write!(path, <<0, 1, 2, 255>>)
 
@@ -23,10 +33,13 @@ defmodule MingaEditor.Commands.BufferManagementSaveAsTest do
     assert notice_message(ctx) == "WARNING: File changed on disk. Use :w! to force save."
   end
 
-  test ":saveas with the current filename preserves external changes", %{tmp_dir: root} do
+  test ":saveas with the current filename preserves external changes", %{
+    tmp_dir: root,
+    options_server: options_server
+  } do
     path = Path.join(root, "current-saveas.txt")
     File.write!(path, "original")
-    ctx = start_editor("original", file_path: path)
+    ctx = start_editor("original", file_path: path, options_server: options_server)
     assert :ok = Buffer.insert_text(ctx.buffer, "local ")
     File.write!(path, "external newer\n")
 
@@ -40,13 +53,14 @@ defmodule MingaEditor.Commands.BufferManagementSaveAsTest do
   end
 
   test "non-forced explicit write rejects another existing file without adopting it", %{
-    tmp_dir: root
+    tmp_dir: root,
+    options_server: options_server
   } do
     source = Path.join(root, "source.txt")
     target = Path.join(root, "existing.txt")
     File.write!(source, "source")
     File.write!(target, <<0, 1, 2, 255>>)
-    ctx = start_editor("source", file_path: source)
+    ctx = start_editor("source", file_path: source, options_server: options_server)
     assert :ok = Buffer.insert_text(ctx.buffer, "local ")
 
     send_ex_sync(ctx, "w #{target}")
@@ -59,11 +73,12 @@ defmodule MingaEditor.Commands.BufferManagementSaveAsTest do
 
   test "forced explicit write adopts only its captured target and later plain save checks conflicts",
        %{
-         tmp_dir: root
+         tmp_dir: root,
+         options_server: options_server
        } do
     target = Path.join(root, "force.txt")
     File.write!(target, "first external")
-    ctx = start_editor("local")
+    ctx = start_editor("local", options_server: options_server)
     assert :ok = Buffer.insert_text(ctx.buffer, "forced ")
 
     send_ex_sync(ctx, "w! #{target}")
@@ -81,9 +96,12 @@ defmodule MingaEditor.Commands.BufferManagementSaveAsTest do
     assert notice_message(ctx) == "WARNING: File changed on disk. Use :w! to force save."
   end
 
-  test "successful non-forced explicit write retains save-as identity behavior", %{tmp_dir: root} do
+  test "successful non-forced explicit write retains save-as identity behavior", %{
+    tmp_dir: root,
+    options_server: options_server
+  } do
     target = Path.join(root, "named.ex")
-    ctx = start_editor("defmodule Named, do: nil\n")
+    ctx = start_editor("defmodule Named, do: nil\n", options_server: options_server)
     assert :ok = Buffer.insert_text(ctx.buffer, "# saved\n")
 
     send_ex_sync(ctx, "saveas #{target}")
