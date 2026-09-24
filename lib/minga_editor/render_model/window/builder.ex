@@ -241,7 +241,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       resolve_retained_and_digest(resident_result, resident_entries, retain_ctx)
 
     new_retained_wrap =
-      retained_wrap_lines(resident_entries, wrap_on and visible_line_map == nil)
+      retained_wrap_lines(all_visual_entries, wrap_on and visible_line_map == nil)
 
     presentation_rows = Enum.map(resident_entries, & &1.row)
     committed_rows = Enum.map(visual_entries, & &1.row)
@@ -911,15 +911,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end)
   end
 
-  # Rebuilds the per-logical-line wrapped-line cache from this frame's visual
-  # entries so the next wrapped frame can reuse unchanged logical lines whole.
-  # Only meaningful for the wrapped path; other modes carry an empty map (#2287).
-  #
-  # Entries are stored UNTRIMMED-shape but already trimmed to the visible set; we
-  # reset each entry's `display_row` to 0 so a reused logical line is positioned
-  # identically by `trim_visual_entries/3` regardless of where it landed this
-  # frame. Trimming may drop a logical line's leading rows; such partial groups
-  # are not cached so reuse only ever replays a complete logical line.
+  # Cache complete logical lines before viewport trimming, including continuation rows outside the current presentation.
+  # Reused entries reset display_row so the next viewport positions them independently.
   @spec retained_wrap_lines([visual_row_entry()], boolean()) ::
           %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}}
   defp retained_wrap_lines(_visual_entries, false), do: %{}

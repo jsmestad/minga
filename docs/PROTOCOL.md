@@ -423,6 +423,8 @@ A frontend-resolved position in an immutable displayed text row. All integers ar
 
 Total size: 33 bytes. The row index is not viewport-local. A wrapped windowed payload uses its retained payload rank; a resident document uses its document-store rank. The renderer checks the row ID at that rank and resolves the offset through its retained source map. The editor checks the buffer version before applying cursor or selection state. Stale or non-source-backed endpoints do not fall back to current screen geometry. Release always ends the gesture, including a release with zero presentation and row fields.
 
+The frontend reports the exact composed boundary, including the exclusive row end for blank space after text. BEAM resolves current modal mouse gestures to characters: a nonempty row-end hit selects that row's final composed grapheme through the source map. This keeps soft-wrap clicks and inclusive drag selections on the displayed row; virtual text retains its source anchor. Exact insertion-boundary mapping remains a separate operation.
+
 ### `0x1F` text_presentation_state
 
 Fixed 12 bytes: `opcode:u8, window_id:u16, presentation_id:u64, state:u8`. State 1 activates the presentation used for subsequent text input; state 0 discards a presentation that the frontend can no longer use. These messages are durable and ordered with pointer input. They are distinct from `frame_applied`, which acknowledges semantic publication before native drawing completes. A client must retain a presentation while its committed candidate, native drawing attempts, or visible input model can still use it.

@@ -124,6 +124,59 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMapTest do
     end
   end
 
+  describe "VisualRow.source_character_position/2" do
+    test "row-end hits stay on the final grapheme while insertion boundaries remain exact" do
+      for {source, first_text, source_end, composed_end, last_byte} <- [
+            {"ab", "a", 1, 1, 0},
+            {"a😀b", "a😀", 5, 3, 1},
+            {"ae\u0301b", "ae\u0301", 4, 3, 1},
+            {"a界b", "a界", 4, 2, 1}
+          ] do
+        map = plain_map(source) |> SourceOffsetMap.slice(0, source_end, 0, composed_end)
+        entry = VisualRow.new(row(:normal, first_text), map, 0, composed_end, 0)
+
+        assert VisualRow.source_character_position(entry, composed_end) == {:ok, {7, last_byte}}
+        assert VisualRow.source_character_position(entry, 100) == {:ok, {7, last_byte}}
+        assert VisualRow.source_position(entry, composed_end) == {:ok, {7, source_end}}
+      end
+    end
+
+    test "expanded tabs, concealed replacements and virtual text keep their source mapping" do
+      {_id, conceal} =
+        Decorations.add_conceal(Decorations.new(), {0, 1}, {0, 4}, replacement: "😀")
+
+      {_id, virtual} =
+        Decorations.add_virtual_text(Decorations.new(), {0, 1},
+          segments: [{"XY", Face.new()}],
+          placement: :inline
+        )
+
+      for {source, composed, text, decorations, source_end, composed_end, expected} <- [
+            {"\tb", "    b", "    ", Decorations.new(), 1, 4, 0},
+            {"abcdef", "a😀ef", "a😀", conceal, 4, 3, 1},
+            {"ab", "aXYb", "aXY", virtual, 1, 3, 1}
+          ] do
+        map = SourceOffsetMap.new(source, composed, decorations, 0, tab_width: 4)
+        map = SourceOffsetMap.slice(map, 0, source_end, 0, composed_end)
+        entry = VisualRow.new(row(:normal, text), map, 0, composed_end, 0)
+        assert VisualRow.source_character_position(entry, 100) == {:ok, {7, expected}}
+      end
+    end
+
+    test "continuation indentation, final rows and empty rows retain modal character targets" do
+      map = plain_map("abcdef") |> SourceOffsetMap.slice(2, 6, 2, 6)
+      entry = VisualRow.new(row(:wrap_continuation, "  cdef"), map, 2, 6, 2)
+      assert VisualRow.source_character_position(entry, 0) == {:ok, {7, 2}}
+      assert VisualRow.source_character_position(entry, 6) == {:ok, {7, 5}}
+      assert VisualRow.source_character_position(entry, 100) == {:ok, {7, 5}}
+
+      empty = VisualRow.new(row(:normal, ""), plain_map(""), 0, 0, 0)
+      virtual = VisualRow.new(row(:virtual_line, "hint"), plain_map("hint"), 0, 4, 0)
+      assert VisualRow.source_character_position(empty, 100) == {:ok, {7, 0}}
+      assert VisualRow.source_character_position(virtual, 100) == :not_source_backed
+    end
+  end
+
   defp assert_boundaries(text, boundaries) do
     map = plain_map(text)
 

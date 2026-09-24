@@ -63,7 +63,7 @@ defmodule MingaEditor.Renderer.TextPresentation do
     with {:ok, %VisualRow{row: %Row{row_id: stored_row_id}} = row} <-
            row_at(presentation.rows, row_index),
          true <- stored_row_id == row_id,
-         {:ok, {line, byte}} <- VisualRow.source_position(row, utf16_offset) do
+         {:ok, {line, byte}} <- VisualRow.source_character_position(row, utf16_offset) do
       {:ok,
        TextTarget.new(%{
          window_id: presentation.window_id,

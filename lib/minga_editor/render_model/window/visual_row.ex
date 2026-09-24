@@ -84,6 +84,29 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
   def reused?(%__MODULE__{reused?: reused?}), do: reused?
 
   @doc """
+  Resolves a modal pointer target to a character in the displayed row.
+
+  A hit at or beyond the row end targets its final composed grapheme, so a soft-wrap boundary does not select the next row's first character.
+  The source map preserves Unicode grapheme boundaries, replacement ranges, and virtual-text anchors.
+  Empty and non-source rows retain their existing boundary behavior.
+  """
+  @spec source_character_position(t(), non_neg_integer()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | :not_source_backed
+  def source_character_position(
+        %__MODULE__{
+          composed_start_utf16: start_utf16,
+          composed_end_utf16: end_utf16,
+          indent_width: indent
+        } = entry,
+        row_local_utf16
+      )
+      when end_utf16 > start_utf16 and row_local_utf16 >= indent + end_utf16 - start_utf16,
+      do: source_position(entry, indent + end_utf16 - start_utf16 - 1, :start)
+
+  def source_character_position(%__MODULE__{} = entry, row_local_utf16),
+    do: source_position(entry, row_local_utf16)
+
+  @doc """
   Resolves a row-local composed UTF-16 boundary to a source position.
 
   Wrap indentation resolves to the row's first source byte. Offsets past the

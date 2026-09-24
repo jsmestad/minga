@@ -891,6 +891,96 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(reused_entries, & &1.row) == second_model.rows
     end
 
+    test "modal clicks and drags at the wrap edge stay on the displayed row" do
+      state = gui_state(rows: 6, cols: 20, content: "abcdefghijABCDEFGHIJ")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      {model, result} = build_window_with_stats(state, [], [])
+      [first_row | _] = model.rows
+      assert first_row.text == "abcdefghijABCD"
+      presentation = result.text_presentation
+
+      event =
+        MingaEditor.Mouse.TextEvent.new(%{
+          window_id: presentation.window_id,
+          presentation_id: presentation.presentation_id,
+          row_index: 0,
+          row_id: first_row.row_id,
+          utf16_offset: 14,
+          button: :left,
+          mods: 0,
+          event_type: :press,
+          click_count: 1,
+          scroll_x: 0,
+          scroll_y: 0
+        })
+
+      assert {:ok, target} =
+               MingaEditor.Renderer.TextPresentation.resolve(
+                 presentation,
+                 0,
+                 first_row.row_id,
+                 14
+               )
+
+      assert target.byte == 13
+
+      workspace =
+        SessionState.transition_mode(state.workspace, :insert)
+
+      clicked =
+        MingaEditor.Mouse.handle_text_event(%{state | workspace: workspace}, event, target)
+
+      assert clicked.workspace.editing.mode == :normal
+      assert BufferProcess.cursor(buffer) == {0, 13}
+      clicked_model = build_window_model(clicked, [])
+      assert clicked_model.cursor_row == 0
+
+      assert {:ok, start_target} =
+               MingaEditor.Renderer.TextPresentation.resolve(presentation, 0, first_row.row_id, 0)
+
+      pressed =
+        MingaEditor.Mouse.handle_text_event(state, %{event | utf16_offset: 0}, start_target)
+
+      dragged = MingaEditor.Mouse.handle_text_event(pressed, %{event | event_type: :drag}, target)
+      assert BufferProcess.cursor(buffer) == {0, 13}
+      assert dragged.workspace.editing.mode == :visual
+      dragged_model = build_window_model(dragged, [])
+      assert dragged_model.cursor_row == 0
+      assert dragged_model.accessibility_selection_ranges == [{0, 0, 14}]
+    end
+
+    test "wrapped cache preserves a logical line clipped by the bottom of the viewport" do
+      long_line = String.duplicate("abcdefghij", 12)
+      state = gui_state(rows: 6, cols: 20, content: "top\n" <> long_line <> "\nnext")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+
+      {first_model, first_result} = build_window_with_stats(state, [], [])
+
+      visible_text =
+        first_model.rows |> Enum.filter(&(&1.buf_line == 1)) |> Enum.map_join(& &1.text)
+
+      assert byte_size(visible_text) < byte_size(long_line)
+
+      :ok = BufferProcess.move_to(buffer, {1, 90})
+      {cold_model, _cold_result} = build_window_with_stats(state, [], [])
+
+      {reused_model, _reused_result} =
+        build_window_with_stats(state, [],
+          retained_rows: first_result.retained_rows,
+          retained_wrap_lines: first_result.retained_wrap_lines,
+          row_slot_allocator: first_result.row_slot_allocator
+        )
+
+      assert Enum.map(reused_model.rows, &{&1.buf_line, &1.visual_index, &1.text}) ==
+               Enum.map(cold_model.rows, &{&1.buf_line, &1.visual_index, &1.text})
+
+      assert reused_model.cursor_row == cold_model.cursor_row
+    end
+
     test "wrapped row IDs follow their durable source when a line is inserted above" do
       state = gui_state(cols: 20, content: "top\nabcdefghijABCDEFGHIJ")
       buffer = state.workspace.buffers.active
