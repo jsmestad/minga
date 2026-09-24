@@ -622,23 +622,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             os_signpost(.end, log: startupLog, name: "AppStartup")
 
             let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
-            withAnimation(.easeOut(duration: duration)) {
+            withAnimation(.easeOut(duration: duration), completionCriteria: .removed) {
                 self.appState.hasReceivedFirstFrame = true
+            } completion: { [weak self] in
+                guard let editorNSView = self?.editorNSView else { return }
+                _ = editorNSView.focusPolicy.requestPresentationFocus()
             }
-
-            // Publish the frame before asking AppKit for focus. Activating while the startup overlay is still installed can prevent SwiftUI from committing the editor hierarchy under UI automation.
-            self.scheduleEditorActivationAfterFirstRender()
 
             self.acceptsOpenRequests = true
             self.flushPendingOpenRequests()
-        }
-    }
-
-    private func scheduleEditorActivationAfterFirstRender() {
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            guard let editorNSView = self?.editorNSView else { return }
-            _ = editorNSView.focusPolicy.requestPresentationFocus()
         }
     }
 
