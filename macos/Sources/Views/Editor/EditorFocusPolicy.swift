@@ -1,58 +1,11 @@
 import AppKit
-
-private let firstResponderKeyPath = "firstResponder"
-
-@MainActor
-private final class FirstResponderChangeStream: NSObject {
-    let changes: AsyncStream<Void>
-
-    private let continuation: AsyncStream<Void>.Continuation
-    private weak var window: NSWindow?
-
-    init(window: NSWindow) {
-        let pair = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
-        changes = pair.stream
-        continuation = pair.continuation
-        self.window = window
-        super.init()
-        window.addObserver(
-            self,
-            forKeyPath: firstResponderKeyPath,
-            options: [.new],
-            context: nil
-        )
-    }
-
-    func invalidate() {
-        window?.removeObserver(self, forKeyPath: firstResponderKeyPath)
-        window = nil
-        finish()
-    }
-
-    nonisolated func finish() {
-        continuation.finish()
-    }
-
-    override func observeValue(
-        forKeyPath keyPath: String?,
-        of object: Any?,
-        change: [NSKeyValueChangeKey: Any]?,
-        context: UnsafeMutableRawPointer?
-    ) {
-        guard keyPath == firstResponderKeyPath else {
-            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
-            return
-        }
-        continuation.yield(())
-    }
-}
+import Combine
 
 /// Owns AppKit focus reclamation and overlay key-routing lifetime for one editor view.
 @MainActor
 final class EditorFocusPolicy {
     private weak var editorView: EditorNSView?
     private weak var attachedWindow: NSWindow?
-    private var firstResponderChanges: FirstResponderChangeStream?
     private var firstResponderTask: Task<Void, Never>?
     private var windowUpdateTask: Task<Void, Never>?
     private var applicationActivationTask: Task<Void, Never>?
@@ -70,8 +23,6 @@ final class EditorFocusPolicy {
     deinit {
         firstResponderTask?.cancel()
         firstResponderTask = nil
-        firstResponderChanges?.finish()
-        firstResponderChanges = nil
         windowUpdateTask?.cancel()
         applicationActivationTask?.cancel()
         deferredReclaimTask?.cancel()
@@ -87,10 +38,9 @@ final class EditorFocusPolicy {
         detach()
         attachedWindow = window
         window.initialFirstResponder = editorView
-        let responderChanges = FirstResponderChangeStream(window: window)
-        firstResponderChanges = responderChanges
-        firstResponderTask = Task { @MainActor [weak self] in
-            for await _ in responderChanges.changes {
+        firstResponderTask = Task { @MainActor [weak self, weak window] in
+            guard let window else { return }
+            for await _ in window.publisher(for: \.firstResponder, options: [.new]).values {
                 guard let self else { return }
                 self.windowFirstResponderDidChange()
             }
@@ -120,8 +70,6 @@ final class EditorFocusPolicy {
         if attachedWindow?.initialFirstResponder === editorView {
             attachedWindow?.initialFirstResponder = nil
         }
-        firstResponderChanges?.invalidate()
-        firstResponderChanges = nil
         firstResponderTask?.cancel()
         firstResponderTask = nil
         windowUpdateTask?.cancel()

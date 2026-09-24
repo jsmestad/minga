@@ -282,8 +282,8 @@ struct MouseInputTests {
         #expect(window.firstResponder === fieldEditor)
     }
 
-    @Test("pending presentation focus follows the first responder after native text editing ends")
-    @MainActor func pendingPresentationFocusFollowsFirstResponder() async throws {
+    @Test("pending presentation focus observation detaches and reattaches with the editor")
+    @MainActor func pendingPresentationFocusObservationLifecycle() async throws {
         let spy = SpyEncoder()
         guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
         let focusStealer = FocusStealingView(frame: NSRect(x: 200, y: 16, width: 100, height: 24))
@@ -294,6 +294,17 @@ struct MouseInputTests {
         #expect(!view.focusPolicy.requestPresentationFocus())
         #expect(window.firstResponder === fieldEditor)
 
+        view.removeFromSuperview()
+        #expect(window.makeFirstResponder(focusStealer))
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === focusStealer)
+
+        window.contentView?.addSubview(view)
+        await Task.yield()
+        #expect(window.makeFirstResponder(textField))
+        _ = try #require(window.firstResponder as? NSTextView)
+        #expect(!view.focusPolicy.requestPresentationFocus())
         #expect(window.makeFirstResponder(focusStealer))
         await Task.yield()
         await Task.yield()
