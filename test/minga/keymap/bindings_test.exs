@@ -1,8 +1,6 @@
 defmodule Minga.Keymap.BindingsTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
-
   alias Minga.Keymap.Bindings
 
   # Convenient key constructors
@@ -305,62 +303,6 @@ defmodule Minga.Keymap.BindingsTest do
     end
   end
 
-  describe "bind/4 — prefix/command overlap warning" do
-    test "warns and keeps both bindings when a prefix key is bound after its longer sequence" do
-      # short-then-long ordering: 'g g' exists, then 'g' is bound on top of it.
-      trie = Bindings.bind(Bindings.new(), [key(?g), key(?g)], :document_start, "First line")
-
-      log =
-        capture_log(fn ->
-          trie = Bindings.bind(trie, [key(?g)], :go, "Go")
-          send(self(), {:trie, trie})
-        end)
-
-      assert_received {:trie, trie}
-
-      assert log =~ "shadows"
-      assert log =~ ":go"
-
-      # Regression: the longer sequence must still resolve in the trie.
-      assert {:command, :document_start, "First line"} =
-               Bindings.lookup_sequence(trie, [key(?g), key(?g)])
-    end
-
-    test "warns when a longer sequence is bound through an existing command-bearing node" do
-      # long-then-short ordering: 'g' command exists, then 'g g' is added.
-      trie = Bindings.bind(Bindings.new(), [key(?g)], :go, "Go")
-
-      log =
-        capture_log(fn ->
-          trie = Bindings.bind(trie, [key(?g), key(?g)], :document_start, "First line")
-          send(self(), {:trie, trie})
-        end)
-
-      assert_received {:trie, trie}
-
-      assert log =~ "shadowed"
-      assert log =~ ":go"
-
-      # Both bindings are recorded even though dispatch favors the short one.
-      assert {:command, :go} = Bindings.lookup(trie, key(?g))
-
-      assert {:command, :document_start, "First line"} =
-               Bindings.lookup_sequence(trie, [key(?g), key(?g)])
-    end
-
-    test "does not warn for non-overlapping bindings" do
-      log =
-        capture_log(fn ->
-          Bindings.new()
-          |> Bindings.bind([key(?h)], :move_left, "Move left")
-          |> Bindings.bind([key(?g), key(?g)], :document_start, "First line")
-          |> Bindings.bind([key(?d), key(?w)], :delete_word, "Delete word")
-        end)
-
-      refute log =~ "shadow"
-    end
-  end
-
   describe "unbind/2" do
     test "removes a single-key binding" do
       trie = Bindings.new()
@@ -429,6 +371,74 @@ defmodule Minga.Keymap.BindingsTest do
 
       # 'g' command still works
       assert {:command, :go_prefix} = Bindings.lookup(trie, key(?g))
+    end
+  end
+end
+
+defmodule Minga.Keymap.BindingsLoggingTest do
+  # CaptureLog installs a global Logger handler and can capture messages from
+  # concurrent tests. Keep exact positive and negative log assertions isolated.
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
+
+  alias Minga.Keymap.Bindings
+
+  defp key(cp, mods \\ 0), do: {cp, mods}
+
+  describe "bind/4 — prefix/command overlap warning" do
+    test "warns and keeps both bindings when a prefix key is bound after its longer sequence" do
+      # short-then-long ordering: 'g g' exists, then 'g' is bound on top of it.
+      trie = Bindings.bind(Bindings.new(), [key(?g), key(?g)], :document_start, "First line")
+
+      log =
+        capture_log(fn ->
+          trie = Bindings.bind(trie, [key(?g)], :go, "Go")
+          send(self(), {:trie, trie})
+        end)
+
+      assert_received {:trie, trie}
+
+      assert log =~ "shadows"
+      assert log =~ ":go"
+
+      # Regression: the longer sequence must still resolve in the trie.
+      assert {:command, :document_start, "First line"} =
+               Bindings.lookup_sequence(trie, [key(?g), key(?g)])
+    end
+
+    test "warns when a longer sequence is bound through an existing command-bearing node" do
+      # long-then-short ordering: 'g' command exists, then 'g g' is added.
+      trie = Bindings.bind(Bindings.new(), [key(?g)], :go, "Go")
+
+      log =
+        capture_log(fn ->
+          trie = Bindings.bind(trie, [key(?g), key(?g)], :document_start, "First line")
+          send(self(), {:trie, trie})
+        end)
+
+      assert_received {:trie, trie}
+
+      assert log =~ "shadowed"
+      assert log =~ ":go"
+
+      # Both bindings are recorded even though dispatch favors the short one.
+      assert {:command, :go} = Bindings.lookup(trie, key(?g))
+
+      assert {:command, :document_start, "First line"} =
+               Bindings.lookup_sequence(trie, [key(?g), key(?g)])
+    end
+
+    test "does not warn for non-overlapping bindings" do
+      log =
+        capture_log(fn ->
+          Bindings.new()
+          |> Bindings.bind([key(?h)], :move_left, "Move left")
+          |> Bindings.bind([key(?g), key(?g)], :document_start, "First line")
+          |> Bindings.bind([key(?d), key(?w)], :delete_word, "Delete word")
+        end)
+
+      refute log =~ "shadow"
     end
   end
 end
