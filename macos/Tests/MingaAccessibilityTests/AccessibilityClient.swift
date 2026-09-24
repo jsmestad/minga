@@ -69,9 +69,19 @@ final class AccessibilityClient {
         matching predicate: (AccessibilityNode) -> Bool
     ) throws -> AccessibilityNode {
         let element = query.firstMatch
-        return try wait(description, timeout: timeout, waitingFor: element) {
-            guard element.exists, let node = try? self.snapshot(element), predicate(node) else { return nil }
-            return node
+        var lastObservedNode: AccessibilityNode?
+
+        do {
+            return try wait(description, timeout: timeout, waitingFor: element) {
+                guard element.exists, let node = try? self.snapshot(element) else { return nil }
+                lastObservedNode = node
+                return predicate(node) ? node : nil
+            }
+        } catch AccessibilityClientError.timeout(_, _) {
+            guard let lastObservedNode else { throw AccessibilityClientError.timeout(description, timeout) }
+            throw AccessibilityClientError.condition(
+                "Timed out after \(String(format: "%.2f", timeout)) seconds waiting for \(description); last observed \(diagnosticSummary(lastObservedNode))"
+            )
         }
     }
 
@@ -280,6 +290,16 @@ final class AccessibilityClient {
 
     private func summary(_ node: AccessibilityNode) -> String {
         "role=\(node.role) id=\(node.identifier ?? "nil") label=\(node.label ?? "nil")"
+    }
+
+    private func diagnosticSummary(_ node: AccessibilityNode) -> String {
+        [
+            summary(node),
+            "value=\(bounded(node.value))",
+            "focused=\(String(describing: node.focused))",
+            "selectedTextRange=\(String(describing: node.selectedTextRange))",
+            "selectedText=\(bounded(node.selectedText))"
+        ].joined(separator: " ")
     }
 
     private func bounded(_ value: String?) -> String {
