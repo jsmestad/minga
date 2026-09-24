@@ -17,7 +17,6 @@ defmodule MingaAgent.EventLog do
   alias MingaAgent.EventLog.TouchedFiles
   alias MingaAgent.EventLog.Writer
 
-  @default_db_dir Path.expand("~/.local/share/minga")
   @db_filename "agent_events.db"
   @default_max_queue_size 1_000
   @default_max_queue_bytes 8 * 1024 * 1024
@@ -45,7 +44,11 @@ defmodule MingaAgent.EventLog do
   @doc "Returns the configured event-log database path."
   @spec db_path(keyword()) :: String.t()
   def db_path(opts \\ []) do
-    dir = Keyword.get(opts, :db_dir, @default_db_dir)
+    dir =
+      Keyword.get_lazy(opts, :db_dir, fn ->
+        Path.join(System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"), "minga")
+      end)
+
     Path.join(dir, @db_filename)
   end
 

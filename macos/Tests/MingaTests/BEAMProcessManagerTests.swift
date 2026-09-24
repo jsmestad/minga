@@ -47,6 +47,7 @@ struct BEAMLaunchConfigurationTests {
     func buildsSafeConfiguration() {
         let arguments = [
             "Minga",
+            "-NSTreatUnknownArgumentsAsOpen", "NO",
             "--safe",
             "-Q",
             "--editor",
@@ -56,6 +57,7 @@ struct BEAMLaunchConfigurationTests {
             "--debug-log", "/tmp/minga.log", "two.ex",
             "-D", "/tmp/minga-short.log", "three.ex",
             "--minga-launch-nonce", "nonce-123",
+            "--minga-ipc-runtime-parent", "/private/tmp/minga-ui-test",
             "--ignored"
         ]
         let configuration = makeConfiguration(appArguments: arguments, launchNonce: "nonce-123")

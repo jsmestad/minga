@@ -270,6 +270,58 @@ struct MouseInputTests {
         #expect(window.firstResponder === view)
     }
 
+    @Test("presentation focus yields to active native text editing")
+    @MainActor func presentationFocusYieldsToNativeTextInput() throws {
+        let spy = SpyEncoder()
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
+
+        #expect(window.makeFirstResponder(textField))
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+
+        #expect(!view.focusPolicy.requestPresentationFocus())
+        #expect(window.firstResponder === fieldEditor)
+    }
+
+    @Test("pending presentation focus observation detaches and reattaches with the editor")
+    @MainActor func pendingPresentationFocusObservationLifecycle() async throws {
+        let spy = SpyEncoder()
+        guard let (view, window, textField) = makeWindowedView(spy: spy) else { return }
+        let focusStealer = FocusStealingView(frame: NSRect(x: 200, y: 16, width: 100, height: 24))
+        window.contentView?.addSubview(focusStealer)
+
+        #expect(window.makeFirstResponder(textField))
+        let fieldEditor = try #require(window.firstResponder as? NSTextView)
+        #expect(!view.focusPolicy.requestPresentationFocus())
+        #expect(window.firstResponder === fieldEditor)
+
+        view.removeFromSuperview()
+        #expect(window.makeFirstResponder(focusStealer))
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === focusStealer)
+
+        window.contentView?.addSubview(view)
+        await Task.yield()
+        #expect(window.makeFirstResponder(textField))
+        _ = try #require(window.firstResponder as? NSTextView)
+        #expect(!view.focusPolicy.requestPresentationFocus())
+        #expect(window.makeFirstResponder(focusStealer))
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === view)
+
+        #expect(window.makeFirstResponder(focusStealer))
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === view)
+
+        #expect(window.makeFirstResponder(textField))
+        let restoredFieldEditor = try #require(window.firstResponder as? NSTextView)
+        await Task.yield()
+        await Task.yield()
+        #expect(window.firstResponder === restoredFieldEditor)
+    }
+
     @Test("native modal close restoration is immediate for an attached editor and a no-op while detached")
     @MainActor func nativeModalCloseRestorationLifecycle() throws {
         let spy = SpyEncoder()

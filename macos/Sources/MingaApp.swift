@@ -623,10 +623,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
 
             os_signpost(.end, log: startupLog, name: "AppStartup")
+            self.editorNSView?.focusPolicy.firstFrameDidRender()
 
             let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
-            withAnimation(.easeOut(duration: duration)) {
+            withAnimation(.easeOut(duration: duration), completionCriteria: .removed) {
                 self.appState.hasReceivedFirstFrame = true
+            } completion: { [weak self] in
+                guard let editorNSView = self?.editorNSView else { return }
+                _ = editorNSView.focusPolicy.requestPresentationFocus()
             }
 
             self.acceptsOpenRequests = true

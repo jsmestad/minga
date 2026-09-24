@@ -71,6 +71,7 @@ struct PickerQueryField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> PickerNSTextField {
         let field = PickerNSTextField()
+        field.setAccessibilityIdentifier("minga.picker.query")
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none

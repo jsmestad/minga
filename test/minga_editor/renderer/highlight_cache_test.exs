@@ -52,8 +52,10 @@ defmodule MingaEditor.Renderer.HighlightCacheTest do
         assert tuple_size(prepared[buffer].spans) == count * 2
         :erlang.garbage_collect()
         {:reductions, before_count} = Process.info(self(), :reductions)
-        Enum.each(1..100, fn _ -> HighlightCache.prepare(cache, intent) end)
+        {same_cache, same_prepared} = HighlightCache.prepare(cache, intent)
         {:reductions, after_count} = Process.info(self(), :reductions)
+        assert same_cache == cache
+        assert :erts_debug.same(same_prepared[buffer], prepared[buffer])
         after_count - before_count
       end
 
