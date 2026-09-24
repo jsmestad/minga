@@ -1071,8 +1071,10 @@ struct GUIFrameSwiftUIInvalidationTests {
 
         #expect(policy.contains("final class EditorFocusPolicy"))
         #expect(policy.contains("NSWindow.didUpdateNotification"))
+        #expect(policy.contains("NSApplication.didBecomeActiveNotification"))
         #expect(policy.contains("NSEvent.addLocalMonitorForEvents"))
         #expect(policy.contains("windowUpdateTask"))
+        #expect(policy.contains("applicationActivationTask"))
         #expect(policy.contains("deferredReclaimTask"))
         #expect(editorView.contains("nsView.swiftUIUpdateDidOccur()"))
         #expect(!editorNSView.contains("FirstResponderGuard"))

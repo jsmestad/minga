@@ -3785,6 +3785,12 @@ extension EditorNSView {
         encoder.send(.focusWindow(windowID: identity.windowID, generation: identity.generation))
     }
 
+    func nativeApplicationFocusDidSettle() {
+        refreshAccessibilityNativeFocus()
+        guard accessibilityHasNativeKeyboardFocus else { return }
+        NSAccessibility.post(element: self, notification: .focusedUIElementChanged)
+    }
+
     private func accessibilityPaneElements() -> [EditorPaneAccessibilityElement] {
         synchronizeAccessibilityPresentation()
         let projections = accessibilityProjections

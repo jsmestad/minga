@@ -6,9 +6,11 @@ final class EditorFocusPolicy {
     private weak var editorView: EditorNSView?
     private weak var attachedWindow: NSWindow?
     private var windowUpdateTask: Task<Void, Never>?
+    private var applicationActivationTask: Task<Void, Never>?
     private var deferredReclaimTask: Task<Void, Never>?
     private var agentKeyMonitor: Any?
     private var nativeModalDepth = 0
+    private var presentationFocusRequested = false
 
     private(set) var agentOverlayVisible = false
 
@@ -18,6 +20,7 @@ final class EditorFocusPolicy {
 
     deinit {
         windowUpdateTask?.cancel()
+        applicationActivationTask?.cancel()
         deferredReclaimTask?.cancel()
     }
 
@@ -37,6 +40,15 @@ final class EditorFocusPolicy {
                 self.reclaimEditorIfNeeded(in: window, respectingNativeTextInput: true)
             }
         }
+        applicationActivationTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: NSApplication.didBecomeActiveNotification,
+                object: NSApp
+            ) {
+                guard let self else { return }
+                self.applicationDidBecomeActive()
+            }
+        }
         reconcileAgentKeyMonitor()
         scheduleDeferredReclaim()
     }
@@ -45,6 +57,8 @@ final class EditorFocusPolicy {
     func detach() {
         windowUpdateTask?.cancel()
         windowUpdateTask = nil
+        applicationActivationTask?.cancel()
+        applicationActivationTask = nil
         deferredReclaimTask?.cancel()
         deferredReclaimTask = nil
         removeAgentKeyMonitor()
@@ -130,12 +144,15 @@ final class EditorFocusPolicy {
               let editorView,
               editorView.window === window
         else { return false }
+        presentationFocusRequested = true
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         if !nativeTextEditingIsActive(), window.firstResponder !== editorView {
             window.makeFirstResponder(editorView)
         }
-        return presentationFocusReady()
+        let ready = presentationFocusReady()
+        if ready { editorView.nativeApplicationFocusDidSettle() }
+        return ready
     }
 
     /// Reclaims and verifies the AppKit responder state required by a native open receipt.
@@ -146,6 +163,7 @@ final class EditorFocusPolicy {
               editorView.window === window,
               window.isVisible,
               !window.isMiniaturized,
+              NSApp.isActive,
               window.isKeyWindow,
               !nativeTextEditingIsActive()
         else { return false }
@@ -225,6 +243,13 @@ final class EditorFocusPolicy {
             guard !Task.isCancelled, let self, let window = self.attachedWindow else { return }
             self.reclaimEditorIfNeeded(in: window, respectingNativeTextInput: true)
         }
+    }
+
+    private func applicationDidBecomeActive() {
+        guard presentationFocusRequested, let window = attachedWindow else { return }
+        reclaimEditorIfNeeded(in: window, respectingNativeTextInput: true)
+        guard presentationFocusReady() else { return }
+        editorView?.nativeApplicationFocusDidSettle()
     }
 
     private func reclaimEditorIfNeeded(in window: NSWindow, respectingNativeTextInput: Bool) {
