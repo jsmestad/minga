@@ -62,6 +62,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       application_quit_decision: 0x0E,
       operation_native_result: 0x0F,
       native_presentation_observation: 0x1D,
+      editor_text_event: 0x1E,
+      text_presentation_state: 0x1F,
       log_message: 0x60
     )
   end
@@ -183,7 +185,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_surface_layout: 0xA4,
       gui_empty_state: 0xA5,
       gui_completion_selection: 0xA6,
-      gui_picker_selection: 0xA7
+      gui_picker_selection: 0xA7,
+      gui_text_presentation: 0xA8
     )
   end
 

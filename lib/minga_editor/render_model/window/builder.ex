@@ -40,6 +40,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.RenderModel.Window.ContentDigest
   alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderModel.Window.ResidentBuild
+  alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.RenderModel.Window.VisualRow
   alias Minga.RenderModel.Window.Annotation
   alias Minga.RenderModel.Window.Cursorline
@@ -122,7 +123,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       is_active: is_active,
       viewport: viewport,
       cursor_line: cursor_line,
-      cursor_byte_col: _cursor_byte_col,
+      cursor_byte_col: cursor_byte_col,
       cursor_col: cursor_col,
       first_line: first_line,
       lines: lines,
@@ -240,7 +241,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       resolve_retained_and_digest(resident_result, resident_entries, retain_ctx)
 
     new_retained_wrap =
-      retained_wrap_lines(resident_entries, wrap_on and visible_line_map == nil)
+      retained_wrap_lines(all_visual_entries, wrap_on and visible_line_map == nil)
 
     presentation_rows = Enum.map(resident_entries, & &1.row)
     committed_rows = Enum.map(visual_entries, & &1.row)
@@ -250,6 +251,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {display_cursor_row, display_cursor_col} =
       compute_display_cursor(
         cursor_line,
+        cursor_byte_col,
         cursor_col,
         viewport,
         window.fold_map,
@@ -300,18 +302,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         false
       end
 
+    raw_selection =
+      ContentHelpers.visual_selection_bounds(state, {cursor_line, scroll.cursor_byte_col})
+
+    selection_source =
+      selection_coordinates(raw_selection, ctx.visual_selection, wrapped_coordinates?)
+
     # Selection in display coordinates
     selection =
       build_selection(
-        ctx.visual_selection,
+        selection_source,
         viewport,
         visible_row_count,
         visual_entries,
         wrapped_coordinates?
       )
-
-    raw_selection =
-      ContentHelpers.visual_selection_bounds(state, {cursor_line, scroll.cursor_byte_col})
 
     accessibility_selection_ranges =
       accessibility_selection_ranges(
@@ -378,8 +383,43 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     row_store_mode = row_store_mode(scroll)
 
+    text_rows = text_presentation_rows(resident_build_state, resident_entries)
+
+    text_store_identity =
+      text_store_identity(row_store_mode, visible_row_start_index, resident_entries)
+
+    text_identity =
+      {
+        snapshot.version,
+        retain_ctx.compose_fp,
+        content_digest,
+        window.fold_map,
+        ctx.content_w,
+        ctx.wrap_on,
+        Minga.Core.WidthOracle.fingerprint(ctx.width_oracle),
+        scroll.content_epoch,
+        rect,
+        viewport.top,
+        viewport.left,
+        viewport.visual_row_offset,
+        text_store_identity
+      }
+
+    {:buffer, buffer} = window.content
+
+    text_presentation =
+      TextPresentation.retain(
+        RendererWindow.text_presentation(window),
+        win_id,
+        buffer,
+        snapshot.version,
+        text_identity,
+        text_rows
+      )
+
     render_window = %RenderWindow{
       window_id: win_id,
+      text_presentation_id: text_presentation.presentation_id,
       content_kind: content_kind,
       accessibility_label: accessibility_label(snapshot),
       accessibility_generation: window.accessibility_generation,
@@ -422,7 +462,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        retained_wrap_lines: new_retained_wrap,
        resident_build: resident_build_state,
        resident_rows_spliced: resident_rows_spliced,
-       row_slot_allocator: row_slot_allocator
+       row_slot_allocator: row_slot_allocator,
+       text_presentation: text_presentation
      }, font_registry}
   end
 
@@ -870,15 +911,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end)
   end
 
-  # Rebuilds the per-logical-line wrapped-line cache from this frame's visual
-  # entries so the next wrapped frame can reuse unchanged logical lines whole.
-  # Only meaningful for the wrapped path; other modes carry an empty map (#2287).
-  #
-  # Entries are stored UNTRIMMED-shape but already trimmed to the visible set; we
-  # reset each entry's `display_row` to 0 so a reused logical line is positioned
-  # identically by `trim_visual_entries/3` regardless of where it landed this
-  # frame. Trimming may drop a logical line's leading rows; such partial groups
-  # are not cached so reuse only ever replays a complete logical line.
+  # Cache complete logical lines before viewport trimming, including continuation rows outside the current presentation.
+  # Reused entries reset display_row so the next viewport positions them independently.
   @spec retained_wrap_lines([visual_row_entry()], boolean()) ::
           %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}}
   defp retained_wrap_lines(_visual_entries, false), do: %{}
@@ -940,21 +974,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     )
     |> elem(0)
     |> Enum.at(visual_row)
-    |> source_position_from_visual_entry(display_col, ctx.decorations)
+    |> source_position_from_visual_entry(display_col)
   end
 
-  @spec source_position_from_visual_entry(
-          visual_row_entry() | nil,
-          non_neg_integer(),
-          Decorations.t()
-        ) ::
+  @spec source_position_from_visual_entry(visual_row_entry() | nil, non_neg_integer()) ::
           {:ok, non_neg_integer(), non_neg_integer()} | :error
-  defp source_position_from_visual_entry(nil, _display_col, _decorations), do: :error
+  defp source_position_from_visual_entry(nil, _display_col), do: :error
 
-  defp source_position_from_visual_entry(entry, display_col, decorations) do
-    composed_col = entry.source_start_col + max(display_col - entry.indent_width, 0)
-    buffer_col = Decorations.display_col_to_buf_col(decorations, entry.buf_line, composed_col)
-    {:ok, entry.buf_line, buffer_col}
+  defp source_position_from_visual_entry(entry, display_col) do
+    row_local_utf16 = utf16_at_display_col(entry.row.text, display_col)
+
+    case VisualRow.source_position(entry, row_local_utf16) do
+      {:ok, {line, source_byte}} -> {:ok, line, source_byte}
+      :not_source_backed -> :error
+    end
   end
 
   # ── Visual row building ────────────────────────────────────────────────
@@ -1316,22 +1349,50 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp wrap_composed_entries(composed_text, source_text, spans, buf_line, source_id, ctx, opts) do
     [visual_rows] = WrapMap.compute([composed_text], Keyword.fetch!(opts, :content_width), opts)
     decorations = composition_decorations(ctx, buf_line)
-    source_offset_map = SourceOffsetMap.new(source_text, composed_text, decorations, buf_line)
+
+    source_offset_map =
+      SourceOffsetMap.new(source_text, composed_text, decorations, buf_line,
+        tab_width: ctx.tab_width
+      )
+
     source_line_width = Unicode.display_width(source_text)
 
-    visual_rows
+    visual_rows_with_offsets =
+      Enum.map(visual_rows, fn visual_row ->
+        composed_start_byte = Map.get(visual_row, :byte_offset, 0)
+
+        composed_end_byte =
+          composed_start_byte +
+            byte_size(Map.get(visual_row, :source_text, Map.get(visual_row, :text, "")))
+
+        {
+          visual_row,
+          utf16_offset(composed_text, composed_start_byte),
+          utf16_offset(composed_text, composed_end_byte)
+        }
+      end)
+
+    composed_boundaries =
+      visual_rows_with_offsets
+      |> Enum.flat_map(fn {_visual_row, composed_start_utf16, composed_end_utf16} ->
+        [{composed_start_utf16, :start}, {composed_end_utf16, :end}]
+      end)
+
+    source_bytes =
+      source_offset_map
+      |> SourceOffsetMap.composed_utf16_to_source_bytes(composed_boundaries)
+      |> Enum.chunk_every(2)
+
+    visual_rows_with_offsets
+    |> Enum.zip(source_bytes)
     |> Enum.with_index()
-    |> Enum.map(fn {visual_row, visual_index} ->
+    |> Enum.map(fn {{{visual_row, composed_start_utf16, composed_end_utf16},
+                     [source_start_byte, source_end_byte]}, visual_index} ->
       text = WrapMap.display_text(visual_row)
       row_type = if visual_index == 0, do: :normal, else: :wrap_continuation
       row_spans = spans_for_visual_row(spans, composed_text, visual_row)
       source_start = visual_row_source_start(composed_text, visual_row)
       source_end = visual_row_source_end(source_start, visual_row)
-      composed_start_byte = Map.get(visual_row, :byte_offset, 0)
-
-      composed_end_byte =
-        composed_start_byte +
-          byte_size(Map.get(visual_row, :source_text, Map.get(visual_row, :text, "")))
 
       source_start_col =
         Decorations.display_col_to_buf_col(
@@ -1348,11 +1409,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           source_end,
           source_line_width
         )
-
-      source_start_byte = Unicode.display_col_to_byte(source_text, source_start_col)
-      source_end_byte = Unicode.display_col_to_byte(source_text, source_end_col)
-      composed_start_utf16 = utf16_offset(composed_text, composed_start_byte)
-      composed_end_utf16 = utf16_offset(composed_text, composed_end_byte)
 
       source_offset_map =
         SourceOffsetMap.slice(
@@ -1378,8 +1434,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       VisualRow.new(
         row,
         source_offset_map,
-        source_start,
-        source_end,
+        source_start_col,
+        source_end_col,
         indent_width
       )
     end)
@@ -1438,7 +1494,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     VisualRow.new(
       row,
-      SourceOffsetMap.new(source_text, row.text, decorations, row.buf_line),
+      SourceOffsetMap.new(source_text, row.text, decorations, row.buf_line,
+        tab_width: ctx.tab_width
+      ),
       source_start_col,
       source_end_col,
       indent_width
@@ -1888,9 +1946,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     segments = Composition.compose_segments(segments, ctx.decorations, buf_line)
 
     segments =
-      if ctx.show_invisible,
-        do: Composition.apply_invisible_chars(segments, ctx.tab_width, ctx.whitespace_face),
-        else: segments
+      Composition.present_whitespace(
+        segments,
+        ctx.tab_width,
+        ctx.show_invisible,
+        ctx.whitespace_face
+      )
 
     # Convert to composed text + spans
     Composition.segments_to_text_and_spans(segments, font_registry)
@@ -1978,7 +2039,28 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   # ── Cursor display coordinates ─────────────────────────────────────────
 
+  @spec text_presentation_rows(ResidentBuild.t() | nil, [visual_row_entry()]) ::
+          TextPresentation.rows()
+  defp text_presentation_rows(%ResidentBuild{store: store}, _entries), do: {:resident, store}
+  defp text_presentation_rows(nil, entries), do: {:windowed, List.to_tuple(entries)}
+
+  @spec text_store_identity(:windowed | {:resident, non_neg_integer()}, non_neg_integer(), [
+          visual_row_entry()
+        ]) :: tuple()
+  defp text_store_identity({:resident, count}, _start, _entries), do: {:resident, count}
+  defp text_store_identity(:windowed, start, entries), do: {:windowed, start, length(entries)}
+
+  @spec selection_coordinates(
+          ContentHelpers.visual_selection(),
+          ContentHelpers.visual_selection(),
+          boolean()
+        ) :: ContentHelpers.visual_selection()
+  defp selection_coordinates(nil, display_selection, true), do: display_selection
+  defp selection_coordinates(source_selection, _display_selection, true), do: source_selection
+  defp selection_coordinates(_source_selection, display_selection, false), do: display_selection
+
   @spec compute_display_cursor(
+          non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           Viewport.t(),
@@ -1989,18 +2071,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         ) :: {non_neg_integer(), non_neg_integer()}
   defp compute_display_cursor(
          cursor_line,
-         cursor_col,
+         cursor_byte_col,
+         _cursor_col,
          _viewport,
          _fold_map,
-         decorations,
+         _decorations,
          visual_entries,
          true
        ) do
-    compute_wrapped_display_cursor(cursor_line, cursor_col, decorations, visual_entries)
+    compute_wrapped_display_cursor(cursor_line, cursor_byte_col, visual_entries)
   end
 
   defp compute_display_cursor(
          cursor_line,
+         _cursor_byte_col,
          cursor_col,
          viewport,
          fold_map,
@@ -2069,35 +2153,74 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec compute_wrapped_display_cursor(
           non_neg_integer(),
           non_neg_integer(),
-          Decorations.t(),
           [visual_row_entry()]
         ) :: {non_neg_integer(), non_neg_integer()}
-  defp compute_wrapped_display_cursor(cursor_line, cursor_col, decorations, visual_entries) do
-    cursor_display_col = Decorations.buf_col_to_display_col(decorations, cursor_line, cursor_col)
-
-    visual_entries
-    |> Enum.filter(&(&1.buf_line == cursor_line))
-    |> visual_entry_for_source_col(cursor_display_col)
-    |> cursor_position_from_visual_entry(cursor_display_col)
+  defp compute_wrapped_display_cursor(cursor_line, cursor_byte, visual_entries) do
+    entries = Enum.filter(visual_entries, &(&1.buf_line == cursor_line))
+    entry = visual_entry_for_source_byte(entries, cursor_byte) || Enum.at(entries, -1)
+    cursor_position_from_visual_entry(entry, cursor_byte)
   end
 
-  @spec visual_entry_for_source_col([visual_row_entry()], non_neg_integer()) ::
+  @spec visual_entry_for_source_byte([visual_row_entry()], non_neg_integer()) ::
           visual_row_entry() | nil
-  defp visual_entry_for_source_col([], _cursor_display_col), do: nil
+  defp visual_entry_for_source_byte([], _cursor_byte), do: nil
 
-  defp visual_entry_for_source_col(entries, cursor_display_col) do
+  defp visual_entry_for_source_byte(entries, cursor_byte) do
     Enum.find(entries, fn entry ->
-      cursor_display_col >= entry.source_start_col and cursor_display_col < entry.source_end_col
-    end) || Enum.at(entries, -1)
+      cursor_byte >= entry.source_start_byte and cursor_byte < entry.source_end_byte
+    end)
   end
 
   @spec cursor_position_from_visual_entry(visual_row_entry() | nil, non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()}
-  defp cursor_position_from_visual_entry(nil, cursor_display_col), do: {0, cursor_display_col}
+  defp cursor_position_from_visual_entry(nil, cursor_byte), do: {0, cursor_byte}
 
-  defp cursor_position_from_visual_entry(entry, cursor_display_col) do
-    col = max(cursor_display_col - entry.source_start_col + entry.indent_width, 0)
-    {entry.display_row, col}
+  defp cursor_position_from_visual_entry(entry, cursor_byte) do
+    row_utf16 = utf16_offset(entry.row.text, byte_size(entry.row.text))
+    indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
+
+    row_local_utf16 =
+      entry.source_offset_map
+      |> SourceOffsetMap.source_to_composed_utf16(cursor_byte, :start)
+      |> Kernel.-(entry.composed_start_utf16)
+      |> Kernel.+(indent_utf16)
+      |> max(0)
+      |> min(row_utf16)
+
+    {entry.display_row, display_col_at_utf16(entry.row.text, row_local_utf16)}
+  end
+
+  @spec display_col_at_utf16(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp display_col_at_utf16(text, target_utf16) do
+    do_display_col_at_utf16(text, target_utf16, 0, 0)
+  end
+
+  @spec do_display_col_at_utf16(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp do_display_col_at_utf16("", _target_utf16, _utf16, display_col), do: display_col
+
+  defp do_display_col_at_utf16(_text, target_utf16, utf16, display_col)
+       when target_utf16 <= utf16,
+       do: display_col
+
+  defp do_display_col_at_utf16(text, target_utf16, utf16, display_col) do
+    {grapheme, rest} = String.next_grapheme(text)
+    next_utf16 = utf16 + utf16_offset(grapheme, byte_size(grapheme))
+
+    if target_utf16 < next_utf16 do
+      display_col
+    else
+      do_display_col_at_utf16(
+        rest,
+        target_utf16,
+        next_utf16,
+        display_col + Unicode.grapheme_width(grapheme)
+      )
+    end
   end
 
   @spec adjust_cursor_col_for_shape(
@@ -3130,18 +3253,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           [visual_row_entry()]
         ) :: Selection.t() | nil
-  defp build_wrapped_char_selection(start_line, start_col, end_line, end_col, visual_entries) do
+  defp build_wrapped_char_selection(start_line, start_byte, end_line, end_byte, visual_entries) do
     selected_entries = visual_entries_for_line_range(visual_entries, start_line, end_line)
 
     with [_ | _] <- selected_entries,
-         start_entry <- selection_endpoint_entry(selected_entries, start_line, start_col, :first),
-         end_entry <- selection_endpoint_entry(selected_entries, end_line, end_col, :last) do
+         {start_entry, projected_start_byte} <-
+           selection_start_entry(selected_entries, start_line, start_byte),
+         {end_entry, projected_end_byte} <-
+           selection_end_entry(selected_entries, end_line, end_byte) do
       %Selection{
         type: :char,
         start_row: start_entry.display_row,
-        start_col: selection_visual_col(start_entry, start_col, :start),
+        start_col: selection_visual_col(start_entry, projected_start_byte, :start),
         end_row: end_entry.display_row,
-        end_col: selection_visual_col(end_entry, end_col, :end)
+        end_col: selection_visual_col(end_entry, projected_end_byte, :end)
       }
     else
       _ -> nil
@@ -3169,20 +3294,56 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end
   end
 
-  @spec selection_endpoint_entry(
+  @spec selection_start_entry(
           [visual_row_entry()],
           non_neg_integer(),
-          non_neg_integer(),
-          :first | :last
-        ) :: visual_row_entry()
-  defp selection_endpoint_entry(entries, line, col, fallback) do
+          non_neg_integer()
+        ) :: {visual_row_entry(), non_neg_integer()}
+  defp selection_start_entry(entries, line, source_byte) do
     line_entries = Enum.filter(entries, &(&1.buf_line == line))
 
-    if line_entries == [] do
-      endpoint_fallback(entries, fallback)
-    else
-      visual_entry_for_source_col(line_entries, col) || endpoint_fallback(entries, fallback)
+    case visual_entry_for_source_byte(line_entries, source_byte) do
+      nil ->
+        entry = endpoint_fallback(entries, :first)
+        {entry, entry.source_start_byte}
+
+      entry ->
+        {entry, source_byte}
     end
+  end
+
+  @spec selection_end_entry(
+          [visual_row_entry()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {visual_row_entry(), non_neg_integer()}
+  defp selection_end_entry(entries, line, source_byte) do
+    line_entries = Enum.filter(entries, &(&1.buf_line == line))
+
+    case line_entries do
+      [] ->
+        entry = endpoint_fallback(entries, :last)
+        {entry, entry.source_end_byte}
+
+      [first | _] ->
+        source_end = Unicode.next_grapheme_byte_offset(first.source_text, source_byte)
+        entry = last_entry_intersecting_source(line_entries, source_byte, source_end)
+        entry = entry || endpoint_fallback(line_entries, :last)
+        {entry, min(source_end, entry.source_end_byte)}
+    end
+  end
+
+  @spec last_entry_intersecting_source(
+          [visual_row_entry()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: visual_row_entry() | nil
+  defp last_entry_intersecting_source(entries, source_start, source_end) do
+    entries
+    |> Enum.filter(fn entry ->
+      entry.source_start_byte < source_end and entry.source_end_byte > source_start
+    end)
+    |> Enum.at(-1)
   end
 
   @spec endpoint_fallback([visual_row_entry()], :first | :last) :: visual_row_entry()
@@ -3293,9 +3454,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       [
         build_range.(
           entry.display_row,
-          visual_col_for_source_byte(entry, range_start),
+          visual_col_for_source_byte(entry, range_start, :start),
           entry.display_row,
-          visual_col_for_source_byte(entry, range_end)
+          visual_col_for_source_byte(entry, range_end, :end)
         )
       ]
     else
@@ -3305,19 +3466,36 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec selection_visual_col(visual_row_entry(), non_neg_integer(), :start | :end) ::
           non_neg_integer()
-  defp selection_visual_col(entry, source_col, :start) when source_col <= entry.source_start_col,
-    do: 0
+  defp selection_visual_col(entry, source_byte, :start)
+       when source_byte <= entry.source_start_byte,
+       do: 0
 
-  defp selection_visual_col(entry, source_col, :end) when source_col >= entry.source_end_col,
-    do: entry.row_width
+  defp selection_visual_col(entry, source_byte, :end)
+       when source_byte >= entry.source_end_byte,
+       do: entry.row_width
 
-  defp selection_visual_col(entry, source_col, _endpoint),
-    do: visual_col_for_source_col(entry, source_col)
+  defp selection_visual_col(entry, source_byte, affinity) do
+    visual_col_for_source_byte(entry, source_byte, affinity)
+  end
 
-  @spec visual_col_for_source_byte(visual_row_entry(), non_neg_integer()) :: non_neg_integer()
-  defp visual_col_for_source_byte(entry, source_byte) do
-    source_col = Unicode.display_col(entry.source_text, source_byte)
-    visual_col_for_source_col(entry, source_col)
+  @spec visual_col_for_source_byte(
+          visual_row_entry(),
+          non_neg_integer(),
+          SourceOffsetMap.affinity()
+        ) :: non_neg_integer()
+  defp visual_col_for_source_byte(entry, source_byte, affinity) do
+    row_utf16 = utf16_offset(entry.row.text, byte_size(entry.row.text))
+    indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
+
+    row_local_utf16 =
+      entry.source_offset_map
+      |> SourceOffsetMap.source_to_composed_utf16(source_byte, affinity)
+      |> Kernel.-(entry.composed_start_utf16)
+      |> Kernel.+(indent_utf16)
+      |> max(0)
+      |> min(row_utf16)
+
+    display_col_at_utf16(entry.row.text, row_local_utf16)
   end
 
   @spec visual_col_for_source_col(visual_row_entry(), non_neg_integer()) :: non_neg_integer()
@@ -3327,6 +3505,40 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> max(entry.source_start_col)
     |> Kernel.-(entry.source_start_col)
     |> Kernel.+(entry.indent_width)
+  end
+
+  @spec utf16_at_display_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp utf16_at_display_col(text, display_col) do
+    do_utf16_at_display_col(text, display_col, 0, 0)
+  end
+
+  @spec do_utf16_at_display_col(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp do_utf16_at_display_col("", _target_col, _current_col, utf16), do: utf16
+
+  defp do_utf16_at_display_col(text, target_col, current_col, utf16) do
+    case String.next_grapheme(text) do
+      {grapheme, rest} ->
+        next_col = current_col + Unicode.grapheme_width(grapheme)
+
+        if next_col > target_col do
+          utf16
+        else
+          do_utf16_at_display_col(
+            rest,
+            target_col,
+            next_col,
+            utf16 + utf16_offset(grapheme, byte_size(grapheme))
+          )
+        end
+
+      nil ->
+        utf16
+    end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────

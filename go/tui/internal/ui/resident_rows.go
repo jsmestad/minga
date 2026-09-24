@@ -191,6 +191,23 @@ func ropeRange(n *rowRope, start, end int, out *[]protocol.WindowRow) {
 }
 
 func (s residentRows) count() int { return ropeCount(s.root) }
+
+func (s residentRows) lowerBoundBufferLine(line uint32) int {
+	if s.sequential {
+		return min(int(line), s.count())
+	}
+	low, high := 0, s.count()
+	for low < high {
+		middle := low + (high-low)/2
+		row, _ := s.get(middle)
+		if row.BufferLine < line {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	return low
+}
 func (s residentRows) get(index int) (protocol.WindowRow, bool) {
 	row, ok := ropeGet(s.root, index)
 	if ok && s.sequential {

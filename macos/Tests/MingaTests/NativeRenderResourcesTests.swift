@@ -719,6 +719,8 @@ struct NativeRenderResourcesTests {
         descriptor.usage = .renderTarget
         guard let texture = device.makeTexture(descriptor: descriptor) else { return }
         var reports: [NativePresentationFailure] = []
+        var finishedAttempts = 0
+        var textPresentations = 0
         var factories = nativeTestFactories()
         factories.present = { _ in }
         factories.observeCompletion = { _, completion in
@@ -733,12 +735,15 @@ struct NativeRenderResourcesTests {
         renderer.setupRenderers(fontManager: fontManager)
         let before = renderer.activeResourceSnapshot()
         renderer.render(
-            frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
+            snapshot: CommittedEditorSnapshot(generation: 1, frameSeq: 1, frameState: FrameState(cols: 4, rows: 4), themeColors: nil, surfaces: [], activeWindowId: nil, metadata: .empty), fontManager: fontManager,
             drawableProvider: { NativeTestDrawable(texture: texture) },
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
-            presentationInputSeq: 301
+            presentationInputSeq: 301,
+            onAttemptFinished: { finishedAttempts += 1 },
+            onTextPresented: { _, _ in textPresentations += 1 }
         )
         #expect(reports.count == 1)
+        #expect(finishedAttempts == 1 && textPresentations == 0)
         #expect(reports.first?.phase == .completion)
         #expect(renderer.activeResourceSnapshot() == before)
         #expect(renderer.lastCompletedPresentationGeneration == 0)
@@ -794,6 +799,8 @@ struct NativeRenderResourcesTests {
         typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
         var completions: [Completion] = []
         var presentCalls = 0
+        var finishedAttempts = 0
+        var textPresentations = 0
         let metrics = GUIFramePresentationMetrics()
         let committedFrame = GUICommittedFrame(generation: 3, frameSeq: 42)
         metrics.beginCommitted(frame: committedFrame, impact: .editor)
@@ -807,18 +814,25 @@ struct NativeRenderResourcesTests {
         let before = renderer.activeResourceSnapshot()
 
         renderer.render(
-            frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
+            snapshot: CommittedEditorSnapshot(generation: 3, frameSeq: 42, frameState: FrameState(cols: 4, rows: 4), themeColors: nil, surfaces: [], activeWindowId: nil, metadata: .empty), fontManager: fontManager,
             drawableProvider: { NativeTestDrawable(texture: texture) },
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
-            presentationInputSeq: 302, presentationFrame: committedFrame
+            presentationInputSeq: 302,
+            onAttemptFinished: { finishedAttempts += 1 },
+            onTextPresented: { snapshot, _ in
+                #expect(snapshot.frameSeq == 42)
+                textPresentations += 1
+            }
         )
         #expect(completions.count == 1)
+        #expect(finishedAttempts == 0 && textPresentations == 0)
         #expect(presentCalls == 0)
         #expect(metrics.snapshot().isEmpty)
         #expect(renderer.activeResourceSnapshot() == before)
 
         completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
         #expect(completions.count == 2)
+        #expect(finishedAttempts == 0 && textPresentations == 0)
         #expect(presentCalls == 0)
         #expect(metrics.snapshot() == [
             .init(frame: committedFrame, domain: .editor, outcome: .submitted)
@@ -827,6 +841,7 @@ struct NativeRenderResourcesTests {
 
         completions[1](true, Int(MTLCommandBufferStatus.completed.rawValue))
         #expect(presentCalls == 1)
+        #expect(finishedAttempts == 1 && textPresentations == 1)
         #expect(metrics.snapshot() == [
             .init(frame: committedFrame, domain: .editor, outcome: .submitted),
             .init(frame: committedFrame, domain: .editor, outcome: .presented)

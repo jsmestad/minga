@@ -17,7 +17,9 @@ defmodule MingaEditor.State.MouseTest do
     test "start_drag/3 stores tagged active drag and stop_drag/1 clears it" do
       mouse = %Mouse{} |> Mouse.start_drag({5, 10}, 7)
 
-      assert mouse.drag == {:active, %{anchor: {5, 10}, origin_window: 7, click_count: 1}}
+      assert mouse.drag ==
+               {:active, %{anchor: {5, 10}, origin_window: 7, source: :legacy, click_count: 1}}
+
       assert Mouse.dragging?(mouse)
       assert Mouse.active_drag(mouse) == {:active, {5, 10}, 7, 1}
 
@@ -26,6 +28,13 @@ defmodule MingaEditor.State.MouseTest do
       assert mouse.drag == :idle
       refute Mouse.dragging?(mouse)
       assert Mouse.active_drag(mouse) == :idle
+    end
+
+    test "start_text_drag/5 binds the gesture to its buffer source version" do
+      mouse = Mouse.start_text_drag(%Mouse{}, {2, 3}, 7, self(), 11)
+
+      assert Mouse.active_text_drag(mouse) == {:active, {2, 3}, 7, self(), 11, 1}
+      assert Mouse.active_drag(mouse) == {:active, {2, 3}, 7, 1}
     end
 
     test "start_drag/2 preserves recorded native double-click count" do
@@ -53,6 +62,23 @@ defmodule MingaEditor.State.MouseTest do
 
       assert mouse.resize == :idle
       refute Mouse.resizing?(mouse)
+    end
+  end
+
+  describe "text click history" do
+    test "same row offsets in different windows remain separate clicks" do
+      mouse = Mouse.record_text_press_at(%Mouse{}, 1, self(), 7, 44, 3, 1, 100)
+      assert Mouse.click_count(mouse) == 1
+
+      mouse = Mouse.record_text_press_at(mouse, 2, self(), 7, 44, 3, 1, 120)
+      assert Mouse.click_count(mouse) == 1
+    end
+
+    test "a new source version resets timing-derived click history" do
+      mouse = Mouse.record_text_press_at(%Mouse{}, 1, self(), 7, 44, 3, 1, 100)
+      mouse = Mouse.record_text_press_at(mouse, 1, self(), 8, 44, 3, 1, 120)
+
+      assert Mouse.click_count(mouse) == 1
     end
   end
 

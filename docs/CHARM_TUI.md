@@ -41,6 +41,12 @@ The Charm renderer targets the Semantic UI path, not the legacy cell-grid path. 
 
 It renders roughly 9 of the shared-chrome components today. Decoding and rendering the remaining components is tracked in #2100, and overall cross-frontend coverage is tracked in the Semantic UI inventory (#2113).
 
+## Editor pointer input
+
+The TUI resolves text clicks and drags from the committed row store, terminal grapheme widths, clipping, and local scroll transform used to render the editor. It sends `editor_text_event` with the presentation ID, absolute row-store rank, row ID, and composed UTF-16 offset. The renderer maps that position to source bytes; the BEAM owns selection and editing behavior.
+
+The input model activates the final committed text presentation for each Bubble Tea update and discards presentations it can no longer use. These lifecycle messages stay ordered with pointer input. Drag capture stays with the originating editor pane until release, including release after a stale or missing target. Chrome and overlays retain their input precedence. See [the input ownership contract](ARCHITECTURE.md#the-input-rule) and [the wire format](PROTOCOL.md#0x1e-editor_text_event).
+
 ## Validation
 
 Before pushing renderer changes, run:

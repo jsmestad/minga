@@ -12,6 +12,7 @@ struct EditorLocalPresentationTransform: Sendable, Equatable {
 struct VisibleEditorPresentation: Sendable {
     let snapshot: CommittedEditorSnapshot
     let localTransform: EditorLocalPresentationTransform?
+    var textLayout: PresentedTextLayout? = nil
 }
 
 /// Immutable gutter state owned by one committed editor surface.
@@ -53,6 +54,7 @@ struct EditorSnapshotMetadata: Sendable {
     var horizontalSeparators: [Wire.HorizontalSeparator] = []
     /// Core-scoped identity and semantic revision for the exact active editor target in this frame.
     var presentationTarget: PresentationTarget?
+    var textPresentations: [UInt16: UInt64] = [:]
 
     static let empty = EditorSnapshotMetadata()
 }
@@ -91,7 +93,12 @@ struct PresentedWindowSurface: Sendable {
 
     var visibleRowRange: Range<Int> {
         let viewport = paneGeometry.viewport
-        let start = content.rowStore.lowerBound(bufferLine: viewport.top) + Int(viewport.visualRowOffset)
+        let start: Int
+        if let presentation = content.scrollPresentation {
+            start = content.rowStore.lowerBound(bufferLine: presentation.anchorTop) + Int(presentation.anchorVisualRowOffset)
+        } else {
+            start = content.rowStore.lowerBound(bufferLine: viewport.top) + Int(viewport.visualRowOffset)
+        }
         let end = start + Int(viewport.rows)
         return min(start, content.rowStore.count)..<min(max(end, start), content.rowStore.count)
     }

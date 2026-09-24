@@ -16,6 +16,8 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
+  alias MingaEditor.Mouse.TextEvent
+  alias MingaEditor.Mouse.Target.Text, as: TextTarget
   alias MingaEditor.Startup
   alias MingaEditor.State.Windows
   alias MingaEditor.Session.State, as: SessionState
@@ -876,6 +878,229 @@ defmodule MingaEditor.MouseTest do
             )
       }
     end)
+  end
+
+  describe "presented text targets" do
+    test "a source-version change rejects the resolved position before moving" do
+      {state, buffer} = start_mouse_state("alpha\nbeta")
+      stale_version = BufferProcess.version(buffer)
+      :ok = BufferProcess.insert_text(buffer, "x")
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      event = text_event(state, :press)
+      target = text_target(state, buffer, stale_version, {1, 2})
+
+      state = Mouse.handle_text_event(state, event, target)
+
+      assert BufferProcess.cursor(buffer) == {0, 0}
+      refute MouseState.dragging?(state.workspace.mouse)
+    end
+
+    test "a valid Unicode byte target moves atomically and preserves the origin window" do
+      {state, buffer} = start_mouse_state("a😀b\nsecond")
+      version = BufferProcess.version(buffer)
+      event = text_event(state, :press)
+      target = text_target(state, buffer, version, {0, 5})
+
+      state = Mouse.handle_text_event(state, event, target)
+
+      assert BufferProcess.cursor(buffer) == {0, 5}
+
+      assert {:active, {0, 5}, state.workspace.windows.active, 1} ==
+               MouseState.active_drag(state.workspace.mouse)
+    end
+
+    test "a drag may continue through a newer presentation of the same buffer version" do
+      {state, buffer} = start_mouse_state("alpha beta")
+      version = BufferProcess.version(buffer)
+      press = text_event(state, :press)
+      state = Mouse.handle_text_event(state, press, text_target(state, buffer, version, {0, 1}))
+
+      drag = %{press | event_type: :drag, presentation_id: press.presentation_id + 1}
+      state = Mouse.handle_text_event(state, drag, text_target(state, buffer, version, {0, 7}))
+
+      assert BufferProcess.cursor(buffer) == {0, 7}
+      assert %VisualState{visual_anchor: {0, 1}} = state.workspace.editing.mode_state
+    end
+
+    test "an edit between press and drag rejects the old semantic anchor" do
+      {state, buffer} = start_mouse_state("alpha beta")
+      version = BufferProcess.version(buffer)
+      press = text_event(state, :press)
+      state = Mouse.handle_text_event(state, press, text_target(state, buffer, version, {0, 1}))
+
+      :ok = BufferProcess.insert_text(buffer, "!")
+      cursor_after_edit = BufferProcess.cursor(buffer)
+      current_version = BufferProcess.version(buffer)
+      drag = %{press | event_type: :drag, presentation_id: press.presentation_id + 1}
+
+      state =
+        Mouse.handle_text_event(
+          state,
+          drag,
+          text_target(state, buffer, current_version, {0, 7})
+        )
+
+      assert BufferProcess.cursor(buffer) == cursor_after_edit
+      assert state.workspace.editing.mode == :normal
+    end
+
+    test "a different buffer between press and drag rejects the old semantic anchor" do
+      {state, buffer} = start_mouse_state("alpha beta")
+      other = start_test_buffer(state, "other buffer", :semantic_drag_other)
+      version = BufferProcess.version(buffer)
+      press = text_event(state, :press)
+      state = Mouse.handle_text_event(state, press, text_target(state, buffer, version, {0, 1}))
+
+      other_version = BufferProcess.version(other)
+      drag = %{press | event_type: :drag, presentation_id: press.presentation_id + 1}
+      target = text_target(state, other, other_version, {0, 4})
+      state = Mouse.handle_text_event(state, drag, target)
+
+      assert BufferProcess.cursor(buffer) == {0, 1}
+      assert BufferProcess.cursor(other) == {0, 0}
+      assert state.workspace.editing.mode == :normal
+    end
+
+    test "a stale press cannot arm a following valid press as a double click" do
+      {state, buffer} = start_mouse_state("alpha beta")
+      stale_version = BufferProcess.version(buffer)
+      :ok = BufferProcess.insert_text(buffer, "!")
+      press = text_event(state, :press)
+
+      state =
+        Mouse.handle_text_event(
+          state,
+          press,
+          text_target(state, buffer, stale_version, {0, 1})
+        )
+
+      assert MouseState.click_count(state.workspace.mouse) == 0
+
+      current_version = BufferProcess.version(buffer)
+
+      state =
+        Mouse.handle_text_event(
+          state,
+          press,
+          text_target(state, buffer, current_version, {0, 1})
+        )
+
+      assert state.workspace.editing.mode == :normal
+      assert MouseState.click_count(state.workspace.mouse) == 1
+      assert {:active, {0, 1}, _, 1} = MouseState.active_drag(state.workspace.mouse)
+    end
+
+    test "rapid clicks at the same retained row offset in different panes stay single clicks" do
+      {state, buffer} = start_mouse_state("alpha beta")
+      state = Movement.execute(state, :split_vertical)
+      first_window = state.workspace.windows.active
+      second_window = Enum.find(Map.keys(state.workspace.windows.map), &(&1 != first_window))
+      version = BufferProcess.version(buffer)
+
+      first_event = text_event_for_window(first_window, :press)
+      first_target = text_target_for_window(first_window, buffer, version, {0, 2})
+      state = Mouse.handle_text_event(state, first_event, first_target)
+
+      second_event = text_event_for_window(second_window, :press)
+      second_target = text_target_for_window(second_window, buffer, version, {0, 2})
+      state = Mouse.handle_text_event(state, second_event, second_target)
+
+      assert state.workspace.editing.mode == :normal
+      assert {:active, {0, 2}, ^second_window, 1} = MouseState.active_drag(state.workspace.mouse)
+    end
+
+    test "a stale release still terminates the drag gesture" do
+      {state, buffer} = start_mouse_state("alpha\nbeta")
+      version = BufferProcess.version(buffer)
+      press = text_event(state, :press)
+      target = text_target(state, buffer, version, {0, 2})
+      state = Mouse.handle_text_event(state, press, target)
+      assert MouseState.dragging?(state.workspace.mouse)
+
+      :ok = BufferProcess.insert_text(buffer, "x")
+      release = %{press | event_type: :release, presentation_id: 0, row_id: 0}
+      state = Mouse.handle_text_event(state, release, nil)
+
+      refute MouseState.dragging?(state.workspace.mouse)
+    end
+
+    test "Shift keeps the existing cursor as the semantic selection anchor" do
+      {state, buffer} = start_mouse_state("alpha\nbeta")
+      :ok = BufferProcess.move_to(buffer, {0, 2})
+      version = BufferProcess.version(buffer)
+      event = %{text_event(state, :press) | mods: 0x01}
+      target = text_target(state, buffer, version, {1, 3})
+
+      state = Mouse.handle_text_event(state, event, target)
+
+      assert BufferProcess.cursor(buffer) == {1, 3}
+
+      assert %VisualState{visual_anchor: {0, 2}, visual_type: :char} =
+               state.workspace.editing.mode_state
+    end
+
+    test "right press inside the semantic visual selection preserves it" do
+      {state, buffer} = start_mouse_state("alpha beta")
+      state = set_visual_selection(state, buffer, {0, 0}, {0, 8}, :char)
+      version = BufferProcess.version(buffer)
+      event = %{text_event(state, :press) | button: :right}
+      target = text_target(state, buffer, version, {0, 3})
+
+      state = Mouse.handle_text_event(state, event, target)
+
+      assert BufferProcess.cursor(buffer) == {0, 8}
+      assert %VisualState{visual_anchor: {0, 0}} = state.workspace.editing.mode_state
+    end
+
+    test "drag edge intent scrolls the originating window and extends from the original anchor" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      version = BufferProcess.version(buffer)
+      press = text_event(state, :press)
+      origin = text_target(state, buffer, version, {0, 0})
+      state = Mouse.handle_text_event(state, press, origin)
+      win_id = state.workspace.windows.active
+
+      drag = %{press | event_type: :drag, scroll_y: 1}
+      destination = text_target(state, buffer, version, {4, 2})
+      state = Mouse.handle_text_event(state, drag, destination)
+
+      assert window_viewport(state, win_id).top == 1
+      assert BufferProcess.cursor(buffer) == {4, 2}
+      assert %VisualState{visual_anchor: {0, 0}} = state.workspace.editing.mode_state
+    end
+  end
+
+  defp text_event(state, event_type),
+    do: text_event_for_window(state.workspace.windows.active, event_type)
+
+  defp text_event_for_window(window_id, event_type) do
+    TextEvent.new(%{
+      window_id: window_id,
+      presentation_id: 11,
+      row_index: 0,
+      row_id: 22,
+      utf16_offset: 0,
+      button: :left,
+      mods: 0,
+      event_type: event_type,
+      click_count: 1,
+      scroll_x: 0,
+      scroll_y: 0
+    })
+  end
+
+  defp text_target(state, buffer, version, position),
+    do: text_target_for_window(state.workspace.windows.active, buffer, version, position)
+
+  defp text_target_for_window(window_id, buffer, version, {line, byte}) do
+    TextTarget.new(%{
+      window_id: window_id,
+      buffer: buffer,
+      source_version: version,
+      line: line,
+      byte: byte
+    })
   end
 
   defp active_viewport(state),

@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.AckHandler do
       FrameHandler.send_receipt(state.editor_pid, output, seq, lease.attempt.intent)
 
       state
+      |> State.acknowledge_text_presentations(output)
       |> FrameHandler.commit_output(output)
       |> FrameHandler.advance()
     else

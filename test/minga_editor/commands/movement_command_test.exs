@@ -184,10 +184,23 @@ defmodule MingaEditor.Commands.MovementCommandTest do
       _ = BufferProcess.set_option(buffer, :breakindent, true)
       _ = BufferProcess.set_option(buffer, :tab_width, 4)
 
+      [wrap_entry] =
+        WrapMap.compute(["\t" <> String.duplicate("a", 30)], 7,
+          breakindent: true,
+          linebreak: false,
+          tab_width: 4
+        )
+
+      assert Enum.map(Enum.take(wrap_entry, 3), &{&1.byte_offset, &1.indent_width}) == [
+               {0, 0},
+               {4, 4},
+               {8, 4}
+             ]
+
       BufferProcess.move_to(buffer, {0, 4})
 
       _ = Movement.execute(state, :move_down)
-      assert BufferProcess.cursor(buffer) == {0, 5}
+      assert BufferProcess.cursor(buffer) == {0, 8}
 
       _ = Movement.execute(state, :move_up)
       assert BufferProcess.cursor(buffer) == {0, 4}

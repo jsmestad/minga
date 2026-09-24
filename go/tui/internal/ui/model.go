@@ -88,6 +88,15 @@ type Model struct {
 	// a tab_reorder or file_tree_drop gui_action (ticket #2229, AC3). It is nil
 	// when no draggable press is active.
 	mouseDrag *chromeDrag
+	// textDrag preserves the pane that owned a body-text press. Drag and release
+	// stay attached to that pane even when the pointer crosses another split.
+	textDrag *editorTextDrag
+	// textPresentations are the immutable presentation identities backing the
+	// exact committed model used for input during this Update cycle.
+	textPresentations              map[uint16]uint64
+	pendingTextPresentations       map[uint16]uint64
+	pendingTextPresentationCommit  bool
+	pendingTextPresentationDiscard map[textPresentationRef]struct{}
 	// layout caches the spatial arrangement of every top-level region (header,
 	// body, footer, left pane) for the current frame. It is the single source
 	// of truth for region positions, replacing the old renderedHeaderHeight
@@ -169,28 +178,30 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}, filter *InputFilter) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
-		width:              int(width),
-		height:             int(height),
-		out:                out,
-		done:               done,
-		viewport:           vp,
-		zones:              newZoneManager(),
-		windows:            map[uint16]protocol.WindowContent{},
-		residentRows:       map[uint16]residentRows{},
-		chrome:             map[byte]protocol.ChromePayload{},
-		activePalette:      bootstrapPalette(),
-		gutters:            map[uint16]protocol.Gutter{},
-		indentGuides:       map[uint16]protocol.IndentGuides{},
-		extensionRuntimes:  map[string]protocol.ExtensionRuntimePayload{},
-		latency:            latency.New(),
-		hudVisible:         latencyHUDEnvEnabled(),
-		lineCache:          newLineCache(),
-		renderWork:         &renderWorkCollector{},
-		localPresentation:  newLocalPresentation(),
-		inputFilter:        filter,
-		transcript:         newResidentTranscript(),
-		transcriptRenderer: newAgentTranscriptRenderer(),
-		now:                time.Now,
+		width:                          int(width),
+		height:                         int(height),
+		out:                            out,
+		done:                           done,
+		viewport:                       vp,
+		zones:                          newZoneManager(),
+		windows:                        map[uint16]protocol.WindowContent{},
+		residentRows:                   map[uint16]residentRows{},
+		chrome:                         map[byte]protocol.ChromePayload{},
+		activePalette:                  bootstrapPalette(),
+		gutters:                        map[uint16]protocol.Gutter{},
+		indentGuides:                   map[uint16]protocol.IndentGuides{},
+		extensionRuntimes:              map[string]protocol.ExtensionRuntimePayload{},
+		latency:                        latency.New(),
+		hudVisible:                     latencyHUDEnvEnabled(),
+		lineCache:                      newLineCache(),
+		renderWork:                     &renderWorkCollector{},
+		localPresentation:              newLocalPresentation(),
+		textPresentations:              map[uint16]uint64{},
+		pendingTextPresentationDiscard: map[textPresentationRef]struct{}{},
+		inputFilter:                    filter,
+		transcript:                     newResidentTranscript(),
+		transcriptRenderer:             newAgentTranscriptRenderer(),
+		now:                            time.Now,
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
@@ -282,6 +293,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
+		if m.textDrag != nil && isEditorTextDragContinuation(msg) {
+			updated, packet, handled := m.handleEditorTextMouse(msg)
+			m = updated
+			if packet != nil {
+				m.send(packet)
+			}
+			if handled {
+				break
+			}
+		}
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
@@ -303,6 +324,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				if packet, ok := m.semanticMousePacket(msg); ok {
 					m.send(packet)
+				} else if updated, packet, handled := m.handleEditorTextMouse(msg); handled {
+					m = updated
+					if packet != nil {
+						m.send(packet)
+					}
 				} else if packet, ok := m.mousePacket(msg); ok {
 					m.send(packet)
 				}
@@ -325,6 +351,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
+		m.publishTextPresentationInputModel()
 	case port.LogMsg:
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	}
@@ -651,6 +678,7 @@ func stagingThemeValidation(commands []protocol.Command) (found bool, missing []
 // transaction discards staging and emits typed rejection (#2219), except a missing theme on a keyframe latches a protocol error because the BEAM must own theme selection.
 func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cmd {
 	if m.staging != nil && m.staging.staleGeneration {
+		m.discardStagedTextPresentations()
 		m.staging = nil
 		m.lastFrameOutcome = frameOutcomeStale
 		return cmds
@@ -706,6 +734,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			m.lastFrameOutcome = frameOutcomeRecoveryRequired
 			generation, seq := m.staging.generation, m.staging.seq
 			m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, failure.windowID))
+			m.discardStagedTextPresentations()
 			m.staging = nil
 			return cmds
 		}
@@ -722,6 +751,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			m.lastFrameOutcome = frameOutcomeRecoveryRequired
 			generation, seq := m.staging.generation, m.staging.seq
 			m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, gutterFailure.windowID))
+			m.discardStagedTextPresentations()
 			m.staging = nil
 			return cmds
 		}
@@ -735,6 +765,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 
 	// Valid: replay the buffer atomically through the live mutation path.
 	generation, seq := m.staging.generation, m.staging.seq
+	nextTextPresentations, unusedTextPresentations := stagedTextPresentations(m.staging.commands)
 	for _, staged := range m.staging.commands {
 		m.applyMutation(staged)
 	}
@@ -744,6 +775,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	if transcriptCandidate != nil {
 		m.transcript = transcriptCandidate
 	}
+	m.queueCommittedTextPresentations(nextTextPresentations, unusedTextPresentations)
 	m.lastCommittedSeq = seq
 	m.lastCommittedGeneration = generation
 	m.staging = nil
@@ -807,6 +839,7 @@ func (m *Model) rejectStagingWithDisposition(cmds []tea.Cmd, reason byte, dispos
 	if disposition == protocol.DispositionTerminal {
 		m.lastTerminalRejection = &terminal
 	}
+	m.discardStagedTextPresentations()
 	m.staging = nil
 	// Typed rejection is the automatic recovery trigger. Keep diagnostics and
 	// the visible resync state debounced while stale frames from the old credit
@@ -1009,6 +1042,9 @@ func (m *Model) applyMutation(command protocol.Command) {
 		m.putWindow(command.Window)
 	case protocol.CommandWindowDelta:
 		m.applyWindowDelta(command.Window)
+	case protocol.CommandTextPresentation:
+		// Presentation identities publish as one complete map at commit. Keeping
+		// this command mutation-free prevents a partial replay from changing input.
 	case protocol.CommandClipboardWrite:
 		m.pendingClipboard = command.ClipboardText
 	case protocol.CommandExtensionRuntime:

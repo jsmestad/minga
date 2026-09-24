@@ -21,6 +21,11 @@ const (
 	MouseDrag    byte = 0x03
 )
 
+const (
+	TextPresentationDiscarded byte = 0
+	TextPresentationActive    byte = 1
+)
+
 // Log levels for EncodeLogMessage, matching the BEAM's decode_log_level.
 const (
 	LogLevelErr   byte = 0
@@ -165,6 +170,30 @@ func EncodeMouseEvent(row, col int16, button, mods, eventType, clickCount byte) 
 		mods,
 		eventType,
 		clickCount,
+	}
+}
+
+func EncodeEditorTextEvent(windowID uint16, presentationID uint64, rowIndex uint32, rowID uint64, utf16Offset uint32, button, mods, eventType, clickCount byte, scrollX, scrollY int8) []byte {
+	return []byte{
+		generated.OPEditorTextEvent,
+		byte(windowID >> 8), byte(windowID),
+		byte(presentationID >> 56), byte(presentationID >> 48), byte(presentationID >> 40), byte(presentationID >> 32),
+		byte(presentationID >> 24), byte(presentationID >> 16), byte(presentationID >> 8), byte(presentationID),
+		byte(rowIndex >> 24), byte(rowIndex >> 16), byte(rowIndex >> 8), byte(rowIndex),
+		byte(rowID >> 56), byte(rowID >> 48), byte(rowID >> 40), byte(rowID >> 32),
+		byte(rowID >> 24), byte(rowID >> 16), byte(rowID >> 8), byte(rowID),
+		byte(utf16Offset >> 24), byte(utf16Offset >> 16), byte(utf16Offset >> 8), byte(utf16Offset),
+		button, mods, eventType, clickCount, byte(scrollX), byte(scrollY),
+	}
+}
+
+func EncodeTextPresentationState(windowID uint16, presentationID uint64, state byte) []byte {
+	return []byte{
+		generated.OPTextPresentationState,
+		byte(windowID >> 8), byte(windowID),
+		byte(presentationID >> 56), byte(presentationID >> 48), byte(presentationID >> 40), byte(presentationID >> 32),
+		byte(presentationID >> 24), byte(presentationID >> 16), byte(presentationID >> 8), byte(presentationID),
+		state,
 	}
 }
 

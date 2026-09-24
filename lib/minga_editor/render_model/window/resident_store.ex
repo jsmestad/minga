@@ -18,7 +18,12 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
           required(:content_hash) => non_neg_integer(),
           required(:payload) => term()
         }
-  @type tree :: nil | {:chunk, non_neg_integer(), pos_integer(), tree(), tuple(), tree()}
+  @type node_ref :: reference()
+  @type tree ::
+          nil
+          | {:chunk, node_ref(), non_neg_integer(), pos_integer(), tree(), tuple(), tree()}
+  @type rank_node :: term()
+  @type rank_header :: {rank_node() | nil, non_neg_integer(), pos_integer(), rank_node() | nil}
   @type work :: %{
           rows_visited: non_neg_integer(),
           rows_copied: non_neg_integer(),
@@ -96,6 +101,47 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     end
   end
 
+  @doc "Returns the immutable root used by renderer-owned interaction indexes."
+  @spec interaction_root(t()) :: tree()
+  def interaction_root(%__MODULE__{root: root}), do: root
+
+  @doc "Returns one immutable node projection for renderer-owned interaction indexes."
+  @spec interaction_node(tree()) ::
+          {:ok, {node_ref(), non_neg_integer(), tree(), non_neg_integer(), tuple(), tree()}}
+          | :error
+  def interaction_node({:chunk, ref, _priority, size, left, entries, right}),
+    do: {:ok, {ref, size, left, tree_size(left), entries, right}}
+
+  def interaction_node(nil), do: :error
+
+  @doc "Locates a rank using the same traversal for local and published immutable trees."
+  @spec locate_rank(rank_node() | nil, non_neg_integer(), (rank_node() ->
+                                                             {:ok, rank_header()} | :error)) ::
+          {:ok, rank_node(), non_neg_integer()} | :error
+  def locate_rank(nil, _index, _header), do: :error
+
+  def locate_rank(root, index, header) when index >= 0 and is_function(header, 1) do
+    case header.(root) do
+      {:ok, {left, left_size, _own_size, _right}} when index < left_size ->
+        locate_rank(left, index, header)
+
+      {:ok, {_left, left_size, own_size, _right}} when index < left_size + own_size ->
+        {:ok, root, index - left_size}
+
+      {:ok, {_left, left_size, own_size, right}} ->
+        locate_rank(right, index - left_size - own_size, header)
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc "Applies resident positional projection to one stored payload."
+  @spec project_payload(term(), non_neg_integer()) :: term()
+  def project_payload(%VisualRow{} = payload, index), do: VisualRow.reposition(payload, index)
+
+  def project_payload(payload, _index), do: payload
+
   @spec payload_range(t(), non_neg_integer(), non_neg_integer()) :: [term()]
   def payload_range(%__MODULE__{} = store, start, count) do
     range_entries(store.root, start, count)
@@ -169,15 +215,13 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     |> Enum.reduce(store, fn index, acc -> replace_at(acc, index, fun.(index)) end)
   end
 
-  defp project_payload(%VisualRow{} = payload, index), do: VisualRow.reposition(payload, index)
-
-  defp project_payload(payload, _index), do: payload
-
   defp chunk_node([], _salt), do: nil
 
   defp chunk_node(entries, salt) do
     tuple = List.to_tuple(entries)
-    {:chunk, :erlang.phash2({salt, hd(entries).id}), tuple_size(tuple), nil, tuple, nil}
+
+    {:chunk, make_ref(), :erlang.phash2({salt, hd(entries).id}), tuple_size(tuple), nil, tuple,
+     nil}
   end
 
   defp chunk_node_counted([], _salt, work), do: {nil, work}
@@ -194,13 +238,13 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
 
   defp node(priority, left, tuple, right),
     do:
-      {:chunk, priority, tree_size(left) + tuple_size(tuple) + tree_size(right), left, tuple,
-       right}
+      {:chunk, make_ref(), priority, tree_size(left) + tuple_size(tuple) + tree_size(right), left,
+       tuple, right}
 
   defp merge(nil, right), do: right
   defp merge(left, nil), do: left
 
-  defp merge({:chunk, lp, _, ll, le, lr} = left, {:chunk, rp, _, rl, re, rr} = right) do
+  defp merge({:chunk, _, lp, _, ll, le, lr} = left, {:chunk, _, rp, _, rl, re, rr} = right) do
     if lp <= rp, do: node(lp, ll, le, merge(lr, right)), else: node(rp, merge(left, rl), re, rr)
   end
 
@@ -211,8 +255,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
   defp merge_counted(left, nil, work), do: {left, work}
 
   defp merge_counted(
-         {:chunk, lp, _, ll, le, lr} = left,
-         {:chunk, rp, _, rl, re, rr} = right,
+         {:chunk, _, lp, _, ll, le, lr} = left,
+         {:chunk, _, rp, _, rl, re, rr} = right,
          work
        ) do
     work = touch_chunk(work)
@@ -237,7 +281,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     end
   end
 
-  defp do_split({:chunk, priority, _, left, entries, right}, rank) do
+  defp do_split({:chunk, _, priority, _, left, entries, right}, rank) do
     split_chunk(priority, left, entries, right, rank, tree_size(left), tuple_size(entries))
   end
 
@@ -276,7 +320,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     end
   end
 
-  defp do_split_counted({:chunk, priority, _, left, entries, right}, rank, work) do
+  defp do_split_counted({:chunk, _, priority, _, left, entries, right}, rank, work) do
     split_counted_chunk(
       priority,
       left,
@@ -312,18 +356,14 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     {left_tree, right_tree, work}
   end
 
-  defp lookup({:chunk, _, _, left, entries, right}, index),
-    do: lookup_chunk(left, entries, right, index, tree_size(left))
-
-  defp lookup_chunk(left, _entries, _right, index, left_size) when index < left_size,
-    do: lookup(left, index)
-
-  defp lookup_chunk(_left, entries, _right, index, left_size)
-       when index < left_size + tuple_size(entries),
-       do: {:ok, elem(entries, index - left_size)}
-
-  defp lookup_chunk(_left, entries, right, index, left_size),
-    do: lookup(right, index - left_size - tuple_size(entries))
+  defp lookup(root, index) do
+    with {:ok, node, offset} <- locate_rank(root, index, &local_rank_header/1),
+         {:chunk, _, _, _, _, entries, _} <- node do
+      {:ok, elem(entries, offset)}
+    else
+      _ -> :error
+    end
+  end
 
   defp range_entries(_tree, _start, count) when count <= 0, do: []
   defp range_entries(nil, _start, _count), do: []
@@ -336,7 +376,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
 
   defp tree_entries(nil, acc), do: acc
 
-  defp tree_entries({:chunk, _, _, left, entries, right}, acc) do
+  defp tree_entries({:chunk, _, _, _, left, entries, right}, acc) do
     left_entries = tree_entries(left, [])
     right_entries = tree_entries(right, [])
     acc ++ left_entries ++ Tuple.to_list(entries) ++ right_entries
@@ -350,9 +390,15 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
   defp touch_chunk(work), do: %{work | chunks_touched: work.chunks_touched + 1}
 
   defp tree_size(nil), do: 0
-  defp tree_size({:chunk, _, size, _, _, _}), do: size
+  defp tree_size({:chunk, _, _, size, _, _, _}), do: size
   defp chunk_count(nil), do: 0
-  defp chunk_count({:chunk, _, _, left, _, right}), do: 1 + chunk_count(left) + chunk_count(right)
+
+  defp chunk_count({:chunk, _, _, _, left, _, right}),
+    do: 1 + chunk_count(left) + chunk_count(right)
+
+  defp local_rank_header({:chunk, _, _, _, left, entries, right}),
+    do: {:ok, {left, tree_size(left), tuple_size(entries), right}}
+
   defp tuple_slice(_tuple, _start, 0), do: {}
 
   defp tuple_slice(tuple, start, count),

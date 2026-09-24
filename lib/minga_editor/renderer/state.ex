@@ -21,6 +21,8 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.Renderer.RejectionState
   alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.ResidentWindowState
+  alias MingaEditor.Renderer.TextPresentations
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Window
@@ -47,6 +49,7 @@ defmodule MingaEditor.Renderer.State do
           caches: Caches.t(),
           message_store: MessageStore.t() | nil,
           resident_windows: %{optional(Window.id()) => ResidentWindowState.t()},
+          text_presentations: TextPresentations.t(),
           observed_buffers: ObservedBuffers.t(),
           pipeline: pipeline(),
           require_ack?: boolean(),
@@ -64,6 +67,7 @@ defmodule MingaEditor.Renderer.State do
             caches: Caches.new(),
             message_store: nil,
             resident_windows: %{},
+            text_presentations: nil,
             observed_buffers: ObservedBuffers.new(),
             pipeline: &RenderPipeline.run/1,
             require_ack?: true,
@@ -78,9 +82,15 @@ defmodule MingaEditor.Renderer.State do
       require_ack?: Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline)),
       ack_timeout_ms: Keyword.get(opts, :ack_timeout_ms, 2_000),
       caches: Caches.new(Keyword.get(opts, :recovery_generation, 0)),
+      text_presentations: TextPresentations.new(),
       generation_reserver: Keyword.get(opts, :generation_reserver)
     }
   end
+
+  @doc "Returns the protected read capability owned by this renderer generation."
+  @spec text_interaction_reader(t()) :: Reader.t()
+  def text_interaction_reader(%__MODULE__{text_presentations: presentations}),
+    do: TextPresentations.reader(presentations)
 
   @doc "Reserves a fresh generation from the live frontend connection owner."
   @spec reserve_recovery_generation(t()) :: pos_integer()
@@ -344,6 +354,7 @@ defmodule MingaEditor.Renderer.State do
          state
          | resident_windows: windows,
            observed_buffers: observed_buffers,
+           text_presentations: TextPresentations.drop_buffer(state.text_presentations, buffer),
            highlight_cache: HighlightCache.drop_buffer(state.highlight_cache, buffer)
        }, true}
     else
@@ -375,6 +386,39 @@ defmodule MingaEditor.Renderer.State do
         message_store: reset_message_cursor(state.message_store),
         resident_windows: residents
     }
+  end
+
+  @doc "Resets frontend state after the transport connection itself was abandoned."
+  @spec reset_connection(t(), non_neg_integer(), ResidentWindowState.hydration_reason()) :: t()
+  def reset_connection(%__MODULE__{} = state, recovery_generation, reason \\ :reset_required) do
+    state = reset_frontend(state, recovery_generation, reason)
+    %{state | text_presentations: TextPresentations.reset(state.text_presentations)}
+  end
+
+  @doc "Retains immutable text presentations from one acknowledged frontend frame."
+  @spec acknowledge_text_presentations(t(), Input.t()) :: t()
+  def acknowledge_text_presentations(%__MODULE__{} = state, %Input{} = output) do
+    %{
+      state
+      | text_presentations: TextPresentations.acknowledge_output(state.text_presentations, output)
+    }
+  end
+
+  @doc "Applies an ordered frontend visibility lifecycle transition."
+  @spec text_presentation_state(t(), Window.id(), non_neg_integer(), :active | :discarded) ::
+          {:ok, t()} | {:error, :unknown, t()}
+  def text_presentation_state(%__MODULE__{} = state, window_id, presentation_id, :active) do
+    case TextPresentations.activate(state.text_presentations, window_id, presentation_id) do
+      {:ok, presentations} -> {:ok, %{state | text_presentations: presentations}}
+      {:error, :unknown} -> {:error, :unknown, state}
+    end
+  end
+
+  def text_presentation_state(%__MODULE__{} = state, window_id, presentation_id, :discarded) do
+    presentations =
+      TextPresentations.discard(state.text_presentations, window_id, presentation_id)
+
+    {:ok, %{state | text_presentations: presentations}}
   end
 
   defp advance_successor(state, nil), do: {:idle, state}

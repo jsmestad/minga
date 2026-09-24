@@ -34,6 +34,7 @@ defmodule Minga.RenderModel.Window do
 
   @enforce_keys [:window_id, :content_kind, :rect, :rows, :cursor_row, :cursor_col, :cursor_shape]
   defstruct window_id: 0,
+            text_presentation_id: 0,
             content_kind: :buffer,
             accessibility_label: "",
             accessibility_generation: 0,
@@ -65,6 +66,7 @@ defmodule Minga.RenderModel.Window do
 
   @type t :: %__MODULE__{
           window_id: pos_integer(),
+          text_presentation_id: non_neg_integer(),
           content_kind: content_kind(),
           accessibility_label: String.t(),
           accessibility_generation: non_neg_integer(),

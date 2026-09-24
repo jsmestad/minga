@@ -503,6 +503,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onNativePresentationObservation = { [weak self] evidence in
             self?.encoder?.send(.nativePresentationObservation(evidence))
         }
+        disp.textPresentationLeases.onState = { [weak self] windowID, presentationID, state in
+            self?.encoder?.send(.textPresentationState(windowID: windowID, presentationID: presentationID, state: state))
+        }
         disp.requestPresentationFocus = { [weak self] in
             self?.editorNSView?.focusPolicy.requestPresentationFocus() == true
         }

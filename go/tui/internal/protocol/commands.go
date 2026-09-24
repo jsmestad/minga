@@ -24,6 +24,7 @@ const (
 	CommandSetWindowBg
 	CommandWindowContent
 	CommandWindowDelta
+	CommandTextPresentation
 	CommandChrome
 	CommandClipboardWrite
 	CommandExtensionRuntime
@@ -56,6 +57,7 @@ type Command struct {
 	Title            string
 	WindowBg         uint32
 	Window           WindowContent
+	TextPresentation TextPresentation
 	Chrome           ChromePayload
 	ClipboardText    string
 	ExtensionRuntime ExtensionRuntimePayload
@@ -64,6 +66,11 @@ type Command struct {
 	// does not match the BEAM's, so the frontend shows a blocking error instead
 	// of decoding a stream it cannot parse (ticket #2237).
 	ProtocolError string
+}
+
+type TextPresentation struct {
+	WindowID       uint16
+	PresentationID uint64
 }
 
 type ExtensionRuntimePayload struct {
@@ -247,6 +254,18 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return decodeClipboardWrite(payload)
 	case generated.OPGuiWindowContent, generated.OPGuiWindowViewportDelta, generated.OPGuiWindowRowsDelta:
 		return decodeWindowContent(payload)
+	case generated.OPGuiTextPresentation:
+		if len(payload) < 11 {
+			return Command{}, fmt.Errorf("short text presentation")
+		}
+		return Command{
+			Kind: CommandTextPresentation,
+			Size: 11,
+			TextPresentation: TextPresentation{
+				WindowID:       binary.BigEndian.Uint16(payload[1:3]),
+				PresentationID: binary.BigEndian.Uint64(payload[3:11]),
+			},
+		}, nil
 	case generated.OPGuiWindowOverlayDelta:
 		return decodeOverlayDelta(payload)
 	case generated.OPGuiExtensionRuntime:

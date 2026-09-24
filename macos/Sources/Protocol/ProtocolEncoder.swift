@@ -235,7 +235,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(replacement, limit: Int(UInt16.max))
         case .ready, .keyPress, .resize, .requestKeyframe, .frameApplied, .frameRejected,
              .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
-             .applicationQuitRequest, .applicationQuitDecision, .mouse, .scrollBatch,
+             .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
              .selectTab, .closeTab, .tabCopyPath, .tabReorder, .tabPin, .tabUnpin,
              .tabMoveLeft, .tabMoveRight, .hoverOpen, .pickerItemActivate,
              .pickerActionActivate, .fileTreeClick, .fileTreeToggle, .fileTreeOpenInSplit,
@@ -288,6 +288,15 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .applicationQuitDecision(let requestID, let decision): _ = encodeApplicationQuitDecision(requestID: requestID, decision: decision)
         case .fileDialogResult(let requestID, let outcome, let paths): _ = encodeFileDialogResult(requestID: requestID, outcome: outcome, paths: paths)
         case .mouse(let row, let column, let button, let modifiers, let eventType, let clickCount): encodeMouseEvent(row: row, col: column, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount)
+        case .editorText(let target, let button, let modifiers, let eventType, let clickCount, let scrollX, let scrollY):
+            encodeEditorText(target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: scrollX, scrollY: scrollY)
+        case .textPresentationState(let windowID, let presentationID, let state):
+            var buf = Data(count: 12)
+            buf[0] = OP_TEXT_PRESENTATION_STATE
+            writeU16(&buf, 1, windowID)
+            writeU64(&buf, 3, presentationID)
+            buf[11] = state.rawValue
+            writeFrame(buf)
         case .scrollBatch(let windowID, let deltaLines, let direction): encodeScrollBatch(windowId: windowID, deltaLines: deltaLines, direction: direction)
         case .paste(let text): encodePasteEvent(text: text)
         case .log(let level, let message): encodeLog(level: level, message: message)
@@ -627,6 +636,23 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf[6] = modifiers
         buf[7] = eventType
         buf[8] = clickCount
+        writeFrame(buf)
+    }
+
+    private func encodeEditorText(_ target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8) {
+        var buf = Data(count: 33)
+        buf[0] = OP_EDITOR_TEXT_EVENT
+        writeU16(&buf, 1, target.windowID)
+        writeU64(&buf, 3, target.presentationID)
+        writeU32(&buf, 11, target.rowIndex)
+        writeU64(&buf, 15, target.rowID)
+        writeU32(&buf, 23, target.utf16Offset)
+        buf[27] = button
+        buf[28] = modifiers
+        buf[29] = eventType
+        buf[30] = clickCount
+        buf[31] = UInt8(bitPattern: scrollX)
+        buf[32] = UInt8(bitPattern: scrollY)
         writeFrame(buf)
     }
 

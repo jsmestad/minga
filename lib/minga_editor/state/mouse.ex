@@ -37,16 +37,21 @@ defmodule MingaEditor.State.Mouse do
              %{
                anchor: {non_neg_integer(), non_neg_integer()},
                origin_window: MingaEditor.Window.id() | nil,
+               source: :legacy | {:text, pid(), non_neg_integer()},
                click_count: pos_integer()
              }}
   @type resize ::
           :idle | {:active, {WindowTree.direction() | :agent_separator, non_neg_integer()}}
+  @type click_position ::
+          {integer(), integer()}
+          | {:text, MingaEditor.Window.id(), pid(), non_neg_integer(), non_neg_integer(),
+             non_neg_integer()}
   @type clicks ::
           :idle
           | {:pressed,
              %{
                time: integer(),
-               pos: {integer(), integer()},
+               pos: click_position(),
                count: pos_integer()
              }}
   @type hover :: :idle | {:active, {integer(), integer()}, reference() | nil}
@@ -75,6 +80,30 @@ defmodule MingaEditor.State.Mouse do
            %{
              anchor: anchor,
              origin_window: origin_window,
+             source: :legacy,
+             click_count: max(click_count(mouse), 1)
+           }}
+    }
+  end
+
+  @doc "Begins a source-version-bound drag from an immutable text presentation."
+  @spec start_text_drag(
+          t(),
+          {non_neg_integer(), non_neg_integer()},
+          MingaEditor.Window.id(),
+          pid(),
+          non_neg_integer()
+        ) :: t()
+  def start_text_drag(%__MODULE__{} = mouse, anchor, origin_window, buffer, source_version)
+      when is_pid(buffer) and is_integer(source_version) and source_version >= 0 do
+    %{
+      mouse
+      | drag:
+          {:active,
+           %{
+             anchor: anchor,
+             origin_window: origin_window,
+             source: {:text, buffer, source_version},
              click_count: max(click_count(mouse), 1)
            }}
     }
@@ -98,6 +127,25 @@ defmodule MingaEditor.State.Mouse do
   end
 
   def active_drag(%__MODULE__{drag: :idle}), do: :idle
+
+  @spec active_text_drag(t()) ::
+          {:active, {non_neg_integer(), non_neg_integer()}, MingaEditor.Window.id(), pid(),
+           non_neg_integer(), pos_integer()}
+          | :idle
+  def active_text_drag(%__MODULE__{
+        drag:
+          {:active,
+           %{
+             anchor: anchor,
+             origin_window: origin_window,
+             source: {:text, buffer, source_version},
+             click_count: click_count
+           }}
+      }) do
+    {:active, anchor, origin_window, buffer, source_version, click_count}
+  end
+
+  def active_text_drag(%__MODULE__{}), do: :idle
 
   @spec start_resize(t(), WindowTree.direction() | :agent_separator, non_neg_integer()) :: t()
   def start_resize(%__MODULE__{} = mouse, direction, position) do
@@ -135,46 +183,92 @@ defmodule MingaEditor.State.Mouse do
   @spec record_press_at(t(), integer(), integer(), pos_integer(), integer()) :: t()
   def record_press_at(%__MODULE__{} = mouse, row, col, native_click_count, now)
       when is_integer(now) do
+    record_press_identity(mouse, {row, col}, native_click_count, now)
+  end
+
+  @doc "Records a press against immutable presented text identity, scoped to its window."
+  @spec record_text_press_at(
+          t(),
+          MingaEditor.Window.id(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          integer()
+        ) :: t()
+  def record_text_press_at(
+        %__MODULE__{} = mouse,
+        window_id,
+        buffer,
+        source_version,
+        row_id,
+        utf16_offset,
+        native_click_count,
+        now
+      )
+      when is_integer(window_id) and window_id > 0 and is_pid(buffer) and
+             is_integer(source_version) and source_version >= 0 and is_integer(row_id) and
+             row_id >= 0 and is_integer(utf16_offset) and utf16_offset >= 0 and is_integer(now) do
+    record_press_identity(
+      mouse,
+      {:text, window_id, buffer, source_version, row_id, utf16_offset},
+      native_click_count,
+      now
+    )
+  end
+
+  @spec record_press_identity(t(), click_position(), pos_integer(), integer()) :: t()
+  defp record_press_identity(mouse, position, native_click_count, now) do
     effective_count =
       if native_click_count > 1 do
-        # GUI sends native click count; trust it
         min(native_click_count, 3)
       else
-        # TUI: detect multi-click from timing
-        compute_click_count(mouse, row, col, now)
+        compute_click_count(mouse, position, now)
       end
 
-    %{mouse | clicks: {:pressed, %{time: now, pos: {row, col}, count: effective_count}}}
+    %{mouse | clicks: {:pressed, %{time: now, pos: position, count: effective_count}}}
   end
 
   @spec click_count(t()) :: non_neg_integer()
   def click_count(%__MODULE__{clicks: {:pressed, %{count: count}}}), do: count
   def click_count(%__MODULE__{clicks: :idle}), do: 0
 
-  @spec compute_click_count(t(), integer(), integer(), integer()) :: pos_integer()
+  @spec compute_click_count(t(), click_position(), integer()) :: pos_integer()
   defp compute_click_count(
          %__MODULE__{
-           clicks: {:pressed, %{time: prev_time, pos: {prev_row, prev_col}, count: prev_count}}
+           clicks:
+             {:pressed, %{time: previous_time, pos: previous_position, count: previous_count}}
          },
-         row,
-         col,
+         position,
          now
        ) do
-    time_ok = now - prev_time <= @double_click_ms
-    pos_ok = abs(row - prev_row) <= @click_distance and abs(col - prev_col) <= @click_distance
+    repeat? =
+      now - previous_time <= @double_click_ms and
+        nearby_click_position?(previous_position, position)
 
-    if time_ok and pos_ok do
-      # Cycle: 1 → 2 → 3 → 1
-      case prev_count do
-        3 -> 1
-        n -> n + 1
-      end
-    else
-      1
-    end
+    next_click_count(previous_count, repeat?)
   end
 
-  defp compute_click_count(%__MODULE__{clicks: :idle}, _row, _col, _now), do: 1
+  defp compute_click_count(%__MODULE__{clicks: :idle}, _position, _now), do: 1
+
+  @spec nearby_click_position?(click_position(), click_position()) :: boolean()
+  defp nearby_click_position?({previous_row, previous_col}, {row, col}) do
+    abs(row - previous_row) <= @click_distance and abs(col - previous_col) <= @click_distance
+  end
+
+  defp nearby_click_position?(
+         {:text, window_id, buffer, source_version, row_id, previous_offset},
+         {:text, window_id, buffer, source_version, row_id, offset}
+       ),
+       do: abs(offset - previous_offset) <= @click_distance
+
+  defp nearby_click_position?(_previous, _current), do: false
+
+  @spec next_click_count(pos_integer(), boolean()) :: pos_integer()
+  defp next_click_count(3, true), do: 1
+  defp next_click_count(count, true), do: count + 1
+  defp next_click_count(_count, false), do: 1
 
   @spec double_click_ms() :: pos_integer()
   def double_click_ms, do: @double_click_ms

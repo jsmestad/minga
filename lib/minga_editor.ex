@@ -288,13 +288,23 @@ defmodule MingaEditor do
 
     renderer_pid = renderer_pid_for_backend(state.frontend.backend)
 
+    interaction_reader =
+      if is_pid(renderer_pid) do
+        MingaEditor.Renderer.Server.text_interaction_reader(renderer_pid)
+      end
+
     if state.frontend.backend != :headless and is_nil(renderer_pid) do
       Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
     end
 
     state = %{
       state
-      | render: MingaEditor.State.Render.connect_renderer(state.render, renderer_pid)
+      | render:
+          MingaEditor.State.Render.connect_renderer(
+            state.render,
+            renderer_pid,
+            interaction_reader
+          )
     }
 
     # Agent stream coalescer (#2289). Linked to the Editor so it shares the
@@ -912,6 +922,67 @@ defmodule MingaEditor do
     new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
   end
+
+  def handle_info(
+        {:minga_input, {:text_presentation_state, window_id, presentation_id, lifecycle}},
+        %{render: %{renderer: renderer}} = state
+      )
+      when is_pid(renderer) do
+    _result =
+      MingaEditor.Renderer.Server.text_presentation_state(
+        renderer,
+        window_id,
+        presentation_id,
+        lifecycle
+      )
+
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:minga_input, {:editor_text_event, %MingaEditor.Mouse.TextEvent{} = event}},
+        %{render: %{text_interaction_reader: reader}} = state
+      )
+      when reader != nil do
+    target =
+      if event.event_type == :release do
+        nil
+      else
+        case MingaEditor.Renderer.TextInteractionIndex.Reader.resolve(reader, event) do
+          {:ok, resolved} -> resolved
+          {:error, _reason} -> nil
+        end
+      end
+
+    snapshot = Input.Router.capture_snapshot(state)
+    new_state = MingaEditor.Mouse.handle_text_event(state, event, target)
+    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:minga_input,
+         {:editor_text_event,
+          %MingaEditor.Mouse.TextEvent{button: :left, event_type: :release} = event}},
+        state
+      ) do
+    snapshot = Input.Router.capture_snapshot(state)
+    new_state = MingaEditor.Mouse.handle_text_event(state, event, nil)
+    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:minga_input, {:editor_text_event, %MingaEditor.Mouse.TextEvent{}}},
+        state
+      ),
+      do: {:noreply, state}
+
+  def handle_info(
+        {:minga_input, {:text_presentation_state, _window_id, _presentation_id, _lifecycle}},
+        state
+      ),
+      do: {:noreply, state}
 
   def handle_info({:minga_input, {:scroll_batch, window_id, delta_lines, direction}}, state) do
     snapshot = Input.Router.capture_snapshot(state)

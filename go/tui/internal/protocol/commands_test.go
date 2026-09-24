@@ -47,6 +47,36 @@ func TestEncodeInputEventLayouts(t *testing.T) {
 	if len(mouse) != 9 || mouse[0] != generated.OPMouseEvent || mouse[8] != 1 {
 		t.Fatalf("mouse_event layout = %v, want 9 bytes with click count", mouse)
 	}
+
+	text := EncodeEditorTextEvent(0x1234, 0x0102030405060708, 0x11223344, 0x1020304050607080, 0x55667788, 2, 0x09, MouseDrag, 3, -1, 1)
+	if len(text) != 33 || text[0] != generated.OPEditorTextEvent {
+		t.Fatalf("editor_text_event layout = %v, want fixed 33 bytes", text)
+	}
+	if binary.BigEndian.Uint16(text[1:3]) != 0x1234 || binary.BigEndian.Uint64(text[3:11]) != 0x0102030405060708 || binary.BigEndian.Uint32(text[11:15]) != 0x11223344 || binary.BigEndian.Uint64(text[15:23]) != 0x1020304050607080 || binary.BigEndian.Uint32(text[23:27]) != 0x55667788 {
+		t.Fatalf("editor_text_event big-endian identity fields = %v", text)
+	}
+	if text[27] != 2 || text[28] != 0x09 || text[29] != MouseDrag || text[30] != 3 || int8(text[31]) != -1 || int8(text[32]) != 1 {
+		t.Fatalf("editor_text_event tail = %v", text[27:])
+	}
+
+	state := EncodeTextPresentationState(0x1234, 0x0102030405060708, TextPresentationActive)
+	if len(state) != 12 || state[0] != generated.OPTextPresentationState || binary.BigEndian.Uint16(state[1:3]) != 0x1234 || binary.BigEndian.Uint64(state[3:11]) != 0x0102030405060708 || state[11] != TextPresentationActive {
+		t.Fatalf("text_presentation_state layout = %v", state)
+	}
+}
+
+func TestDecodeTextPresentation(t *testing.T) {
+	packet := []byte{generated.OPGuiTextPresentation, 0x12, 0x34, 1, 2, 3, 4, 5, 6, 7, 8}
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Kind != CommandTextPresentation || command.Size != 11 {
+		t.Fatalf("decoded command = kind %v size %d", command.Kind, command.Size)
+	}
+	if command.TextPresentation.WindowID != 0x1234 || command.TextPresentation.PresentationID != 0x0102030405060708 {
+		t.Fatalf("decoded presentation = %+v", command.TextPresentation)
+	}
 }
 
 func TestDecodeProtocolError(t *testing.T) {

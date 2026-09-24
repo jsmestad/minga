@@ -206,30 +206,7 @@ func (m Model) windowRow(window protocol.WindowContent, index int) (protocol.Win
 
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
-	height := m.windowRowCount(window)
-	width := m.width
-	if placement, ok := m.semanticWindowPlacement(window); ok {
-		if placement.width > 0 {
-			width = placement.width
-		}
-		if placement.height > 0 {
-			height = placement.height
-		}
-	} else if window.GeometrySet && window.Geometry.ViewportRows > 0 {
-		height = int(window.Geometry.ViewportRows)
-	} else if hasGutter && gutter.ContentHeight > 0 {
-		height = int(gutter.ContentHeight)
-	} else if len(m.windowOrder) <= 1 {
-		height = max(height, m.bodyHeight())
-	}
-	// The BEAM's ContentRect.Height does not account for the Go TUI's header
-	// chrome (tabs, breadcrumbs), so it can exceed the actual visible body
-	// area. Cap height to bodyHeight so scroll bounds and rendering agree
-	// with the real viewport, preventing the last lines from being clipped
-	// behind the footer.
-	if body := m.bodyHeight(); height > body && body > 0 {
-		height = body
-	}
+	width, height := m.windowRenderDimensions(window, hasGutter, gutter)
 	// Scrollbar: reserve the rightmost column when total content exceeds the
 	// viewport height so the thumb indicator can be drawn there.
 	sb := computeScrollbar(window, height)
@@ -251,7 +228,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	// would grow without bound under vertical scroll.
 	builder := m.lineCache.beginWindowRender(window.ID, context)
 	sourceStart := m.presentationSourceStart(window, height)
-	overscanBefore := presentationPayloadOverscanBefore(window)
+	overscanBefore := m.presentationPayloadStart(window)
 	lines := make([]string, 0, height)
 	m.renderWork.decorationVisits += len(window.SearchMatches) + len(window.Diagnostics) +
 		len(window.Highlights) + len(window.Annotations)
@@ -348,7 +325,7 @@ func scrollOverscanAfter(scroll protocol.ScrollPresentation) int {
 // concept that no longer applies.
 func (m Model) presentationScrollRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
 	if m.windowCoversDocument(window) {
-		return presentationDocumentRowBounds(window, visibleRows)
+		return m.presentationDocumentRowBounds(window, visibleRows)
 	}
 	return m.presentationPayloadOverscanBounds(window, visibleRows)
 }
@@ -381,25 +358,58 @@ func (m Model) windowCoversDocument(window protocol.WindowContent) bool {
 // default), so the max forward offset is documentRows - 1 - before rather than
 // documentRows - visibleRows - before. Rows past the document end render as
 // tilde fills.
-func presentationDocumentRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
-	before = presentationPayloadOverscanBefore(window)
+func (m Model) presentationDocumentRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
+	before = m.presentationPayloadStart(window)
 	documentRows := int(window.Geometry.TotalLines)
 	return before, max(documentRows-1-before, 0)
 }
 
 func (m Model) presentationPayloadOverscanBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
-	before = presentationPayloadOverscanBefore(window)
+	before = m.presentationPayloadStart(window)
 	if visibleRows > 0 {
 		return before, max(m.windowRowCount(window)-visibleRows-before, 0)
 	}
 	return before, scrollOverscanAfter(window.Scroll)
 }
 
-func presentationPayloadOverscanBefore(window protocol.WindowContent) int {
+func (m Model) presentationPayloadStart(window protocol.WindowContent) int {
 	if !window.ScrollSet {
 		return 0
 	}
+	if store, ok := m.residentRows[window.ID]; ok {
+		anchor := store.lowerBoundBufferLine(window.Scroll.AnchorTop) + int(window.Scroll.AnchorVisualRowOffset)
+		if anchor < store.count() {
+			return anchor
+		}
+		visible := store.lowerBoundBufferLine(window.Scroll.VisibleStartLine)
+		if visible < store.count() {
+			return visible
+		}
+	}
 	return scrollOverscanBefore(window.Scroll)
+}
+
+func (m Model) windowRenderDimensions(window protocol.WindowContent, hasGutter bool, gutter protocol.Gutter) (width int, height int) {
+	height = m.windowRowCount(window)
+	width = m.width
+	if placement, ok := m.semanticWindowPlacement(window); ok {
+		if placement.width > 0 {
+			width = placement.width
+		}
+		if placement.height > 0 {
+			height = placement.height
+		}
+	} else if window.GeometrySet && window.Geometry.ViewportRows > 0 {
+		height = int(window.Geometry.ViewportRows)
+	} else if hasGutter && gutter.ContentHeight > 0 {
+		height = int(gutter.ContentHeight)
+	} else if len(m.windowOrder) <= 1 {
+		height = max(height, m.bodyHeight())
+	}
+	if body := m.bodyHeight(); height > body && body > 0 {
+		height = body
+	}
+	return width, height
 }
 
 func presentationVisibleRows(window protocol.WindowContent) int {

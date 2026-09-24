@@ -9,6 +9,8 @@ defmodule MingaEditor.Renderer.ServerTest do
   use ExUnit.Case, async: false
 
   alias Minga.Frontend.Adapter.GUI.Caches, as: GUICaches
+  alias Minga.Core.Decorations
+  alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.Frontend.Manager
@@ -29,6 +31,12 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.Renderer.Submission
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
+  alias MingaEditor.Renderer.TextPresentation
+  alias MingaEditor.Mouse.TextEvent
+  alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
+  alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.State.Render
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.Renderer.RenderWindow, as: Window
@@ -121,6 +129,80 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     assert_receive {:tel, [:minga, :render, :coalesced], %{count: 1},
                     %{dropped_seq: 2, new_seq: 3}}
+  end
+
+  test "acknowledged active presentation resolves directly while the renderer is blocked" do
+    parent = self()
+    presentation = text_presentation()
+
+    pipeline = fn input ->
+      case input.frame_seq do
+        1 ->
+          window =
+            input.windows.map |> Map.fetch!(1) |> Window.put_text_presentation(presentation)
+
+          send(parent, {:presentation_pipeline, input.frame_seq})
+          %{input | windows: Windows.set_map(input.windows, %{1 => window})}
+
+        2 ->
+          send(parent, {:renderer_blocked, self()})
+
+          receive do
+            :release_renderer -> input
+          end
+      end
+    end
+
+    renderer = start_ack_renderer(self(), pipeline: pipeline, ack_timeout_ms: 60_000)
+    reader = RendererServer.text_interaction_reader(renderer)
+
+    RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 1)
+    assert_receive {:presentation_pipeline, 1}, @async_render_timeout
+    RendererServer.frame_status(renderer, {:frame_applied, 1, 1})
+    assert_receive {:render_done, %RenderReceipt{frame_seq: 1}}, @async_render_timeout
+
+    assert :ok =
+             RendererServer.text_presentation_state(
+               renderer,
+               1,
+               presentation.presentation_id,
+               :active
+             )
+
+    RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 2)
+    assert_receive {:renderer_blocked, ^renderer}, @async_render_timeout
+
+    assert {:ok, %TextTarget{line: 4, byte: 1}} = Reader.resolve(reader, text_event(presentation))
+
+    send(renderer, :release_renderer)
+  end
+
+  test "interaction reader is protected and isolated from restarted renderer generations" do
+    opts = [
+      name: nil,
+      editor_pid: nil,
+      require_ack?: false,
+      generation_reserver: generation_reserver()
+    ]
+
+    {:ok, renderer} = RendererServer.start_link(opts)
+    reader = RendererServer.text_interaction_reader(renderer)
+    %Reader{table: table} = reader
+
+    assert_raise ArgumentError, fn -> :ets.insert(table, {:unauthorized, true}) end
+
+    GenServer.stop(renderer)
+    assert {:error, :unavailable} = Reader.resolve(reader, text_event(text_presentation()))
+
+    {:ok, replacement} = RendererServer.start_link(opts)
+    replacement_reader = RendererServer.text_interaction_reader(replacement)
+    %Reader{table: replacement_table} = replacement_reader
+    refute replacement_table == table
+
+    assert {:error, :inactive} =
+             Reader.resolve(replacement_reader, text_event(text_presentation()))
+
+    GenServer.stop(replacement)
   end
 
   test "pipeline crashes drop frames without killing the server" do
@@ -1843,6 +1925,46 @@ defmodule MingaEditor.Renderer.ServerTest do
       {:frame_rejected, generation, frame_seq, last_applied, :base_sequence_mismatch,
        :retryable_recovery}
     )
+  end
+
+  defp text_presentation do
+    text = "hello"
+
+    row = %Row{
+      row_id: 101,
+      row_type: :normal,
+      buf_line: 4,
+      text: text,
+      spans: [],
+      content_hash: Row.compute_hash(text, [])
+    }
+
+    visual =
+      VisualRow.new(
+        row,
+        SourceOffsetMap.new(text, text, Decorations.new(), 4),
+        0,
+        byte_size(text),
+        0
+      )
+
+    TextPresentation.new(1, self(), 7, :server_test, {:windowed, {visual}})
+  end
+
+  defp text_event(presentation) do
+    TextEvent.new(%{
+      window_id: presentation.window_id,
+      presentation_id: presentation.presentation_id,
+      row_index: 0,
+      row_id: 101,
+      utf16_offset: 1,
+      button: :left,
+      mods: 0,
+      event_type: :press,
+      click_count: 1,
+      scroll_x: 0,
+      scroll_y: 0
+    })
   end
 
   defp stub_intent, do: stub_snapshot().intent

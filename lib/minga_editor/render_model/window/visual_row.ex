@@ -82,4 +82,73 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
 
   @spec reused?(t()) :: boolean()
   def reused?(%__MODULE__{reused?: reused?}), do: reused?
+
+  @doc """
+  Resolves a modal pointer target to a character in the displayed row.
+
+  A hit at or beyond the row end targets its final composed grapheme, so a soft-wrap boundary does not select the next row's first character.
+  The source map preserves Unicode grapheme boundaries, replacement ranges, and virtual-text anchors.
+  Empty and non-source rows retain their existing boundary behavior.
+  """
+  @spec source_character_position(t(), non_neg_integer()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | :not_source_backed
+  def source_character_position(
+        %__MODULE__{
+          composed_start_utf16: start_utf16,
+          composed_end_utf16: end_utf16,
+          indent_width: indent
+        } = entry,
+        row_local_utf16
+      )
+      when end_utf16 > start_utf16 and row_local_utf16 >= indent + end_utf16 - start_utf16,
+      do: source_position(entry, indent + end_utf16 - start_utf16 - 1, :start)
+
+  def source_character_position(%__MODULE__{} = entry, row_local_utf16),
+    do: source_position(entry, row_local_utf16)
+
+  @doc """
+  Resolves a row-local composed UTF-16 boundary to a source position.
+
+  Wrap indentation resolves to the row's first source byte. Offsets past the
+  rendered row resolve to its final source byte. Inline virtual text resolves
+  to its anchor, and fold-summary text resolves to source end-of-line.
+  """
+  @spec source_position(t(), non_neg_integer()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | :not_source_backed
+  def source_position(%__MODULE__{} = entry, row_local_utf16) do
+    source_position(entry, row_local_utf16, :start)
+  end
+
+  @doc """
+  Resolves a row-local composed UTF-16 boundary with explicit affinity.
+
+  Inside replacement text or a grapheme's UTF-16 range, `:start` chooses the
+  preceding source boundary and `:end` chooses the following source boundary.
+  """
+  @spec source_position(t(), non_neg_integer(), SourceOffsetMap.affinity()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | :not_source_backed
+  def source_position(
+        %__MODULE__{row: %Row{row_type: row_type}},
+        _row_local_utf16,
+        _affinity
+      )
+      when row_type in [:virtual_line, :block],
+      do: :not_source_backed
+
+  def source_position(%__MODULE__{} = entry, row_local_utf16, affinity) do
+    content_utf16 = entry.composed_end_utf16 - entry.composed_start_utf16
+
+    content_local_utf16 =
+      row_local_utf16 |> max(entry.indent_width) |> Kernel.-(entry.indent_width)
+
+    composed_utf16 = entry.composed_start_utf16 + min(content_local_utf16, content_utf16)
+
+    source_byte =
+      entry.source_offset_map
+      |> SourceOffsetMap.composed_utf16_to_source_byte(composed_utf16, affinity)
+      |> max(entry.source_start_byte)
+      |> min(entry.source_end_byte)
+
+    {:ok, {entry.buf_line, source_byte}}
+  end
 end

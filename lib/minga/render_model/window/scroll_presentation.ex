@@ -70,7 +70,7 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
       reset_required: window.full_refresh,
       anchor_top: geometry.viewport.top,
       anchor_left: geometry.viewport.left,
-      anchor_visual_row_offset: geometry.viewport.visual_row_offset,
+      anchor_visual_row_offset: retained_anchor_offset(window.rows, geometry),
       visible_start_line: visible_start_line,
       visible_end_line: visible_end_line,
       overscan_start_line: overscan_start_line,
@@ -80,6 +80,18 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
       scroll_seq: window.scroll_seq
     }
   end
+
+  # The row store can begin partway through the anchor's wrapped source line.
+  # Frontends skip only the continuation rows still present in that store.
+  @spec retained_anchor_offset([Row.t()], PaneGeometry.t()) :: non_neg_integer()
+  defp retained_anchor_offset(
+         [%Row{buf_line: line, visual_index: first_visual_index} | _],
+         %PaneGeometry{viewport: %{top: line, visual_row_offset: offset}}
+       ),
+       do: max(offset - first_visual_index, 0)
+
+  defp retained_anchor_offset(_rows, %PaneGeometry{viewport: viewport}),
+    do: viewport.visual_row_offset
 
   @spec resident_line_range(Window.t(), PaneGeometry.t()) ::
           {non_neg_integer(), non_neg_integer()}

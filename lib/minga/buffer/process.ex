@@ -295,6 +295,24 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:move_to, pos})
   end
 
+  @doc "Moves to an exact byte position only while the expected content revision is current."
+  @spec move_to_if_version(GenServer.server(), non_neg_integer(), Document.position()) ::
+          {:ok, Document.position()} | {:error, :stale | :position_out_of_range}
+  def move_to_if_version(server, version, {line, col} = position)
+      when is_integer(version) and version >= 0 and is_integer(line) and line >= 0 and
+             is_integer(col) and col >= 0 do
+    GenServer.call(server, {:move_to_if_version, version, position})
+  end
+
+  @doc "Validates an exact byte position without moving the cursor."
+  @spec resolve_position_if_version(GenServer.server(), non_neg_integer(), Document.position()) ::
+          {:ok, Document.position()} | {:error, :stale | :position_out_of_range}
+  def resolve_position_if_version(server, version, {line, col} = position)
+      when is_integer(version) and version >= 0 and is_integer(line) and line >= 0 and
+             is_integer(col) and col >= 0 do
+    GenServer.call(server, {:resolve_position_if_version, version, position})
+  end
+
   @doc "Moves to an exact external UTF-16 position only while the expected content revision is current."
   @spec move_to_utf16_if_version(
           GenServer.server(),
@@ -1378,6 +1396,21 @@ defmodule Minga.Buffer.Process do
     {:reply, :ok, %{state | document: new_buf}}
   end
 
+  def handle_call({:move_to_if_version, expected_version, position}, _from, state) do
+    case resolve_byte_position(state, expected_version, position) do
+      {:ok, resolved} ->
+        new_buf = Cursor.place(state.document, resolved)
+        {:reply, {:ok, resolved}, %{state | document: new_buf}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:resolve_position_if_version, expected_version, position}, _from, state) do
+    {:reply, resolve_byte_position(state, expected_version, position), state}
+  end
+
   def handle_call(
         {:move_to_utf16_if_version, expected_version, one_based_line, utf16_column},
         _from,
@@ -2144,6 +2177,35 @@ defmodule Minga.Buffer.Process do
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec resolve_byte_position(state(), non_neg_integer(), Document.position()) ::
+          {:ok, Document.position()} | {:error, :stale | :position_out_of_range}
+  defp resolve_byte_position(state, expected_version, {line, column}) do
+    resolve_byte_position_for(state, BufState.version(state), expected_version, line, column)
+  end
+
+  @spec resolve_byte_position_for(
+          state(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {:ok, Document.position()} | {:error, :stale | :position_out_of_range}
+  defp resolve_byte_position_for(_state, actual_version, expected_version, _line, _column)
+       when actual_version != expected_version,
+       do: {:error, :stale}
+
+  defp resolve_byte_position_for(state, _actual_version, _expected_version, line, column) do
+    case Document.line_at(state.document, line) do
+      text when is_binary(text) ->
+        if column <= byte_size(text) and Cursor.caret_boundary?(text, column),
+          do: {:ok, {line, column}},
+          else: {:error, :position_out_of_range}
+
+      nil ->
+        {:error, :position_out_of_range}
     end
   end
 

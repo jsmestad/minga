@@ -452,7 +452,7 @@ A frame is atomic on the wire. The Emit stage brackets every frame's semantic an
 
 **The out-of-band allowlist.** A small set of commands is sanctioned to ride outside the transaction bracket. `set_title` and `set_window_bg` are side-channel writes the Emit stage sends only when they change (`send_title`/`send_window_bg`); if one happens to arrive inside an open transaction it still stages so the swap stays atomic, otherwise it applies directly. `protocol_error` is out-of-band by design: the BEAM rejected the frontend's handshake `protocol_version`, so it never enters a transaction; the frontend latches the reason and renders a blocking error surface. Everything else (semantic and chrome commands) is a protocol violation outside a transaction and triggers a resync rather than a partial paint.
 
-**The ephemeral-layer carve-out.** The transaction model says the BEAM owns structure, not pixels. A documented client-local ephemeral layer states what a frontend may render *between* commits without a round-trip: cursor blink, spinners, smooth scroll, local scrollback. The line is hit-testing: anything the BEAM hit-tests against (any placed surface) must come through a frame transaction, because input correctness depends on the BEAM and the frontend agreeing on geometry. Purely visual, non-interactive motion may live in the frontend. This is an accepted, bounded impurity, not a general escape hatch.
+**Frontend presentation between commits.** The BEAM owns semantic content, placement, stacking, and authoritative editor state. A frontend may apply cursor blink, spinners, smooth scroll, and local scrollback between commits. It must resolve pointer targets from the exact presentation it displays, including those local transforms. A committed frame is not proof that a native renderer has displayed it.
 
 **Frontend-local interaction state.** Semantic frontends are not dumb terminals. The BEAM owns the authoritative semantic model, durable editor state, placement, stacking, containment, and validation of committed actions. Frontends own zero-latency local interaction state when it can be resolved from the last committed semantic model and has no durable effect until activation. This is not about event frequency. It is about whether the interaction should feel instant without waiting for a BEAM render transaction.
 
@@ -463,7 +463,15 @@ Each frontend holds a single local-presentation container with one discard entry
 
 The shared code is the container and dispatch; the row-identity check is a capability of identity transforms, not a universal step. Applying `retained_row_miss` to scroll would be wrong because scroll has no row identity.
 
-Cursor motion and selection extension are **out of bounds** for local presentation. They are operands the BEAM hit-tests and encodes, never client-decided. The BEAM resolves cursor position against the buffer, wrap state, fold state, and virtual text; the frontend cannot predict the result without duplicating that logic.
+The frontend identifies the displayed text under the pointer; the BEAM decides what the interaction means. For editor text, each frontend reports a window ID, immutable text presentation ID, absolute row-store index, row ID, and row-local composed UTF-16 offset. Swift resolves that offset with the CoreText line used to draw the row. The TUI uses its terminal width and clipping rules. Neither frontend reconstructs source coordinates or applies selection semantics.
+
+The renderer retains the source map for each admitted text presentation and publishes a protected, read-only interaction index. The editor reads this index directly, verifies the row identity, and converts the composed offset to a source UTF-8 byte position without waiting for the renderer mailbox. It validates the source version before changing the cursor or selection. Buffer edits invalidate old source positions; unrelated cursor, viewport, or chrome frames do not change the meaning of an already displayed row. Wrap indentation, expanded tabs, virtual text, folds, and Unicode correspondence belong to the retained source map.
+
+`text_presentation_state` and `editor_text_event` use the same ordered input stream. A frontend marks a text presentation active when it becomes the presentation used for input, then discards it when no committed candidate, native attempt, or visible presentation can use it. Swift retains those references through Metal completion; the TUI switches them with its committed input model. The editor forwards lifecycle changes to the renderer in mailbox order, so retirement cannot overtake a prior pointer event. Mouse release always ends the gesture, even if its endpoint no longer resolves. Same-connection frame recovery and pending buffer replacement preserve the last visible lease until the frontend discards it; a real connection reset or monitored buffer termination clears the corresponding leases.
+
+The renderer is the only writer of the interaction index. Immutable resident-store chunks are shared across presentation leases; an edit publishes only changed tree paths and chunks, while pointer lookup reads small rank headers and one bounded chunk. Lease and current-window references retain the required nodes. Activation exposes only fully published graphs, and lookup rechecks the active presentation before returning. A reader belongs to one renderer generation: connection reset clears its contents, renderer termination deletes its table, and either condition makes unresolved input fail closed.
+
+Cursor movement, selection extension, multi-click selection, modifier semantics, and edits remain BEAM state transitions. The native frontend uses the same retained line geometry to draw the BEAM-resolved cursor and selection. It does not maintain a second authoritative selection.
 
 File tree is the canonical example. The BEAM sends a presentation generation plus stable row IDs, paths, labels, icons, expansion state, git state, diagnostics, focus context, and inline editing state. The frontend may own transient row selection while the user navigates the already committed row model. On activation, the frontend sends the surface, intent, generation, and stable row ID. The BEAM resolves that identity against its current model and may resync if the generation or row is stale. Completion and picker use the same lifecycle while their focused state owners retain their typed payloads. Scroll remains an offset transform with its existing anchor-key lifecycle.
 
@@ -475,7 +483,7 @@ The BEAM is the single authority for where every surface sits and which one wins
 
 These placements are emitted inside the frame transaction as a `gui_surface_layout` command (`Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder`, from `ctx.surface_placements`). One rect+z list does double duty: the frontend composites surfaces by `z` and derives its mouse zones from these rects, and the BEAM arbitrates stacking and containment from the same placements. The Go compositor's old hand-ordered `overlayLines()` fallback table is gone; every overlay surface is now a focus-tree node with a BEAM-authoritative rect (#2268 → #2281). Footer-band secondary overlays (float popup, agent context, extension panel, observatory, edit timeline, notifications, extension overlay) are content-height-sized and bottom-anchored via `MingaEditor.Layout.OverlayBand`, carrying their historical stacking z so the single highest-z winner positions at its placement rect instead of footer-appending.
 
-The registry owns surface *rects and z-order*, not every handler's interpretation of a click inside its surface. Intra-window geometry (gutter width, fold column, cell-to-buffer-line) stays in `MingaEditor.Mouse.HitTest`; the agent window's chat/preview/prompt sub-division stays in `Input.AgentMouse`; per-segment tab-bar and status-bar modeline click regions stay as render-time text-property spans. The registry places the tab-bar and status-bar surfaces; the handler interprets the click.
+The registry owns surface *rects and z-order*, not every handler's interpretation of a click inside its surface. Editor text targets come from each frontend's displayed row geometry and the renderer's retained source maps. Legacy non-text mouse targets (including gutter and divider actions) remain in `MingaEditor.Mouse.HitTest`; the agent window's chat/preview/prompt sub-division stays in `Input.AgentMouse`; per-segment tab-bar and status-bar modeline click regions stay as render-time text-property spans. The registry places the tab-bar and status-bar surfaces; the handler interprets the click.
 
 ### The input rule
 
@@ -568,38 +576,32 @@ Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines 
 
 ### Mouse Event Routing
 
-Mouse routing is position-based, not scope-based. Keyboard input routes through the active shell's overlay and surface handler lists, where scoped handlers read `keymap_scope` for keyboard focus. Initial clicks, wheels, and ordinary routed mouse events use the `FocusTree` built from layout rects; active editor drag/release and resize drag/release keep their direct `MingaEditor.Mouse.handle/7` ownership so an in-progress drag is not retargeted. This means scrolling over the agent chat scrolls the chat regardless of which pane has keyboard focus.
-
-Both the Go TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/7`, which either preserves the active drag/resize direct route or resolves a `FocusTree` hit or scroll path and bubbles through node handlers.
+The Swift GUI and Go TUI resolve editor text against their displayed presentation. They send `editor_text_event` (`0x1E`) with the window, presentation, row identity, and composed UTF-16 offset. The editor resolves that target through the renderer-owned interaction index. `MingaEditor.Mouse.handle_text_event/3` applies shared cursor and selection operations after validating the source version.
 
 ```
-Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + click_count)
+Frontend pointer event
     │
-    ▼
-Editor.handle_info decodes via Port.Protocol
+    ├─ Editor text → frontend displayed-row hit test
+    │     └─ editor_text_event → direct presentation/source index lookup
+    │           └─ Mouse.handle_text_event → version-checked editing operation
+    │                 ├─ single click → position cursor and start drag
+    │                 ├─ double/triple click → select word/line and snap drag
+    │                 ├─ Shift+click → extend selection
+    │                 ├─ Cmd/Ctrl+click → goto definition
+    │                 └─ middle click → paste register at position
     │
-    ▼
-Input.Router.dispatch_mouse preserves active drag/resize direct routes or resolves a FocusTree path
-    │
-    ├─ Overlay or surface node under the cursor
-    │     ├─ Handler implements handle_mouse_at_node/8 → called with node context
-    │     ├─ Handler implements handle_mouse/7 → called as legacy fallback
-    │     └─ Passthrough → bubble to the parent node
-    │
-    └─ Buffer-content fallback
-          └─ Editor.Mouse.handle/7
-                ├─ click_count=1 → position cursor, start drag
-                ├─ click_count=2 → select word (visual char), word-snapped drag
-                ├─ click_count=3 → select line (visual line), line-snapped drag
-                ├─ Shift+click  → extend visual selection
-                ├─ Cmd/Ctrl+click → :goto_definition
-                ├─ Middle click → paste register at position
-                └─ Wheel left/right → horizontal viewport scroll
+    └─ Wheel, divider, or legacy non-text surface → mouse_event (0x04)
+          └─ Input.Router.dispatch_mouse → FocusTree path or captured resize
+                ├─ node handler → handle_mouse_at_node/8
+                ├─ legacy handler → handle_mouse/7
+                └─ passthrough → parent node
 ```
 
-Each content-type handler is responsible for its own region. `Editor.Mouse` handles only buffer content; it has no knowledge of agent panels, file trees, or other content types. This follows the same principle as keyboard dispatch: the editing model produces commands, and each content type interprets them against its own data model.
+The frontend captures the editor window for a text gesture. BEAM binds the drag anchor to the source buffer and version, so scrolling can update the presentation without carrying an old anchor into edited or replacement text. Release ends the gesture even when its target no longer resolves. Registered overlays retain priority over editor text in the frontend.
 
-Multi-click detection works differently per frontend. The GUI sends `NSEvent.clickCount` directly in the protocol, so the BEAM trusts the native OS timing. The TUI sends `click_count=1` and the BEAM's `State.Mouse.record_press/4` detects multi-clicks using a timing window and position threshold, cycling 1 → 2 → 3 → 1.
+Each content-type handler interprets input against its own data model. Wheel events follow the surface under the pointer, independently of keyboard focus. The legacy buffer route remains available for non-semantic callers, but shipped frontends send displayed text targets for body clicks and drags.
+
+The GUI supplies `NSEvent.clickCount`. The TUI supplies `click_count=1`, and BEAM detects repeated clicks using a timing window and semantic target identity. Buffer/version and window/row identity keep unrelated source presentations from sharing a click sequence.
 
 Node-aware built-in FocusTree handlers implement `handle_mouse_at_node/8` directly when they need routed node context; they should not add coordinate-only `handle_mouse/7` wrappers that rebuild the tree and self-hit-test after the router has already selected a node. The `handle_mouse_at_node/8` and legacy `handle_mouse/7` callbacks are optional on `Input.Handler`. Router keeps `handle_mouse/7` as the legacy fallback for external or simple handlers without node context, including simple built-in handlers that do not need node metadata. Nodes without a mouse-capable handler pass through during FocusTree bubbling. This keeps keyboard-only handlers simple until they need mouse support.
 
@@ -819,7 +821,7 @@ These guide what we build and how:
 
 - **GUI-first, TUI-capable.** Design for native GUI frontends (Swift/Metal, GTK4) first. The TUI is a capable fallback, like Emacs's terminal mode, not the primary target.
 - **Fault tolerance over speed.** The BEAM's supervision model means crashes are recoverable events, not catastrophes.
-- **Process isolation.** Editor state and rendering never share memory; either can fail independently. Multiple frontends can exist because the protocol enforces this boundary.
+- **Process isolation.** Editor and renderer processes own their mutable state independently. The renderer may publish immutable interaction data through a protected ETS table with one writer and generation-scoped readers. Renderer failure invalidates those readers; it never transfers editing authority. Frontends remain separated from the BEAM by the protocol.
 - **Vim grammar, modern UX.** Modal editing with discoverable leader-key menus.
 - **Elixir for logic, platform-native rendering.** The BEAM handles everything a text editor needs to think about. Swift/Metal, Go/Bubble Tea, and the planned GTK4 frontend handle everything a display needs to draw; Zig is parser infrastructure, not a display.
 - **Test everything.** Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.

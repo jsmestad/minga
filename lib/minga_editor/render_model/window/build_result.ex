@@ -3,8 +3,9 @@ defmodule MingaEditor.RenderModel.Window.BuildResult do
 
   alias Minga.RenderModel.Window.{Row, RowSlotAllocator}
   alias MingaEditor.RenderModel.Window.{ResidentBuild, VisualRow}
+  alias MingaEditor.Renderer.TextPresentation
 
-  @enforce_keys ~w(rasterized retained_rows retained_wrap_lines resident_build resident_rows_spliced row_slot_allocator)a
+  @enforce_keys ~w(rasterized retained_rows retained_wrap_lines resident_build resident_rows_spliced row_slot_allocator text_presentation)a
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
@@ -13,6 +14,7 @@ defmodule MingaEditor.RenderModel.Window.BuildResult do
           retained_wrap_lines: %{optional(Row.row_id()) => {non_neg_integer(), [VisualRow.t()]}},
           resident_build: ResidentBuild.t() | nil,
           resident_rows_spliced: non_neg_integer(),
-          row_slot_allocator: RowSlotAllocator.t()
+          row_slot_allocator: RowSlotAllocator.t(),
+          text_presentation: TextPresentation.t()
         }
 end
