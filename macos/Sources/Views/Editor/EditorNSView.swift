@@ -1116,7 +1116,7 @@ final class EditorNSView: MTKView {
         cancelIMEComposition()
         let result = super.resignFirstResponder()
         if result {
-            refreshAccessibilityNativeFocus()
+            clearAccessibilityNativeFocus()
             stopCursorBlink()
         }
         return result
@@ -3883,6 +3883,13 @@ extension EditorNSView {
             element.updateNativeKeyboardFocus(focused)
         }
         _ = accessibilityPaneElements()
+    }
+
+    private func clearAccessibilityNativeFocus() {
+        for element in accessibilityPaneCache.values {
+            element.updateNativeKeyboardFocus(false)
+        }
+        accessibilityFocusedElementSnapshot.write(nil)
     }
 
     private func updateAccessibilityFocusedElement(_ paneElements: [EditorPaneAccessibilityElement]) {

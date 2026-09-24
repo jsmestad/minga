@@ -1417,6 +1417,15 @@ struct ContentViewTests {
             #expect(editorView.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === initialChildren[0])
             let selectorFocusedElement = editorView.perform(focusedElementSelector)?.takeUnretainedValue()
             #expect(selectorFocusedElement as? EditorPaneAccessibilityElement === initialChildren[0])
+
+            let nativeTextField = NSTextField(frame: NSRect(x: 16, y: 16, width: 160, height: 24))
+            editorView.addSubview(nativeTextField)
+            #expect(window.makeFirstResponder(nativeTextField))
+            _ = try #require(window.firstResponder as? NSTextView)
+            #expect(editorView.accessibilityFocusedUIElement == nil)
+            #expect(editorView.perform(focusedElementSelector) == nil)
+            #expect(window.makeFirstResponder(editorView))
+            nativeTextField.removeFromSuperview()
         } else {
             #expect(editorView.accessibilityFocusedUIElement == nil)
         }
