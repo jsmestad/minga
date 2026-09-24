@@ -3751,7 +3751,7 @@ extension EditorNSView {
         accessibilityPaneElements()
     }
 
-    override func accessibilityFocusedUIElement() -> Any? {
+    func accessibilityFocusedUIElement() -> Any? {
         guard accessibilityHasNativeKeyboardFocus else { return nil }
         let paneElements = accessibilityPaneElements()
         guard let activeIdentity = accessibilityProjections.first(where: \.isActivePane)?.identity else { return nil }
