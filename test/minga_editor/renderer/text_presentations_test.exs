@@ -5,10 +5,18 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
   alias Minga.RenderModel.Window.Row
   alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderModel.Window.SourceOffsetMap
   alias MingaEditor.RenderModel.Window.VisualRow
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.Renderer.RenderWindow
+  alias MingaEditor.Renderer.WindowCache
+  alias MingaEditor.Window
   alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.TextPresentations
+  alias MingaEditor.State.Windows
 
   test "acknowledging a newer candidate does not retire the older visible presentation" do
     first = presentation(1, 101, 3, "first")
@@ -126,6 +134,162 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
     assert {:error, :inactive} = TextPresentations.resolve(reset, event(presentation, 1))
   end
 
+  test "viewport-only presentation reuses the published resident graph" do
+    store = resident_store(256, 255)
+    first = resident_presentation(store, :first)
+    second = resident_presentation(store, :viewport_only)
+
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [first])
+    assert TextPresentations.last_publication_nodes(registry) > 0
+
+    registry = TextPresentations.acknowledge(registry, [second])
+    assert TextPresentations.last_publication_nodes(registry) == 0
+  end
+
+  test "65,536-row middle splice resolves the shifted suffix with bounded publication" do
+    store = resident_store(65_536, 65_535)
+    first = resident_presentation(store, :before_splice)
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [first])
+
+    inserted = ResidentStore.entry(:inserted, 1, :opaque)
+    changed = ResidentStore.insert_at(store, 32_768, inserted)
+    shifted = resident_presentation(changed, :after_splice)
+    registry = TextPresentations.acknowledge(registry, [shifted])
+
+    assert TextPresentations.last_publication_nodes(registry) <= 128
+    assert {:ok, registry} = TextPresentations.activate(registry, 1, shifted.presentation_id)
+
+    event = resident_event(shifted, 65_536, 65_535)
+    assert {:ok, %TextTarget{line: 65_536}} = TextPresentations.resolve(registry, event)
+  end
+
+  test "shared resident children remain valid when leases release in either order" do
+    Enum.each([:base_first, :changed_first], fn release_order ->
+      base_store = resident_store(256, 255)
+
+      changed_store =
+        ResidentStore.replace_at(base_store, 0, ResidentStore.entry(0, 999, :opaque))
+
+      base = resident_presentation(base_store, {:base, release_order})
+      changed = resident_presentation(changed_store, {:changed, release_order})
+
+      registry = TextPresentations.acknowledge(TextPresentations.new(), [base, changed])
+
+      {discarded, retained} =
+        case release_order do
+          :base_first -> {base, changed}
+          :changed_first -> {changed, base}
+        end
+
+      assert {:ok, registry} =
+               TextPresentations.activate(registry, 1, retained.presentation_id)
+
+      registry =
+        TextPresentations.discard(registry, 1, discarded.presentation_id)
+
+      assert {:ok, %TextTarget{line: 255}} =
+               TextPresentations.resolve(registry, resident_event(retained, 255, 255))
+    end)
+  end
+
+  test "current root survives lease discard and full reset removes the graph" do
+    store = resident_store(128, 127)
+    first = resident_presentation(store, :first)
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [first])
+    initial_nodes = TextPresentations.last_publication_nodes(registry)
+
+    registry = TextPresentations.discard(registry, 1, first.presentation_id)
+    replacement = resident_presentation(store, :same_current_root)
+    registry = TextPresentations.acknowledge(registry, [replacement])
+    assert TextPresentations.last_publication_nodes(registry) == 0
+
+    registry = TextPresentations.reset(registry)
+    registry = TextPresentations.acknowledge(registry, [replacement])
+    assert TextPresentations.last_publication_nodes(registry) == initial_nodes
+  end
+
+  test "repeated acknowledgement does not leak a lease pin through normal window cleanup" do
+    store = resident_store(128, 127)
+    presentation = resident_presentation(store, :same_candidate)
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [presentation])
+    initial_nodes = TextPresentations.last_publication_nodes(registry)
+
+    registry = TextPresentations.acknowledge(registry, [presentation])
+    registry = TextPresentations.discard(registry, 1, presentation.presentation_id)
+    registry = TextPresentations.acknowledge_output(registry, output_without_windows())
+
+    replacement = resident_presentation(store, :republished_after_cleanup)
+    registry = TextPresentations.acknowledge(registry, [replacement])
+    assert TextPresentations.last_publication_nodes(registry) == initial_nodes
+  end
+
+  test "same window switching to non-text releases its current root after visible lease discard" do
+    store = resident_store(128, 127)
+    presentation = resident_presentation(store, :before_empty_view)
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [presentation])
+    initial_nodes = TextPresentations.last_publication_nodes(registry)
+    assert {:ok, registry} = TextPresentations.activate(registry, 1, presentation.presentation_id)
+
+    state = TestHelpers.base_state()
+    input = Input.from_editor_state(state)
+    window = state.workspace.windows.map |> Map.fetch!(1) |> Window.show_empty_state()
+    empty = RenderWindow.materialize(1, WindowIntent.from_window(window), %WindowCache{})
+    output = %{input | windows: Windows.set_map(input.windows, %{1 => empty})}
+    registry = TextPresentations.acknowledge_output(registry, output)
+
+    assert {:ok, %TextTarget{line: 127}} =
+             TextPresentations.resolve(registry, resident_event(presentation, 127, 127))
+
+    registry = TextPresentations.discard(registry, 1, presentation.presentation_id)
+    replacement = resident_presentation(store, :after_empty_view)
+    registry = TextPresentations.acknowledge(registry, [replacement])
+    assert TextPresentations.last_publication_nodes(registry) == initial_nodes
+  end
+
+  test "shared child graphs reclaim fully after both release orders" do
+    Enum.each([:base_first, :changed_first], fn release_order ->
+      base_store = resident_store(256, 255)
+
+      changed_store =
+        ResidentStore.replace_at(base_store, 0, ResidentStore.entry(0, 999, :opaque))
+
+      base = resident_presentation(base_store, {:reclaim_base, release_order})
+      changed = resident_presentation(changed_store, {:reclaim_changed, release_order})
+      registry = TextPresentations.acknowledge(TextPresentations.new(), [base])
+      base_nodes = TextPresentations.last_publication_nodes(registry)
+      registry = TextPresentations.acknowledge(registry, [changed])
+
+      ordered = if release_order == :base_first, do: [base, changed], else: [changed, base]
+
+      registry =
+        Enum.reduce(ordered, registry, fn presentation, acc ->
+          TextPresentations.discard(acc, 1, presentation.presentation_id)
+        end)
+
+      registry = TextPresentations.acknowledge_output(registry, output_without_windows())
+      republished = resident_presentation(base_store, {:republished, release_order})
+      registry = TextPresentations.acknowledge(registry, [republished])
+      assert TextPresentations.last_publication_nodes(registry) == base_nodes
+    end)
+  end
+
+  test "buffer cleanup releases lease and current graph roots" do
+    store = resident_store(128, 127)
+    presentation = resident_presentation(store, :before_buffer_down)
+    registry = TextPresentations.acknowledge(TextPresentations.new(), [presentation])
+    initial_nodes = TextPresentations.last_publication_nodes(registry)
+    assert {:ok, registry} = TextPresentations.activate(registry, 1, presentation.presentation_id)
+
+    registry = TextPresentations.drop_buffer(registry, self())
+
+    assert {:error, :inactive} =
+             TextPresentations.resolve(registry, resident_event(presentation, 127, 127))
+
+    replacement = resident_presentation(store, :after_buffer_down)
+    registry = TextPresentations.acknowledge(registry, [replacement])
+    assert TextPresentations.last_publication_nodes(registry) == initial_nodes
+  end
+
   defp presentation(window_id, row_id, line, text, buffer \\ self()) do
     row = %Row{
       row_id: row_id,
@@ -168,6 +332,60 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
 
     visual = VisualRow.new(row, map, 1, 5, 2)
     TextPresentation.new(7, self(), 9, {:wrapped_unicode, 701}, {:windowed, {visual}})
+  end
+
+  defp resident_store(size, target_index) do
+    entries =
+      for index <- 0..(size - 1) do
+        payload = if index == target_index, do: visual_row(index, index, "x"), else: :opaque
+        ResidentStore.entry(index, index, payload)
+      end
+
+    ResidentStore.from_entries(entries)
+  end
+
+  defp resident_presentation(store, identity) do
+    TextPresentation.new(1, self(), 7, identity, {:resident, store})
+  end
+
+  defp resident_event(presentation, row_index, row_id) do
+    TextEvent.new(%{
+      window_id: presentation.window_id,
+      presentation_id: presentation.presentation_id,
+      row_index: row_index,
+      row_id: row_id,
+      utf16_offset: 0,
+      button: :left,
+      mods: 0,
+      event_type: :press,
+      click_count: 1,
+      scroll_x: 0,
+      scroll_y: 0
+    })
+  end
+
+  defp visual_row(row_id, line, text) do
+    row = %Row{
+      row_id: row_id,
+      row_type: :normal,
+      buf_line: line,
+      text: text,
+      spans: [],
+      content_hash: Row.compute_hash(text, [])
+    }
+
+    VisualRow.new(
+      row,
+      SourceOffsetMap.new(text, text, Decorations.new(), line),
+      0,
+      byte_size(text),
+      0
+    )
+  end
+
+  defp output_without_windows do
+    input = TestHelpers.base_state() |> Input.from_editor_state()
+    %{input | windows: Windows.set_map(input.windows, %{})}
   end
 
   defp event(presentation, offset) do

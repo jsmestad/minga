@@ -288,13 +288,23 @@ defmodule MingaEditor do
 
     renderer_pid = renderer_pid_for_backend(state.frontend.backend)
 
+    interaction_reader =
+      if is_pid(renderer_pid) do
+        MingaEditor.Renderer.Server.text_interaction_reader(renderer_pid)
+      end
+
     if state.frontend.backend != :headless and is_nil(renderer_pid) do
       Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
     end
 
     state = %{
       state
-      | render: MingaEditor.State.Render.connect_renderer(state.render, renderer_pid)
+      | render:
+          MingaEditor.State.Render.connect_renderer(
+            state.render,
+            renderer_pid,
+            interaction_reader
+          )
     }
 
     # Agent stream coalescer (#2289). Linked to the Editor so it shares the
@@ -931,14 +941,14 @@ defmodule MingaEditor do
 
   def handle_info(
         {:minga_input, {:editor_text_event, %MingaEditor.Mouse.TextEvent{} = event}},
-        %{render: %{renderer: renderer}} = state
+        %{render: %{text_interaction_reader: reader}} = state
       )
-      when is_pid(renderer) do
+      when reader != nil do
     target =
       if event.event_type == :release do
         nil
       else
-        case MingaEditor.Renderer.Server.resolve_text_target(renderer, event) do
+        case MingaEditor.Renderer.TextInteractionIndex.Reader.resolve(reader, event) do
           {:ok, resolved} -> resolved
           {:error, _reason} -> nil
         end

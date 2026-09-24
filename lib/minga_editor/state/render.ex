@@ -11,11 +11,13 @@ defmodule MingaEditor.State.Render do
   alias MingaEditor.Layout
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.Renderer.Submission
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.UI.Panel.MessageStore
 
   @type t :: %__MODULE__{
           renderer: pid() | nil,
+          text_interaction_reader: Reader.t() | nil,
           submitted_highlights: Submission.revisions() | nil,
           submitted_semantic_tokens: Submission.revisions(),
           render_correlation: term(),
@@ -26,6 +28,7 @@ defmodule MingaEditor.State.Render do
         }
 
   defstruct renderer: nil,
+            text_interaction_reader: nil,
             submitted_highlights: nil,
             submitted_semantic_tokens: %{},
             render_correlation: RenderCorrelation.new(),
@@ -40,13 +43,38 @@ defmodule MingaEditor.State.Render do
 
   @doc "Records the renderer process currently serving this editor."
   @spec connect_renderer(t(), pid() | nil) :: t()
-  def connect_renderer(%__MODULE__{renderer: renderer} = render, renderer), do: render
+  def connect_renderer(
+        %__MODULE__{renderer: renderer, text_interaction_reader: nil} = render,
+        renderer
+      ),
+      do: render
 
   def connect_renderer(%__MODULE__{} = render, renderer)
       when is_pid(renderer) or is_nil(renderer),
       do: %{
         render
         | renderer: renderer,
+          text_interaction_reader: nil,
+          submitted_highlights: nil,
+          submitted_semantic_tokens: %{}
+      }
+
+  @doc "Atomically records one renderer generation and its interaction reader."
+  @spec connect_renderer(t(), pid() | nil, Reader.t() | nil) :: t()
+  def connect_renderer(
+        %__MODULE__{renderer: renderer, text_interaction_reader: reader} = render,
+        renderer,
+        reader
+      ),
+      do: render
+
+  def connect_renderer(%__MODULE__{} = render, renderer, reader)
+      when (is_pid(renderer) and is_struct(reader, Reader)) or
+             (is_nil(renderer) and is_nil(reader)),
+      do: %{
+        render
+        | renderer: renderer,
+          text_interaction_reader: reader,
           submitted_highlights: nil,
           submitted_semantic_tokens: %{}
       }

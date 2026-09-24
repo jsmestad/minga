@@ -60,20 +60,50 @@ defmodule MingaEditor.Renderer.TextPresentation do
   @spec resolve(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           {:ok, TextTarget.t()} | {:error, :row_not_found | :row_id_mismatch | :not_source_backed}
   def resolve(%__MODULE__{} = presentation, row_index, row_id, utf16_offset) do
-    with {:ok, %VisualRow{row: %Row{row_id: stored_row_id}} = row} <-
-           row_at(presentation.rows, row_index),
-         true <- stored_row_id == row_id,
+    case row_at(presentation.rows, row_index) do
+      {:ok, row} ->
+        resolve_row(
+          presentation.window_id,
+          presentation.buffer,
+          presentation.source_version,
+          row,
+          row_id,
+          utf16_offset
+        )
+
+      :error ->
+        {:error, :row_not_found}
+    end
+  end
+
+  @doc "Resolves one already-located visual row through the shared source mapping."
+  @spec resolve_row(
+          Window.id(),
+          pid(),
+          non_neg_integer(),
+          VisualRow.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {:ok, TextTarget.t()} | {:error, :row_id_mismatch | :not_source_backed}
+  def resolve_row(
+        window_id,
+        buffer,
+        source_version,
+        %VisualRow{row: %Row{row_id: stored_row_id}} = row,
+        row_id,
+        utf16_offset
+      ) do
+    with true <- stored_row_id == row_id,
          {:ok, {line, byte}} <- VisualRow.source_character_position(row, utf16_offset) do
       {:ok,
        TextTarget.new(%{
-         window_id: presentation.window_id,
-         buffer: presentation.buffer,
-         source_version: presentation.source_version,
+         window_id: window_id,
+         buffer: buffer,
+         source_version: source_version,
          line: line,
          byte: byte
        })}
     else
-      :error -> {:error, :row_not_found}
       false -> {:error, :row_id_mismatch}
       :not_source_backed -> {:error, :not_source_backed}
     end

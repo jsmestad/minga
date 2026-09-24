@@ -13,6 +13,7 @@ defmodule MingaEditor.Renderer.StateTest do
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.RecoveryHandler
   alias MingaEditor.Renderer.State
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.TextPresentations
 
@@ -105,9 +106,10 @@ defmodule MingaEditor.Renderer.StateTest do
     state =
       %{State.new(generation_reserver: fn -> 2 end) | text_presentations: registry}
 
+    reader = State.text_interaction_reader(state)
     assert {:noreply, recovered} = RecoveryHandler.transaction(state, attempt(10))
 
-    assert {:ok, %TextTarget{line: 3}} = State.resolve_text_target(recovered, event(old))
+    assert {:ok, %TextTarget{line: 3}} = Reader.resolve(reader, event(old))
 
     replacement = presentation(1, 102, 4, "recovered")
 
@@ -124,10 +126,11 @@ defmodule MingaEditor.Renderer.StateTest do
                :active
              )
 
-    assert {:ok, %TextTarget{line: 4}} = State.resolve_text_target(recovered, event(replacement))
+    assert {:ok, %TextTarget{line: 4}} = Reader.resolve(reader, event(replacement))
 
     reset = State.reset_connection(recovered, 3)
-    assert {:error, :inactive} = State.resolve_text_target(reset, event(replacement))
+    assert State.text_interaction_reader(reset) == reader
+    assert {:error, :inactive} = Reader.resolve(reader, event(replacement))
   end
 
   defp presentation(window_id, row_id, line, text) do

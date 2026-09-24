@@ -16,8 +16,7 @@ defmodule MingaEditor.Renderer.Server do
   alias MingaEditor.Renderer.RecoveryHandler
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.State
-  alias MingaEditor.Mouse.TextEvent
-  alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Window
 
   @type t :: State.t()
@@ -80,6 +79,11 @@ defmodule MingaEditor.Renderer.Server do
           MingaEditor.Renderer.RejectionState.terminal() | nil
   def terminal_failure(server \\ __MODULE__), do: GenServer.call(server, :terminal_failure)
 
+  @doc "Returns the immutable interaction-index reader for this renderer generation."
+  @spec text_interaction_reader(GenServer.server()) :: Reader.t()
+  def text_interaction_reader(server \\ __MODULE__),
+    do: GenServer.call(server, :text_interaction_reader)
+
   @doc "Records one-shot adaptation evidence without changing the retained source presentation."
   @spec record_adaptation(
           GenServer.server(),
@@ -122,13 +126,6 @@ defmodule MingaEditor.Renderer.Server do
         ) :: :ok | {:error, :unknown}
   def text_presentation_state(server \\ __MODULE__, window_id, presentation_id, lifecycle) do
     GenServer.call(server, {:text_presentation_state, window_id, presentation_id, lifecycle})
-  end
-
-  @doc "Resolves one text-pointer event against the exact active presentation lease."
-  @spec resolve_text_target(GenServer.server(), TextEvent.t()) ::
-          {:ok, TextTarget.t()} | {:error, atom()}
-  def resolve_text_target(server \\ __MODULE__, %TextEvent{} = event) do
-    GenServer.call(server, {:resolve_text_target, event})
   end
 
   @doc "Requests recovery only when the failed generation and committed base still match."
@@ -185,6 +182,9 @@ defmodule MingaEditor.Renderer.Server do
   def handle_call(:terminal_failure, _from, state),
     do: {:reply, State.terminal_failure(state), state}
 
+  def handle_call(:text_interaction_reader, _from, state),
+    do: {:reply, State.text_interaction_reader(state), state}
+
   def handle_call(
         {:text_presentation_state, window_id, presentation_id, lifecycle},
         _from,
@@ -194,10 +194,6 @@ defmodule MingaEditor.Renderer.Server do
       {:ok, updated} -> {:reply, :ok, updated}
       {:error, :unknown, unchanged} -> {:reply, {:error, :unknown}, unchanged}
     end
-  end
-
-  def handle_call({:resolve_text_target, %TextEvent{} = event}, _from, state) do
-    {:reply, State.resolve_text_target(state, event), state}
   end
 
   def handle_call({:request_recovery, failed_generation, last_applied_frame_seq}, _from, state),

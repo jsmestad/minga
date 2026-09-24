@@ -22,8 +22,7 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.ResidentWindowState
   alias MingaEditor.Renderer.TextPresentations
-  alias MingaEditor.Mouse.TextEvent
-  alias MingaEditor.Mouse.Target.Text, as: TextTarget
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Window
@@ -68,7 +67,7 @@ defmodule MingaEditor.Renderer.State do
             caches: Caches.new(),
             message_store: nil,
             resident_windows: %{},
-            text_presentations: TextPresentations.new(),
+            text_presentations: nil,
             observed_buffers: ObservedBuffers.new(),
             pipeline: &RenderPipeline.run/1,
             require_ack?: true,
@@ -83,9 +82,15 @@ defmodule MingaEditor.Renderer.State do
       require_ack?: Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline)),
       ack_timeout_ms: Keyword.get(opts, :ack_timeout_ms, 2_000),
       caches: Caches.new(Keyword.get(opts, :recovery_generation, 0)),
+      text_presentations: TextPresentations.new(),
       generation_reserver: Keyword.get(opts, :generation_reserver)
     }
   end
+
+  @doc "Returns the protected read capability owned by this renderer generation."
+  @spec text_interaction_reader(t()) :: Reader.t()
+  def text_interaction_reader(%__MODULE__{text_presentations: presentations}),
+    do: TextPresentations.reader(presentations)
 
   @doc "Reserves a fresh generation from the live frontend connection owner."
   @spec reserve_recovery_generation(t()) :: pos_integer()
@@ -415,11 +420,6 @@ defmodule MingaEditor.Renderer.State do
 
     {:ok, %{state | text_presentations: presentations}}
   end
-
-  @doc "Resolves a frontend text event against the exact active immutable presentation."
-  @spec resolve_text_target(t(), TextEvent.t()) :: {:ok, TextTarget.t()} | {:error, atom()}
-  def resolve_text_target(%__MODULE__{} = state, %TextEvent{} = event),
-    do: TextPresentations.resolve(state.text_presentations, event)
 
   defp advance_successor(state, nil), do: {:idle, state}
   defp advance_successor(state, %FrameAttempt{} = successor), do: {:schedule, state, successor}

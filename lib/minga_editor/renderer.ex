@@ -219,8 +219,12 @@ defmodule MingaEditor.Renderer do
     {:ok, renderer} =
       RendererServer.start_link(name: nil, editor_pid: nil, require_ack?: false)
 
-    {%{state | render: MingaEditor.State.Render.connect_renderer(state.render, renderer)},
-     renderer}
+    reader = RendererServer.text_interaction_reader(renderer)
+
+    {%{
+       state
+       | render: MingaEditor.State.Render.connect_renderer(state.render, renderer, reader)
+     }, renderer}
   end
 
   @spec log_synchronous_error(state(), non_neg_integer(), Exception.t()) :: state()

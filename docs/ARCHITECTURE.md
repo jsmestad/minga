@@ -465,9 +465,11 @@ The shared code is the container and dispatch; the row-identity check is a capab
 
 The frontend identifies the displayed text under the pointer; the BEAM decides what the interaction means. For editor text, each frontend reports a window ID, immutable text presentation ID, absolute row-store index, row ID, and row-local composed UTF-16 offset. Swift resolves that offset with the CoreText line used to draw the row. The TUI uses its terminal width and clipping rules. Neither frontend reconstructs source coordinates or applies selection semantics.
 
-The renderer retains the source map for each admitted text presentation. It verifies the row identity and converts the composed offset to a source UTF-8 byte position. The editor validates the source version before changing the cursor or selection. Buffer edits invalidate old source positions; unrelated cursor, viewport, or chrome frames do not change the meaning of an already displayed row. Wrap indentation, expanded tabs, virtual text, folds, and Unicode correspondence belong to the retained source map.
+The renderer retains the source map for each admitted text presentation and publishes a protected, read-only interaction index. The editor reads this index directly, verifies the row identity, and converts the composed offset to a source UTF-8 byte position without waiting for the renderer mailbox. It validates the source version before changing the cursor or selection. Buffer edits invalidate old source positions; unrelated cursor, viewport, or chrome frames do not change the meaning of an already displayed row. Wrap indentation, expanded tabs, virtual text, folds, and Unicode correspondence belong to the retained source map.
 
 `text_presentation_state` and `editor_text_event` use the same ordered input stream. A frontend marks a text presentation active when it becomes the presentation used for input, then discards it when no committed candidate, native attempt, or visible presentation can use it. Swift retains those references through Metal completion; the TUI switches them with its committed input model. The editor forwards lifecycle changes to the renderer in mailbox order, so retirement cannot overtake a prior pointer event. Mouse release always ends the gesture, even if its endpoint no longer resolves. Same-connection frame recovery and pending buffer replacement preserve the last visible lease until the frontend discards it; a real connection reset or monitored buffer termination clears the corresponding leases.
+
+The renderer is the only writer of the interaction index. Immutable resident-store chunks are shared across presentation leases; an edit publishes only changed tree paths and chunks, while pointer lookup reads small rank headers and one bounded chunk. Lease and current-window references retain the required nodes. Activation exposes only fully published graphs, and lookup rechecks the active presentation before returning. A reader belongs to one renderer generation: connection reset clears its contents, renderer termination deletes its table, and either condition makes unresolved input fail closed.
 
 Cursor movement, selection extension, multi-click selection, modifier semantics, and edits remain BEAM state transitions. The native frontend uses the same retained line geometry to draw the BEAM-resolved cursor and selection. It does not maintain a second authoritative selection.
 
@@ -574,13 +576,13 @@ Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines 
 
 ### Mouse Event Routing
 
-The Swift GUI and Go TUI resolve editor text against their displayed presentation. They send `editor_text_event` (`0x1E`) with the window, presentation, row identity, and composed UTF-16 offset. The renderer resolves that target through its retained source map. `MingaEditor.Mouse.handle_text_event/3` applies shared cursor and selection operations after validating the source version.
+The Swift GUI and Go TUI resolve editor text against their displayed presentation. They send `editor_text_event` (`0x1E`) with the window, presentation, row identity, and composed UTF-16 offset. The editor resolves that target through the renderer-owned interaction index. `MingaEditor.Mouse.handle_text_event/3` applies shared cursor and selection operations after validating the source version.
 
 ```
 Frontend pointer event
     │
     ├─ Editor text → frontend displayed-row hit test
-    │     └─ editor_text_event → renderer presentation/source resolution
+    │     └─ editor_text_event → direct presentation/source index lookup
     │           └─ Mouse.handle_text_event → version-checked editing operation
     │                 ├─ single click → position cursor and start drag
     │                 ├─ double/triple click → select word/line and snap drag
@@ -819,7 +821,7 @@ These guide what we build and how:
 
 - **GUI-first, TUI-capable.** Design for native GUI frontends (Swift/Metal, GTK4) first. The TUI is a capable fallback, like Emacs's terminal mode, not the primary target.
 - **Fault tolerance over speed.** The BEAM's supervision model means crashes are recoverable events, not catastrophes.
-- **Process isolation.** Editor state and rendering never share memory; either can fail independently. Multiple frontends can exist because the protocol enforces this boundary.
+- **Process isolation.** Editor and renderer processes own their mutable state independently. The renderer may publish immutable interaction data through a protected ETS table with one writer and generation-scoped readers. Renderer failure invalidates those readers; it never transfers editing authority. Frontends remain separated from the BEAM by the protocol.
 - **Vim grammar, modern UX.** Modal editing with discoverable leader-key menus.
 - **Elixir for logic, platform-native rendering.** The BEAM handles everything a text editor needs to think about. Swift/Metal, Go/Bubble Tea, and the planned GTK4 frontend handle everything a display needs to draw; Zig is parser infrastructure, not a display.
 - **Test everything.** Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.
