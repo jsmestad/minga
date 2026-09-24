@@ -57,22 +57,25 @@ private extension MingaAccessibilityWorkflowTests {
                 timeout: firstFrameTimeout,
                 query: alphaQuery
             ) {
-                $0.focused == true && $0.value?.contains("ALPHA PANE λ🙂") == true
+                $0.value?.contains("ALPHA PANE λ🙂") == true
             }
         }
         try require(
             alpha.identifier?.hasPrefix("minga.editor.") == true,
             "Alpha pane lacks its stable accessibility identity"
         )
-        try require(alpha.focused == true, "Alpha pane is not the actual AX-focused editor after launch")
         try client.requireRawAccessibilityAccess()
-        let initialSelection = try client.waitForEditorNode(
+        try client.waitForRawFocus(
+            "the initial alpha editor AX focus",
+            timeout: timeout,
+            node: alpha
+        )
+        let initialSelection = try client.waitForRawFocusedEditorNode(
             "the initial insertion position",
             timeout: timeout,
             query: alphaQuery
         ) {
-            $0.focused == true && $0.selectedTextRange == NSRange(location: 0, length: 0)
-                && $0.selectedText == nil
+            $0.selectedTextRange == NSRange(location: 0, length: 0) && $0.selectedText == nil
         }
         try require(
             initialSelection.selectedTextRange == NSRange(location: 0, length: 0),
@@ -80,25 +83,25 @@ private extension MingaAccessibilityWorkflowTests {
         )
 
         app.typeText("$")
-        _ = try client.waitForEditorNode(
+        _ = try client.waitForRawFocusedEditorNode(
             "the insertion position before the Unicode emoji", timeout: timeout, query: alphaQuery
         ) {
-            $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
+            $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
         }
 
         app.typeText("v")
-        _ = try client.waitForEditorNode(
+        _ = try client.waitForRawFocusedEditorNode(
             "the visual selection of the Unicode emoji", timeout: timeout, query: alphaQuery
         ) {
-            $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 2) && $0.selectedText == "🙂"
+            $0.selectedTextRange == NSRange(location: 12, length: 2) && $0.selectedText == "🙂"
         }
 
         app.typeKey(.escape, modifierFlags: [])
         _ = try timed("focus-after-mode-cycle") {
-            try client.waitForEditorNode(
+            try client.waitForRawFocusedEditorNode(
                 "the restored alpha editor insertion state", timeout: timeout, query: alphaQuery
             ) {
-                $0.focused == true && $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
+                $0.selectedTextRange == NSRange(location: 12, length: 0) && $0.selectedText == nil
             }
         }
     }
@@ -132,14 +135,18 @@ private extension MingaAccessibilityWorkflowTests {
             )
         }
 
-        _ = try client.waitForNode(
+        let beta = try client.waitForNode(
             "the activated beta_target.ex editor",
             timeout: timeout,
             query: editorPaneQuery(named: "beta_target.ex", client: client)
         ) {
             $0.value?.contains("BETA PANE é🙂") == true
-                && $0.focused == true
         }
+        try client.waitForRawFocus(
+            "the activated beta_target.ex editor AX focus",
+            timeout: timeout,
+            node: beta
+        )
         try require(
             activeFileTabExists(named: "beta_target.ex", client: client),
             "AX activation did not make beta_target.ex the exact active file tab"
@@ -160,14 +167,18 @@ private extension MingaAccessibilityWorkflowTests {
         ) { _ in true }
         app.typeKey(.escape, modifierFlags: [])
         _ = try timed("picker-dismissal-focus-return") {
-            try client.waitForNode(
+            let beta = try client.waitForNode(
                 "beta editor focus after picker dismissal",
                 timeout: timeout,
                 query: editorPaneQuery(named: "beta_target.ex", client: client)
             ) {
                 $0.value?.contains("BETA PANE é🙂") == true
-                    && $0.focused == true
             }
+            try client.waitForRawFocus(
+                "beta editor raw AX focus after picker dismissal",
+                timeout: timeout,
+                node: beta
+            )
         }
         try require(
             activeFileTabExists(named: "beta_target.ex", client: client),
@@ -201,8 +212,13 @@ private extension MingaAccessibilityWorkflowTests {
 
         let distinctPanes = try distinctAlphaAndBetaPanes(client: client)
         let activeAlpha = try requireNode(
-            distinctPanes.first { isEditorPane($0, named: "alpha_target.ex") && $0.focused == true },
-            "Accessibility activation on the alpha tab did not expose alpha as the focused pane"
+            distinctPanes.first { isEditorPane($0, named: "alpha_target.ex") },
+            "Accessibility activation on the alpha tab did not expose the alpha pane"
+        )
+        try client.waitForRawFocus(
+            "alpha AX focus after tab activation",
+            timeout: timeout,
+            node: activeAlpha
         )
         try require(
             activeAlpha.value?.contains("ALPHA PANE λ🙂") == true,
@@ -235,17 +251,23 @@ private extension MingaAccessibilityWorkflowTests {
             "beta_target.ex to own real keyboard focus",
             timeout: timeout,
             query: editorPaneQuery(named: "beta_target.ex", client: client)
-        ) {
-            $0.focused == true
-        }
+        ) { _ in true }
+        try client.waitForRawFocus(
+            "beta_target.ex raw AX focus",
+            timeout: timeout,
+            node: focusedBeta
+        )
         try require(
             focusedBeta.value?.contains("BETA PANE é🙂") == true,
             "Focused beta pane exposes the wrong text"
         )
+        let alpha = try client.waitForNode(
+            "the inactive alpha_target.ex pane",
+            timeout: timeout,
+            query: editorPaneQuery(named: "alpha_target.ex", client: client)
+        ) { _ in true }
         try require(
-            try client.nodeExists(
-                query: editorPaneQuery(named: "alpha_target.ex", client: client)
-            ) { $0.focused == false },
+            try !client.rawElementIsFocused(alpha),
             "Alpha remained AX-focused after focusing the named beta pane"
         )
     }
@@ -294,13 +316,16 @@ private extension MingaAccessibilityWorkflowTests {
         ) {
             $0.value?.contains("choices") == true
         }
-        _ = try client.waitForNode(
-            "the focused native picker query field",
+        let queryField = try client.waitForNode(
+            "the native picker query field",
             timeout: timeout,
-            query: client.elements(ofType: .textField)
-        ) {
-            $0.focused == true
-        }
+            query: client.elements(ofType: .textField, identifierPrefix: "minga.picker.query")
+        ) { _ in true }
+        try client.waitForRawFocus(
+            "the native picker query field AX focus",
+            timeout: timeout,
+            node: queryField
+        )
     }
 
     func activeFileTabExists(named fileName: String, client: AccessibilityClient) throws -> Bool {

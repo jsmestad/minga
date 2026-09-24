@@ -8,9 +8,21 @@ struct AccessibilityNode {
     let identifier: String?
     let label: String?
     let value: String?
-    let focused: Bool?
     let selectedTextRange: NSRange?
     let selectedText: String?
+}
+
+private struct RawAccessibilityFocusState {
+    let elementFocused: Bool
+    let applicationFocusedIdentifier: String?
+
+    func matches(identifier: String) -> Bool {
+        elementFocused && applicationFocusedIdentifier == identifier
+    }
+
+    var diagnosticSummary: String {
+        "rawElementFocused=\(elementFocused) applicationFocusedIdentifier=\(applicationFocusedIdentifier ?? "nil")"
+    }
 }
 
 enum RawAccessibilityAccessDisposition {
@@ -92,7 +104,7 @@ final class AccessibilityClient {
         )
     }
 
-    func waitForEditorNode(
+    func waitForRawFocusedEditorNode(
         _ description: String,
         timeout: TimeInterval = 12,
         query: XCUIElementQuery,
@@ -103,6 +115,7 @@ final class AccessibilityClient {
             timeout: timeout,
             query: query,
             includeTextSelection: true,
+            requireRawFocus: true,
             matching: predicate
         )
     }
@@ -120,11 +133,45 @@ final class AccessibilityClient {
             return
         case .infrastructure:
             throw AccessibilityClientError.condition(
-                "INFRASTRUCTURE: launched text-range verification requires raw macOS Accessibility access; AXIsProcessTrusted=\(trusted), reading AXRole returned AXError \(result.rawValue)"
+                "INFRASTRUCTURE: launched accessibility verification requires raw macOS Accessibility access; AXIsProcessTrusted=\(trusted), reading AXRole returned AXError \(result.rawValue)"
             )
         case .targetFailure(let error):
             throw AccessibilityClientError.api("checking launched application AX access", error)
         }
+    }
+
+    func waitForRawFocus(
+        _ description: String,
+        timeout: TimeInterval = 12,
+        node: AccessibilityNode
+    ) throws {
+        guard let identifier = node.identifier else {
+            throw AccessibilityClientError.condition(
+                "Raw accessibility focus requires a stable identifier for \(summary(node))"
+            )
+        }
+        var lastObservedState: RawAccessibilityFocusState?
+        do {
+            let _: Bool = try wait(description, timeout: timeout, waitingFor: node.element) {
+                let state = try self.rawFocusState(identifier: identifier)
+                lastObservedState = state
+                return state.matches(identifier: identifier) ? true : nil
+            }
+        } catch AccessibilityClientError.timeout(_, _) {
+            let suffix = lastObservedState.map { "; last observed \($0.diagnosticSummary)" } ?? ""
+            throw AccessibilityClientError.condition(
+                "Timed out after \(String(format: "%.2f", timeout)) seconds waiting for \(description)\(suffix)"
+            )
+        }
+    }
+
+    func rawElementIsFocused(_ node: AccessibilityNode) throws -> Bool {
+        guard let identifier = node.identifier else {
+            throw AccessibilityClientError.condition(
+                "Raw accessibility focus requires a stable identifier for \(summary(node))"
+            )
+        }
+        return try rawFocusState(identifier: identifier).elementFocused
     }
 
     private func waitForNode(
@@ -132,22 +179,30 @@ final class AccessibilityClient {
         timeout: TimeInterval,
         query: XCUIElementQuery,
         includeTextSelection: Bool,
+        requireRawFocus: Bool = false,
         matching predicate: (AccessibilityNode) -> Bool
     ) throws -> AccessibilityNode {
         let element = query.firstMatch
         var lastObservedNode: AccessibilityNode?
+        var lastObservedRawFocus: RawAccessibilityFocusState?
 
         do {
             return try wait(description, timeout: timeout, waitingFor: element) {
                 guard element.exists else { return nil }
                 let node = try self.snapshot(element, includeTextSelection: includeTextSelection)
                 lastObservedNode = node
-                return predicate(node) ? node : nil
+                guard predicate(node) else { return nil }
+                guard requireRawFocus else { return node }
+                guard let identifier = node.identifier else { return nil }
+                let rawFocus = try self.rawFocusState(identifier: identifier)
+                lastObservedRawFocus = rawFocus
+                return rawFocus.matches(identifier: identifier) ? node : nil
             }
         } catch AccessibilityClientError.timeout(_, _) {
             guard let lastObservedNode else { throw AccessibilityClientError.timeout(description, timeout) }
+            let rawFocusSuffix = lastObservedRawFocus.map { "; \($0.diagnosticSummary)" } ?? ""
             throw AccessibilityClientError.condition(
-                "Timed out after \(String(format: "%.2f", timeout)) seconds waiting for \(description); last observed \(diagnosticSummary(lastObservedNode))"
+                "Timed out after \(String(format: "%.2f", timeout)) seconds waiting for \(description); last observed \(diagnosticSummary(lastObservedNode))\(rawFocusSuffix)"
             )
         }
     }
@@ -224,7 +279,6 @@ final class AccessibilityClient {
                     "id=\(node.identifier ?? "nil")",
                     "label=\(node.label ?? "nil")",
                     "value=\(bounded(node.value))",
-                    "focused=\(String(describing: node.focused))",
                     "selectedTextRange=\(String(describing: node.selectedTextRange))",
                     "selectedText=\(bounded(node.selectedText))"
                 ].joined(separator: " ")
@@ -243,7 +297,6 @@ final class AccessibilityClient {
         includeTextSelection: Bool = false
     ) throws -> AccessibilityNode {
         let snapshot = try element.snapshot()
-        let representation = snapshot.dictionaryRepresentation
         let identifier = emptyAsNil(snapshot.identifier)
         let textSelection: (range: NSRange, text: String?)? = if includeTextSelection, let identifier {
             try editorTextSelection(identifier: identifier)
@@ -256,7 +309,6 @@ final class AccessibilityClient {
             identifier: identifier,
             label: emptyAsNil(snapshot.label),
             value: describe(snapshot.value),
-            focused: representation[.hasFocus] as? Bool,
             selectedTextRange: textSelection?.range,
             selectedText: textSelection?.text
         )
@@ -275,8 +327,33 @@ final class AccessibilityClient {
         return (NSRange(location: range.location, length: range.length), emptyAsNil(selectedText ?? ""))
     }
 
-    private func accessibilityElement(identifier: String) throws -> AXUIElement? {
-        if let cached = accessibilityElementsByIdentifier[identifier] { return cached }
+    private func rawFocusState(identifier: String) throws -> RawAccessibilityFocusState {
+        guard let element = try accessibilityElement(identifier: identifier, useCache: false) else {
+            return RawAccessibilityFocusState(
+                elementFocused: false,
+                applicationFocusedIdentifier: nil
+            )
+        }
+        let elementFocused = (try attribute(kAXFocusedAttribute as CFString, from: element) as? Bool) == true
+        guard let rawFocusedElement = try attribute(
+            kAXFocusedUIElementAttribute as CFString,
+            from: accessibilityApplication
+        ), CFGetTypeID(rawFocusedElement) == AXUIElementGetTypeID() else {
+            return RawAccessibilityFocusState(
+                elementFocused: elementFocused,
+                applicationFocusedIdentifier: nil
+            )
+        }
+        let focusedElement = unsafeDowncast(rawFocusedElement, to: AXUIElement.self)
+        let focusedIdentifier = try attribute(kAXIdentifierAttribute as CFString, from: focusedElement) as? String
+        return RawAccessibilityFocusState(
+            elementFocused: elementFocused,
+            applicationFocusedIdentifier: focusedIdentifier
+        )
+    }
+
+    private func accessibilityElement(identifier: String, useCache: Bool = true) throws -> AXUIElement? {
+        if useCache, let cached = accessibilityElementsByIdentifier[identifier] { return cached }
 
         var pending = [accessibilityApplication]
         while let element = pending.popLast() {
@@ -381,7 +458,6 @@ final class AccessibilityClient {
         [
             summary(node),
             "value=\(bounded(node.value))",
-            "focused=\(String(describing: node.focused))",
             "selectedTextRange=\(String(describing: node.selectedTextRange))",
             "selectedText=\(bounded(node.selectedText))"
         ].joined(separator: " ")
