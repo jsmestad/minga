@@ -13,6 +13,18 @@ struct AccessibilityNode {
     let selectedText: String?
 }
 
+enum RawAccessibilityAccessDisposition {
+    case available
+    case infrastructure
+    case targetFailure(AXError)
+
+    static func classify(trusted: Bool, result: AXError) -> RawAccessibilityAccessDisposition {
+        if !trusted || result == .apiDisabled { return .infrastructure }
+        if result == .success { return .available }
+        return .targetFailure(result)
+    }
+}
+
 enum AccessibilityClientError: Error, CustomStringConvertible {
     case api(String, AXError)
     case condition(String)
@@ -103,10 +115,15 @@ final class AccessibilityClient {
             kAXRoleAttribute as CFString,
             &role
         )
-        guard trusted, result == .success else {
+        switch RawAccessibilityAccessDisposition.classify(trusted: trusted, result: result) {
+        case .available:
+            return
+        case .infrastructure:
             throw AccessibilityClientError.condition(
                 "INFRASTRUCTURE: launched text-range verification requires raw macOS Accessibility access; AXIsProcessTrusted=\(trusted), reading AXRole returned AXError \(result.rawValue)"
             )
+        case .targetFailure(let error):
+            throw AccessibilityClientError.api("checking launched application AX access", error)
         }
     }
 

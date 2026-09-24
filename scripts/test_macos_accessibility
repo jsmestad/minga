@@ -183,6 +183,7 @@ run_variant() {
         -test-timeouts-enabled YES \
         -maximum-test-execution-time-allowance 120 \
         -only-testing:MingaAccessibilityTests/MingaAccessibilityWorkflowTests/testRealApplicationAccessibilityNavigationAndFocus \
+        -only-testing:MingaAccessibilityTests/RawAccessibilityAccessDispositionTests \
         MINGA_APP_BUNDLE_IDENTIFIER="$test_bundle_id" \
         MINGA_AX_VARIANT="$variant" \
         MINGA_AX_APP_BUNDLE_ID="$test_bundle_id" \
