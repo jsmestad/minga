@@ -445,27 +445,42 @@ Minga has project-specific Credo checks in `credo/checks/`. These enforce archit
 | `NoDirectModalOverlayWriteCheck` | EX9005 | Modal overlay writes must flow through `MingaEditor.State.ModalOverlay`, not raw `%{state \| modal: ...}`. |
 | `NoRawWorkspaceSnapshotCheck` | EX9006 | No `Map.from_struct` on workspace structs. Use `TabContext.from_workspace/1` instead of converting to an intermediate map. See #1403. |
 
-### Pre-commit Checks (enforced by commit-gate extension)
+### Feedback Loop and Pre-commit Checks (enforced by commit-gate extension)
 
-The `commit-gate` extension blocks every `git commit` until all checks pass. You don't need to remember this; the extension catches it automatically. But you should still run all relevant checks proactively, not just wait for the gate to yell at you. Running checks proactively is faster than getting blocked and re-running the review cycle.
+The `commit-gate` extension blocks every `git commit` until all checks pass. Run the checks proactively; getting blocked and re-running the review cycle is slower. Pick the cheapest tier that answers the question you have. Timings are warm-cache numbers on Apple silicon.
+
+**Tier 1, while editing (seconds, run as often as you like):**
+
+```bash
+mix compile --warnings-as-errors          # ~3s no-op. Type errors and warnings for the whole project.
+mix test.debug test/minga/foo_test.exs    # The test file that covers what you touched. Verbose, stops at 3 failures.
+mix format                                # Whole project, ~3s. Run before Tier 2; its output is not negotiable.
+```
+
+**Tier 2, once before review (about 25s warm, plus about 100s for the suite):**
+
+```bash
+make lint                                 # format check + changed-file Credo + ExDNA in parallel with compile -> incremental Dialyzer.
+mix test.llm                              # Full non-heavy suite, module-level summary, stops at 5 failures.
+mix zig.lint                              # Only if you touched .zig files.
+mix swift.build                           # Only if you touched .swift files; then run the Swift tests.
+```
+
+`make lint` is a gate, not a compiler. Do not run it after every edit; Tier 1 gives the same compile and test signal faster. It prints one `[pass]`, `[FAIL]`, or `[skip]` line per check with its duration, then the full log of every failed check (and of a passing compile that emitted warnings). Independent checks all run even when one fails, so fix everything it lists in one pass; only Dialyzer is skipped when compile fails. On a branch that changes no Elixir-relevant file (docs, Swift, Go, Zig only), the compile chain and ExDNA are skipped and the gate finishes in a few seconds. It refuses to run when the active Elixir differs from the `.tool-versions` pin, because that mismatch silently costs a full recompile.
+
+**Never run locally (CI owns these):** `make lint.full`, `mix dialyzer` (classic, cold PLT), `mix reach.check` (advisory only: it exits 0 with hundreds of findings and takes about 4 minutes), `mix credo --strict` on the whole project, and `mix test` with default output (use `mix test.llm`).
+
+**Expected one-time costs, do not interrupt them:** changing `mix.exs` or `mix.lock` forces a full recompile (about 60s); a `mix.lock` or toolchain change also cold-starts incremental Dialyzer (about 3 minutes). Touching `docs/protocol_schema.toml`, `config/language_aliases.json`, `lib/minga/language/*.ex`, or `extensions/*/lib` regenerates their artifacts on the next compile (a few seconds); otherwise the generator compilers are skipped. Two Elixir installs on `PATH` (for example Homebrew ahead of asdf) make every shell switch a full recompile; the toolchain must be the one in `.tool-versions`.
+
+**Swift harness tests:** `test/minga_editor/integration/gui_protocol_test.exs` runs only when `priv/minga-test-harness` exists and is newer than every Swift source it compiles. A missing binary excludes the module silently; a stale one excludes it with a one-line notice, so failures there are never noise from a stale binary. Rebuild with `mix swift.harness` only when you changed Swift protocol decoding.
 
 **Before requesting review, do this self-check:**
 
-1. **Run `make lint`** before requesting review and between edits (format + changed Credo + compile + incremental Dialyzer). Agents should not run `make lint.full`; CI owns the full project-wide gate.
+1. **Run `make lint`** once. Agents should not run `make lint.full`; CI owns the full project-wide gate.
 2. **Run `mix test.llm`**. Fix any failures.
 3. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
 4. **If you touched `.zig` files**, run `mix zig.lint`.
 5. **If you touched `.swift` files**, run `mix swift.build` and Swift tests.
-
-```bash
-make lint                         # Format + changed Credo + compile + incremental Dialyzer
-mix test.debug test/minga/foo_test.exs  # Focused edit-loop test, verbose and fast
-mix test.quick                    # Broad edit-loop check for stale tests only
-mix test.llm                      # Full non-heavy suite before review
-mix test.heavy                    # Only :heavy tests (OS process, timeout, multi-turn)
-mix test --failed                 # Re-run only previously failed tests while debugging
-mix zig.lint                      # zig fmt --check + zig build test (only if .zig changed)
-```
 
 If any check fails, fix it before committing. No exceptions.
 

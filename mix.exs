@@ -1,3 +1,4 @@
+Code.require_file("mix/compiler_manifest.ex", __DIR__)
 Code.require_file("mix/protocol_generator.ex", __DIR__)
 Code.require_file("mix/language_alias_generator.ex", __DIR__)
 Code.require_file("mix/compilers/language_aliases_gen.ex", __DIR__)

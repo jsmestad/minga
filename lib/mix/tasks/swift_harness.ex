@@ -60,6 +60,26 @@ defmodule Mix.Tasks.Swift.Harness do
   # in-line, so these imports must be removed before swiftc sees the file.
   @cross_module_import ~r/^import (?:MingaProtocol|MingaUI)\R/m
 
+  @type status :: :ready | :missing | :stale
+
+  @doc "Every Swift source compiled into the harness binary."
+  @spec sources() :: [Path.t()]
+  def sources, do: @protocol_module_sources ++ @harness_app_sources
+
+  @doc """
+  Reports whether the harness binary at `path` can be trusted by the test suite.
+
+  `:stale` means a Swift source is newer than the binary, so protocol round-trip tests would fail on decode drift rather than on real regressions.
+  """
+  @spec status(Path.t()) :: status()
+  def status(path), do: status(File.exists?(path), path)
+
+  defp status(false, _path), do: :missing
+  defp status(true, path), do: freshness(Mix.Utils.stale?(sources(), [path]))
+
+  defp freshness(true), do: :stale
+  defp freshness(false), do: :ready
+
   @impl Mix.Task
   @spec run(list()) :: :ok
   def run(args) do

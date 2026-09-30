@@ -70,6 +70,18 @@ defmodule Minga.Mix.ProtocolGenerator do
     end
   end
 
+  @doc "Files whose change requires regenerating protocol artifacts."
+  @spec source_paths() :: [Path.t()]
+  def source_paths, do: [@schema_path, @protocol_zig_path, Path.relative_to_cwd(__ENV__.file)]
+
+  @doc "Every artifact written by `run/2`, excluding the in-place `protocol.zig` export block."
+  @spec generated_paths() :: [Path.t()]
+  def generated_paths, do: Enum.map(renderers(true), &elem(&1, 0))
+
+  @doc "Sources plus outputs: every file whose content decides whether generation must run again."
+  @spec tracked_paths() :: [Path.t()]
+  def tracked_paths, do: source_paths() ++ generated_paths()
+
   @spec ensure_generator_deps_loaded!() :: :ok
   defp ensure_generator_deps_loaded! do
     case Code.ensure_loaded(Toml) do
@@ -206,21 +218,27 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec generated_files(schema(), boolean()) :: [generated_file()]
   defp generated_files(schema, format_generated_go) do
+    Enum.map(renderers(format_generated_go), fn {path, render} -> {path, render.(schema)} end)
+  end
+
+  # The single table of output paths and their renderers; `generated_paths/0` projects it.
+  @spec renderers(boolean()) :: [{Path.t(), (schema() -> String.t())}]
+  defp renderers(format_generated_go) do
     [
-      {@generated_elixir_path, elixir_file(schema)},
-      {@generated_golden_fields_path, golden_fields_elixir_file(schema)},
-      {@generated_encode_path, encode_elixir_file(schema)},
-      {@generated_swift_path, swift_file(schema)},
-      {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
-      {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
-      {@generated_go_opcodes_path, go_opcodes_file(schema, format_generated_go)},
-      {@generated_go_command_size_path, go_command_size_file(schema, format_generated_go)},
-      {@generated_zig_command_size_path, zig_command_size_file(schema)},
-      {@generated_swift_command_size_path, swift_command_size_file(schema)},
-      {@generated_swift_semantic_decode_path, swift_semantic_decode_file(schema)},
-      {@generated_go_semantic_types_path, go_semantic_types_file(schema, format_generated_go)},
-      {@generated_go_semantic_decode_path, go_semantic_decode_file(schema, format_generated_go)},
-      {@generated_go_golden_path, go_golden_decode_file(schema, format_generated_go)}
+      {@generated_elixir_path, &elixir_file/1},
+      {@generated_golden_fields_path, &golden_fields_elixir_file/1},
+      {@generated_encode_path, &encode_elixir_file/1},
+      {@generated_swift_path, &swift_file/1},
+      {@generated_zig_opcodes_path, &zig_opcodes_file/1},
+      {@generated_zig_schema_test_path, &zig_schema_test_file/1},
+      {@generated_go_opcodes_path, &go_opcodes_file(&1, format_generated_go)},
+      {@generated_go_command_size_path, &go_command_size_file(&1, format_generated_go)},
+      {@generated_zig_command_size_path, &zig_command_size_file/1},
+      {@generated_swift_command_size_path, &swift_command_size_file/1},
+      {@generated_swift_semantic_decode_path, &swift_semantic_decode_file/1},
+      {@generated_go_semantic_types_path, &go_semantic_types_file(&1, format_generated_go)},
+      {@generated_go_semantic_decode_path, &go_semantic_decode_file(&1, format_generated_go)},
+      {@generated_go_golden_path, &go_golden_decode_file(&1, format_generated_go)}
     ]
   end
 

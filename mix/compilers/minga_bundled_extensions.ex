@@ -3,20 +3,49 @@ defmodule Mix.Tasks.Compile.MingaBundledExtensions do
 
   use Mix.Task.Compiler
 
+  alias Minga.Mix.CompilerManifest
+
+  @manifest_name "minga_bundled_extensions"
+  @extensions ["git_porcelain", "knowledge_graph", "adversarial"]
+
   @impl true
-  @spec run([String.t()]) :: {:ok, []}
-  def run(_args) do
+  @spec run([String.t()]) :: {:ok, []} | {:noop, []}
+  def run(args) do
     Mix.Project.ensure_structure()
-    copy_extension("git_porcelain")
-    copy_extension("knowledge_graph")
-    copy_extension("adversarial")
-    {:ok, []}
+    manifest = CompilerManifest.path(@manifest_name)
+
+    if CompilerManifest.stale?(manifest, tracked_paths(), args) do
+      Enum.each(@extensions, &copy_extension/1)
+      CompilerManifest.record(manifest, tracked_paths())
+      {:ok, []}
+    else
+      {:noop, []}
+    end
   end
 
-  defp copy_extension(name) do
-    source = Path.join([File.cwd!(), "extensions", name, "lib"])
+  @impl true
+  @spec manifests() :: [String.t()]
+  def manifests, do: [CompilerManifest.path(@manifest_name)]
 
-    target = Path.join([Mix.Project.app_path(), "priv", "extensions", name, "lib"])
+  @impl true
+  @spec clean() :: :ok
+  def clean, do: CompilerManifest.remove(CompilerManifest.path(@manifest_name))
+
+  # Both trees are fingerprinted: a file deleted from the source or lingering in the target forces a fresh copy.
+  defp tracked_paths do
+    Enum.flat_map(@extensions, fn name ->
+      CompilerManifest.tree(source_dir(name)) ++ CompilerManifest.tree(target_dir(name))
+    end)
+  end
+
+  defp source_dir(name), do: Path.join([File.cwd!(), "extensions", name, "lib"])
+
+  defp target_dir(name),
+    do: Path.join([Mix.Project.app_path(), "priv", "extensions", name, "lib"])
+
+  defp copy_extension(name) do
+    source = source_dir(name)
+    target = target_dir(name)
 
     unless File.dir?(source) do
       Mix.raise("Bundled extension #{name} source is missing: #{source}")
