@@ -14,8 +14,8 @@ defmodule MingaAgent.Changeset.Server do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Replace
-  alias Minga.Core.Overlay
   alias MingaAgent.Changeset.MergedEvent
+  alias MingaAgent.Changeset.Overlay
 
   @tombstone_suffix ".__changeset_deleted__"
 

@@ -2822,7 +2822,13 @@ defmodule Minga.Buffer.Process do
     patch = UndoPatch.from_delta(delta, state.document)
 
     undo_history =
-      UndoHistory.record_edit(state.undo_history, BufState.version(state), patch, source)
+      UndoHistory.record_edit(
+        state.undo_history,
+        BufState.version(state),
+        patch,
+        source,
+        now_ms()
+      )
 
     %{state | document: new_buf, undo_history: undo_history}
   end
@@ -2832,7 +2838,13 @@ defmodule Minga.Buffer.Process do
     patch = UndoPatch.from_documents(state.document, new_buf)
 
     undo_history =
-      UndoHistory.record_edit(state.undo_history, BufState.version(state), patch, source)
+      UndoHistory.record_edit(
+        state.undo_history,
+        BufState.version(state),
+        patch,
+        source,
+        now_ms()
+      )
 
     %{state | document: new_buf, undo_history: undo_history}
   end
@@ -2840,7 +2852,13 @@ defmodule Minga.Buffer.Process do
   @spec push_undo_batch(state(), Document.t(), BufState.edit_source(), [UndoPatch.t()]) :: state()
   defp push_undo_batch(state, new_buf, source, patches) do
     undo_history =
-      UndoHistory.record_edit_batch(state.undo_history, BufState.version(state), patches, source)
+      UndoHistory.record_edit_batch(
+        state.undo_history,
+        BufState.version(state),
+        patches,
+        source,
+        now_ms()
+      )
 
     %{state | document: new_buf, undo_history: undo_history}
   end
@@ -2850,7 +2868,13 @@ defmodule Minga.Buffer.Process do
     patch = UndoPatch.from_delta(delta, state.document)
 
     undo_history =
-      UndoHistory.record_edit_force(state.undo_history, BufState.version(state), patch, source)
+      UndoHistory.record_edit_force(
+        state.undo_history,
+        BufState.version(state),
+        patch,
+        source,
+        now_ms()
+      )
 
     %{state | document: new_buf, undo_history: undo_history}
   end
@@ -2860,10 +2884,20 @@ defmodule Minga.Buffer.Process do
     patch = UndoPatch.from_documents(state.document, new_buf)
 
     undo_history =
-      UndoHistory.record_edit_force(state.undo_history, BufState.version(state), patch, source)
+      UndoHistory.record_edit_force(
+        state.undo_history,
+        BufState.version(state),
+        patch,
+        source,
+        now_ms()
+      )
 
     %{state | document: new_buf, undo_history: undo_history}
   end
+
+  # UndoHistory is clock-free; the process owns the coalescing clock.
+  @spec now_ms() :: integer()
+  defp now_ms, do: System.monotonic_time(:millisecond)
 
   # Logs undo/redo source for non-user edits (diagnostic, gated by :log_level_editor).
   @spec log_undo_source(:undo | :redo, BufState.edit_source()) :: :ok

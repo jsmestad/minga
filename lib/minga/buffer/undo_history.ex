@@ -19,6 +19,8 @@ defmodule Minga.Buffer.UndoHistory do
   @type version :: non_neg_integer()
   @type patches :: nonempty_list(UndoPatch.t())
   @type entry :: {version(), patches(), edit_source()}
+  @typedoc "Monotonic timestamp in milliseconds, supplied by the caller so this module stays clock-free."
+  @type at :: integer()
 
   defstruct undo_entries: [],
             redo_entries: [],
@@ -38,36 +40,32 @@ defmodule Minga.Buffer.UndoHistory do
   @spec coalesce_ms() :: pos_integer()
   def coalesce_ms, do: @coalesce_ms
 
-  @doc "Records an undo patch, coalescing rapid edits into one history entry."
-  @spec record_edit(t(), version(), UndoPatch.t(), edit_source()) :: t()
-  def record_edit(%__MODULE__{} = history, version, patch, source)
-      when source in [:user, :agent, :lsp, :recovery] do
-    now = System.monotonic_time(:millisecond)
-    elapsed = now - history.last_recorded_at
-
-    do_record_edit(history, version, patch, source, now, elapsed)
+  @doc "Records an undo patch at monotonic time `at`, coalescing rapid same-source edits into one history entry."
+  @spec record_edit(t(), version(), UndoPatch.t(), edit_source(), at()) :: t()
+  def record_edit(%__MODULE__{} = history, version, patch, source, at)
+      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
+    do_record_edit(history, version, patch, source, at, at - history.last_recorded_at)
   end
 
-  @doc "Records one undo entry containing all patches in the batch."
-  @spec record_edit_batch(t(), version(), patches(), edit_source()) :: t()
-  def record_edit_batch(%__MODULE__{} = history, version, [_patch | _rest] = patches, source)
-      when source in [:user, :agent, :lsp, :recovery] do
-    now = System.monotonic_time(:millisecond)
+  @doc "Records one undo entry containing all patches in the batch, stamped at monotonic time `at`."
+  @spec record_edit_batch(t(), version(), patches(), edit_source(), at()) :: t()
+  def record_edit_batch(%__MODULE__{} = history, version, [_patch | _rest] = patches, source, at)
+      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
     entry = {version, patches, source}
 
     %{
       history
       | undo_entries: cap_entries([entry | history.undo_entries]),
         redo_entries: [],
-        last_recorded_at: now
+        last_recorded_at: at
     }
   end
 
-  @doc "Records an undo patch without time-based coalescing."
-  @spec record_edit_force(t(), version(), UndoPatch.t(), edit_source()) :: t()
-  def record_edit_force(%__MODULE__{} = history, version, patch, source)
-      when source in [:user, :agent, :lsp, :recovery] do
-    record_edit_batch(history, version, [patch], source)
+  @doc "Records an undo patch without time-based coalescing, stamped at monotonic time `at`."
+  @spec record_edit_force(t(), version(), UndoPatch.t(), edit_source(), at()) :: t()
+  def record_edit_force(%__MODULE__{} = history, version, patch, source, at)
+      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
+    record_edit_batch(history, version, [patch], source, at)
   end
 
   @doc "Returns the previous document/version and updates history, or `:empty` when undo is unavailable."

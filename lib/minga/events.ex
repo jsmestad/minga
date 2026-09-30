@@ -54,8 +54,8 @@ defmodule Minga.Events do
 
   `Registry` ships with OTP (no dependencies), supports pattern-based
   dispatch, and has zero overhead for topics with no subscribers. It is
-  the same primitive that Phoenix.PubSub builds on, without the Phoenix
-  dependency. The wrapper module makes swapping to PubSub or `:pg`
+  the same primitive the mainstream web framework's PubSub builds on, without
+  that dependency. The wrapper module makes swapping to PubSub or `:pg`
   a one-file change if distributed events are ever needed.
   """
 

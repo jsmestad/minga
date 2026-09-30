@@ -1,7 +1,7 @@
-defmodule Minga.Core.OverlayTest do
+defmodule MingaAgent.Changeset.OverlayTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Core.Overlay
+  alias MingaAgent.Changeset.Overlay
 
   setup do
     dir = Path.join(System.tmp_dir!(), "overlay-test-#{System.unique_integer([:positive])}")

@@ -47,12 +47,12 @@ cd zig && zig build test       # Zig renderer tests
 Run the fast local gate once before requesting review. CI owns the full gate; `make lint.full` exists for reproducing a CI failure locally.
 
 ```bash
-make lint                         # Formatting + changed Credo + ExDNA, in parallel with compile -> incremental Dialyzer (~25s warm)
-make lint.full                    # Same plus full Credo, Reach, and classic Dialyzer (minutes)
+make lint                         # Formatting + changed Credo + ExDNA, in parallel with compile -> incremental Dialyzer + Reach arch policy (~25s warm)
+make lint.full                    # Same plus full Credo, Reach smells, and classic Dialyzer (minutes)
 mix test.llm                      # Non-heavy test suite with an LLM-friendly summary
 ```
 
-Both gates run every independent check even when one fails (Dialyzer is skipped only when compile fails) and print one status line per check followed by the logs of the failed ones. The fast gate skips compile, Dialyzer, and ExDNA on branches with no Elixir-relevant change. CI also runs full Credo, ExDNA, Reach, and classic Dialyzer before merge.
+Both gates run every independent check even when one fails (Dialyzer and Reach are skipped only when compile fails) and print one status line per check followed by the logs of the failed ones. The fast gate skips compile, Dialyzer, Reach, and ExDNA on branches with no Elixir-relevant change. CI also runs full Credo, ExDNA, Reach, and classic Dialyzer before merge.
 
 ## Project Layout
 

@@ -84,6 +84,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.UI.Picker.Item"
   ]
 
+  @doc "Layer 0 module prefixes. `.reach.exs` mirrors this list as its effects policy; `test/minga/credo/reach_policy_test.exs` fails when they drift."
+  @spec layer_0_prefixes() :: [String.t()]
+  def layer_0_prefixes, do: @layer_0_prefixes
+
   # Layer 2: Orchestration and presentation.
   #
   # Some namespaces (Frontend, UI, Agent) are split across layers. The
