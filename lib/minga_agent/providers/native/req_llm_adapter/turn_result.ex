@@ -6,19 +6,25 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter.TurnResult do
   """
 
   alias MingaAgent.Providers.Native.ReqLLMAdapter
+  alias ReqLLM.Message
 
-  @enforce_keys [:text, :tool_calls, :usage]
-  defstruct [:text, :tool_calls, :usage]
+  @enforce_keys [:message, :tool_calls, :usage]
+  defstruct [:message, :tool_calls, :usage]
 
   @type t :: %__MODULE__{
-          text: String.t(),
+          message: Message.t(),
           tool_calls: [ReqLLMAdapter.ToolCall.t()],
           usage: ReqLLMAdapter.raw_usage() | nil
         }
 
-  @doc "Creates a decoded turn result for Native orchestration."
-  @spec new(String.t(), [ReqLLMAdapter.ToolCall.t()], ReqLLMAdapter.raw_usage() | nil) :: t()
-  def new(text, tool_calls, usage) when is_binary(text) and is_list(tool_calls) do
-    %__MODULE__{text: text, tool_calls: tool_calls, usage: usage}
+  @doc "Creates a decoded turn result while retaining the complete assistant message."
+  @spec new(
+          Message.t(),
+          [ReqLLMAdapter.ToolCall.t()],
+          ReqLLMAdapter.raw_usage() | nil
+        ) :: t()
+  def new(%Message{role: :assistant} = message, tool_calls, usage)
+      when is_list(tool_calls) do
+    %__MODULE__{message: message, tool_calls: tool_calls, usage: usage}
   end
 end

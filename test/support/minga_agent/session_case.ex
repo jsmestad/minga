@@ -33,7 +33,17 @@ defmodule Minga.Test.SessionCase do
 
   @spec send_provider_event(GenServer.server(), MingaAgent.Event.t()) :: :ok
   def send_provider_event(session, event) do
-    send(session, {:agent_provider_event, event})
+    case {:sys.get_state(session).continuation.active_request, event} do
+      {nil, %MingaAgent.Event.Error{} = lifecycle_error} ->
+        send(session, {:agent_provider_lifecycle_event, lifecycle_error})
+
+      {%{request_id: request_id}, request_event} ->
+        send(session, {:agent_provider_event, request_id, request_event})
+
+      {nil, request_event} ->
+        send(session, {:agent_provider_event, "missing-request-identity", request_event})
+    end
+
     MingaAgent.Session.status(session)
     :ok
   end

@@ -4,12 +4,13 @@ defmodule Minga.Test.SessionSlowMockProvider do
   use GenServer
 
   alias MingaAgent.Event
+  alias Minga.Test.ProviderRequest
 
   @impl MingaAgent.Provider
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl MingaAgent.Provider
-  def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+  def send_prompt(pid, request), do: GenServer.cast(pid, {:prompt, request})
 
   @impl MingaAgent.Provider
   def abort(pid), do: GenServer.cast(pid, :abort)
@@ -18,10 +19,10 @@ defmodule Minga.Test.SessionSlowMockProvider do
   def new_session(pid), do: GenServer.cast(pid, :new_session)
 
   @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
+  def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
   @impl MingaAgent.Provider
-  def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+  def set_model(_pid, _model), do: :ok
 
   @spec proceed(GenServer.server()) :: :ok
   def proceed(pid), do: GenServer.cast(pid, :proceed)
@@ -33,10 +34,11 @@ defmodule Minga.Test.SessionSlowMockProvider do
   end
 
   @impl GenServer
-  def handle_cast({:prompt, text}, state) do
-    send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-    send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
-    {:noreply, %{state | pending: text}}
+  def handle_cast({:prompt, request}, state) do
+    text = ProviderRequest.text(request)
+    ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
+    ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: text})
+    {:noreply, %{state | pending: request}}
   end
 
   def handle_cast(:proceed, state) do
@@ -48,7 +50,13 @@ defmodule Minga.Test.SessionSlowMockProvider do
       cost: 0.001
     }
 
-    send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
+    ProviderRequest.complete(
+      state.subscriber,
+      state.pending,
+      ProviderRequest.text(state.pending),
+      usage
+    )
+
     {:noreply, %{state | pending: nil}}
   end
 

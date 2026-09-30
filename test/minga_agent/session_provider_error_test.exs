@@ -44,6 +44,8 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
       session =
         start_test_session(
+          persist?: true,
+          session_store_dir: Path.join(dir, "sessions"),
           provider: Native,
           provider_opts: [
             model: "anthropic:claude-sonnet-4-20250514",
@@ -170,7 +172,14 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
 
     test "provider errors reject approval requests that arrive after failure" do
-      session = start_subscribed_session()
+      session =
+        start_subscribed_session(
+          Minga.Test.SessionContinuationProvider,
+          test_pid: self()
+        )
+
+      assert :ok = Session.send_prompt(session, "start a turn")
+      assert_receive {:continuation_request, _request}, @event_timeout
 
       send_provider_event(session, %Event.Error{
         kind: :provider_error,

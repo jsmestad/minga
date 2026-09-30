@@ -286,13 +286,13 @@ defmodule MingaEditor.Commands.TargetedTabCloseTest do
 
     first = {first_buffer, tab_bar(state).active_id}
 
-    {state, opened} =
+    {state, reversed_opened} =
       Enum.reduce(rest, {state, [first]}, fn {_name, buffer}, {current, acc} ->
         next = Commands.add_buffer(current, buffer)
-        {next, acc ++ [{buffer, tab_bar(next).active_id}]}
+        {next, [{buffer, tab_bar(next).active_id} | acc]}
       end)
 
-    {state, opened}
+    {state, Enum.reverse(reversed_opened)}
   end
 
   defp file_buffer(ctx, name) do

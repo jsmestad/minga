@@ -321,10 +321,21 @@ defmodule MingaAgent.Session.Transcript do
         {:error, "Branch #{branch_index} not found. Use /branches to list."}
 
       %Branch{} = branch ->
+        entries = branch.entries
+
+        available_ids =
+          MapSet.new(
+            Enum.map(entries, & &1.id) ++
+              Enum.flat_map(transcript.branches, fn branch ->
+                Enum.map(branch.entries, & &1.id)
+              end)
+          )
+
         {:ok,
          %{
            transcript
-           | entries: branch.entries,
+           | entries: entries,
+             pinned_ids: MapSet.intersection(transcript.pinned_ids, available_ids),
              revision: transcript.revision + 1
          }}
     end
@@ -465,13 +476,35 @@ defmodule MingaAgent.Session.Transcript do
   @spec normalize_messages([Message.t()], [term()], pos_integer()) ::
           {[TranscriptEntry.t()], pos_integer()}
   defp normalize_messages(messages, ids, next_id) do
-    messages
-    |> Enum.with_index()
-    |> Enum.map_reduce({next_id, MapSet.new()}, fn {message, index}, {next, local_ids} ->
-      {id, next} = normalize_id(Enum.at(ids, index), local_ids, next)
-      {TranscriptEntry.new(id, message), {next, MapSet.put(local_ids, id)}}
-    end)
-    |> then(fn {entries, {next, _local_ids}} -> {entries, next} end)
+    {entries, next_id, _seen} =
+      normalize_message_entries(messages, ids, next_id, %{}, [])
+
+    {Enum.reverse(entries), next_id}
+  end
+
+  @spec normalize_message_entries(
+          [Message.t()],
+          [term()],
+          pos_integer(),
+          %{optional(pos_integer()) => true},
+          [TranscriptEntry.t()]
+        ) ::
+          {[TranscriptEntry.t()], pos_integer(), %{optional(pos_integer()) => true}}
+  defp normalize_message_entries([], _ids, next_id, seen, entries),
+    do: {entries, next_id, seen}
+
+  defp normalize_message_entries([message | messages], [candidate | ids], next_id, seen, entries) do
+    {id, next_id} = normalize_id(candidate, seen, next_id)
+    seen = Map.put(seen, id, true)
+    entry = TranscriptEntry.new(id, message)
+    normalize_message_entries(messages, ids, next_id, seen, [entry | entries])
+  end
+
+  defp normalize_message_entries([message | messages], [], next_id, seen, entries) do
+    {id, next_id} = normalize_id(nil, seen, next_id)
+    seen = Map.put(seen, id, true)
+    entry = TranscriptEntry.new(id, message)
+    normalize_message_entries(messages, [], next_id, seen, [entry | entries])
   end
 
   @spec normalize_branches([Branch.t() | restore_branch()], pos_integer()) ::
@@ -499,11 +532,11 @@ defmodule MingaAgent.Session.Transcript do
     {Branch.new(name, entries, created_at), next_id}
   end
 
-  @spec normalize_id(term(), MapSet.t(pos_integer()), pos_integer()) ::
+  @spec normalize_id(term(), %{optional(pos_integer()) => true}, pos_integer()) ::
           {pos_integer(), pos_integer()}
   defp normalize_id(candidate, local_ids, next_id)
        when is_integer(candidate) and candidate > 0 do
-    if MapSet.member?(local_ids, candidate),
+    if Map.has_key?(local_ids, candidate),
       do: {next_id, next_id + 1},
       else: {candidate, next_id}
   end

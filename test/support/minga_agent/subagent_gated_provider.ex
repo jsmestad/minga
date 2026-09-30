@@ -6,16 +6,18 @@ defmodule Minga.Test.SubagentGatedProvider do
   use GenServer
 
   alias MingaAgent.Event
+  alias Minga.Test.ProviderRequest
+  alias MingaAgent.Session.Request
 
-  @type state :: %{subscriber: pid(), test_pid: pid()}
+  @type state :: %{subscriber: pid(), test_pid: pid(), active_request: Request.t() | nil}
 
   @spec start_link(keyword()) :: GenServer.on_start()
   @impl MingaAgent.Provider
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
-  @spec send_prompt(GenServer.server(), String.t()) :: :ok
+  @spec send_prompt(GenServer.server(), Request.t()) :: :ok
   @impl MingaAgent.Provider
-  def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
+  def send_prompt(pid, request), do: GenServer.call(pid, {:prompt, request})
 
   @spec abort(GenServer.server()) :: :ok
   @impl MingaAgent.Provider
@@ -24,10 +26,6 @@ defmodule Minga.Test.SubagentGatedProvider do
   @spec new_session(GenServer.server()) :: :ok
   @impl MingaAgent.Provider
   def new_session(pid), do: GenServer.call(pid, :new_session)
-
-  @spec seed_messages(GenServer.server(), [term()]) :: :ok
-  @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
 
   @spec get_state(GenServer.server()) :: {:ok, map()}
   @impl MingaAgent.Provider
@@ -42,7 +40,11 @@ defmodule Minga.Test.SubagentGatedProvider do
     await_startup_gate(opts)
 
     {:ok,
-     %{subscriber: Keyword.fetch!(opts, :subscriber), test_pid: Keyword.fetch!(opts, :test_pid)}}
+     %{
+       subscriber: Keyword.fetch!(opts, :subscriber),
+       test_pid: Keyword.fetch!(opts, :test_pid),
+       active_request: nil
+     }}
   end
 
   @spec await_startup_gate(keyword()) :: :ok
@@ -62,16 +64,16 @@ defmodule Minga.Test.SubagentGatedProvider do
 
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, :ok, state()}
   @impl GenServer
-  def handle_call({:prompt, text}, _from, state) do
-    send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-    send(state.test_pid, {:provider_prompt, self(), text})
-    {:reply, :ok, state}
+  def handle_call({:prompt, request}, _from, state) do
+    ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
+    send(state.test_pid, {:provider_prompt, self(), ProviderRequest.text(request)})
+    {:reply, :ok, %{state | active_request: request}}
   end
 
   def handle_call({:proceed, text}, _from, state) do
-    send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
-    send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{}})
-    {:reply, :ok, state}
+    ProviderRequest.emit(state.subscriber, state.active_request, %Event.TextDelta{delta: text})
+    ProviderRequest.complete(state.subscriber, state.active_request, text)
+    {:reply, :ok, %{state | active_request: nil}}
   end
 
   def handle_call(:abort, _from, state), do: {:reply, :ok, state}

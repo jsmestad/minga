@@ -24,10 +24,31 @@ defmodule MingaAgent.SessionManager do
   @type state :: %{
           sessions: %{String.t() => session_entry()},
           background_subagents: %{String.t() => Handle.t()},
+          identity_reservations: %{String.t() => identity_reservation_entry()},
+          identity_reservations_by_owner: %{pid() => String.t()},
           next_id: pos_integer(),
-          session_supervisor: GenServer.server()
+          session_supervisor: GenServer.server(),
+          startup_task_supervisor: GenServer.server()
         }
+  @type identity_reservation :: {String.t(), reference()}
+  @typep identity_reservation_entry :: %{
+           owner_pid: pid(),
+           source_id: String.t(),
+           reference: reference(),
+           token: String.t()
+         }
 
+  @typep startup_delivery_phase ::
+           :pending
+           | {:in_flight, String.t(), reference(), Task.ref(), pid()}
+           | {:retry_wait, reference(), reference(), reference()}
+           | {:indeterminate, reference(), term()}
+  @typep startup_delivery :: %{
+           reference: reference(),
+           prompt: String.t(),
+           attempt: non_neg_integer(),
+           phase: startup_delivery_phase()
+         }
   @typedoc "Restart bookkeeping for a managed session that is being recovered."
   @type restart_state :: %{
           attempts: pos_integer(),
@@ -40,11 +61,16 @@ defmodule MingaAgent.SessionManager do
 
   @typedoc "An entry in the sessions map."
   @type session_entry :: %{
-          pid: pid(),
+          pid: pid() | nil,
           monitor_ref: reference() | nil,
+          provider_pid: pid() | nil,
+          provider_monitor_ref: reference() | nil,
+          effect_worker_refs: %{pid() => reference()},
           token: String.t(),
           restart_opts: keyword(),
-          restart_state: restart_state() | nil
+          restart_state: restart_state() | nil,
+          stop_pending?: boolean(),
+          startup_delivery: startup_delivery() | nil
         }
 
   # ── Event payload ──────────────────────────────────────────────────────────
@@ -106,6 +132,40 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:start_session, opts})
   end
 
+  @doc "Registers the provider and external effect workers owned by a managed Session."
+  @spec register_effect_workers(GenServer.server(), pid(), pid(), [pid()]) ::
+          :ok | {:error, :session_not_found | :provider_mismatch}
+  def register_effect_workers(manager, session_pid, provider_pid, worker_pids) do
+    GenServer.call(
+      manager,
+      {:register_effect_workers, session_pid, provider_pid, worker_pids}
+    )
+  end
+
+  @doc "Reserves an unused durable ID for the managed Session that calls this API."
+  @spec reserve_session_identity(GenServer.server(), String.t()) ::
+          {:ok, :unchanged | identity_reservation()}
+          | {:error,
+             :session_not_managed
+             | :session_id_in_use
+             | {:remote_token_persistence_failed, term()}}
+  def reserve_session_identity(manager, target_id) when is_binary(target_id) do
+    GenServer.call(manager, {:reserve_session_identity, target_id}, :infinity)
+  end
+
+  @doc "Commits the calling Session's reserved ID and transfers its persisted token."
+  @spec commit_session_identity(GenServer.server(), identity_reservation()) ::
+          :ok | {:error, :stale_identity_reservation}
+  def commit_session_identity(manager, reservation) do
+    GenServer.call(manager, {:commit_session_identity, reservation}, :infinity)
+  end
+
+  @doc "Releases the calling Session's exact reservation without changing its ID."
+  @spec abort_session_identity(GenServer.server(), identity_reservation()) :: :ok
+  def abort_session_identity(manager, reservation) do
+    GenServer.call(manager, {:abort_session_identity, reservation}, :infinity)
+  end
+
   @doc "Starts or returns the stable session with the given ID."
   @spec start_or_get_session(String.t(), keyword()) :: {:ok, String.t(), pid()} | {:error, term()}
   def start_or_get_session(session_id, opts \\ []) when is_binary(session_id) do
@@ -163,7 +223,13 @@ defmodule MingaAgent.SessionManager do
   @doc "Stops a session by its human-readable ID through the given manager."
   @spec stop_session(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
   def stop_session(manager, session_id) when is_binary(session_id) do
-    GenServer.call(manager, {:stop_session, session_id})
+    case GenServer.call(manager, {:stop_session, session_id}) do
+      {:stop_session, session_supervisor, pid} ->
+        MingaAgent.Supervisor.stop_session(session_supervisor, pid)
+
+      result ->
+        result
+    end
   end
 
   @doc "Sends a user prompt to a session by ID."
@@ -173,9 +239,12 @@ defmodule MingaAgent.SessionManager do
   end
 
   @doc "Sends a user prompt to a session by ID through the given manager."
-  @spec send_prompt(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
+  @spec send_prompt(GenServer.server(), String.t(), String.t()) ::
+          :ok | {:queued, :steering} | {:error, term()}
   def send_prompt(manager, session_id, prompt) when is_binary(session_id) and is_binary(prompt) do
-    GenServer.call(manager, {:send_prompt, session_id, prompt})
+    with {:ok, pid} <- get_session(manager, session_id) do
+      Session.send_prompt_for_id(pid, session_id, prompt)
+    end
   end
 
   @doc "Aborts the current operation on a session by ID."
@@ -185,9 +254,11 @@ defmodule MingaAgent.SessionManager do
   end
 
   @doc "Aborts the current operation on a session by ID through the given manager."
-  @spec abort(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
+  @spec abort(GenServer.server(), String.t()) :: :ok | {:error, :not_found | :session_id_changed}
   def abort(manager, session_id) when is_binary(session_id) do
-    GenServer.call(manager, {:abort, session_id})
+    with {:ok, pid} <- get_session(manager, session_id) do
+      Session.abort_for_id(pid, session_id)
+    end
   end
 
   @doc "Lists every active registration with available metadata or a safe unavailable reason."
@@ -249,7 +320,13 @@ defmodule MingaAgent.SessionManager do
   @doc "Stops a session by its PID through the given manager."
   @spec stop_session_by_pid(GenServer.server(), pid()) :: :ok | {:error, :not_found}
   def stop_session_by_pid(manager, pid) when is_pid(pid) do
-    GenServer.call(manager, {:stop_session_by_pid, pid})
+    case GenServer.call(manager, {:stop_session_by_pid, pid}) do
+      {:stop_session, session_supervisor, session_pid} ->
+        MingaAgent.Supervisor.stop_session(session_supervisor, session_pid)
+
+      result ->
+        result
+    end
   end
 
   # ── GenServer callbacks ────────────────────────────────────────────────────
@@ -261,8 +338,12 @@ defmodule MingaAgent.SessionManager do
      %{
        sessions: %{},
        background_subagents: %{},
+       identity_reservations: %{},
+       identity_reservations_by_owner: %{},
        next_id: 1,
-       session_supervisor: Keyword.get(opts, :session_supervisor, MingaAgent.Supervisor)
+       session_supervisor: Keyword.get(opts, :session_supervisor, MingaAgent.Supervisor),
+       startup_task_supervisor:
+         Keyword.get(opts, :startup_task_supervisor, Minga.Eval.TaskSupervisor)
      }}
   end
 
@@ -295,6 +376,51 @@ defmodule MingaAgent.SessionManager do
     end
   end
 
+  def handle_call(
+        {:register_effect_workers, session_pid, provider_pid, worker_pids},
+        _from,
+        state
+      )
+      when is_list(worker_pids) do
+    case find_session_by_owner_pid(state.sessions, session_pid) do
+      {session_id, entry} ->
+        case register_effect_workers(entry, provider_pid, worker_pids) do
+          {:ok, entry} ->
+            {:reply, :ok, put_session_entry(state, session_id, entry)}
+
+          :provider_mismatch ->
+            {:reply, {:error, :provider_mismatch}, state}
+        end
+
+      nil ->
+        {:reply, {:error, :session_not_found}, state}
+    end
+  end
+
+  def handle_call({:reserve_session_identity, target_id}, {owner_pid, _tag}, state) do
+    case reserve_managed_identity(state, owner_pid, target_id) do
+      {:ok, :unchanged, state} ->
+        {:reply, {:ok, :unchanged}, state}
+
+      {:ok, reservation, state} ->
+        {:reply, {:ok, reservation}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:commit_session_identity, reservation}, {owner_pid, _tag}, state) do
+    case commit_managed_identity(state, owner_pid, reservation) do
+      {:ok, new_state} -> {:reply, :ok, new_state}
+      :stale -> {:reply, {:error, :stale_identity_reservation}, state}
+    end
+  end
+
+  def handle_call({:abort_session_identity, reservation}, {owner_pid, _tag}, state) do
+    {:reply, :ok, abort_managed_identity(state, owner_pid, reservation)}
+  end
+
   def handle_call({:start_background_subagent, parent_session_pid, task, opts}, _from, state) do
     case Keyword.fetch(opts, :session_opts) do
       {:ok, session_opts} ->
@@ -317,38 +443,22 @@ defmodule MingaAgent.SessionManager do
 
   def handle_call({:stop_session, session_id}, _from, state) do
     case Map.fetch(state.sessions, session_id) do
-      {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) ->
-        Process.demonitor(ref, [:flush])
-        MingaAgent.Supervisor.stop_session(state.session_supervisor, pid)
-        {:reply, :ok, remove_session(state, session_id)}
+      {:ok, %{monitor_ref: ref, pid: pid, stop_pending?: false} = entry}
+      when is_reference(ref) ->
+        entry = %{entry | restart_state: nil, stop_pending?: true}
 
-      {:ok, %{monitor_ref: nil, restart_state: %{timer_ref: timer_ref}}} ->
-        Process.cancel_timer(timer_ref)
-        {:reply, :ok, remove_session(state, session_id)}
+        {:reply, {:stop_session, state.session_supervisor, pid},
+         finish_pending_stop(state, session_id, entry)}
 
-      :error ->
-        {:reply, {:error, :not_found}, state}
-    end
-  end
+      {:ok, %{monitor_ref: nil} = entry} ->
+        entry = cancel_restart_timer(entry)
+        entry = %{entry | pid: nil, restart_state: nil, stop_pending?: true}
+        {:reply, :ok, finish_pending_stop(state, session_id, entry)}
 
-  def handle_call({:send_prompt, session_id, prompt}, _from, state) do
-    case Map.fetch(state.sessions, session_id) do
-      {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) ->
-        result = Session.send_prompt(pid, prompt)
-        {:reply, result, state}
-
-      _ ->
-        {:reply, {:error, :not_found}, state}
-    end
-  end
-
-  def handle_call({:abort, session_id}, _from, state) do
-    case Map.fetch(state.sessions, session_id) do
-      {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) ->
-        Session.abort(pid)
+      {:ok, %{stop_pending?: true}} ->
         {:reply, :ok, state}
 
-      _ ->
+      :error ->
         {:reply, {:error, :not_found}, state}
     end
   end
@@ -364,14 +474,18 @@ defmodule MingaAgent.SessionManager do
 
   def handle_call({:get_session, session_id}, _from, state) do
     case Map.fetch(state.sessions, session_id) do
-      {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) -> {:reply, {:ok, pid}, state}
-      _ -> {:reply, {:error, :not_found}, state}
+      {:ok, %{monitor_ref: ref, pid: pid, stop_pending?: false}} when is_reference(ref) ->
+        {:reply, {:ok, pid}, state}
+
+      _ ->
+        {:reply, {:error, :not_found}, state}
     end
   end
 
   def handle_call({:session_token, session_id}, _from, state) do
     case Map.fetch(state.sessions, session_id) do
-      {:ok, %{monitor_ref: ref, token: token}} when is_reference(ref) ->
+      {:ok, %{monitor_ref: ref, token: token, stop_pending?: false}}
+      when is_reference(ref) ->
         {:reply, {:ok, token}, state}
 
       _ ->
@@ -381,10 +495,14 @@ defmodule MingaAgent.SessionManager do
 
   def handle_call({:stop_session_by_pid, pid}, _from, state) do
     case find_session_by_pid(state.sessions, pid) do
-      {session_id, %{monitor_ref: ref}} ->
-        Process.demonitor(ref, [:flush])
-        MingaAgent.Supervisor.stop_session(state.session_supervisor, pid)
-        {:reply, :ok, remove_session(state, session_id)}
+      {session_id, %{pid: ^pid, stop_pending?: false} = entry} ->
+        entry = %{entry | restart_state: nil, stop_pending?: true}
+
+        {:reply, {:stop_session, state.session_supervisor, pid},
+         finish_pending_stop(state, session_id, entry)}
+
+      {_session_id, %{pid: ^pid, stop_pending?: true}} ->
+        {:reply, :ok, state}
 
       nil ->
         {:reply, {:error, :not_found}, state}
@@ -403,21 +521,21 @@ defmodule MingaAgent.SessionManager do
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    case find_session_by_ref(state.sessions, ref) do
-      {session_id, entry} ->
-        if should_restart_session?(reason) do
-          handle_session_restart_down(state, session_id, entry, pid, reason)
-        else
-          Minga.Log.info(
-            :agent,
-            "[SessionManager] Session #{session_id} (#{inspect(pid)}) stopped: #{inspect(reason)}"
-          )
+    handle_process_down(state, ref, pid, reason)
+  end
 
-          broadcast_session_stopped(session_id, pid, reason)
-          {:noreply, remove_session(state, session_id)}
+  def handle_info({:session_provider_attached, _session_id, session_pid, provider_pid}, state) do
+    case find_session_by_owner_pid(state.sessions, session_pid) do
+      {session_id, entry} ->
+        if is_reference(entry.provider_monitor_ref) do
+          Process.demonitor(entry.provider_monitor_ref, [:flush])
         end
 
-      nil ->
+        provider_monitor_ref = Process.monitor(provider_pid)
+        entry = %{entry | provider_pid: provider_pid, provider_monitor_ref: provider_monitor_ref}
+        {:noreply, put_session_entry(state, session_id, entry)}
+
+      _ ->
         {:noreply, state}
     end
   end
@@ -432,19 +550,210 @@ defmodule MingaAgent.SessionManager do
     end
   end
 
-  def handle_info({:send_background_prompt, session_id, task, attempt}, state) do
-    case Map.fetch(state.sessions, session_id) do
-      {:ok, %{pid: pid}} ->
-        state = send_background_prompt(state, session_id, pid, task, attempt)
-        {:noreply, state}
+  def handle_info({:deliver_background_prompt, session_id, delivery_ref}, state) do
+    {:noreply, deliver_startup_prompt(state, session_id, delivery_ref)}
+  end
 
-      :error ->
+  def handle_info(
+        {task_ref, {:startup_prompt_result, delivery_ref, expected_id, session_ref, outcome}},
+        state
+      )
+      when is_reference(task_ref) do
+    Process.demonitor(task_ref, [:flush])
+
+    {:noreply,
+     handle_startup_prompt_result(
+       state,
+       task_ref,
+       delivery_ref,
+       expected_id,
+       session_ref,
+       outcome
+     )}
+  end
+
+  def handle_info(
+        {:retry_background_prompt, session_id, delivery_ref, session_ref, timer_token},
+        state
+      ) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{pid: pid, monitor_ref: ^session_ref, startup_delivery: delivery} = entry}
+      when is_pid(pid) ->
+        case delivery do
+          %{
+            reference: ^delivery_ref,
+            phase: {:retry_wait, ^session_ref, _timer_ref, ^timer_token}
+          } ->
+            delivery = %{delivery | phase: :pending}
+            state = put_session_entry(state, session_id, %{entry | startup_delivery: delivery})
+            send(self(), {:deliver_background_prompt, session_id, delivery_ref})
+            {:noreply, state}
+
+          _ ->
+            {:noreply, state}
+        end
+
+      _ ->
         {:noreply, state}
     end
   end
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @spec handle_process_down(state(), reference(), pid(), term()) :: {:noreply, state()}
+  defp handle_process_down(state, ref, pid, reason) do
+    case startup_delivery_for_task_ref(state.sessions, ref) do
+      nil ->
+        handle_managed_process_down(state, ref, pid, reason)
+
+      {session_id, entry, delivery, expected_id, session_ref, task_pid} ->
+        handle_startup_prompt_task_down(
+          state,
+          session_id,
+          entry,
+          delivery,
+          expected_id,
+          session_ref,
+          task_pid,
+          reason
+        )
+    end
+  end
+
+  @spec handle_startup_prompt_task_down(
+          state(),
+          String.t(),
+          session_entry(),
+          startup_delivery(),
+          String.t(),
+          reference(),
+          pid(),
+          term()
+        ) :: {:noreply, state()}
+  defp handle_startup_prompt_task_down(
+         state,
+         session_id,
+         entry,
+         delivery,
+         expected_id,
+         session_ref,
+         task_pid,
+         reason
+       ) do
+    delivery = %{
+      delivery
+      | phase: {:indeterminate, session_ref, {:task_down, reason}}
+    }
+
+    Minga.Log.error(
+      :agent,
+      "[SessionManager] Background sub-agent startup prompt for session #{expected_id} (currently registered as #{session_id}) has unknown outcome after task #{inspect(task_pid)} exited: #{inspect(reason)}"
+    )
+
+    state = put_session_entry(state, session_id, %{entry | startup_delivery: delivery})
+    {:noreply, state}
+  end
+
+  @spec handle_managed_process_down(state(), reference(), pid(), term()) :: {:noreply, state()}
+  defp handle_managed_process_down(state, ref, pid, reason) do
+    state = abort_owner_identity_reservation(state, pid)
+
+    case find_session_by_ref(state.sessions, ref) do
+      {session_id, %{stop_pending?: true} = entry} ->
+        entry = reset_startup_delivery_after_down(entry, ref)
+        entry = %{entry | pid: nil, monitor_ref: nil}
+        {:noreply, finish_pending_stop(state, session_id, entry)}
+
+      {session_id, entry} ->
+        handle_session_process_down(state, session_id, entry, ref, pid, reason)
+
+      nil ->
+        handle_provider_or_effect_worker_down(state, ref, pid)
+    end
+  end
+
+  @spec handle_session_process_down(
+          state(),
+          String.t(),
+          session_entry(),
+          reference(),
+          pid(),
+          term()
+        ) :: {:noreply, state()}
+  defp handle_session_process_down(state, session_id, entry, ref, pid, reason) do
+    entry = reset_startup_delivery_after_down(entry, ref)
+
+    if should_restart_session?(reason) do
+      handle_session_restart_down(state, session_id, entry, pid, reason)
+    else
+      Minga.Log.info(
+        :agent,
+        "[SessionManager] Session #{session_id} (#{inspect(pid)}) stopped: #{inspect(reason)}"
+      )
+
+      broadcast_session_stopped(session_id, pid, reason)
+
+      entry = %{
+        entry
+        | pid: nil,
+          monitor_ref: nil,
+          restart_state: nil,
+          stop_pending?: true
+      }
+
+      {:noreply, finish_pending_stop(state, session_id, entry)}
+    end
+  end
+
+  @spec handle_provider_or_effect_worker_down(state(), reference(), pid()) :: {:noreply, state()}
+  defp handle_provider_or_effect_worker_down(state, ref, pid) do
+    case find_session_by_provider_ref(state.sessions, ref) do
+      nil -> handle_effect_worker_down(state, ref, pid)
+      _session -> handle_provider_down(state, ref, pid)
+    end
+  end
+
+  @spec deliver_startup_prompt(state(), String.t(), reference()) :: state()
+  defp deliver_startup_prompt(state, session_id, delivery_ref) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok,
+       %{
+         pid: pid,
+         monitor_ref: session_ref,
+         startup_delivery: %{reference: ^delivery_ref, phase: :pending} = delivery
+       } = entry}
+      when is_reference(session_ref) and is_pid(pid) ->
+        launch_startup_prompt_task(state, pid, session_id, session_ref, entry, delivery)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec launch_startup_prompt_task(
+          state(),
+          pid(),
+          String.t(),
+          reference(),
+          session_entry(),
+          startup_delivery()
+        ) :: state()
+  defp launch_startup_prompt_task(state, pid, session_id, session_ref, entry, delivery) do
+    case start_startup_prompt_task(state, pid, session_id, session_ref, delivery) do
+      {:ok, task} ->
+        delivery = %{
+          delivery
+          | phase: {:in_flight, session_id, session_ref, task.ref, task.pid}
+        }
+
+        put_session_entry(state, session_id, %{entry | startup_delivery: delivery})
+
+      {:error, reason} ->
+        log_startup_prompt_task_failure(session_id, reason)
+        retry_startup_delivery(state, session_id, entry, delivery)
+    end
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
@@ -475,8 +784,20 @@ defmodule MingaAgent.SessionManager do
           | background_subagents: Map.put(new_state.background_subagents, session_id, handle)
         }
 
+        delivery = %{
+          reference: make_ref(),
+          prompt: task,
+          attempt: 0,
+          phase: :pending
+        }
+
+        entry = Map.fetch!(new_state.sessions, session_id)
+
+        new_state =
+          put_session_entry(new_state, session_id, %{entry | startup_delivery: delivery})
+
         broadcast_background_subagent_started(handle)
-        send(self(), {:send_background_prompt, session_id, task, 0})
+        send(self(), {:deliver_background_prompt, session_id, delivery.reference})
         {:reply, {:ok, handle}, new_state}
 
       {:error, reason} ->
@@ -491,11 +812,28 @@ defmodule MingaAgent.SessionManager do
   defp start_managed_session(state, opts) do
     {session_id, opts} = session_id_for_start(state, opts)
 
+    case Map.fetch(state.identity_reservations, session_id) do
+      {:ok, _reservation} ->
+        {:error, :session_id_in_use}
+
+      :error ->
+        start_or_get_unreserved_session(state, opts, session_id)
+    end
+  end
+
+  @spec start_or_get_unreserved_session(state(), keyword(), String.t()) ::
+          {:ok, String.t(), pid(), state()}
+          | {:existing, String.t(), pid(), state()}
+          | {:error, term()}
+  defp start_or_get_unreserved_session(state, opts, session_id) do
     case Map.fetch(state.sessions, session_id) do
-      {:ok, %{monitor_ref: ref, pid: pid}} when is_reference(ref) ->
+      {:ok, %{monitor_ref: ref, pid: pid, stop_pending?: false}} when is_reference(ref) ->
         {:existing, session_id, pid, state}
 
       {:ok, %{monitor_ref: nil}} ->
+        {:error, :restart_pending}
+
+      {:ok, %{stop_pending?: true}} ->
         {:error, :restart_pending}
 
       :error ->
@@ -507,6 +845,7 @@ defmodule MingaAgent.SessionManager do
           {:ok, String.t(), pid(), state()} | {:error, term()}
   defp do_start_managed_session(state, opts, session_id) do
     {supplied_token, session_opts} = Keyword.pop(opts, :remote_token)
+    session_opts = Keyword.put(session_opts, :session_manager, self())
 
     with {:ok, token} <-
            session_token_for_start(session_id, supplied_token, session_opts),
@@ -517,9 +856,14 @@ defmodule MingaAgent.SessionManager do
       entry = %{
         pid: pid,
         monitor_ref: ref,
+        provider_pid: nil,
+        provider_monitor_ref: nil,
+        effect_worker_refs: %{},
         token: token,
         restart_opts: session_opts,
-        restart_state: nil
+        restart_state: nil,
+        startup_delivery: nil,
+        stop_pending?: false
       }
 
       sessions = Map.put(state.sessions, session_id, entry)
@@ -593,6 +937,200 @@ defmodule MingaAgent.SessionManager do
     32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
   end
 
+  @spec reserve_managed_identity(state(), pid(), String.t()) ::
+          {:ok, :unchanged | identity_reservation(), state()} | {:error, term()}
+  defp reserve_managed_identity(state, owner_pid, target_id) do
+    case find_session_by_owner_pid(state.sessions, owner_pid) do
+      {^target_id, _entry} ->
+        {:ok, :unchanged, state}
+
+      {source_id, %{monitor_ref: ref, stop_pending?: false} = entry}
+      when is_reference(ref) ->
+        reserve_target_identity(state, owner_pid, source_id, target_id, entry)
+
+      _ ->
+        {:error, :session_not_managed}
+    end
+  end
+
+  @spec reserve_target_identity(state(), pid(), String.t(), String.t(), session_entry()) ::
+          {:ok, identity_reservation(), state()} | {:error, term()}
+  defp reserve_target_identity(state, owner_pid, source_id, target_id, entry) do
+    available? =
+      not Map.has_key?(state.sessions, target_id) and
+        not Map.has_key?(state.identity_reservations, target_id) and
+        not Map.has_key?(state.identity_reservations_by_owner, owner_pid)
+
+    if available? do
+      case session_token_for_start(target_id, nil, entry.restart_opts) do
+        {:ok, token} ->
+          reservation_ref = make_ref()
+
+          reservation = %{
+            owner_pid: owner_pid,
+            source_id: source_id,
+            reference: reservation_ref,
+            token: token
+          }
+
+          reservations = Map.put(state.identity_reservations, target_id, reservation)
+          owners = Map.put(state.identity_reservations_by_owner, owner_pid, target_id)
+
+          state = %{
+            state
+            | identity_reservations: reservations,
+              identity_reservations_by_owner: owners
+          }
+
+          {:ok, {target_id, reservation_ref}, state}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, :session_id_in_use}
+    end
+  end
+
+  @spec commit_managed_identity(state(), pid(), identity_reservation()) ::
+          {:ok, state()} | :stale
+  defp commit_managed_identity(state, owner_pid, {target_id, reservation_ref}) do
+    case Map.fetch(state.identity_reservations, target_id) do
+      {:ok,
+       %{
+         owner_pid: ^owner_pid,
+         source_id: source_id,
+         reference: ^reservation_ref,
+         token: token
+       } = reservation} ->
+        case Map.fetch(state.sessions, source_id) do
+          {:ok, %{pid: ^owner_pid, stop_pending?: false} = entry} ->
+            commit_identity_rekey(state, target_id, reservation, entry, token)
+
+          _ ->
+            :stale
+        end
+
+      _ ->
+        :stale
+    end
+  end
+
+  @spec commit_identity_rekey(
+          state(),
+          String.t(),
+          identity_reservation_entry(),
+          session_entry(),
+          String.t()
+        ) :: {:ok, state()} | :stale
+  defp commit_identity_rekey(state, target_id, reservation, entry, token) do
+    source_id = reservation.source_id
+
+    if Map.has_key?(state.sessions, target_id) do
+      :stale
+    else
+      entry = %{
+        entry
+        | token: token,
+          restart_opts: Keyword.put(entry.restart_opts, :session_id, target_id)
+      }
+
+      entry = reset_startup_delivery_after_rekey(entry)
+
+      sessions = state.sessions |> Map.delete(source_id) |> Map.put(target_id, entry)
+
+      new_state = %{
+        state
+        | sessions: sessions,
+          next_id: next_id_after_start(state, target_id),
+          background_subagents:
+            rekey_background_subagents(state.background_subagents, source_id, target_id)
+      }
+
+      new_state = release_identity_reservation(new_state, target_id, reservation.reference)
+      {:ok, schedule_pending_startup_prompt(new_state, target_id)}
+    end
+  end
+
+  @spec reset_startup_delivery_after_rekey(session_entry()) :: session_entry()
+  defp reset_startup_delivery_after_rekey(
+         %{startup_delivery: %{phase: {:retry_wait, _session_ref, timer_ref, _token}} = delivery} =
+           entry
+       ) do
+    Process.cancel_timer(timer_ref)
+    %{entry | startup_delivery: %{delivery | phase: :pending}}
+  end
+
+  defp reset_startup_delivery_after_rekey(entry), do: entry
+
+  @spec abort_managed_identity(state(), pid(), identity_reservation()) :: state()
+  defp abort_managed_identity(state, owner_pid, {target_id, reservation_ref}) do
+    case Map.fetch(state.identity_reservations, target_id) do
+      {:ok, %{owner_pid: ^owner_pid, reference: ^reservation_ref}} ->
+        release_identity_reservation(state, target_id, reservation_ref)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec abort_owner_identity_reservation(state(), pid()) :: state()
+  defp abort_owner_identity_reservation(state, owner_pid) do
+    case Map.fetch(state.identity_reservations_by_owner, owner_pid) do
+      {:ok, target_id} ->
+        case Map.fetch(state.identity_reservations, target_id) do
+          {:ok, %{owner_pid: ^owner_pid, reference: reservation_ref}} ->
+            release_identity_reservation(state, target_id, reservation_ref)
+
+          _ ->
+            %{
+              state
+              | identity_reservations_by_owner:
+                  Map.delete(state.identity_reservations_by_owner, owner_pid)
+            }
+        end
+
+      :error ->
+        state
+    end
+  end
+
+  @spec release_identity_reservation(state(), String.t(), reference()) :: state()
+  defp release_identity_reservation(state, target_id, reservation_ref) do
+    case Map.fetch(state.identity_reservations, target_id) do
+      {:ok, %{reference: ^reservation_ref, owner_pid: owner_pid}} ->
+        %{
+          state
+          | identity_reservations: Map.delete(state.identity_reservations, target_id),
+            identity_reservations_by_owner:
+              Map.delete(state.identity_reservations_by_owner, owner_pid)
+        }
+
+      _ ->
+        state
+    end
+  end
+
+  @spec rekey_background_subagents(%{String.t() => Handle.t()}, String.t(), String.t()) ::
+          %{String.t() => Handle.t()}
+  defp rekey_background_subagents(background_subagents, source_id, target_id) do
+    background_subagents =
+      case Map.pop(background_subagents, source_id) do
+        {nil, remaining} ->
+          remaining
+
+        {handle, remaining} ->
+          Map.put(remaining, target_id, Handle.with_session_id(handle, target_id))
+      end
+
+    Map.new(background_subagents, fn {session_id, handle} ->
+      parent_session_id =
+        if handle.parent_session_id == source_id, do: target_id, else: handle.parent_session_id
+
+      {session_id, Handle.with_parent_session_id(handle, parent_session_id)}
+    end)
+  end
+
   @spec active_session_entry?(session_entry()) :: boolean()
   defp active_session_entry?(%{monitor_ref: ref}) when is_reference(ref), do: true
   defp active_session_entry?(_entry), do: false
@@ -602,17 +1140,14 @@ defmodule MingaAgent.SessionManager do
   defp handle_session_restart_down(state, session_id, entry, old_pid, reason) do
     case next_restart_attempt(entry, old_pid, reason) do
       {:ok, entry, delay_ms} ->
-        timer_token = make_ref()
+        entry = %{entry | monitor_ref: nil}
 
-        timer_ref =
-          Process.send_after(
-            self(),
-            {:restart_session, session_id, timer_token},
-            delay_ms
-          )
-
-        entry = entry |> put_restart_timer(timer_ref, timer_token) |> Map.put(:monitor_ref, nil)
-        {:noreply, put_session_entry(state, session_id, entry)}
+        if (is_pid(entry.provider_pid) and Process.alive?(entry.provider_pid)) or
+             map_size(entry.effect_worker_refs) > 0 do
+          {:noreply, put_session_entry(state, session_id, entry)}
+        else
+          schedule_session_restart(state, session_id, entry, delay_ms)
+        end
 
       :exhausted ->
         Minga.Log.error(
@@ -621,18 +1156,174 @@ defmodule MingaAgent.SessionManager do
         )
 
         broadcast_session_stopped(session_id, old_pid, {:restart_exhausted, reason})
-        {:noreply, remove_session(state, session_id)}
+        entry = %{entry | pid: nil, monitor_ref: nil, restart_state: nil, stop_pending?: true}
+        {:noreply, finish_pending_stop(state, session_id, entry)}
     end
+  end
+
+  @spec schedule_session_restart(state(), String.t(), session_entry(), non_neg_integer()) ::
+          {:noreply, state()}
+  defp schedule_session_restart(state, session_id, entry, delay_ms) do
+    timer_token = make_ref()
+
+    timer_ref =
+      Process.send_after(
+        self(),
+        {:restart_session, session_id, timer_token},
+        delay_ms
+      )
+
+    entry = put_restart_timer(entry, timer_ref, timer_token)
+    {:noreply, put_session_entry(state, session_id, entry)}
+  end
+
+  @spec handle_provider_down(state(), reference(), pid()) :: {:noreply, state()}
+  defp handle_provider_down(state, ref, _pid) do
+    case find_session_by_provider_ref(state.sessions, ref) do
+      {session_id, %{stop_pending?: true} = entry} ->
+        entry = %{entry | provider_pid: nil, provider_monitor_ref: nil}
+        {:noreply, finish_pending_stop(state, session_id, entry)}
+
+      {session_id, %{monitor_ref: nil, restart_state: %{attempts: _attempts}} = entry} ->
+        entry = %{entry | provider_pid: nil, provider_monitor_ref: nil}
+
+        if map_size(entry.effect_worker_refs) == 0 do
+          schedule_session_restart(state, session_id, entry, restart_delay_for_entry(entry))
+        else
+          {:noreply, put_session_entry(state, session_id, entry)}
+        end
+
+      {session_id, entry} ->
+        entry = %{entry | provider_pid: nil, provider_monitor_ref: nil}
+        {:noreply, put_session_entry(state, session_id, entry)}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  @spec handle_effect_worker_down(state(), reference(), pid()) :: {:noreply, state()}
+  defp handle_effect_worker_down(state, ref, _pid) do
+    case find_session_by_effect_worker_ref(state.sessions, ref) do
+      {session_id, entry} ->
+        effect_worker_refs =
+          Enum.reject(entry.effect_worker_refs, fn {_worker_pid, worker_ref} ->
+            worker_ref == ref
+          end)
+          |> Map.new()
+
+        entry = %{entry | effect_worker_refs: effect_worker_refs}
+        maybe_schedule_after_worker_down(state, session_id, entry)
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  @spec maybe_schedule_after_worker_down(state(), String.t(), session_entry()) ::
+          {:noreply, state()}
+  defp maybe_schedule_after_worker_down(
+         state,
+         session_id,
+         %{stop_pending?: true} = entry
+       ) do
+    {:noreply, finish_pending_stop(state, session_id, entry)}
+  end
+
+  defp maybe_schedule_after_worker_down(state, session_id, entry) do
+    case {entry.monitor_ref, entry.restart_state, map_size(entry.effect_worker_refs)} do
+      {nil, %{attempts: _attempts}, 0} ->
+        if is_pid(entry.provider_pid) and Process.alive?(entry.provider_pid) do
+          {:noreply, put_session_entry(state, session_id, entry)}
+        else
+          if is_reference(entry.provider_monitor_ref) do
+            Process.demonitor(entry.provider_monitor_ref, [:flush])
+          end
+
+          entry = %{entry | provider_pid: nil, provider_monitor_ref: nil}
+          schedule_session_restart(state, session_id, entry, restart_delay_for_entry(entry))
+        end
+
+      _ ->
+        {:noreply, put_session_entry(state, session_id, entry)}
+    end
+  end
+
+  @spec finish_pending_stop(state(), String.t(), session_entry()) :: state()
+  defp finish_pending_stop(state, session_id, entry) do
+    case {entry.pid, entry.provider_pid, map_size(entry.effect_worker_refs)} do
+      {nil, nil, 0} -> remove_session(state, session_id)
+      _generation_still_running -> put_session_entry(state, session_id, entry)
+    end
+  end
+
+  @spec cancel_restart_timer(session_entry()) :: session_entry()
+  defp cancel_restart_timer(%{restart_state: %{timer_ref: timer_ref} = restart_state} = entry) do
+    if is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+    %{entry | restart_state: %{restart_state | timer_ref: nil, timer_token: nil}}
+  end
+
+  defp cancel_restart_timer(entry), do: entry
+
+  @spec register_effect_workers(session_entry(), pid(), [pid()]) ::
+          {:ok, session_entry()} | :provider_mismatch
+  defp register_effect_workers(%{provider_pid: nil} = entry, provider_pid, worker_pids) do
+    entry = %{
+      entry
+      | provider_pid: provider_pid,
+        provider_monitor_ref: Process.monitor(provider_pid)
+    }
+
+    register_effect_workers(entry, provider_pid, worker_pids)
+  end
+
+  defp register_effect_workers(%{provider_pid: provider_pid} = entry, provider_pid, worker_pids) do
+    entry = cancel_restart_timer(entry)
+
+    effect_worker_refs =
+      Enum.reduce(worker_pids, entry.effect_worker_refs, fn worker_pid, refs ->
+        case Map.fetch(refs, worker_pid) do
+          :error -> Map.put(refs, worker_pid, Process.monitor(worker_pid))
+          {:ok, _ref} -> refs
+        end
+      end)
+
+    {:ok, %{entry | effect_worker_refs: effect_worker_refs}}
+  end
+
+  defp register_effect_workers(_entry, _provider_pid, _worker_pids), do: :provider_mismatch
+
+  @spec restart_delay_for_entry(session_entry()) :: non_neg_integer()
+  defp restart_delay_for_entry(%{restart_opts: opts, restart_state: %{attempts: attempts}}) do
+    restart_delay_ms(restart_policy(opts), attempts)
   end
 
   @spec handle_session_restart_timeout(state(), String.t(), session_entry()) ::
           {:noreply, state()}
   defp handle_session_restart_timeout(state, session_id, entry) do
+    entry = cancel_restart_timer(entry)
+
+    if previous_generation_active?(entry) do
+      {:noreply, put_session_entry(state, session_id, entry)}
+    else
+      do_handle_session_restart_timeout(state, session_id, entry)
+    end
+  end
+
+  @spec previous_generation_active?(session_entry()) :: boolean()
+  defp previous_generation_active?(%{provider_pid: provider_pid, effect_worker_refs: workers}) do
+    map_size(workers) > 0 or (is_pid(provider_pid) and Process.alive?(provider_pid))
+  end
+
+  @spec do_handle_session_restart_timeout(state(), String.t(), session_entry()) ::
+          {:noreply, state()}
+  defp do_handle_session_restart_timeout(state, session_id, entry) do
     restart_state = entry.restart_state
 
     case restart_managed_session(state, session_id, entry) do
       {:ok, new_state, new_pid} ->
         new_state = restore_restarted_session_state(new_state, session_id, new_pid, entry)
+        new_state = schedule_pending_startup_prompt(new_state, session_id)
 
         broadcast_session_restarted(
           session_id,
@@ -665,6 +1356,7 @@ defmodule MingaAgent.SessionManager do
               )
 
             retry_entry = put_restart_timer(retry_entry, timer_ref, timer_token)
+
             {:noreply, put_session_entry(new_state, session_id, retry_entry)}
 
           :exhausted ->
@@ -679,9 +1371,43 @@ defmodule MingaAgent.SessionManager do
               {:restart_exhausted, restart_reason}
             )
 
-            {:noreply, remove_session(new_state, session_id)}
+            terminal_entry = %{
+              entry
+              | pid: nil,
+                monitor_ref: nil,
+                restart_state: nil,
+                stop_pending?: true
+            }
+
+            {:noreply, finish_pending_stop(new_state, session_id, terminal_entry)}
         end
     end
+  end
+
+  @spec remove_session(state(), String.t()) :: state()
+  defp remove_session(state, session_id) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, entry} ->
+        case entry.restart_state do
+          %{timer_ref: timer_ref} when is_reference(timer_ref) -> Process.cancel_timer(timer_ref)
+          _restart_state -> :ok
+        end
+
+        if is_reference(entry.provider_monitor_ref) do
+          Process.demonitor(entry.provider_monitor_ref, [:flush])
+        end
+
+        Enum.each(entry.effect_worker_refs, fn {_pid, ref} ->
+          Process.demonitor(ref, [:flush])
+        end)
+
+      :error ->
+        :ok
+    end
+
+    sessions = Map.delete(state.sessions, session_id)
+    background_subagents = Map.delete(state.background_subagents, session_id)
+    %{state | sessions: sessions, background_subagents: background_subagents}
   end
 
   @spec next_restart_attempt(session_entry(), pid(), term()) ::
@@ -728,21 +1454,6 @@ defmodule MingaAgent.SessionManager do
   @spec put_session_entry(state(), String.t(), session_entry()) :: state()
   defp put_session_entry(state, session_id, entry) do
     %{state | sessions: Map.put(state.sessions, session_id, entry)}
-  end
-
-  @spec remove_session(state(), String.t()) :: state()
-  defp remove_session(state, session_id) do
-    case Map.fetch(state.sessions, session_id) do
-      {:ok, %{restart_state: %{timer_ref: timer_ref}}} when is_reference(timer_ref) ->
-        Process.cancel_timer(timer_ref)
-
-      _ ->
-        :ok
-    end
-
-    sessions = Map.delete(state.sessions, session_id)
-    background_subagents = Map.delete(state.background_subagents, session_id)
-    %{state | sessions: sessions, background_subagents: background_subagents}
   end
 
   @spec restart_policy(keyword()) :: %{
@@ -859,74 +1570,308 @@ defmodule MingaAgent.SessionManager do
     SessionStore.sessions_dir(Keyword.get(opts, :session_store_dir))
   end
 
-  @background_prompt_retry_ms 10
-  @background_prompt_max_attempts 100
+  @startup_prompt_retry_base_ms 10
+  @startup_prompt_retry_max_ms 1_000
   @background_prompt_call_timeout_ms 30_000
 
-  @spec send_background_prompt(state(), String.t(), pid(), String.t(), non_neg_integer()) ::
-          state()
-  defp send_background_prompt(state, session_id, pid, task, attempt) do
-    case safe_send_prompt(pid, task) do
-      :ok ->
-        state
+  @spec startup_delivery_for_task_ref(%{String.t() => session_entry()}, term()) ::
+          {String.t(), session_entry(), startup_delivery(), String.t(), reference(), pid()}
+          | nil
+  defp startup_delivery_for_task_ref(sessions, task_ref) do
+    Enum.find_value(sessions, fn {session_id, entry} ->
+      case entry.startup_delivery do
+        %{
+          phase: {:in_flight, expected_session_id, session_ref, ^task_ref, task_pid}
+        } = delivery ->
+          {session_id, entry, delivery, expected_session_id, session_ref, task_pid}
 
-      {:queued, :steering} ->
-        # Another admitted turn won the startup race. The queued task remains
-        # owned by the session and will run when that turn completes.
-        state
+        _ ->
+          nil
+      end
+    end)
+  end
 
-      {:error, :provider_not_ready} when attempt < @background_prompt_max_attempts ->
-        schedule_background_prompt_retry(session_id, task, attempt)
-        state
-
-      {:exit, {:timeout, _call} = reason} ->
-        # Retrying a timed-out GenServer.call duplicates the still-queued request.
-        log_background_prompt_failure(session_id, pid, attempt, reason)
-        state
-
-      {:exit, _reason} when attempt < @background_prompt_max_attempts ->
-        schedule_background_prompt_retry(session_id, task, attempt)
-        state
-
-      {:error, reason} ->
-        Session.add_system_message(
-          pid,
-          "Background sub-agent failed to start: #{inspect(reason)}",
-          :error
+  @spec handle_startup_prompt_result(
+          state(),
+          term(),
+          reference(),
+          String.t(),
+          reference(),
+          term()
+        ) :: state()
+  defp handle_startup_prompt_result(
+         state,
+         task_ref,
+         delivery_ref,
+         expected_session_id,
+         session_ref,
+         outcome
+       ) do
+    case startup_delivery_for_task_ref(state.sessions, task_ref) do
+      {session_id, entry,
+       %{
+         reference: ^delivery_ref,
+         phase: {:in_flight, ^expected_session_id, ^session_ref, _, _}
+       } = delivery, _, _, _} ->
+        handle_startup_prompt_outcome(
+          state,
+          session_id,
+          expected_session_id,
+          entry,
+          delivery,
+          session_ref,
+          outcome
         )
 
-        state
-
-      {:exit, reason} ->
-        log_background_prompt_failure(session_id, pid, attempt, reason)
+      _ ->
         state
     end
   end
 
-  @spec schedule_background_prompt_retry(String.t(), String.t(), non_neg_integer()) :: :ok
-  defp schedule_background_prompt_retry(session_id, task, attempt) do
-    Process.send_after(
-      self(),
-      {:send_background_prompt, session_id, task, attempt + 1},
-      @background_prompt_retry_ms
-    )
-
-    :ok
+  @spec handle_startup_prompt_outcome(
+          state(),
+          String.t(),
+          String.t(),
+          session_entry(),
+          startup_delivery(),
+          reference(),
+          term()
+        ) :: state()
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         _expected_session_id,
+         %{stop_pending?: true} = entry,
+         delivery,
+         _session_ref,
+         _outcome
+       ) do
+    clear_startup_delivery(state, session_id, entry, delivery)
   end
 
-  @spec safe_send_prompt(pid(), String.t()) ::
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         _expected_session_id,
+         entry,
+         delivery,
+         _session_ref,
+         outcome
+       )
+       when outcome in [:ok, {:queued, :steering}] do
+    clear_startup_delivery(state, session_id, entry, delivery)
+  end
+
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         _expected_session_id,
+         entry,
+         delivery,
+         _session_ref,
+         {:error, reason}
+       )
+       when reason in [:provider_not_ready, :credential_discovery_pending, :session_id_changed] do
+    retry_startup_delivery(state, session_id, entry, delivery)
+  end
+
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         expected_session_id,
+         entry,
+         delivery,
+         session_ref,
+         {:exit, reason}
+       ) do
+    mark_startup_delivery_indeterminate(
+      state,
+      session_id,
+      expected_session_id,
+      entry,
+      delivery,
+      session_ref,
+      {:session_call_exit, reason}
+    )
+  end
+
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         expected_session_id,
+         entry,
+         delivery,
+         _session_ref,
+         {:error, reason}
+       ) do
+    state = clear_startup_delivery(state, session_id, entry, delivery)
+
+    Minga.Log.warning(
+      :agent,
+      "[SessionManager] Background sub-agent startup prompt for session #{expected_session_id} (currently registered as #{session_id}) failed: #{inspect(reason)}"
+    )
+
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{pid: pid, stop_pending?: false}} when is_pid(pid) ->
+        Session.add_system_message_for_id(
+          pid,
+          expected_session_id,
+          "Background sub-agent failed to start: #{inspect(reason)}",
+          :error
+        )
+
+      _ ->
+        :ok
+    end
+
+    state
+  end
+
+  defp handle_startup_prompt_outcome(
+         state,
+         session_id,
+         expected_session_id,
+         entry,
+         delivery,
+         session_ref,
+         outcome
+       ) do
+    mark_startup_delivery_indeterminate(
+      state,
+      session_id,
+      expected_session_id,
+      entry,
+      delivery,
+      session_ref,
+      {:unexpected_outcome, outcome}
+    )
+  end
+
+  @spec clear_startup_delivery(state(), String.t(), session_entry(), startup_delivery()) ::
+          state()
+  defp clear_startup_delivery(state, session_id, entry, _delivery) do
+    put_session_entry(state, session_id, %{entry | startup_delivery: nil})
+  end
+
+  @spec retry_startup_delivery(state(), String.t(), session_entry(), startup_delivery()) ::
+          state()
+  defp retry_startup_delivery(state, session_id, entry, delivery) do
+    delivery = %{delivery | attempt: delivery.attempt + 1}
+
+    case {entry.monitor_ref, entry.pid, entry.stop_pending?} do
+      {session_ref, pid, false} when is_reference(session_ref) and is_pid(pid) ->
+        timer_token = make_ref()
+
+        timer_ref =
+          Process.send_after(
+            self(),
+            {:retry_background_prompt, session_id, delivery.reference, session_ref, timer_token},
+            startup_prompt_retry_delay(delivery.attempt)
+          )
+
+        delivery = %{
+          delivery
+          | phase: {:retry_wait, session_ref, timer_ref, timer_token}
+        }
+
+        put_session_entry(state, session_id, %{entry | startup_delivery: delivery})
+
+      _ ->
+        put_session_entry(state, session_id, %{
+          entry
+          | startup_delivery: %{delivery | phase: :pending}
+        })
+    end
+  end
+
+  @spec startup_prompt_retry_delay(non_neg_integer()) :: pos_integer()
+  defp startup_prompt_retry_delay(attempt) do
+    shift = min(attempt, 7)
+    min(@startup_prompt_retry_base_ms * 2 ** shift, @startup_prompt_retry_max_ms)
+  end
+
+  @spec mark_startup_delivery_indeterminate(
+          state(),
+          String.t(),
+          String.t(),
+          session_entry(),
+          startup_delivery(),
+          reference(),
+          term()
+        ) :: state()
+  defp mark_startup_delivery_indeterminate(
+         state,
+         session_id,
+         expected_session_id,
+         entry,
+         delivery,
+         session_ref,
+         reason
+       ) do
+    delivery = %{delivery | phase: {:indeterminate, session_ref, reason}}
+
+    Minga.Log.error(
+      :agent,
+      "[SessionManager] Background sub-agent startup prompt for session #{expected_session_id} (currently registered as #{session_id}) has unknown outcome and will not be retried: #{inspect(reason)}"
+    )
+
+    put_session_entry(state, session_id, %{entry | startup_delivery: delivery})
+  end
+
+  @spec reset_startup_delivery_after_down(session_entry(), reference()) :: session_entry()
+  defp reset_startup_delivery_after_down(
+         %{startup_delivery: %{phase: {:retry_wait, session_ref, timer_ref, _token}} = delivery} =
+           entry,
+         session_ref
+       ) do
+    Process.cancel_timer(timer_ref)
+    %{entry | startup_delivery: %{delivery | phase: :pending}}
+  end
+
+  defp reset_startup_delivery_after_down(entry, _session_ref), do: entry
+
+  @spec schedule_pending_startup_prompt(state(), String.t()) :: state()
+  defp schedule_pending_startup_prompt(state, session_id) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{startup_delivery: %{reference: delivery_ref, phase: :pending}}} ->
+        send(self(), {:deliver_background_prompt, session_id, delivery_ref})
+        state
+
+      _ ->
+        state
+    end
+  end
+
+  @spec start_startup_prompt_task(
+          state(),
+          pid(),
+          String.t(),
+          reference(),
+          startup_delivery()
+        ) :: {:ok, Task.t()} | {:error, term()}
+  defp start_startup_prompt_task(state, pid, session_id, session_ref, delivery) do
+    {:ok,
+     Task.Supervisor.async_nolink(state.startup_task_supervisor, fn ->
+       outcome = safe_send_prompt_for_id(pid, session_id, delivery.prompt)
+       {:startup_prompt_result, delivery.reference, session_id, session_ref, outcome}
+     end)}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec safe_send_prompt_for_id(pid(), String.t(), String.t()) ::
           :ok | {:queued, :steering} | {:error, term()} | {:exit, term()}
-  defp safe_send_prompt(pid, task) do
-    GenServer.call(pid, {:send_prompt, task}, @background_prompt_call_timeout_ms)
+  defp safe_send_prompt_for_id(pid, session_id, prompt) do
+    Session.send_prompt_for_id(pid, session_id, prompt, @background_prompt_call_timeout_ms)
   catch
     :exit, reason -> {:exit, reason}
   end
 
-  @spec log_background_prompt_failure(String.t(), pid(), non_neg_integer(), term()) :: :ok
-  defp log_background_prompt_failure(session_id, pid, attempt, reason) do
+  @spec log_startup_prompt_task_failure(String.t(), term()) :: :ok
+  defp log_startup_prompt_task_failure(session_id, reason) do
     Minga.Log.error(
       :agent,
-      "[SessionManager] Background sub-agent #{session_id} (#{inspect(pid)}) failed to accept prompt after #{attempt + 1} attempts: #{inspect(reason)}"
+      "[SessionManager] Could not start background sub-agent #{session_id} startup prompt task: #{inspect(reason)}"
     )
 
     :ok
@@ -998,6 +1943,26 @@ defmodule MingaAgent.SessionManager do
           {String.t(), session_entry()} | nil
   defp find_session_by_ref(sessions, ref) do
     Enum.find(sessions, fn {_id, entry} -> entry.monitor_ref == ref end)
+  end
+
+  @spec find_session_by_provider_ref(%{String.t() => session_entry()}, reference()) ::
+          {String.t(), session_entry()} | nil
+  defp find_session_by_provider_ref(sessions, ref) do
+    Enum.find(sessions, fn {_id, entry} -> entry.provider_monitor_ref == ref end)
+  end
+
+  @spec find_session_by_effect_worker_ref(%{String.t() => session_entry()}, reference()) ::
+          {String.t(), session_entry()} | nil
+  defp find_session_by_effect_worker_ref(sessions, ref) do
+    Enum.find(sessions, fn {_id, entry} ->
+      Enum.any?(entry.effect_worker_refs, fn {_pid, worker_ref} -> worker_ref == ref end)
+    end)
+  end
+
+  @spec find_session_by_owner_pid(%{String.t() => session_entry()}, pid()) ::
+          {String.t(), session_entry()} | nil
+  defp find_session_by_owner_pid(sessions, pid) do
+    Enum.find(sessions, fn {_id, entry} -> entry.pid == pid end)
   end
 
   @spec find_session_by_pid(%{String.t() => session_entry()}, pid()) ::

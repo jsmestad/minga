@@ -57,12 +57,55 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
         state
 
       session_pid ->
-        Session.load_session(session_pid, session_id)
+        case Session.load_session(session_pid, session_id) do
+          :ok ->
+            state
+
+          {:error, reason} ->
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Could not load agent session: #{inspect(reason)}"
+            )
+        end
+    end
+  end
+
+  def on_select(%Item{id: {session_id, :legacy_import}}, state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
+      nil ->
         state
+
+      session_pid ->
+        case Session.import_legacy_session(session_pid, session_id) do
+          :ok ->
+            state
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :agent,
+              "[Agent.SessionSource] legacy import failed for #{session_id}: #{inspect(reason)}"
+            )
+
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              legacy_import_failure_message(reason)
+            )
+        end
     end
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec legacy_import_failure_message(term()) :: String.t()
+  defp legacy_import_failure_message({:legacy_import_persistence_failed, _reason}),
+    do: "Could not save the imported history. The original legacy record remains unchanged."
+
+  defp legacy_import_failure_message({:legacy_import_saved_but_restore_failed, _reason}),
+    do:
+      "The imported copy was saved but could not be opened. The original legacy record remains unchanged."
+
+  defp legacy_import_failure_message(_reason),
+    do: "Could not import legacy agent history. The original record remains unchanged."
 
   @spec tab_candidates(TabBar.t()) :: [Item.t()]
   defp tab_candidates(tb) do
@@ -177,8 +220,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     |> SessionStore.list()
     |> Enum.map(fn meta ->
       %Item{
-        id: {meta.id, :disk},
-        label: meta.title,
+        id: {meta.id, disk_candidate_kind(meta.continuation_kind)},
+        label: disk_label(meta),
         description: disk_description(meta),
         annotation: format_turn_count(meta.turn_count),
         search_text: "#{meta.preview} #{meta.recent_messages}"
@@ -196,9 +239,31 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   defp session_store_dir(_ctx), do: nil
 
+  @spec disk_candidate_kind(:lossless | :legacy_reconstructed | :legacy_import_required) ::
+          :disk | :legacy_import
+  defp disk_candidate_kind(kind) when kind in [:lossless, :legacy_reconstructed], do: :disk
+  defp disk_candidate_kind(:legacy_import_required), do: :legacy_import
+
+  @spec disk_label(SessionStore.session_meta()) :: String.t()
+  defp disk_label(%{continuation_kind: :legacy_import_required, title: title}),
+    do: "[Legacy portable import] #{title}"
+
+  defp disk_label(%{continuation_kind: :legacy_reconstructed, title: title}),
+    do: "[Reconstructed continuation] #{title}"
+
+  defp disk_label(meta), do: meta.title
+
   @spec disk_description(SessionStore.session_meta()) :: String.t()
   defp disk_description(meta) do
+    continuation =
+      case meta.continuation_kind do
+        :lossless -> "lossless continuation"
+        :legacy_reconstructed -> "reconstructed continuation; original data was lossy"
+        :legacy_import_required -> "reconstructed text; original preserved"
+      end
+
     [
+      continuation,
       "#{meta.provider_name}/#{meta.model_name}",
       format_turn_count(meta.turn_count),
       format_disk_timestamp(meta.last_message_at),

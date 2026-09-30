@@ -126,8 +126,17 @@ defmodule MingaEditor.Commands.InlineAsk do
     case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       session_pid when is_pid(session_pid) ->
         messages = [{:user, ask.prompt}, {:assistant, InlineAsk.response(ask)}]
-        MingaAgent.Session.seed_messages(session_pid, messages)
-        AgentLifecycle.cache_messages(state, MingaAgent.Session.messages(session_pid))
+
+        case MingaAgent.Session.seed_messages(session_pid, messages) do
+          :ok ->
+            AgentLifecycle.cache_messages(state, MingaAgent.Session.messages(session_pid))
+
+          {:error, reason} ->
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Inline Ask history could not be added to the agent session: #{inspect(reason)}"
+            )
+        end
 
       _ ->
         state

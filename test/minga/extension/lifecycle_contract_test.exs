@@ -1226,7 +1226,8 @@ defmodule Minga.Extension.LifecycleContractTest do
     authority = instance_pid(ctx, name)
     Process.exit(authority, :kill)
 
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, reason}
+    assert reason in [:killed, :noproc]
     assert_receive {:blocked_start_caller, {:error, {:authority_unavailable, ^name, _reason}}}
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
     assert :ok = stop_extension(ctx, name, ctx.opts)

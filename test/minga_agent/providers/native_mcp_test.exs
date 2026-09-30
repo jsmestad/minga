@@ -6,6 +6,8 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   alias MingaAgent.MCP.FakeTransport
   alias MingaAgent.MCP.ServerConfig
   alias MingaAgent.Providers.Native
+  alias MingaAgent.Session.Request
+  alias ReqLLM.Context
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
@@ -42,7 +44,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
 
   defp start_provider(opts) do
     defaults = [
-      subscriber: self(),
+      subscriber: start_provider_subscriber(self()),
       model: "anthropic:claude-sonnet-4-20250514",
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [builtin_tool()],
@@ -54,6 +56,56 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     ]
 
     Native.start_link(Keyword.merge(defaults, opts))
+  end
+
+  defp start_provider_subscriber(owner) do
+    spawn_link(fn -> provider_subscriber_loop(owner, Process.monitor(owner)) end)
+  end
+
+  defp provider_subscriber_loop(owner, owner_ref) do
+    receive do
+      {:agent_provider_event, _request_id, event} ->
+        send(owner, {:agent_provider_event, event})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:agent_provider_event, event} ->
+        send(owner, {:agent_provider_event, event})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:agent_provider_lifecycle_event, event} ->
+        send(owner, {:agent_provider_lifecycle_event, event})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
+        GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from,
+       {:admit_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _name, _args}} ->
+        GenServer.reply(from, :ok)
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from,
+       {:complete_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _result_message}} ->
+        GenServer.reply(from, :ok)
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from, :dequeue_steering_messages} ->
+        GenServer.reply(from, [])
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
+        :ok
+    end
+  end
+
+  defp send_prompt(provider, text) do
+    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+
+    request =
+      Request.new("request-" <> identity, String.to_integer(identity), 0, [Context.user(text)])
+
+    Native.send_prompt(provider, request)
   end
 
   defp build_stream_response(chunks, usage \\ %{}) do
@@ -77,6 +129,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     receive do
       {:agent_provider_event, %Event.AgentEnd{} = event} -> Enum.reverse([event | acc])
       {:agent_provider_event, event} -> collect_until_end([event | acc])
+      {:agent_provider_lifecycle_event, event} -> collect_until_end([event | acc])
     after
       @receive_timeout -> flunk("provider did not emit AgentEnd")
     end
@@ -93,7 +146,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     end
 
     {:ok, provider} = start_provider(tmp_dir: dir, llm_client: client)
-    assert :ok = Native.send_prompt(provider, "hello")
+    assert :ok = send_prompt(provider, "hello")
     _events = collect_until_end()
 
     assert_receive {:llm_tools, tool_names}, @receive_timeout
@@ -116,7 +169,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     end
 
     {:ok, provider} = start_provider(tmp_dir: dir, llm_client: client, mcp_enabled?: false)
-    assert :ok = Native.send_prompt(provider, "hello")
+    assert :ok = send_prompt(provider, "hello")
     _events = collect_until_end()
 
     assert_receive {:llm_tools, tool_names}, @receive_timeout
@@ -146,7 +199,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     end
 
     {:ok, provider} = start_provider(tmp_dir: dir, llm_client: client)
-    assert :ok = Native.send_prompt(provider, "discover mcp")
+    assert :ok = send_prompt(provider, "discover mcp")
     events = collect_until_end()
 
     assert_receive {:mcp_transport_started, "Local Tools", _transport}, @receive_timeout
@@ -200,7 +253,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     refute description =~ secret
     assert description =~ "Bearer [REDACTED]"
 
-    assert :ok = Native.send_prompt(provider, "discover mcp")
+    assert :ok = send_prompt(provider, "discover mcp")
     events = collect_until_end()
 
     assert Enum.any?(events, fn
@@ -273,7 +326,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     end
 
     {:ok, provider} = start_provider(tmp_dir: dir, llm_client: client)
-    assert :ok = Native.send_prompt(provider, "use mcp")
+    assert :ok = send_prompt(provider, "use mcp")
     events = collect_until_end()
 
     assert_receive {:mcp_transport_started, "Local Tools", _transport}, @receive_timeout
@@ -316,7 +369,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert :ok = Native.send_prompt(provider, "discover mcp")
+    assert :ok = send_prompt(provider, "discover mcp")
     events = collect_until_end()
 
     assert Enum.any?(events, fn
@@ -401,7 +454,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert :ok = Native.send_prompt(provider, "discover mcp")
+    assert :ok = send_prompt(provider, "discover mcp")
     events = collect_until_end()
 
     assert Enum.any?(events, fn
@@ -458,7 +511,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert :ok = Native.send_prompt(provider, "discover mcp")
+    assert :ok = send_prompt(provider, "discover mcp")
     events = collect_until_end()
 
     assert Enum.any?(events, fn
@@ -509,7 +562,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert :ok = Native.send_prompt(provider, "discover mcp")
+    assert :ok = send_prompt(provider, "discover mcp")
     _events = collect_until_end()
     assert_receive {:mcp_transport_started, "Alpha", alpha_transport}, @receive_timeout
     assert_receive {:mcp_transport_started, "Beta", beta_transport}, @receive_timeout

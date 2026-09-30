@@ -16,21 +16,19 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     @behaviour MingaAgent.Provider
 
     use GenServer
+    alias Minga.Test.ProviderRequest
 
     @impl MingaAgent.Provider
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
     @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
+    def send_prompt(pid, request), do: GenServer.call(pid, {:prompt, request})
 
     @impl MingaAgent.Provider
     def abort(pid), do: GenServer.cast(pid, :abort)
 
     @impl MingaAgent.Provider
     def new_session(pid), do: GenServer.cast(pid, :new_session)
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: "test", is_streaming: true, token_usage: nil}}
@@ -45,9 +43,10 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     end
 
     @impl true
-    def handle_call({:prompt, text}, _from, state) do
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+    def handle_call({:prompt, request}, _from, state) do
+      text = ProviderRequest.text(request)
+      ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
+      ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: text})
       notify_prompt_observer(state.prompt_observer, text)
       {:reply, :ok, state}
     end
@@ -64,12 +63,13 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     @behaviour MingaAgent.Provider
 
     use GenServer
+    alias Minga.Test.ProviderRequest
 
     @impl MingaAgent.Provider
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
     @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+    def send_prompt(pid, request), do: GenServer.cast(pid, {:prompt, request})
 
     @impl MingaAgent.Provider
     def abort(pid), do: GenServer.cast(pid, :abort)
@@ -78,64 +78,120 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     def new_session(pid), do: GenServer.cast(pid, :new_session)
 
     @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: "test", is_streaming: false, token_usage: nil}}
 
     @impl true
     def init(opts) do
-      {:ok, %{subscriber: Keyword.fetch!(opts, :subscriber)}}
+      {:ok,
+       %{
+         subscriber: Keyword.fetch!(opts, :subscriber),
+         test_pid: Keyword.get(opts, :test_pid)
+       }}
     end
 
     @impl true
-    def handle_cast({:prompt, text}, state) do
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+    def handle_cast({:prompt, request}, state) do
+      text = ProviderRequest.text(request)
+      ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
+      ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: text})
 
-      send(
+      args = %{path: "secret.txt", api_key: "nope"}
+
+      assistant_tool_message = %ReqLLM.Message{
+        role: :assistant,
+        content: [ReqLLM.Message.ContentPart.text(text)],
+        tool_calls: [ReqLLM.ToolCall.new("tool-1", "read_file", JSON.encode!(args))]
+      }
+
+      calls = [
+        %{tool_call_id: "tool-1", name: "read_file", arguments: args}
+      ]
+
+      {:ok, checkpoint_id} =
+        GenServer.call(
+          state.subscriber,
+          {:checkpoint_tool_group, request.request_id,
+           Enum.concat(request.messages, [assistant_tool_message]), calls}
+        )
+
+      :ok =
+        GenServer.call(
+          state.subscriber,
+          {:admit_tool_effect, request.request_id, checkpoint_id, "tool-1", "read_file", args}
+        )
+
+      ProviderRequest.emit(
         state.subscriber,
-        {:agent_provider_event,
-         %Event.ToolStart{
-           tool_call_id: "tool-1",
-           name: "read_file",
-           args: %{path: "secret.txt", api_key: "nope"}
-         }}
+        request,
+        %Event.ToolStart{tool_call_id: "tool-1", name: "read_file", args: args}
       )
 
-      send(
+      result_message =
+        ReqLLM.Context.tool_result_message("read_file", "tool-1", "ok", %{is_error: false})
+
+      :ok =
+        GenServer.call(
+          state.subscriber,
+          {:complete_tool_effect, request.request_id, checkpoint_id, "tool-1", result_message}
+        )
+
+      ProviderRequest.emit(
         state.subscriber,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tool-1", name: "read_file", result: "ok", is_error: false}}
+        request,
+        %Event.ToolEnd{
+          tool_call_id: "tool-1",
+          name: "read_file",
+          result: "ok",
+          is_error: false
+        }
       )
 
-      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{}})
+      outcome =
+        MingaAgent.Session.Outcome.new(
+          request,
+          request.messages ++
+            [assistant_tool_message, result_message, ReqLLM.Context.assistant(text)]
+        )
+
+      ProviderRequest.emit(
+        state.subscriber,
+        request,
+        %Event.AgentEnd{usage: nil, outcome: outcome}
+      )
+
+      notify_completion(state.test_pid, state.subscriber, text)
+
       {:noreply, state}
     end
 
     def handle_cast(:abort, state), do: {:noreply, state}
     def handle_cast(:new_session, state), do: {:noreply, state}
+
+    defp notify_completion(test_pid, subscriber, text) when is_pid(test_pid) do
+      MingaAgent.Session.status(subscriber)
+      send(test_pid, {:replay_provider_finished, text})
+    end
+
+    defp notify_completion(nil, _subscriber, _text), do: :ok
   end
 
   defmodule TodoProvider do
     @behaviour MingaAgent.Provider
 
     use GenServer
+    alias Minga.Test.ProviderRequest
 
     @impl MingaAgent.Provider
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
     @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+    def send_prompt(pid, request), do: GenServer.cast(pid, {:prompt, request})
 
     @impl MingaAgent.Provider
     def abort(pid), do: GenServer.cast(pid, :abort)
 
     @impl MingaAgent.Provider
     def new_session(pid), do: GenServer.cast(pid, :new_session)
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: "test", is_streaming: false, token_usage: nil}}
@@ -146,21 +202,22 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     end
 
     @impl true
-    def handle_cast({:prompt, text}, state) do
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+    def handle_cast({:prompt, request}, state) do
+      text = ProviderRequest.text(request)
+      ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
+      ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: text})
 
-      send(
+      ProviderRequest.emit(
         state.subscriber,
-        {:agent_provider_event,
-         %Event.TodoPlan{
-           todos: [
-             %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
-           ]
-         }}
+        request,
+        %Event.TodoPlan{
+          todos: [
+            %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
+          ]
+        }
       )
 
-      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{}})
+      ProviderRequest.complete(state.subscriber, request, text)
       {:noreply, state}
     end
 
@@ -182,12 +239,15 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
          session_id: "stable-session",
          provider: ReplayProvider,
          event_log_server: log_name,
-         persist?: false,
-         hooks_enabled?: false}
+         persist?: true,
+         session_store_dir: tmp_dir,
+         hooks_enabled?: false,
+         provider_opts: [test_pid: self()]}
       )
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "hello")
+    assert_receive {:replay_provider_finished, "hello"}
     :sys.get_state(session)
     :sys.get_state(log_pid)
 

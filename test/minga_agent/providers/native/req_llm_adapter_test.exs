@@ -5,8 +5,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias ReqLLM.StreamResponse.MetadataHandle
 
-  defp build_stream_response(chunks, usage \\ %{}) do
-    {:ok, handle} = MetadataHandle.start_link(fn -> %{usage: usage, finish_reason: :stop} end)
+  defp build_stream_response(chunks, usage \\ %{}, response_metadata \\ %{}) do
+    metadata = Map.merge(%{usage: usage, finish_reason: :stop}, response_metadata)
+    {:ok, handle} = MetadataHandle.start_link(fn -> metadata end)
 
     %ReqLLM.StreamResponse{
       stream: chunks,
@@ -92,7 +93,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
                        arguments: %{"pattern" => "needle"}
                      }}
 
-    assert %ReqLLMAdapter.TurnResult{text: "hello", tool_calls: tool_calls, usage: usage} = result
+    assert %ReqLLMAdapter.TurnResult{tool_calls: tool_calls, usage: usage} = result
 
     assert [
              %ReqLLMAdapter.ToolCall{
@@ -104,6 +105,104 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
     assert usage.input_tokens == 10
     assert usage.output_tokens == 5
+  end
+
+  test "retains the complete assistant message for provider continuation" do
+    reasoning =
+      ReqLLM.Message.ReasoningDetails.from_openai_compatible(
+        %{
+          "text" => "private reasoning",
+          "signature" => "opaque-signature",
+          "vendor_field" => "kept"
+        },
+        :openrouter,
+        0
+      )
+
+    opaque_part = ReqLLM.Message.ContentPart.image_url("https://example.test/result.png")
+
+    stream_response =
+      build_stream_response(
+        [
+          ReqLLM.StreamChunk.text("before", %{provider_field: "opaque"}),
+          ReqLLM.StreamChunk.content_part(opaque_part),
+          ReqLLM.StreamChunk.content_part(opaque_part, %{stream_only?: true}),
+          ReqLLM.StreamChunk.thinking("temporary preview", %{stream_only?: true}),
+          ReqLLM.StreamChunk.thinking("private reasoning"),
+          ReqLLM.StreamChunk.text("after"),
+          ReqLLM.StreamChunk.tool_call("grep", %{"pattern" => "one"}, %{id: "tc_1", index: 0}),
+          ReqLLM.StreamChunk.tool_call("grep", %{"pattern" => "two"}, %{id: "tc_2", index: 1}),
+          ReqLLM.StreamChunk.meta(%{
+            finish_reason: :tool_use,
+            reasoning_details: [reasoning]
+          })
+        ],
+        %{},
+        %{
+          response_id: "resp_1",
+          phase: :analysis,
+          phase_items: ["item_1"],
+          provider_meta: %{trace_id: "trace_1"}
+        }
+      )
+
+    assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
+
+    assert Enum.map(result.message.content, & &1.type) == [:text, :image_url, :thinking, :text]
+
+    assert result.message.content |> Enum.at(0) ==
+             ReqLLM.Message.ContentPart.text("before", %{provider_field: "opaque"})
+
+    assert Enum.at(result.message.content, 1) == opaque_part
+    assert Enum.at(result.message.content, 2).text == "private reasoning"
+    assert Enum.at(result.message.content, 3).text == "after"
+    assert result.message.reasoning_details == [reasoning]
+    assert result.message.metadata.response_id == "resp_1"
+    assert result.message.metadata.phase == :analysis
+    assert result.message.metadata.phase_items == ["item_1"]
+
+    assert Enum.map(result.message.tool_calls, & &1.id) == ["tc_1", "tc_2"]
+    assert Enum.map(result.tool_calls, & &1.id) == ["tc_1", "tc_2"]
+  end
+
+  test "keeps interleaved text and thinking in provider order" do
+    stream_response =
+      build_stream_response([
+        ReqLLM.StreamChunk.text("before"),
+        ReqLLM.StreamChunk.thinking("reasoning"),
+        ReqLLM.StreamChunk.text("after"),
+        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+      ])
+
+    assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
+    assert Enum.map(result.message.content, & &1.type) == [:text, :thinking, :text]
+    assert Enum.map(result.message.content, & &1.text) == ["before", "reasoning", "after"]
+  end
+
+  test "rejects a response marked incomplete instead of returning a successful turn" do
+    stream_response =
+      build_stream_response(
+        [
+          ReqLLM.StreamChunk.text("partial response"),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :incomplete})
+        ],
+        %{},
+        %{finish_reason: :incomplete}
+      )
+
+    assert {:error, {:incomplete_response, :incomplete}, "partial response"} =
+             ReqLLMAdapter.process_stream(stream_response)
+  end
+
+  test "preserves structured content materialized by ReqLLM" do
+    stream_response =
+      build_stream_response([
+        ReqLLM.StreamChunk.text(~s({"answer":"ok"})),
+        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+      ])
+
+    assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
+    assert result.message.content == [%{type: :object, object: %{"answer" => "ok"}}]
   end
 
   test "stops the stream accumulator when a callback raises" do

@@ -41,6 +41,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
+  alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.Outcome
+  alias MingaAgent.Session.Request
   alias MingaAgent.Session.ProviderLifecycle
   alias MingaAgent.Session.Persistence
   alias MingaAgent.Session.SubscriberAttachment
@@ -48,10 +51,12 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.TurnExecution
   require ProviderLifecycle
+  alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
   alias MingaAgent.SubagentContext
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
+  alias ReqLLM.Context
 
   @typedoc "Agent session status."
   @type status :: TurnExecution.status()
@@ -100,6 +105,7 @@ defmodule MingaAgent.Session do
           credential_readiness: Credentials.readiness(),
           turn_execution: TurnExecution.t(),
           transcript: Transcript.t(),
+          continuation: Continuation.t(),
           subscriber_lifecycle: SubscriberLifecycle.t(),
           tool_approval_policy: tool_approval_policy(),
           idle_gc_timeout_ms: non_neg_integer(),
@@ -111,6 +117,7 @@ defmodule MingaAgent.Session do
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
           session_store_dir: String.t() | nil,
+          session_manager: pid() | nil,
           created_at: DateTime.t(),
           credentials_configured: boolean()
         }
@@ -156,6 +163,43 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:send_prompt, content})
   end
 
+  @doc """
+  Sends a prompt only when the Session still has the expected identity.
+
+  Returns `{:error, :session_id_changed}` when a manager lookup became stale.
+  """
+  @spec send_prompt_for_id(
+          GenServer.server(),
+          String.t(),
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: :ok | {:queued, :steering} | {:error, term()}
+  def send_prompt_for_id(session, expected_session_id, content) do
+    send_prompt_for_id(session, expected_session_id, content, 5_000)
+  end
+
+  @doc """
+  Sends a prompt only when the Session still has the expected identity.
+
+  Use the timeout to bound an asynchronous caller's wait for prompt admission.
+  Returns `{:error, :session_id_changed}` when a manager lookup became stale.
+  """
+  @spec send_prompt_for_id(
+          GenServer.server(),
+          String.t(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          non_neg_integer() | :infinity
+        ) :: :ok | {:queued, :steering} | {:error, term()}
+  def send_prompt_for_id(session, expected_session_id, content, timeout)
+      when is_binary(expected_session_id) and (is_binary(content) or is_list(content)) do
+    GenServer.call(session, {:send_prompt_for_id, expected_session_id, content}, timeout)
+  end
+
+  @doc "Aborts only when the Session still has the expected identity."
+  @spec abort_for_id(GenServer.server(), String.t()) :: :ok | {:error, :session_id_changed}
+  def abort_for_id(session, expected_session_id) when is_binary(expected_session_id) do
+    GenServer.call(session, {:abort_for_id, expected_session_id})
+  end
+
   @doc "Aborts the current agent operation."
   @spec abort(GenServer.server()) :: :ok
   def abort(session) do
@@ -175,7 +219,7 @@ defmodule MingaAgent.Session do
   end
 
   @doc "Seeds a session transcript without sending a prompt."
-  @spec seed_messages(GenServer.server(), [Message.t()]) :: :ok
+  @spec seed_messages(GenServer.server(), [Message.t()]) :: :ok | {:error, term()}
   def seed_messages(session, messages) when is_list(messages) do
     GenServer.call(session, {:seed_messages, messages})
   end
@@ -304,6 +348,17 @@ defmodule MingaAgent.Session do
   @spec load_session(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def load_session(session, session_id) when is_binary(session_id) do
     GenServer.call(session, {:load_session, session_id})
+  end
+
+  @doc """
+  Explicitly imports an unversioned display-only session into a new portable record.
+
+  The source file is never changed. The imported transcript is visibly marked
+  as reconstructed and is not represented as lossless provider continuation.
+  """
+  @spec import_legacy_session(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def import_legacy_session(session, session_id) when is_binary(session_id) do
+    GenServer.call(session, {:import_legacy_session, session_id})
   end
 
   @doc "Returns lightweight metadata about this session (for the picker)."
@@ -466,8 +521,7 @@ defmodule MingaAgent.Session do
   end
 
   @doc "Branches the conversation at the given turn index."
-  @spec branch_at(GenServer.server(), non_neg_integer()) ::
-          {:ok, String.t()} | {:error, String.t()}
+  @spec branch_at(GenServer.server(), non_neg_integer()) :: {:ok, String.t()} | {:error, term()}
   def branch_at(session, turn_index) when is_integer(turn_index) do
     GenServer.call(session, {:branch_at, turn_index})
   end
@@ -479,7 +533,7 @@ defmodule MingaAgent.Session do
   end
 
   @doc "Switches to a named branch, replacing the current messages."
-  @spec switch_branch(GenServer.server(), non_neg_integer()) :: :ok | {:error, String.t()}
+  @spec switch_branch(GenServer.server(), non_neg_integer()) :: :ok | {:error, term()}
   def switch_branch(session, branch_index) when is_integer(branch_index) do
     GenServer.call(session, {:switch_branch, branch_index})
   end
@@ -488,6 +542,17 @@ defmodule MingaAgent.Session do
   @spec add_system_message(GenServer.server(), String.t(), Message.system_level()) :: :ok
   def add_system_message(session, text, level \\ :info) do
     GenServer.cast(session, {:add_system_message, text, level})
+  end
+
+  @doc "Appends a system message only when the session still has the expected identity."
+  @spec add_system_message_for_id(
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          Message.system_level()
+        ) :: :ok
+  def add_system_message_for_id(session, expected_session_id, text, level) do
+    GenServer.cast(session, {:add_system_message_for_id, expected_session_id, text, level})
   end
 
   @doc """
@@ -735,6 +800,7 @@ defmodule MingaAgent.Session do
           [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
           now
         ),
+      continuation: Continuation.new(),
       subscriber_lifecycle: SubscriberLifecycle.new(),
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
@@ -747,6 +813,7 @@ defmodule MingaAgent.Session do
       session_start_hook_enabled?:
         Keyword.get(opts, :session_start_hook_enabled?, Keyword.get(opts, :hooks_enabled?, true)),
       session_store_dir: Keyword.get(opts, :session_store_dir),
+      session_manager: Keyword.get(opts, :session_manager),
       created_at: now,
       credentials_configured: credentials_configured?
     }
@@ -772,13 +839,10 @@ defmodule MingaAgent.Session do
   @impl GenServer
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:seed_messages, messages}, _from, state) do
-    state =
-      state
-      |> append_msgs(messages)
-      |> seed_provider_messages(messages)
-      |> notify_messages_changed()
-
-    {:reply, :ok, state}
+    case model_seed_messages(messages) do
+      {:ok, model_messages} -> reply_to_seed_messages(state, messages, model_messages)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:send_prompt_as, client_pid, content}, _from, state) do
@@ -791,6 +855,45 @@ defmodule MingaAgent.Session do
 
   def handle_call({:send_prompt, content}, _from, state) do
     handle_prompt(content, :steering, state)
+  end
+
+  def handle_call(
+        {:send_prompt_for_id, expected_session_id, _content},
+        _from,
+        %{session_id: current_session_id} = state
+      )
+      when expected_session_id != current_session_id do
+    {:reply, {:error, :session_id_changed}, state}
+  end
+
+  def handle_call(
+        {:send_prompt_for_id, session_id, content},
+        _from,
+        %{session_id: session_id} = state
+      ) do
+    handle_prompt(content, :steering, state)
+  end
+
+  def handle_call(
+        {:abort_for_id, expected_session_id},
+        _from,
+        %{session_id: current_session_id} = state
+      )
+      when expected_session_id != current_session_id do
+    {:reply, {:error, :session_id_changed}, state}
+  end
+
+  def handle_call(
+        {:abort_for_id, _expected_session_id},
+        _from,
+        %{provider: provider} = state
+      )
+      when ProviderLifecycle.is_detached(provider) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:abort_for_id, _expected_session_id}, _from, state) do
+    {:reply, :ok, abort_turn(state)}
   end
 
   def handle_call({:send_follow_up, content}, _from, state) do
@@ -850,55 +953,22 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:new_session, _from, state) do
-    restart_credential_check? = AvailabilityCheck.checking?(state.credential_availability)
-    state = stop_credential_check(state)
+    session_id = generate_session_id()
 
-    if ProviderLifecycle.pid(state.provider) do
-      state.provider.module.new_session(ProviderLifecycle.pid(state.provider))
+    case reserve_session_identity(state, session_id) do
+      {:ok, reservation} ->
+        case commit_session_identity(state, reservation) do
+          :ok ->
+            {:reply, :ok, reset_new_session(state, session_id)}
+
+          {:error, reason} ->
+            abort_session_identity(state, reservation)
+            {:reply, {:error, {:session_identity_commit_failed, reason}}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
-
-    record_critical_event(state, :session_stopped, %{
-      reason: "new_session",
-      status: TurnExecution.status(state.turn_execution)
-    })
-
-    now = DateTime.utc_now()
-    timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
-
-    state = cancel_save_timer(state)
-    source_execution = state.turn_execution
-    execution = TurnExecution.reset(source_execution)
-
-    state = %{
-      state
-      | session_id: generate_session_id(),
-        created_at: now
-    }
-
-    transcript =
-      state.transcript
-      |> Transcript.reset([Message.system("Session cleared · #{timestamp}")])
-      |> Transcript.touch(now)
-
-    state = %{state | transcript: transcript}
-
-    record_critical_event(state, :session_started, %{
-      model: state.provider.model_name,
-      provider: state.provider.provider_name,
-      background_subagent: state.background_subagent
-    })
-
-    state =
-      state
-      |> reject_execution_approval(source_execution)
-      |> announce_turn_status(execution)
-
-    state =
-      state
-      |> Map.put(:turn_execution, execution)
-      |> maybe_restart_credential_check(restart_credential_check?)
-
-    {:reply, :ok, notify_messages_changed(state)}
   end
 
   def handle_call(:session_id, _from, state) do
@@ -917,15 +987,18 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:load_session, session_id}, _from, state) do
-    case SessionStore.load(session_id, state.session_store_dir) do
-      {:ok, data} ->
-        case restore_loaded_session(state, data) do
-          {:ok, state} -> {:reply, :ok, state}
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
+    with {:ok, data} <- SessionStore.load(session_id, state.session_store_dir),
+         {:ok, restored} <- restore_loaded_session(state, data) do
+      {:reply, :ok, restored}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+  def handle_call({:import_legacy_session, session_id}, _from, state) do
+    case SessionStore.load_legacy(session_id, state.session_store_dir) do
+      {:ok, legacy_data} -> persist_legacy_import(state, session_id, legacy_data)
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -1084,15 +1157,27 @@ defmodule MingaAgent.Session do
     {:reply, :ok, detach_subscriber(state, pid, :detached)}
   end
 
+  def handle_call(
+        :compact,
+        _from,
+        %{continuation: %Continuation{tool_checkpoint: %{}}} = state
+      ),
+      do: {:reply, {:error, :effect_reconciliation_required}, state}
+
   def handle_call(:compact, _from, %{provider: provider} = state)
       when ProviderLifecycle.is_detached(provider) do
     {:reply, {:error, "No active provider"}, state}
   end
 
   def handle_call(:compact, _from, state) do
-    if function_exported?(state.provider.module, :compact, 1) do
-      result = state.provider.module.compact(ProviderLifecycle.pid(state.provider))
-      {:reply, result, state}
+    if function_exported?(state.provider.module, :compact, 2) do
+      result =
+        state.provider.module.compact(
+          ProviderLifecycle.pid(state.provider),
+          state.continuation.messages
+        )
+
+      reply_to_compact(state, result)
     else
       {:reply, {:error, "Provider does not support compaction"}, state}
     end
@@ -1126,6 +1211,7 @@ defmodule MingaAgent.Session do
 
   def handle_call({:activate_skill, name}, _from, state) do
     result = GenServer.call(ProviderLifecycle.pid(state.provider), {:activate_skill, name})
+    state = maybe_refresh_continuation_system(state, result)
     {:reply, result, state}
   end
 
@@ -1140,6 +1226,7 @@ defmodule MingaAgent.Session do
 
   def handle_call({:deactivate_skill, name}, _from, state) do
     result = GenServer.call(ProviderLifecycle.pid(state.provider), {:deactivate_skill, name})
+    state = maybe_refresh_continuation_system(state, result)
     {:reply, result, state}
   end
 
@@ -1293,14 +1380,24 @@ defmodule MingaAgent.Session do
     {:reply, :ok, state}
   end
 
+  def handle_call(
+        {:branch_at, _turn_index},
+        _from,
+        %{continuation: %Continuation{active_request: %Request{}}} = state
+      ),
+      do: {:reply, {:error, :request_active}, state}
+
+  def handle_call(
+        {:branch_at, _turn_index},
+        _from,
+        %{continuation: %Continuation{tool_checkpoint: %{}}} = state
+      ),
+      do: {:reply, {:error, :effect_reconciliation_required}, state}
+
   def handle_call({:branch_at, turn_index}, _from, state) do
     case Transcript.branch_at(state.transcript, turn_index, DateTime.utc_now()) do
       {:ok, transcript, branch} ->
-        state = %{state | transcript: transcript}
-        state = notify_messages_changed(state)
-
-        {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch.name}'."},
-         state}
+        reply_to_branch_at(state, turn_index, transcript, branch)
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1311,16 +1408,318 @@ defmodule MingaAgent.Session do
     {:reply, {:ok, Branch.list(Transcript.branches(state.transcript))}, state}
   end
 
+  def handle_call(
+        {:switch_branch, _branch_index},
+        _from,
+        %{continuation: %Continuation{active_request: %Request{}}} = state
+      ),
+      do: {:reply, {:error, :request_active}, state}
+
+  def handle_call(
+        {:switch_branch, _branch_index},
+        _from,
+        %{continuation: %Continuation{tool_checkpoint: %{}}} = state
+      ),
+      do: {:reply, {:error, :effect_reconciliation_required}, state}
+
   def handle_call({:switch_branch, branch_index}, _from, state) do
-    case Transcript.switch_branch(state.transcript, branch_index) do
-      {:ok, transcript} ->
-        state = %{state | transcript: transcript}
-        state = notify_messages_changed(state)
-        {:reply, :ok, state}
+    branch = Enum.at(Transcript.branches(state.transcript), branch_index - 1)
+
+    case {branch, Transcript.switch_branch(state.transcript, branch_index)} do
+      {%Branch{name: branch_name}, {:ok, transcript}} ->
+        reply_to_switch_branch(state, transcript, branch_name)
+
+      {_branch, {:error, reason}} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:checkpoint_tool_group, request_id, messages, calls}, _from, state)
+      when is_binary(request_id) and is_list(messages) and is_list(calls) do
+    with {:ok, checkpoint_id, continuation} <-
+           Continuation.checkpoint_tool_group(state.continuation, request_id, messages, calls),
+         {:ok, committed} <-
+           commit_effect_snapshot(state, %{state | continuation: continuation}) do
+      {:reply, {:ok, checkpoint_id}, committed}
+    else
+      {:error, reason} ->
+        {:reply, {:error, {:tool_checkpoint_failed, reason}}, state}
+    end
+  end
+
+  def handle_call(
+        {:admit_tool_effect, request_id, checkpoint_id, tool_call_id, name, args},
+        _from,
+        state
+      )
+      when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) and
+             is_binary(name) and is_map(args) do
+    with {:ok, continuation} <-
+           Continuation.admit_tool_effect(
+             state.continuation,
+             request_id,
+             checkpoint_id,
+             tool_call_id,
+             name,
+             args
+           ),
+         {:ok, committed} <-
+           commit_effect_snapshot(state, %{state | continuation: continuation}) do
+      result =
+        case EventLog.record(
+               committed.session_id,
+               :tool_call_started,
+               %{
+                 checkpoint_id: checkpoint_id,
+                 tool_call_id: tool_call_id,
+                 name: name,
+                 args: args
+               },
+               committed.event_log_server
+             ) do
+          {:queued, receipt} -> EventLog.await(receipt)
+          {:error, reason} -> {:error, reason}
+        end
+
+      case result do
+        {:persisted, _event_id} ->
+          {:reply, :ok, committed}
+
+        {:error, reason} ->
+          message =
+            "Tool effect admission was durably saved, but its event journal record failed: #{inspect(reason)}"
+
+          state =
+            committed
+            |> append_error_message_once(message)
+            |> notify_messages_changed()
+            |> broadcast({:warning, message})
+
+          {:reply, :ok, state}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, {:effect_admission_failed, reason}}, state}
+    end
+  end
+
+  def handle_call(
+        {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message},
+        _from,
+        state
+      )
+      when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) do
+    with {:ok, continuation} <-
+           Continuation.complete_tool_effect(
+             state.continuation,
+             request_id,
+             checkpoint_id,
+             tool_call_id,
+             result_message
+           ),
+         {:ok, committed} <-
+           commit_effect_snapshot(state, %{state | continuation: continuation}) do
+      {:reply, :ok, committed}
+    else
+      {:error, reason} ->
+        {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, state}
+    end
+  end
+
+  @spec reply_to_seed_messages(state(), [Message.t()], [ReqLLM.Message.t()]) ::
+          {:reply, term(), state()}
+  defp reply_to_seed_messages(state, _messages, []), do: {:reply, :ok, state}
+
+  defp reply_to_seed_messages(state, messages, model_messages) do
+    candidate = append_msgs(state, messages)
+
+    [{transcript_id, _message} | _rest] =
+      candidate.transcript |> Transcript.messages_with_ids() |> Enum.reverse()
+
+    case Continuation.seed_messages(state.continuation, model_messages, transcript_id) do
+      {:ok, continuation} -> commit_seed_messages(state, candidate, continuation)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec commit_seed_messages(state(), state(), Continuation.t()) :: {:reply, term(), state()}
+  defp commit_seed_messages(state, candidate, continuation) do
+    case commit_session_transition(state, %{candidate | continuation: continuation}) do
+      {:ok, committed} ->
+        {:reply, :ok, committed}
+
+      {:error, reason, failed} ->
+        {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
+    end
+  end
+
+  @spec persist_legacy_import(state(), String.t(), SessionStore.session_data()) ::
+          {:reply, term(), state()}
+  defp persist_legacy_import(state, session_id, legacy_data) do
+    imported_data = prepare_legacy_import(legacy_data, legacy_import_id(session_id))
+
+    case SessionStore.save(imported_data, state.session_store_dir) do
+      :ok ->
+        reply_to_legacy_import_restore(state, imported_data)
+
+      {:error, reason} ->
+        {:reply, {:error, {:legacy_import_persistence_failed, reason}}, state}
+    end
+  end
+
+  @spec reply_to_legacy_import_restore(state(), SessionStore.session_data()) ::
+          {:reply, term(), state()}
+  defp reply_to_legacy_import_restore(state, imported_data) do
+    case restore_loaded_session(state, imported_data) do
+      {:ok, restored} ->
+        {:reply, :ok, restored}
+
+      {:error, reason} ->
+        {:reply, {:error, {:legacy_import_saved_but_restore_failed, reason}}, state}
+    end
+  end
+
+  @spec reply_to_compact(state(), term()) :: {:reply, term(), state()}
+  defp reply_to_compact(state, {:ok, messages, summary}) do
+    case Continuation.replace_messages(state.continuation, messages) do
+      {:ok, continuation} -> persist_compacted_messages(state, continuation, summary)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp reply_to_compact(state, {:error, _reason} = error), do: {:reply, error, state}
+
+  @spec persist_compacted_messages(state(), Continuation.t(), String.t()) ::
+          {:reply, term(), state()}
+  defp persist_compacted_messages(state, continuation, summary) do
+    candidate = %{state | continuation: continuation}
+    {persisted, save_result} = persist_completed_boundary(candidate)
+
+    case save_result do
+      :ok ->
+        {:reply, {:ok, summary}, persisted}
+
+      {:error, reason} ->
+        {:reply, {:error, {:persistence_failed, reason}},
+         %{persisted | continuation: state.continuation}}
+    end
+  end
+
+  @spec reply_to_branch_at(state(), pos_integer(), Transcript.t(), Branch.t()) ::
+          {:reply, term(), state()}
+  defp reply_to_branch_at(state, turn_index, transcript, branch) do
+    [{selected_id, _message} | _rest] =
+      transcript |> Transcript.messages_with_ids() |> Enum.reverse()
+
+    case Continuation.branch_at(state.continuation, branch.name, selected_id) do
+      {:ok, continuation} ->
+        candidate = %{state | transcript: transcript, continuation: continuation}
+        commit_branch_at(state, candidate, turn_index, branch.name)
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  @spec commit_branch_at(state(), state(), pos_integer(), String.t()) ::
+          {:reply, term(), state()}
+  defp commit_branch_at(state, candidate, turn_index, branch_name) do
+    case commit_session_transition(state, candidate) do
+      {:ok, committed} ->
+        {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
+         committed}
+
+      {:error, reason, failed} ->
+        {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
+    end
+  end
+
+  @spec reply_to_switch_branch(state(), Transcript.t(), String.t()) ::
+          {:reply, term(), state()}
+  defp reply_to_switch_branch(state, transcript, branch_name) do
+    case Continuation.switch_branch(state.continuation, branch_name) do
+      {:ok, continuation} ->
+        candidate = %{state | transcript: transcript, continuation: continuation}
+        commit_branch_switch(state, candidate)
+
+      {:error, :branch_not_resumable}
+      when state.continuation.provenance == :legacy_reconstructed ->
+        continuation = Continuation.import_legacy(Transcript.messages(transcript))
+
+        candidate =
+          %{state | transcript: transcript, continuation: continuation}
+          |> append_system_message(
+            "This explicitly imported legacy branch is portable reconstructed text. It is not a lossless continuation and no tool, attachment, or provider metadata was invented.",
+            :info
+          )
+
+        commit_branch_switch(state, candidate)
+
+      {:error, :branch_not_resumable} ->
+        {:reply, {:error, :branch_not_resumable}, state}
+    end
+  end
+
+  @spec commit_branch_switch(state(), state()) :: {:reply, term(), state()}
+  defp commit_branch_switch(state, candidate) do
+    case commit_session_transition(state, candidate) do
+      {:ok, committed} ->
+        {:reply, :ok, committed}
+
+      {:error, reason, failed} ->
+        {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
+    end
+  end
+
+  @spec reset_new_session(state(), String.t()) :: state()
+  defp reset_new_session(state, session_id) do
+    restart_credential_check? = AvailabilityCheck.checking?(state.credential_availability)
+    state = stop_credential_check(state)
+
+    if ProviderLifecycle.pid(state.provider) do
+      state.provider.module.new_session(ProviderLifecycle.pid(state.provider))
+    end
+
+    record_critical_event(state, :session_stopped, %{
+      reason: "new_session",
+      status: TurnExecution.status(state.turn_execution)
+    })
+
+    now = DateTime.utc_now()
+    timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
+
+    state = cancel_save_timer(state)
+    source_execution = state.turn_execution
+    execution = TurnExecution.reset(source_execution)
+    state = %{state | session_id: session_id, created_at: now}
+
+    transcript =
+      state.transcript
+      |> Transcript.reset([Message.system("Session cleared · #{timestamp}")])
+      |> Transcript.touch(now)
+
+    state = %{
+      state
+      | transcript: transcript,
+        continuation: Continuation.reset(state.continuation)
+    }
+
+    record_critical_event(state, :session_started, %{
+      model: state.provider.model_name,
+      provider: state.provider.provider_name,
+      background_subagent: state.background_subagent
+    })
+
+    state =
+      state
+      |> reject_execution_approval(source_execution)
+      |> announce_turn_status(execution)
+
+    state =
+      state
+      |> Map.put(:turn_execution, execution)
+      |> maybe_restart_credential_check(restart_credential_check?)
+
+    notify_messages_changed(state)
   end
 
   @impl GenServer
@@ -1328,6 +1727,17 @@ defmodule MingaAgent.Session do
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
     state = notify_messages_changed(state)
+    {:noreply, state}
+  end
+
+  def handle_cast({:add_system_message_for_id, expected_session_id, text, level}, state)
+      when state.session_id == expected_session_id do
+    state = append_system_message(state, text, level)
+    state = notify_messages_changed(state)
+    {:noreply, state}
+  end
+
+  def handle_cast({:add_system_message_for_id, _expected_session_id, _text, _level}, state) do
     {:noreply, state}
   end
 
@@ -1354,8 +1764,29 @@ defmodule MingaAgent.Session do
     end
   end
 
-  def handle_info({:agent_provider_event, event}, state) do
-    state = handle_provider_event(event, state)
+  def handle_info({:agent_provider_event, request_id, event}, state)
+      when is_binary(request_id) do
+    if Continuation.accepts?(state.continuation, request_id) do
+      {:noreply, handle_provider_event(event, state)}
+    else
+      {:noreply, reject_stale_tool_approval(event, state)}
+    end
+  end
+
+  def handle_info({:agent_provider_lifecycle_event, %Event.Error{} = event}, state) do
+    {:noreply, report_turn_error(state, humanize_error(event, state))}
+  end
+
+  def handle_info({:agent_provider_event, %Event.SystemMessage{} = event}, state) do
+    {:noreply, handle_provider_event(event, state)}
+  end
+
+  def handle_info({:agent_provider_event, _event_without_request_identity}, state) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent.Session] ignored provider response without request identity"
+    )
+
     {:noreply, state}
   end
 
@@ -1479,24 +1910,8 @@ defmodule MingaAgent.Session do
 
   def handle_info({:save_session, token}, state) do
     case Persistence.save_due(state.persistence, token) do
-      :stale ->
-        {:noreply, state}
-
-      {:save, persistence} ->
-        state = %{state | persistence: persistence}
-
-        case save_to_disk(state) do
-          :ok ->
-            {:noreply, %{state | persistence: Persistence.saved(persistence)}}
-
-          {:error, reason} ->
-            Minga.Log.error(
-              :agent,
-              "[Agent.Session] failed to save session #{state.session_id} to disk: #{inspect(reason)}"
-            )
-
-            {:noreply, schedule_save_retry(state)}
-        end
+      :stale -> {:noreply, state}
+      {:save, persistence} -> save_session(state, persistence)
     end
   end
 
@@ -1504,16 +1919,86 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  @spec reply_to_continue(state(), TurnExecution.t() | nil) :: {:reply, term(), state()}
-  defp reply_to_continue(state, proposed_execution) do
-    result =
-      if function_exported?(state.provider.module, :continue, 1) do
-        state.provider.module.continue(ProviderLifecycle.pid(state.provider))
+  @spec save_session(state(), Persistence.t()) :: {:noreply, state()}
+  defp save_session(state, persistence) do
+    state = %{state | persistence: persistence}
+    previous_durable_revision = state.continuation.durable_revision
+    {candidate, recovered_turn?} = recover_durable_retry(state)
+    candidate = durable_save_candidate(candidate)
+
+    case save_to_disk(candidate) do
+      :ok ->
+        finish_successful_save(
+          candidate,
+          persistence,
+          recovered_turn?,
+          previous_durable_revision
+        )
+
+      {:error, reason} ->
+        Minga.Log.error(
+          :agent,
+          "[Agent.Session] failed to save session #{state.session_id} to disk: #{inspect(reason)}"
+        )
+
+        {:noreply, schedule_save_retry(state)}
+    end
+  end
+
+  @spec finish_successful_save(state(), Persistence.t(), boolean(), non_neg_integer()) ::
+          {:noreply, state()}
+  defp finish_successful_save(candidate, persistence, recovered_turn?, previous_durable_revision) do
+    state = %{candidate | persistence: Persistence.saved(persistence)}
+
+    state =
+      if recovered_turn? do
+        state
+        |> broadcast(:messages_changed)
+        |> announce_turn_status(state.turn_execution)
       else
-        {:error, "Provider does not support continue"}
+        state
       end
 
-    {:reply, result, finish_continue(state, proposed_execution, result)}
+    {:noreply, maybe_publish_resumable_boundary(state, previous_durable_revision)}
+  end
+
+  @spec reply_to_continue(state(), TurnExecution.t() | nil) :: {:reply, term(), state()}
+  defp reply_to_continue(state, proposed_execution) do
+    content =
+      "Your previous response was interrupted mid-stream. Please continue from where you left off. Do not repeat what you already said."
+
+    if function_exported?(state.provider.module, :continue, 2) do
+      continue_provider_request(state, proposed_execution, content)
+    else
+      {:reply, {:error, "Provider does not support continue"}, state}
+    end
+  end
+
+  @spec continue_provider_request(state(), TurnExecution.t() | nil, String.t()) ::
+          {:reply, term(), state()}
+  defp continue_provider_request(state, proposed_execution, content) do
+    case begin_provider_request(state, content) do
+      {:ok, request, request_state} ->
+        dispatch_continue_request(state, request_state, request, proposed_execution)
+
+      {:error, reason, failed_state} ->
+        {:reply, {:error, reason}, failed_state}
+    end
+  end
+
+  @spec dispatch_continue_request(state(), state(), Request.t(), TurnExecution.t() | nil) ::
+          {:reply, term(), state()}
+  defp dispatch_continue_request(state, request_state, request, proposed_execution) do
+    case state.provider.module.continue(ProviderLifecycle.pid(state.provider), request) do
+      :ok ->
+        {:reply, :ok, finish_continue(request_state, proposed_execution, :ok)}
+
+      {:error, reason} ->
+        {:error, reason, failed_state} =
+          persist_provider_dispatch_failure(request_state, reason)
+
+        {:reply, {:error, reason}, finish_continue(failed_state, proposed_execution, :error)}
+    end
   end
 
   @spec finish_continue(state(), TurnExecution.t() | nil, term()) :: state()
@@ -1532,6 +2017,8 @@ defmodule MingaAgent.Session do
       |> reject_execution_approval(source_execution)
       |> abort_provider()
       |> abort_active_tools(source_execution, false)
+      |> cancel_provider_request()
+      |> reconcile_interrupted_checkpoint()
       |> append_system_message("Aborted", :info)
       |> notify_messages_changed()
       |> announce_turn_status(execution)
@@ -1573,23 +2060,292 @@ defmodule MingaAgent.Session do
     %{state | turn_execution: execution}
   end
 
-  @spec complete_provider_turn(state(), Event.token_usage() | nil) :: state()
-  defp complete_provider_turn(state, usage) do
+  @spec complete_provider_turn(state(), Event.token_usage() | nil, Outcome.t() | nil) :: state()
+  defp complete_provider_turn(state, usage, outcome) do
     source_execution = state.turn_execution
 
     case TurnExecution.begin_completion(source_execution) do
       {:ok, completing} ->
-        state
-        |> reject_execution_approval(source_execution)
-        |> notify(:complete, completion_notification(state))
-        |> collapse_transcript_thinking()
-        |> apply_turn_usage(usage)
-        |> dispatch_stop()
-        |> finish_provider_turn(completing)
+        state =
+          state
+          |> reject_execution_approval(source_execution)
+          |> collapse_transcript_thinking()
+          |> apply_turn_usage(usage)
+
+        {state, outcome_result} = apply_provider_outcome(state, outcome)
+        {state, boundary_result} = persist_completed_boundary(state)
+
+        case {outcome_result, boundary_result} do
+          {:accepted, :ok} ->
+            state
+            |> notify(:complete, completion_notification(state))
+            |> dispatch_stop()
+            |> finish_provider_turn(completing)
+
+          {:accepted, {:error, _reason}} ->
+            fail_completed_turn(
+              state,
+              completing,
+              "The turn finished in memory but could not be saved. Its result is not yet durable."
+            )
+
+          {{:interrupted, message}, _boundary_result} ->
+            fail_completed_turn(state, completing, message)
+
+          {{:rejected, message}, _boundary_result} ->
+            fail_completed_turn(state, completing, message)
+        end
 
       {:error, :invalid_phase} ->
         state
     end
+  end
+
+  @spec fail_completed_turn(state(), TurnExecution.t(), String.t()) :: state()
+  defp fail_completed_turn(state, completing, message) do
+    execution = TurnExecution.fail(completing, message)
+
+    state
+    |> notify(:error, message)
+    |> announce_turn_status(execution)
+    |> append_error_message_once(message)
+    |> notify_messages_changed()
+    |> broadcast({:error, message})
+    |> Map.put(:turn_execution, execution)
+  end
+
+  @spec apply_provider_outcome(state(), Outcome.t() | nil) ::
+          {state(), :accepted | {:interrupted, String.t()} | {:rejected, String.t()}}
+  defp apply_provider_outcome(state, nil) do
+    continuation = Continuation.interrupt_request(state.continuation)
+    state = %{state | continuation: continuation} |> reconcile_interrupted_checkpoint()
+
+    {state, {:interrupted, "Agent response ended before a continuation was returned."}}
+  end
+
+  defp apply_provider_outcome(state, %Outcome{} = outcome) do
+    transcript_id = boundary_transcript_id(state.transcript)
+
+    case Continuation.complete(state.continuation, outcome, transcript_id) do
+      {:ok, continuation} ->
+        {%{state | continuation: continuation}, :accepted}
+
+      {:error, reason} ->
+        state = cancel_provider_request(state)
+
+        state =
+          if state.continuation.tool_checkpoint do
+            reconcile_interrupted_checkpoint(state)
+          else
+            state
+          end
+
+        message =
+          "Provider outcome was rejected (#{inspect(reason)}). The active request was canceled and the last durable continuation was preserved."
+
+        {state, {:rejected, message}}
+    end
+  end
+
+  @spec boundary_transcript_id(Transcript.t()) :: pos_integer()
+  defp boundary_transcript_id(transcript) do
+    entries = Enum.reverse(Transcript.messages_with_ids(transcript))
+    [{fallback_id, _message} | _rest] = entries
+
+    Enum.find_value(entries, fallback_id, fn
+      {_id, {:usage, _usage}} -> nil
+      {id, _message} -> id
+    end)
+  end
+
+  @spec reconcile_interrupted_checkpoint(state()) :: state()
+  defp reconcile_interrupted_checkpoint(
+         %{continuation: %Continuation{tool_checkpoint: nil}} = state
+       ),
+       do: state
+
+  defp reconcile_interrupted_checkpoint(state) do
+    {continuation, reconciliation} =
+      Continuation.reconcile_interrupted(
+        state.continuation,
+        boundary_transcript_id(state.transcript)
+      )
+
+    indeterminate_count = Enum.count(reconciliation, &(&1.status == :indeterminate))
+    not_executed_count = Enum.count(reconciliation, &(&1.status == :not_executed))
+
+    candidate =
+      state
+      |> Map.put(:continuation, continuation)
+      |> reconcile_transcript_tool_calls(reconciliation)
+      |> append_system_message(
+        "Interrupted tool-call group reconciled without replay: " <>
+          "#{indeterminate_count} admitted call(s) are indeterminate and " <>
+          "#{not_executed_count} unadmitted call(s) were not executed.",
+        if(indeterminate_count == 0, do: :info, else: :error)
+      )
+
+    case commit_effect_snapshot(state, candidate) do
+      {:ok, committed} ->
+        committed
+
+      {:error, reason} ->
+        state
+        |> append_error_message_once(
+          "Interrupted effect reconciliation could not be saved. Further model execution is blocked; reload the session to retry safely."
+        )
+        |> broadcast({:error, "Effect reconciliation save failed: #{inspect(reason)}"})
+    end
+  end
+
+  @spec reconcile_transcript_tool_calls(state(), [map()]) :: state()
+  defp reconcile_transcript_tool_calls(state, reconciliation) do
+    statuses = Map.new(reconciliation, &{&1.tool_call_id, &1})
+
+    transcript =
+      Transcript.transform_messages(state.transcript, fn
+        {:tool_call, %ToolCall{id: id} = tool_call} ->
+          reconcile_transcript_tool_call(tool_call, Map.get(statuses, id))
+
+        message ->
+          message
+      end)
+
+    %{state | transcript: transcript}
+  end
+
+  @spec reconcile_transcript_tool_call(ToolCall.t(), map() | nil) :: Message.t()
+  defp reconcile_transcript_tool_call(tool_call, %{status: :indeterminate}) do
+    {:tool_call,
+     ToolCall.error(
+       tool_call,
+       "Outcome indeterminate after interruption; the tool was not rerun."
+     )}
+  end
+
+  defp reconcile_transcript_tool_call(tool_call, %{status: :not_executed}) do
+    {:tool_call,
+     ToolCall.error(tool_call, "Not executed because durable effect admission did not occur.")}
+  end
+
+  defp reconcile_transcript_tool_call(
+         tool_call,
+         %{
+           status: :completed,
+           result_message: %ReqLLM.Message{metadata: metadata} = result_message
+         }
+       ) do
+    result = result_message_text(result_message)
+
+    if Map.get(metadata || %{}, :is_error, false),
+      do: {:tool_call, ToolCall.error(tool_call, result)},
+      else: {:tool_call, ToolCall.complete(tool_call, result)}
+  end
+
+  defp reconcile_transcript_tool_call(tool_call, _unrelated), do: {:tool_call, tool_call}
+
+  @spec result_message_text(ReqLLM.Message.t()) :: String.t()
+  defp result_message_text(%ReqLLM.Message{content: content}) when is_binary(content),
+    do: content
+
+  defp result_message_text(%ReqLLM.Message{content: content}) when is_list(content) do
+    Enum.map_join(content, "", fn
+      %ReqLLM.Message.ContentPart{type: :text, text: text} when is_binary(text) -> text
+    end)
+  end
+
+  @spec persist_completed_boundary(state()) :: {state(), :ok | {:error, term()}}
+  defp persist_completed_boundary(state) do
+    if Persistence.enabled?(state.persistence) and
+         (not Continuation.durable?(state.continuation) or
+            not is_nil(state.continuation.active_request)) do
+      candidate = %{state | continuation: Continuation.mark_durable(state.continuation)}
+      persist_boundary_candidate(state, candidate)
+    else
+      {state, :ok}
+    end
+  end
+
+  @spec persist_boundary_candidate(state(), state()) :: {state(), :ok | {:error, term()}}
+  defp persist_boundary_candidate(state, candidate) do
+    case save_to_disk(candidate) do
+      :ok ->
+        {persistence, timer_to_cancel} = Persistence.cancel(candidate.persistence)
+        cancel_runtime_timer(timer_to_cancel)
+
+        persisted = %{candidate | persistence: Persistence.saved(persistence)}
+        {announce_resumable_boundary(persisted, candidate.continuation), :ok}
+
+      {:error, reason} ->
+        Minga.Log.error(
+          :agent,
+          "[Agent.Session] failed to commit resumable boundary #{state.session_id}: #{inspect(reason)}"
+        )
+
+        failed =
+          state
+          |> append_error_message_once(
+            "Conversation save failed. The previous durable boundary remains resumable; this completed turn is not yet durable."
+          )
+          |> broadcast(:messages_changed)
+          |> broadcast({:error, "Conversation save failed: #{inspect(reason)}"})
+          |> schedule_save_retry()
+
+        {failed, {:error, reason}}
+    end
+  end
+
+  @spec announce_resumable_boundary(state(), Continuation.t()) :: state()
+  defp announce_resumable_boundary(state, %Continuation{active_request: nil} = continuation),
+    do: broadcast(state, {:resumable_boundary, continuation.revision})
+
+  defp announce_resumable_boundary(state, %Continuation{}), do: state
+
+  @spec commit_session_transition(state(), state()) ::
+          {:ok, state()} | {:error, term(), state()}
+  defp commit_session_transition(previous, candidate) do
+    case persist_session_transition(candidate) do
+      {:ok, committed} ->
+        {:ok, broadcast(committed, :messages_changed)}
+
+      {:error, reason} ->
+        {:error, reason, report_session_transition_failure(previous, reason)}
+    end
+  end
+
+  @spec persist_session_transition(state()) :: {:ok, state()} | {:error, term()}
+  defp persist_session_transition(state) do
+    if Persistence.enabled?(state.persistence) do
+      candidate = durable_save_candidate(state)
+
+      case save_to_disk(candidate) do
+        :ok ->
+          {persistence, timer_to_cancel} = Persistence.cancel(candidate.persistence)
+          cancel_runtime_timer(timer_to_cancel)
+          {:ok, %{candidate | persistence: Persistence.saved(persistence)}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:ok, state}
+    end
+  end
+
+  @spec report_session_transition_failure(state(), term()) :: state()
+  defp report_session_transition_failure(state, reason) do
+    message =
+      "Conversation save failed. The previous durable conversation remains available; this change was not saved."
+
+    Minga.Log.error(
+      :agent,
+      "[Agent.Session] failed to persist session transition: #{inspect(reason)}"
+    )
+
+    state
+    |> append_error_message_once(message)
+    |> broadcast({:error, "Conversation save failed: #{inspect(reason)}"})
+    |> notify_messages_changed()
   end
 
   @spec collapse_transcript_thinking(state()) :: state()
@@ -1734,12 +2490,6 @@ defmodule MingaAgent.Session do
 
     state = append_msg(state, {:tool_call, tool_call})
 
-    record_critical_event(state, :tool_call_started, %{
-      tool_call_id: event.tool_call_id,
-      name: event.name,
-      args: event.args
-    })
-
     state
     |> broadcast({:tool_started, event.name, event.args})
     |> notify_messages_changed()
@@ -1839,9 +2589,24 @@ defmodule MingaAgent.Session do
       |> record_user_message_event(user_message)
       |> notify_messages_changed()
 
-    case state.provider.module.send_prompt(ProviderLifecycle.pid(state.provider), send_content) do
-      :ok -> %{state | turn_execution: execution}
-      {:error, _reason} -> queued_send_failed(state, execution)
+    case begin_provider_request(state, send_content) do
+      {:ok, request, request_state} ->
+        case request_state.provider.module.send_prompt(
+               ProviderLifecycle.pid(request_state.provider),
+               request
+             ) do
+          :ok ->
+            %{request_state | turn_execution: execution}
+
+          {:error, reason} ->
+            {:error, _reason, failed_state} =
+              persist_provider_dispatch_failure(request_state, reason)
+
+            queued_send_failed(failed_state, execution)
+        end
+
+      {:error, _reason, failed_state} ->
+        queued_send_failed(failed_state, execution)
     end
   end
 
@@ -1879,6 +2644,14 @@ defmodule MingaAgent.Session do
           TurnExecution.prompt_kind(),
           state()
         ) :: {:reply, :ok | {:queued, TurnExecution.prompt_kind()} | {:error, term()}, state()}
+  defp handle_prompt(
+         _content,
+         _kind,
+         %{continuation: %Continuation{tool_checkpoint: %{}}} = state
+       ) do
+    {:reply, {:error, :effect_reconciliation_required}, state}
+  end
+
   defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state) do
     {:reply, {:error, :credential_discovery_pending}, state}
   end
@@ -1929,30 +2702,57 @@ defmodule MingaAgent.Session do
         ) :: {:reply, :ok | {:error, term()}, state()}
   defp send_new_turn(content, state, execution) do
     case dispatch_user_prompt_submit(state, content) do
-      :ok ->
-        {user_message, send_content} = build_user_message(content)
-
-        state =
-          state
-          |> append_msg(user_message)
-          |> record_user_message_event(user_message)
-          |> notify_messages_changed()
-
-        case state.provider.module.send_prompt(
-               ProviderLifecycle.pid(state.provider),
-               send_content
-             ) do
-          :ok ->
-            {:reply, :ok, %{state | turn_execution: execution}}
-
-          {:error, _reason} = error ->
-            {:reply, error, announce_turn_status(state, state.turn_execution)}
-        end
-
-      {:error, %HookResult{} = result} ->
-        {:reply, {:error, {:hook_veto, HookResult.message(result)}}, state}
+      :ok -> begin_new_turn(content, state, execution)
+      {:error, %HookResult{} = result} -> reply_to_prompt_veto(state, result)
     end
   end
+
+  @spec begin_new_turn(
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          state(),
+          TurnExecution.t()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp begin_new_turn(content, state, execution) do
+    {user_message, send_content} = build_user_message(content)
+
+    state =
+      state
+      |> append_msg(user_message)
+      |> record_user_message_event(user_message)
+      |> notify_messages_changed()
+
+    case begin_provider_request(state, send_content) do
+      {:ok, request, request_state} ->
+        dispatch_new_turn_request(state, request_state, request, execution)
+
+      {:error, reason, failed_state} ->
+        failed_state = announce_turn_status(failed_state, state.turn_execution)
+        {:reply, {:error, reason}, failed_state}
+    end
+  end
+
+  @spec dispatch_new_turn_request(state(), state(), Request.t(), TurnExecution.t()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp dispatch_new_turn_request(state, request_state, request, execution) do
+    case request_state.provider.module.send_prompt(
+           ProviderLifecycle.pid(request_state.provider),
+           request
+         ) do
+      :ok ->
+        {:reply, :ok, %{request_state | turn_execution: execution}}
+
+      {:error, reason} ->
+        {:error, failure_reason, failed_state} =
+          persist_provider_dispatch_failure(request_state, reason)
+
+        failed_state = announce_turn_status(failed_state, state.turn_execution)
+        {:reply, {:error, failure_reason}, failed_state}
+    end
+  end
+
+  @spec reply_to_prompt_veto(state(), HookResult.t()) :: {:reply, {:error, term()}, state()}
+  defp reply_to_prompt_veto(state, result),
+    do: {:reply, {:error, {:hook_veto, HookResult.message(result)}}, state}
 
   # ── Event handling ──────────────────────────────────────────────────────────
 
@@ -1968,8 +2768,8 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp handle_provider_event(%Event.AgentEnd{usage: usage}, state),
-    do: complete_provider_turn(state, usage)
+  defp handle_provider_event(%Event.AgentEnd{usage: usage, outcome: outcome}, state),
+    do: complete_provider_turn(state, usage, outcome)
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
     state
@@ -2019,9 +2819,17 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
-    case TurnExecution.trusted_scope(state.turn_execution, event) do
-      nil -> request_tool_approval(event, state)
-      scope -> auto_approve_tool(event, state, scope)
+    case {TurnExecution.error(state.turn_execution),
+          TurnExecution.trusted_scope(state.turn_execution, event)} do
+      {message, _scope} when is_binary(message) ->
+        send(event.reply_to, {:tool_approval_response, event.tool_call_id, :reject})
+        broadcast(state, {:approval_rejected, event.tool_call_id, event.name, message})
+
+      {nil, nil} ->
+        request_tool_approval(event, state)
+
+      {nil, scope} ->
+        auto_approve_tool(event, state, scope)
     end
   end
 
@@ -2052,6 +2860,16 @@ defmodule MingaAgent.Session do
     report_turn_error(state, humanize_error(event, state))
   end
 
+  defp reject_stale_tool_approval(%Event.ToolApproval{} = event, state) do
+    reject_pending_approval(event)
+
+    message = "The provider request ended before this tool approval could be resolved."
+
+    Minga.Log.warning(:agent, "Rejected stale tool approval for #{event.name}")
+    broadcast(state, {:approval_rejected, event.tool_call_id, event.name, message})
+  end
+
+  defp reject_stale_tool_approval(_event, state), do: state
   @spec handle_tool_file_changed(Event.ToolFileChanged.t(), String.t(), state()) :: state()
   defp handle_tool_file_changed(event, tool_name, state) do
     state
@@ -2164,6 +2982,25 @@ defmodule MingaAgent.Session do
     %{state | transcript: Transcript.append_many(state.transcript, messages)}
   end
 
+  @spec model_seed_messages([Message.t()]) ::
+          {:ok, [ReqLLM.Message.t()]} | {:error, {:unsupported_seed_message, term()}}
+  defp model_seed_messages(messages) do
+    Enum.reduce_while(messages, {:ok, []}, fn
+      {:user, text}, {:ok, acc} when is_binary(text) ->
+        {:cont, {:ok, [Context.user(text) | acc]}}
+
+      {:assistant, text}, {:ok, acc} when is_binary(text) ->
+        {:cont, {:ok, [Context.assistant(text) | acc]}}
+
+      message, {:ok, _acc} ->
+        {:halt, {:error, {:unsupported_seed_message, message}}}
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
   defp append_system_message(state, text, level) do
     record_critical_event(state, :system_message, %{message: text, level: level})
@@ -2197,7 +3034,7 @@ defmodule MingaAgent.Session do
 
   # ── Status management ──────────────────────────────────────────────────────
 
-  @spec reject_pending_approval(pending_approval() | nil) :: :ok
+  @spec reject_pending_approval(pending_approval() | Event.tool_approval() | nil) :: :ok
   defp reject_pending_approval(nil), do: :ok
 
   defp reject_pending_approval(%{tool_call_id: tool_call_id, reply_to: reply_to}) do
@@ -2408,9 +3245,11 @@ defmodule MingaAgent.Session do
       "[Agent.Session] reclaiming idle detached session #{state.session_id}"
     )
 
-    case save_to_disk(state) do
+    candidate = durable_save_candidate(state)
+
+    case save_to_disk(candidate) do
       :ok ->
-        {:stop, :normal, state}
+        {:stop, :normal, candidate}
 
       {:error, reason} ->
         Minga.Log.error(
@@ -2788,34 +3627,108 @@ defmodule MingaAgent.Session do
     |> schedule_save()
   end
 
-  @spec seed_provider_messages(state(), [Message.t()]) :: state()
-  defp seed_provider_messages(
-         %{
-           provider: %ProviderLifecycle{
-             module: module,
-             phase: {:running, provider, _monitor_ref, _lease, _retry}
-           }
-         } = state,
-         messages
-       )
-       when is_pid(provider) do
-    case module.seed_messages(provider, messages) do
-      :ok ->
-        state
+  @spec begin_provider_request(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
+  defp begin_provider_request(state, content) do
+    state = refresh_continuation_system(state)
 
-      {:error, reason} ->
-        append_system_message(
-          state,
-          "Failed to seed provider context: #{inspect(reason)}",
-          :error
-        )
+    with {:ok, state} <- compact_request_continuation(state),
+         {:ok, turn_id} <- request_turn_id(state),
+         request_id = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
+         {:ok, request, continuation} <-
+           Continuation.begin_request(state.continuation, request_id, turn_id, content) do
+      candidate = %{state | continuation: continuation}
+      {persisted, save_result} = persist_completed_boundary(candidate)
+
+      case save_result do
+        :ok ->
+          {:ok, request, persisted}
+
+        {:error, reason} ->
+          {:error, {:conversation_persistence_failed, reason},
+           %{persisted | continuation: state.continuation}}
+      end
+    else
+      {:error, reason} -> {:error, reason, state}
     end
-  catch
-    :exit, reason ->
-      append_system_message(state, "Failed to seed provider context: #{inspect(reason)}", :error)
   end
 
-  defp seed_provider_messages(state, _messages), do: state
+  @spec request_turn_id(state()) :: {:ok, pos_integer()}
+  defp request_turn_id(state) do
+    id =
+      state.transcript
+      |> Transcript.messages_with_ids()
+      |> Enum.reverse()
+      |> Enum.find_value(fn
+        {message_id, {:user, _text}} -> message_id
+        {message_id, {:user, _text, _attachments}} -> message_id
+        _other -> nil
+      end)
+
+    case id do
+      message_id when is_integer(message_id) -> {:ok, message_id}
+      nil -> {:ok, state.transcript.next_id}
+    end
+  end
+
+  @spec compact_request_continuation(state()) :: {:ok, state()} | {:error, term()}
+  defp compact_request_continuation(%{continuation: %Continuation{tool_checkpoint: %{}}} = state),
+    do: {:ok, state}
+
+  defp compact_request_continuation(state) do
+    if function_exported?(state.provider.module, :compact, 3) do
+      result =
+        state.provider.module.compact(
+          ProviderLifecycle.pid(state.provider),
+          state.continuation.messages,
+          []
+        )
+
+      apply_request_compaction(state, result)
+    else
+      {:ok, state}
+    end
+  end
+
+  @spec apply_request_compaction(state(), term()) :: {:ok, state()} | {:error, term()}
+  defp apply_request_compaction(state, {:ok, messages, _summary})
+       when messages == state.continuation.messages,
+       do: {:ok, state}
+
+  defp apply_request_compaction(state, {:ok, messages, summary}) do
+    case Continuation.replace_messages(state.continuation, messages) do
+      {:ok, continuation} ->
+        state = %{state | continuation: continuation}
+        {:ok, append_system_message(state, "Context compacted: #{summary}", :info)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp apply_request_compaction(_state, {:error, reason}),
+    do: {:error, {:compaction_failed, reason}}
+
+  @spec cancel_provider_request(state()) :: state()
+  defp cancel_provider_request(state) do
+    %{state | continuation: Continuation.interrupt_request(state.continuation)}
+  end
+
+  @spec persist_provider_dispatch_failure(state(), term()) ::
+          {:error, term(), state()}
+  defp persist_provider_dispatch_failure(request_state, provider_reason) do
+    interrupted = cancel_provider_request(request_state)
+
+    case commit_session_transition(request_state, interrupted) do
+      {:ok, committed} ->
+        {:error, provider_reason, committed}
+
+      {:error, persistence_reason, failed_state} ->
+        {:error, {:conversation_persistence_failed, persistence_reason}, failed_state}
+    end
+  end
 
   # ── Provider startup ────────────────────────────────────────────────────────
 
@@ -2964,7 +3877,16 @@ defmodule MingaAgent.Session do
 
   @spec start_provider_process(state()) :: {:ok, pid(), state()} | {:error, term(), state()}
   defp start_provider_process(state) do
-    case state.provider.module.start_link(state.provider.opts) do
+    provider_opts =
+      case {state.provider.module, state.session_manager} do
+        {MingaAgent.Providers.Native, manager} when is_pid(manager) ->
+          Keyword.put(state.provider.opts, :session_manager, manager)
+
+        _provider ->
+          state.provider.opts
+      end
+
+    case state.provider.module.start_link(provider_opts) do
       {:ok, pid} -> {:ok, pid, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -3467,10 +4389,13 @@ defmodule MingaAgent.Session do
     monitor_ref = Process.monitor(pid)
     {:ok, lifecycle} = ProviderLifecycle.attach(state.provider, pid, monitor_ref)
 
+    if is_pid(state.session_manager) do
+      send(state.session_manager, {:session_provider_attached, state.session_id, self(), pid})
+    end
+
     state = %{state | provider: lifecycle}
     state = clear_provider_start_error(state)
 
-    state = seed_provider_messages(state, Transcript.messages(state.transcript))
     state = apply_pending_thinking_level(state)
     state = maybe_show_auth_onboarding(state)
     dispatch_session_start(state)
@@ -3500,12 +4425,35 @@ defmodule MingaAgent.Session do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
     {:failed, lifecycle, lease} = ProviderLifecycle.failure(state.provider, reason)
     release_provider_lease(lease)
-    state = %{state | provider: lifecycle}
 
-    state = mark_provider_failed(state, "Agent provider crashed")
+    state =
+      state
+      |> Map.put(:provider, lifecycle)
+      |> recover_interrupted_request()
+      |> mark_provider_failed("Agent provider crashed")
+
     state = maybe_schedule_provider_restart(state, reason)
     broadcast(state, {:error, TurnExecution.error(state.turn_execution)})
     state
+  end
+
+  @spec recover_interrupted_request(state()) :: state()
+  defp recover_interrupted_request(state) do
+    previous_continuation = state.continuation
+    continuation = Continuation.interrupt_request(previous_continuation)
+    state = %{state | continuation: continuation}
+
+    case {continuation.tool_checkpoint, continuation == previous_continuation} do
+      {nil, true} ->
+        state
+
+      {nil, false} ->
+        {persisted, _save_result} = persist_completed_boundary(state)
+        persisted
+
+      {_checkpoint, _changed?} ->
+        reconcile_interrupted_checkpoint(state)
+    end
   end
 
   @spec maybe_schedule_provider_restart(state(), term()) :: state()
@@ -3879,6 +4827,37 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec maybe_refresh_continuation_system(state(), term()) :: state()
+  defp maybe_refresh_continuation_system(state, {:ok, _skill}),
+    do: refresh_continuation_system(state)
+
+  defp maybe_refresh_continuation_system(state, :ok), do: refresh_continuation_system(state)
+  defp maybe_refresh_continuation_system(state, _error), do: state
+
+  @spec refresh_continuation_system(state()) :: state()
+  defp refresh_continuation_system(
+         %{continuation: %Continuation{messages: [%ReqLLM.Message{role: :system} | _rest]}} =
+           state
+       ),
+       do: state
+
+  defp refresh_continuation_system(state) do
+    provider_pid = ProviderLifecycle.pid(state.provider)
+
+    with true <- function_exported?(state.provider.module, :get_state, 1),
+         {:ok, %{system_prompt: system_prompt}} <-
+           state.provider.module.get_state(provider_pid),
+         true <- is_binary(system_prompt),
+         {:ok, continuation} <-
+           Continuation.replace_system(state.continuation, Context.system(system_prompt)) do
+      state = %{state | continuation: continuation}
+      {state, _save_result} = persist_completed_boundary(state)
+      state
+    else
+      _unsupported_or_active -> state
+    end
+  end
+
   # ── Session persistence ─────────────────────────────────────────────────────
 
   @save_debounce_ms 500
@@ -3916,6 +4895,61 @@ defmodule MingaAgent.Session do
     :ok
   end
 
+  @spec durable_save_candidate(state()) :: state()
+  defp durable_save_candidate(%{continuation: %Continuation{active_request: nil}} = state) do
+    %{state | continuation: Continuation.mark_durable(state.continuation)}
+  end
+
+  defp durable_save_candidate(state), do: state
+
+  @spec recover_durable_retry(state()) :: {state(), boolean()}
+  defp recover_durable_retry(state) do
+    case {TurnExecution.error(state.turn_execution), TurnExecution.recover(state.turn_execution)} do
+      {"The turn finished in memory but could not be saved. Its result is not yet durable.",
+       {:changed, execution}} ->
+        candidate =
+          state
+          |> Map.put(:turn_execution, execution)
+          |> append_system_message("The completed turn is now saved and resumable.", :info)
+
+        {candidate, true}
+
+      _other ->
+        {state, false}
+    end
+  end
+
+  @spec maybe_publish_resumable_boundary(state(), non_neg_integer()) :: state()
+  defp maybe_publish_resumable_boundary(state, previous_durable_revision) do
+    if state.continuation.durable_revision > previous_durable_revision do
+      broadcast(state, {:resumable_boundary, state.continuation.durable_revision})
+    else
+      state
+    end
+  end
+
+  @spec commit_effect_snapshot(state(), state()) :: {:ok, state()} | {:error, term()}
+  defp commit_effect_snapshot(state, candidate) do
+    if Persistence.enabled?(state.persistence) do
+      candidate = %{candidate | continuation: Continuation.mark_durable(candidate.continuation)}
+
+      case save_to_disk(candidate) do
+        :ok ->
+          {persistence, timer_to_cancel} = Persistence.cancel(candidate.persistence)
+          cancel_runtime_timer(timer_to_cancel)
+          {:ok, %{candidate | persistence: Persistence.saved(persistence)}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      # Non-persistent sessions keep the checkpoint in Session memory. They
+      # cannot be restored after a process restart, so no durable guarantee is
+      # claimed for their effects.
+      {:ok, candidate}
+    end
+  end
+
   @spec save_to_disk(state()) :: :ok | {:error, term()}
   defp save_to_disk(state) do
     if Persistence.enabled?(state.persistence) do
@@ -3939,7 +4973,8 @@ defmodule MingaAgent.Session do
         pinned_ids: Transcript.pinned_ids(state.transcript),
         usage: Transcript.usage(state.transcript),
         branches: Transcript.branches(state.transcript),
-        memory: Memory.read(state.session_store_dir)
+        memory: Memory.read(state.session_store_dir),
+        continuation: state.continuation
       }
 
       SessionStore.save(data, state.session_store_dir)
@@ -3960,98 +4995,438 @@ defmodule MingaAgent.Session do
           {:ok, state()} | {:error, term()}
   defp restore_loaded_session(state, data) do
     case persist_current_before_replacement(state, data.id) do
-      :ok ->
-        restart_credential_check? = AvailabilityCheck.checking?(state.credential_availability)
-        state = stop_credential_check(state)
-        state = cancel_save_timer(state)
-        loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
-
-        provider_name =
-          Map.get(data, :provider_name, state.provider.provider_name)
-
-        provider_opts = Keyword.put(state.provider.opts, :model, data.model_name)
-
-        lifecycle =
-          ProviderLifecycle.replace(
-            state.provider,
-            data.model_name,
-            provider_name,
-            provider_opts
-          )
-
-        transcript =
-          Transcript.restore(
-            data.messages,
-            data.message_ids,
-            Map.get(data, :branches, []),
-            data.usage,
-            Map.get(data, :pinned_ids, MapSet.new()),
-            loaded_at
-          )
-
-        execution = TurnExecution.restore(state.turn_execution)
-        state = restore_turn_execution(state, execution)
-
-        {persistence, timer_to_cancel} = Persistence.restored(state.persistence)
-
-        cancel_runtime_timer(timer_to_cancel)
-
-        state = %{
-          state
-          | session_id: data.id,
-            transcript: transcript,
-            persistence: persistence,
-            provider: lifecycle,
-            turn_execution: execution,
-            pending_model_change: nil,
-            created_at: loaded_at
-        }
-
-        apply_loaded_model_to_provider(state)
-        state = maybe_restart_credential_check(state, restart_credential_check?)
-        finish_loaded_session_restore(state, data)
-
-      {:error, reason} ->
-        {:error, {:save_current_failed, reason}}
+      :ok -> reserve_loaded_session(state, data)
+      {:error, reason} -> {:error, {:save_current_failed, reason}}
     end
   end
 
-  @spec finish_loaded_session_restore(state(), SessionStore.session_data()) ::
+  @spec reserve_loaded_session(state(), SessionStore.session_data()) ::
           {:ok, state()} | {:error, term()}
-  defp finish_loaded_session_restore(state, data) do
-    case restore_memory_snapshot_if_recorded(state, data) do
-      :ok ->
-        state =
-          seed_provider_messages(state, Transcript.messages(state.transcript))
+  defp reserve_loaded_session(state, data) do
+    case reserve_session_identity(state, data.id) do
+      {:ok, reservation} -> restore_reserved_session(state, data, reservation)
+      {:error, _reason} = error -> error
+    end
+  end
 
-        broadcast(state, {:status_changed, :idle})
-        broadcast(state, :messages_changed)
+  @spec restore_reserved_session(
+          state(),
+          SessionStore.session_data(),
+          SessionManager.identity_reservation() | :unchanged | :unmanaged
+        ) :: {:ok, state()} | {:error, term()}
+  defp restore_reserved_session(state, data, reservation) do
+    case restore_loaded_candidate(state, data, reservation) do
+      {:ok, _restored} = result ->
+        result
+
+      {:error, _reason} = error ->
+        abort_session_identity(state, reservation)
+        error
+    end
+  end
+
+  @spec reserve_session_identity(state(), String.t()) ::
+          {:ok, SessionManager.identity_reservation() | :unchanged | :unmanaged}
+          | {:error, term()}
+  defp reserve_session_identity(%{session_manager: nil}, _target_id), do: {:ok, :unmanaged}
+  defp reserve_session_identity(%{session_id: target_id}, target_id), do: {:ok, :unchanged}
+
+  defp reserve_session_identity(state, target_id) do
+    SessionManager.reserve_session_identity(state.session_manager, target_id)
+  end
+
+  @spec commit_session_identity(
+          state(),
+          SessionManager.identity_reservation() | :unchanged | :unmanaged
+        ) ::
+          :ok | {:error, term()}
+  defp commit_session_identity(_state, reservation) when reservation in [:unchanged, :unmanaged],
+    do: :ok
+
+  defp commit_session_identity(state, reservation) do
+    SessionManager.commit_session_identity(state.session_manager, reservation)
+  end
+
+  @spec abort_session_identity(
+          state(),
+          SessionManager.identity_reservation() | :unchanged | :unmanaged
+        ) :: :ok
+  defp abort_session_identity(_state, reservation) when reservation in [:unchanged, :unmanaged],
+    do: :ok
+
+  defp abort_session_identity(state, reservation) do
+    SessionManager.abort_session_identity(state.session_manager, reservation)
+  end
+
+  @spec restore_loaded_candidate(
+          state(),
+          SessionStore.session_data(),
+          SessionManager.identity_reservation() | :unchanged | :unmanaged
+        ) :: {:ok, state()} | {:error, term()}
+  defp restore_loaded_candidate(state, data, reservation) do
+    restart_credential_check? = AvailabilityCheck.checking?(state.credential_availability)
+    loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
+    provider_name = Map.get(data, :provider_name, state.provider.provider_name)
+    provider_opts = Keyword.put(state.provider.opts, :model, data.model_name)
+
+    lifecycle =
+      ProviderLifecycle.replace(
+        state.provider,
+        data.model_name,
+        provider_name,
+        provider_opts
+      )
+
+    transcript =
+      Transcript.restore(
+        data.messages,
+        data.message_ids,
+        Map.get(data, :branches, []),
+        data.usage,
+        Map.get(data, :pinned_ids, MapSet.new()),
+        loaded_at
+      )
+
+    execution = TurnExecution.restore(state.turn_execution)
+
+    candidate = %{
+      state
+      | session_id: data.id,
+        transcript: transcript,
+        continuation: data.continuation,
+        provider: lifecycle,
+        turn_execution: execution,
+        pending_model_change: nil,
+        created_at: loaded_at
+    }
+
+    with {:ok, staged, reconciled?} <- reconcile_loaded_checkpoint(candidate),
+         {:ok, staged} <- prepare_reconciliation_warning(staged, reconciled?),
+         :ok <- restore_loaded_provider_model(staged, state.provider.model_name) do
+      restore_loaded_memory_candidate(
+        state,
+        data,
+        staged,
+        lifecycle,
+        execution,
+        loaded_at,
+        restart_credential_check?,
+        reservation
+      )
+    end
+  end
+
+  @spec restore_loaded_memory_candidate(
+          state(),
+          SessionStore.session_data(),
+          state(),
+          ProviderLifecycle.t(),
+          TurnExecution.t(),
+          DateTime.t(),
+          boolean(),
+          SessionManager.identity_reservation() | :unchanged | :unmanaged
+        ) :: {:ok, state()} | {:error, term()}
+  defp restore_loaded_memory_candidate(
+         state,
+         data,
+         staged,
+         lifecycle,
+         execution,
+         loaded_at,
+         restart_credential_check?,
+         reservation
+       ) do
+    case restore_loaded_memory(staged, data) do
+      :ok ->
+        install_loaded_session(
+          state,
+          staged,
+          lifecycle,
+          execution,
+          loaded_at,
+          restart_credential_check?,
+          reservation
+        )
+
+      {:error, memory_error} ->
+        rollback_loaded_memory_restore(staged, state.provider.model_name, memory_error)
+    end
+  end
+
+  @spec rollback_loaded_memory_restore(state(), String.t(), term()) :: {:error, term()}
+  defp rollback_loaded_memory_restore(staged, previous_model, memory_error) do
+    case rollback_loaded_provider_model(staged, previous_model) do
+      :ok ->
+        {:error, memory_error}
+
+      {:error, rollback_error} ->
+        {:error, {:restore_rollback_failed, memory_error, rollback_error}}
+    end
+  end
+
+  @spec restore_loaded_memory(state(), SessionStore.session_data()) ::
+          :ok | {:error, {:memory_restore_failed, term()}}
+  defp restore_loaded_memory(state, data) do
+    case restore_memory_snapshot_if_recorded(state, data) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:memory_restore_failed, reason}}
+    end
+  end
+
+  @spec restore_loaded_provider_model(state(), String.t()) ::
+          :ok | {:error, {:provider_model_restore_failed, term()}}
+  defp restore_loaded_provider_model(state, current_model) do
+    case apply_loaded_model_to_provider(state, current_model) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:provider_model_restore_failed, reason}}
+    end
+  end
+
+  @spec install_loaded_session(
+          state(),
+          state(),
+          ProviderLifecycle.t(),
+          TurnExecution.t(),
+          DateTime.t(),
+          boolean(),
+          SessionManager.identity_reservation() | :unchanged | :unmanaged
+        ) :: {:ok, state()} | {:error, term()}
+  defp install_loaded_session(
+         state,
+         staged,
+         lifecycle,
+         execution,
+         loaded_at,
+         restart_credential_check?,
+         reservation
+       ) do
+    case commit_session_identity(state, reservation) do
+      :ok ->
+        install_loaded_session_state(
+          state,
+          staged,
+          lifecycle,
+          execution,
+          loaded_at,
+          restart_credential_check?
+        )
+
+      {:error, reason} ->
+        {:error, {:session_identity_commit_failed, reason}}
+    end
+  end
+
+  @spec install_loaded_session_state(
+          state(),
+          state(),
+          ProviderLifecycle.t(),
+          TurnExecution.t(),
+          DateTime.t(),
+          boolean()
+        ) :: {:ok, state()}
+  defp install_loaded_session_state(
+         state,
+         staged,
+         lifecycle,
+         execution,
+         loaded_at,
+         restart_credential_check?
+       ) do
+    current =
+      state
+      |> stop_credential_check()
+      |> cancel_save_timer()
+      |> restore_turn_execution(execution)
+
+    {persistence, timer_to_cancel} = Persistence.restored(current.persistence)
+    cancel_runtime_timer(timer_to_cancel)
+
+    loaded = %{
+      current
+      | session_id: staged.session_id,
+        transcript: staged.transcript,
+        continuation: staged.continuation,
+        persistence: persistence,
+        provider: lifecycle,
+        turn_execution: execution,
+        pending_model_change: nil,
+        created_at: loaded_at
+    }
+
+    loaded = maybe_restart_credential_check(loaded, restart_credential_check?)
+    finish_loaded_session_restore(loaded)
+  end
+
+  @spec finish_loaded_session_restore(state()) :: {:ok, state()}
+  defp finish_loaded_session_restore(state) do
+    broadcast(state, {:status_changed, :idle})
+    broadcast(state, :messages_changed)
+    {:ok, state}
+  end
+
+  @spec reconcile_loaded_checkpoint(state()) ::
+          {:ok, state(), boolean()} | {:error, {:checkpoint_reconciliation_failed, term()}}
+  defp reconcile_loaded_checkpoint(
+         %{continuation: %Continuation{tool_checkpoint: nil, active_request: nil}} = state
+       ),
+       do: {:ok, state, false}
+
+  defp reconcile_loaded_checkpoint(%{continuation: %Continuation{tool_checkpoint: nil}} = state) do
+    candidate =
+      state
+      |> Map.put(:continuation, Continuation.interrupt_request(state.continuation))
+      |> append_system_message(
+        "Recovered an interrupted provider request. Its exact user prompt is preserved for the next continuation.",
+        :error
+      )
+
+    case commit_loaded_checkpoint_snapshot(state, candidate) do
+      {:ok, committed} -> {:ok, committed, true}
+      {:error, reason} -> {:error, {:checkpoint_reconciliation_failed, reason}}
+    end
+  end
+
+  defp reconcile_loaded_checkpoint(state) do
+    {continuation, reconciliation} =
+      Continuation.reconcile_interrupted(
+        state.continuation,
+        boundary_transcript_id(state.transcript)
+      )
+
+    indeterminate_count = Enum.count(reconciliation, &(&1.status == :indeterminate))
+    not_executed_count = Enum.count(reconciliation, &(&1.status == :not_executed))
+
+    message =
+      "Recovered an interrupted provider tool-call group without replaying any call. " <>
+        "#{indeterminate_count} admitted call(s) now have an explicit indeterminate result; " <>
+        "#{not_executed_count} unadmitted call(s) are marked not executed. " <>
+        "The exact provider continuation was preserved for the next request."
+
+    candidate =
+      state
+      |> Map.put(:continuation, continuation)
+      |> reconcile_transcript_tool_calls(reconciliation)
+      |> append_system_message(message, if(indeterminate_count == 0, do: :info, else: :error))
+
+    case commit_loaded_checkpoint_snapshot(state, candidate) do
+      {:ok, committed} -> {:ok, committed, true}
+      {:error, reason} -> {:error, {:checkpoint_reconciliation_failed, reason}}
+    end
+  end
+
+  @spec commit_loaded_checkpoint_snapshot(state(), state()) :: {:ok, state()} | {:error, term()}
+  defp commit_loaded_checkpoint_snapshot(state, candidate) do
+    if Persistence.enabled?(state.persistence) do
+      candidate = %{
+        candidate
+        | continuation: Continuation.mark_durable(candidate.continuation)
+      }
+
+      case save_to_disk(candidate) do
+        :ok -> {:ok, candidate}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :session_persistence_disabled}
+    end
+  end
+
+  @spec prepare_reconciliation_warning(state(), boolean()) :: {:ok, state()} | {:error, term()}
+  defp prepare_reconciliation_warning(state, true), do: {:ok, state}
+
+  defp prepare_reconciliation_warning(state, false) do
+    case EventLog.open_read_connection() do
+      {:ok, db} ->
+        try do
+          case all_event_log_events(db, state.session_id) do
+            {:ok, events} ->
+              interrupted =
+                Enum.filter(
+                  events,
+                  &(&1.event_type in [:tool_call_interrupted, :approval_interrupted])
+                )
+
+              case interrupted do
+                [] ->
+                  {:ok, state}
+
+                _events ->
+                  message =
+                    "Earlier admitted work was interrupted. Its outcome is treated as indeterminate and Minga will not rerun it automatically."
+
+                  {:ok, append_system_message(state, message, :error)}
+              end
+
+            {:error, reason} ->
+              {:error, {:event_log_reconciliation_failed, reason}}
+          end
+        after
+          MingaAgent.EventLog.Store.close(db)
+        end
+
+      {:error, :database_not_found} ->
         {:ok, state}
 
       {:error, reason} ->
-        {:error, {:memory_restore_failed, reason}}
+        {:error, {:event_log_reconciliation_failed, reason}}
     end
+  rescue
+    _error -> {:error, :event_log_reconciliation_failed}
+  end
+
+  @spec apply_loaded_model_to_provider(state(), String.t()) :: :ok | {:error, term()}
+  defp apply_loaded_model_to_provider(%{provider: provider}, _current_model)
+       when ProviderLifecycle.is_detached(provider),
+       do: :ok
+
+  defp apply_loaded_model_to_provider(state, current_model) do
+    case dispatch_optional(state.provider.module, :set_model, [
+           ProviderLifecycle.pid(state.provider),
+           state.provider.model_name
+         ]) do
+      :ok ->
+        :ok
+
+      {:error, :not_supported} when current_model == state.provider.model_name ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+
+      result ->
+        {:error, {:unexpected_model_restore_result, result}}
+    end
+  catch
+    :exit, reason -> {:error, {:provider_unavailable, reason}}
+  end
+
+  @spec rollback_loaded_provider_model(state(), String.t()) :: :ok | {:error, term()}
+  defp rollback_loaded_provider_model(%{provider: provider}, _current_model)
+       when ProviderLifecycle.is_detached(provider),
+       do: :ok
+
+  defp rollback_loaded_provider_model(state, current_model)
+       when current_model == state.provider.model_name,
+       do: :ok
+
+  defp rollback_loaded_provider_model(state, current_model) do
+    case dispatch_optional(state.provider.module, :set_model, [
+           ProviderLifecycle.pid(state.provider),
+           current_model
+         ]) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+      result -> {:error, {:unexpected_model_rollback_result, result}}
+    end
+  catch
+    :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
 
   @spec persist_current_before_replacement(state(), String.t()) :: :ok | {:error, term()}
   defp persist_current_before_replacement(%{session_id: target_id}, target_id), do: :ok
-  defp persist_current_before_replacement(state, _target_id), do: save_to_disk(state)
 
-  @spec apply_loaded_model_to_provider(state()) :: :ok
-  defp apply_loaded_model_to_provider(%{provider: provider})
-       when ProviderLifecycle.is_detached(provider),
-       do: :ok
-
-  defp apply_loaded_model_to_provider(state) do
-    dispatch_optional(state.provider.module, :set_model, [
-      ProviderLifecycle.pid(state.provider),
-      state.provider.model_name
-    ])
-
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
+  defp persist_current_before_replacement(state, _target_id),
+    do: state |> durable_save_candidate() |> save_to_disk()
 
   @spec restore_memory_snapshot_if_recorded(state(), SessionStore.session_data()) ::
           :ok | {:error, term()}
@@ -4068,9 +5443,16 @@ defmodule MingaAgent.Session do
 
   defp restore_memory_snapshot(state, memory) when is_binary(memory) do
     path = Memory.path(state.session_store_dir)
+    temporary_path = path <> ".restore.tmp"
 
-    with :ok <- File.mkdir_p(Path.dirname(path)) do
-      File.write(path, memory)
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(temporary_path, memory),
+         :ok <- File.rename(temporary_path, path) do
+      :ok
+    else
+      {:error, reason} ->
+        File.rm(temporary_path)
+        {:error, reason}
     end
   end
 
@@ -4123,6 +5505,27 @@ defmodule MingaAgent.Session do
       {:user, text, _attachments} when is_binary(text) -> text
       _ -> nil
     end)
+  end
+
+  @spec legacy_import_id(String.t()) :: String.t()
+  defp legacy_import_id(source_id) do
+    suffix = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+    "#{source_id}-portable-#{suffix}"
+  end
+
+  @spec prepare_legacy_import(SessionStore.session_data(), String.t()) ::
+          SessionStore.session_data()
+  defp prepare_legacy_import(data, imported_id) do
+    imported_notice =
+      "Imported legacy display history. Continuation is reconstructed and may omit provider signatures, tool groups, or attachments; the original record was preserved."
+
+    message_ids = Map.fetch!(data, :message_ids)
+    next_message_id = Enum.reduce(message_ids, 0, &max/2) + 1
+
+    data
+    |> Map.put(:id, imported_id)
+    |> Map.put(:messages, Enum.concat(data.messages, [{:system, imported_notice, :info}]))
+    |> Map.put(:message_ids, Enum.concat(message_ids, [next_message_id]))
   end
 
   defp generate_session_id do

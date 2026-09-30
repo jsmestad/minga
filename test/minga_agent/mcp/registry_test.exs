@@ -132,7 +132,7 @@ defmodule MingaAgent.MCP.RegistryTest do
 
     assert [failure] = failures
     assert failure =~ "MCP server Broken failed to start"
-    assert_receive {:agent_provider_event, %Event.Error{message: message}}
+    assert_receive {:agent_provider_lifecycle_event, %Event.Error{message: message}}
     assert message =~ "Broken"
 
     assert Enum.map(tools, & &1.name) == ["mcp_healthy__echo_text"]

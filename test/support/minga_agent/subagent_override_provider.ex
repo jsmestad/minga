@@ -21,10 +21,6 @@ defmodule Minga.Test.SubagentOverrideProvider do
   @impl MingaAgent.Provider
   def new_session(pid), do: SubagentRecordingProvider.new_session(pid)
 
-  @spec seed_messages(GenServer.server(), [term()]) :: :ok
-  @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
-
   @spec get_state(GenServer.server()) :: {:ok, map()}
   @impl MingaAgent.Provider
   def get_state(pid), do: SubagentRecordingProvider.get_state(pid)

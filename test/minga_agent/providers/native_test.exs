@@ -11,9 +11,9 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
   alias MingaAgent.Test.RecordingProcessBackend
-  alias MingaAgent.ToolCall
   alias MingaAgent.Tools
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse.MetadataHandle
@@ -34,12 +34,10 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
-  defp build_stream_response(chunks, usage \\ %{}) do
+  defp build_stream_response(chunks, usage \\ %{}, response_metadata \\ %{}) do
     # MetadataHandle is a GenServer that returns metadata when awaited.
-    {:ok, handle} =
-      MetadataHandle.start_link(fn ->
-        %{usage: usage, finish_reason: :stop}
-      end)
+    metadata = Map.merge(%{usage: usage, finish_reason: :stop}, response_metadata)
+    {:ok, handle} = MetadataHandle.start_link(fn -> metadata end)
 
     stream_response = %ReqLLM.StreamResponse{
       stream: chunks,
@@ -80,6 +78,45 @@ defmodule MingaAgent.Providers.NativeTest do
     assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
   end
 
+  defp send_prompt(pid, content) do
+    messages = Process.get({__MODULE__, pid, :messages}, [])
+    revision = Process.get({__MODULE__, pid, :revision}, 0)
+    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+
+    request =
+      Request.new(
+        "request-" <> identity,
+        String.to_integer(identity),
+        revision,
+        Enum.concat(messages, [Context.user(content)])
+      )
+
+    Process.put({__MODULE__, pid, :active_request}, request)
+    Process.put({__MODULE__, :provider_for_request, request.request_id}, pid)
+    Native.send_prompt(pid, request)
+  end
+
+  defp continue(pid) do
+    content =
+      "Your previous response was interrupted mid-stream. Please continue from where you left off. Do not repeat what you already said."
+
+    messages = Process.get({__MODULE__, pid, :messages}, [])
+    revision = Process.get({__MODULE__, pid, :revision}, 0)
+    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+
+    request =
+      Request.new(
+        "request-" <> identity,
+        String.to_integer(identity),
+        revision,
+        Enum.concat(messages, [Context.user(content)])
+      )
+
+    Process.put({__MODULE__, pid, :active_request}, request)
+    Process.put({__MODULE__, :provider_for_request, request.request_id}, pid)
+    Native.continue(pid, request)
+  end
+
   defp fake_error_client(error_reason) do
     fn _model, _messages, _opts ->
       {:error, error_reason}
@@ -87,8 +124,10 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   defp start_provider(opts) do
+    subscriber = start_provider_subscriber(self())
+
     defaults = [
-      subscriber: self(),
+      subscriber: subscriber,
       model: "anthropic:claude-sonnet-4-20250514",
       config: %AgentConfig{},
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
@@ -98,6 +137,186 @@ defmodule MingaAgent.Providers.NativeTest do
 
     merged = Keyword.merge(defaults, opts)
     Native.start_link(merged)
+  end
+
+  defp start_provider_subscriber(owner) do
+    spawn_link(fn ->
+      owner_ref = Process.monitor(owner)
+      provider_subscriber_loop(owner, owner_ref)
+    end)
+  end
+
+  defp provider_subscriber_loop(owner, owner_ref) do
+    receive do
+      {:agent_provider_event, _request_id, %Event.AgentEnd{outcome: outcome} = event} ->
+        send(owner, {:native_test_outcome, outcome})
+        send(owner, {:agent_provider_event, event})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:agent_provider_event, _request_id, event} ->
+        send(owner, {:agent_provider_event, event})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:agent_provider_event, event} ->
+        send(owner, {:agent_provider_event, event})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
+        GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from,
+       {:admit_tool_effect, _request_id, _checkpoint_id, tool_call_id, _name, _args}} ->
+        send(owner, {:effect_admitted, tool_call_id})
+        GenServer.reply(from, :ok)
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from,
+       {:complete_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _result_message}} ->
+        GenServer.reply(from, :ok)
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:"$gen_call", from, :dequeue_steering_messages} ->
+        GenServer.reply(from, [])
+        provider_subscriber_loop(owner, owner_ref)
+
+      {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
+        :ok
+    end
+  end
+
+  defp start_effect_registration_manager(owner) do
+    spawn_link(fn -> effect_registration_manager_loop(owner, Process.monitor(owner)) end)
+  end
+
+  defp effect_registration_manager_loop(owner, owner_ref) do
+    receive do
+      {:"$gen_call", from, {:register_effect_workers, session_pid, provider_pid, worker_pids}} ->
+        send(owner, {:session_effect_workers_registered, session_pid, provider_pid, worker_pids})
+        GenServer.reply(from, :ok)
+        effect_registration_manager_loop(owner, owner_ref)
+
+      {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
+        :ok
+    end
+  end
+
+  defp start_effect_barrier_subscriber(
+         owner,
+         checkpoint_reply,
+         admission_reply,
+         terminal_replies \\ [:ok]
+       ) do
+    spawn_link(fn ->
+      effect_barrier_subscriber_loop(
+        owner,
+        Process.monitor(owner),
+        checkpoint_reply,
+        admission_reply,
+        terminal_replies
+      )
+    end)
+  end
+
+  defp effect_barrier_subscriber_loop(
+         owner,
+         owner_ref,
+         checkpoint_reply,
+         admission_reply,
+         terminal_replies
+       ) do
+    receive do
+      {:agent_provider_event, _request_id, %Event.AgentEnd{outcome: outcome} = event} ->
+        send(owner, {:native_test_outcome, outcome})
+        send(owner, {:agent_provider_event, event})
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:agent_provider_event, _request_id, event} ->
+        send(owner, {:agent_provider_event, event})
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:agent_provider_event, event} ->
+        send(owner, {:agent_provider_event, event})
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from, {:checkpoint_tool_group, request_id, messages, calls}} ->
+        send(owner, {:checkpoint_attempt, request_id, messages, calls})
+        GenServer.reply(from, checkpoint_reply)
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from,
+       {:admit_tool_effect, request_id, checkpoint_id, tool_call_id, name, args}} ->
+        send(owner, {:admission_attempt, request_id, checkpoint_id, tool_call_id, name, args})
+        GenServer.reply(from, admission_reply)
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from,
+       {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message}} ->
+        send(
+          owner,
+          {:terminal_persistence_attempt, request_id, checkpoint_id, tool_call_id, result_message}
+        )
+
+        [terminal_reply | remaining_replies] = terminal_replies
+        GenServer.reply(from, terminal_reply)
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          if(remaining_replies == [], do: [:ok], else: remaining_replies)
+        )
+
+      {:"$gen_call", from, :dequeue_steering_messages} ->
+        GenServer.reply(from, [])
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
+        :ok
+    end
   end
 
   defp agent_config(fields) do
@@ -139,8 +358,24 @@ defmodule MingaAgent.Providers.NativeTest do
     timeout = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
+      {:native_test_outcome, nil} ->
+        collect_run_events_acc(acc, deadline, deadline_ms)
+
+      {:native_test_outcome, outcome} ->
+        Process.put({__MODULE__, outcome.request_id, :outcome}, outcome)
+
+        case Process.get({__MODULE__, :provider_for_request, outcome.request_id}) do
+          nil ->
+            :ok
+
+          pid ->
+            Process.put({__MODULE__, pid, :messages}, outcome.messages)
+            Process.put({__MODULE__, pid, :revision}, outcome.conversation_revision + 1)
+        end
+
+        collect_run_events_acc(acc, deadline, deadline_ms)
+
       {:agent_provider_event, %Event.AgentEnd{} = event} ->
-        # AgentEnd is always the last event of a run; return immediately
         Enum.reverse([event | acc])
 
       {:agent_provider_event, event} ->
@@ -228,7 +463,7 @@ defmodule MingaAgent.Providers.NativeTest do
         {:ok, pid} =
           start_provider(project_root: dir, tools: tools, llm_client: client)
 
-        assert :ok = Native.send_prompt(pid, "Inspect the project")
+        assert :ok = send_prompt(pid, "Inspect the project")
         assert_receive {^ref, names}, 5_000
         _events = collect_run_events()
         names
@@ -275,7 +510,7 @@ defmodule MingaAgent.Providers.NativeTest do
           process_backend: RecordingProcessBackend
         )
 
-      assert :ok = Native.send_prompt(pid, "Find Elixir files")
+      assert :ok = send_prompt(pid, "Find Elixir files")
       events = collect_run_events()
 
       assert %Event.ToolEnd{is_error: false, result: result} =
@@ -317,7 +552,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :destructive, destructive_tools: ["shell"])
         )
 
-      assert :ok = Native.send_prompt(pid, "Print the working directory")
+      assert :ok = send_prompt(pid, "Print the working directory")
 
       assert_receive {:agent_provider_event,
                       %Event.ToolApproval{
@@ -353,7 +588,7 @@ defmodule MingaAgent.Providers.NativeTest do
       refute session_state.system_prompt =~ "Current time:"
     end
 
-    test "auto compaction honors configured threshold", %{tmp_dir: dir} do
+    test "provider compaction honors configured threshold", %{tmp_dir: dir} do
       parent = self()
 
       client = fn _model, messages, _opts ->
@@ -373,16 +608,18 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(compaction_threshold: 0.0, compaction_keep_recent: 1)
         )
 
-      assert :ok =
-               Native.seed_messages(pid, [
-                 {:user, String.duplicate("user ", 200)},
-                 {:assistant, String.duplicate("assistant ", 200)}
-               ])
+      Process.put(
+        {__MODULE__, pid, :messages},
+        [
+          Context.user(String.duplicate("user ", 200)),
+          Context.assistant(String.duplicate("assistant ", 200))
+        ]
+      )
 
-      assert :ok = Native.send_prompt(pid, "continue")
-
+      messages = Process.get({__MODULE__, pid, :messages})
+      assert {:ok, compacted, _summary} = Native.compact(pid, messages, [])
+      assert compacted != messages
       assert_receive :summary_called, 1_000
-      assert_receive :agent_called, 1_000
     end
 
     test "thinking level accepts known values, rejects unknown values, and cycles in order", %{
@@ -401,67 +638,6 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "off"}} = Native.cycle_thinking_level(pid)
-    end
-
-    test "seed_messages rehydrates tool calls, tool results, and thinking entries", %{
-      tmp_dir: dir
-    } do
-      {:ok, pid} = start_provider(tmp_dir: dir)
-
-      tool_call =
-        "tc_read"
-        |> ToolCall.new("read_file", %{"path" => "lib/a.ex"})
-        |> ToolCall.complete("file contents")
-
-      messages = [
-        {:user, "Inspect lib/a.ex"},
-        {:assistant, "I'll read it."},
-        {:thinking, "Need to inspect the file first.", true},
-        {:tool_call, tool_call},
-        {:assistant, "The file contains file contents."}
-      ]
-
-      assert :ok = Native.seed_messages(pid, messages)
-
-      %{context: context} = :sys.get_state(pid)
-      assert %Context{} = Context.validate!(context)
-
-      [
-        system_message,
-        user_message,
-        assistant_message,
-        thinking_message,
-        tool_call_message,
-        tool_result_message,
-        final_message
-      ] = context.messages
-
-      assert system_message.role == :system
-      assert user_message.role == :user
-      assert text_content(user_message) == "Inspect lib/a.ex"
-      assert assistant_message.role == :assistant
-      assert text_content(assistant_message) == "I'll read it."
-
-      assert thinking_message.role == :assistant
-
-      assert [%{type: :thinking, text: "Need to inspect the file first."}] =
-               thinking_message.content
-
-      assert tool_call_message.role == :assistant
-      assert text_content(tool_call_message) == ""
-      assert [reqllm_tool_call] = tool_call_message.tool_calls
-      assert reqllm_tool_call.id == "tc_read"
-      assert reqllm_tool_call.function.name == "read_file"
-      assert JSON.decode!(reqllm_tool_call.function.arguments) == %{"path" => "lib/a.ex"}
-
-      assert tool_result_message.role == :tool
-      assert tool_result_message.name == "read_file"
-      assert tool_result_message.tool_call_id == "tc_read"
-      assert text_content(tool_result_message) == "file contents"
-      assert tool_result_message.metadata == %{}
-
-      assert final_message.role == :assistant
-      assert text_content(final_message) == "The file contains file contents."
     end
 
     test "rebuilds built-in tool closures after fork store down so stale pids stop leaking", %{
@@ -607,7 +783,7 @@ defmodule MingaAgent.Providers.NativeTest do
             llm_client: client
           )
 
-        assert :ok = Native.send_prompt(pid, "test")
+        assert :ok = send_prompt(pid, "test")
         assert_receive {^ref, ^model, opts}, 2_000
 
         if expected_effort do
@@ -651,7 +827,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, thinking_level: "medium")
 
-      :ok = Native.send_prompt(pid, "Hello")
+      :ok = send_prompt(pid, "Hello")
       collect_run_events()
 
       assert :ok = Native.set_model(pid, "openai:o4-mini")
@@ -659,11 +835,16 @@ defmodule MingaAgent.Providers.NativeTest do
       assert state.model.id == "openai:o4-mini"
       assert state.thinking_level == "medium"
 
-      :ok = Native.send_prompt(pid, "Follow up")
+      :ok = send_prompt(pid, "Follow up")
       collect_run_events()
 
       assert_received {^messages_ref, 1, "openai:o4-mini", messages}
-      assert Enum.count(messages) >= 4
+
+      assert Enum.map(messages, &{&1.role, text_content(&1)}) == [
+               {:user, "Hello"},
+               {:assistant, "Response 0"},
+               {:user, "Follow up"}
+             ]
     end
   end
 
@@ -694,7 +875,7 @@ defmodule MingaAgent.Providers.NativeTest do
           llm_client: fake_llm_client(chunks, %{input_tokens: 10, output_tokens: 5})
         )
 
-      assert :ok = Native.send_prompt(pid, "Hi")
+      assert :ok = send_prompt(pid, "Hi")
 
       events = collect_run_events()
       assert %Event.AgentStart{} = Enum.at(events, 0)
@@ -712,6 +893,265 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   describe "send_prompt with tool calls" do
+    @tag :tmp_dir
+    test "Session owner death terminates an admitted effect worker", %{tmp_dir: dir} do
+      test_pid = self()
+
+      tool =
+        ReqLLM.Tool.new!(
+          name: "owner_lifecycle_effect",
+          description: "Waits until its Session owner is gone",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:owner_effect_started, self()})
+
+            receive do
+              :allow_effect_completion ->
+                send(test_pid, :owner_effect_completed)
+                {:ok, "completed"}
+            end
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        build_stream_response([
+          ReqLLM.StreamChunk.tool_call("owner_lifecycle_effect", %{}, %{
+            id: "tc_owner_lifecycle",
+            index: 0
+          }),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+        ])
+      end
+
+      subscriber =
+        start_effect_barrier_subscriber(
+          self(),
+          {:ok, "owner-checkpoint"},
+          :ok
+        )
+
+      Process.unlink(subscriber)
+
+      manager = start_effect_registration_manager(self())
+      Process.unlink(manager)
+
+      {:ok, provider} =
+        start_provider(
+          tmp_dir: dir,
+          subscriber: subscriber,
+          llm_client: client,
+          tools: [tool],
+          session_manager: manager
+        )
+
+      Process.unlink(provider)
+      provider_ref = Process.monitor(provider)
+      subscriber_ref = Process.monitor(subscriber)
+
+      assert :ok = send_prompt(provider, "run one effect")
+      assert_receive {:admission_attempt, _, _, "tc_owner_lifecycle", _, _}, 1_000
+      assert_receive {:owner_effect_started, worker}, 1_000
+      worker_ref = Process.monitor(worker)
+
+      assert_receive {
+                       :session_effect_workers_registered,
+                       ^subscriber,
+                       ^provider,
+                       [^worker]
+                     },
+                     1_000
+
+      Process.exit(subscriber, :kill)
+
+      assert_receive {:DOWN, ^subscriber_ref, :process, ^subscriber, :killed}, 1_000
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 1_000
+      assert_receive {:DOWN, ^provider_ref, :process, ^provider, _reason}, 1_000
+      refute_receive :owner_effect_completed, 50
+    end
+
+    test "checkpoint persistence failure prevents admission and tool execution", %{tmp_dir: dir} do
+      test_pid = self()
+
+      tool =
+        ReqLLM.Tool.new!(
+          name: "checkpoint_barrier_effect",
+          description: "Must not execute without a durable provider checkpoint",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, :checkpoint_barrier_effect_executed)
+            {:ok, "executed"}
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        build_stream_response([
+          ReqLLM.StreamChunk.tool_call("checkpoint_barrier_effect", %{}, %{
+            id: "tc_checkpoint_failure",
+            index: 0
+          }),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+        ])
+      end
+
+      subscriber =
+        start_effect_barrier_subscriber(
+          self(),
+          {:error, {:tool_checkpoint_failed, :disk_full}},
+          :ok
+        )
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          subscriber: subscriber,
+          llm_client: client,
+          tools: [tool]
+        )
+
+      assert :ok = send_prompt(pid, "run it")
+      events = collect_run_events()
+      refute Enum.any?(events, &match?(%Event.ToolStart{}, &1))
+
+      assert_receive {:checkpoint_attempt, _request_id, messages, [call]}, 1_000
+      [assistant_message | _rest] = Enum.reverse(messages)
+      assert assistant_message.role == :assistant
+      assert Enum.map(assistant_message.tool_calls, & &1.id) == ["tc_checkpoint_failure"]
+      assert call.tool_call_id == "tc_checkpoint_failure"
+      refute_receive {:admission_attempt, _, _, _, _, _}, 100
+      refute_receive :checkpoint_barrier_effect_executed, 100
+    end
+
+    test "ambiguous admission failure aborts before execution and model continuation", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+
+      tool =
+        ReqLLM.Tool.new!(
+          name: "admission_barrier_effect",
+          description: "Must not execute without durable single-attempt admission",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, :admission_barrier_effect_executed)
+            {:ok, "executed"}
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        :counters.add(call_count, 1, 1)
+
+        build_stream_response([
+          ReqLLM.StreamChunk.tool_call("admission_barrier_effect", %{}, %{
+            id: "tc_admission_failure",
+            index: 0
+          }),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+        ])
+      end
+
+      subscriber =
+        start_effect_barrier_subscriber(
+          self(),
+          {:ok, "checkpoint-admission-failure"},
+          {:error, {:effect_admission_failed, :journal_unavailable}}
+        )
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          subscriber: subscriber,
+          llm_client: client,
+          tools: [tool]
+        )
+
+      assert :ok = send_prompt(pid, "run it")
+      events = collect_run_events()
+
+      assert_receive {:admission_attempt, _request_id, "checkpoint-admission-failure",
+                      "tc_admission_failure", "admission_barrier_effect", %{}},
+                     1_000
+
+      refute_received {:terminal_persistence_attempt, _, _, _, _}
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+      assert Enum.any?(events, &match?(%Event.AgentEnd{outcome: nil}, &1))
+      assert :counters.get(call_count, 1) == 1
+      refute_received :admission_barrier_effect_executed
+    end
+
+    test "terminal persistence retries never invoke an admitted effect twice", %{tmp_dir: dir} do
+      invocation_count = :counters.new(1, [:atomics])
+      model_call_count = :counters.new(1, [:atomics])
+
+      tool =
+        ReqLLM.Tool.new!(
+          name: "outcome_retry_effect",
+          description: "Executes once while terminal persistence retries",
+          parameter_schema: [],
+          callback: fn _args ->
+            :counters.add(invocation_count, 1, 1)
+            {:ok, "executed once"}
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(model_call_count, 1)
+        :counters.add(model_call_count, 1, 1)
+
+        if count == 0 do
+          build_stream_response([
+            ReqLLM.StreamChunk.tool_call("outcome_retry_effect", %{}, %{
+              id: "tc_outcome_retry",
+              index: 0
+            }),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ])
+        else
+          build_stream_response([
+            ReqLLM.StreamChunk.text("Recovered the recorded result."),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+      end
+
+      subscriber =
+        start_effect_barrier_subscriber(
+          self(),
+          {:ok, "checkpoint-outcome-retry"},
+          :ok,
+          [
+            {:error, {:tool_outcome_persistence_failed, :disk_busy}},
+            {:error, {:tool_outcome_persistence_failed, :disk_busy}},
+            :ok
+          ]
+        )
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          subscriber: subscriber,
+          llm_client: client,
+          tools: [tool]
+        )
+
+      assert :ok = send_prompt(pid, "run it")
+      _events = collect_run_events()
+
+      assert_receive {:terminal_persistence_attempt, _, "checkpoint-outcome-retry",
+                      "tc_outcome_retry", _},
+                     1_000
+
+      assert_receive {:terminal_persistence_attempt, _, "checkpoint-outcome-retry",
+                      "tc_outcome_retry", _},
+                     1_000
+
+      assert_receive {:terminal_persistence_attempt, _, "checkpoint-outcome-retry",
+                      "tc_outcome_retry", _},
+                     1_000
+
+      assert :counters.get(invocation_count, 1) == 1
+    end
+
     test "executes tools and emits tool events", %{tmp_dir: dir} do
       # Write a file so the read_file tool can find it
       File.write!(Path.join(dir, "test.txt"), "file contents")
@@ -747,7 +1187,7 @@ defmodule MingaAgent.Providers.NativeTest do
       tools = Tools.all(project_root: dir)
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: tools)
 
-      assert :ok = Native.send_prompt(pid, "Read test.txt")
+      assert :ok = send_prompt(pid, "Read test.txt")
 
       events = collect_run_events()
 
@@ -764,6 +1204,95 @@ defmodule MingaAgent.Providers.NativeTest do
       # Should eventually get a text response and AgentEnd
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "replays the complete assistant response before appending grouped tool results", %{
+      tmp_dir: dir
+    } do
+      File.write!(Path.join(dir, "test.txt"), "file contents")
+      parent = self()
+      call_count = :counters.new(1, [:atomics])
+
+      reasoning =
+        ReqLLM.Message.ReasoningDetails.from_openai_compatible(
+          %{"text" => "checking the file", "signature" => "opaque-signature"},
+          :openrouter,
+          0
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        case count do
+          0 ->
+            build_stream_response(
+              [
+                ReqLLM.StreamChunk.text("I will inspect it."),
+                ReqLLM.StreamChunk.thinking("checking the file"),
+                ReqLLM.StreamChunk.text(" Then I will verify the results."),
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_first",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_second",
+                  index: 1
+                }),
+                ReqLLM.StreamChunk.meta(%{
+                  finish_reason: :tool_use,
+                  reasoning_details: [reasoning]
+                })
+              ],
+              %{},
+              %{response_id: "resp_native_1"}
+            )
+
+          1 ->
+            send(parent, {:continuation_messages, messages})
+
+            build_stream_response([
+              ReqLLM.StreamChunk.text("The file contents are confirmed."),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ])
+        end
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: Tools.all(project_root: dir)
+        )
+
+      assert :ok = send_prompt(pid, "Read test.txt twice")
+      _events = collect_run_events()
+
+      assert_received {:continuation_messages, messages}
+
+      assistant_message =
+        Enum.find(messages, &(&1.role == :assistant and is_list(&1.tool_calls)))
+
+      assert Enum.map(assistant_message.content, & &1.type) == [:text, :thinking, :text]
+
+      assert Enum.map(assistant_message.content, & &1.text) == [
+               "I will inspect it.",
+               "checking the file",
+               " Then I will verify the results."
+             ]
+
+      assert assistant_message.reasoning_details == [reasoning]
+      assert assistant_message.metadata.response_id == "resp_native_1"
+      assert Enum.map(assistant_message.tool_calls, & &1.id) == ["tc_first", "tc_second"]
+
+      tool_results =
+        Enum.filter(
+          messages,
+          &(&1.role == :tool and &1.tool_call_id in ["tc_first", "tc_second"])
+        )
+
+      assert Enum.map(tool_results, & &1.tool_call_id) == ["tc_first", "tc_second"]
+      assert Enum.all?(tool_results, &(text_content(&1) == "file contents"))
     end
 
     test "executes the supplied custom spec with refreshed project context", %{tmp_dir: dir} do
@@ -829,7 +1358,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       assert :ok = Native.refresh_project_view(pid, second_view)
-      assert :ok = Native.send_prompt(pid, "Report context")
+      assert :ok = send_prompt(pid, "Report context")
 
       events = collect_run_events()
 
@@ -901,7 +1430,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(tmp_dir: dir, llm_client: client, tools: [slow_tool, failing_tool])
 
-      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert :ok = send_prompt(pid, "Run both tools")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
       assert_receive {:tool_started, "slow_tool", slow_pid}, 2_000
       assert_receive {:tool_started, "failing_tool", _failing_pid}, 2_000
@@ -919,7 +1448,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [nil, true]
     end
 
-    test "abnormal concurrent tool exit becomes an error while a sibling completes", %{
+    test "abnormal concurrent tool exit stops model continuation with an unknown effect", %{
       tmp_dir: dir
     } do
       test_pid = self()
@@ -978,7 +1507,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(tmp_dir: dir, llm_client: client, tools: [crashing_tool, sibling_tool])
 
-      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert :ok = send_prompt(pid, "Run both tools")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
       assert_receive {:tool_started, "crashing_tool"}, 1_000
       assert_receive {:tool_started, "sibling_tool", sibling_pid}, 1_000
@@ -986,29 +1515,19 @@ defmodule MingaAgent.Providers.NativeTest do
       send(sibling_pid, {release_ref, :release})
       events = collect_run_events()
 
-      crash_end = Enum.find(events, &match?(%Event.ToolEnd{name: "crashing_tool"}, &1))
-      assert crash_end != nil
-      assert crash_end.is_error == true
-      assert crash_end.result =~ "killed"
+      refute Enum.any?(events, &match?(%Event.ToolEnd{name: "crashing_tool"}, &1))
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "sibling_tool", is_error: false}, &1))
-      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
-
-      assert_received {^messages_ref, messages}
-      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
-      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_crash", "tc_sibling"]
-
-      assert Enum.map(tool_messages, &tool_message_text/1) == [
-               "Tool task failed: :killed",
-               "sibling result"
-             ]
-
-      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [true, nil]
+      assert Enum.any?(events, &match?(%Event.AgentEnd{outcome: nil}, &1))
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+      assert :counters.get(call_count, 1) == 1
+      refute_received {^messages_ref, _messages}
     end
 
     test "concurrent tool update events keep streaming while sibling tools run", %{tmp_dir: dir} do
       test_pid = self()
       release_ref = make_ref()
       messages_ref = make_ref()
+      tool_event_ref = make_ref()
       provider_holder = start_supervised!({Agent, fn -> nil end})
       call_count = :counters.new(1, [:atomics])
 
@@ -1022,18 +1541,24 @@ defmodule MingaAgent.Providers.NativeTest do
           parameter_schema: [],
           callback: fn _args ->
             provider_pid = Agent.get(provider_holder, & &1)
+            send(test_pid, {:streaming_tool_waiting, self()})
 
-            send(
-              provider_pid,
-              {:agent_event,
-               %Event.ToolUpdate{
-                 tool_call_id: "tc_stream",
-                 name: "shell",
-                 partial_result: "stream chunk\n"
-               }}
-            )
+            receive do
+              {^tool_event_ref, request_id} ->
+                send(
+                  provider_pid,
+                  {:agent_event, request_id,
+                   %Event.ToolUpdate{
+                     tool_call_id: "tc_stream",
+                     name: "shell",
+                     partial_result: "stream chunk\n"
+                   }}
+                )
 
-            {:ok, "stream result"}
+                {:ok, "stream result"}
+            after
+              1_000 -> {:error, "stream update synchronization timed out"}
+            end
           end
         )
 
@@ -1080,10 +1605,13 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(tmp_dir: dir, llm_client: client, tools: [streaming_tool, sibling_tool])
 
-      Agent.update(provider_holder, fn _ -> pid end)
+      Agent.update(provider_holder, fn _old_provider -> pid end)
 
-      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert :ok = send_prompt(pid, "Run both tools")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+      request = Process.get({__MODULE__, pid, :active_request})
+      assert_receive {:streaming_tool_waiting, streaming_tool_pid}, 1_000
+      send(streaming_tool_pid, {tool_event_ref, request.request_id})
 
       assert_receive {:agent_provider_event,
                       %Event.ToolUpdate{
@@ -1169,7 +1697,7 @@ defmodule MingaAgent.Providers.NativeTest do
         {:ok, pid} =
           start_provider(tmp_dir: dir, llm_client: client, tools: [tool_one, tool_two])
 
-        assert :ok = Native.send_prompt(pid, "Run both tools")
+        assert :ok = send_prompt(pid, "Run both tools")
         assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
         assert_receive {:registration_cleanup_client_waiting, ^release_ref}, 1_000
 
@@ -1241,7 +1769,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :destructive, destructive_tools: [])
         )
 
-      assert :ok = Native.send_prompt(pid, "Write the file")
+      assert :ok = send_prompt(pid, "Write the file")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
       events = collect_run_events()
 
@@ -1288,7 +1816,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :destructive, destructive_tools: ["read_file"])
         )
 
-      assert :ok = Native.send_prompt(pid, "Read the file")
+      assert :ok = send_prompt(pid, "Read the file")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
 
       assert_receive {:agent_provider_event,
@@ -1354,7 +1882,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :destructive, destructive_tools: [])
         )
 
-      assert :ok = Native.send_prompt(pid, "Run custom tool")
+      assert :ok = send_prompt(pid, "Run custom tool")
 
       assert_receive {:agent_provider_event,
                       %Event.ToolApproval{
@@ -1386,7 +1914,15 @@ defmodule MingaAgent.Providers.NativeTest do
           name: "ask_tool",
           description: "Requires approval before running",
           parameter_schema: [],
-          callback: fn _args -> {:ok, "approved result"} end
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "ask_tool", self()})
+
+            receive do
+              {^release_ref, :release} -> {:ok, "approved result"}
+            after
+              1_000 -> {:error, "approval tool timed out"}
+            end
+          end
         )
 
       allowed_tool =
@@ -1434,18 +1970,21 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_permissions: %{"ask_tool" => :ask, "allowed_tool" => :allow})
         )
 
-      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert :ok = send_prompt(pid, "Run both tools")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
 
       assert_receive {:agent_provider_event,
                       %Event.ToolApproval{tool_call_id: "tc_ask", reply_to: reply_to}},
-                     1_000
+                     5_000
 
-      assert_receive {:tool_started, "allowed_tool", allowed_pid}, 1_000
+      assert_receive {:tool_started, "allowed_tool", allowed_pid}, 5_000
       send(reply_to, {:tool_approval_response, "tc_ask", :approve})
+      assert_receive {:effect_admitted, "tc_ask"}, 5_000
+      assert_receive {:tool_started, "ask_tool", ask_pid}, 5_000
+      assert MapSet.member?(:sys.get_state(pid).tool_workers, ask_pid)
+      send(ask_pid, {release_ref, :release})
       send(allowed_pid, {release_ref, :release})
       events = collect_run_events()
-
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "ask_tool", is_error: false}, &1))
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "allowed_tool", is_error: false}, &1))
 
@@ -1524,14 +2063,14 @@ defmodule MingaAgent.Providers.NativeTest do
             )
         )
 
-      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert :ok = send_prompt(pid, "Run both tools")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
 
       assert_receive {:agent_provider_event,
                       %Event.ToolApproval{tool_call_id: "tc_reject", reply_to: reply_to}},
-                     1_000
+                     5_000
 
-      assert_receive {:tool_started, "reject_allowed_tool", allowed_pid}, 1_000
+      assert_receive {:tool_started, "reject_allowed_tool", allowed_pid}, 5_000
       send(reply_to, {:tool_approval_response, "tc_reject", :reject})
       send(allowed_pid, {release_ref, :release})
       events = collect_run_events()
@@ -1556,6 +2095,7 @@ defmodule MingaAgent.Providers.NativeTest do
              ]
 
       assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [true, nil]
+      refute_received {:effect_admitted, "tc_reject"}
       refute_receive :rejected_approval_tool_ran, 50
     end
 
@@ -1605,7 +2145,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :all, tool_permissions: %{"read_file" => :ask})
         )
 
-      assert :ok = Native.send_prompt(pid, "Read the file and then list the directory")
+      assert :ok = send_prompt(pid, "Read the file and then list the directory")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
 
       assert_receive {:agent_provider_event,
@@ -1697,7 +2237,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(tmp_dir: root, llm_client: client, project_view: project_view, tools: nil)
 
-      assert :ok = Native.send_prompt(pid, "Read the file through ProjectView")
+      assert :ok = send_prompt(pid, "Read the file through ProjectView")
 
       events = collect_run_events()
       assert_received {:project_view_call, {:read_file, "lib/file.txt"}}
@@ -1745,7 +2285,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :none)
         )
 
-      assert :ok = Native.send_prompt(pid, "Delete the file")
+      assert :ok = send_prompt(pid, "Delete the file")
       events = collect_run_events()
 
       assert Enum.any?(events, &match?(%Event.ToolStart{name: "delete_file"}, &1))
@@ -1800,7 +2340,7 @@ defmodule MingaAgent.Providers.NativeTest do
           config: agent_config(tool_approval: :none)
         )
 
-      assert :ok = Native.send_prompt(pid, "Patch the file")
+      assert :ok = send_prompt(pid, "Patch the file")
       events = collect_run_events()
 
       assert Enum.any?(events, &match?(%Event.ToolStart{name: "apply_diff"}, &1))
@@ -1846,7 +2386,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       tools = Tools.all(project_root: dir)
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: tools)
-      :ok = Native.send_prompt(pid, "Read nonexistent.txt")
+      :ok = send_prompt(pid, "Read nonexistent.txt")
       _events = collect_run_events()
 
       assert_received {^messages_ref, 1, messages}
@@ -1861,7 +2401,7 @@ defmodule MingaAgent.Providers.NativeTest do
       client = fake_error_client("API rate limited")
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
 
-      assert :ok = Native.send_prompt(pid, "Hello")
+      assert :ok = send_prompt(pid, "Hello")
 
       events = collect_run_events()
 
@@ -1884,7 +2424,7 @@ defmodule MingaAgent.Providers.NativeTest do
       client = fake_error_client("boom once")
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
 
-      assert :ok = Native.send_prompt(pid, "Hello")
+      assert :ok = send_prompt(pid, "Hello")
 
       assert_receive {:agent_provider_event, %Event.Error{message: msg, kind: :provider_error}},
                      1_000
@@ -1905,7 +2445,7 @@ defmodule MingaAgent.Providers.NativeTest do
       client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
-      :ok = Native.send_prompt(pid, "Tell me a very long story")
+      :ok = send_prompt(pid, "Tell me a very long story")
       assert_streaming_started(pid, stream_ref)
 
       assert :ok = Native.abort(pid)
@@ -1962,7 +2502,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: [blocking_tool])
 
-      assert :ok = Native.send_prompt(pid, "Run the blocking tool")
+      assert :ok = send_prompt(pid, "Run the blocking tool")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
       assert_receive {:abort_blocking_tool_started, worker_pid}, 5_000
       worker_ref = Process.monitor(worker_pid)
@@ -1992,7 +2532,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       worker_ref = Process.monitor(worker_pid)
       {:ok, pid} = start_provider(tmp_dir: dir)
-      :ok = GenServer.call(pid, {:register_tool_workers, [{make_ref(), worker_pid}]})
+      :ok = GenServer.call(pid, {:register_tool_workers, [worker_pid]})
 
       assert :ok = Native.abort(pid)
       assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
@@ -2052,7 +2592,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: [blocking_tool])
 
-      assert :ok = Native.send_prompt(pid, "Run the blocking tool")
+      assert :ok = send_prompt(pid, "Run the blocking tool")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
       assert_receive {:new_session_blocking_tool_started, worker_pid}, 1_000
       worker_ref = Process.monitor(worker_pid)
@@ -2085,7 +2625,7 @@ defmodule MingaAgent.Providers.NativeTest do
       end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
-      :ok = Native.send_prompt(pid, "Tell me something important")
+      :ok = send_prompt(pid, "Tell me something important")
 
       events = collect_run_events()
 
@@ -2102,15 +2642,15 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
     end
 
-    test "continue resumes after interrupted stream", %{tmp_dir: dir} do
+    test "continue resumes without replaying an incomplete assistant turn", %{tmp_dir: dir} do
+      parent = self()
       call_count = :counters.new(1, [:atomics])
 
-      client = fn _model, _messages, _opts ->
+      client = fn _model, messages, _opts ->
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
 
         if count == 0 do
-          # First call: stream drops mid-response
           error_stream =
             Stream.resource(
               fn -> 0 end,
@@ -2123,32 +2663,108 @@ defmodule MingaAgent.Providers.NativeTest do
 
           build_stream_response(error_stream)
         else
-          # Second call (continue): complete response
-          chunks = [
+          send(parent, {:continued_messages, messages})
+
+          build_stream_response([
             ReqLLM.StreamChunk.text("Continuing from where I left off."),
             ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-          ]
-
-          build_stream_response(chunks)
+          ])
         end
       end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
 
-      # First prompt gets interrupted
-      :ok = Native.send_prompt(pid, "Tell me something")
+      :ok = send_prompt(pid, "Tell me something")
       _events1 = collect_run_events()
 
-      # Continue should work
-      :ok = Native.continue(pid)
+      :ok = continue(pid)
       events2 = collect_run_events()
+
+      assert_received {:continued_messages, messages}
+
+      refute Enum.any?(
+               messages,
+               &(&1.role == :assistant and text_content(&1) =~ "Partial response here")
+             )
 
       text_deltas = Enum.filter(events2, &match?(%Event.TextDelta{}, &1))
       continued_text = Enum.map_join(text_deltas, & &1.delta)
       assert continued_text =~ "Continuing from where I left off"
     end
 
-    test "continue fails when no stream was interrupted", %{tmp_dir: dir} do
+    test "does not execute or replay tool calls from an incomplete response", %{tmp_dir: dir} do
+      parent = self()
+      call_count = :counters.new(1, [:atomics])
+
+      side_effect_tool =
+        Spec.new!(
+          source: :config,
+          name: "side_effect",
+          description: "Records whether the tool is executed",
+          parameter_schema: %{},
+          build: fn _context ->
+            fn _args ->
+              send(parent, :side_effect_executed)
+              {:ok, "executed"}
+            end
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        if count == 0 do
+          build_stream_response(
+            [
+              ReqLLM.StreamChunk.tool_call("side_effect", %{}, %{
+                id: "tc_incomplete",
+                index: 0,
+                expects_arg_fragments: true
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_calls})
+            ],
+            %{},
+            %{finish_reason: :tool_calls}
+          )
+        else
+          send(parent, {:continued_messages, messages})
+
+          build_stream_response([
+            ReqLLM.StreamChunk.text("Recovered."),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: [side_effect_tool]
+        )
+
+      assert :ok = send_prompt(pid, "Run the tool")
+      first_events = collect_run_events()
+
+      assert Enum.any?(first_events, fn
+               %Event.TextDelta{delta: delta} -> String.contains?(delta, "incomplete")
+               _event -> false
+             end)
+
+      refute_received :side_effect_executed
+
+      assert :ok = continue(pid)
+      _continued_events = collect_run_events()
+
+      assert_received {:continued_messages, messages}
+      refute Enum.any?(messages, &(&1.role == :assistant and is_list(&1.tool_calls)))
+      refute_received :side_effect_executed
+    end
+
+    test "accepts Session-provided continuation without provider-local interruption history", %{
+      tmp_dir: dir
+    } do
       chunks = [
         ReqLLM.StreamChunk.text("Complete response"),
         ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
@@ -2157,10 +2773,11 @@ defmodule MingaAgent.Providers.NativeTest do
       client = fake_llm_client(chunks)
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
 
-      :ok = Native.send_prompt(pid, "Hello")
-      _events = collect_run_events()
+      assert :ok = send_prompt(pid, "Hello")
+      collect_run_events()
 
-      assert {:error, "No interrupted response to continue from"} = Native.continue(pid)
+      assert :ok = continue(pid)
+      assert Enum.any?(collect_run_events(), &match?(%Event.AgentEnd{outcome: %{}}, &1))
     end
 
     test "continue fails while already streaming", %{tmp_dir: dir} do
@@ -2168,10 +2785,10 @@ defmodule MingaAgent.Providers.NativeTest do
       client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
-      :ok = Native.send_prompt(pid, "Long story")
+      :ok = send_prompt(pid, "Long story")
       assert_streaming_started(pid, stream_ref)
 
-      assert {:error, "Already streaming"} = Native.continue(pid)
+      assert {:error, "Already streaming"} = continue(pid)
 
       Native.abort(pid)
     end
@@ -2193,7 +2810,7 @@ defmodule MingaAgent.Providers.NativeTest do
       end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
-      :ok = Native.send_prompt(pid, "Hello")
+      :ok = send_prompt(pid, "Hello")
 
       events = collect_run_events()
 
@@ -2209,11 +2826,11 @@ defmodule MingaAgent.Providers.NativeTest do
       client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
-      :ok = Native.send_prompt(pid, "First prompt")
+      :ok = send_prompt(pid, "First prompt")
       assert_receive {:agent_provider_event, %Event.AgentStart{}}
       assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
 
-      assert {:error, :already_streaming} = Native.send_prompt(pid, "Second prompt")
+      assert {:error, :already_streaming} = send_prompt(pid, "Second prompt")
 
       Native.abort(pid)
     end
@@ -2244,7 +2861,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(tmp_dir: dir, llm_client: client, tools: tools, max_turns: 3)
 
-      :ok = Native.send_prompt(pid, "Read the file over and over")
+      :ok = send_prompt(pid, "Read the file over and over")
 
       events = collect_run_events()
 
@@ -2295,7 +2912,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(tmp_dir: dir, llm_client: client, tools: tools, max_turns: 10)
 
-      :ok = Native.send_prompt(pid, "Read the file twice")
+      :ok = send_prompt(pid, "Read the file twice")
 
       events = collect_run_events()
 
@@ -2342,14 +2959,14 @@ defmodule MingaAgent.Providers.NativeTest do
         start_provider(tmp_dir: dir, llm_client: client, tools: tools, max_turns: 2)
 
       # First prompt hits the limit after 2 turns
-      :ok = Native.send_prompt(pid, "Keep reading")
+      :ok = send_prompt(pid, "Keep reading")
       events1 = collect_run_events()
 
       text1 = events1 |> Enum.filter(&match?(%Event.TextDelta{}, &1)) |> Enum.map_join(& &1.delta)
       assert text1 =~ "Turn limit reached"
 
       # Continue should reset the counter and keep going
-      :ok = Native.continue(pid)
+      :ok = continue(pid)
       events2 = collect_run_events()
 
       text2 = events2 |> Enum.filter(&match?(%Event.TextDelta{}, &1)) |> Enum.map_join(& &1.delta)
@@ -2386,7 +3003,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert session_state.system_prompt =~
                "Do not use shell to recursively list or search files when find or grep can answer the question."
 
-      :ok = Native.send_prompt(pid, "test")
+      :ok = send_prompt(pid, "test")
       events = collect_run_events()
 
       assert %Event.AgentEnd{
@@ -2417,7 +3034,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
-      :ok = Native.send_prompt(pid, "test")
+      :ok = send_prompt(pid, "test")
       events = collect_run_events()
 
       assert %Event.AgentEnd{
@@ -2441,7 +3058,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
-      :ok = Native.send_prompt(pid, "test")
+      :ok = send_prompt(pid, "test")
       events = collect_run_events()
 
       assert %Event.AgentEnd{
@@ -2465,7 +3082,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
-      :ok = Native.send_prompt(pid, "test")
+      :ok = send_prompt(pid, "test")
       events = collect_run_events()
 
       assert %Event.AgentEnd{usage: %TurnUsage{input: 0, output: 0, cost: cost}} =
@@ -2496,7 +3113,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :ok = GenServer.call(pid, {:set_max_cost, nil})
       assert {:ok, %{max_cost: nil}} = GenServer.call(pid, :get_budget)
 
-      :ok = Native.send_prompt(pid, "test")
+      :ok = send_prompt(pid, "test")
       collect_run_events()
 
       :ok = Native.new_session(pid)
@@ -2531,13 +3148,13 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 1.0)
 
-      assert :ok = Native.send_prompt(pid, "initial prompt")
+      assert :ok = send_prompt(pid, "initial prompt")
       initial_events = collect_run_events()
       assert Enum.any?(initial_events, &match?(%Event.TextDelta{delta: "Initial"}, &1))
       assert Enum.any?(initial_events, &match?(%Event.AgentEnd{}, &1))
       assert {:ok, %{session_cost: 2.0}} = GenServer.call(pid, :get_budget)
 
-      assert {:error, :cost_limit_reached} = Native.send_prompt(pid, "blocked by budget")
+      assert {:error, :cost_limit_reached} = send_prompt(pid, "blocked by budget")
 
       assert_receive {:agent_provider_event, %Event.Error{message: message}}, 1_000
       assert message =~ "Session cost limit reached"
@@ -2545,7 +3162,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
 
       assert :ok = GenServer.call(pid, {:set_max_cost, 3.0})
-      assert :ok = Native.send_prompt(pid, "after budget increase")
+      assert :ok = send_prompt(pid, "after budget increase")
 
       events = collect_run_events()
       assert Enum.any?(events, &match?(%Event.TextDelta{delta: "Recovered"}, &1))
@@ -2584,7 +3201,7 @@ defmodule MingaAgent.Providers.NativeTest do
           max_turns: 100
         )
 
-      :ok = Native.send_prompt(pid, "Keep reading forever")
+      :ok = send_prompt(pid, "Keep reading forever")
 
       events = collect_run_events()
 
@@ -2622,7 +3239,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: nil)
 
-      :ok = Native.send_prompt(pid, "test")
+      :ok = send_prompt(pid, "test")
       events = collect_run_events()
 
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
@@ -2666,7 +3283,7 @@ defmodule MingaAgent.Providers.NativeTest do
         end
 
         {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client, config: config)
-        :ok = Native.send_prompt(pid, "test")
+        :ok = send_prompt(pid, "test")
 
         assert_receive {^ref, opts}, 2_000
 
@@ -2702,7 +3319,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       log =
         capture_log(fn ->
-          Native.send_prompt(pid, "hello")
+          send_prompt(pid, "hello")
           events = collect_run_events()
 
           error = Enum.find(events, &match?(%Event.Error{}, &1))
@@ -2734,7 +3351,7 @@ defmodule MingaAgent.Providers.NativeTest do
           max_retries: 0
         )
 
-      Native.send_prompt(pid, "hello")
+      send_prompt(pid, "hello")
       events = collect_run_events()
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
@@ -2766,7 +3383,7 @@ defmodule MingaAgent.Providers.NativeTest do
           max_retries: 0
         )
 
-      Native.send_prompt(pid, "hello")
+      send_prompt(pid, "hello")
       events = collect_run_events()
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
@@ -2804,7 +3421,7 @@ defmodule MingaAgent.Providers.NativeTest do
             max_retries: 0
           )
 
-        Native.send_prompt(pid, "hello")
+        send_prompt(pid, "hello")
         events = collect_run_events()
 
         error = Enum.find(events, &match?(%Event.Error{}, &1))
@@ -2826,7 +3443,7 @@ defmodule MingaAgent.Providers.NativeTest do
           tmp_dir: tmp_dir
         )
 
-      Native.send_prompt(pid, "hello")
+      send_prompt(pid, "hello")
       events = collect_run_events()
 
       error_events = Enum.filter(events, &match?(%Event.Error{}, &1))

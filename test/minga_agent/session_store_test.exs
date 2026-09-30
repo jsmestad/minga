@@ -2,6 +2,8 @@ defmodule MingaAgent.SessionStoreTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Branch
+  alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.SessionStore
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.ToolCall
@@ -40,6 +42,7 @@ defmodule MingaAgent.SessionStoreTest do
       message_ids: [10, 20, 30, 40, 50, 60],
       pinned_ids: MapSet.new([20, 50]),
       usage: %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003},
+      continuation: Continuation.new(),
       branches: [
         Branch.new(
           "branch-1",
@@ -63,6 +66,36 @@ defmodule MingaAgent.SessionStoreTest do
       assert loaded.model_name == "claude-sonnet-4"
     end
 
+    test "persists the exact active request for restart recovery" do
+      data = sample_data()
+
+      assert {:ok, request, continuation} =
+               Continuation.begin_request(data.continuation, "request-in-flight", 21, [
+                 ReqLLM.Context.user("continue this exact prompt")
+               ])
+
+      assert :ok = SessionStore.save(%{data | continuation: continuation})
+      assert {:ok, loaded} = SessionStore.load(data.id)
+      assert loaded.continuation.active_request == request
+      assert loaded.continuation.active_request.messages == request.messages
+    end
+
+    test "rejects omitted and out-of-range continuation history fields" do
+      encoded = ContinuationCodec.encode(Continuation.new())
+
+      for field <- ["boundaries", "branches"] do
+        assert {:error, :invalid_continuation} =
+                 encoded |> Map.delete(field) |> ContinuationCodec.decode()
+      end
+
+      malformed_boundary = %{"transcript_id" => 1, "message_count" => 1, "revision" => 1}
+
+      assert {:error, :invalid_continuation_boundaries} =
+               encoded
+               |> Map.put("boundaries", [malformed_boundary])
+               |> ContinuationCodec.decode()
+    end
+
     test "preserves user messages" do
       data = sample_data()
       SessionStore.save(data)
@@ -75,7 +108,9 @@ defmodule MingaAgent.SessionStoreTest do
     test "preserves user message attachments" do
       data = %{
         sample_data()
-        | messages: [{:user, "see image", [%{filename: "chart.png", size_kb: 42}]}]
+        | messages: [{:user, "see image", [%{filename: "chart.png", size_kb: 42}]}],
+          message_ids: [10],
+          pinned_ids: MapSet.new()
       }
 
       SessionStore.save(data)
@@ -110,7 +145,7 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.preview == nil
     end
 
-    test "loads corrupted message atoms defensively", %{tmp_dir: dir} do
+    test "rejects unknown legacy tool status instead of inventing a completion", %{tmp_dir: dir} do
       sessions_dir = SessionStore.sessions_dir(dir)
       File.mkdir_p!(sessions_dir)
 
@@ -128,9 +163,8 @@ defmodule MingaAgent.SessionStoreTest do
         })
       )
 
-      assert {:ok, loaded} = SessionStore.load("bad-atoms", dir)
-      assert {:system, "bad level", :info} in loaded.messages
-      assert {:tool_call, %{status: :complete}} = Enum.at(loaded.messages, -1)
+      assert {:error, :legacy_import_required} = SessionStore.load("bad-atoms", dir)
+      assert {:error, :invalid_session_record} = SessionStore.load_legacy("bad-atoms", dir)
     end
 
     test "rejects malformed preview payloads defensively", %{tmp_dir: dir} do
@@ -161,7 +195,8 @@ defmodule MingaAgent.SessionStoreTest do
 
       File.write!(Path.join(sessions_dir, "bad-preview-kind.json"), JSON.encode!(base_payload))
 
-      {:ok, loaded_kind} = SessionStore.load("bad-preview-kind", dir)
+      {:ok, loaded_kind} = SessionStore.load_legacy("bad-preview-kind", dir)
+
       [{:tool_call, tool_call_kind}] = loaded_kind.messages
       assert tool_call_kind.preview == nil
 
@@ -177,7 +212,8 @@ defmodule MingaAgent.SessionStoreTest do
         JSON.encode!(bad_lines_payload)
       )
 
-      {:ok, loaded_lines} = SessionStore.load("bad-preview-lines", dir)
+      {:ok, loaded_lines} = SessionStore.load_legacy("bad-preview-lines", dir)
+
       [{:tool_call, tool_call_lines}] = loaded_lines.messages
       assert tool_call_lines.preview == nil
     end
@@ -265,12 +301,69 @@ defmodule MingaAgent.SessionStoreTest do
         })
       )
 
+      source = File.read!(Path.join(sessions_dir, "legacy-branch.json"))
+      assert {:error, :legacy_import_required} = SessionStore.load("legacy-branch", dir)
+
       assert {:ok, %{branches: [branch], message_ids: [1, 2], pinned_ids: pinned_ids}} =
-               SessionStore.load("legacy-branch", dir)
+               SessionStore.load_legacy("legacy-branch", dir)
+
+      assert File.read!(Path.join(sessions_dir, "legacy-branch.json")) == source
 
       assert Branch.messages(branch) == [{:user, "question"}, {:assistant, "answer"}]
       assert Branch.entry_ids(branch) == [1, 2]
       assert pinned_ids == MapSet.new([2])
+    end
+
+    test "version-one records require explicit legacy import", %{tmp_dir: dir} do
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+      path = Path.join(sessions_dir, "version-one.json")
+
+      File.write!(
+        path,
+        JSON.encode!(%{
+          "id" => "version-one",
+          "version" => 1,
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "model_name" => "test-model",
+          "messages" => [%{"type" => "user", "text" => "question"}],
+          "usage" => %{}
+        })
+      )
+
+      assert {:error, :legacy_import_required} = SessionStore.load("version-one", dir)
+      assert {:ok, imported} = SessionStore.load_legacy("version-one", dir)
+      assert imported.continuation.provenance == :legacy_reconstructed
+      assert {:ok, original} = JSON.decode(File.read!(path))
+      assert original["version"] == 1
+
+      assert [%{id: "version-one", continuation_kind: :legacy_import_required}] =
+               SessionStore.list(dir)
+    end
+
+    test "legacy imports retain reconstructed provenance after being saved as version two", %{
+      tmp_dir: dir
+    } do
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      File.write!(
+        Path.join(sessions_dir, "legacy-provenance.json"),
+        JSON.encode!(%{
+          "id" => "legacy-provenance",
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "model_name" => "test-model",
+          "messages" => [%{"type" => "user", "text" => "question"}],
+          "usage" => %{}
+        })
+      )
+
+      assert {:ok, imported} = SessionStore.load_legacy("legacy-provenance", dir)
+      assert imported.continuation.provenance == :legacy_reconstructed
+      assert :ok = SessionStore.save(imported, dir)
+
+      assert [%{id: "legacy-provenance", continuation_kind: :legacy_reconstructed}] =
+               SessionStore.list(dir)
     end
 
     test "normalizes invalid persisted branch identity candidates without raising", %{
@@ -303,7 +396,9 @@ defmodule MingaAgent.SessionStoreTest do
         })
       )
 
-      assert {:ok, %{branches: [branch]}} = SessionStore.load("invalid-branch-ids", dir)
+      assert {:ok, %{branches: [branch]}} =
+               SessionStore.load_legacy("invalid-branch-ids", dir)
+
       assert Branch.entry_ids(branch) == [11, 12, 2]
       assert Branch.messages(branch) == [{:user, "one"}, {:assistant, "two"}, {:user, "three"}]
     end
@@ -324,6 +419,58 @@ defmodule MingaAgent.SessionStoreTest do
       assert private_mode?(File.stat!(session_path).mode, 0o077)
       assert private_mode?(File.stat!(token_dir).mode, 0o077)
       assert private_mode?(File.stat!(token_path).mode, 0o077)
+    end
+
+    test "rejects unknown session and continuation versions", %{tmp_dir: dir} do
+      data = sample_data("future-version")
+      assert :ok = SessionStore.save(data, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      record = path |> File.read!() |> JSON.decode!()
+
+      File.write!(path, JSON.encode!(Map.put(record, "version", 99)))
+      assert {:error, {:unknown_session_version, 99}} = SessionStore.load(data.id, dir)
+
+      continuation = Map.put(record["continuation"], "version", 99)
+      record = %{record | "continuation" => continuation}
+      File.write!(path, JSON.encode!(record))
+
+      assert {:error, {:unknown_continuation_version, 99}} = SessionStore.load(data.id, dir)
+    end
+
+    test "rejects unknown version-two message types and tool statuses", %{tmp_dir: dir} do
+      malformed_records = [
+        {"unknown-type",
+         fn record -> put_in(record, ["messages", Access.at(0), "type"], "other") end},
+        {"unknown-status",
+         fn record -> put_in(record, ["messages", Access.at(3), "status"], "other") end}
+      ]
+
+      for {id, mutate} <- malformed_records do
+        data = sample_data(id)
+        assert :ok = SessionStore.save(data, dir)
+
+        path = Path.join(SessionStore.sessions_dir(dir), "#{id}.json")
+        record = path |> File.read!() |> JSON.decode!()
+        File.write!(path, JSON.encode!(mutate.(record)))
+
+        assert {:error, :invalid_session_record} = SessionStore.load(id, dir)
+      end
+    end
+
+    test "malformed transcript projections return errors from both load paths", %{tmp_dir: dir} do
+      data = sample_data("malformed-record")
+      assert :ok = SessionStore.save(data, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      record = path |> File.read!() |> JSON.decode!()
+
+      File.write!(path, JSON.encode!(Map.put(record, "messages", [nil])))
+      assert {:error, :invalid_session_record} = SessionStore.load(data.id, dir)
+
+      legacy_record = record |> Map.put("version", 1) |> Map.put("messages", [nil])
+      File.write!(path, JSON.encode!(legacy_record))
+      assert {:error, :invalid_session_record} = SessionStore.load_legacy(data.id, dir)
     end
 
     test "returns error for nonexistent session" do
@@ -550,8 +697,14 @@ defmodule MingaAgent.SessionStoreTest do
 
   describe "atomic writes" do
     test "overwrites an existing session" do
-      data1 = %{sample_data() | messages: [{:user, "first"}]}
-      data2 = %{sample_data() | messages: [{:user, "second"}]}
+      data1 = %{
+        sample_data()
+        | messages: [{:user, "first"}],
+          message_ids: [1],
+          pinned_ids: MapSet.new()
+      }
+
+      data2 = %{data1 | messages: [{:user, "second"}]}
 
       SessionStore.save(data1)
       SessionStore.save(data2)

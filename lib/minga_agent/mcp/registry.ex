@@ -246,7 +246,7 @@ defmodule MingaAgent.MCP.Registry do
       "MCP server #{server_name} failed to start: #{format_error(reason)}. Built-in tools remain available."
 
     Minga.Log.warning(:agent, "[Agent.Native] #{message}")
-    send(subscriber, {:agent_provider_event, %Event.Error{message: message}})
+    send(subscriber, {:agent_provider_lifecycle_event, %Event.Error{message: message}})
     message
   end
 

@@ -13,6 +13,8 @@ defmodule Minga.Test.ScriptedProvider do
   use GenServer
 
   alias MingaAgent.Event
+  alias Minga.Test.ProviderRequest
+  alias MingaAgent.Session.Request
 
   @type script_step :: {:event, Event.t()} | :wait_for_abort | :wait_for_continue | :crash
   @type state :: %{
@@ -20,6 +22,8 @@ defmodule Minga.Test.ScriptedProvider do
           owner: pid(),
           scripts: [[script_step()]],
           current_script: [script_step()],
+          active_request: Request.t() | nil,
+          response_text: String.t(),
           waiting_for_abort?: boolean(),
           waiting_for_continue?: boolean()
         }
@@ -44,9 +48,9 @@ defmodule Minga.Test.ScriptedProvider do
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl MingaAgent.Provider
-  @spec send_prompt(GenServer.server(), String.t()) :: :ok
-  def send_prompt(pid, text) when is_binary(text) do
-    GenServer.cast(pid, {:send_prompt, text})
+  @spec send_prompt(GenServer.server(), Request.t()) :: :ok
+  def send_prompt(pid, %Request{} = request) do
+    GenServer.cast(pid, {:send_prompt, request})
     :ok
   end
 
@@ -63,10 +67,6 @@ defmodule Minga.Test.ScriptedProvider do
     GenServer.cast(pid, :new_session)
     :ok
   end
-
-  @impl MingaAgent.Provider
-  @spec seed_messages(GenServer.server(), [MingaAgent.Message.t()]) :: :ok
-  def seed_messages(_pid, _messages), do: :ok
 
   @impl MingaAgent.Provider
   @spec get_state(GenServer.server()) :: {:ok, map()}
@@ -115,13 +115,16 @@ defmodule Minga.Test.ScriptedProvider do
        owner: Keyword.fetch!(opts, :owner),
        scripts: Keyword.get(opts, :scripts, [Keyword.get(opts, :script, [])]),
        current_script: [],
+       active_request: nil,
+       response_text: "",
        waiting_for_abort?: false,
        waiting_for_continue?: false
      }}
   end
 
   @impl GenServer
-  def handle_cast({:send_prompt, text}, state) do
+  def handle_cast({:send_prompt, request}, state) do
+    text = ProviderRequest.text(request)
     send(state.owner, {:scripted_provider_prompt, self(), text})
     {script, scripts} = next_script(state.scripts)
 
@@ -129,6 +132,8 @@ defmodule Minga.Test.ScriptedProvider do
       state
       | scripts: scripts,
         current_script: [],
+        active_request: request,
+        response_text: "",
         waiting_for_abort?: false,
         waiting_for_continue?: false
     }
@@ -140,7 +145,14 @@ defmodule Minga.Test.ScriptedProvider do
     send(state.owner, {:scripted_provider_abort, self()})
 
     {:noreply,
-     %{state | current_script: [], waiting_for_abort?: false, waiting_for_continue?: false}}
+     %{
+       state
+       | current_script: [],
+         active_request: nil,
+         response_text: "",
+         waiting_for_abort?: false,
+         waiting_for_continue?: false
+     }}
   end
 
   def handle_cast(:continue, state) do
@@ -151,7 +163,14 @@ defmodule Minga.Test.ScriptedProvider do
 
   def handle_cast(:new_session, state) do
     {:noreply,
-     %{state | current_script: [], waiting_for_abort?: false, waiting_for_continue?: false}}
+     %{
+       state
+       | current_script: [],
+         active_request: nil,
+         response_text: "",
+         waiting_for_abort?: false,
+         waiting_for_continue?: false
+     }}
   end
 
   @impl GenServer
@@ -171,6 +190,22 @@ defmodule Minga.Test.ScriptedProvider do
   @spec run_script([script_step()], state()) :: state()
   defp run_script([], state), do: state
 
+  defp run_script([{:event, %Event.TextDelta{delta: delta} = event} | rest], state) do
+    emit(state, event)
+    run_script(rest, %{state | response_text: state.response_text <> delta})
+  end
+
+  defp run_script([{:event, %Event.AgentEnd{usage: usage}} | rest], state) do
+    ProviderRequest.complete(
+      state.subscriber,
+      state.active_request,
+      state.response_text,
+      usage
+    )
+
+    run_script(rest, %{state | active_request: nil})
+  end
+
   defp run_script([{:event, event} | rest], state) do
     emit(state, event)
     run_script(rest, state)
@@ -189,8 +224,12 @@ defmodule Minga.Test.ScriptedProvider do
   end
 
   @spec emit(state(), Event.t()) :: :ok
-  defp emit(%{subscriber: subscriber}, event) when is_pid(subscriber) do
-    send(subscriber, {:agent_provider_event, event})
+  defp emit(
+         %{subscriber: subscriber, active_request: %Request{} = request},
+         event
+       )
+       when is_pid(subscriber) do
+    ProviderRequest.emit(subscriber, request, event)
     :ok
   end
 

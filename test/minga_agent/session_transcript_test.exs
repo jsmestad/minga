@@ -6,15 +6,14 @@ defmodule MingaAgent.SessionTranscriptTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}
       )
 
       # GenServer.call after send ensures all handle_info have run
@@ -43,26 +42,24 @@ defmodule MingaAgent.SessionTranscriptTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "first"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "first"}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "grep", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc2", name: "grep", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc2", name: "grep", result: "second"}}
+        %Event.ToolEnd{tool_call_id: "tc2", name: "grep", result: "second"}
       )
 
       pairs_before = Session.messages_with_ids(session)
@@ -98,9 +95,9 @@ defmodule MingaAgent.SessionTranscriptTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
       # Tool starts collapsed
@@ -109,10 +106,9 @@ defmodule MingaAgent.SessionTranscriptTest do
       assert tc.collapsed == true
 
       # ToolUpdate auto-expands
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolUpdate{tool_call_id: "tc1", name: "bash", partial_result: "line 1\n"}}
+        %Event.ToolUpdate{tool_call_id: "tc1", name: "bash", partial_result: "line 1\n"}
       )
 
       messages = Session.messages(session)
@@ -125,14 +121,14 @@ defmodule MingaAgent.SessionTranscriptTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}
       )
 
       messages = Session.messages(session)
@@ -147,6 +143,7 @@ defmodule MingaAgent.SessionTranscriptTest do
   describe "ToolFileChanged event" do
     test "broadcasts file_changed with before/after content" do
       session = start_subscribed_session()
+      assert :ok = Session.continue(session)
 
       event = %Event.ToolFileChanged{
         tool_call_id: "tc1",
@@ -155,7 +152,7 @@ defmodule MingaAgent.SessionTranscriptTest do
         after_content: "new content"
       }
 
-      send(session, {:agent_provider_event, event})
+      send_provider_event(session, event)
 
       assert_receive {:agent_event, _,
                       {:file_changed, "lib/foo.ex", "old content", "new content", "tc1",
@@ -167,31 +164,28 @@ defmodule MingaAgent.SessionTranscriptTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolStart{
-           tool_call_id: "tc1",
-           name: "write_file",
-           args: %{"path" => "lib/foo.ex", "content" => "new content"}
-         }}
+        %Event.ToolStart{
+          tool_call_id: "tc1",
+          name: "write_file",
+          args: %{"path" => "lib/foo.ex", "content" => "new content"}
+        }
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "write_file", result: "wrote file"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "write_file", result: "wrote file"}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolFileChanged{
-           tool_call_id: "tc1",
-           path: "lib/foo.ex",
-           before_content: "old content",
-           after_content: "new content"
-         }}
+        %Event.ToolFileChanged{
+          tool_call_id: "tc1",
+          path: "lib/foo.ex",
+          before_content: "old content",
+          after_content: "new content"
+        }
       )
 
       :sys.get_state(session)
@@ -220,8 +214,8 @@ defmodule MingaAgent.SessionTranscriptTest do
     test "thinking blocks stay expanded during streaming and collapse on AgentEnd" do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "Let me think..."}})
+      send_provider_event(session, %Event.AgentStart{})
+      send_provider_event(session, %Event.ThinkingDelta{delta: "Let me think..."})
 
       # While thinking, the block should be expanded
       messages = Session.messages(session)
@@ -235,7 +229,7 @@ defmodule MingaAgent.SessionTranscriptTest do
       assert {:thinking, _, false} = thinking
 
       # TextDelta arrives: thinking should remain expanded during the turn
-      send(session, {:agent_provider_event, %Event.TextDelta{delta: "Here is my answer"}})
+      send_provider_event(session, %Event.TextDelta{delta: "Here is my answer"})
 
       messages = Session.messages(session)
 
@@ -248,7 +242,7 @@ defmodule MingaAgent.SessionTranscriptTest do
       assert {:thinking, _, false} = thinking
 
       # AgentEnd: thinking collapses now that the turn is complete
-      send(session, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
+      send_provider_event(session, %Event.AgentEnd{usage: nil})
 
       messages = Session.messages(session)
 
@@ -264,22 +258,22 @@ defmodule MingaAgent.SessionTranscriptTest do
     test "toggle_all_tool_collapses also toggles thinking blocks" do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
-      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
+      send_provider_event(session, %Event.AgentStart{})
+      send_provider_event(session, %Event.ThinkingDelta{delta: "hmm"})
+      send_provider_event(session, %Event.TextDelta{delta: "answer"})
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}
       )
 
       # End the turn so thinking blocks collapse
-      send(session, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
+      send_provider_event(session, %Event.AgentEnd{usage: nil})
 
       # Both should be collapsed
       messages = Session.messages(session)
@@ -333,6 +327,7 @@ defmodule MingaAgent.SessionTranscriptTest do
           timestamp: DateTime.to_iso8601(DateTime.utc_now()),
           model_name: "test-model",
           messages: [{:user, "loaded"}, {:assistant, "reply"}],
+          continuation: MingaAgent.Session.Continuation.new(),
           usage: %MingaAgent.TurnUsage{
             input: 10,
             output: 5,
@@ -357,7 +352,7 @@ defmodule MingaAgent.SessionTranscriptTest do
       pairs_during = Session.messages_with_ids(slow_session)
       assert Enum.map(pairs_during, &elem(&1, 0)) == [1, 2, 3]
 
-      send(slow_session, {:agent_provider_event, %Event.TextDelta{delta: " world"}})
+      send_provider_event(slow_session, %Event.TextDelta{delta: " world"})
 
       pairs_after_delta = Session.messages_with_ids(slow_session)
       assert Enum.map(pairs_after_delta, &elem(&1, 0)) == [1, 2, 3]
@@ -374,15 +369,15 @@ defmodule MingaAgent.SessionTranscriptTest do
     test "thinking deltas get one stable ID, then assistant gets the next" do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: " ok"}})
+      send_provider_event(session, %Event.AgentStart{})
+      send_provider_event(session, %Event.ThinkingDelta{delta: "hmm"})
+      send_provider_event(session, %Event.ThinkingDelta{delta: " ok"})
 
       pairs_thinking = Session.messages_with_ids(session)
       assert Enum.map(pairs_thinking, &elem(&1, 0)) == [1, 2]
       assert {2, {:thinking, "hmm ok", _collapsed}} = Enum.at(pairs_thinking, -1)
 
-      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
+      send_provider_event(session, %Event.TextDelta{delta: "answer"})
       pairs_with_assistant = Session.messages_with_ids(session)
 
       assert Enum.map(pairs_with_assistant, &elem(&1, 0)) == [1, 2, 3]
@@ -394,27 +389,26 @@ defmodule MingaAgent.SessionTranscriptTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
       pairs_start = Session.messages_with_ids(session)
       {tool_id, {:tool_call, tc_start}} = Enum.at(pairs_start, -1)
       assert tc_start.status == :running
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolUpdate{tool_call_id: "tc1", name: "bash", partial_result: "output"}}
+        %Event.ToolUpdate{tool_call_id: "tc1", name: "bash", partial_result: "output"}
       )
 
       pairs_update = Session.messages_with_ids(session)
       assert {^tool_id, {:tool_call, %{result: "output"}}} = Enum.at(pairs_update, -1)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}
       )
 
       pairs_end = Session.messages_with_ids(session)
@@ -425,16 +419,16 @@ defmodule MingaAgent.SessionTranscriptTest do
     test "message mutations preserve existing IDs" do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "thinking..."}})
+      send_provider_event(session, %Event.ThinkingDelta{delta: "thinking..."})
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}
       )
 
       pairs_before = Session.messages_with_ids(session)

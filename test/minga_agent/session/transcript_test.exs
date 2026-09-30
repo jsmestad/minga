@@ -155,6 +155,21 @@ defmodule MingaAgent.Session.TranscriptTest do
     assert entry_ids(appended) == [9, 10, 11, 12]
   end
 
+  test "restore allocates missing message identities in transcript order" do
+    transcript =
+      Transcript.restore(
+        [{:user, "one"}, {:assistant, "two"}, {:user, "three"}],
+        [8],
+        [],
+        TurnUsage.new(),
+        MapSet.new(),
+        @now
+      )
+
+    assert entry_ids(transcript) == [8, 9, 10]
+    assert Transcript.append(transcript, {:assistant, "four"}) |> entry_ids() == [8, 9, 10, 11]
+  end
+
   test "restore infers structural identities for legacy active messages" do
     transcript =
       Transcript.restore(

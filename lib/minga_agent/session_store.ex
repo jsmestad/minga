@@ -12,8 +12,10 @@ defmodule MingaAgent.SessionStore do
   picker calls `list/0` to scan the directory for past sessions.
   """
 
-  alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Transcript
+  alias MingaAgent.ToolApproval.Preview
 
   @typedoc "Session metadata for the picker (without full message content)."
   @type session_meta :: %{
@@ -27,7 +29,8 @@ defmodule MingaAgent.SessionStore do
           recent_messages: String.t(),
           message_count: non_neg_integer(),
           turn_count: non_neg_integer(),
-          cost: float()
+          cost: float(),
+          continuation_kind: :lossless | :legacy_reconstructed | :legacy_import_required
         }
 
   @typedoc "Full session data for save/load."
@@ -37,6 +40,7 @@ defmodule MingaAgent.SessionStore do
           required(:model_name) => String.t(),
           required(:messages) => [MingaAgent.Message.t()],
           required(:usage) => MingaAgent.TurnUsage.t(),
+          required(:continuation) => Continuation.t(),
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
           optional(:provider_name) => String.t(),
@@ -45,6 +49,21 @@ defmodule MingaAgent.SessionStore do
           optional(:pinned_ids) => MapSet.t(pos_integer()),
           optional(:memory) => String.t() | nil
         }
+
+  @typep deserialized_transcript_session :: %{
+           required(:id) => String.t(),
+           required(:timestamp) => String.t(),
+           required(:last_message_at) => String.t(),
+           required(:title) => String.t(),
+           required(:model_name) => String.t(),
+           required(:provider_name) => String.t(),
+           required(:messages) => [MingaAgent.Message.t()],
+           required(:message_ids) => [pos_integer()],
+           required(:pinned_ids) => MapSet.t(pos_integer()),
+           required(:usage) => MingaAgent.TurnUsage.t(),
+           required(:branches) => [MingaAgent.Branch.t()],
+           optional(:memory) => String.t() | nil
+         }
 
   @typep remote_token_result :: {:ok, String.t()} | :missing | {:error, term()}
 
@@ -68,16 +87,22 @@ defmodule MingaAgent.SessionStore do
   @spec save(session_data(), String.t() | nil) :: :ok | {:error, term()}
   def save(%{id: id} = data, config_dir \\ nil) when is_binary(id) do
     path = Path.join(sessions_dir(config_dir), "#{id}.json")
-    json = JSON.encode!(serialize(data))
 
-    case atomic_write_private(path, json) do
-      :ok ->
-        :ok
-
+    with {:ok, json} <- encode_snapshot(data),
+         :ok <- atomic_write_private(path, json) do
+      :ok
+    else
       {:error, reason} ->
-        Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{reason}")
+        Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{inspect(reason)}")
         {:error, reason}
     end
+  end
+
+  @spec encode_snapshot(session_data()) :: {:ok, String.t()} | {:error, term()}
+  defp encode_snapshot(data) do
+    {:ok, JSON.encode!(serialize(data))}
+  rescue
+    error -> {:error, {:snapshot_encode_failed, Exception.message(error)}}
   end
 
   @doc """
@@ -147,22 +172,176 @@ defmodule MingaAgent.SessionStore do
   defp encode_remote_token(token), do: JSON.encode!(%{"remote_token" => token})
 
   @doc """
-  Loads a persisted session transcript.
+  Loads a versioned, lossless session snapshot.
 
-  Returns `{:ok, session_data}` or `{:error, reason}`.
+  Legacy display-only records are rejected until the caller explicitly uses
+  `load_legacy/2`; unknown future versions are never guessed.
   """
   @spec load(String.t(), String.t() | nil) :: {:ok, session_data()} | {:error, term()}
   def load(session_id, config_dir \\ nil) when is_binary(session_id) do
+    with {:ok, data} <- read_record(session_id, config_dir) do
+      load_versioned_record(data, session_id)
+    end
+  rescue
+    _error -> {:error, :invalid_session_record}
+  end
+
+  @spec load_versioned_record(map(), String.t()) :: {:ok, session_data()} | {:error, term()}
+  defp load_versioned_record(%{"version" => 2} = data, session_id) do
+    with :ok <- validate_versioned_record(data, session_id), do: deserialize(data)
+  end
+
+  defp load_versioned_record(%{"version" => version}, _session_id)
+       when version not in [nil, 1],
+       do: {:error, {:unknown_session_version, version}}
+
+  defp load_versioned_record(_data, _session_id), do: {:error, :legacy_import_required}
+
+  @doc "Reads an unversioned or version-one display-only record for explicit one-way import."
+  @spec load_legacy(String.t(), String.t() | nil) :: {:ok, session_data()} | {:error, term()}
+  def load_legacy(session_id, config_dir \\ nil) when is_binary(session_id) do
+    with {:ok, data} <- read_record(session_id, config_dir) do
+      case data["version"] do
+        version when version in [nil, 1] ->
+          legacy = deserialize_legacy(data)
+          {:ok, Map.put(legacy, :continuation, Continuation.import_legacy(legacy.messages))}
+
+        _version ->
+          {:error, :not_legacy_session}
+      end
+    end
+  rescue
+    _error -> {:error, :invalid_session_record}
+  end
+
+  @spec read_record(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  defp read_record(session_id, config_dir) do
     path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
 
     with {:ok, json} <- File.read(path),
          {:ok, data} when is_map(data) <- decode_json(json) do
-      {:ok, deserialize(data)}
+      {:ok, data}
     else
       {:ok, _other} -> {:error, :invalid_session_record}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  @spec validate_versioned_record(map(), String.t()) :: :ok | {:error, atom()}
+  defp validate_versioned_record(data, requested_id) do
+    with true <- data["id"] == requested_id,
+         true <- non_empty_string?(data["id"]),
+         true <- valid_timestamp?(data["timestamp"]),
+         true <- valid_timestamp?(data["last_message_at"]),
+         true <- non_empty_string?(data["title"]),
+         true <- non_empty_string?(data["model_name"]),
+         true <- non_empty_string?(data["provider_name"]),
+         true <- is_list(data["messages"]) and Enum.all?(data["messages"], &valid_v2_message?/1),
+         true <- valid_v2_message_ids?(data["message_ids"], data["messages"]),
+         true <- valid_v2_branches?(data["branches"]),
+         true <- valid_v2_pins?(data["pinned_ids"], data["message_ids"], data["branches"]),
+         true <- valid_v2_usage?(data["usage"]),
+         true <- is_nil(data["memory"]) or is_binary(data["memory"]),
+         true <- is_map(data["continuation"]) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_session_record}
+    end
+  end
+
+  @spec non_empty_string?(term()) :: boolean()
+  defp non_empty_string?(value), do: is_binary(value) and value != ""
+
+  @spec valid_timestamp?(term()) :: boolean()
+  defp valid_timestamp?(value) when is_binary(value) do
+    match?({:ok, _, _}, DateTime.from_iso8601(value))
+  end
+
+  defp valid_timestamp?(_value), do: false
+
+  @spec valid_v2_message?(term()) :: boolean()
+  defp valid_v2_message?(%{"type" => "user", "text" => text} = message) when is_binary(text) do
+    case Map.get(message, "attachments", []) do
+      attachments when is_list(attachments) -> Enum.all?(attachments, &valid_attachment?/1)
+      _invalid -> false
+    end
+  end
+
+  defp valid_v2_message?(%{"type" => "thinking", "text" => text, "collapsed" => collapsed}),
+    do: is_binary(text) and is_boolean(collapsed)
+
+  defp valid_v2_message?(%{"type" => "assistant", "text" => text}) when is_binary(text),
+    do: true
+
+  defp valid_v2_message?(%{"type" => "tool_call"} = message) do
+    non_empty_string?(message["id"]) and non_empty_string?(message["name"]) and
+      is_map(message["args"]) and message["status"] in ["running", "complete", "error"] and
+      (is_nil(message["result"]) or is_binary(message["result"])) and
+      is_boolean(message["is_error"]) and is_boolean(message["collapsed"])
+  end
+
+  defp valid_v2_message?(%{"type" => "system", "text" => text, "level" => level}),
+    do: is_binary(text) and level in ["info", "error"]
+
+  defp valid_v2_message?(%{"type" => "usage", "data" => usage}), do: valid_v2_usage?(usage)
+  defp valid_v2_message?(_message), do: false
+
+  @spec valid_attachment?(term()) :: boolean()
+  defp valid_attachment?(%{"filename" => filename, "size_kb" => size_kb}),
+    do: is_binary(filename) and is_integer(size_kb) and size_kb >= 0
+
+  defp valid_attachment?(_attachment), do: false
+
+  @spec valid_v2_message_ids?(term(), [term()]) :: boolean()
+  defp valid_v2_message_ids?(ids, messages) when is_list(ids) do
+    length(ids) == length(messages) and Enum.all?(ids, &(is_integer(&1) and &1 > 0)) and
+      Enum.uniq(ids) == ids
+  end
+
+  defp valid_v2_message_ids?(_ids, _messages), do: false
+
+  @spec valid_v2_pins?(term(), term(), term()) :: boolean()
+  defp valid_v2_pins?(pins, ids, branches)
+       when is_list(pins) and is_list(ids) and is_list(branches) do
+    branch_ids =
+      Enum.flat_map(branches, fn
+        %{"message_ids" => branch_message_ids} when is_list(branch_message_ids) ->
+          branch_message_ids
+
+        _branch ->
+          []
+      end)
+
+    valid_ids = MapSet.new(ids ++ branch_ids)
+    Enum.all?(pins, &(is_integer(&1) and &1 > 0 and MapSet.member?(valid_ids, &1)))
+  end
+
+  defp valid_v2_pins?(_pins, _ids, _branches), do: false
+
+  @spec valid_v2_branches?(term()) :: boolean()
+  defp valid_v2_branches?(branches) when is_list(branches) do
+    Enum.all?(branches, fn
+      %{"name" => name, "messages" => messages, "message_ids" => ids, "created_at" => created_at} ->
+        non_empty_string?(name) and is_list(messages) and
+          Enum.all?(messages, &valid_v2_message?/1) and is_list(ids) and
+          length(ids) == length(messages) and Enum.all?(ids, &(is_integer(&1) and &1 > 0)) and
+          length(Enum.uniq(ids)) == length(ids) and valid_timestamp?(created_at)
+
+      _branch ->
+        false
+    end)
+  end
+
+  defp valid_v2_branches?(_branches), do: false
+
+  @spec valid_v2_usage?(term()) :: boolean()
+  defp valid_v2_usage?(usage) when is_map(usage) do
+    Enum.all?(["input", "output", "cache_read", "cache_write"], fn key ->
+      is_integer(usage[key]) and usage[key] >= 0
+    end) and is_number(usage["cost"]) and usage["cost"] >= 0
+  end
+
+  defp valid_v2_usage?(_usage), do: false
 
   @doc """
   Lists all saved sessions as metadata (without full messages).
@@ -268,9 +447,11 @@ defmodule MingaAgent.SessionStore do
   @spec serialize(session_data()) :: map()
   defp serialize(data) do
     messages = Map.get(data, :messages, [])
+    message_ids = Map.get(data, :message_ids) || default_message_ids(messages)
     timestamp = Map.get(data, :timestamp) || DateTime.to_iso8601(DateTime.utc_now())
 
     %{
+      "version" => 2,
       "id" => data.id,
       "timestamp" => timestamp,
       "last_message_at" => Map.get(data, :last_message_at, timestamp),
@@ -278,13 +459,18 @@ defmodule MingaAgent.SessionStore do
       "model_name" => data.model_name,
       "provider_name" => Map.get(data, :provider_name, "unknown"),
       "messages" => Enum.map(messages, &serialize_message/1),
-      "message_ids" => Map.get(data, :message_ids, []),
+      "message_ids" => message_ids,
       "pinned_ids" => serialize_pinned_ids(Map.get(data, :pinned_ids)),
       "usage" => serialize_usage(data.usage),
       "branches" => Enum.map(Map.get(data, :branches, []), &serialize_branch/1),
-      "memory" => Map.get(data, :memory)
+      "memory" => Map.get(data, :memory),
+      "continuation" => ContinuationCodec.encode(data.continuation)
     }
   end
+
+  @spec default_message_ids([term()]) :: [pos_integer()]
+  defp default_message_ids(messages) when messages == [], do: []
+  defp default_message_ids(messages), do: Enum.to_list(1..length(messages))
 
   @spec serialize_message(MingaAgent.Message.t()) :: map()
   defp serialize_message({:user, text, attachments}) do
@@ -337,13 +523,29 @@ defmodule MingaAgent.SessionStore do
     }
   end
 
-  @spec deserialize(map()) :: session_data()
+  @spec deserialize(map()) :: {:ok, session_data()} | {:error, term()}
   defp deserialize(data) do
-    timestamp = data["timestamp"] || ""
+    with {:ok, continuation} <- ContinuationCodec.decode(data["continuation"]) do
+      session =
+        data
+        |> deserialize_legacy()
+        |> Map.put(:continuation, continuation)
+
+      {:ok, session}
+    end
+  end
+
+  @spec deserialize_legacy(map()) :: deserialized_transcript_session()
+  defp deserialize_legacy(data) do
+    timestamp = string_or_default(data["timestamp"], "")
     transcript = deserialize_transcript(data, timestamp)
     session = deserialize_session(data, timestamp, transcript)
 
-    if Map.has_key?(data, "memory"), do: Map.put(session, :memory, data["memory"]), else: session
+    case Map.fetch(data, "memory") do
+      {:ok, memory} when is_binary(memory) -> Map.put(session, :memory, memory)
+      {:ok, nil} -> Map.put(session, :memory, nil)
+      _missing_or_invalid_memory -> session
+    end
   end
 
   @spec deserialize_transcript(map(), String.t()) :: Transcript.t()
@@ -362,17 +564,18 @@ defmodule MingaAgent.SessionStore do
     )
   end
 
-  @spec deserialize_session(map(), String.t(), Transcript.t()) :: session_data()
+  @spec deserialize_session(map(), String.t(), Transcript.t()) ::
+          deserialized_transcript_session()
   defp deserialize_session(data, timestamp, transcript) do
     messages = Transcript.messages(transcript)
 
     %{
-      id: data["id"],
+      id: string_or_default(data["id"], "unknown"),
       timestamp: timestamp,
-      last_message_at: data["last_message_at"] || timestamp,
-      title: data["title"] || title_from_messages(messages),
-      model_name: data["model_name"] || "unknown",
-      provider_name: data["provider_name"] || "unknown",
+      last_message_at: string_or_default(data["last_message_at"], timestamp),
+      title: string_or_default(data["title"], title_from_messages(messages)),
+      model_name: string_or_default(data["model_name"], "unknown"),
+      provider_name: string_or_default(data["provider_name"], "unknown"),
       messages: messages,
       message_ids: Enum.map(Transcript.messages_with_ids(transcript), &elem(&1, 0)),
       pinned_ids: Transcript.pinned_ids(transcript),
@@ -380,6 +583,10 @@ defmodule MingaAgent.SessionStore do
       branches: Transcript.branches(transcript)
     }
   end
+
+  @spec string_or_default(term(), String.t()) :: String.t()
+  defp string_or_default(value, _default) when is_binary(value), do: value
+  defp string_or_default(_value, default), do: default
 
   @spec deserialize_pinned_ids(term()) :: MapSet.t()
   defp deserialize_pinned_ids(ids) when is_list(ids), do: MapSet.new(ids)
@@ -423,9 +630,8 @@ defmodule MingaAgent.SessionStore do
     {:usage, deserialize_turn_usage(data)}
   end
 
-  # Fallback for unknown message types
-  defp deserialize_message(%{"type" => type} = msg) do
-    {:system, "Unknown message type: #{type} - #{inspect(msg)}", :info}
+  defp deserialize_message(%{"type" => type}) do
+    raise ArgumentError, "unsupported persisted message type: #{inspect(type)}"
   end
 
   @spec deserialize_attachment(map()) :: MingaAgent.Message.image_attachment()
@@ -488,7 +694,10 @@ defmodule MingaAgent.SessionStore do
   defp deserialize_tool_status("running"), do: :running
   defp deserialize_tool_status("complete"), do: :complete
   defp deserialize_tool_status("error"), do: :error
-  defp deserialize_tool_status(_status), do: :complete
+
+  defp deserialize_tool_status(status) do
+    raise ArgumentError, "unsupported persisted tool status: #{inspect(status)}"
+  end
 
   @spec deserialize_system_level(String.t() | nil) :: MingaAgent.Message.system_level()
   defp deserialize_system_level("error"), do: :error
@@ -538,7 +747,8 @@ defmodule MingaAgent.SessionStore do
   @spec load_meta(String.t()) :: session_meta() | nil
   defp load_meta(path) do
     with {:ok, json} <- File.read(path),
-         {:ok, data} when is_map(data) <- decode_json(json) do
+         {:ok, data} when is_map(data) <- decode_json(json),
+         true <- data["version"] in [nil, 1, 2] do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
       timestamp = data["timestamp"] || ""
@@ -555,12 +765,24 @@ defmodule MingaAgent.SessionStore do
         recent_messages: recent_messages(messages),
         message_count: Enum.count(messages),
         turn_count: count_user_messages(messages),
-        cost: total_cost(data, messages)
+        cost: total_cost(data, messages),
+        continuation_kind: continuation_kind(data)
       }
     else
       _ -> nil
     end
   end
+
+  @spec continuation_kind(map()) ::
+          :lossless | :legacy_reconstructed | :legacy_import_required
+  defp continuation_kind(%{
+         "version" => 2,
+         "continuation" => %{"provenance" => "legacy_reconstructed"}
+       }),
+       do: :legacy_reconstructed
+
+  defp continuation_kind(%{"version" => 2}), do: :lossless
+  defp continuation_kind(_data), do: :legacy_import_required
 
   @spec title_from_messages([MingaAgent.Message.t()]) :: String.t()
   defp title_from_messages(messages) do
