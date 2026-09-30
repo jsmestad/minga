@@ -12,8 +12,8 @@ help:
 	@printf "  \033[1mbin/minga\033[0m          Launch the Go/Bubble Tea TUI\n"
 	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
 	@printf "\033[1;36mQuality checks\033[0m\n"
-	@printf "  \033[1mmake lint\033[0m          Fast local gate: format, changed Credo, ExDNA, compile, incremental Dialyzer (parallel, ~25s warm)\n"
-	@printf "  \033[1mmake lint.full\033[0m     Full gate: format, Credo, ExDNA, Reach, compile, classic Dialyzer\n"
+	@printf "  \033[1mmake lint\033[0m          Fast local gate: format, changed Credo, ExDNA, compile, incremental Dialyzer, Reach arch policy (parallel, ~25s warm)\n"
+	@printf "  \033[1mmake lint.full\033[0m     Full gate: format, Credo, ExDNA, compile, classic Dialyzer, Reach arch and smells\n"
 	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict Credo\n"
 	@printf "  \033[1mmake test\033[0m          Build parser support and run the full ExUnit suite\n"
 	@printf "  \033[1mmake test.llm\033[0m      Build parser support and run LLM-friendly tests\n\n"
@@ -67,7 +67,7 @@ endif
 
 # ── Lint ────────────────────────────────────────────────────────────────
 
-# Local lint gates. scripts/lint runs independent checks concurrently, replays each log in a fixed order, skips the compile chain on docs-only branches, and keeps Reach (advisory-only, exit 0, about 4 minutes) in the full gate only.
+# Local lint gates. scripts/lint runs independent checks concurrently, replays each log in a fixed order, skips the compile chain on docs-only branches, and keeps Reach smells (advisory-only, exit 0, about 4 minutes) in the full gate only; the Reach arch policy is a 12s gate in both.
 lint:
 	@scripts/lint fast
 

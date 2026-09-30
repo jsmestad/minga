@@ -115,10 +115,7 @@ defmodule MingaEditor.KeyDispatch do
     pending = ToolPrompts.queue(prompts)
 
     if old_mode == :tool_confirm and CoreEditing.mode(result) == :normal and pending != [] do
-      ms = %Minga.Mode.ToolConfirmState{
-        pending: pending,
-        declined: ToolPrompts.declined(prompts)
-      }
+      ms = ToolPromptWorkflow.confirm_state(pending, ToolPrompts.declined(prompts))
 
       %{
         result

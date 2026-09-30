@@ -1,4 +1,4 @@
-defmodule Minga.Core.Overlay do
+defmodule MingaAgent.Changeset.Overlay do
   @moduledoc """
   Lazy filesystem overlay using copy-on-write isolation.
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Local lint gate behind `make lint` (fast) and `make lint.full`.
 #
-# Independent checks run concurrently. Each check writes to its own log, and the logs are replayed in a fixed order once everything finishes, so output stays readable and deterministic. Independent checks all run even when one fails; only Dialyzer is skipped, because it needs the BEAM files that a failed compile did not produce.
+# Independent checks run concurrently. Each check writes to its own log, and the logs are replayed in a fixed order once everything finishes, so output stays readable and deterministic. Independent checks all run even when one fails; only the checks that need BEAM files (Dialyzer, Reach) are skipped when compile fails.
 #
-# fast: format, changed-file Credo, ExDNA           (no compile, run in parallel)
-#       compile -> incremental Dialyzer              (sequential, in parallel with the group above)
+# fast: format, changed-file Credo, ExDNA                      (no compile, run in parallel)
+#       compile -> incremental Dialyzer + Reach arch policy     (followers run in parallel once compile passes)
 #       When no Elixir-relevant file changed against the base ref (docs-only branches), the compile chain and ExDNA are skipped.
-# full: format, full Credo, ExDNA, Reach            (no compile, run in parallel)
-#       compile -> classic Dialyzer                  (sequential, in parallel with the group above)
+# full: format, full Credo, ExDNA                              (no compile, run in parallel)
+#       compile -> classic Dialyzer + Reach arch and smells     (followers run in parallel once compile passes)
 set -uo pipefail
 
 mode=${1:-fast}
@@ -66,10 +66,16 @@ skip() {
   echo 0 >"$log_dir/$1.seconds"
 }
 
-# chain NAME1 CMD1 NAME2 CMD2 : run CMD2 only when CMD1 succeeds, in one background job.
+# chain NAME1 CMD1 [NAME CMD]... : run CMD1, then every following command concurrently, only when CMD1 succeeds. One background job.
 chain() {
-  local first=$1 first_cmd=$2 second=$3 second_cmd=$4
-  names+=("$first" "$second")
+  local first=$1 first_cmd=$2
+  shift 2
+  local followers=("$@")
+  names+=("$first")
+  local i
+  for ((i = 0; i < ${#followers[@]}; i += 2)); do
+    names+=("${followers[i]}")
+  done
   (
     start=$(date +%s)
     bash -c "$first_cmd" >"$log_dir/$first.log" 2>&1
@@ -77,15 +83,23 @@ chain() {
     echo $rc >"$log_dir/$first.status"
     echo $(( $(date +%s) - start )) >"$log_dir/$first.seconds"
     if [ $rc -ne 0 ]; then
-      echo "$first failed, no BEAM files to analyze" >"$log_dir/$second.log"
-      echo skip >"$log_dir/$second.status"
-      echo 0 >"$log_dir/$second.seconds"
+      for ((i = 0; i < ${#followers[@]}; i += 2)); do
+        echo "$first failed, no BEAM files to analyze" >"$log_dir/${followers[i]}.log"
+        echo skip >"$log_dir/${followers[i]}.status"
+        echo 0 >"$log_dir/${followers[i]}.seconds"
+      done
       exit
     fi
-    start=$(date +%s)
-    bash -c "$second_cmd" >"$log_dir/$second.log" 2>&1
-    echo $? >"$log_dir/$second.status"
-    echo $(( $(date +%s) - start )) >"$log_dir/$second.seconds"
+    for ((i = 0; i < ${#followers[@]}; i += 2)); do
+      (
+        name=${followers[i]} cmd=${followers[i + 1]}
+        start=$(date +%s)
+        bash -c "$cmd" >"$log_dir/$name.log" 2>&1
+        echo $? >"$log_dir/$name.status"
+        echo $(( $(date +%s) - start )) >"$log_dir/$name.seconds"
+      ) &
+    done
+    wait
   ) &
 }
 
@@ -112,15 +126,19 @@ fi
 
 if [ "$mode" = full ]; then
   run ex-dna mix ex_dna --max-clones 0
-  run reach mix reach.check --arch --smells
-  chain compile "mix compile --warnings-as-errors" dialyzer "mix dialyzer"
+  chain compile "mix compile --warnings-as-errors" \
+    dialyzer "mix dialyzer" \
+    reach "mix reach.check --arch --smells"
 elif elixir_changed; then
   run ex-dna mix ex_dna --max-clones 0
-  chain compile "mix compile --warnings-as-errors" dialyzer "mix dialyzer.incremental"
+  chain compile "mix compile --warnings-as-errors" \
+    dialyzer "mix dialyzer.incremental" \
+    reach "mix reach.check --arch"
 else
   skip ex-dna "no Elixir-relevant file changed"
   skip compile "no Elixir-relevant file changed"
   skip dialyzer "no Elixir-relevant file changed"
+  skip reach "no Elixir-relevant file changed"
 fi
 
 wait

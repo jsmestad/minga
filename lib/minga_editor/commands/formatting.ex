@@ -22,7 +22,6 @@ defmodule MingaEditor.Commands.Formatting do
   alias MingaEditor.State.Feedback
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.OperationFeedback
-  alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -421,10 +420,8 @@ defmodule MingaEditor.Commands.Formatting do
     state = ToolPromptWorkflow.enqueue(state, tool_name)
     prompts = ToolPromptWorkflow.prompts(state)
 
-    ms = %ToolConfirmState{
-      pending: ToolPrompts.queue(prompts),
-      declined: ToolPrompts.declined(prompts)
-    }
+    ms =
+      ToolPromptWorkflow.confirm_state(ToolPrompts.queue(prompts), ToolPrompts.declined(prompts))
 
     %{
       state

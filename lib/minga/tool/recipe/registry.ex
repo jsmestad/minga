@@ -42,6 +42,20 @@ defmodule Minga.Tool.Recipe.Registry do
     end
   end
 
+  @doc "Display labels for tool names, falling back to the name itself when no recipe is registered. Resolved here so pure mode state can carry labels instead of reading ETS."
+  @spec labels([name()]) :: %{name() => String.t()}
+  def labels(names) when is_list(names) do
+    Map.new(names, fn name -> {name, label(name)} end)
+  end
+
+  @spec label(name()) :: String.t()
+  defp label(name) do
+    case get(name) do
+      nil -> Atom.to_string(name)
+      recipe -> recipe.label
+    end
+  end
+
   @doc "Returns the recipe whose `provides` list includes the given command string."
   @spec for_command(String.t()) :: Recipe.t() | nil
   def for_command(command) when is_binary(command) do

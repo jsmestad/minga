@@ -6,7 +6,9 @@ defmodule MingaEditor.Shell.Traditional.ToolPromptWorkflow do
   suppression, and session-local decisions.
   """
 
+  alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.ToolPrompts
@@ -53,6 +55,16 @@ defmodule MingaEditor.Shell.Traditional.ToolPromptWorkflow do
   @spec advance(state()) :: state()
   def advance(%EditorState{} = state),
     do: update(state, &TraditionalState.advance_tool_prompt/1)
+
+  @doc "Builds the confirm-mode state for the pending queue, resolving display labels here so `Minga.Mode` stays free of registry reads."
+  @spec confirm_state([atom()], MapSet.t(atom())) :: ToolConfirmState.t()
+  def confirm_state(pending, declined) when is_list(pending) do
+    %ToolConfirmState{
+      pending: pending,
+      labels: RecipeRegistry.labels(pending),
+      declined: declined
+    }
+  end
 
   @spec update(state(), (TraditionalState.t() -> TraditionalState.t())) :: state()
   defp update(%EditorState{} = state, transition) do

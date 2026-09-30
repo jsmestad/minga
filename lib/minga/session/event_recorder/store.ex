@@ -8,7 +8,7 @@ defmodule Minga.Session.EventRecorder.Store do
   features can open separate read connections without blocking writes.
 
   Schema evolution uses a simple version table checked at startup.
-  No Ecto, no migration framework.
+  No ORM, no migration framework.
   """
 
   alias Minga.Session.EventRecorder.EventRecord
