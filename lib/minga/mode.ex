@@ -181,8 +181,7 @@ defmodule Minga.Mode do
 
   def display(:tool_confirm, %Minga.Mode.ToolConfirmState{} = s) do
     name = Enum.at(s.pending, s.current)
-    label = tool_label(name)
-    "#{label} not found. Install? [y/n]"
+    "#{Minga.Mode.ToolConfirmState.label(s, name)} not found. Install? [y/n]"
   end
 
   def display(:delete_confirm, %Minga.Mode.DeleteConfirmState{phase: :trash} = s) do
@@ -315,14 +314,6 @@ defmodule Minga.Mode do
 
   @spec reset_count(state()) :: state()
   defp reset_count(%_{} = state), do: %{state | count: nil}
-
-  @spec tool_label(atom()) :: String.t()
-  defp tool_label(name) do
-    case Minga.Tool.Recipe.Registry.get(name) do
-      nil -> Atom.to_string(name)
-      recipe -> recipe.label
-    end
-  end
 
   @spec format_update_label(Minga.Mode.ExtensionConfirmState.update_entry()) :: String.t()
   defp format_update_label(%{pinned: true, name: name}) do

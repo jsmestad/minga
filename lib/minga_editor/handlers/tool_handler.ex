@@ -165,7 +165,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
           MingaEditor.Session.State.transition_mode(
             state.workspace,
             :tool_confirm,
-            %Minga.Mode.ToolConfirmState{pending: pending, declined: declined}
+            ToolPromptWorkflow.confirm_state(pending, declined)
           )
     }
   end
