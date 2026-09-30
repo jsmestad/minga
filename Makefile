@@ -12,8 +12,8 @@ help:
 	@printf "  \033[1mbin/minga\033[0m          Launch the Go/Bubble Tea TUI\n"
 	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
 	@printf "\033[1;36mQuality checks\033[0m\n"
-	@printf "  \033[1mmake lint\033[0m          Local format, changed Credo, compile, Dialyzer, ExDNA, and Reach\n"
-	@printf "  \033[1mmake lint.full\033[0m     Full format, Credo, compile, Dialyzer, ExDNA, and Reach\n"
+	@printf "  \033[1mmake lint\033[0m          Fast local gate: format, changed Credo, ExDNA, compile, incremental Dialyzer (parallel, ~25s warm)\n"
+	@printf "  \033[1mmake lint.full\033[0m     Full gate: format, Credo, ExDNA, Reach, compile, classic Dialyzer\n"
 	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict Credo\n"
 	@printf "  \033[1mmake test\033[0m          Build parser support and run the full ExUnit suite\n"
 	@printf "  \033[1mmake test.llm\033[0m      Build parser support and run LLM-friendly tests\n\n"
@@ -67,40 +67,12 @@ endif
 
 # ── Lint ────────────────────────────────────────────────────────────────
 
-# Run the local lint gate. Each step runs independently so later checks
-# still report failures when an earlier check fails.
+# Local lint gates. scripts/lint runs independent checks concurrently, replays each log in a fixed order, skips the compile chain on docs-only branches, and keeps Reach (advisory-only, exit 0, about 4 minutes) in the full gate only.
 lint:
-	@failed=""; \
-	mix format --check-formatted || failed="$$failed format"; \
-	scripts/credo_changed || failed="$$failed credo"; \
-	mix compile --warnings-as-errors || failed="$$failed compile"; \
-	mix dialyzer.incremental || failed="$$failed dialyzer"; \
-	mix ex_dna --max-clones 0 || failed="$$failed ex-dna"; \
-	mix reach.check --arch --smells || failed="$$failed reach"; \
-	if [ -n "$$failed" ]; then \
-		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
-		exit 1; \
-	else \
-		echo "\n\033[32mFast lint checks passed.\033[0m"; \
-	fi
+	@scripts/lint fast
 
-# Run the complete local gate. Credo is independent of compilation and
-# Dialyzer, so it runs concurrently without dropping any checks.
 lint.full:
-	@failed=""; \
-	mix format --check-formatted || failed="$$failed format"; \
-	mix credo --strict & credo_pid=$$!; \
-	mix compile --warnings-as-errors || failed="$$failed compile"; \
-	mix dialyzer || failed="$$failed dialyzer"; \
-	wait "$$credo_pid" || failed="$$failed credo"; \
-	mix ex_dna --max-clones 0 || failed="$$failed ex-dna"; \
-	mix reach.check --arch --smells || failed="$$failed reach"; \
-	if [ -n "$$failed" ]; then \
-		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
-		exit 1; \
-	else \
-		echo "\n\033[32mFull lint checks passed.\033[0m"; \
-	fi
+	@scripts/lint full
 
 lint.format:
 	mix format --check-formatted

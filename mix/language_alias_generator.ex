@@ -6,6 +6,7 @@ defmodule Minga.Mix.LanguageAliasGenerator do
   @source_path "config/language_aliases.json"
   @elixir_path ".generated/language_aliases/elixir/lib/minga/language/generated_aliases.ex"
   @zig_path "zig/src/generated/language_aliases.zig"
+  @language_sources_glob "lib/minga/language/*.ex"
   @label_pattern ~r/^[a-z0-9_+.#-]+$/
 
   @type alias_entry :: %{from: String.t(), to: String.t()}
@@ -26,6 +27,16 @@ defmodule Minga.Mix.LanguageAliasGenerator do
 
   @spec source_path() :: String.t()
   def source_path, do: @source_path
+
+  @doc "Files whose change requires regenerating alias artifacts. Includes the language sources scanned to validate alias targets, so removing a language invalidates the check."
+  @spec source_paths() :: [Path.t()]
+  def source_paths do
+    [@source_path, Path.relative_to_cwd(__ENV__.file) | Path.wildcard(@language_sources_glob)]
+  end
+
+  @doc "Sources plus outputs: every file whose content decides whether generation must run again."
+  @spec tracked_paths() :: [Path.t()]
+  def tracked_paths, do: source_paths() ++ generated_paths()
 
   @spec generated_paths() :: [String.t()]
   def generated_paths, do: [@elixir_path, @zig_path]
@@ -114,7 +125,7 @@ defmodule Minga.Mix.LanguageAliasGenerator do
   @spec language_source_targets(String.t()) :: [String.t()]
   defp language_source_targets(root) do
     root
-    |> Path.join("lib/minga/language/*.ex")
+    |> Path.join(@language_sources_glob)
     |> Path.wildcard()
     |> Enum.flat_map(&language_targets_from_source/1)
   end
@@ -210,8 +221,16 @@ defmodule Minga.Mix.LanguageAliasGenerator do
     Enum.each(outputs, fn {rel_path, contents} ->
       path = Path.join(root, rel_path)
       File.mkdir_p!(Path.dirname(path))
-      File.write!(path, contents)
+      write_if_changed!(path, contents)
     end)
+  end
+
+  @spec write_if_changed!(Path.t(), String.t()) :: :ok
+  defp write_if_changed!(path, contents) do
+    case File.read(path) do
+      {:ok, ^contents} -> :ok
+      _other -> File.write!(path, contents)
+    end
   end
 
   @spec elixir_output([alias_entry()]) :: String.t()

@@ -30,8 +30,25 @@ end
 
 # Swift protocol coverage runs through the dedicated `mix swift.harness` job.
 # Ordinary ExUnit starts should never build GUI artifacts as a side effect.
+# A binary older than its Swift sources is excluded too: it would fail on
+# decode drift, not on a real regression.
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
-swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]
+
+swift_exclude =
+  case Mix.Tasks.Swift.Harness.status(harness_path) do
+    :ready ->
+      []
+
+    :missing ->
+      [:swift_harness]
+
+    :stale ->
+      IO.puts(
+        "Skipping :swift_harness tests: #{harness_path} is older than its Swift sources. Run `mix swift.harness` to rebuild."
+      )
+
+      [:swift_harness]
+  end
 
 # The packaged native IPC helper exists only after the macOS Xcode app build.
 macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos_ipc_helper]

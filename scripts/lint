@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Local lint gate behind `make lint` (fast) and `make lint.full`.
+#
+# Independent checks run concurrently. Each check writes to its own log, and the logs are replayed in a fixed order once everything finishes, so output stays readable and deterministic. Independent checks all run even when one fails; only Dialyzer is skipped, because it needs the BEAM files that a failed compile did not produce.
+#
+# fast: format, changed-file Credo, ExDNA           (no compile, run in parallel)
+#       compile -> incremental Dialyzer              (sequential, in parallel with the group above)
+#       When no Elixir-relevant file changed against the base ref (docs-only branches), the compile chain and ExDNA are skipped.
+# full: format, full Credo, ExDNA, Reach            (no compile, run in parallel)
+#       compile -> classic Dialyzer                  (sequential, in parallel with the group above)
+set -uo pipefail
+
+mode=${1:-fast}
+case "$mode" in
+  fast|full) ;;
+  *)
+    echo "usage: scripts/lint [fast|full]" >&2
+    exit 2
+    ;;
+esac
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if [ -t 1 ]; then
+  red=$'\033[31m'; green=$'\033[32m'; dim=$'\033[2m'; bold=$'\033[1m'; reset=$'\033[0m'
+else
+  red=""; green=""; dim=""; bold=""; reset=""
+fi
+
+# Preflight: a toolchain other than the .tool-versions pin silently recompiles every dependency (about 60s) and cold-starts the incremental Dialyzer cache (about 3 minutes). Fail fast instead.
+pinned_elixir=$(awk '$1 == "elixir" { sub(/-otp-.*/, "", $2); print $2 }' .tool-versions)
+active_elixir=$(elixir --short-version 2>/dev/null)
+if [ -n "$pinned_elixir" ] && [ "$pinned_elixir" != "$active_elixir" ]; then
+  echo "${red}Toolchain mismatch:${reset} active Elixir $active_elixir, .tool-versions pins $pinned_elixir ($(command -v elixir))." >&2
+  echo "Put the asdf shims ahead of other Elixir installs on PATH, or run from a shell that resolves the pinned toolchain." >&2
+  exit 2
+fi
+
+log_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-lint.XXXXXX")
+trap 'rm -rf "$log_dir"' EXIT
+
+# Insertion order is the report order.
+names=()
+status_of() { cat "$log_dir/$1.status" 2>/dev/null || echo 1; }
+
+# run NAME CMD... : run one check in the background, capturing output and exit status.
+run() {
+  local name=$1
+  shift
+  names+=("$name")
+  (
+    start=$(date +%s)
+    "$@" >"$log_dir/$name.log" 2>&1
+    rc=$?
+    echo $rc >"$log_dir/$name.status"
+    echo $(( $(date +%s) - start )) >"$log_dir/$name.seconds"
+  ) &
+}
+
+# skip NAME REASON : record a check as intentionally not run.
+skip() {
+  names+=("$1")
+  echo "skipped: $2" >"$log_dir/$1.log"
+  echo skip >"$log_dir/$1.status"
+  echo 0 >"$log_dir/$1.seconds"
+}
+
+# chain NAME1 CMD1 NAME2 CMD2 : run CMD2 only when CMD1 succeeds, in one background job.
+chain() {
+  local first=$1 first_cmd=$2 second=$3 second_cmd=$4
+  names+=("$first" "$second")
+  (
+    start=$(date +%s)
+    bash -c "$first_cmd" >"$log_dir/$first.log" 2>&1
+    rc=$?
+    echo $rc >"$log_dir/$first.status"
+    echo $(( $(date +%s) - start )) >"$log_dir/$first.seconds"
+    if [ $rc -ne 0 ]; then
+      echo "$first failed, no BEAM files to analyze" >"$log_dir/$second.log"
+      echo skip >"$log_dir/$second.status"
+      echo 0 >"$log_dir/$second.seconds"
+      exit
+    fi
+    start=$(date +%s)
+    bash -c "$second_cmd" >"$log_dir/$second.log" 2>&1
+    echo $? >"$log_dir/$second.status"
+    echo $(( $(date +%s) - start )) >"$log_dir/$second.seconds"
+  ) &
+}
+
+# Did anything that can change compile, Dialyzer, or clone results change? Same change set as scripts/credo_changed: branch vs merge-base, staged, unstaged, untracked. Collected into a variable first: `grep -q` closing the pipe early would trip `pipefail`.
+elixir_changed() {
+  local base_ref=${CREDO_CHANGED_BASE_REF:-main}
+  local merge_base changed
+  merge_base=$(git merge-base HEAD "$base_ref" 2>/dev/null) || return 0
+  changed=$(
+    git diff --name-only --diff-filter=ACMRD "$merge_base...HEAD"
+    git diff --name-only --diff-filter=ACMRD --cached
+    git diff --name-only --diff-filter=ACMRD
+    git ls-files --others --exclude-standard
+  )
+  grep -q -E '\.(ex|exs|erl|lock)$|^config/|^extensions/|^credo/|^docs/protocol_schema\.toml$|^zig/src/protocol\.zig$' <<<"$changed"
+}
+
+run format mix format --check-formatted
+if [ "$mode" = fast ]; then
+  run credo scripts/credo_changed
+else
+  run credo mix credo --strict
+fi
+
+if [ "$mode" = full ]; then
+  run ex-dna mix ex_dna --max-clones 0
+  run reach mix reach.check --arch --smells
+  chain compile "mix compile --warnings-as-errors" dialyzer "mix dialyzer"
+elif elixir_changed; then
+  run ex-dna mix ex_dna --max-clones 0
+  chain compile "mix compile --warnings-as-errors" dialyzer "mix dialyzer.incremental"
+else
+  skip ex-dna "no Elixir-relevant file changed"
+  skip compile "no Elixir-relevant file changed"
+  skip dialyzer "no Elixir-relevant file changed"
+fi
+
+wait
+
+failed=""
+for name in "${names[@]}"; do
+  rc=$(status_of "$name")
+  seconds=$(cat "$log_dir/$name.seconds" 2>/dev/null || echo "?")
+  case "$rc" in
+    0)    printf '%s[pass]%s %-9s %4ss\n' "$green" "$reset" "$name" "$seconds" ;;
+    skip) printf '%s[skip]%s %-9s %s\n' "$dim" "$reset" "$name" "$(cat "$log_dir/$name.log")" ;;
+    *)
+      failed="$failed $name"
+      printf '%s[FAIL]%s %-9s %4ss\n' "$red" "$reset" "$name" "$seconds"
+      ;;
+  esac
+done
+
+for name in "${names[@]}"; do
+  rc=$(status_of "$name")
+  # Failed checks print in full. A passing compile also prints when it emitted compiler warnings, since those become errors in CI.
+  if [ "$rc" != 0 ] && [ "$rc" != skip ]; then
+    printf '\n%s── %s (exit %s) ──%s\n' "$bold" "$name" "$rc" "$reset"
+    cat "$log_dir/$name.log"
+  elif [ "$name" = compile ] && grep -q -E '^\s*warning:' "$log_dir/$name.log"; then
+    printf '\n%s── %s (passed with warnings) ──%s\n' "$bold" "$name" "$reset"
+    cat "$log_dir/$name.log"
+  fi
+done
+
+if [ -n "$failed" ]; then
+  printf '\n%sFailed checks:%s%s\n' "$red" "$failed" "$reset"
+  exit 1
+fi
+
+printf '\n%s%s lint checks passed.%s\n' "$green" "$mode" "$reset"
