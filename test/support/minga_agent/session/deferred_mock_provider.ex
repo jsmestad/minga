@@ -5,13 +5,14 @@ defmodule Minga.Test.SessionDeferredMockProvider do
 
   alias MingaAgent.Event
   alias MingaAgent.Session
+  alias Minga.Test.ProviderRequest
 
   @impl MingaAgent.Provider
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl MingaAgent.Provider
-  def send_prompt(pid, text) do
-    GenServer.cast(pid, {:prompt, text})
+  def send_prompt(pid, request) do
+    GenServer.cast(pid, {:prompt, request})
     :ok
   end
 
@@ -20,9 +21,6 @@ defmodule Minga.Test.SessionDeferredMockProvider do
 
   @impl MingaAgent.Provider
   def new_session(pid), do: GenServer.cast(pid, :new_session)
-
-  @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
 
   @impl MingaAgent.Provider
   def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
@@ -41,18 +39,19 @@ defmodule Minga.Test.SessionDeferredMockProvider do
   end
 
   @impl GenServer
-  def handle_cast({:prompt, text}, state) do
+  def handle_cast({:prompt, request}, state) do
+    text = ProviderRequest.text(request)
     notify_test(state.test_pid, {:deferred_provider_prompt_received, self(), text})
-    {:noreply, %{state | pending_prompt: text}}
+    {:noreply, %{state | pending_prompt: request}}
   end
 
   def handle_cast(:abort, state), do: {:noreply, state}
   def handle_cast(:new_session, state), do: {:noreply, state}
 
   @impl GenServer
-  def handle_call(:release_start, _from, %{pending_prompt: text, started?: false} = state)
-      when is_binary(text) do
-    send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
+  def handle_call(:release_start, _from, %{pending_prompt: request, started?: false} = state)
+      when not is_nil(request) do
+    ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
     :thinking = Session.status(state.subscriber)
     {:reply, :ok, %{state | started?: true}}
   end
@@ -68,9 +67,9 @@ defmodule Minga.Test.SessionDeferredMockProvider do
       cost: 0.001
     }
 
-    send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
+    ProviderRequest.complete(state.subscriber, state.pending_prompt, "", usage)
     :idle = Session.status(state.subscriber)
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | pending_prompt: nil}}
   end
 
   def handle_call(:release_end, _from, state), do: {:reply, :ok, state}

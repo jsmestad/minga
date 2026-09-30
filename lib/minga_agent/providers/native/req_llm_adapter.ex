@@ -10,9 +10,11 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
   alias MingaAgent.Providers.Native.ReqLLMAdapter.TurnResult
   alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias ReqLLM.Message
   alias ReqLLM.Response
   alias ReqLLM.StreamResponse
   alias ReqLLM.Tool
+  alias ReqLLM.Message.ContentPart
   alias ReqLLM.ToolCall, as: ReqLLMToolCall
 
   @typedoc "Streaming LLM client compatible with ReqLLM.stream_text/3."
@@ -46,6 +48,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
           on_thinking: (String.t() -> term()),
           on_tool_call: (tool_call() -> term())
         ]
+
+  @typep content_event ::
+           {:text | :thinking, [String.t()], map()} | {:content_part, ContentPart.t()}
+  @typep stream_accumulator :: {[String.t()], [content_event()]}
 
   @typedoc "Decoded result from one provider response."
   @type turn_result :: TurnResult.t()
@@ -117,13 +123,23 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @spec process_stream(StreamResponse.t(), stream_callbacks()) ::
           {:ok, turn_result()} | {:error, term(), String.t()}
   def process_stream(%StreamResponse{} = stream_response, callbacks \\ []) do
-    {:ok, accumulator} = Agent.start_link(fn -> "" end)
+    {:ok, accumulator} = Agent.start_link(fn -> {[], []} end)
 
     try do
       result =
         StreamResponse.process_stream(stream_response,
+          on_chunk: fn
+            %ReqLLM.StreamChunk{metadata: %{stream_only?: true}} ->
+              :ok
+
+            %ReqLLM.StreamChunk{type: type} = chunk
+            when type in [:content, :thinking, :content_part] ->
+              Agent.update(accumulator, &accumulate_content_chunk(&1, chunk))
+
+            _chunk ->
+              :ok
+          end,
           on_result: fn text ->
-            Agent.update(accumulator, fn acc -> acc <> text end)
             run_callback(callbacks, :on_text, text)
           end,
           on_thinking: fn text ->
@@ -134,11 +150,17 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
           end
         )
 
-      partial_text = Agent.get(accumulator, & &1)
+      {partial_text_parts, content_events} = Agent.get(accumulator, & &1)
 
       case result do
-        {:ok, response} -> {:ok, response_to_turn_result(response)}
-        {:error, reason} -> {:error, reason, partial_text}
+        {:ok, response} ->
+          case response_to_turn_result(response, content_events) do
+            {:ok, turn_result} -> {:ok, turn_result}
+            {:error, reason} -> {:error, reason, partial_text(partial_text_parts)}
+          end
+
+        {:error, reason} ->
+          {:error, reason, partial_text(partial_text_parts)}
       end
     after
       if Process.alive?(accumulator) do
@@ -146,6 +168,129 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
       end
     end
   end
+
+  @spec accumulate_content_chunk(stream_accumulator(), ReqLLM.StreamChunk.t()) ::
+          stream_accumulator()
+  defp accumulate_content_chunk(
+         {partial_text, content_events},
+         %ReqLLM.StreamChunk{type: :content, text: text, metadata: metadata}
+       )
+       when is_binary(text) do
+    append_ordered_content({[text | partial_text], content_events}, {:text, text, metadata})
+  end
+
+  defp accumulate_content_chunk(
+         accumulator,
+         %ReqLLM.StreamChunk{type: :thinking, text: text, metadata: metadata}
+       )
+       when is_binary(text) do
+    append_ordered_content(accumulator, {:thinking, text, metadata})
+  end
+
+  defp accumulate_content_chunk(
+         {partial_text, content_events},
+         %ReqLLM.StreamChunk{type: :content_part, content_part: %ContentPart{} = part}
+       ) do
+    {partial_text, [{:content_part, part} | content_events]}
+  end
+
+  defp accumulate_content_chunk(accumulator, _chunk), do: accumulator
+
+  @spec append_ordered_content(
+          stream_accumulator(),
+          {:text | :thinking, String.t(), map()}
+        ) :: stream_accumulator()
+  defp append_ordered_content({partial_text, events}, {type, text, metadata}) do
+    case events do
+      [{event_type, texts, event_metadata} | rest]
+      when event_type == type and event_metadata == metadata ->
+        {partial_text, [{type, [text | texts], metadata} | rest]}
+
+      _other ->
+        {partial_text, [{type, [text], metadata} | events]}
+    end
+  end
+
+  @spec ordered_content([content_event()], [term()]) :: [term()]
+  defp ordered_content([], fallback), do: fallback
+
+  defp ordered_content(content_events, fallback) do
+    events = Enum.reverse(content_events)
+    event_types = Enum.map(events, &content_event_type/1)
+    fallback_types = Enum.map(fallback, &content_part_type/1)
+
+    if event_types == fallback_types do
+      if text_metadata_missing?(events, fallback) do
+        Enum.map(events, &content_event_to_part/1)
+      else
+        fallback
+      end
+    else
+      reorder_content_if_safe(events, fallback, event_types, fallback_types)
+    end
+  end
+
+  @spec text_metadata_missing?([content_event()], [term()]) :: boolean()
+  defp text_metadata_missing?(events, fallback) do
+    Enum.zip(events, fallback)
+    |> Enum.any?(fn
+      {{:text, _chunks, metadata}, %ContentPart{type: :text, metadata: stored}} ->
+        metadata != stored
+
+      {{:thinking, _chunks, metadata}, %ContentPart{type: :thinking, metadata: stored}} ->
+        metadata != stored
+
+      _other ->
+        false
+    end)
+  end
+
+  @spec reorder_content_if_safe([content_event()], [term()], [atom()], [atom()]) :: [term()]
+  defp reorder_content_if_safe(events, fallback, event_types, fallback_types) do
+    case {text_thinking_types?(event_types), text_thinking_types?(fallback_types)} do
+      {true, true} ->
+        Enum.map(events, &content_event_to_part/1)
+
+      {false, false} ->
+        reorder_matching_content(events, fallback, event_types, fallback_types)
+
+      _different_content ->
+        fallback
+    end
+  end
+
+  @spec reorder_matching_content([content_event()], [term()], [atom()], [atom()]) :: [term()]
+  defp reorder_matching_content(events, fallback, event_types, fallback_types) do
+    if Enum.frequencies(event_types) == Enum.frequencies(fallback_types) do
+      ordered = Enum.map(events, &content_event_to_part/1)
+      if Enum.frequencies(ordered) == Enum.frequencies(fallback), do: ordered, else: fallback
+    else
+      fallback
+    end
+  end
+
+  @spec content_event_type(content_event()) :: atom()
+  defp content_event_type({:text, _chunks, _metadata}), do: :text
+  defp content_event_type({:thinking, _chunks, _metadata}), do: :thinking
+  defp content_event_type({:content_part, part}), do: part.type
+
+  @spec content_part_type(term()) :: atom()
+  defp content_part_type(%{type: type}) when is_atom(type), do: type
+  defp content_part_type(_part), do: :unknown
+
+  @spec text_thinking_types?([atom()]) :: boolean()
+  defp text_thinking_types?(types), do: Enum.all?(types, &(&1 in [:text, :thinking]))
+
+  @spec content_event_to_part(content_event()) :: ContentPart.t()
+  defp content_event_to_part({:text, chunks, metadata}) do
+    ContentPart.text(chunks |> Enum.reverse() |> IO.iodata_to_binary(), metadata)
+  end
+
+  defp content_event_to_part({:thinking, chunks, metadata}) do
+    ContentPart.thinking(chunks |> Enum.reverse() |> IO.iodata_to_binary(), metadata)
+  end
+
+  defp content_event_to_part({:content_part, part}), do: part
 
   @doc "Runs a non-streaming text request through ReqLLM stream processing."
   @spec call_sync(llm_client(), String.t(), [ReqLLM.Message.t()], keyword(), AgentConfig.t()) ::
@@ -200,38 +345,86 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     end
   end
 
-  @spec response_to_turn_result(Response.t()) :: turn_result()
-  defp response_to_turn_result(response) do
-    TurnResult.new(extract_text(response), extract_tool_calls(response), extract_usage(response))
+  @spec response_to_turn_result(Response.t(), [content_event()]) ::
+          {:ok, turn_result()} | {:error, term()}
+  defp response_to_turn_result(
+         %Response{
+           message: %Message{role: :assistant} = message,
+           finish_reason: finish_reason
+         } = response,
+         content_events
+       )
+       when finish_reason in [:stop, :tool_calls] do
+    case extract_tool_calls(response) do
+      {:ok, tool_calls} ->
+        message = %{message | content: ordered_content(content_events, message.content)}
+
+        {:ok, TurnResult.new(message, tool_calls, extract_usage(response))}
+
+      {:error, reason} ->
+        {:error, {:incomplete_response, reason}}
+    end
   end
 
-  @spec extract_tool_calls(Response.t()) :: [tool_call()]
-  defp extract_tool_calls(%{message: %{tool_calls: nil}}), do: []
+  defp response_to_turn_result(
+         %Response{message: %Message{role: :assistant}, finish_reason: finish_reason},
+         _content_events
+       ) do
+    {:error, {:incomplete_response, finish_reason}}
+  end
+
+  defp response_to_turn_result(%Response{message: message}, _content_events) do
+    {:error, {:invalid_assistant_response, message}}
+  end
+
+  @spec extract_tool_calls(Response.t()) :: {:ok, [tool_call()]} | {:error, term()}
+  defp extract_tool_calls(%{message: %{tool_calls: nil}}), do: {:ok, []}
 
   defp extract_tool_calls(%{message: %{tool_calls: tool_calls}}) when is_list(tool_calls) do
-    Enum.map(tool_calls, &req_llm_tool_call_to_adapter_tool_call/1)
+    tool_calls
+    |> Enum.reduce_while({:ok, []}, fn tool_call, {:ok, acc} ->
+      case req_llm_tool_call_to_adapter_tool_call(tool_call) do
+        {:ok, adapter_call} -> {:cont, {:ok, [adapter_call | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, tool_calls} -> {:ok, Enum.reverse(tool_calls)}
+      {:error, _reason} = error -> error
+    end
   end
 
-  defp extract_tool_calls(_response), do: []
+  defp extract_tool_calls(_response), do: {:error, :invalid_tool_call_list}
 
-  @spec extract_text(Response.t()) :: String.t()
-  defp extract_text(%{message: %{content: content}}) when is_list(content) do
-    content
-    |> Enum.filter(fn part -> Map.get(part, :type, :text) == :text end)
-    |> Enum.map_join("", fn part -> Map.get(part, :text, "") end)
-  end
-
-  defp extract_text(_response), do: ""
+  @spec partial_text([String.t()]) :: String.t()
+  defp partial_text(parts), do: parts |> Enum.reverse() |> IO.iodata_to_binary()
 
   @spec extract_usage(Response.t()) :: raw_usage() | nil
   defp extract_usage(%{usage: usage}) when is_map(usage), do: usage
   defp extract_usage(_response), do: nil
 
-  @spec req_llm_tool_call_to_adapter_tool_call(ReqLLMToolCall.t()) :: tool_call()
-  defp req_llm_tool_call_to_adapter_tool_call(tool_call) do
-    %{id: id, name: name, arguments: arguments} = ReqLLMToolCall.to_map(tool_call)
-    ToolCall.new(id, name, arguments)
+  @spec req_llm_tool_call_to_adapter_tool_call(ReqLLMToolCall.t()) ::
+          {:ok, tool_call()} | {:error, term()}
+  defp req_llm_tool_call_to_adapter_tool_call(
+         %ReqLLMToolCall{id: id, function: %{name: name}} = tool_call
+       ) do
+    case tool_call_error(ReqLLMToolCall.metadata(tool_call)) do
+      nil ->
+        case ReqLLMToolCall.args_map(tool_call) do
+          arguments when is_map(arguments) -> {:ok, ToolCall.new(id, name, arguments)}
+          _invalid_arguments -> {:error, {:invalid_tool_call_arguments, id}}
+        end
+
+      reason ->
+        {:error, {:tool_call_arguments_lost, id, reason}}
+    end
   end
+
+  defp req_llm_tool_call_to_adapter_tool_call(_tool_call), do: {:error, :invalid_tool_call_shape}
+
+  @spec tool_call_error(map()) :: term() | nil
+  defp tool_call_error(%{error: reason}), do: reason
+  defp tool_call_error(_metadata), do: nil
 
   @spec tool_call_chunk_to_map(term()) :: tool_call()
   defp tool_call_chunk_to_map(chunk) do

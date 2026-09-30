@@ -76,6 +76,15 @@ Each agent session runs in its own supervised process tree. An agent can't corru
 
 If an agent hits an error, its supervisor handles recovery. Your buffers, undo history, and unsaved changes are in completely separate processes with completely separate memory.
 
+### Provider turns keep their durable continuation
+
+`MingaAgent.Session` owns the canonical ReqLLM conversation and a separate display transcript. The Native provider receives an immutable request snapshot and returns an outcome; only the Session installs it. A completed boundary is saved as one versioned session snapshot, so reopening that session resumes from the same provider messages rather than rebuilding them from collapsed or edited display history. Provider attachments, tool-call groups, reasoning, and provider-native content remain part of that continuation.
+
+Older display-only sessions require an explicit import. Minga reconstructs portable user and assistant text for the model continuation and marks it as reconstructed. Tool-call and system entries remain in the preserved display record, while missing attachment bytes and provider-native metadata are not invented.
+
+Tool effects have a separate recovery boundary. Minga persists the exact provider tool-call group before admission, records each call as admitted before dispatch, and saves its result before reporting completion. After a crash, an admitted call with no saved result is indeterminate and is never replayed automatically.
+For recovery behavior after process or application restart, see [Session Recovery](SESSION-RECOVERY.md).
+
 ### Multiple agents, no conflicts
 
 Want a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. Each agent has its own memory and communicates with buffers through message passing.

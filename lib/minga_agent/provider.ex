@@ -18,14 +18,13 @@ defmodule MingaAgent.Provider do
         def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
         @impl MingaAgent.Provider
-        def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
-
+        def send_prompt(pid, request), do: GenServer.call(pid, {:prompt, request})
         # ... other callbacks
       end
 
-  Events are delivered to the subscriber (typically `Agent.Session`) as
-  `{:agent_provider_event, event}` messages where `event` is an
-  `Agent.Event` struct.
+  Turn-scoped events are delivered to the subscriber (typically `Agent.Session`)
+  as `{:agent_provider_event, request_id, event}`. Session rejects events whose
+  request identity is no longer active.
   """
 
   alias MingaAgent.Event
@@ -63,17 +62,21 @@ defmodule MingaAgent.Provider do
   """
   @callback start_link(opts()) :: GenServer.on_start()
 
-  @doc "Sends a user prompt to the agent. Returns immediately; responses arrive as events."
-  @callback send_prompt(provider(), String.t()) :: :ok | {:error, term()}
+  @doc "Starts work from an immutable, versioned request snapshot."
+  @callback send_prompt(provider(), MingaAgent.Session.Request.t()) :: :ok | {:error, term()}
 
   @doc "Aborts the current agent operation."
   @callback abort(provider()) :: :ok
 
-  @doc "Starts a fresh agent session, clearing conversation history."
+  @doc "Resets provider runtime state for a fresh Session-owned conversation."
   @callback new_session(provider()) :: :ok | {:error, term()}
 
-  @doc "Seeds conversation history without sending a prompt."
-  @callback seed_messages(provider(), [MingaAgent.Message.t()]) :: :ok | {:error, term()}
+  @doc "Continues work from an immutable, versioned request snapshot."
+  @callback continue(provider(), MingaAgent.Session.Request.t()) :: :ok | {:error, term()}
+
+  @doc "Compacts an immutable continuation and returns its replacement messages."
+  @callback compact(provider(), [ReqLLM.Message.t()]) ::
+              {:ok, [ReqLLM.Message.t()], String.t()} | {:error, term()}
 
   @doc "Returns the current session state (model info, streaming status, etc.)."
   @callback get_state(provider()) :: {:ok, session_state()} | {:error, term()}
@@ -102,6 +105,8 @@ defmodule MingaAgent.Provider do
     set_thinking_level: 2,
     cycle_thinking_level: 1,
     cycle_model: 1,
-    set_model: 2
+    set_model: 2,
+    continue: 2,
+    compact: 2
   ]
 end

@@ -275,7 +275,7 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.send_prompt(session, "start plan turn")
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
+      send_provider_event(session, %Event.AgentStart{})
       :sys.get_state(session)
 
       assert reclaim_timer(session) == nil
@@ -505,9 +505,9 @@ defmodule MingaAgent.SessionLifecycleTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
       # Admit a turn before injecting its provider event.
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
       )
 
       # Session.messages is a call, so it's processed after the send above
@@ -593,10 +593,9 @@ defmodule MingaAgent.SessionLifecycleTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}
       )
 
       snapshot = Session.editor_snapshot(session)
@@ -604,10 +603,9 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert snapshot.status == :tool_executing
       assert snapshot.active_tool_name == "read_file"
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}
       )
 
       snapshot = Session.editor_snapshot(session)
@@ -619,33 +617,30 @@ defmodule MingaAgent.SessionLifecycleTest do
       session = start_subscribed_session()
       assert :ok = Session.continue(session)
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}
       )
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "shell", args: %{}}}
-      )
-
-      snapshot = Session.editor_snapshot(session)
-      assert snapshot.active_tool_name == "shell"
-
-      send(
-        session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}}
+        %Event.ToolStart{tool_call_id: "tc2", name: "shell", args: %{}}
       )
 
       snapshot = Session.editor_snapshot(session)
       assert snapshot.active_tool_name == "shell"
 
-      send(
+      send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc2", name: "shell", result: "output"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == "shell"
+
+      send_provider_event(
+        session,
+        %Event.ToolEnd{tool_call_id: "tc2", name: "shell", result: "output"}
       )
 
       snapshot = Session.editor_snapshot(session)

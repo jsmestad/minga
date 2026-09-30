@@ -56,8 +56,6 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     @impl MingaAgent.Provider
     def new_session(_pid), do: :ok
     @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
     @impl GenServer
@@ -83,17 +81,16 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   # task is `reply_to`. The decision later flows back to `reply_to`.
   defp inject_pending_approval(session, reply_to) do
     assert :ok = Session.send_prompt(session, "approval turn")
-    send(session, {:agent_provider_event, %Event.AgentStart{}})
+    Minga.Test.SessionCase.send_provider_event(session, %Event.AgentStart{})
 
-    send(
+    Minga.Test.SessionCase.send_provider_event(
       session,
-      {:agent_provider_event,
-       %Event.ToolApproval{
-         tool_call_id: "tc1",
-         name: "shell",
-         args: %{"command" => "echo hi"},
-         reply_to: reply_to
-       }}
+      %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "shell",
+        args: %{"command" => "echo hi"},
+        reply_to: reply_to
+      }
     )
 
     # Force a synchronous round-trip so the approval is registered before we act.

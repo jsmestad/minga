@@ -260,7 +260,7 @@ defmodule Minga.MixProject do
       {:stream_data, "~> 1.0", only: :test},
       {:propcheck, "~> 1.5", only: :test},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
-      {:req_llm, "~> 1.16"},
+      {:req_llm, "~> 1.26"},
       {:req, "~> 0.6.2"},
       {:vibe_kit, "~> 0.1.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

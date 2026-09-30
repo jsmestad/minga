@@ -38,9 +38,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     def new_session(_pid), do: :ok
 
     @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
     @impl MingaAgent.Provider
@@ -340,6 +337,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           model_name: "test-model",
           provider_name: "native",
           messages: [{:user, "Resume target"}],
+          continuation: MingaAgent.Session.Continuation.new(),
           usage: %TurnUsage{}
         },
         dir
@@ -484,6 +482,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
                    model_name: "test-model",
                    provider_name: "test",
                    messages: [{:system, "Loaded auth session", :info}],
+                   continuation: MingaAgent.Session.Continuation.new(),
                    usage: %TurnUsage{}
                  },
                  dir

@@ -60,12 +60,18 @@ defmodule Minga.Test.StubServer do
   end
 
   def handle_call({:load_session, session_id}, _from, state) do
-    case Map.get(state, :notify) do
-      pid when is_pid(pid) -> send(pid, {:stub_loaded_session, session_id})
-      _ -> :ok
-    end
+    case Map.get(state, :load_result, :ok) do
+      :ok ->
+        case Map.get(state, :notify) do
+          pid when is_pid(pid) -> send(pid, {:stub_loaded_session, session_id})
+          _ -> :ok
+        end
 
-    {:reply, :ok, Map.put(state, :loaded_session, session_id)}
+        {:reply, :ok, Map.put(state, :loaded_session, session_id)}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
   end
 
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}

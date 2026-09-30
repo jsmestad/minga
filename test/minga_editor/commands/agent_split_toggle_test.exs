@@ -311,6 +311,17 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       assert_receive {:stub_loaded_session, "sess-42"}
     end
 
+    test "does not arm provenance or activate after a legacy session restore is refused" do
+      {:ok, session} = StubServer.start_link(load_result: {:error, :legacy_import_required})
+      state = base_state(session: session)
+
+      new_state = AgentCommands.open_session(state, "sess-legacy", "tc1")
+
+      assert new_state.workspace.agent_ui.panel.transcript.provenance_jump == nil
+      refute new_state.workspace.agent_ui.panel.visible
+      assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
+    end
+
     test "does not crash when the session pid is dead" do
       # Unlinked so killing it does not propagate to the test process.
       dead = spawn(fn -> :ok end)

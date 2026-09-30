@@ -31,8 +31,10 @@ defmodule MingaAgent.Event do
   @typedoc "Agent has started processing a prompt."
   @type agent_start :: %__MODULE__.AgentStart{}
 
-  @typedoc "Agent has finished processing."
-  @type agent_end :: %__MODULE__.AgentEnd{usage: token_usage() | nil}
+  @type agent_end :: %__MODULE__.AgentEnd{
+          usage: token_usage() | nil,
+          outcome: MingaAgent.Session.Outcome.t() | nil
+        }
 
   @typedoc "A chunk of assistant response text."
   @type text_delta :: %__MODULE__.TextDelta{delta: String.t()}
@@ -114,8 +116,12 @@ defmodule MingaAgent.Event do
 
   defmodule AgentEnd do
     @moduledoc false
-    defstruct usage: nil
-    @type t :: %__MODULE__{usage: MingaAgent.Event.token_usage() | nil}
+    defstruct usage: nil, outcome: nil
+
+    @type t :: %__MODULE__{
+            usage: MingaAgent.Event.token_usage() | nil,
+            outcome: MingaAgent.Session.Outcome.t() | nil
+          }
   end
 
   defmodule TextDelta do

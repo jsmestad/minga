@@ -199,9 +199,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      send(
+      Minga.Test.SessionCase.send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "alpha", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc1", name: "alpha", args: %{}}
       )
 
       :sys.get_state(session)
@@ -211,9 +211,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "alpha"
 
-      send(
+      Minga.Test.SessionCase.send_provider_event(
         session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "beta", args: %{}}}
+        %Event.ToolStart{tool_call_id: "tc2", name: "beta", args: %{}}
       )
 
       :sys.get_state(session)
@@ -223,10 +223,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "beta"
 
-      send(
+      Minga.Test.SessionCase.send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "alpha", result: "contents"}}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "alpha", result: "contents"}
       )
 
       :sys.get_state(session)
@@ -236,10 +235,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "beta"
 
-      send(
+      Minga.Test.SessionCase.send_provider_event(
         session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc2", name: "beta", result: "output"}}
+        %Event.ToolEnd{tool_call_id: "tc2", name: "beta", result: "output"}
       )
 
       :sys.get_state(session)

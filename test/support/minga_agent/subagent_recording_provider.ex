@@ -6,6 +6,8 @@ defmodule Minga.Test.SubagentRecordingProvider do
   use GenServer
 
   alias MingaAgent.Event
+  alias Minga.Test.ProviderRequest
+  alias MingaAgent.Session.Request
 
   @type state :: map()
 
@@ -15,10 +17,10 @@ defmodule Minga.Test.SubagentRecordingProvider do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec send_prompt(GenServer.server(), String.t()) :: :ok
+  @spec send_prompt(GenServer.server(), Request.t()) :: :ok
   @impl MingaAgent.Provider
-  def send_prompt(pid, text) do
-    GenServer.call(pid, {:send_prompt, text})
+  def send_prompt(pid, request) do
+    GenServer.call(pid, {:send_prompt, request})
   end
 
   @spec abort(GenServer.server()) :: :ok
@@ -34,10 +36,6 @@ defmodule Minga.Test.SubagentRecordingProvider do
     GenServer.cast(pid, :new_session)
     :ok
   end
-
-  @spec seed_messages(GenServer.server(), [term()]) :: :ok
-  @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
 
   @spec get_state(GenServer.server()) :: {:ok, map()}
   @impl MingaAgent.Provider
@@ -59,7 +57,8 @@ defmodule Minga.Test.SubagentRecordingProvider do
       project_root: Keyword.get(opts, :project_root),
       blocking: Keyword.get(opts, :blocking, false),
       test_pid: Keyword.get(opts, :test_pid),
-      test_ref: Keyword.get(opts, :test_ref)
+      test_ref: Keyword.get(opts, :test_ref),
+      active_request: nil
     }
 
     {:ok, state}
@@ -67,15 +66,16 @@ defmodule Minga.Test.SubagentRecordingProvider do
 
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   @impl GenServer
-  def handle_call({:send_prompt, text}, _from, state) do
+  def handle_call({:send_prompt, request}, _from, state) do
+    text = ProviderRequest.text(request)
     notify_test(state, {:prompt_received, self(), state.subscriber, text})
-    notify_session(state, %Event.AgentStart{})
+    notify_session(state, request, %Event.AgentStart{})
 
     if state.blocking do
-      {:reply, :ok, state}
+      {:reply, :ok, %{state | active_request: request}}
     else
-      notify_session(state, %Event.TextDelta{delta: "child response"})
-      notify_session(state, %Event.AgentEnd{usage: nil})
+      notify_session(state, request, %Event.TextDelta{delta: "child response"})
+      ProviderRequest.complete(state.subscriber, request, "child response")
       {:reply, :ok, state}
     end
   end
@@ -96,9 +96,9 @@ defmodule Minga.Test.SubagentRecordingProvider do
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   @impl GenServer
   def handle_cast(:finish, state) do
-    notify_session(state, %Event.TextDelta{delta: "blocked child response"})
-    notify_session(state, %Event.AgentEnd{usage: nil})
-    {:noreply, state}
+    notify_session(state, state.active_request, %Event.TextDelta{delta: "blocked child response"})
+    ProviderRequest.complete(state.subscriber, state.active_request, "blocked child response")
+    {:noreply, %{state | active_request: nil}}
   end
 
   def handle_cast(_message, state), do: {:noreply, state}
@@ -108,9 +108,9 @@ defmodule Minga.Test.SubagentRecordingProvider do
     GenServer.cast(pid, :finish)
   end
 
-  @spec notify_session(map(), Event.t()) :: :ok
-  defp notify_session(state, event) do
-    send(state.subscriber, {:agent_provider_event, event})
+  @spec notify_session(map(), Request.t(), Event.t()) :: :ok
+  defp notify_session(state, request, event) do
+    ProviderRequest.emit(state.subscriber, request, event)
     :ok
   end
 

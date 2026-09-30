@@ -90,9 +90,6 @@ defmodule MingaAgent.SessionRecoveryTest do
     def new_session(_pid), do: :ok
 
     @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil}}
   end
 
@@ -142,9 +139,6 @@ defmodule MingaAgent.SessionRecoveryTest do
     def new_session(_pid), do: :ok
 
     @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil}}
 
     @impl GenServer
@@ -171,9 +165,6 @@ defmodule MingaAgent.SessionRecoveryTest do
 
     @impl MingaAgent.Provider
     def new_session(_pid), do: :ok
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil}}
@@ -332,6 +323,7 @@ defmodule MingaAgent.SessionRecoveryTest do
                  model_name: "ollama:loaded",
                  provider_name: "ollama",
                  messages: [{:system, "Loaded", :info}],
+                 continuation: MingaAgent.Session.Continuation.new(),
                  usage: %TurnUsage{}
                },
                dir
@@ -468,7 +460,8 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
 
     send(worker, {:credential_probe_result, :available})
-    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}, 1_000
+    await_provider_startup(session)
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
     assert is_pid(Session.get_provider(session))
   end
 

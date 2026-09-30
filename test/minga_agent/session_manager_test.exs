@@ -385,12 +385,257 @@ defmodule MingaAgent.SessionManagerTest do
       assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
     end
 
+    test "stopping a live session reserves its ID until registered effects exit", %{
+      manager: manager
+    } do
+      {:ok, session_id, session_pid} =
+        SessionManager.start_session(manager,
+          provider: Minga.Test.SessionMockProvider,
+          provider_opts: [],
+          persist?: false
+        )
+
+      provider_pid = Session.get_provider(session_pid)
+      assert is_pid(provider_pid)
+
+      worker_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert :ok =
+               SessionManager.register_effect_workers(
+                 manager,
+                 session_pid,
+                 provider_pid,
+                 [worker_pid]
+               )
+
+      provider_ref = Process.monitor(provider_pid)
+      worker_ref = Process.monitor(worker_pid)
+
+      assert :ok = SessionManager.stop_session_by_pid(manager, session_pid)
+      assert_receive {:DOWN, ^provider_ref, :process, ^provider_pid, _reason}, 1_000
+
+      assert {:error, :restart_pending} =
+               SessionManager.start_session(manager, session_id: session_id)
+
+      send(worker_pid, :stop)
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}, 1_000
+      :sys.get_state(manager)
+
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+    end
+
     test "returns error for unknown pid", %{manager: manager} do
       assert {:error, :not_found} = SessionManager.stop_session_by_pid(manager, self())
     end
   end
 
   describe "session DOWN monitoring" do
+    test "does not restart a crashed session until its provider and effect workers exit", %{
+      manager: manager
+    } do
+      Minga.Events.subscribe(:agent_session_restarted)
+      session_id = "provider-drain-#{System.unique_integer([:positive])}"
+
+      assert {:ok, ^session_id, session_pid} =
+               SessionManager.start_session(manager,
+                 session_id: session_id,
+                 restart_backoff_base_ms: 1,
+                 restart_backoff_max_ms: 1
+               )
+
+      provider_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      worker_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      :sys.replace_state(manager, fn state ->
+        Map.update!(state, :sessions, fn sessions ->
+          Map.update!(sessions, session_id, fn entry ->
+            %{
+              entry
+              | provider_pid: provider_pid,
+                provider_monitor_ref: Process.monitor(provider_pid)
+            }
+          end)
+        end)
+      end)
+
+      assert :ok =
+               SessionManager.register_effect_workers(
+                 manager,
+                 session_pid,
+                 provider_pid,
+                 [worker_pid]
+               )
+
+      session_ref = Process.monitor(session_pid)
+      Process.exit(session_pid, :kill)
+      assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :killed}, 1_000
+
+      :sys.get_state(manager)
+
+      assert {:error, :restart_pending} =
+               SessionManager.start_session(manager, session_id: session_id)
+
+      send(provider_pid, :stop)
+      :sys.get_state(manager)
+
+      assert {:error, :restart_pending} =
+               SessionManager.start_session(manager, session_id: session_id)
+
+      refute_receive {:minga_event, :agent_session_restarted, _event}, 20
+
+      send(worker_pid, :stop)
+
+      assert_receive {
+                       :minga_event,
+                       :agent_session_restarted,
+                       %SessionRestartedEvent{
+                         session_id: ^session_id,
+                         old_pid: ^session_pid,
+                         new_pid: new_pid,
+                         reason: :killed
+                       }
+                     },
+                     3_000
+
+      assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
+    end
+
+    test "a late worker registration cancels a queued restart until the generation drains", %{
+      manager: manager
+    } do
+      Minga.Events.subscribe(:agent_session_restarted)
+      session_id = "late-worker-#{System.unique_integer([:positive])}"
+
+      assert {:ok, ^session_id, session_pid} =
+               SessionManager.start_session(manager,
+                 session_id: session_id,
+                 provider: RecordingProvider,
+                 provider_opts: [],
+                 persist?: false,
+                 restart_backoff_base_ms: 100,
+                 restart_backoff_max_ms: 100
+               )
+
+      provider_pid = Session.get_provider(session_pid)
+      assert is_pid(provider_pid)
+
+      :sys.replace_state(manager, fn state ->
+        Map.update!(state, :sessions, fn sessions ->
+          Map.update!(sessions, session_id, fn entry ->
+            if is_reference(entry.provider_monitor_ref) do
+              Process.demonitor(entry.provider_monitor_ref, [:flush])
+            end
+
+            %{entry | provider_pid: nil, provider_monitor_ref: nil}
+          end)
+        end)
+      end)
+
+      worker_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      worker_ref = Process.monitor(worker_pid)
+      session_ref = Process.monitor(session_pid)
+      Process.exit(session_pid, :kill)
+      assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :killed}, 1_000
+      :sys.get_state(manager)
+
+      assert :ok =
+               SessionManager.register_effect_workers(
+                 manager,
+                 session_pid,
+                 provider_pid,
+                 [worker_pid]
+               )
+
+      assert is_nil(:sys.get_state(manager).sessions[session_id].restart_state.timer_token)
+
+      assert {:error, :restart_pending} =
+               SessionManager.start_session(manager, session_id: session_id)
+
+      refute_receive {:minga_event, :agent_session_restarted, _event}, 20
+
+      send(worker_pid, :stop)
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}, 1_000
+
+      assert_receive {
+                       :minga_event,
+                       :agent_session_restarted,
+                       %SessionRestartedEvent{session_id: ^session_id, new_pid: new_pid}
+                     },
+                     1_000
+
+      assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
+    end
+
+    test "stopping a restart-pending session keeps its ID reserved until the provider exits", %{
+      manager: manager
+    } do
+      session_id = "stopped-provider-drain-#{System.unique_integer([:positive])}"
+
+      assert {:ok, ^session_id, session_pid} =
+               SessionManager.start_session(manager, session_id: session_id)
+
+      provider_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      :sys.replace_state(manager, fn state ->
+        Map.update!(state, :sessions, fn sessions ->
+          Map.update!(sessions, session_id, fn entry ->
+            %{
+              entry
+              | provider_pid: provider_pid,
+                provider_monitor_ref: Process.monitor(provider_pid)
+            }
+          end)
+        end)
+      end)
+
+      session_ref = Process.monitor(session_pid)
+      Process.exit(session_pid, :kill)
+      assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :killed}, 1_000
+      :sys.get_state(manager)
+
+      assert :ok = SessionManager.stop_session(manager, session_id)
+
+      assert {:error, :restart_pending} =
+               SessionManager.start_session(manager, session_id: session_id)
+
+      provider_ref = Process.monitor(provider_pid)
+      send(provider_pid, :stop)
+      assert_receive {:DOWN, ^provider_ref, :process, ^provider_pid, :normal}, 1_000
+      :sys.get_state(manager)
+
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+
+      assert {:ok, ^session_id, _new_pid} =
+               SessionManager.start_session(manager, session_id: session_id)
+    end
+
     test "a session that dies during metadata lookup is listed under its old registration and restarted only by its matching monitor",
          %{manager: manager} do
       Minga.Events.subscribe(:agent_session_restarted)
@@ -508,13 +753,31 @@ defmodule MingaAgent.SessionManagerTest do
                      50
     end
 
-    test "restarts a background subagent and refreshes its pid in listings", %{manager: manager} do
+    test "delivers the startup prompt and refreshes the background subagent pid on restart",
+         %{manager: manager} do
       Minga.Events.subscribe(:agent_session_restarted)
 
       assert {:ok, %Handle{} = handle} =
                SessionManager.start_background_subagent(manager, nil, "child work",
-                 session_opts: []
+                 session_opts: [
+                   provider: Minga.Test.StubProvider,
+                   provider_opts: [],
+                   persist?: false
+                 ]
                )
+
+      assert :ok = Session.subscribe(handle.pid)
+
+      prompt_recorded? = fn ->
+        Enum.any?(Session.messages(handle.pid), &match?({:user, "child work"}, &1))
+      end
+
+      unless prompt_recorded?.() do
+        assert_receive {:agent_event, session_pid, :messages_changed}, 1_000
+        assert session_pid == handle.pid
+      end
+
+      assert prompt_recorded?.()
 
       old_pid = handle.pid
       session_id = handle.session_id
@@ -574,6 +837,9 @@ defmodule MingaAgent.SessionManagerTest do
 
     {:ok, session_id, pid} =
       SessionManager.start_session(manager,
+        provider: RecordingProvider,
+        provider_opts: [],
+        persist?: false,
         restart_max_attempts: 2,
         restart_backoff_base_ms: 1,
         restart_backoff_max_ms: 1,
@@ -608,6 +874,26 @@ defmodule MingaAgent.SessionManagerTest do
                    },
                    1000
 
+    provider_pid = Session.get_provider(second_restart)
+    provider_ref = Process.monitor(provider_pid)
+
+    worker_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    worker_ref = Process.monitor(worker_pid)
+
+    assert :ok =
+             SessionManager.register_effect_workers(
+               manager,
+               second_restart,
+               provider_pid,
+               [worker_pid]
+             )
+
     ref = Process.monitor(second_restart)
     Process.exit(second_restart, :kill)
     assert_receive {:DOWN, ^ref, :process, ^second_restart, :killed}, 1000
@@ -626,6 +912,14 @@ defmodule MingaAgent.SessionManagerTest do
     refute_receive {:minga_event, :agent_session_restarted,
                     %SessionRestartedEvent{session_id: ^session_id}},
                    50
+
+    assert {:error, :restart_pending} =
+             SessionManager.start_session(manager, session_id: session_id)
+
+    send(worker_pid, :stop)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}, 1_000
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider_pid, _reason}, 1_000
+    :sys.get_state(manager)
 
     assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
   end
@@ -688,6 +982,21 @@ defmodule MingaAgent.SessionManagerTest do
 
     on_exit(fn -> File.rm_rf(dir) end)
 
+    continuation_messages = [
+      ReqLLM.Context.user("restored"),
+      ReqLLM.Context.assistant("reply")
+    ]
+
+    {:ok, continuation} =
+      MingaAgent.Session.Continuation.restore(
+        continuation_messages,
+        1,
+        1,
+        [],
+        %{},
+        :lossless
+      )
+
     :ok =
       SessionStore.save(
         %{
@@ -695,6 +1004,7 @@ defmodule MingaAgent.SessionManagerTest do
           timestamp: DateTime.to_iso8601(DateTime.utc_now()),
           model_name: "test-model",
           messages: [{:user, "restored"}, {:assistant, "reply"}],
+          continuation: continuation,
           usage: MingaAgent.TurnUsage.new()
         },
         dir
@@ -726,13 +1036,275 @@ defmodule MingaAgent.SessionManagerTest do
              _ -> false
            end)
 
-    provider = MingaAgent.Session.get_provider(new_pid)
-    assert {:ok, %{seeded_messages: seeded_messages}} = RecordingProvider.get_state(provider)
+    assert :sys.get_state(new_pid).continuation.messages == continuation_messages
+  end
 
-    assert Enum.any?(seeded_messages, fn
-             {:user, "restored"} -> true
+  test "managed restart follows the durable ID loaded into its Session", %{manager: manager} do
+    Minga.Events.subscribe(:agent_session_restarted)
+
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "session-manager-identity-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(dir) end)
+    loaded_id = "loaded-identity-#{System.unique_integer([:positive])}"
+    messages = [ReqLLM.Context.user("loaded prompt"), ReqLLM.Context.assistant("loaded reply")]
+
+    {:ok, continuation} =
+      MingaAgent.Session.Continuation.restore(messages, 1, 1, [], %{}, :lossless)
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: loaded_id,
+                 timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+                 model_name: "test-model",
+                 messages: [{:user, "loaded prompt"}, {:assistant, "loaded reply"}],
+                 continuation: continuation,
+                 usage: MingaAgent.TurnUsage.new()
+               },
+               dir
+             )
+
+    assert {:ok, "canonical-target-token"} =
+             SessionStore.establish_remote_token(loaded_id, "canonical-target-token", dir)
+
+    scratch_id = "scratch-identity-#{System.unique_integer([:positive])}"
+
+    assert {:ok, ^scratch_id, old_pid} =
+             SessionManager.start_session(manager,
+               session_id: scratch_id,
+               provider: RecordingProvider,
+               provider_opts: [],
+               persist?: true,
+               session_store_dir: dir
+             )
+
+    assert :ok = Session.load_session(old_pid, loaded_id)
+    assert {:ok, "canonical-target-token"} = SessionManager.session_token(manager, loaded_id)
+    assert {:error, :not_found} = SessionManager.session_token(manager, scratch_id)
+    :sys.get_state(manager)
+    assert {:ok, ^old_pid} = SessionManager.get_session(manager, loaded_id)
+    assert {:error, :not_found} = SessionManager.get_session(manager, scratch_id)
+
+    new_pid = crash_and_wait_for_restart(manager, loaded_id, old_pid)
+
+    assert_receive {
+                     :minga_event,
+                     :agent_session_restarted,
+                     %SessionRestartedEvent{
+                       session_id: ^loaded_id,
+                       old_pid: ^old_pid,
+                       new_pid: ^new_pid
+                     }
+                   },
+                   1_000
+
+    assert :sys.get_state(new_pid).continuation.messages == messages
+  end
+
+  test "starting a new session commits the manager identity and canonical token", %{
+    manager: manager
+  } do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "session-manager-new-identity-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(dir) end)
+    old_id = "old-identity-#{System.unique_integer([:positive])}"
+
+    assert {:ok, ^old_id, pid} =
+             SessionManager.start_session(manager,
+               session_id: old_id,
+               provider: RecordingProvider,
+               provider_opts: [],
+               persist?: true,
+               session_store_dir: dir
+             )
+
+    assert {:ok, old_token} = SessionManager.session_token(manager, old_id)
+    assert :ok = Session.new_session(pid)
+    new_id = Session.session_id(pid)
+
+    assert new_id != old_id
+    assert {:error, :session_id_changed} = Session.send_prompt_for_id(pid, old_id, "stale prompt")
+    assert :ok = Session.add_system_message_for_id(pid, old_id, "stale failure", :error)
+    :sys.get_state(pid)
+    refute Enum.any?(Session.messages(pid), &match?({:system, "stale failure", :error}, &1))
+    assert {:ok, ^pid} = SessionManager.get_session(manager, new_id)
+    assert {:error, :not_found} = SessionManager.get_session(manager, old_id)
+    assert {:error, :not_found} = SessionManager.session_token(manager, old_id)
+    assert {:ok, new_token} = SessionManager.session_token(manager, new_id)
+    refute new_token == old_token
+
+    assert {:ok, ^new_token} =
+             SessionStore.establish_remote_token(new_id, "replacement-token", dir)
+  end
+
+  test "retryable startup prompt refusal retries without a failure message", %{manager: manager} do
+    session_id = "startup-retry-#{System.unique_integer([:positive])}"
+
+    assert {:ok, ^session_id, pid} =
+             SessionManager.start_session(manager,
+               session_id: session_id,
+               provider: Minga.Test.StubProvider,
+               provider_opts: [],
+               persist?: false
+             )
+
+    assert :ok = Session.subscribe(pid)
+    entry = :sys.get_state(manager).sessions[session_id]
+    task_ref = make_ref()
+    delivery_ref = make_ref()
+
+    :sys.replace_state(manager, fn state ->
+      Map.update!(state, :sessions, fn sessions ->
+        Map.update!(sessions, session_id, fn entry ->
+          delivery = %{
+            reference: delivery_ref,
+            prompt: "retry this startup prompt",
+            attempt: 0,
+            phase: {:in_flight, session_id, entry.monitor_ref, task_ref, self()}
+          }
+
+          %{entry | startup_delivery: delivery}
+        end)
+      end)
+    end)
+
+    send(
+      manager,
+      {task_ref,
+       {:startup_prompt_result, delivery_ref, session_id, entry.monitor_ref,
+        {:error, :provider_not_ready}}}
+    )
+
+    assert_receive {:agent_event, ^pid, :messages_changed}, 1_000
+    assert Enum.any?(Session.messages(pid), &match?({:user, "retry this startup prompt"}, &1))
+
+    refute Enum.any?(Session.messages(pid), fn
+             {:system, text, :error} -> text =~ "Background sub-agent failed to start"
              _ -> false
            end)
+  end
+
+  test "terminal startup failure cannot write into a session after it changes identity", %{
+    manager: manager
+  } do
+    old_id = "startup-failure-#{System.unique_integer([:positive])}"
+
+    assert {:ok, ^old_id, pid} =
+             SessionManager.start_session(manager,
+               session_id: old_id,
+               provider: RecordingProvider,
+               provider_opts: [],
+               persist?: false
+             )
+
+    manager_state = :sys.get_state(manager)
+    entry = manager_state.sessions[old_id]
+    task_ref = make_ref()
+    delivery_ref = make_ref()
+
+    :sys.replace_state(manager, fn state ->
+      Map.update!(state, :sessions, fn sessions ->
+        Map.update!(sessions, old_id, fn entry ->
+          delivery = %{
+            reference: delivery_ref,
+            prompt: "startup prompt",
+            attempt: 0,
+            phase: {:in_flight, old_id, entry.monitor_ref, task_ref, self()}
+          }
+
+          %{entry | startup_delivery: delivery}
+        end)
+      end)
+    end)
+
+    assert :ok = Session.new_session(pid)
+    new_id = Session.session_id(pid)
+    assert new_id != old_id
+    assert {:ok, ^pid} = SessionManager.get_session(manager, new_id)
+
+    send(
+      manager,
+      {task_ref,
+       {:startup_prompt_result, delivery_ref, old_id, entry.monitor_ref,
+        {:error, :provider_failed}}}
+    )
+
+    :sys.get_state(manager)
+    :sys.get_state(pid)
+
+    refute Enum.any?(Session.messages(pid), fn
+             {:system, text, :error} -> text =~ "Background sub-agent failed to start"
+             _ -> false
+           end)
+  end
+
+  test "loading a session rejects an ID already owned by another live session", %{
+    manager: manager
+  } do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "session-manager-identity-collision-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(dir) end)
+    target_id = "identity-target-#{System.unique_integer([:positive])}"
+    source_id = "identity-source-#{System.unique_integer([:positive])}"
+
+    {:ok, continuation} =
+      MingaAgent.Session.Continuation.restore(
+        [ReqLLM.Context.user("target transcript")],
+        1,
+        1,
+        [],
+        %{},
+        :lossless
+      )
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: target_id,
+                 timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+                 model_name: "test-model",
+                 messages: [{:user, "target transcript"}],
+                 continuation: continuation,
+                 usage: MingaAgent.TurnUsage.new()
+               },
+               dir
+             )
+
+    assert {:ok, ^target_id, target_pid} =
+             SessionManager.start_session(manager,
+               session_id: target_id,
+               provider: RecordingProvider,
+               provider_opts: [],
+               persist?: true,
+               session_store_dir: dir
+             )
+
+    assert {:ok, source_id, source_pid} =
+             SessionManager.start_session(manager,
+               session_id: source_id,
+               provider: RecordingProvider,
+               provider_opts: [],
+               persist?: true,
+               session_store_dir: dir
+             )
+
+    assert {:error, :session_id_in_use} = Session.load_session(source_pid, target_id)
+    assert {:ok, ^source_pid} = SessionManager.get_session(manager, source_id)
+    assert {:ok, ^target_pid} = SessionManager.get_session(manager, target_id)
+    assert :sys.get_state(source_pid).session_id == source_id
+    assert :sys.get_state(target_pid).session_id == target_id
   end
 
   test "managed restarts surface degraded restore when prior context is missing", %{
@@ -788,42 +1360,6 @@ defmodule MingaAgent.SessionManagerTest do
     assert log =~ "could not restore prior context"
   end
 
-  describe "background prompt retry logging" do
-    test "logs an actionable error when retries exhaust after an exit", %{manager: manager} do
-      {:ok, session_id, _live_pid} =
-        SessionManager.start_session(manager,
-          provider: Minga.Test.StubProvider,
-          provider_opts: []
-        )
-
-      dead_pid =
-        spawn(fn ->
-          receive do
-            :stop -> :ok
-          end
-        end)
-
-      ref = Process.monitor(dead_pid)
-      send(dead_pid, :stop)
-      assert_receive {:DOWN, ^ref, :process, ^dead_pid, :normal}
-
-      :sys.replace_state(manager, fn state ->
-        %{state | sessions: Map.update!(state.sessions, session_id, &%{&1 | pid: dead_pid})}
-      end)
-
-      log =
-        capture_log(fn ->
-          send(manager, {:send_background_prompt, session_id, "child work", 100})
-          :sys.get_state(manager)
-        end)
-
-      assert log =~ session_id
-      assert log =~ inspect(dead_pid)
-      assert log =~ "after 101 attempts"
-      assert log =~ "failed to accept prompt"
-    end
-  end
-
   @spec write_legacy_session(String.t(), String.t(), String.t()) :: :ok
   defp write_legacy_session(session_id, token, dir) do
     data = %{
@@ -831,7 +1367,8 @@ defmodule MingaAgent.SessionManagerTest do
       timestamp: DateTime.to_iso8601(DateTime.utc_now()),
       model_name: "test",
       messages: [],
-      usage: MingaAgent.TurnUsage.new()
+      usage: MingaAgent.TurnUsage.new(),
+      continuation: MingaAgent.Session.Continuation.new()
     }
 
     :ok = SessionStore.save(data, dir)

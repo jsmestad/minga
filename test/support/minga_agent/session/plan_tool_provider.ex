@@ -7,13 +7,14 @@ defmodule Minga.Test.SessionPlanToolProvider do
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
+  alias Minga.Test.ProviderRequest
 
   @impl MingaAgent.Provider
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl MingaAgent.Provider
-  def send_prompt(pid, _text) do
-    GenServer.cast(pid, :attempt_write)
+  def send_prompt(pid, request) do
+    GenServer.cast(pid, {:attempt_write, request})
     :ok
   end
 
@@ -28,9 +29,6 @@ defmodule Minga.Test.SessionPlanToolProvider do
     GenServer.cast(pid, :new_session)
     :ok
   end
-
-  @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
 
   @impl MingaAgent.Provider
   def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
@@ -60,7 +58,7 @@ defmodule Minga.Test.SessionPlanToolProvider do
   end
 
   @impl GenServer
-  def handle_cast(:attempt_write, state) do
+  def handle_cast({:attempt_write, request}, state) do
     result =
       Executor.execute(
         "write_file",
@@ -69,7 +67,7 @@ defmodule Minga.Test.SessionPlanToolProvider do
         execution_mode(MingaAgent.Session.status(state.subscriber))
       )
 
-    maybe_emit_plan_refusal(state.subscriber, result)
+    maybe_emit_plan_refusal(state.subscriber, request, result)
     send(state.parent, {:provider_tool_result, result})
     {:noreply, state}
   end
@@ -81,13 +79,20 @@ defmodule Minga.Test.SessionPlanToolProvider do
   defp execution_mode(:plan), do: :plan
   defp execution_mode(_status), do: :exec
 
-  @spec maybe_emit_plan_refusal(pid(), Executor.result()) :: :ok
-  defp maybe_emit_plan_refusal(subscriber, {:error, {:plan_mode_refused, message}}) do
-    send(
+  @spec maybe_emit_plan_refusal(
+          pid(),
+          MingaAgent.Session.Request.t(),
+          Executor.result()
+        ) :: :ok
+  defp maybe_emit_plan_refusal(
+         subscriber,
+         request,
+         {:error, {:plan_mode_refused, message}}
+       ) do
+    ProviderRequest.emit(
       subscriber,
-      {:agent_provider_event, %Event.SystemMessage{message: message, level: :info}}
+      request,
+      %Event.SystemMessage{message: message, level: :info}
     )
-
-    :ok
   end
 end

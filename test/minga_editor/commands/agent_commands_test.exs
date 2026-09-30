@@ -222,9 +222,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     def new_session(pid), do: GenServer.cast(pid, :new_session)
 
     @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
     def get_state(_pid) do
       {:ok,
        %{

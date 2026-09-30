@@ -69,6 +69,19 @@ defmodule MingaAgent.Subagent.Handle do
     %{handle | parent_pid: parent_pid}
   end
 
+  @doc "Returns a copy of the handle with a different session ID."
+  @spec with_session_id(t(), String.t()) :: t()
+  def with_session_id(%__MODULE__{} = handle, session_id) when is_binary(session_id) do
+    %{handle | session_id: session_id}
+  end
+
+  @doc "Returns a copy of the handle with a different parent session ID."
+  @spec with_parent_session_id(t(), String.t() | nil) :: t()
+  def with_parent_session_id(%__MODULE__{} = handle, session_id)
+      when is_binary(session_id) or is_nil(session_id) do
+    %{handle | parent_session_id: session_id}
+  end
+
   @spec truncate(String.t(), pos_integer()) :: String.t()
   defp truncate(text, max_len) do
     if String.length(text) > max_len do

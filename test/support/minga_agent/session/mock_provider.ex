@@ -4,6 +4,7 @@ defmodule Minga.Test.SessionMockProvider do
   use GenServer
 
   alias MingaAgent.Event
+  alias Minga.Test.ProviderRequest
 
   @impl MingaAgent.Provider
   def start_link(opts) do
@@ -11,8 +12,8 @@ defmodule Minga.Test.SessionMockProvider do
   end
 
   @impl MingaAgent.Provider
-  def send_prompt(pid, text) do
-    GenServer.cast(pid, {:prompt, text})
+  def send_prompt(pid, request) do
+    GenServer.cast(pid, {:prompt, request})
     :ok
   end
 
@@ -22,17 +23,16 @@ defmodule Minga.Test.SessionMockProvider do
     :ok
   end
 
-  @spec continue(GenServer.server()) :: :ok
-  def continue(_pid), do: :ok
+  @impl MingaAgent.Provider
+
+  @spec continue(GenServer.server(), MingaAgent.Session.Request.t()) :: :ok
+  def continue(_pid, _request), do: :ok
 
   @impl MingaAgent.Provider
   def new_session(pid) do
     GenServer.cast(pid, :new_session)
     :ok
   end
-
-  @impl MingaAgent.Provider
-  def seed_messages(_pid, _messages), do: :ok
 
   @impl MingaAgent.Provider
   def get_state(_pid) do
@@ -46,12 +46,10 @@ defmodule Minga.Test.SessionMockProvider do
   end
 
   @impl GenServer
-  def handle_cast({:prompt, _text}, state) do
-    # Simulate: agent_start → text_delta → agent_end
-    send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-
-    send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: "Hello "}})
-    send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: "world!"}})
+  def handle_cast({:prompt, request}, state) do
+    ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
+    ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: "Hello "})
+    ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: "world!"})
 
     usage = %MingaAgent.TurnUsage{
       input: 100,
@@ -61,8 +59,7 @@ defmodule Minga.Test.SessionMockProvider do
       cost: 0.01
     }
 
-    send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
-
+    ProviderRequest.complete(state.subscriber, request, "Hello world!", usage)
     {:noreply, state}
   end
 
