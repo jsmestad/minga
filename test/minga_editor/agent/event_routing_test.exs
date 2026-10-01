@@ -20,6 +20,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.Agent.UIState
   alias MingaAgent.Event
   alias MingaAgent.Session
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -172,6 +173,53 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
 
       assert ss2.tab_bar == ss.tab_bar
+    end
+  end
+
+  describe "Agent.Events.dispatch/2 model selection" do
+    test "installs an accepted exact selection in the foreground panel" do
+      selection =
+        ModelSelectionFixture.selection(
+          display_name: "Accepted Model",
+          model_provider: "openai",
+          reasoning: %{
+            effort: "high",
+            options: ["off", "low", "medium", "high"]
+          }
+        )
+
+      state = Events.dispatch(event_state(%AgentState{}), {:model_selection_changed, selection})
+
+      assert state.workspace.agent_ui.panel.model_name == "Accepted Model"
+      assert state.workspace.agent_ui.panel.provider_name == "openai"
+      assert state.workspace.agent_ui.panel.thinking_level == "high"
+
+      assert state.workspace.agent_ui.view.toast == %{
+               message:
+                 "Model activated: Accepted Model via openai/#{selection.route.execution.wire_protocol}",
+               icon: "✓",
+               level: :info
+             }
+    end
+
+    test "does not replace the visible model when an exact selection is rejected" do
+      selection = ModelSelectionFixture.selection(display_name: "Rejected Model")
+
+      state =
+        event_state(%AgentState{})
+        |> then(fn state ->
+          ui = UIState.set_model_name(state.workspace.agent_ui, "Active Model")
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+        end)
+        |> Events.dispatch({:model_selection_rejected, selection, "Ollama is unavailable"})
+
+      assert state.workspace.agent_ui.panel.model_name == "Active Model"
+
+      assert state.workspace.agent_ui.view.toast == %{
+               message: "Ollama is unavailable",
+               icon: "✗",
+               level: :error
+             }
     end
   end
 

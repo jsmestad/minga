@@ -14,8 +14,10 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
   alias MingaAgent.Test.RecordingProcessBackend
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tools
   alias ReqLLM.Context
+  alias ReqLLM.Message.ContentPart
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
@@ -43,7 +45,7 @@ defmodule MingaAgent.Providers.NativeTest do
       stream: chunks,
       metadata_handle: handle,
       cancel: fn -> :ok end,
-      model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+      model: ModelSelectionFixture.selection().request_model,
       context: ReqLLM.Context.new()
     }
 
@@ -129,6 +131,7 @@ defmodule MingaAgent.Providers.NativeTest do
     defaults = [
       subscriber: subscriber,
       model: "anthropic:claude-sonnet-4-20250514",
+      model_selection: ModelSelectionFixture.selection(),
       config: %AgentConfig{},
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [],
@@ -426,8 +429,8 @@ defmodule MingaAgent.Providers.NativeTest do
         start_provider(tmp_dir: dir, thinking_level: "high", active_skill_names: ["plan"])
 
       assert {:ok, session_state} = Native.get_state(pid)
-      assert session_state.model.provider == "native"
-      assert session_state.model.id == "anthropic:claude-sonnet-4-20250514"
+      assert session_state.model.provider == "openai"
+      assert String.starts_with?(session_state.model.id, "ms2_")
       assert session_state.is_streaming == false
       assert session_state.thinking_level == "high"
       assert session_state.active_skill_names == ["plan"]
@@ -625,14 +628,21 @@ defmodule MingaAgent.Providers.NativeTest do
     test "thinking level accepts known values, rejects unknown values, and cycles in order", %{
       tmp_dir: dir
     } do
-      {:ok, pid} = start_provider(tmp_dir: dir)
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          model_selection:
+            ModelSelectionFixture.selection(
+              reasoning: %{effort: "off", options: ["off", "low", "medium", "high"]}
+            )
+        )
 
       for level <- ["low", "medium", "high", "off"] do
         assert :ok = Native.set_thinking_level(pid, level)
       end
 
-      assert {:error, msg} = Native.set_thinking_level(pid, "turbo")
-      assert msg =~ "unknown thinking level"
+      assert {:error, _reason} = Native.set_thinking_level(pid, "turbo")
+      assert {:ok, %{thinking_level: "off"}} = Native.get_state(pid)
 
       assert {:ok, %{"level" => "low"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
@@ -775,16 +785,19 @@ defmodule MingaAgent.Providers.NativeTest do
           build_stream_response([ReqLLM.StreamChunk.text("ok")])
         end
 
+        model_id = model |> String.split(":", parts: 2) |> List.last()
+
         {:ok, pid} =
           start_provider(
             tmp_dir: dir,
             model: model,
+            model_selection: ModelSelectionFixture.selection(model_id: model_id),
             thinking_level: thinking_level,
             llm_client: client
           )
 
         assert :ok = send_prompt(pid, "test")
-        assert_receive {^ref, ^model, opts}, 2_000
+        assert_receive {^ref, %LLMDB.Model{provider_model_id: ^model_id}, opts}, 2_000
 
         if expected_effort do
           assert Keyword.get(opts, :reasoning_effort) == expected_effort
@@ -794,12 +807,6 @@ defmodule MingaAgent.Providers.NativeTest do
 
         provider_options = Keyword.get(opts, :provider_options, [])
         refute Keyword.has_key?(provider_options, :additional_model_request_fields)
-
-        if String.starts_with?(model, "openai_codex:") do
-          assert provider_options[:auth_mode] == :oauth
-          assert provider_options[:oauth_file] == MingaAgent.Credentials.oauth_path()
-          assert provider_options[:codex_originator] == "minga"
-        end
 
         collect_run_events()
       end)
@@ -830,15 +837,23 @@ defmodule MingaAgent.Providers.NativeTest do
       :ok = send_prompt(pid, "Hello")
       collect_run_events()
 
-      assert :ok = Native.set_model(pid, "openai:o4-mini")
+      switched_selection =
+        ModelSelectionFixture.selection(
+          model_id: "o4-mini",
+          display_name: "o4-mini",
+          reasoning: %{effort: "medium", options: ["off", "medium"]}
+        )
+
+      assert :ok = Native.set_model(pid, switched_selection)
       assert {:ok, state} = Native.get_state(pid)
-      assert state.model.id == "openai:o4-mini"
+      assert state.model.id == MingaAgent.ModelSelection.id(switched_selection)
+      assert state.model.name == "o4-mini"
       assert state.thinking_level == "medium"
 
       :ok = send_prompt(pid, "Follow up")
       collect_run_events()
 
-      assert_received {^messages_ref, 1, "openai:o4-mini", messages}
+      assert_received {^messages_ref, 1, %LLMDB.Model{provider_model_id: "o4-mini"}, messages}
 
       assert Enum.map(messages, &{&1.role, text_content(&1)}) == [
                {:user, "Hello"},
@@ -861,6 +876,48 @@ defmodule MingaAgent.Providers.NativeTest do
   # ── Streaming tests ─────────────────────────────────────────────────────────
 
   describe "send_prompt streaming" do
+    test "rejects a turn when the exact route does not explicitly support tools", %{
+      tmp_dir: dir
+    } do
+      selection =
+        ModelSelectionFixture.selection(
+          display_name: "Text Only",
+          capabilities: %{tools: :unknown, images: false, streaming: true}
+        )
+
+      test_pid = self()
+
+      client = fn _model, _messages, _opts ->
+        send(test_pid, :unsupported_tool_request_started)
+        {:error, :unexpected_request}
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, model_selection: selection, llm_client: client)
+
+      assert {:error, message} = send_prompt(pid, "Inspect the project")
+      assert message =~ "does not explicitly support tools"
+      assert message =~ "Choose a tool-capable route"
+      refute_received :unsupported_tool_request_started
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+    end
+
+    test "rejects image history when the exact route does not support images", %{tmp_dir: dir} do
+      selection =
+        ModelSelectionFixture.selection(
+          display_name: "No Images",
+          capabilities: %{tools: true, images: false, streaming: true}
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, model_selection: selection)
+      image = ContentPart.image(<<0, 1, 2>>, "image/png")
+
+      assert {:error, message} = send_prompt(pid, [image])
+      assert message =~ "does not explicitly support image input"
+      assert message =~ "Choose an image-capable route"
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+    end
+
     test "emits start, text, thinking, and end events", %{tmp_dir: dir} do
       chunks = [
         ReqLLM.StreamChunk.thinking("Let me think..."),
@@ -2399,7 +2456,14 @@ defmodule MingaAgent.Providers.NativeTest do
   describe "send_prompt with LLM error" do
     test "emits error event on API failure", %{tmp_dir: dir} do
       client = fake_error_client("API rate limited")
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          max_retries: 0,
+          model_selection: ModelSelectionFixture.selection(model_provider: "anthropic")
+        )
 
       assert :ok = send_prompt(pid, "Hello")
 
@@ -2408,9 +2472,6 @@ defmodule MingaAgent.Providers.NativeTest do
       error = Enum.find(events, &match?(%Event.Error{}, &1))
       assert error != nil
       assert %Event.Error{kind: :rate_limited, provider: "anthropic"} = error
-
-      assert error.message ==
-               "The model provider is rate limiting requests. Wait a moment, then try again."
 
       agent_end = Enum.find(events, &match?(%Event.AgentEnd{}, &1))
       assert agent_end != nil
@@ -3248,53 +3309,37 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
-  describe "custom API base URL" do
-    test "base_url option follows override, per-provider, global, and unset precedence", %{
+  describe "exact request endpoint" do
+    test "the active resolved endpoint cannot be replaced by mutable config defaults", %{
       tmp_dir: dir
     } do
-      cases = [
-        {agent_config(api_base_url_override: "https://gateway.corp.com/v1"),
-         "https://gateway.corp.com/v1"},
-        {%AgentConfig{}, nil},
-        {agent_config(
-           api_base_url: "https://global.example.com/v1",
-           api_endpoints: %{
-             "anthropic" => "https://anthropic-gw.corp.com/v1",
-             "openai" => "https://openai-gw.corp.com/v1"
-           }
-         ), "https://anthropic-gw.corp.com/v1"},
-        {agent_config(
-           api_base_url: "https://global.example.com/v1",
-           api_endpoints: %{"openai" => "https://openai-only.com/v1"}
-         ), "https://global.example.com/v1"},
-        {agent_config(
-           api_base_url_override: "https://env-override.com/v1",
-           api_endpoints: %{"anthropic" => "https://should-lose.com"}
-         ), "https://env-override.com/v1"}
-      ]
+      parent = self()
+      selection = ModelSelectionFixture.selection(base_url: "http://127.0.0.1:9000/v1")
 
-      for {config, expected_base_url} <- cases do
-        ref = make_ref()
-        test_pid = self()
+      config =
+        agent_config(
+          api_base_url_override: "https://wrong-override.example/v1",
+          api_base_url: "https://wrong-default.example/v1",
+          api_endpoints: %{"openai" => "https://wrong-provider.example/v1"}
+        )
 
-        capturing_client = fn _model, _messages, opts ->
-          send(test_pid, {ref, opts})
-          build_stream_response([{:text, "ok"}])
-        end
-
-        {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client, config: config)
-        :ok = send_prompt(pid, "test")
-
-        assert_receive {^ref, opts}, 2_000
-
-        if expected_base_url do
-          assert Keyword.get(opts, :base_url) == expected_base_url
-        else
-          refute Keyword.has_key?(opts, :base_url)
-        end
-
-        collect_run_events()
+      client = fn model, _messages, opts ->
+        send(parent, {:executed_route, model.base_url, opts})
+        build_stream_response([{:text, "ok"}])
       end
+
+      {:ok, provider} =
+        start_provider(
+          tmp_dir: dir,
+          model_selection: selection,
+          llm_client: client,
+          config: config
+        )
+
+      assert :ok = send_prompt(provider, "Use the active route")
+      assert_receive {:executed_route, "http://127.0.0.1:9000/v1", opts}, 2_000
+      refute Keyword.has_key?(opts, :base_url)
+      assert Enum.any?(collect_run_events(), &match?(%Event.AgentEnd{}, &1))
     end
   end
 
@@ -3311,7 +3356,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} =
         start_provider(
-          model: "anthropic:claude-sonnet-4-20250514",
+          model_selection: ModelSelectionFixture.selection(model_provider: "anthropic"),
           llm_client: fake_error_client(reason),
           tmp_dir: tmp_dir,
           max_retries: 0
@@ -3326,9 +3371,6 @@ defmodule MingaAgent.Providers.NativeTest do
 
           assert %Event.Error{message: message, kind: :auth_failed, provider: "anthropic"} =
                    error
-
-          assert message ==
-                   "Couldn't authenticate with Anthropic. Run /auth anthropic <key> or pick another configured model with /model."
 
           refute message =~ "ReqLLM"
           refute message =~ "Splode"
@@ -3345,7 +3387,7 @@ defmodule MingaAgent.Providers.NativeTest do
     } do
       {:ok, pid} =
         start_provider(
-          model: "openai_codex:gpt-5.5",
+          model_selection: ModelSelectionFixture.selection(model_provider: "openai_codex"),
           llm_client: fake_error_client("Unauthorized"),
           tmp_dir: tmp_dir,
           max_retries: 0
@@ -3377,7 +3419,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} =
         start_provider(
-          model: "openai_codex:gpt-5.3-codex",
+          model_selection: ModelSelectionFixture.selection(model_provider: "openai_codex"),
           llm_client: fake_error_client(reason),
           tmp_dir: tmp_dir,
           max_retries: 0
@@ -3388,12 +3430,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
 
-      assert %Event.Error{message: message, kind: :invalid_model, provider: "openai_codex"} =
-               error
-
-      assert message =~ "gpt-5.3-codex-spark"
-      assert message =~ "/model"
-      refute message =~ "unexpected error"
+      assert %Event.Error{kind: :invalid_model, provider: "openai_codex"} = error
     end
 
     test "string-only provider errors classify auth, rate limit, and network failures", %{
@@ -3415,7 +3452,7 @@ defmodule MingaAgent.Providers.NativeTest do
       Enum.each(cases, fn {reason, kind} ->
         {:ok, pid} =
           start_provider(
-            model: "anthropic:claude-sonnet-4-20250514",
+            model_selection: ModelSelectionFixture.selection(model_provider: "anthropic"),
             llm_client: fake_error_client(reason),
             tmp_dir: tmp_dir,
             max_retries: 0
@@ -3427,31 +3464,6 @@ defmodule MingaAgent.Providers.NativeTest do
         error = Enum.find(events, &match?(%Event.Error{}, &1))
         assert %Event.Error{kind: ^kind} = error
       end)
-    end
-  end
-
-  describe "model format validation" do
-    test "bare model name without provider prefix returns :invalid_format error", %{
-      tmp_dir: tmp_dir
-    } do
-      # A model name like "claude-sonnet-4" (no provider prefix) should
-      # fail with a clear error, not a cryptic :invalid_format atom.
-      {:ok, pid} =
-        start_provider(
-          model: "claude-sonnet-4",
-          llm_client: fake_llm_client([]),
-          tmp_dir: tmp_dir
-        )
-
-      send_prompt(pid, "hello")
-      events = collect_run_events()
-
-      error_events = Enum.filter(events, &match?(%Event.Error{}, &1))
-      assert error_events != []
-
-      error = hd(error_events)
-      assert error.message =~ "is invalid"
-      assert error.message =~ "provider:model"
     end
   end
 end

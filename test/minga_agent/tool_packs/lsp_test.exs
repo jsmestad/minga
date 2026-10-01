@@ -155,6 +155,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
       Native.start_link(
         subscriber: self(),
         model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
         project_root: System.tmp_dir!(),
         config: %AgentConfig{},
         skip_api_key_env: true

@@ -27,6 +27,8 @@ defmodule MingaAgent.Config do
     # Provider & model
     provider: :auto,
     model: @unconfigured_model,
+    selection_intent: nil,
+    model_favorites: [],
     models: [],
 
     # Generation
@@ -92,6 +94,8 @@ defmodule MingaAgent.Config do
   @type t :: %__MODULE__{
           provider: :auto | :native | String.t(),
           model: String.t(),
+          selection_intent: map() | nil,
+          model_favorites: [String.t()],
           models: [String.t()],
           max_tokens: pos_integer(),
           prompt_cache: boolean(),
@@ -139,6 +143,8 @@ defmodule MingaAgent.Config do
     %__MODULE__{
       provider: get(:agent_provider, :auto),
       model: resolve_model(),
+      selection_intent: configured_selection_intent(),
+      model_favorites: get(:agent_model_favorites, []),
       models: get(:agent_models, []),
       max_tokens: get(:agent_max_tokens, 16_384),
       prompt_cache: get(:agent_prompt_cache, true),
@@ -185,6 +191,24 @@ defmodule MingaAgent.Config do
   @doc "Returns the internal sentinel used when no configured provider has an available model."
   @spec unconfigured_model() :: String.t()
   def unconfigured_model, do: @unconfigured_model
+
+  @doc "Returns the raw, unresolved model-selection intent stored in user config."
+  @spec configured_selection_intent() :: map() | nil
+  def configured_selection_intent do
+    case configured_model() do
+      nil -> nil
+      model -> %{"model" => model}
+    end
+  end
+
+  @doc "Returns raw model-selection intent from a specific options server."
+  @spec configured_selection_intent(Minga.Config.Options.server()) :: map() | nil
+  def configured_selection_intent(options_server) do
+    case configured_model(options_server) do
+      nil -> nil
+      model -> %{"model" => model}
+    end
+  end
 
   @doc "Returns a config with agent hooks disabled."
   @spec without_hooks(t()) :: t()
@@ -326,9 +350,22 @@ defmodule MingaAgent.Config do
 
   @spec first_available_model() :: String.t() | nil
   defp first_available_model do
-    case MingaAgent.ModelCatalog.available_models("") do
-      [%{"id" => model} | _rest] when is_binary(model) and model != "" -> model
-      _other -> nil
+    config = %__MODULE__{
+      model: @unconfigured_model,
+      selection_intent: nil,
+      model_favorites: get(:agent_model_favorites, []),
+      max_tokens: get(:agent_max_tokens, 16_384),
+      api_base_url: get(:agent_api_base_url, ""),
+      api_base_url_override: non_empty_env("MINGA_API_BASE_URL"),
+      api_endpoints: get(:agent_api_endpoints, nil)
+    }
+
+    case MingaAgent.ModelResolver.candidates(config: config) do
+      [%MingaAgent.ModelCandidate{selection: selection} | _rest] ->
+        MingaAgent.ModelSelection.id(selection)
+
+      _other ->
+        nil
     end
   rescue
     _ -> nil

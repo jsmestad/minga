@@ -40,6 +40,9 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:title_format` | string | `"{filename} {dirty}({directory}) - Minga"` | Terminal window title format (see [Window Title](#window-title)) |
 | `:recent_files_limit` | positive integer | `200` | Max recent files tracked per project |
 | `:persist_recent_files` | boolean | `true` | Write recent file history to disk (see [Projects](PROJECTS.md)) |
+| `:agent_model` | string or `nil` | `nil` | Default model intent; resolves to one exact executable route before activation (see [Agent model selection](AGENT-MODEL-SELECTION.md)) |
+| `:agent_model_favorites` | list of strings | `[]` | Stable model-route IDs, or legacy `provider:model` IDs during migration, pinned to the top of the picker |
+| `:agent_api_endpoints` | map or `nil` | `nil` | Explicit custom endpoint, protocol, auth mode, model metadata, limits, and capabilities |
 | `:agent_tool_approval` | `:destructive`, `:all`, `:none` | `:destructive` | When to prompt before executing agent tools |
 | `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file", "shell", "git_stage", "git_commit", "rename"]` | Which tools are classified as destructive |
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
@@ -199,6 +202,12 @@ Extension segments are removed automatically when the owning extension stops or 
 ### Responsive truncation
 
 Each segment has a priority. When the window is too narrow, Minga drops the lowest-priority visible segment first, then recalculates the line. Built-in priorities keep mode, filename, position, filetype, and diagnostics longer than parser, percent, and background-agent details. Custom segments default to priority `50`; pass `priority:` to make them more or less important.
+
+## Agent model routes
+
+Set `:agent_model` to a provider/model intent such as `"anthropic:claude-sonnet-4-20250514"`. Minga resolves it to one exact executable route before use. Open `/model` to inspect the protocol, endpoint, credential profile, limits, reasoning controls, and tool/image/streaming capability evidence for every available route.
+
+Use `:agent_api_endpoints` for explicit custom or local endpoints. Custom routes must declare a supported protocol and authentication mode; Minga rejects incompatible paths and unavailable credentials instead of inferring a provider or silently falling back. See [Agent model selection](AGENT-MODEL-SELECTION.md) for the configuration schema, migration behavior, support matrix, capability policy, smoke command, and picker benchmark.
 
 ## Agent reactive diagnostics
 

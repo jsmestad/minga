@@ -2,6 +2,7 @@ defmodule MingaAgent.SessionStoreTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Branch
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.SessionStore
@@ -57,16 +58,65 @@ defmodule MingaAgent.SessionStoreTest do
   # ── Save/Load round-trip ───────────────────────────────────────────────────
 
   describe "save and load round-trip" do
-    test "saves and loads via the public API" do
+    test "saves and loads a session", %{tmp_dir: dir} do
       data = sample_data()
-      assert :ok = SessionStore.save(data)
+      assert :ok = SessionStore.save(data, dir)
 
-      assert {:ok, loaded} = SessionStore.load(data.id)
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
       assert loaded.id == data.id
       assert loaded.model_name == "claude-sonnet-4"
     end
 
-    test "persists the exact active request for restart recovery" do
+    test "persists a versioned secret-free executable selection", %{tmp_dir: dir} do
+      selection = model_selection()
+      data = Map.put(sample_data("selected-route"), :model_selection, selection)
+
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      raw = File.read!(path)
+      record = JSON.decode!(raw)
+
+      assert record["version"] == 4
+
+      assert record["model_selection"]["credential"] == %{
+               "kind" => "none",
+               "provider" => "test"
+             }
+
+      refute Map.has_key?(record["model_selection"], "api_key")
+      refute Map.has_key?(record["model_selection"], "access_token")
+
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+      assert %ModelSelection.Stored{} = loaded.model_selection
+      assert ModelSelection.id(loaded.model_selection) == ModelSelection.id(selection)
+    end
+
+    test "loads version two model strings as deterministic correction intent", %{tmp_dir: dir} do
+      data = sample_data("version-two-selection")
+      assert :ok = SessionStore.save(data, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+      record =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.put("version", 2)
+        |> Map.delete("model_selection")
+        |> Map.delete("selection_intent")
+
+      File.write!(path, JSON.encode!(record))
+
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+      assert loaded.model_selection == nil
+
+      assert loaded.selection_intent == %{
+               "model" => data.model_name,
+               "provider" => data.provider_name
+             }
+    end
+
+    test "persists the exact active request for restart recovery", %{tmp_dir: dir} do
       data = sample_data()
 
       assert {:ok, request, continuation} =
@@ -74,8 +124,8 @@ defmodule MingaAgent.SessionStoreTest do
                  ReqLLM.Context.user("continue this exact prompt")
                ])
 
-      assert :ok = SessionStore.save(%{data | continuation: continuation})
-      assert {:ok, loaded} = SessionStore.load(data.id)
+      assert :ok = SessionStore.save(%{data | continuation: continuation}, dir)
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
       assert loaded.continuation.active_request == request
       assert loaded.continuation.active_request.messages == request.messages
     end
@@ -96,16 +146,16 @@ defmodule MingaAgent.SessionStoreTest do
                |> ContinuationCodec.decode()
     end
 
-    test "preserves user messages" do
+    test "preserves user messages", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       user_msgs = Enum.filter(loaded.messages, &match?({:user, _}, &1))
       assert [{:user, "Hello, how are you?"}] = user_msgs
     end
 
-    test "preserves user message attachments" do
+    test "preserves user message attachments", %{tmp_dir: dir} do
       data = %{
         sample_data()
         | messages: [{:user, "see image", [%{filename: "chart.png", size_kb: 42}]}],
@@ -113,25 +163,25 @@ defmodule MingaAgent.SessionStoreTest do
           pinned_ids: MapSet.new()
       }
 
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       assert loaded.messages == [{:user, "see image", [%{filename: "chart.png", size_kb: 42}]}]
     end
 
-    test "preserves assistant messages" do
+    test "preserves assistant messages", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       assert {:assistant, "I'm doing great!"} in loaded.messages
     end
 
-    test "preserves tool call messages" do
+    test "preserves tool call messages", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       tool_calls = Enum.filter(loaded.messages, &match?({:tool_call, _}, &1))
       assert [{:tool_call, tc}] = tool_calls
       assert tc.name == "read_file"
@@ -218,40 +268,40 @@ defmodule MingaAgent.SessionStoreTest do
       assert tool_call_lines.preview == nil
     end
 
-    test "preserves thinking messages" do
+    test "preserves thinking messages", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       thinking = Enum.filter(loaded.messages, &match?({:thinking, _, _}, &1))
       assert [{:thinking, "Let me think about this...", true}] = thinking
     end
 
-    test "preserves system messages" do
+    test "preserves system messages", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       system = Enum.filter(loaded.messages, &match?({:system, _, _}, &1))
       assert [{:system, "Session started", :info}] = system
     end
 
-    test "preserves usage messages" do
+    test "preserves usage messages", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       usage = Enum.filter(loaded.messages, &match?({:usage, _}, &1))
       assert [{:usage, u}] = usage
       assert u.input == 100
       assert u.cost == 0.003
     end
 
-    test "preserves total usage" do
+    test "preserves total usage", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      {:ok, loaded} = SessionStore.load(data.id)
+      {:ok, loaded} = SessionStore.load(data.id, dir)
       assert loaded.usage.input == 100
       assert loaded.usage.cost == 0.003
     end
@@ -473,8 +523,8 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:error, :invalid_session_record} = SessionStore.load_legacy(data.id, dir)
     end
 
-    test "returns error for nonexistent session" do
-      assert {:error, _} = SessionStore.load("nonexistent-id")
+    test "returns error for nonexistent session", %{tmp_dir: dir} do
+      assert {:error, _} = SessionStore.load("nonexistent-id", dir)
     end
 
     test "returns error when the sessions directory cannot be created", %{tmp_dir: dir} do
@@ -588,40 +638,40 @@ defmodule MingaAgent.SessionStoreTest do
 
   # ── List ────────────────────────────────────────────────────────────────────
 
-  describe "list/0" do
-    test "returns empty list when no sessions exist" do
+  describe "list/1" do
+    test "returns empty list when no sessions exist", %{tmp_dir: dir} do
       # Sessions dir may not exist yet
-      sessions = SessionStore.list()
+      sessions = SessionStore.list(dir)
       # Should not crash, returns a list
       assert is_list(sessions)
     end
 
-    test "lists saved sessions with metadata" do
+    test "lists saved sessions with metadata", %{tmp_dir: dir} do
       data1 = sample_data("session-a")
       data2 = sample_data("session-b")
-      SessionStore.save(data1)
-      SessionStore.save(data2)
+      SessionStore.save(data1, dir)
+      SessionStore.save(data2, dir)
 
-      sessions = SessionStore.list()
+      sessions = SessionStore.list(dir)
       ids = Enum.map(sessions, & &1.id)
       assert "session-a" in ids
       assert "session-b" in ids
     end
 
-    test "metadata includes preview from first user message" do
+    test "metadata includes preview from first user message", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      sessions = SessionStore.list()
+      sessions = SessionStore.list(dir)
       session = Enum.find(sessions, &(&1.id == data.id))
       assert session.preview =~ "Hello"
     end
 
-    test "metadata includes model name" do
+    test "metadata includes model name", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      sessions = SessionStore.list()
+      sessions = SessionStore.list(dir)
       session = Enum.find(sessions, &(&1.id == data.id))
       assert session.model_name == "claude-sonnet-4"
     end
@@ -669,34 +719,34 @@ defmodule MingaAgent.SessionStoreTest do
 
   # ── Delete ──────────────────────────────────────────────────────────────────
 
-  describe "delete/1" do
-    test "deletes a saved session" do
+  describe "delete/2" do
+    test "deletes a saved session", %{tmp_dir: dir} do
       data = sample_data()
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      assert :ok = SessionStore.delete(data.id)
-      assert {:error, _} = SessionStore.load(data.id)
+      assert :ok = SessionStore.delete(data.id, dir)
+      assert {:error, _} = SessionStore.load(data.id, dir)
     end
   end
 
   # ── Clear all ───────────────────────────────────────────────────────────────
 
-  describe "clear_all/0" do
-    test "removes all sessions" do
-      SessionStore.save(sample_data("s1"))
-      SessionStore.save(sample_data("s2"))
+  describe "clear_all/1" do
+    test "removes all sessions", %{tmp_dir: dir} do
+      SessionStore.save(sample_data("s1"), dir)
+      SessionStore.save(sample_data("s2"), dir)
 
-      SessionStore.clear_all()
+      SessionStore.clear_all(dir)
 
-      assert {:error, _} = SessionStore.load("s1")
-      assert {:error, _} = SessionStore.load("s2")
+      assert {:error, _} = SessionStore.load("s1", dir)
+      assert {:error, _} = SessionStore.load("s2", dir)
     end
   end
 
   # ── Atomic writes ──────────────────────────────────────────────────────────
 
   describe "atomic writes" do
-    test "overwrites an existing session" do
+    test "overwrites an existing session", %{tmp_dir: dir} do
       data1 = %{
         sample_data()
         | messages: [{:user, "first"}],
@@ -706,41 +756,41 @@ defmodule MingaAgent.SessionStoreTest do
 
       data2 = %{data1 | messages: [{:user, "second"}]}
 
-      SessionStore.save(data1)
-      SessionStore.save(data2)
+      SessionStore.save(data1, dir)
+      SessionStore.save(data2, dir)
 
-      {:ok, loaded} = SessionStore.load(data1.id)
+      {:ok, loaded} = SessionStore.load(data1.id, dir)
       assert [{:user, "second"}] = loaded.messages
     end
   end
 
   # ── Prune ───────────────────────────────────────────────────────────────────
 
-  describe "prune/1" do
-    test "removes sessions older than N days" do
+  describe "prune/2" do
+    test "removes sessions older than N days", %{tmp_dir: dir} do
       old_ts = DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -60 * 86_400, :second))
       new_ts = DateTime.to_iso8601(DateTime.utc_now())
 
       old_data = %{sample_data("old-session") | timestamp: old_ts}
       new_data = %{sample_data("new-session") | timestamp: new_ts}
 
-      SessionStore.save(old_data)
-      SessionStore.save(new_data)
+      SessionStore.save(old_data, dir)
+      SessionStore.save(new_data, dir)
 
-      pruned = SessionStore.prune(30)
+      pruned = SessionStore.prune(30, dir)
       assert pruned >= 1
 
-      assert {:error, _} = SessionStore.load("old-session")
-      assert {:ok, _} = SessionStore.load("new-session")
+      assert {:error, _} = SessionStore.load("old-session", dir)
+      assert {:ok, _} = SessionStore.load("new-session", dir)
     end
 
-    test "does not remove sessions within retention period" do
+    test "does not remove sessions within retention period", %{tmp_dir: dir} do
       data = sample_data("recent-session")
-      SessionStore.save(data)
+      SessionStore.save(data, dir)
 
-      pruned = SessionStore.prune(30)
+      pruned = SessionStore.prune(30, dir)
       assert pruned == 0
-      assert {:ok, _} = SessionStore.load("recent-session")
+      assert {:ok, _} = SessionStore.load("recent-session", dir)
     end
 
     test "pruning a transcript does not revoke its durable identity", %{tmp_dir: dir} do
@@ -765,4 +815,7 @@ defmodule MingaAgent.SessionStoreTest do
   defp private_mode?(mode, mask) do
     Bitwise.band(mode, mask) == 0
   end
+
+  defp model_selection,
+    do: MingaAgent.Test.ModelSelectionFixture.selection(model_provider: "test")
 end

@@ -448,6 +448,9 @@ defmodule MingaAgent.SessionManagerTest do
                  restart_backoff_max_ms: 1
                )
 
+      MingaAgent.Session.get_provider(session_pid)
+      :sys.get_state(manager)
+
       provider_pid =
         spawn(fn ->
           receive do

@@ -2,10 +2,12 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Memory
+  alias MingaAgent.ModelCandidate
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaAgent.TurnUsage
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.AuthStatusEffect
   alias MingaEditor.Agent.UIState
@@ -41,34 +43,38 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
     @impl MingaAgent.Provider
-    def get_available_models(_pid) do
-      {:ok,
-       [
-         %{
-           "id" => "anthropic:claude-sonnet-4",
-           "name" => "Claude Sonnet 4",
-           "provider" => "anthropic",
-           "context_window" => 200_000,
-           "cost" => nil
-         },
-         %{
-           "id" => "openai:gpt-4o",
-           "name" => "GPT-4o",
-           "provider" => "openai",
-           "context_window" => 128_000,
-           "cost" => nil
-         }
-       ]}
-    end
+    def get_available_models(pid), do: GenServer.call(pid, :get_available_models)
 
     @impl MingaAgent.Provider
-    def cycle_model(_pid), do: {:ok, %{"model" => "openai:gpt-4o", "index" => 1, "total" => 1}}
+    def cycle_model(_pid), do: {:error, "Model cycling is unavailable"}
 
     @impl MingaAgent.Provider
     def set_model(_pid, _model), do: :ok
 
     @impl GenServer
-    def init(_opts), do: {:ok, %{}}
+    def init(opts), do: {:ok, Keyword.get(opts, :candidates, default_candidates())}
+
+    @impl GenServer
+    def handle_call(:get_available_models, _from, candidates),
+      do: {:reply, {:ok, candidates}, candidates}
+
+    defp default_candidates do
+      [
+        candidate("claude-sonnet-4", "Claude Sonnet 4", "anthropic"),
+        candidate("gpt-4o", "GPT-4o", "openai")
+      ]
+    end
+
+    defp candidate(model_id, display_name, provider) do
+      selection =
+        ModelSelectionFixture.selection(
+          model_id: model_id,
+          display_name: display_name,
+          model_provider: provider
+        )
+
+      %ModelCandidate{selection: selection, favorite: false, current: false}
+    end
   end
 
   defmodule HeldAuthProbe do
@@ -84,8 +90,27 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   end
 
   defp start_session(opts \\ []) do
-    session_opts = Keyword.merge([provider: NoopProvider, provider_opts: []], opts)
-    start_supervised!({Session, session_opts})
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "minga-slash-#{Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)}"
+      )
+
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    session_opts =
+      Keyword.merge(
+        [
+          provider: NoopProvider,
+          provider_opts: [],
+          persist?: false,
+          hooks_enabled?: false,
+          session_store_dir: dir
+        ],
+        opts
+      )
+
+    start_supervised!(Supervisor.child_spec({Session, session_opts}, id: {Session, make_ref()}))
   end
 
   defp start_effect_scheduler do
@@ -93,6 +118,17 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
     :ok = EffectScheduler.attach(scheduler, self())
     scheduler
+  end
+
+  defp model_candidate(model_id, display_name \\ nil) do
+    selection =
+      ModelSelectionFixture.selection(
+        model_id: model_id,
+        display_name: display_name || model_id,
+        model_provider: "test"
+      )
+
+    %ModelCandidate{selection: selection, favorite: false, current: false}
   end
 
   describe "slash_command?/1" do
@@ -205,28 +241,41 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       refute "help" in labels
     end
 
-    test "returns configured model candidates after model and a space" do
-      models = ["anthropic:claude-sonnet-4", "openai:gpt-4o"]
-      candidates = SlashCommand.completion_candidates(mock_state(), "model gpt", models)
-      assert [%{label: "openai:gpt-4o", insert: "model openai:gpt-4o"}] = candidates
+    test "returns exact model route candidates after model and a space" do
+      candidate = model_candidate("gpt-4o", "GPT-4o")
+      session = start_session(provider_opts: [candidates: [candidate]])
+
+      assert [completion] =
+               SlashCommand.completion_candidates(mock_state(session: session), "model gpt")
+
+      id = MingaAgent.ModelSelection.id(candidate.selection)
+      assert completion.label == id
+      assert completion.insert == "model #{id}"
+      assert completion.description =~ "GPT-4o"
+      assert completion.description =~ "test:none"
+      assert completion.description =~ "tools yes, images yes, streaming yes"
     end
 
-    test "renders all configured model entries when many are available" do
-      models =
-        1..25
-        |> Enum.map(fn index ->
-          index
-          |> Integer.to_string()
-          |> String.pad_leading(2, "0")
-          |> then(&"zz-#{&1}")
+    test "renders every exact route when many are available" do
+      candidates =
+        Enum.map(1..25, fn index ->
+          model_id =
+            index
+            |> Integer.to_string()
+            |> String.pad_leading(2, "0")
+            |> then(&"zz-#{&1}")
+
+          model_candidate(model_id)
         end)
 
+      session = start_session(provider_opts: [candidates: candidates])
+
       labels =
-        SlashCommand.completion_candidates(mock_state(), "model zz", models)
+        SlashCommand.completion_candidates(mock_state(session: session), "model zz")
         |> Enum.map(& &1.label)
 
-      assert Enum.count(labels) == 25
-      assert MapSet.new(labels) == MapSet.new(models)
+      expected_ids = Enum.map(candidates, &MingaAgent.ModelSelection.id(&1.selection))
+      assert MapSet.new(labels) == MapSet.new(expected_ids)
     end
   end
 
@@ -312,9 +361,13 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert picker_ui.source == MingaEditor.UI.Picker.AgentModelSource
     end
 
-    test "/model with name sets model (triggers restart)" do
-      {:ok, state} = SlashCommand.execute(mock_state(), "/model gpt-4o")
-      assert state.workspace.agent_ui.panel.model_name == "gpt-4o"
+    test "/model with a name preserves the UI when no session can validate it" do
+      state = mock_state()
+      prior_model = state.workspace.agent_ui.panel.model_name
+      {:ok, state} = SlashCommand.execute(state, "/model gpt-4o")
+
+      assert state.workspace.agent_ui.panel.model_name == prior_model
+      assert state.shell_runtime.state.notice.message =~ "No agent session"
     end
 
     test "command parsing is case-insensitive" do
@@ -362,7 +415,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth publishes local pending status while its held probe leaves Editor work responsive" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{"openai" => :env}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{"openai" => :env}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
 
       state =
@@ -403,16 +456,10 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth ignores a late result after active-session replacement" do
       original_session = start_session()
 
-      replacement_session =
-        start_supervised!(
-          Supervisor.child_spec(
-            {Session, provider: NoopProvider, provider_opts: []},
-            id: {:replacement_session, make_ref()}
-          )
-        )
+      replacement_session = start_session()
 
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       original_state = %{mock_state(session: original_session) | effect_scheduler: scheduler}
 
       _state =
@@ -445,7 +492,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth ignores a late result after new_session reuses the active PID" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
       original_session_id = Session.session_id(session)
 
@@ -490,7 +537,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       session = start_session(session_store_dir: dir, persist?: false)
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
 
       _state =
@@ -520,7 +567,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth timeout kills its worker and publishes terminal unavailable status" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
 
       _state =
@@ -549,7 +596,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "repeated /auth status requests keep only the newest probe" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
       effect_opts = [probe: {HeldAuthProbe, :availability, [self()]}]
 

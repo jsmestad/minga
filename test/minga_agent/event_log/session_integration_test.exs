@@ -247,6 +247,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "hello")
+    :sys.get_state(Session.get_provider(session))
     assert_receive {:replay_provider_finished, "hello"}
     :sys.get_state(session)
     :sys.get_state(log_pid)

@@ -18,6 +18,7 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
          skip_api_key_env: true,
          provider: :test,
          model: "test",
+         model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
          read_only?: true,
          tools: [read_tool, write_tool]},
         id: {:native_read_only, make_ref()}
@@ -40,6 +41,7 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
          skip_api_key_env: true,
          provider: :test,
          model: "test",
+         model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
          read_only?: true,
          tool_allowlist: [],
          tools: [tool("read_file")]},
@@ -61,6 +63,7 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
          skip_api_key_env: true,
          provider: :test,
          model: "test",
+         model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
          read_only?: true,
          config: config,
          tools: [tool("read_file")]},

@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaAgent.FileMention
   alias MingaAgent.Markdown
   alias MingaAgent.Message
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaEditor.Agent.PromptBuffer
@@ -173,6 +174,7 @@ defmodule MingaEditor.Commands.Agent do
     case load_persisted_session(session_pid, session_id) do
       :ok ->
         state
+        |> sync_restored_model_selection(session_pid)
         |> arm_provenance_jump(session_pid, tool_call_id, origin)
         |> activate_agent_view(return_target)
 
@@ -193,7 +195,8 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec load_persisted_session(pid(), String.t()) :: :ok | {:error, atom()}
+  @spec load_persisted_session(pid(), String.t()) ::
+          :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
   defp load_persisted_session(session_pid, session_id) do
     case Session.load_session(session_pid, session_id) do
       :ok ->
@@ -214,7 +217,7 @@ defmodule MingaEditor.Commands.Agent do
     :exit, _reason -> {:error, :session_unavailable}
   end
 
-  @spec safe_restore_error(term()) :: atom()
+  @spec safe_restore_error(term()) :: atom() | {:model_selection_correction_required, String.t()}
   defp safe_restore_error(:invalid_session_record), do: :invalid_saved_session
 
   defp safe_restore_error({:checkpoint_reconciliation_failed, _reason}),
@@ -239,11 +242,20 @@ defmodule MingaEditor.Commands.Agent do
     do: :unsupported_session_version
 
   defp safe_restore_error({:save_current_failed, _reason}), do: :current_session_save_failed
+
+  defp safe_restore_error({:model_selection_correction_required, message})
+       when is_binary(message),
+       do: {:model_selection_correction_required, message}
+
   defp safe_restore_error({:invalid_continuation_boundaries, _reason}), do: :invalid_saved_session
   defp safe_restore_error({:invalid_continuation, _reason}), do: :invalid_saved_session
   defp safe_restore_error(_reason), do: :restore_failed
 
-  @spec restore_failure_message(atom()) :: String.t()
+  @spec restore_failure_message(atom() | {:model_selection_correction_required, String.t()}) ::
+          String.t()
+  defp restore_failure_message({:model_selection_correction_required, message}),
+    do: "#{message} The current conversation was not replaced."
+
   defp restore_failure_message(:invalid_saved_session),
     do: "The saved session record is invalid. The current conversation was not replaced."
 
@@ -886,11 +898,12 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
           {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
-  defp resolve_prompt_for_session(state, text, model) do
+  defp resolve_prompt_for_session(state, text, _model) do
     if remote_session?(state) do
       {:ok, text}
     else
-      resolve_mentions(text, model: model)
+      selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
+      resolve_mentions(text, model_selection: selection)
     end
   end
 
@@ -1327,18 +1340,20 @@ defmodule MingaEditor.Commands.Agent do
       NoticeWorkflow.publish(state, "No agent session")
     else
       case Session.cycle_model(Runtime.active_session(state.shell_runtime)) do
-        {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
-          state = apply_model_and_provider(state, model)
+        {:ok, %{"model" => model} = result} ->
+          provider = Map.get(result, "provider", AgentConfig.extract_provider_prefix(model))
+          state = apply_model_and_provider(state, model, provider)
           state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
+          route = Map.get(result, "route")
+          message = Enum.reject(["Model: #{model}", route], &is_nil/1) |> Enum.join(" via ")
 
-          Session.add_system_message(
-            Runtime.active_session(state.shell_runtime),
-            "Model: #{model} [#{index}/#{total}]"
-          )
+          Session.add_system_message(Runtime.active_session(state.shell_runtime), message)
+          NoticeWorkflow.publish(state, message)
 
+        {:pending, :credential_discovery} ->
           NoticeWorkflow.publish(
             state,
-            "Model: #{model} [#{index}/#{total}]"
+            "Checking exact local model route availability. The current model remains active."
           )
 
         {:error, reason} when is_binary(reason) ->
@@ -1351,9 +1366,9 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec maybe_update_thinking_level(state(), term()) :: state()
-  @spec apply_model_and_provider(state(), String.t()) :: state()
-  defp apply_model_and_provider(state, model) do
-    provider = AgentConfig.extract_provider_prefix(model)
+  @spec apply_model_and_provider(state(), String.t(), String.t() | nil) :: state()
+  defp apply_model_and_provider(state, model, provider \\ nil) do
+    provider = provider || AgentConfig.extract_provider_prefix(model)
 
     state
     |> update_agent_ui(&UIState.set_model_name(&1, model))
@@ -1366,23 +1381,26 @@ defmodule MingaEditor.Commands.Agent do
 
   defp maybe_update_thinking_level(state, _level), do: state
 
-  @doc "Sets the agent model without resetting conversation context."
-  @spec set_model(state(), String.t()) :: state()
-  def set_model(state, model) do
-    state = apply_model_and_provider(state, model)
+  @doc "Sets an exact agent model route without resetting conversation context."
+  @spec set_model(state(), String.t() | ModelSelection.t()) :: state()
+  def set_model(state, model_or_selection) do
+    display = model_display(model_or_selection)
 
     case Runtime.active_session(state.shell_runtime) do
       nil ->
-        NoticeWorkflow.publish(state, "Model: #{model}")
+        NoticeWorkflow.publish(state, "No agent session; model selection was not changed")
 
       session ->
-        case Session.set_model(session, model) do
+        case Session.set_model(session, model_or_selection) do
           :ok ->
-            Session.add_system_message(session, "Model: #{model}")
-            NoticeWorkflow.publish(state, "Model: #{model}")
+            state = apply_model_selection_to_ui(state, model_or_selection)
+            Session.add_system_message(session, "Model: #{display}")
+            NoticeWorkflow.publish(state, "Model: #{display}")
 
           {:pending, :credential_discovery} ->
-            message = "Model change accepted: #{model}. Checking local Ollama availability."
+            message =
+              "Checking exact route availability for #{display}. The current model remains active."
+
             Session.add_system_message(session, message)
             NoticeWorkflow.publish(state, message)
 
@@ -1390,13 +1408,44 @@ defmodule MingaEditor.Commands.Agent do
             NoticeWorkflow.publish(state, reason)
 
           {:error, reason} ->
-            NoticeWorkflow.publish(
-              state,
-              "Error: #{inspect(reason)}"
-            )
+            NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
         end
     end
   end
+
+  @spec sync_restored_model_selection(state(), pid()) :: state()
+  defp sync_restored_model_selection(state, session) do
+    case Session.model_selection(session) do
+      %ModelSelection{} = selection ->
+        apply_model_selection_to_ui(state, selection)
+
+      nil ->
+        state
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :agent,
+        "[Agent.Commands] restored model selection unavailable: #{inspect(reason)}"
+      )
+
+      state
+  end
+
+  @spec apply_model_selection_to_ui(state(), String.t() | ModelSelection.t()) :: state()
+  defp apply_model_selection_to_ui(state, %ModelSelection{} = selection) do
+    state
+    |> apply_model_and_provider(selection.route.display_name, selection.route.model_provider)
+    |> update_agent_ui(&UIState.set_thinking_level(&1, selection.policy.reasoning.effort))
+  end
+
+  defp apply_model_selection_to_ui(state, model), do: apply_model_and_provider(state, model)
+
+  @spec model_display(String.t() | ModelSelection.t()) :: String.t()
+  defp model_display(%ModelSelection{} = selection),
+    do: "#{selection.route.display_name} via #{selection.route.execution.wire_protocol}"
+
+  defp model_display(model), do: model
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
   #

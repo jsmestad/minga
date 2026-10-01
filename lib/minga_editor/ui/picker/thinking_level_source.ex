@@ -1,21 +1,24 @@
 defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   @moduledoc """
-  Picker source for AI agent thinking levels.
+  Picker source for reasoning controls supported by the active resolved route.
 
-  Presents the supported provider levels and marks the current level so `SPC a T` shows the available choices instead of cycling blindly.
+  Unsupported effort levels are never offered.
   """
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias MingaAgent.ModelSelection
+  alias MingaAgent.Session
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
-  @levels [
-    {"off", "No additional reasoning effort"},
-    {"low", "Low reasoning effort"},
-    {"medium", "Medium reasoning effort"},
-    {"high", "High reasoning effort"}
-  ]
+  @descriptions %{
+    "off" => "No additional reasoning effort",
+    "low" => "Low reasoning effort",
+    "medium" => "Medium reasoning effort",
+    "high" => "High reasoning effort"
+  }
+  @level_order ["off", "low", "medium", "high"]
 
   @impl true
   @spec title() :: String.t()
@@ -27,13 +30,18 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(%Context{picker_ui: %{context: %{current_level: current_level}}}) do
-    Enum.map(@levels, &format_level(&1, current_level))
+  def candidates(%Context{agent_session: session} = context) when is_pid(session) do
+    case Session.model_selection(session) do
+      %ModelSelection{} = selection ->
+        reasoning = selection.policy.reasoning
+        Enum.map(reasoning.options, &format_level(&1, reasoning.effort))
+
+      nil ->
+        candidates_without_selection(context)
+    end
   end
 
-  def candidates(_context) do
-    Enum.map(@levels, &format_level(&1, nil))
-  end
+  def candidates(context), do: candidates_without_selection(context)
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
@@ -41,15 +49,24 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
     MingaEditor.Commands.Agent.set_thinking_level(state, level)
   end
 
-  @spec format_level({String.t(), String.t()}, String.t() | nil) :: Item.t()
-  defp format_level({level, description}, current_level) do
+  @spec format_level(String.t(), String.t() | nil) :: Item.t()
+  defp format_level(level, current_level) do
     %Item{
       id: level,
       label: display_name(level),
-      description: description,
+      description: Map.get(@descriptions, level, "Provider-specific reasoning control"),
       active: level == current_level
     }
   end
+
+  @spec candidates_without_selection(Context.t()) :: [Item.t()]
+  defp candidates_without_selection(%Context{
+         picker_ui: %{context: %{current_level: current_level}}
+       }) do
+    Enum.map(@level_order, &format_level(&1, current_level))
+  end
+
+  defp candidates_without_selection(_context), do: []
 
   @spec display_name(String.t()) :: String.t()
   defp display_name("off"), do: "Off"

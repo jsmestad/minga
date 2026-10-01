@@ -12,18 +12,17 @@ defmodule MingaAgent.Compaction do
   discussed.
   """
 
-  alias MingaAgent.ModelLimits
   alias MingaAgent.TokenEstimator
   alias ReqLLM.Context
   alias ReqLLM.Message
 
   @typedoc "A function that takes (model, messages, opts) and returns {:ok, text} or {:error, reason}."
-  @type summary_fn :: (String.t(), [Message.t()], keyword() ->
+  @type summary_fn :: (LLMDB.Model.t(), [Message.t()], keyword() ->
                          {:ok, String.t()} | {:error, term()})
 
   @typedoc "Options for compaction."
   @type compact_opts :: [
-          model: String.t(),
+          model: LLMDB.Model.t(),
           llm_client: summary_fn(),
           context_limit: pos_integer() | nil,
           threshold: float(),
@@ -32,7 +31,6 @@ defmodule MingaAgent.Compaction do
 
   @default_threshold 0.80
   @default_keep_recent 6
-  @default_context_limit 100_000
   @summary_max_tokens 2048
 
   @doc """
@@ -42,9 +40,9 @@ defmodule MingaAgent.Compaction do
   performed, or `{:ok, context}` if the context is within limits.
 
   Options:
-  - `:model` — the model string (used for context limit lookup and summary call)
+  - `:model` — exact request model used for the summary call
   - `:llm_client` — the LLM client function for generating the summary
-  - `:context_limit` — override the model's context limit
+  - `:context_limit` — exact resolved context limit; automatic compaction is disabled when unknown
   - `:threshold` — fraction of context limit that triggers compaction (default: 0.80)
   - `:keep_recent` — number of recent messages to preserve verbatim (default: 6)
   """
@@ -52,10 +50,10 @@ defmodule MingaAgent.Compaction do
           {:compacted, Context.t(), String.t()} | {:ok, Context.t()}
   def maybe_compact(context, opts) do
     estimated = TokenEstimator.estimate(context.messages)
-    limit = resolve_context_limit(opts)
+    limit = Keyword.get(opts, :context_limit)
     threshold = Keyword.get(opts, :threshold, @default_threshold)
 
-    if estimated > limit * threshold do
+    if is_integer(limit) and limit > 0 and estimated > limit * threshold do
       compact(context, opts)
     else
       {:ok, context}
@@ -160,25 +158,6 @@ defmodule MingaAgent.Compaction do
   end
 
   defp extract_content(_), do: ""
-
-  @spec resolve_context_limit(compact_opts()) :: pos_integer()
-  defp resolve_context_limit(opts) do
-    case Keyword.get(opts, :context_limit) do
-      nil ->
-        model = Keyword.get(opts, :model, "")
-        model_name = strip_provider_prefix(model)
-
-        case ModelLimits.context_limit(model_name) do
-          nil -> @default_context_limit
-          limit -> limit
-        end
-
-      limit ->
-        limit
-    end
-  end
-
-  defdelegate strip_provider_prefix(model), to: MingaAgent.Config
 
   @spec format_tokens(non_neg_integer()) :: String.t()
   defp format_tokens(tokens) when tokens >= 1000 do
