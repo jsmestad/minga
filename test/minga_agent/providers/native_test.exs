@@ -142,6 +142,22 @@ defmodule MingaAgent.Providers.NativeTest do
     ]
 
     merged = Keyword.merge(defaults, opts)
+
+    merged =
+      case Keyword.pop(merged, :thinking_level) do
+        {nil, merged} ->
+          merged
+
+        {level, merged} ->
+          {:ok, selection} =
+            MingaAgent.ModelSelection.with_reasoning(
+              Keyword.fetch!(merged, :model_selection),
+              level
+            )
+
+          Keyword.put(merged, :model_selection, selection)
+      end
+
     Native.start_link(merged)
   end
 

@@ -4,7 +4,7 @@ import MingaProtocol
 
 /// Owns one protocol handle pair and every resource whose lifetime is tied to it.
 ///
-/// `stop()` retires delivery immediately, but it does not claim to interrupt a `FileHandle` read already blocked in `ProtocolReader`. The transport owner must close the pipe or let the peer finish so that retired read can return.
+/// `stop()` retires delivery immediately and closes the owned handles after queued writes retire. Closing the write pipe lets the peer exit and releases a blocked reader without waiting on the main actor.
 @MainActor
 final class ProtocolConnection {
     typealias CurrentConnection = @MainActor (UInt64) -> Bool
@@ -15,6 +15,8 @@ final class ProtocolConnection {
     let connectionID: UInt64
     let encoder: ProtocolEncoder
 
+    private let readHandle: FileHandle
+    private let writeHandle: FileHandle
     private let reader: ProtocolReader
     private let handoff: ProtocolEventHandoff
     private var consumerTask: Task<Void, Never>?
@@ -35,6 +37,8 @@ final class ProtocolConnection {
         encoderFactory: EncoderFactory? = nil
     ) throws {
         self.connectionID = connectionID
+        self.readHandle = readHandle
+        self.writeHandle = writeHandle
 
         let encoder: ProtocolEncoder
         if let encoderFactory {
@@ -138,7 +142,17 @@ final class ProtocolConnection {
         consumerTask?.cancel()
         consumerTask = nil
         reader.stop()
-        encoder.disconnect(reason: .expectedTeardown)
+        let readHandle = readHandle
+        let writeHandle = writeHandle
+        encoder.disconnect(reason: .expectedTeardown) {
+            for handle in [writeHandle, readHandle] {
+                do {
+                    try handle.close()
+                } catch {
+                    NSLog("ProtocolConnection: failed to close retired pipe: \(error)")
+                }
+            }
+        }
     }
 
     func waitForReaderAdmissionForTesting() {

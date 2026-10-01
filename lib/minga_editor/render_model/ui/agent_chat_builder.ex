@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -81,7 +82,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       status: shell_agent.runtime.status || :idle,
-      model_name: display_model_name(panel.model_name),
+      model_name: Panel.model_label(panel),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
       prompt_line_count: MingaEditor.Agent.PromptBuffer.input_line_count(panel),
@@ -115,10 +116,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp transcript_epoch(session, panel) do
     :erlang.phash2({session, panel.transcript.display_start, panel.transcript.version})
   end
-
-  @spec display_model_name(String.t()) :: String.t()
-  defp display_model_name(model) when model in ["", "unknown"], do: "No model configured"
-  defp display_model_name(model), do: model
 
   @spec build_prompt_completion(MingaEditor.Agent.UIState.Panel.t()) :: PromptCompletion.t() | nil
   defp build_prompt_completion(%{mention_completion: %{candidates: candidates} = comp})

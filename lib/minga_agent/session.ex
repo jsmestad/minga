@@ -316,7 +316,8 @@ defmodule MingaAgent.Session do
           error: String.t() | nil,
           active_tool_name: String.t() | nil,
           credentials_configured: boolean(),
-          credential_readiness: Credentials.readiness()
+          credential_readiness: Credentials.readiness(),
+          model_selection: ModelSelection.t() | nil
         }
 
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
@@ -757,7 +758,9 @@ defmodule MingaAgent.Session do
     credential_probe_fn =
       Keyword.get(opts, :credential_probe_fn, &Credentials.ollama_availability/1)
 
-    initial_thinking_level = Keyword.get(opts, :thinking_level)
+    initial_thinking_level =
+      Keyword.get(opts, :thinking_level, Keyword.get(provider_opts, :thinking_level))
+
     timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
 
     session_id = Keyword.get(opts, :session_id, generate_session_id())
@@ -1131,7 +1134,8 @@ defmodule MingaAgent.Session do
       error: TurnExecution.error(state.turn_execution),
       active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
       credentials_configured: state.credentials_configured,
-      credential_readiness: state.credential_readiness
+      credential_readiness: state.credential_readiness,
+      model_selection: state.model_selection
     }
 
     {:reply, snapshot, state}
@@ -4801,15 +4805,7 @@ defmodule MingaAgent.Session do
       ]
       |> Keyword.merge(Keyword.get(provider_opts, :model_resolver_opts, []))
 
-    intent =
-      %{
-        "model" => model,
-        "reasoning_effort" => thinking_level
-      }
-      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-      |> Map.new()
-
-    case ModelResolver.resolve(intent, resolver_opts) do
+    case ModelResolver.resolve(model, resolver_opts) do
       {:ok, selection} ->
         case maybe_apply_initial_reasoning(selection, thinking_level) do
           {:ok, selection} -> {selection, nil}
@@ -4853,7 +4849,7 @@ defmodule MingaAgent.Session do
   defp maybe_put_model_selection(opts, nil), do: Keyword.delete(opts, :model_selection)
 
   defp maybe_put_model_selection(opts, %ModelSelection{} = selection),
-    do: Keyword.put(opts, :model_selection, selection)
+    do: opts |> Keyword.delete(:thinking_level) |> Keyword.put(:model_selection, selection)
 
   @spec model_resolution_opts(state(), keyword()) :: keyword()
   defp model_resolution_opts(state, extra \\ []) do
@@ -4953,7 +4949,7 @@ defmodule MingaAgent.Session do
       state.provider.opts
       |> Keyword.put(:model, stable_id)
       |> Keyword.put(:provider, provider_name)
-      |> Keyword.put(:model_selection, selection)
+      |> maybe_put_model_selection(selection)
 
     lifecycle =
       ProviderLifecycle.replace(

@@ -271,7 +271,7 @@ defmodule MingaAgent.Providers.Native do
 
     subscriber = Keyword.fetch!(opts, :subscriber)
     model = Keyword.get(opts, :model, config.model)
-    requested_thinking = Keyword.get(opts, :thinking_level, "off")
+    requested_thinking = Keyword.get(opts, :thinking_level)
     selection = initial_selection!(opts, config, model, requested_thinking)
     project_root = Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
     project_view = Keyword.get(opts, :project_view)
@@ -3069,12 +3069,15 @@ defmodule MingaAgent.Providers.Native do
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
-  @spec initial_selection!(keyword(), AgentConfig.t(), String.t(), String.t()) ::
+  @spec initial_selection!(keyword(), AgentConfig.t(), String.t(), String.t() | nil) ::
           ModelSelection.t()
   defp initial_selection!(opts, config, model, requested_thinking) do
     case Keyword.get(opts, :model_selection) do
-      %ModelSelection{} = selection ->
-        apply_initial_reasoning!(selection, requested_thinking)
+      %ModelSelection{} = selection when requested_thinking == nil ->
+        selection
+
+      %ModelSelection{} ->
+        raise ArgumentError, "Pass reasoning policy in model_selection, not thinking_level"
 
       nil ->
         resolve_legacy_initial_selection!(opts, config, model, requested_thinking)
@@ -3085,7 +3088,7 @@ defmodule MingaAgent.Providers.Native do
           keyword(),
           AgentConfig.t(),
           String.t(),
-          String.t()
+          String.t() | nil
         ) :: ModelSelection.t()
   defp resolve_legacy_initial_selection!(opts, config, model, requested_thinking) do
     resolver_opts =
@@ -3094,13 +3097,15 @@ defmodule MingaAgent.Providers.Native do
       |> Keyword.put_new(:config, config)
       |> Keyword.put_new(:credential_snapshot, MingaAgent.Credentials.snapshot())
 
-    case ModelResolver.resolve(%{"model" => model}, resolver_opts) do
+    case ModelResolver.resolve(model, resolver_opts) do
       {:ok, selection} -> apply_initial_reasoning!(selection, requested_thinking)
       {:error, reason} -> raise ArgumentError, ModelResolver.message(reason)
     end
   end
 
-  @spec apply_initial_reasoning!(ModelSelection.t(), String.t()) :: ModelSelection.t()
+  @spec apply_initial_reasoning!(ModelSelection.t(), String.t() | nil) :: ModelSelection.t()
+  defp apply_initial_reasoning!(selection, nil), do: selection
+
   defp apply_initial_reasoning!(selection, requested_thinking) do
     case ModelSelection.with_reasoning(selection, requested_thinking) do
       {:ok, selection} -> selection

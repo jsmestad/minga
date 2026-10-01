@@ -2,7 +2,6 @@ defmodule MingaEditor.Agent.UIStateTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaAgent.Config, as: AgentConfig
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -22,7 +21,7 @@ defmodule MingaEditor.Agent.UIStateTest do
   end
 
   describe "new/0 and basic state" do
-    test "starts hidden, unfocused, empty, and uses the credential-aware default model" do
+    test "starts hidden with model discovery deferred" do
       ui = UIState.new()
 
       refute ui.panel.visible
@@ -34,8 +33,58 @@ defmodule MingaEditor.Agent.UIStateTest do
       assert MingaEditor.Agent.PromptBuffer.input_cursor(ui) == {0, 0}
       assert MingaEditor.Agent.PromptBuffer.input_line_count(ui) == 1
       assert MingaEditor.Agent.PromptBuffer.input_empty?(ui)
-      assert ui.panel.model_name == AgentConfig.default_model()
+      assert ui.panel.credential_readiness == :checking
       assert ui.panel.credentials_configured == false
+      assert ui.panel.thinking_level == nil
+    end
+
+    test "credential readiness projection retains an unresolved model for every readiness result" do
+      panel = Panel.set_model_name(Panel.new(), "unknown")
+
+      for readiness <- [:checking, :configured, :unconfigured] do
+        updated = Panel.set_credential_readiness(panel, readiness)
+        assert updated.model_name == "unknown"
+        assert updated.credential_readiness == readiness
+        assert updated.credentials_configured == (readiness == :configured)
+      end
+    end
+
+    test "model labels distinguish unresolved discovery from confirmed absence" do
+      panel = Panel.set_model_name(Panel.new(), "unknown")
+
+      assert Panel.model_label(Panel.set_credential_readiness(panel, :checking)) ==
+               "Model not resolved"
+
+      assert Panel.model_label(Panel.set_credential_readiness(panel, :configured)) ==
+               "Model not resolved"
+
+      assert Panel.model_label(Panel.set_credential_readiness(panel, :unconfigured)) ==
+               "No model configured"
+
+      selected = Panel.set_model_name(panel, "openai:selected")
+      assert Panel.model_label(selected) == "openai:selected"
+    end
+
+    test "activation preserves an existing qualified or exact route selection" do
+      options = start_supervised!({Minga.Config.Options, name: nil})
+      assert {:ok, _} = Minga.Config.Options.set(options, :agent_model, "openai:replacement")
+
+      for model <- ["anthropic:selected", "selected@anthropic", "ms2_selected-route"] do
+        panel = Panel.set_model_name(Panel.new(), model)
+        assert Panel.ensure_configured_model(panel, options) == panel
+      end
+    end
+
+    test "activation installs an explicit model for empty and unresolved panels" do
+      options = start_supervised!({Minga.Config.Options, name: nil})
+      assert {:ok, _} = Minga.Config.Options.set(options, :agent_model, "openai:selected")
+
+      for model <- ["", "unknown", "selected"] do
+        panel = Panel.set_model_name(Panel.new(), model)
+        updated = Panel.ensure_configured_model(panel, options)
+        assert updated.model_name == "openai:selected"
+        assert updated.provider_name == "openai"
+      end
     end
 
     test "toggle flips panel visibility" do

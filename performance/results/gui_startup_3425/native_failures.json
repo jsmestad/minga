@@ -1,0 +1,26 @@
+[
+  {
+    "case": "renderer_failure",
+    "app_exit_code": 0,
+    "child_starts": 1,
+    "remaining_child_pids": [],
+    "frame_committed": false,
+    "renderer_failure_observed": true
+  },
+  {
+    "case": "immediate_exit",
+    "app_exit_code": 0,
+    "child_starts": 1,
+    "remaining_child_pids": [],
+    "frame_committed": false,
+    "renderer_failure_observed": false
+  },
+  {
+    "case": "quit_during_startup",
+    "app_exit_code": 0,
+    "child_starts": 1,
+    "remaining_child_pids": [],
+    "frame_committed": false,
+    "renderer_failure_observed": false
+  }
+]

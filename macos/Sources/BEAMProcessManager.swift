@@ -90,16 +90,21 @@ final class BEAMProcessManager {
         BEAMLaunchInputAcquirer.embeddedExecutableURL() != nil
     }
 
-    /// Spawns the BEAM release as a child process with piped stdin/stdout.
+    /// Acquires current bundle inputs and spawns the owned BEAM child.
     func start() {
-        guard exitIntent != .appShutdown else { return }
-        guard process == nil else { return }
-        if exitIntent == .restartScheduled {
-            exitIntent = .running
-        }
+        guard exitIntent != .appShutdown, process == nil else { return }
         guard let configuration = launchConfiguration() else {
             NSLog("BEAMProcessManager: no embedded BEAM release found")
             return
+        }
+        start(configuration: configuration)
+    }
+
+    /// Spawns a child from complete launch inputs and observes its termination.
+    func start(configuration: BEAMLaunchConfiguration) {
+        guard exitIntent != .appShutdown, process == nil else { return }
+        if exitIntent == .restartScheduled {
+            exitIntent = .running
         }
 
         // Prevent App Nap / automatic + sudden termination while the BEAM lives.
@@ -135,6 +140,11 @@ final class BEAMProcessManager {
             try proc.run()
         } catch {
             NSLog("BEAMProcessManager: failed to start BEAM: \(error)")
+            for handle in [stdinPipe.fileHandleForReading, stdinPipe.fileHandleForWriting,
+                           stdoutPipe.fileHandleForReading, stdoutPipe.fileHandleForWriting] {
+                closeLaunchHandle(handle)
+            }
+            endBackgroundActivity()
             onCrash?()
             return
         }
@@ -184,6 +194,41 @@ final class BEAMProcessManager {
 
     func beginAppShutdown() {
         exitIntent = .appShutdown
+    }
+
+    /// Hands the launch pipes to a successfully constructed ProtocolConnection without closing them.
+    func transferPipeOwnership() {
+        readHandle = nil
+        writeHandle = nil
+    }
+
+    /// Aborts an owned launch without blocking the main actor or scheduling a restart.
+    func abortStartup() {
+        exitIntent = .appShutdown
+        if let process, process.isRunning {
+            process.terminate()
+        }
+        closeLaunchPipes()
+        if process == nil {
+            endBackgroundActivity()
+        }
+    }
+
+    private func closeLaunchPipes() {
+        let handles = [writeHandle, readHandle].compactMap { $0 }
+        writeHandle = nil
+        readHandle = nil
+        for handle in handles {
+            closeLaunchHandle(handle)
+        }
+    }
+
+    private func closeLaunchHandle(_ handle: FileHandle) {
+        do {
+            try handle.close()
+        } catch {
+            NSLog("BEAMProcessManager: failed to close launch pipe: \(error)")
+        }
     }
 
     enum TransportRestartDisposition: Equatable, Sendable {
@@ -288,8 +333,8 @@ final class BEAMProcessManager {
         NSLog("BEAMProcessManager: BEAM exited (status \(status), reason \(reason.rawValue))")
 
         self.process = nil
-        self.readHandle = nil
-        self.writeHandle = nil
+        closeLaunchPipes()
+        endBackgroundActivity()
 
         // Prune old timestamps outside the restart window.
         let now = Date()

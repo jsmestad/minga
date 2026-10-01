@@ -25,6 +25,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.RenderModel.UI.StatusBar.Selection, as: StatusSelection
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaAgent.StatusCommand
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Editing
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Shell.Traditional.Modeline
@@ -382,7 +383,7 @@ defmodule MingaEditor.StatusBar.Data do
 
     %{
       session_id: session_id,
-      model: model_name(panel.model_name, session_model),
+      model: model_name(panel, session_model),
       status: agent.runtime.status,
       workdir: workdir || File.cwd!()
     }
@@ -408,16 +409,15 @@ defmodule MingaEditor.StatusBar.Data do
     :exit, _ -> nil
   end
 
-  @spec model_name(String.t(), String.t() | nil) :: String.t()
-  defp model_name(panel_model, _session_model)
-       when is_binary(panel_model) and panel_model not in ["", "unknown"],
-       do: panel_model
+  @spec model_name(Panel.t(), String.t() | nil) :: String.t()
+  defp model_name(%Panel{model_name: model}, _session_model) when model not in ["", "unknown"],
+    do: model
 
-  defp model_name(_panel_model, session_model)
+  defp model_name(_panel, session_model)
        when is_binary(session_model) and session_model not in ["", "unknown"],
        do: session_model
 
-  defp model_name(_panel_model, _session_model), do: "No model configured"
+  defp model_name(panel, _session_model), do: Panel.model_label(panel)
 
   # ── Git helpers ────────────────────────────────────────────────────────────
 

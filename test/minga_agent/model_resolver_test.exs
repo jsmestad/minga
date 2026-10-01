@@ -47,6 +47,68 @@ defmodule MingaAgent.ModelResolverTest do
     cost: %{}
   }
 
+  test "a fresh unconfigured profile skips catalog acquisition, including favorites" do
+    opts = [
+      credential_snapshot: Snapshot.new(%{}, nil, "http://localhost"),
+      backend_spec: Native.spec(),
+      models: :catalog_must_not_be_enumerated,
+      favorites: ["openai:not-a-codex-name"]
+    ]
+
+    assert ModelResolver.candidates(opts) == []
+  end
+
+  test "an unsupported credential does not enable catalog discovery" do
+    opts = [
+      credential_snapshot: Snapshot.new(%{"unsupported" => :env}, nil, "http://localhost"),
+      backend_spec: Native.spec(),
+      models: :catalog_must_not_be_enumerated
+    ]
+
+    assert ModelResolver.candidates(opts) == []
+  end
+
+  test "explicit local routes remain selectable without implicit Ollama discovery" do
+    local_model = %{
+      @catalog_model
+      | id: "local-model",
+        provider: :ollama,
+        provider_model_id: "local-model",
+        execution: %{
+          text: %{
+            supported: true,
+            family: "openai_chat_compatible",
+            wire_protocol: "openai_chat",
+            transport: "http",
+            provider_model_id: "local-model",
+            base_url: "http://localhost:11434",
+            path: "/chat/completions"
+          }
+        },
+        extra: %{}
+    }
+
+    opts = [
+      credential_snapshot: Snapshot.new(%{}, nil, "http://localhost:11434"),
+      backend_spec: Native.spec(),
+      models: [local_model],
+      providers: [%{id: :ollama, runtime: %{"base_url" => "http://localhost:11434"}}]
+    ]
+
+    assert ModelResolver.candidates(opts) == []
+
+    [candidate] =
+      ModelResolver.candidates(Keyword.put(opts, :config, %Config{model: "ollama:local-model"}))
+
+    assert candidate.selection.route.request_provider == :ollama
+    id = ModelSelection.id(candidate.selection)
+    assert {:ok, selection} = ModelResolver.resolve(id, opts)
+    assert ModelSelection.id(selection) == id
+
+    [current] = ModelResolver.candidates(Keyword.put(opts, :current, selection))
+    assert current.selection == selection
+  end
+
   test "keeps catalog routes unverified without exact model evidence" do
     assert {:ok, selection} =
              ModelResolver.resolve(
@@ -269,6 +331,11 @@ defmodule MingaAgent.ModelResolverTest do
     assert selection.policy.capabilities.tools == false
     assert selection.policy.limits.output == 100
     assert {:ok, _restored} = ModelResolver.restore(selection, opts)
+
+    [candidate] =
+      ModelResolver.candidates(Keyword.put(opts, :models, :catalog_must_not_be_loaded))
+
+    assert candidate.selection.route.execution.provider_model_id == "gateway-wire-alias"
   end
 
   test "restore rejects changed custom capability and wire-model declarations" do

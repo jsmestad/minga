@@ -390,35 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signal(SIGPIPE, SIG_IGN)
 
         os_signpost(.begin, log: startupLog, name: "AppStartup")
-
-        // Register the bundled Nerd Font for devicon rendering.
-        registerBundledFonts()
-
-        // Register as a regular GUI app so macOS routes keyboard events to us.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
-
-        // Initial backing scale for Retina rendering. The window does not exist yet, so NSScreen.main is the only safe source here. EditorNSView.viewDidMoveToWindow/viewDidChangeBackingProperties corrects this if the window lands on another display.
-        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-
-        // Font manager owns the primary and all registered font faces.
-        let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
-        self.fontManager = fm
-
-        // Initial grid dimensions (no gutter padding subtraction yet; the first
-        // setFrameSize call will send corrected cols once the gutter is established).
-        let cols = UInt16(max(defaultWindowWidth / CGFloat(fm.cellWidth), 1))
-        let rows = UInt16(defaultWindowHeight / CGFloat(fm.cellHeight))
-
-        // CoreText renderer.
-        guard let ctRenderer = CoreTextMetalRenderer(
-            resourcePolicy: frameResourcePolicy.nativeRenderer
-        ) else {
-            NSLog("Failed to initialize CoreText Metal renderer")
-            NSApp.terminate(nil)
-            return
-        }
-        ctRenderer.setupRenderers(fontManager: fm)
+        recordStartupPhase("app_startup")
 
         // Protocol encoder and reader: in bundle mode, we spawn the BEAM
         // and use pipe file handles. In dev mode, we use stdin/stdout.
@@ -439,7 +411,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             manager.onNormalExit = { [weak self] in
-                let disposition = self?.applicationQuitCoordinator?.coreDidExit() ?? .noPendingQuit
+                guard let self, self.beamManager?.isShuttingDown != true else { return }
+                let disposition = self.applicationQuitCoordinator?.coreDidExit() ?? .noPendingQuit
                 if disposition == .noPendingQuit {
                     NSApp.terminate(nil)
                 }
@@ -449,6 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             manager.start()
+            recordStartupPhase("beam_spawned")
 
             guard let readH = manager.readHandle, let writeH = manager.writeHandle else {
                 NSLog("Failed to start BEAM process")
@@ -462,6 +436,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             protocolInput = .standardInput
             protocolOutput = .standardOutput
         }
+
+        // Register the bundled Nerd Font for devicon rendering.
+        registerBundledFonts()
+
+        // Register as a regular GUI app so macOS routes keyboard events to us.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+
+        // Initial backing scale for Retina rendering. The window does not exist yet, so NSScreen.main is the only safe source here. EditorNSView.viewDidMoveToWindow/viewDidChangeBackingProperties corrects this if the window lands on another display.
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+
+        // Font manager owns the primary and all registered font faces.
+        let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
+        self.fontManager = fm
+        recordStartupPhase("fonts_ready")
+
+        // Initial grid dimensions (no gutter padding subtraction yet; the first
+        // setFrameSize call will send corrected cols once the gutter is established).
+        let cols = UInt16(max(defaultWindowWidth / CGFloat(fm.cellWidth), 1))
+        let rows = UInt16(defaultWindowHeight / CGFloat(fm.cellHeight))
+
+        // CoreText renderer.
+        guard let ctRenderer = CoreTextMetalRenderer(
+            resourcePolicy: frameResourcePolicy.nativeRenderer
+        ) else {
+            NSLog("Failed to initialize CoreText Metal renderer")
+            beamManager?.abortStartup()
+            NSApp.terminate(nil)
+            return
+        }
+        ctRenderer.setupRenderers(fontManager: fm)
+        recordStartupPhase("native_ready")
 
         let recovery = RecoveryManager { [weak self] in
             if let manager = self?.beamManager {
@@ -614,6 +620,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start the already-installed connection only after every application consumer is ready to receive its ordered events.
         connection.start()
+        recordStartupPhase("protocol_started")
         coreConnectionIsLive = true
 
         // First frame callback: dismiss the startup overlay and flush Finder,
@@ -623,6 +630,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
 
             os_signpost(.end, log: startupLog, name: "AppStartup")
+            recordStartupPhase("first_frame_committed")
             self.editorNSView?.focusPolicy.firstFrameDidRender()
 
             let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
@@ -880,9 +888,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         cancelWorkspaceLifecycleNotifications()
+        beamManager?.beginAppShutdown()
         protocolConnection?.stop()
         protocolConnection = nil
-        beamManager?.beginAppShutdown()
+        beamManager?.abortStartup()
     }
 
     /// Handles Finder/Open With and `open -a Minga file.ex` file URLs.
@@ -1186,6 +1195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         guard let connection else { return nil }
+        beamManager?.transferPipeOwnership()
         protocolConnection = connection
         appState.encoder = connection.encoder
         appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: connection.encoder)

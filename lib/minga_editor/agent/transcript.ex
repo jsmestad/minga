@@ -11,7 +11,7 @@ defmodule MingaEditor.Agent.Transcript do
   @typedoc "Line type for transcript-line-to-message mapping."
   @type line_type :: :text | :code | :tool | :thinking | :usage | :system | :empty
 
-  @type empty_state :: :credentials_missing | :no_model | nil
+  @type empty_state :: :checking | :credentials_missing | :no_model | nil
 
   @type display_result :: %{
           line_index: [{non_neg_integer(), line_type()}],
@@ -254,7 +254,7 @@ defmodule MingaEditor.Agent.Transcript do
          hidden_count,
          message_id_pairs
        )
-       when empty_state in [:credentials_missing, :no_model] do
+       when empty_state in [:checking, :credentials_missing, :no_model] do
     if first_run_transcript?(messages) do
       {[{@empty_state_index, empty_state_message(empty_state)}], [], 0, []}
     else
@@ -286,7 +286,12 @@ defmodule MingaEditor.Agent.Transcript do
   defp user_facing_turn_message?({kind, _, _}) when kind in [:user, :thinking], do: true
   defp user_facing_turn_message?(_message), do: false
 
-  @spec empty_state_message(:credentials_missing | :no_model) :: {:system, String.t(), :info}
+  @spec empty_state_message(:checking | :credentials_missing | :no_model) ::
+          {:system, String.t(), :info}
+  defp empty_state_message(:checking) do
+    {:system, "Checking agent credentials and model availability...", :info}
+  end
+
   defp empty_state_message(:credentials_missing) do
     {:system,
      """

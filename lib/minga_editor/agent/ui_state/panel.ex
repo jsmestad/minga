@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   """
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Credentials
   alias MingaEditor.Agent.Transcript
   alias Minga.Editing.Scroll
@@ -30,7 +31,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
           spinner_frame: non_neg_integer(),
           provider_name: String.t(),
           model_name: String.t(),
-          thinking_level: String.t(),
+          thinking_level: String.t() | nil,
           input_focused: boolean(),
           transcript: TranscriptProjection.t(),
           mention_completion: MingaAgent.FileMention.completion() | nil,
@@ -47,7 +48,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             spinner_frame: 0,
             provider_name: "",
             model_name: "unknown",
-            thinking_level: "medium",
+            thinking_level: nil,
             input_focused: false,
             transcript: TranscriptProjection.new(),
             mention_completion: nil,
@@ -58,37 +59,43 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @doc "Creates a new panel state with truthful model defaults."
   @spec new() :: t()
   def new do
-    model = AgentConfig.default_model()
+    model = AgentConfig.configured_model() || AgentConfig.unconfigured_model()
 
     %__MODULE__{
       provider_name: AgentConfig.extract_provider_prefix(model),
       model_name: model,
       credentials_configured: false,
-      credential_readiness: :unconfigured
+      credential_readiness: :checking
     }
   end
 
   @doc "Refreshes stale unqualified model names to the current credential-aware default."
   @spec ensure_configured_model(t()) :: t()
   def ensure_configured_model(%__MODULE__{} = panel) do
-    default_model = AgentConfig.default_model()
-
-    if stale_unqualified_model?(panel.model_name, default_model) do
-      %{
-        panel
-        | provider_name: AgentConfig.extract_provider_prefix(default_model),
-          model_name: default_model
-      }
-    else
+    if resolved_model?(panel.model_name) do
       panel
+    else
+      refresh_model(panel, AgentConfig.default_model())
     end
   end
 
   @doc "Refreshes stale unqualified model names from a specific options server."
   @spec ensure_configured_model(t(), Minga.Config.Options.server()) :: t()
   def ensure_configured_model(%__MODULE__{} = panel, options_server) do
-    default_model = AgentConfig.default_model(options_server)
+    if resolved_model?(panel.model_name) do
+      panel
+    else
+      refresh_model(panel, AgentConfig.default_model(options_server))
+    end
+  end
 
+  @spec resolved_model?(String.t()) :: boolean()
+  defp resolved_model?(model) do
+    AgentConfig.extract_provider_prefix(model) != "" or String.starts_with?(model, "ms2_")
+  end
+
+  @spec refresh_model(t(), String.t()) :: t()
+  defp refresh_model(panel, default_model) do
     if stale_unqualified_model?(panel.model_name, default_model) do
       %{
         panel
@@ -103,7 +110,6 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @doc "Sets whether any provider credential is configured (drives the model indicator)."
   @spec set_credentials_configured(t(), boolean()) :: t()
   def set_credentials_configured(%__MODULE__{} = panel, configured?) do
-    panel = ensure_configured_model(panel)
     readiness = if configured?, do: :configured, else: :unconfigured
     %{panel | credentials_configured: configured?, credential_readiness: readiness}
   end
@@ -112,12 +118,27 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec set_credential_readiness(t(), Credentials.readiness()) :: t()
   def set_credential_readiness(%__MODULE__{} = panel, readiness)
       when readiness in [:checking, :configured, :unconfigured] do
-    panel = ensure_configured_model(panel)
-
     %{
       panel
       | credentials_configured: readiness == :configured,
         credential_readiness: readiness
+    }
+  end
+
+  @doc "Projects model status without treating deferred resolution as missing credentials."
+  @spec model_label(t()) :: String.t()
+  def model_label(%__MODULE__{model_name: model}) when model not in ["", "unknown"], do: model
+  def model_label(%__MODULE__{credential_readiness: :unconfigured}), do: "No model configured"
+  def model_label(%__MODULE__{}), do: "Model not resolved"
+
+  @doc "Projects an already-resolved selection without discovering models or changing readiness."
+  @spec project_model_selection(t(), ModelSelection.t()) :: t()
+  def project_model_selection(%__MODULE__{} = panel, %ModelSelection{} = selection) do
+    %{
+      panel
+      | model_name: selection.route.display_name,
+        provider_name: selection.route.model_provider,
+        thinking_level: selection.policy.reasoning.effort
     }
   end
 

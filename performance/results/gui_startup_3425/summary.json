@@ -1,0 +1,234 @@
+{
+  "baseline-cold": {
+    "presentation_ms": {
+      "median": 6312.515459125,
+      "p95": 6366.1877925
+    },
+    "launch_to_edit_verified_ms": {
+      "median": 6415.5281875,
+      "p95": 6486.040666
+    },
+    "first_edit_action_ms": {
+      "median": 82.5379795,
+      "p95": 89.901875
+    },
+    "edit_dispatch_ms": {
+      "median": 55.965854,
+      "p95": 63.271333
+    },
+    "peak_sampled_rss_mib": {
+      "median": 1079.1796875,
+      "p95": 1108.828125
+    },
+    "config_extensions_started": {
+      "median": 1445.0,
+      "p95": 1462.3
+    },
+    "editor_init_done": {
+      "median": 3422.1,
+      "p95": 3443.7
+    },
+    "TOTAL": {
+      "median": 5168.8,
+      "p95": 5201.5
+    },
+    "spawn_from_app_startup_ms": 6.154666500000005,
+    "native_setup_ms": 2.8938540000000046,
+    "catalog_call_counts": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ]
+  },
+  "baseline-warm": {
+    "presentation_ms": {
+      "median": 6310.061834125,
+      "p95": 6380.2008755
+    },
+    "launch_to_edit_verified_ms": {
+      "median": 6444.3918754999995,
+      "p95": 6517.513083
+    },
+    "first_edit_action_ms": {
+      "median": 69.056687,
+      "p95": 98.350625
+    },
+    "edit_dispatch_ms": {
+      "median": 54.3823955,
+      "p95": 56.522292
+    },
+    "peak_sampled_rss_mib": {
+      "median": 1082.53125,
+      "p95": 1112.140625
+    },
+    "config_extensions_started": {
+      "median": 1459.4499999999998,
+      "p95": 1478.7
+    },
+    "editor_init_done": {
+      "median": 3418.6499999999996,
+      "p95": 3437.9
+    },
+    "TOTAL": {
+      "median": 5174.1,
+      "p95": 5216.5
+    },
+    "spawn_from_app_startup_ms": 6.155979000000002,
+    "native_setup_ms": 2.879749500000017,
+    "catalog_call_counts": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ]
+  },
+  "candidate-cold": {
+    "presentation_ms": {
+      "median": 2897.768938,
+      "p95": 2942.2939585
+    },
+    "launch_to_edit_verified_ms": {
+      "median": 3018.9102495,
+      "p95": 3067.862792
+    },
+    "first_edit_action_ms": {
+      "median": 87.421979,
+      "p95": 90.7825
+    },
+    "edit_dispatch_ms": {
+      "median": 58.862167,
+      "p95": 68.000917
+    },
+    "peak_sampled_rss_mib": {
+      "median": 242.1953125,
+      "p95": 243.09375
+    },
+    "config_extensions_started": {
+      "median": 1429.1999999999998,
+      "p95": 1463.0
+    },
+    "editor_init_done": {
+      "median": 44.9,
+      "p95": 50.7
+    },
+    "TOTAL": {
+      "median": 1764.6,
+      "p95": 1812.0
+    },
+    "spawn_from_app_startup_ms": 0.9221869999999939,
+    "native_setup_ms": 3.148083000000014,
+    "catalog_call_counts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "candidate-warm": {
+    "presentation_ms": {
+      "median": 2912.09366725,
+      "p95": 2952.028459
+    },
+    "launch_to_edit_verified_ms": {
+      "median": 3031.175979,
+      "p95": 3076.457791
+    },
+    "first_edit_action_ms": {
+      "median": 87.230604,
+      "p95": 97.688791
+    },
+    "edit_dispatch_ms": {
+      "median": 59.6050835,
+      "p95": 65.437583
+    },
+    "peak_sampled_rss_mib": {
+      "median": 242.4375,
+      "p95": 244.375
+    },
+    "config_extensions_started": {
+      "median": 1454.05,
+      "p95": 1478.3
+    },
+    "editor_init_done": {
+      "median": 45.45,
+      "p95": 47.4
+    },
+    "TOTAL": {
+      "median": 1782.4499999999998,
+      "p95": 1808.4
+    },
+    "spawn_from_app_startup_ms": 0.9307709999999929,
+    "native_setup_ms": 3.191208500000016,
+    "catalog_call_counts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

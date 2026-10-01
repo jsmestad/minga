@@ -393,9 +393,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Mark the encoder as disconnected. Called by the reader's
     /// `onDisconnect` callback so writes stop immediately without
     /// waiting for the next EPIPE.
-    func disconnect(reason: DisconnectReason) {
-        writeQueue.async { [weak self] in
-            guard let self, self.connected else { return }
+    func disconnect(
+        reason: DisconnectReason,
+        afterRetirement: @escaping @Sendable () -> Void = {}
+    ) {
+        writeQueue.async { [self] in
+            defer { afterRetirement() }
+            guard self.connected else { return }
             switch reason {
             case .expectedTeardown:
                 self.connected = false

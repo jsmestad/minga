@@ -691,6 +691,80 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert selected.model_selection.credential.source == :env
   end
 
+  test "activation installs an exact route id before starting the provider" do
+    snapshot = CredentialSnapshot.new(%{"openai" => :env}, nil, "http://ollama.test")
+
+    model = %{
+      id: "startup-model",
+      provider: :openai,
+      provider_model_id: "startup-model",
+      modalities: %{"output" => ["text"]},
+      execution: %{
+        text: %{
+          supported: true,
+          family: "openai_responses_compatible",
+          wire_protocol: "openai_responses",
+          transport: "http",
+          provider_model_id: "startup-model",
+          base_url: "https://api.openai.example/v1",
+          path: "/responses"
+        }
+      },
+      extra: %{"reasoning_options" => ["low", "high"]}
+    }
+
+    resolver_opts = [credential_snapshot: snapshot, models: [model]]
+    [candidate] = ModelResolver.candidates(resolver_opts)
+    selection = candidate.selection
+    id = MingaAgent.ModelSelection.id(selection)
+
+    for level <- [nil, "low", "unsupported"] do
+      session =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Session,
+             provider: Native,
+             model_name: id,
+             thinking_level: level,
+             credentials_snapshot_fn: fn -> snapshot end,
+             credentials_configured_fn: fn -> true end,
+             provider_opts: [
+               model: id,
+               skip_api_key_env: true,
+               model_resolver_opts: resolver_opts
+             ]},
+            id: {:activation, level}
+          )
+        )
+
+      await_provider_startup(session)
+
+      case level do
+        "unsupported" ->
+          assert Session.get_provider(session) == nil
+          assert Session.model_selection(session) == nil
+
+          assert Enum.any?(Session.messages(session), fn
+                   {:system, text, _} -> text =~ "unsupported"
+                   _ -> false
+                 end)
+
+        level ->
+          assert Session.editor_snapshot(session).credential_readiness == :configured
+          assert Session.model_selection(session).route == selection.route
+
+          assert Session.model_selection(session).policy.reasoning.effort ==
+                   (level || selection.policy.reasoning.effort)
+
+          assert {:ok, provider_state} = Native.get_state(Session.get_provider(session))
+          assert provider_state.model_selection == Session.model_selection(session)
+
+          assert Session.editor_snapshot(session).model_selection ==
+                   provider_state.model_selection
+      end
+    end
+  end
+
   test "an invalid initial model can be corrected with an exact legacy selection" do
     {session, _checker} =
       start_session(
