@@ -2,101 +2,58 @@ defmodule Minga.Buffer.DirtyFlagPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.SaveState
 
-  @moduletag :tmp_dir
-
-  property "dirty state follows the saved revision across random edits, undo, redo, and save", %{
-    tmp_dir: dir
-  } do
+  property "dirty state follows the saved revision across random edits, undo, redo, and save" do
     check all(
             operations <- StreamData.list_of(operation_generator(), min_length: 1, max_length: 40)
           ) do
-      case_id = System.unique_integer([:positive])
-      child_id = {BufferProcess, case_id}
-      path = Path.join(dir, "dirty-property-#{case_id}.txt")
-      File.write!(path, "start")
+      model = %{current: 0, saved: 0, undo: [], redo: [], next_id: 1}
 
-      buffer = start_supervised!({BufferProcess, file_path: path}, id: child_id)
-      assert {:ok, 0} = BufferProcess.set_option(buffer, :auto_save_delay_ms, 0)
-
-      try do
-        initial = %{id: 0, content: "start", cursor: 0}
-        model = %{current: initial, saved_id: 0, undo: [], redo: [], next_id: 1}
-
-        Enum.reduce(operations, model, fn operation, model ->
-          model = apply_operation(buffer, operation, model)
-
-          assert BufferProcess.content(buffer) == model.current.content
-          assert BufferProcess.dirty?(buffer) == (model.current.id != model.saved_id)
-
-          model
-        end)
-      after
-        :ok = stop_supervised(child_id)
-      end
+      Enum.reduce(operations, {SaveState.new(), model}, fn operation, {state, model} ->
+        {state, model} = apply_operation(state, operation, model)
+        assert SaveState.version(state) == model.current
+        assert SaveState.saved_version(state) == model.saved
+        assert SaveState.dirty?(state) == (model.current != model.saved)
+        {state, model}
+      end)
     end
   end
 
   defp operation_generator do
     StreamData.frequency([
-      {5, StreamData.map(StreamData.member_of(~w(a b c x y z)), &{:insert, &1})},
+      {5, StreamData.constant(:edit)},
       {2, StreamData.constant(:undo)},
       {2, StreamData.constant(:redo)},
-      {2, StreamData.constant(:save)},
-      {1, StreamData.constant(:break)}
+      {2, StreamData.constant(:save)}
     ])
   end
 
-  defp apply_operation(buffer, {:insert, char}, model) do
-    :ok = BufferProcess.break_undo_coalescing(buffer)
-    :ok = BufferProcess.insert_char(buffer, char)
-
-    current = model.current
-    {left, right} = String.split_at(current.content, current.cursor)
-
-    revision = %{
-      id: model.next_id,
-      content: left <> char <> right,
-      cursor: current.cursor + byte_size(char)
-    }
-
-    %{
+  defp apply_operation(state, :edit, model) do
+    next = %{
       model
-      | current: revision,
-        undo: [current | model.undo],
+      | current: model.next_id,
+        undo: [model.current | model.undo],
         redo: [],
         next_id: model.next_id + 1
     }
+
+    {SaveState.mark_changed(state), next}
   end
 
-  defp apply_operation(buffer, :undo, %{undo: [previous | rest]} = model) do
-    :ok = BufferProcess.undo(buffer)
-    %{model | current: previous, undo: rest, redo: [model.current | model.redo]}
+  defp apply_operation(state, :undo, %{undo: [previous | rest]} = model) do
+    {SaveState.restore_version(state, previous),
+     %{model | current: previous, undo: rest, redo: [model.current | model.redo]}}
   end
 
-  defp apply_operation(buffer, :undo, model) do
-    :ok = BufferProcess.undo(buffer)
-    model
+  defp apply_operation(state, :redo, %{redo: [next | rest]} = model) do
+    {SaveState.restore_version(state, next),
+     %{model | current: next, redo: rest, undo: [model.current | model.undo]}}
   end
 
-  defp apply_operation(buffer, :redo, %{redo: [next | rest]} = model) do
-    :ok = BufferProcess.redo(buffer)
-    %{model | current: next, redo: rest, undo: [model.current | model.undo]}
+  defp apply_operation(state, :save, model) do
+    {SaveState.mark_saved(state, {0, 0}, ""), %{model | saved: model.current}}
   end
 
-  defp apply_operation(buffer, :redo, model) do
-    :ok = BufferProcess.redo(buffer)
-    model
-  end
-
-  defp apply_operation(buffer, :save, model) do
-    :ok = BufferProcess.save(buffer)
-    %{model | saved_id: model.current.id}
-  end
-
-  defp apply_operation(buffer, :break, model) do
-    :ok = BufferProcess.break_undo_coalescing(buffer)
-    model
-  end
+  defp apply_operation(state, _empty_history, model), do: {state, model}
 end

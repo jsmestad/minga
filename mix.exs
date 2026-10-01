@@ -68,6 +68,7 @@ defmodule Minga.MixProject do
           "docs/GETTING-STARTED.md",
           # Using Minga
           "docs/CONFIGURATION.md",
+          "docs/AGENT-MODEL-SELECTION.md",
           "docs/PROJECTS.md",
           # Coming From...
           "docs/FOR-NEOVIM-USERS.md",
@@ -92,6 +93,7 @@ defmodule Minga.MixProject do
           ],
           "Using Minga": [
             "docs/CONFIGURATION.md",
+            "docs/AGENT-MODEL-SELECTION.md",
             "docs/PROJECTS.md"
           ],
           "Coming From...": [

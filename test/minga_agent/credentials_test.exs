@@ -223,18 +223,6 @@ defmodule MingaAgent.CredentialsTest do
     end
   end
 
-  describe "provider_from_model/1" do
-    test "extracts provider from prefixed model string" do
-      assert "anthropic" = Credentials.provider_from_model("anthropic:claude-sonnet-4-20250514")
-      assert "openai" = Credentials.provider_from_model("openai:gpt-4o")
-      assert "google" = Credentials.provider_from_model("google:gemini-pro")
-    end
-
-    test "defaults to anthropic for bare model names" do
-      assert "anthropic" = Credentials.provider_from_model("claude-sonnet-4-20250514")
-    end
-  end
-
   describe "env_var_for/1" do
     test "returns correct env var names" do
       assert "ANTHROPIC_API_KEY" = Credentials.env_var_for("anthropic")
@@ -251,12 +239,7 @@ defmodule MingaAgent.CredentialsTest do
     test "uses the request-local token only for the pinned account and path", %{dir: dir} do
       path = Path.join(dir, "oauth.json")
 
-      credential = %OAuth{
-        provider: :openai_codex,
-        provider_key: "openai-codex",
-        account_id: "account-a",
-        oauth_path: path
-      }
+      credential = OAuth.new("account-a", path)
 
       resolver = fn :openai_codex, oauth_file: requested_path ->
         {:ok,
@@ -277,12 +260,7 @@ defmodule MingaAgent.CredentialsTest do
     end
 
     test "rejects a token resolved for a different account", %{dir: dir} do
-      credential = %OAuth{
-        provider: :openai_codex,
-        provider_key: "openai-codex",
-        account_id: "account-a",
-        oauth_path: Path.join(dir, "oauth.json")
-      }
+      credential = OAuth.new("account-a", Path.join(dir, "oauth.json"))
 
       resolver = fn :openai_codex, oauth_file: requested_path ->
         {:ok,

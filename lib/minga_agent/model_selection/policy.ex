@@ -31,7 +31,7 @@ defmodule MingaAgent.ModelSelection.Policy do
          reasoning: reasoning,
          limits: limits,
          capabilities: capabilities,
-         cost: cost
+         cost: MingaAgent.ModelSelection.Encoding.stringify(cost)
        }}
     else
       _invalid -> {:error, :invalid_policy}

@@ -4,9 +4,11 @@ defmodule MingaAgent.Providers.Native do
   @moduledoc """
   Native Elixir agent provider backed by ReqLLM.
 
-  Runs entirely inside the BEAM with no external dependencies. Supports any
-  provider that ReqLLM supports (Anthropic, OpenAI, Ollama, Groq, Bedrock,
-  etc.) by accepting a model string like `"anthropic:claude-sonnet-4-20250514"`.
+  It runs entirely inside the BEAM and supports any ReqLLM-backed provider
+  that has an installed exact text route. Session resolves a model, protocol,
+  endpoint, credential identity, reasoning policy, limits, and capabilities
+  before this provider starts. Native executes that immutable selection without
+  reparsing a model name.
 
   The provider consumes immutable Session-owned continuation snapshots, executes
   tools locally, and emits `Agent.Event` structs to its subscriber (the
@@ -77,14 +79,14 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tools.Todo
   alias Minga.Config
   alias ReqLLM.Context
+  alias ReqLLM.Message.ContentPart
   alias Minga.Log
   alias ReqLLM.Tool
 
   @typedoc "Captures the immutable parameters for one agent turn loop invocation."
   @type loop_ctx :: LoopCtx.t()
 
-  @typedoc "Function that performs the LLM streaming call."
-  @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
+  @type llm_client :: (LLMDB.Model.t(), [ReqLLM.Message.t()], keyword() ->
                          {:ok, ReqLLM.StreamResponse.t()} | {:error, term()})
 
   @typedoc "Function that executes a matching hook."
@@ -600,6 +602,51 @@ defmodule MingaAgent.Providers.Native do
     Enum.filter(tools, &(&1.name in allowlist))
   end
 
+  @spec validate_request_capabilities(state(), Request.t()) :: :ok | {:error, String.t()}
+  defp validate_request_capabilities(state, request) do
+    with :ok <- validate_tool_capability(state.selection, state.tools) do
+      validate_image_capability(state.selection, request.messages)
+    end
+  end
+
+  @spec validate_tool_capability(ModelSelection.t(), [term()]) :: :ok | {:error, String.t()}
+  defp validate_tool_capability(_selection, []), do: :ok
+
+  defp validate_tool_capability(%ModelSelection{} = selection, _tools) do
+    if ModelSelection.tools?(selection) do
+      :ok
+    else
+      {:error,
+       "#{selection.route.display_name} on #{selection.route.execution.wire_protocol} does not explicitly support tools. Choose a tool-capable route."}
+    end
+  end
+
+  @spec validate_image_capability(ModelSelection.t(), [ReqLLM.Message.t()]) ::
+          :ok | {:error, String.t()}
+  defp validate_image_capability(%ModelSelection{} = selection, messages) do
+    if request_contains_image?(messages) and not ModelSelection.images?(selection) do
+      {:error,
+       "#{selection.route.display_name} on #{selection.route.execution.wire_protocol} does not explicitly support image input. Choose an image-capable route."}
+    else
+      :ok
+    end
+  end
+
+  @spec request_contains_image?([ReqLLM.Message.t()]) :: boolean()
+  defp request_contains_image?(messages) do
+    Enum.any?(messages, fn
+      %ReqLLM.Message{content: content} -> image_content?(content)
+      _other -> false
+    end)
+  end
+
+  @spec image_content?(term()) :: boolean()
+  defp image_content?(content) when is_list(content) do
+    Enum.any?(content, &match?(%ContentPart{type: type} when type in [:image, :image_url], &1))
+  end
+
+  defp image_content?(_content), do: false
+
   @impl GenServer
   def handle_call({:send_prompt, _request}, _from, %{streaming: true} = state) do
     {:reply, {:error, :already_streaming}, state}
@@ -613,9 +660,15 @@ defmodule MingaAgent.Providers.Native do
 
       {:reply, {:error, :cost_limit_reached}, clear_stuck_streaming(state)}
     else
-      context = request_context(state, request)
-      state = %{state | active_request: request, streaming: true, interrupted: false}
-      {:reply, :ok, start_agent_turn(state, request, context)}
+      case validate_request_capabilities(state, request) do
+        :ok ->
+          context = request_context(state, request)
+          state = %{state | active_request: request, streaming: true, interrupted: false}
+          {:reply, :ok, start_agent_turn(state, request, context)}
+
+        {:error, message} ->
+          {:reply, {:error, message}, state}
+      end
     end
   end
 
@@ -647,9 +700,15 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call({:continue, %Request{} = request}, _from, state) do
-    context = request_context(state, request)
-    state = %{state | active_request: request, streaming: true, interrupted: false}
-    {:reply, :ok, start_agent_turn(state, request, context)}
+    case validate_request_capabilities(state, request) do
+      :ok ->
+        context = request_context(state, request)
+        state = %{state | active_request: request, streaming: true, interrupted: false}
+        {:reply, :ok, start_agent_turn(state, request, context)}
+
+      {:error, message} ->
+        {:reply, {:error, message}, state}
+    end
   end
 
   def handle_call({:activate_skill, name}, _from, state) do
@@ -3325,9 +3384,9 @@ defmodule MingaAgent.Providers.Native do
     "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
   end
 
-  defp error_event_message(:invalid_model, message, "openai_codex", reason, model) do
+  defp error_event_message(:invalid_model, message, "openai_codex", reason, _model) do
     if codex_chatgpt_model_incompatible?(reason) do
-      "This model isn't available for your ChatGPT account. Pick #{codex_chatgpt_fallback_model(model)} with /model, then retry."
+      "This model isn't available for your ChatGPT account. Open /model and choose an available route, then retry."
     else
       message
     end
@@ -3339,6 +3398,7 @@ defmodule MingaAgent.Providers.Native do
   defp classify_error_reason(:invalid_format), do: :invalid_model
   defp classify_error_reason({:http_streaming_failed, reason}), do: classify_error_reason(reason)
   defp classify_error_reason({:provider_build_failed, _reason}), do: :auth_failed
+  defp classify_error_reason({:credential_unavailable, _identity}), do: :auth_failed
   defp classify_error_reason({:exit, reason}), do: classify_error_reason(reason)
   defp classify_error_reason({:throw, reason}), do: classify_error_reason(reason)
 
@@ -3398,26 +3458,6 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp codex_chatgpt_model_incompatible?(_reason), do: false
-
-  @spec codex_chatgpt_fallback_model(String.t()) :: String.t()
-  defp codex_chatgpt_fallback_model(model) do
-    case String.split(model, ":", parts: 2) do
-      [provider, model_id] when provider != "" and model_id != "" ->
-        "#{provider}:#{codex_chatgpt_fallback_model_id(model_id)}"
-
-      _other ->
-        "openai_codex:#{codex_chatgpt_fallback_model_id(model)}"
-    end
-  end
-
-  @spec codex_chatgpt_fallback_model_id(String.t()) :: String.t()
-  defp codex_chatgpt_fallback_model_id(model_id) do
-    if String.ends_with?(model_id, "-spark") do
-      model_id
-    else
-      model_id <> "-spark"
-    end
-  end
 
   # Last-resort compatibility for third-party clients that only return a string.
   # Internal provider/session contracts use `Event.Error.kind` instead.

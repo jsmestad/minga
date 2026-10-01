@@ -117,7 +117,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
       opts =
         opts
         |> Keyword.merge(auth_opts)
-        |> maybe_add_prompt_cache(selection.route.model_provider, config)
+        |> maybe_add_prompt_cache(selection.route.request_provider, config)
         |> maybe_add_codex_originator(selection)
         |> maybe_add_reasoning_effort(selection.policy.reasoning.effort)
 
@@ -315,8 +315,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
            request_opts <-
              opts
              |> Keyword.take([:max_tokens])
+             |> limit_summary_tokens(selection.policy.limits.request_output)
              |> Keyword.merge(auth_opts)
-             |> maybe_add_prompt_cache(selection.route.model_provider, config)
+             |> maybe_add_prompt_cache(selection.route.request_provider, config)
              |> maybe_add_codex_originator(selection),
            {:ok, stream_response} <-
              stream(llm_client, selection.request_model, messages, request_opts),
@@ -325,6 +326,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
       end
     end
   end
+
+  @spec limit_summary_tokens(keyword(), pos_integer()) :: keyword()
+  defp limit_summary_tokens(opts, limit),
+    do: Keyword.update(opts, :max_tokens, limit, &min(&1, limit))
 
   @doc "Creates a ReqLLM tool-call value for assistant messages."
   @spec assistant_tool_call(String.t(), String.t(), map()) :: ReqLLMToolCall.t()
@@ -448,8 +453,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     end
   end
 
-  @spec maybe_add_prompt_cache(keyword(), String.t(), AgentConfig.t()) :: keyword()
-  defp maybe_add_prompt_cache(opts, "anthropic", config) do
+  @spec maybe_add_prompt_cache(keyword(), atom(), AgentConfig.t()) :: keyword()
+  defp maybe_add_prompt_cache(opts, :anthropic, config) do
     if config.prompt_cache do
       Keyword.update(
         opts,

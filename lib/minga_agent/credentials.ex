@@ -119,7 +119,8 @@ defmodule MingaAgent.Credentials do
   def request_options(%OAuth{} = credential, opts) do
     path = credential.oauth_path || Keyword.get(opts, :oauth_path, oauth_path())
 
-    with {:ok, resolved} <- resolve_req_llm_oauth(path, opts),
+    with true <- OAuth.new(credential.account_id, path).source_id == credential.source_id,
+         {:ok, resolved} <- resolve_req_llm_oauth(path, opts),
          true <- oauth_resolution_matches?(resolved, credential, path),
          token when is_binary(token) and token != "" <- Map.get(resolved, :token) do
       {:ok,
@@ -176,7 +177,7 @@ defmodule MingaAgent.Credentials do
     stored = acquire_stored_credentials(opts)
 
     sources =
-      Map.new(@known_providers, fn provider ->
+      Map.new(credential_owners(stored), fn provider ->
         {provider, configured_source(provider, stored, opts)}
       end)
       |> Map.reject(fn {_provider, source} -> is_nil(source) end)
@@ -266,20 +267,6 @@ defmodule MingaAgent.Credentials do
   def any_configured?(%Snapshot{} = snapshot), do: Snapshot.locally_configured?(snapshot)
 
   @doc """
-  Extracts the provider name from a model string like "anthropic:claude-sonnet-4-20250514".
-
-  Returns `"anthropic"` for bare model names (no prefix), since Anthropic
-  is the default provider.
-  """
-  @spec provider_from_model(String.t()) :: provider()
-  def provider_from_model(model) when is_binary(model) do
-    case String.split(model, ":", parts: 2) do
-      [provider, _model_name] -> String.downcase(provider)
-      [_bare_model] -> "anthropic"
-    end
-  end
-
-  @doc """
   Returns the environment variable name for a provider, or nil if unknown.
   """
   @spec env_var_for(provider()) :: String.t() | nil
@@ -354,6 +341,15 @@ defmodule MingaAgent.Credentials do
       {:ok, credentials} when is_map(credentials) -> credentials
       _error -> %{}
     end
+  end
+
+  @spec credential_owners(map()) :: [provider()]
+  defp credential_owners(stored) do
+    stored
+    |> Map.keys()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Kernel.++(@known_providers)
+    |> Enum.uniq()
   end
 
   @spec configured_source(provider(), map(), keyword()) :: :env | :file | nil

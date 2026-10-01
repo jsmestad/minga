@@ -6,6 +6,7 @@ defmodule MingaAgent.SessionRecoveryTest do
   alias MingaAgent.Credentials.AvailabilityCheck
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Providers.Native
+  alias MingaAgent.ModelResolver
   alias MingaAgent.Session
   alias MingaAgent.Session.ProviderLifecycle
   alias MingaAgent.SessionStore
@@ -71,13 +72,6 @@ defmodule MingaAgent.SessionRecoveryTest do
         |> Keyword.put(:credentials_snapshot_fn, credentials_snapshot_fn)
         |> Keyword.put(:credential_probe_fn, credential_probe_fn)
       )
-
-    if not initial_credentials_state and Keyword.get(opts, :provider) == Native do
-      assert_receive {:credential_probe_started, worker}, 1_000
-      monitor = Process.monitor(worker)
-      send(worker, {:release_credential_probe, self()})
-      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
-    end
 
     # `start_link/1` schedules `:start_provider` when credentials are already
     # configured; wait it out here so callers observe a settled session.
@@ -242,7 +236,7 @@ defmodule MingaAgent.SessionRecoveryTest do
       [
         provider: Native,
         provider_opts: [
-          model: AgentConfig.unconfigured_model(),
+          model: "ollama:llama3",
           skip_api_key_env: true,
           model_resolver_opts: recovery_model_opts()
         ],
@@ -255,7 +249,7 @@ defmodule MingaAgent.SessionRecoveryTest do
     {session, sequence}
   end
 
-  defp start_running_held_model_session(keep_credentials? \\ false) do
+  defp start_running_held_model_session(keep_credentials? \\ false, opts \\ []) do
     {checker, credentials_configured_fn} = start_credential_checker(true)
 
     credentials_snapshot_fn = fn ->
@@ -275,6 +269,48 @@ defmodule MingaAgent.SessionRecoveryTest do
       end
     end
 
+    session_opts =
+      [
+        provider: Native,
+        provider_opts: [
+          model: "anthropic:claude-sonnet-4-20250514",
+          skip_api_key_env: true,
+          model_resolver_opts: recovery_model_opts()
+        ],
+        credentials_configured_fn: credentials_configured_fn,
+        credentials_snapshot_fn: credentials_snapshot_fn,
+        credential_probe_fn: probe
+      ]
+      |> Keyword.merge(opts)
+
+    session = start_supervised!({Session, session_opts})
+
+    await_provider_startup(session)
+    provider = Session.get_provider(session)
+    assert is_pid(provider)
+    Agent.update(checker, fn _configured? -> keep_credentials? end)
+    {session, provider}
+  end
+
+  test "local activation probes the same snapshot that resolved its immutable endpoint" do
+    counter = start_supervised!({Agent, fn -> 0 end})
+
+    snapshot_fn = fn ->
+      count = Agent.get_and_update(counter, fn count -> {count, count + 1} end)
+      host = if count == 0, do: "http://endpoint-a:11434", else: "http://endpoint-b:11434"
+      CredentialSnapshot.new(%{"anthropic" => :env}, nil, host)
+    end
+
+    parent = self()
+
+    probe = fn snapshot ->
+      send(parent, {:probed_host, snapshot.ollama_host, self()})
+
+      receive do
+        :accept -> :available
+      end
+    end
+
     session =
       start_supervised!(
         {Session,
@@ -284,16 +320,66 @@ defmodule MingaAgent.SessionRecoveryTest do
            skip_api_key_env: true,
            model_resolver_opts: recovery_model_opts()
          ],
-         credentials_configured_fn: credentials_configured_fn,
-         credentials_snapshot_fn: credentials_snapshot_fn,
+         credentials_snapshot_fn: snapshot_fn,
          credential_probe_fn: probe}
       )
 
     await_provider_startup(session)
-    provider = Session.get_provider(session)
-    assert is_pid(provider)
-    Agent.update(checker, fn _configured? -> keep_credentials? end)
-    {session, provider}
+    Agent.update(counter, fn _ -> 0 end)
+    Session.subscribe(session, self())
+    assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
+    assert_receive {:probed_host, "http://endpoint-a:11434", worker}
+    send(worker, :accept)
+    assert_receive {:agent_event, ^session, {:model_selection_changed, selection}}
+    assert URI.parse(selection.route.execution.base_url).host == "endpoint-a"
+  end
+
+  @tag :tmp_dir
+  test "a failed detached restore preserves the original provider retry", %{tmp_dir: dir} do
+    tracker = start_supervised!({Agent, fn -> %{attempts: 0, failures_remaining: :always} end})
+
+    session =
+      start_supervised!(
+        {Session,
+         provider: FlakyStartProvider,
+         provider_opts: [test_pid: self(), tracker: tracker],
+         session_store_dir: dir,
+         persist?: false,
+         provider_restart_backoff_base_ms: 30_000,
+         provider_restart_backoff_max_ms: 30_000,
+         provider_restart_max_attempts: 3}
+      )
+
+    assert_receive {:flaky_start_attempt, 1}
+    state = await_provider_startup(session)
+    {timer_ref, token} = ProviderLifecycle.retry_timer(state.provider)
+    original_id = Session.session_id(session)
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: "failed-detached-restore",
+                 model_name: "custom-model",
+                 provider_name: "custom",
+                 messages: [],
+                 continuation: MingaAgent.Session.Continuation.new(),
+                 usage: %TurnUsage{}
+               },
+               dir
+             )
+
+    assert {:error, {:provider_model_restore_failed, _reason}} =
+             Session.load_session(session, "failed-detached-restore")
+
+    assert_receive {:flaky_start_attempt, 2}
+    assert Session.session_id(session) == original_id
+    assert is_integer(Process.read_timer(timer_ref))
+    Agent.update(tracker, &%{&1 | failures_remaining: 0})
+    send(session, {:start_provider, token})
+    assert_receive {:flaky_start_attempt, 3}
+    assert_receive {:flaky_provider_started, provider}
+    await_provider_startup(session)
+    assert Session.get_provider(session) == provider
   end
 
   test "held credential discovery leaves Session queries and prompt refusal responsive" do
@@ -368,7 +454,7 @@ defmodule MingaAgent.SessionRecoveryTest do
   end
 
   @tag :tmp_dir
-  test "load_session stops and replaces a held probe with the loaded logical identity", %{
+  test "load_session validates a saved local route before replacing the active session", %{
     tmp_dir: dir
   } do
     assert :ok =
@@ -388,26 +474,58 @@ defmodule MingaAgent.SessionRecoveryTest do
     {session, _sequence} =
       start_held_discovery_session(session_store_dir: dir, persist?: false)
 
-    assert_receive {:credential_probe_started, 1, first_worker}, 1_000
-    first_monitor = Process.monitor(first_worker)
-    old_state = :sys.get_state(session)
-    {:running, old_request, old_task, _timer_ref} = old_state.credential_availability.phase
+    assert_receive {:credential_probe_started, 1, active_worker}, 1_000
+    active_monitor = Process.monitor(active_worker)
+    active_session_id = Session.session_id(session)
 
-    assert :ok = Session.load_session(session, "loaded-logical-session")
-    assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
-    assert_receive {:credential_probe_started, 2, second_worker}, 1_000
+    restore = Task.async(fn -> Session.load_session(session, "loaded-logical-session") end)
+    assert_receive {:credential_probe_started, 2, restore_worker}, 1_000
 
-    loaded_state = :sys.get_state(session)
+    assert Session.session_id(session) == active_session_id
+    refute_receive {:DOWN, ^active_monitor, :process, ^active_worker, _reason}, 50
 
-    {:running, loaded_request, _loaded_task, _loaded_timer_ref} =
-      loaded_state.credential_availability.phase
+    send(restore_worker, {:credential_probe_result, :available})
+    assert Task.await(restore, 5_000) == :ok
+    assert_receive {:DOWN, ^active_monitor, :process, ^active_worker, :killed}, 1_000
 
-    assert loaded_state.session_id == "loaded-logical-session"
-    assert loaded_request.session_id == "loaded-logical-session"
+    assert Session.session_id(session) == "loaded-logical-session"
+    assert Session.editor_snapshot(session).credential_readiness == :configured
+    refute AvailabilityCheck.checking?(:sys.get_state(session).credential_availability)
+  end
 
-    send(session, {old_task.ref, {old_request.token, :available}})
-    assert Session.editor_snapshot(session).credential_readiness == :checking
-    send(second_worker, {:credential_probe_result, {:unavailable, :loaded_session}})
+  @tag :tmp_dir
+  test "failed saved local validation keeps the current session and route", %{tmp_dir: dir} do
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: "unavailable-local-session",
+                 timestamp: "2026-09-16T00:00:00Z",
+                 model_name: "ollama:loaded",
+                 provider_name: "ollama",
+                 messages: [{:system, "Must not replace current", :info}],
+                 continuation: MingaAgent.Session.Continuation.new(),
+                 usage: %TurnUsage{}
+               },
+               dir
+             )
+
+    {session, provider} =
+      start_running_held_model_session(false, session_store_dir: dir, persist?: false)
+
+    current_session_id = Session.session_id(session)
+    assert {:ok, current_provider} = Native.get_state(provider)
+
+    restore = Task.async(fn -> Session.load_session(session, "unavailable-local-session") end)
+    assert_receive {:credential_probe_started, 1, restore_worker}, 1_000
+    send(restore_worker, {:credential_probe_result, {:unavailable, :offline}})
+
+    assert {:error, {:model_selection_correction_required, message}} =
+             Task.await(restore, 5_000)
+
+    assert message =~ "Start Ollama"
+    assert Session.session_id(session) == current_session_id
+    assert {:ok, after_rejection} = Native.get_state(provider)
+    assert after_rejection.model_selection == current_provider.model_selection
   end
 
   test "repeated refreshes retain only one active discovery worker" do
@@ -595,22 +713,42 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert Session.subagent_context(session).provider_name == "anthropic"
   end
 
-  test "current discovery activates the exact pending route" do
-    {session, provider} = start_running_held_model_session()
+  @tag :tmp_dir
+  test "current discovery emits and saves the accepted exact route only after activation", %{
+    tmp_dir: dir
+  } do
+    {session, provider} =
+      start_running_held_model_session(false, session_store_dir: dir)
+
     assert {:ok, initial} = Native.get_state(provider)
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
+
     assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
     assert_receive {:credential_probe_started, 1, worker}, 1_000
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
     assert {:ok, current} = Native.get_state(provider)
     assert current.model_selection == initial.model_selection
-    assert :ok = Session.subscribe(session, self())
-    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
 
     send(worker, {:credential_probe_result, :available})
     assert_receive {:agent_event, ^session, {:credentials_status, :configured}}, 1_000
-    await_provider_startup(session)
+
+    assert_receive {:agent_event, ^session, {:model_selection_changed, selection}}, 1_000
+    assert selection.route.model_provider == "ollama"
+    assert selection.route.execution.provider_model_id == "model-b"
+
     assert {:ok, selected} = Native.get_state(provider)
-    assert selected.model_selection.route.model_provider == "ollama"
-    assert selected.model_selection.route.execution.provider_model_id == "model-b"
+    assert selected.model_selection == selection
+
+    saved =
+      await_saved_selection(
+        Session.session_id(session),
+        dir,
+        MingaAgent.ModelSelection.id(selection)
+      )
+
+    assert MingaAgent.ModelSelection.id(saved.model_selection) ==
+             MingaAgent.ModelSelection.id(selection)
   end
 
   test "a stale successful discovery never replaces the active route with an obsolete pending route" do
@@ -627,22 +765,30 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
 
     send(session, {first_task.ref, {first_request.token, :available}})
-    assert Session.editor_snapshot(session).credential_readiness == :checking
+    assert Session.editor_snapshot(session).credential_readiness == :configured
     assert {:ok, current} = Native.get_state(provider)
     assert current.model_selection == initial.model_selection
     send(second_worker, {:credential_probe_result, {:unavailable, :newest}})
   end
 
-  test "an unavailable current discovery preserves the active route" do
+  test "an unavailable current discovery rejects the candidate and preserves the active route" do
     {session, provider} = start_running_held_model_session()
     assert {:ok, initial} = Native.get_state(provider)
+    assert :ok = Session.subscribe(session, self())
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
+
     assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
     assert_receive {:credential_probe_started, 1, worker}, 1_000
-    assert :ok = Session.subscribe(session, self())
-    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
 
     send(worker, {:credential_probe_result, {:unavailable, :offline}})
-    assert_receive {:agent_event, ^session, {:credentials_status, :unconfigured}}, 1_000
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}, 1_000
+
+    assert_receive {:agent_event, ^session, {:model_selection_rejected, candidate, message}},
+                   1_000
+
+    assert candidate.route.execution.provider_model_id == "model-b"
+    assert message =~ "Start Ollama"
     assert {:ok, current} = Native.get_state(provider)
     assert current.model_selection == initial.model_selection
   end
@@ -653,7 +799,7 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert {:pending, :credential_discovery} = Session.set_model(session, "ollama:model-b")
     assert_receive {:credential_probe_started, 1, worker}, 1_000
     assert :ok = Session.subscribe(session, self())
-    assert_receive {:agent_event, ^session, {:credentials_status, :checking}}
+    assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
 
     send(worker, {:credential_probe_result, {:unavailable, :offline}})
     assert_receive {:agent_event, ^session, {:credentials_status, :configured}}, 1_000
@@ -981,6 +1127,99 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert_receive {:agent_event, ^configured_session, {:credentials_status, :configured}}
   end
 
+  test "missing explicit remote credentials do not fall back to Ollama discovery" do
+    test_pid = self()
+
+    session =
+      start_supervised!(
+        {Session,
+         provider: Native,
+         provider_opts: [
+           model: "anthropic:claude-sonnet-4-20250514",
+           skip_api_key_env: true,
+           model_resolver_opts: recovery_model_opts()
+         ],
+         credentials_snapshot_fn: &empty_credential_snapshot/0,
+         credential_probe_fn: fn _snapshot ->
+           send(test_pid, :unexpected_ollama_discovery)
+           :available
+         end}
+      )
+
+    :sys.get_state(session)
+    refute_receive :unexpected_ollama_discovery, 50
+    assert :ok = Session.refresh_credentials(session)
+    :sys.get_state(session)
+    refute_receive :unexpected_ollama_discovery, 50
+    assert Session.get_provider(session) == nil
+    assert Session.editor_snapshot(session).credential_readiness == :unconfigured
+
+    assert Enum.any?(Session.messages(session), fn
+             {:system, message, :error} ->
+               message =~ "Model selection needs correction" and
+                 message =~ "Credential profile"
+
+             _other ->
+               false
+           end)
+  end
+
+  @tag :tmp_dir
+  test "validated remote restore starts a detached native provider", %{tmp_dir: dir} do
+    ready_snapshot =
+      CredentialSnapshot.new(%{"anthropic" => :env}, nil, "http://ollama.test")
+
+    resolver_opts =
+      recovery_model_opts()
+      |> Keyword.put(:credential_snapshot, ready_snapshot)
+
+    assert {:ok, selection} =
+             ModelResolver.resolve("anthropic:claude-sonnet-4-20250514", resolver_opts)
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: "remote-restore",
+                 timestamp: "2026-09-16T00:00:00Z",
+                 model_name: MingaAgent.ModelSelection.id(selection),
+                 provider_name: "anthropic",
+                 model_selection: selection,
+                 messages: [{:system, "Remote restored", :info}],
+                 continuation: MingaAgent.Session.Continuation.new(),
+                 usage: %TurnUsage{}
+               },
+               dir
+             )
+
+    snapshot =
+      {Agent, fn -> empty_credential_snapshot() end}
+      |> Supervisor.child_spec(id: {:restore_snapshot, make_ref()})
+      |> start_supervised!()
+
+    session =
+      start_supervised!(
+        {Session,
+         provider: Native,
+         provider_opts: [
+           model: "anthropic:claude-sonnet-4-20250514",
+           skip_api_key_env: true,
+           model_resolver_opts: recovery_model_opts()
+         ],
+         session_store_dir: dir,
+         persist?: false,
+         credentials_snapshot_fn: fn -> Agent.get(snapshot, & &1) end}
+      )
+
+    :sys.get_state(session)
+    assert Session.get_provider(session) == nil
+    Agent.update(snapshot, fn _old -> ready_snapshot end)
+
+    assert :ok = Session.load_session(session, "remote-restore")
+    assert is_pid(Session.get_provider(session))
+    assert Session.model_selection(session) == selection
+    assert Session.editor_snapshot(session).credential_readiness == :configured
+  end
+
   test "a missing exact profile cannot replace the current local route or held discovery" do
     {session, _sequence} = start_held_discovery_session()
     assert_receive {:credential_probe_started, 1, worker}, 1_000
@@ -1020,6 +1259,31 @@ defmodule MingaAgent.SessionRecoveryTest do
       assert selection.credential.source == :env
       assert Session.metadata(session).provider_name == "anthropic"
     end
+  end
+
+  defp await_saved_selection(session_id, dir, selection_id, attempts \\ 80)
+
+  defp await_saved_selection(session_id, dir, selection_id, attempts) when attempts > 0 do
+    case SessionStore.load(session_id, dir) do
+      {:ok, %{model_selection: selection} = saved} ->
+        if not is_nil(selection) and MingaAgent.ModelSelection.id(selection) == selection_id do
+          saved
+        else
+          Process.sleep(25)
+          await_saved_selection(session_id, dir, selection_id, attempts - 1)
+        end
+
+      {:error, _reason} ->
+        Process.sleep(25)
+        await_saved_selection(session_id, dir, selection_id, attempts - 1)
+    end
+  end
+
+  defp await_saved_selection(session_id, dir, selection_id, 0) do
+    flunk(
+      "session #{session_id} did not persist accepted model selection #{selection_id}: " <>
+        inspect(SessionStore.load(session_id, dir))
+    )
   end
 
   defp assert_snapshot_error(session, expected_text, attempts \\ 20)

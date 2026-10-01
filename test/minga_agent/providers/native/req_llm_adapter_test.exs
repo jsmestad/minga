@@ -15,7 +15,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
       stream: chunks,
       metadata_handle: handle,
       cancel: fn -> :ok end,
-      model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+      model: ModelSelectionFixture.selection().request_model,
       context: ReqLLM.Context.new()
     }
   end
@@ -43,6 +43,41 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
     assert {:error, {:credential_unavailable, "anthropic:env"}} =
              ReqLLMAdapter.stream_opts(selection, [], config, env: %{"OPENAI_API_KEY" => "other"})
+  end
+
+  test "cache options follow the executing protocol rather than the model source owner" do
+    for {request_provider, owner, expected_cache?} <- [
+          {:anthropic, "local", true},
+          {:openai, "anthropic", false}
+        ] do
+      selection =
+        ModelSelectionFixture.selection(request_provider: request_provider, model_provider: owner)
+
+      assert {:ok, opts} =
+               ReqLLMAdapter.stream_opts(selection, [], %AgentConfig{prompt_cache: true})
+
+      assert get_in(opts, [:provider_options, :anthropic_prompt_cache]) == true == expected_cache?
+    end
+  end
+
+  test "compaction cannot exceed the active model output budget" do
+    parent = self()
+
+    selection =
+      ModelSelectionFixture.selection(
+        limits: %{context: 2_000, input: nil, output: 100, request_output: 80}
+      )
+
+    client = fn _model, _messages, opts ->
+      send(parent, {:summary_budget, opts[:max_tokens]})
+      {:ok, build_stream_response([ReqLLM.StreamChunk.text("summary")])}
+    end
+
+    summary = ReqLLMAdapter.summary_client(client, selection, %AgentConfig{})
+    assert {:ok, "summary"} = summary.(nil, [], max_tokens: 4_096)
+    assert_receive {:summary_budget, 80}
+    assert {:ok, "summary"} = summary.(nil, [], max_tokens: 40)
+    assert_receive {:summary_budget, 40}
   end
 
   test "processes streaming text, thinking, tool calls, and usage into neutral turn data" do

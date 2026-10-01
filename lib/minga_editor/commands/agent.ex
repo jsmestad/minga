@@ -174,6 +174,7 @@ defmodule MingaEditor.Commands.Agent do
     case load_persisted_session(session_pid, session_id) do
       :ok ->
         state
+        |> sync_restored_model_selection(session_pid)
         |> arm_provenance_jump(session_pid, tool_call_id, origin)
         |> activate_agent_view(return_target)
 
@@ -194,7 +195,8 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec load_persisted_session(pid(), String.t()) :: :ok | {:error, atom()}
+  @spec load_persisted_session(pid(), String.t()) ::
+          :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
   defp load_persisted_session(session_pid, session_id) do
     case Session.load_session(session_pid, session_id) do
       :ok ->
@@ -215,7 +217,7 @@ defmodule MingaEditor.Commands.Agent do
     :exit, _reason -> {:error, :session_unavailable}
   end
 
-  @spec safe_restore_error(term()) :: atom()
+  @spec safe_restore_error(term()) :: atom() | {:model_selection_correction_required, String.t()}
   defp safe_restore_error(:invalid_session_record), do: :invalid_saved_session
 
   defp safe_restore_error({:checkpoint_reconciliation_failed, _reason}),
@@ -240,11 +242,20 @@ defmodule MingaEditor.Commands.Agent do
     do: :unsupported_session_version
 
   defp safe_restore_error({:save_current_failed, _reason}), do: :current_session_save_failed
+
+  defp safe_restore_error({:model_selection_correction_required, message})
+       when is_binary(message),
+       do: {:model_selection_correction_required, message}
+
   defp safe_restore_error({:invalid_continuation_boundaries, _reason}), do: :invalid_saved_session
   defp safe_restore_error({:invalid_continuation, _reason}), do: :invalid_saved_session
   defp safe_restore_error(_reason), do: :restore_failed
 
-  @spec restore_failure_message(atom()) :: String.t()
+  @spec restore_failure_message(atom() | {:model_selection_correction_required, String.t()}) ::
+          String.t()
+  defp restore_failure_message({:model_selection_correction_required, message}),
+    do: "#{message} The current conversation was not replaced."
+
   defp restore_failure_message(:invalid_saved_session),
     do: "The saved session record is invalid. The current conversation was not replaced."
 
@@ -1339,6 +1350,12 @@ defmodule MingaEditor.Commands.Agent do
           Session.add_system_message(Runtime.active_session(state.shell_runtime), message)
           NoticeWorkflow.publish(state, message)
 
+        {:pending, :credential_discovery} ->
+          NoticeWorkflow.publish(
+            state,
+            "Checking exact local model route availability. The current model remains active."
+          )
+
         {:error, reason} when is_binary(reason) ->
           NoticeWorkflow.publish(state, reason)
 
@@ -1371,9 +1388,7 @@ defmodule MingaEditor.Commands.Agent do
 
     case Runtime.active_session(state.shell_runtime) do
       nil ->
-        state
-        |> apply_model_selection_to_ui(model_or_selection)
-        |> NoticeWorkflow.publish("Model: #{display}")
+        NoticeWorkflow.publish(state, "No agent session; model selection was not changed")
 
       session ->
         case Session.set_model(session, model_or_selection) do
@@ -1383,7 +1398,9 @@ defmodule MingaEditor.Commands.Agent do
             NoticeWorkflow.publish(state, "Model: #{display}")
 
           {:pending, :credential_discovery} ->
-            message = "Model change accepted: #{display}. Checking exact route availability."
+            message =
+              "Checking exact route availability for #{display}. The current model remains active."
+
             Session.add_system_message(session, message)
             NoticeWorkflow.publish(state, message)
 
@@ -1394,6 +1411,25 @@ defmodule MingaEditor.Commands.Agent do
             NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
         end
     end
+  end
+
+  @spec sync_restored_model_selection(state(), pid()) :: state()
+  defp sync_restored_model_selection(state, session) do
+    case Session.model_selection(session) do
+      %ModelSelection{} = selection ->
+        apply_model_selection_to_ui(state, selection)
+
+      nil ->
+        state
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :agent,
+        "[Agent.Commands] restored model selection unavailable: #{inspect(reason)}"
+      )
+
+      state
   end
 
   @spec apply_model_selection_to_ui(state(), String.t() | ModelSelection.t()) :: state()

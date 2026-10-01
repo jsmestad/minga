@@ -58,6 +58,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
     context = format_context(selection.policy.limits.context)
     cost = format_cost(selection.policy.cost)
     thinking = format_thinking(selection)
+    capabilities = format_capabilities(selection)
     credential = ModelSelection.credential_id(selection.credential)
 
     description =
@@ -68,6 +69,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
         status,
         context,
         thinking,
+        capabilities,
         cost
       ]
       |> Enum.reject(&(&1 in [nil, ""]))
@@ -96,6 +98,19 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
        do: "$#{input}/#{output} per MTok"
 
   defp format_cost(_cost), do: ""
+
+  @spec format_capabilities(ModelSelection.t()) :: String.t()
+  defp format_capabilities(%ModelSelection{policy: %{capabilities: capabilities}}) do
+    tools = capability_label(capabilities.tools)
+    images = capability_label(capabilities.images)
+    streaming = capability_label(capabilities.streaming)
+    "tools #{tools}, images #{images}, streaming #{streaming}"
+  end
+
+  @spec capability_label(ModelSelection.capability()) :: String.t()
+  defp capability_label(true), do: "yes"
+  defp capability_label(false), do: "no"
+  defp capability_label(:unknown), do: "unknown"
 
   @spec format_context(integer() | nil) :: String.t()
   defp format_context(nil), do: ""

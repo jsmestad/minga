@@ -65,6 +65,7 @@ defmodule MingaAgent.ModelSelection do
          evidence: evidence
        }}
     else
+      {:error, reason} -> {:error, reason}
       _invalid -> {:error, :invalid_model_selection}
     end
   end
@@ -121,7 +122,11 @@ defmodule MingaAgent.ModelSelection do
     identity = %{
       version: @version,
       backend_id: backend_id,
-      route: Route.encode(route),
+      route:
+        Map.take(
+          Route.encode(route),
+          ~w(origin request_provider model_provider model_id execution)
+        ),
       credential: credential_identity(credential)
     }
 
@@ -170,21 +175,38 @@ defmodule MingaAgent.ModelSelection do
   end
 
   @spec validate_credential(credential_ref(), Route.t()) :: :ok | {:error, :invalid_credential}
-  defp validate_credential(%ApiKey{provider: provider, source: source}, %Route{})
-       when is_binary(provider) and provider != "" and source in [:env, :file],
+  defp validate_credential(
+         %ApiKey{provider: owner, source: source},
+         %Route{origin: {_kind, owner, _model}, request_provider: request_provider}
+       )
+       when is_binary(owner) and owner != "" and source in [:env, :file] and
+              request_provider != :openai_codex,
        do: :ok
 
   defp validate_credential(
-         %OAuth{provider: :openai_codex, provider_key: "openai-codex", account_id: account_id},
-         %Route{request_provider: :openai_codex}
+         %OAuth{
+           provider: :openai_codex,
+           provider_key: "openai-codex",
+           account_id: account_id,
+           source_id: source_id
+         },
+         %Route{request_provider: :openai_codex, origin: {:catalog, "openai", _model}}
        )
-       when is_binary(account_id) and account_id != "",
+       when is_binary(account_id) and account_id != "" and is_binary(source_id) and
+              byte_size(source_id) == 64,
        do: :ok
 
-  defp validate_credential(%None{provider: "ollama"}, %Route{request_provider: :ollama}), do: :ok
+  defp validate_credential(
+         %None{provider: "ollama"},
+         %Route{request_provider: :ollama, origin: {:catalog, "ollama", _model}}
+       ),
+       do: :ok
 
-  defp validate_credential(%None{}, %Route{request_provider: :openai, origin: {:custom, _, _}}),
-    do: :ok
+  defp validate_credential(
+         %None{provider: owner},
+         %Route{origin: {:custom, owner, _model}}
+       ),
+       do: :ok
 
   defp validate_credential(_credential, _route), do: {:error, :invalid_credential}
 
@@ -202,7 +224,8 @@ defmodule MingaAgent.ModelSelection do
       "kind" => "oauth",
       "provider" => "openai_codex",
       "provider_key" => credential.provider_key,
-      "account_id" => credential.account_id
+      "account_id" => credential.account_id,
+      "source_id" => credential.source_id
     }
   end
 
@@ -225,10 +248,12 @@ defmodule MingaAgent.ModelSelection do
          "kind" => "oauth",
          "provider" => "openai_codex",
          "provider_key" => "openai-codex",
-         "account_id" => account_id
+         "account_id" => account_id,
+         "source_id" => source_id
        })
-       when is_binary(account_id) and account_id != "" do
-    {:ok, OAuth.new(account_id, nil)}
+       when is_binary(account_id) and account_id != "" and
+              is_binary(source_id) and byte_size(source_id) == 64 do
+    {:ok, OAuth.restore(account_id, source_id)}
   end
 
   defp decode_credential(%{"kind" => "none", "provider" => provider})
@@ -245,9 +270,9 @@ defmodule MingaAgent.ModelSelection do
         "effort" => policy.reasoning.effort,
         "options" => policy.reasoning.options
       },
-      "limits" => stringify(Map.from_struct(policy.limits)),
+      "limits" => MingaAgent.ModelSelection.Encoding.stringify(Map.from_struct(policy.limits)),
       "capabilities" => stringify_capabilities(Map.from_struct(policy.capabilities)),
-      "cost" => stringify(policy.cost)
+      "cost" => MingaAgent.ModelSelection.Encoding.stringify(policy.cost)
     }
   end
 
@@ -314,20 +339,11 @@ defmodule MingaAgent.ModelSelection do
       kind: :oauth,
       provider: credential.provider,
       provider_key: credential.provider_key,
-      account_id: credential.account_id
+      account_id: credential.account_id,
+      source_id: credential.source_id
     }
   end
 
   defp credential_identity(%None{} = credential),
     do: %{kind: :none, provider: credential.provider}
-
-  @spec stringify(term()) :: term()
-  defp stringify(map) when is_map(map) do
-    Map.new(map, fn {key, value} -> {to_string(key), stringify(value)} end)
-  end
-
-  defp stringify(list) when is_list(list), do: Enum.map(list, &stringify/1)
-  defp stringify(value) when is_nil(value) or is_boolean(value), do: value
-  defp stringify(value) when is_atom(value), do: Atom.to_string(value)
-  defp stringify(value), do: value
 end

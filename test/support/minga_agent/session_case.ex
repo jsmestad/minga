@@ -51,6 +51,7 @@ defmodule Minga.Test.SessionCase do
   @spec start_test_session(keyword()) :: pid()
   def start_test_session(opts) do
     opts = Keyword.put_new(opts, :persist?, false)
+    opts = native_session_credentials(opts)
     child_id = {:session, System.unique_integer([:positive, :monotonic])}
     session = start_supervised!({MingaAgent.Session, opts}, id: child_id)
     :sys.get_state(session, @provider_startup_timeout)
@@ -179,6 +180,19 @@ defmodule Minga.Test.SessionCase do
   end
 
   def wait_until_subscriber_role(_session, _pid, _expected_role, 0), do: :ok
+
+  @spec native_session_credentials(keyword()) :: keyword()
+  defp native_session_credentials(opts) do
+    case Keyword.get(opts, :provider) do
+      MingaAgent.Providers.Native ->
+        Keyword.put_new(opts, :credentials_snapshot_fn, fn ->
+          MingaAgent.Credentials.Snapshot.new(%{}, nil, "http://127.0.0.1:1")
+        end)
+
+      _provider ->
+        opts
+    end
+  end
 
   @spec native_provider_opts(module(), keyword()) :: keyword()
   defp native_provider_opts(MingaAgent.Providers.Native, provider_opts) do

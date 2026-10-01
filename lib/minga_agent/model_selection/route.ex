@@ -49,6 +49,7 @@ defmodule MingaAgent.ModelSelection.Route do
          model_provider when is_binary(model_provider) and model_provider != "" <-
            Map.get(attrs, :model_provider),
          model_id when is_binary(model_id) and model_id != "" <- Map.get(attrs, :model_id),
+         true <- origin_matches_model?(origin, model_provider, model_id),
          display_name when is_binary(display_name) and display_name != "" <-
            Map.get(attrs, :display_name),
          %TextExecution{} = execution <- Map.get(attrs, :execution),
@@ -72,6 +73,10 @@ defmodule MingaAgent.ModelSelection.Route do
 
   def new(_attrs), do: {:error, :invalid_route}
 
+  @spec origin_matches_model?(origin(), String.t(), String.t()) :: boolean()
+  defp origin_matches_model?({_kind, provider, id}, provider, id), do: true
+  defp origin_matches_model?(_origin, _provider, _id), do: false
+
   @doc "Materializes the route once into the exact inline model ReqLLM executes."
   @spec materialize(t()) :: {:ok, LLMDB.Model.t()} | {:error, term()}
   def materialize(%__MODULE__{} = route) do
@@ -79,7 +84,7 @@ defmodule MingaAgent.ModelSelection.Route do
 
     attrs = %{
       provider: route.request_provider,
-      id: route.id,
+      id: execution.provider_model_id,
       model: execution.provider_model_id,
       provider_model_id: execution.provider_model_id,
       name: route.display_name,
@@ -115,7 +120,7 @@ defmodule MingaAgent.ModelSelection.Route do
       "model_id" => route.model_id,
       "display_name" => route.display_name,
       "execution" => TextExecution.encode(route.execution),
-      "metadata" => stringify(route.metadata)
+      "metadata" => MingaAgent.ModelSelection.Encoding.stringify(route.metadata)
     }
   end
 
@@ -293,14 +298,4 @@ defmodule MingaAgent.ModelSelection.Route do
   defp projected_protocol(%LLMDB.Model{extra: %{wire: %{protocol: protocol}}}), do: protocol
 
   defp projected_protocol(_model), do: nil
-
-  @spec stringify(term()) :: term()
-  defp stringify(map) when is_map(map) do
-    Map.new(map, fn {key, value} -> {to_string(key), stringify(value)} end)
-  end
-
-  defp stringify(list) when is_list(list), do: Enum.map(list, &stringify/1)
-  defp stringify(value) when is_nil(value) or is_boolean(value), do: value
-  defp stringify(value) when is_atom(value), do: Atom.to_string(value)
-  defp stringify(value), do: value
 end

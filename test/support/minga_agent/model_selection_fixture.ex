@@ -2,7 +2,6 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
   @moduledoc false
 
   alias MingaAgent.ModelSelection
-  alias MingaAgent.ModelSelection.Credential.ApiKey
   alias MingaAgent.ModelSelection.Credential.None
   alias MingaAgent.ModelSelection.Evidence
   alias MingaAgent.ModelSelection.Policy
@@ -21,7 +20,8 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
       "models" => %{
         @custom_model_id => %{
           "name" => "Test Model",
-          "reasoning_options" => ["off", "none", "minimal", "low", "medium", "high"]
+          "reasoning_options" => ["off", "none", "minimal", "low", "medium", "high"],
+          "capabilities" => %{"tools" => true, "images" => true, "streaming" => true}
         }
       }
     }
@@ -38,7 +38,11 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
     request_provider = Keyword.get(opts, :request_provider, :openai)
     defaults = execution_defaults(request_provider)
     model_id = Keyword.get(opts, :model_id, "test-model")
-    model_provider = Keyword.get(opts, :model_provider, Atom.to_string(request_provider))
+
+    default_owner =
+      if request_provider == :openai_codex, do: "openai", else: Atom.to_string(request_provider)
+
+    model_provider = Keyword.get(opts, :model_provider, default_owner)
     display_name = Keyword.get(opts, :display_name, model_id)
 
     {:ok, execution} =
@@ -54,7 +58,13 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
 
     {:ok, route} =
       Route.new(%{
-        origin: Keyword.get(opts, :origin, {:custom, "test", model_id}),
+        origin:
+          Keyword.get(
+            opts,
+            :origin,
+            {if(request_provider == :openai_codex, do: :catalog, else: :custom), model_provider,
+             model_id}
+          ),
         request_provider: request_provider,
         id: Keyword.get(opts, :route_id, "test/#{model_id}"),
         model_provider: model_provider,
@@ -87,7 +97,9 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
       ModelSelection.build(
         Spec.new!(source: :config, id: "native", module: Native, display_name: "Native"),
         route,
-        Keyword.get_lazy(opts, :credential, fn -> fixture_credential(request_provider) end),
+        Keyword.get_lazy(opts, :credential, fn ->
+          fixture_credential(request_provider, model_provider)
+        end),
         policy,
         Evidence.new(
           Keyword.get(opts, :catalog_evidence, false),
@@ -98,9 +110,12 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
     selection
   end
 
-  @spec fixture_credential(atom()) :: ModelSelection.credential_ref()
-  defp fixture_credential(:openai), do: None.new("test")
-  defp fixture_credential(provider), do: ApiKey.new(Atom.to_string(provider), :env)
+  @spec fixture_credential(atom(), String.t()) :: ModelSelection.credential_ref()
+  defp fixture_credential(:openai_codex, _owner),
+    do:
+      MingaAgent.ModelSelection.Credential.OAuth.new("fixture-account", "/tmp/fixture-oauth.json")
+
+  defp fixture_credential(_provider, owner), do: None.new(owner)
 
   @spec execution_defaults(atom()) :: map()
   defp execution_defaults(:anthropic) do
@@ -110,6 +125,16 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
       transport: "http",
       base_url: "https://anthropic.example/v1",
       path: "/v1/messages"
+    }
+  end
+
+  defp execution_defaults(:openai_codex) do
+    %{
+      family: "openai_responses_compatible",
+      wire_protocol: "openai_codex_responses",
+      transport: "http",
+      base_url: "https://chatgpt.com/backend-api",
+      path: "/codex/responses"
     }
   end
 

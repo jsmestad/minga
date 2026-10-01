@@ -5,6 +5,7 @@ defmodule MingaAgent.ModelResolverTest do
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.ProviderPacks.Native
 
   @provider %{
@@ -118,6 +119,161 @@ defmodule MingaAgent.ModelResolverTest do
              )
   end
 
+  test "keeps API-key and OAuth profiles as distinct exact routes" do
+    snapshot =
+      Snapshot.new(
+        %{"openai" => :env},
+        OAuth.new("account-123", "/tmp/minga-resolver-oauth.json"),
+        "http://localhost"
+      )
+
+    candidates =
+      snapshot
+      |> resolver_opts()
+      |> ModelResolver.candidates()
+
+    assert [_, _] = candidates
+
+    assert api_key =
+             Enum.find(candidates, &(&1.selection.route.request_provider == :openai))
+
+    assert oauth =
+             Enum.find(candidates, &(&1.selection.route.request_provider == :openai_codex))
+
+    assert ModelSelection.credential_id(api_key.selection.credential) == "openai:env"
+    assert api_key.selection.route.execution.wire_protocol == "openai_responses"
+
+    assert ModelSelection.credential_id(oauth.selection.credential) ==
+             "openai-codex:account-123"
+
+    assert oauth.selection.route.execution.wire_protocol == "openai_codex_responses"
+    assert oauth.selection.route.execution.base_url == "https://chatgpt.com/backend-api"
+    refute ModelSelection.id(api_key.selection) == ModelSelection.id(oauth.selection)
+  end
+
+  test "restore rejects imported catalog execution and credential-owner substitution" do
+    opts =
+      resolver_opts(
+        Snapshot.new(%{"openai" => :env, "anthropic" => :env}, nil, "http://localhost")
+      )
+
+    {:ok, selection} = ModelResolver.resolve("openai:not-a-codex-name", opts)
+    encoded = ModelSelection.encode(selection)
+
+    changes = [
+      {["route", "execution", "base_url"], "https://attacker.example/v1"},
+      {["route", "execution", "path"], "/collect"},
+      {["route", "execution", "provider_model_id"], "different-model"},
+      {["credential", "provider"], "anthropic"},
+      {["backend_id"], "different-backend"}
+    ]
+
+    for {path, replacement} <- changes do
+      assert {:error, {:selection_correction_required, _message}} =
+               encoded |> put_in(path, replacement) |> ModelResolver.restore(opts)
+    end
+  end
+
+  test "display-name changes preserve the executable selection identity" do
+    opts = resolver_opts(Snapshot.new(%{"openai" => :env}, nil, "http://localhost"))
+    {:ok, original} = ModelResolver.resolve("openai:not-a-codex-name", opts)
+    updated = Keyword.put(opts, :models, [%{@catalog_model | name: "Renamed Catalog Label"}])
+    {:ok, renamed} = ModelResolver.resolve("openai:not-a-codex-name", updated)
+    assert ModelSelection.id(original) == ModelSelection.id(renamed)
+    assert {:ok, restored} = ModelResolver.restore(original, updated)
+    assert restored.route.execution == original.route.execution
+  end
+
+  test "OAuth persistence binds a source without serializing its filesystem path" do
+    path = "/tmp/private-source-a/oauth.json"
+    snapshot = Snapshot.new(%{}, OAuth.new("same-account", path), "http://localhost")
+    [candidate] = ModelResolver.candidates(resolver_opts(snapshot))
+    encoded = ModelSelection.encode(candidate.selection)
+    refute JSON.encode!(encoded) =~ path
+    assert encoded["credential"]["source_id"] == OAuth.new("same-account", path).source_id
+
+    changed =
+      Snapshot.new(
+        %{},
+        OAuth.new("same-account", "/tmp/private-source-b/oauth.json"),
+        "http://localhost"
+      )
+
+    assert {:error, {:selection_correction_required, _message}} =
+             ModelResolver.restore(encoded, resolver_opts(changed))
+  end
+
+  test "explicit configured model ownership overrides a same-id catalog model" do
+    config = %Config{
+      api_endpoints: %{
+        "openai" => %{
+          "url" => "http://127.0.0.1:9000/v1",
+          "protocol" => "openai_chat",
+          "auth_mode" => "none",
+          "models" => %{
+            "not-a-codex-name" => %{
+              "provider_model_id" => "gateway-wire-alias",
+              "capabilities" => %{"tools" => false, "streaming" => true},
+              "limits" => %{"output" => 100}
+            }
+          }
+        }
+      }
+    }
+
+    opts = resolver_opts(Snapshot.new(%{}, nil, "http://localhost"), config)
+    assert {:ok, selection} = ModelResolver.resolve("openai:not-a-codex-name", opts)
+    assert selection.route.execution.provider_model_id == "gateway-wire-alias"
+    assert selection.request_model.id == "gateway-wire-alias"
+    assert selection.policy.capabilities.tools == false
+    assert selection.policy.limits.output == 100
+    assert {:ok, _restored} = ModelResolver.restore(selection, opts)
+  end
+
+  test "restore rejects changed custom capability and wire-model declarations" do
+    config = MingaAgent.Test.ModelSelectionFixture.config()
+    opts = resolver_opts(Snapshot.new(%{}, nil, "http://localhost"), config)
+    {:ok, selection} = ModelResolver.resolve("test:test-model", opts)
+
+    for {path, replacement} <- [
+          {[:api_endpoints, "test", "models", "test-model", "capabilities", "tools"], false},
+          {[:api_endpoints, "test", "models", "test-model", "provider_model_id"],
+           "changed-wire-id"}
+        ] do
+      changed = put_in(config, [Access.key(:api_endpoints) | tl(path)], replacement)
+
+      assert {:error, {:selection_correction_required, _message}} =
+               ModelResolver.restore(selection, Keyword.put(opts, :config, changed))
+    end
+  end
+
+  test "anonymous custom Anthropic and Google protocols bind the exact endpoint owner" do
+    for protocol <- ["anthropic_messages", "google_generate_content"] do
+      config = %Config{
+        api_endpoints: %{
+          "private" => %{
+            "url" => "http://127.0.0.1:9000",
+            "protocol" => protocol,
+            "auth_mode" => "none",
+            "models" => %{"alias" => %{"provider_model_id" => "wire-model"}}
+          }
+        }
+      }
+
+      opts = resolver_opts(Snapshot.new(%{}, nil, "http://localhost"), config)
+      assert {:ok, selection} = ModelResolver.resolve("private:alias", opts)
+      assert ModelSelection.credential_id(selection.credential) == "private:none"
+      assert selection.request_model.id == "wire-model"
+      assert {:ok, _restored} = ModelResolver.restore(selection, opts)
+
+      encoded =
+        put_in(ModelSelection.encode(selection), ["credential", "provider"], "other-owner")
+
+      assert {:error, {:selection_correction_required, _message}} =
+               ModelResolver.restore(encoded, opts)
+    end
+  end
+
   test "restoration refuses to switch to another credential source" do
     {:ok, selection} =
       ModelResolver.resolve(
@@ -169,6 +325,111 @@ defmodule MingaAgent.ModelResolverTest do
     assert selection.policy.capabilities.images == :unknown
     assert selection.policy.capabilities.streaming == :unknown
     assert selection.evidence.status == :unverified
+  end
+
+  @tag :tmp_dir
+  test "a non-vendor custom endpoint uses its exact file credential and survives restore", %{
+    tmp_dir: dir
+  } do
+    secret = "private-endpoint-file-key"
+    credential_opts = [config_dir: dir, oauth_identity_probe: fn -> nil end]
+    assert :ok = MingaAgent.Credentials.store("private", secret, credential_opts)
+    snapshot = MingaAgent.Credentials.snapshot(credential_opts)
+
+    config = %Config{
+      api_endpoints: %{
+        "private" => %{
+          "url" => "https://private.example/v1",
+          "protocol" => "openai_chat",
+          "auth_mode" => "api_key",
+          "models" => %{
+            "exact-custom" => %{
+              "capabilities" => %{"tools" => true, "images" => false, "streaming" => true},
+              "limits" => %{"context" => 32_000, "output" => 2_000}
+            }
+          }
+        }
+      }
+    }
+
+    opts = resolver_opts(snapshot, config)
+    assert {:ok, selection} = ModelResolver.resolve("private:exact-custom", opts)
+
+    assert selection.credential ==
+             MingaAgent.ModelSelection.Credential.ApiKey.new("private", :file)
+
+    assert selection.route.execution.base_url == "https://private.example/v1"
+    assert selection.route.execution.provider_model_id == "exact-custom"
+
+    assert {:ok, request_opts} =
+             MingaAgent.Credentials.request_options(selection.credential, credential_opts)
+
+    assert request_opts[:api_key] == secret
+    encoded = ModelSelection.encode(selection)
+    refute JSON.encode!(encoded) =~ secret
+    assert {:ok, restored} = ModelResolver.restore(encoded, opts)
+    assert ModelSelection.id(restored) == ModelSelection.id(selection)
+    File.write!(Path.join([dir, "minga", "credentials.json"]), "{}")
+
+    assert {:error, {:credential_unavailable, "private:file"}} =
+             MingaAgent.Credentials.request_options(restored.credential, credential_opts)
+  end
+
+  test "legacy favorites migrate unique routes but never guess between API-key and OAuth profiles" do
+    unique_snapshot = Snapshot.new(%{"openai" => :env}, nil, "http://localhost")
+
+    unique_candidates =
+      ModelResolver.candidates(
+        Keyword.put(resolver_opts(unique_snapshot), :favorites, ["openai:not-a-codex-name"])
+      )
+
+    assert [
+             %MingaAgent.ModelCandidate{
+               selection: %{
+                 credential: %MingaAgent.ModelSelection.Credential.ApiKey{
+                   provider: "openai",
+                   source: :env
+                 }
+               }
+             }
+           ] =
+             Enum.filter(unique_candidates, & &1.favorite)
+
+    snapshot =
+      Snapshot.new(
+        %{"openai" => :env},
+        OAuth.new("favorite-account", "/tmp/favorite-oauth.json"),
+        "http://localhost"
+      )
+
+    candidates =
+      ModelResolver.candidates(
+        Keyword.put(resolver_opts(snapshot), :favorites, ["openai:not-a-codex-name"])
+      )
+
+    assert [] = Enum.filter(candidates, & &1.favorite)
+
+    assert Enum.any?(candidates, fn candidate ->
+             match?(%OAuth{}, candidate.selection.credential) and not candidate.favorite
+           end)
+  end
+
+  test "custom boolean capabilities produce an executable selection and survive restore" do
+    config = MingaAgent.Test.ModelSelectionFixture.config()
+    opts = resolver_opts(Snapshot.new(%{}, nil, "http://localhost"), config)
+
+    assert {:ok, selection} =
+             ModelResolver.resolve(MingaAgent.Test.ModelSelectionFixture.model_intent(), opts)
+
+    assert ModelSelection.tools?(selection)
+    assert ModelSelection.images?(selection)
+
+    assert {:ok, restored} =
+             selection |> ModelSelection.encode() |> ModelResolver.restore(opts)
+
+    assert ModelSelection.id(restored) == ModelSelection.id(selection)
+    assert ModelSelection.tools?(restored)
+    assert ModelSelection.images?(restored)
   end
 
   test "serialized identity is versioned and contains no credential value" do
