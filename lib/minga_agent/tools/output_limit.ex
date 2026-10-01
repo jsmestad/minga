@@ -169,9 +169,11 @@ defmodule MingaAgent.Tools.OutputLimit do
   @spec remaining_ms(integer()) :: non_neg_integer()
   defp remaining_ms(deadline_ms), do: max(deadline_ms - System.monotonic_time(:millisecond), 0)
 
-  @doc "Closes a command Port if needed and drains already-delivered Port messages."
+  @doc "Terminates a live command producer, closes its Port, and drains delivered Port messages."
   @spec close_port(port()) :: :ok
   def close_port(port) do
+    terminate_producer(port)
+
     try do
       Port.close(port)
     rescue
@@ -179,6 +181,26 @@ defmodule MingaAgent.Tools.OutputLimit do
     end
 
     drain_port(port)
+  end
+
+  @spec terminate_producer(port()) :: :ok
+  defp terminate_producer(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, pid} ->
+        case System.cmd("/bin/kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true) do
+          {_output, 0} ->
+            :ok
+
+          {output, status} ->
+            Minga.Log.warning(
+              :agent,
+              "Tool producer #{pid} kill exited #{status}: #{String.trim(output)}"
+            )
+        end
+
+      nil ->
+        :ok
+    end
   end
 
   @spec drain_port(port()) :: :ok

@@ -61,7 +61,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       skip_api_key_env: true
     ]
 
-    Native.start_link(Keyword.merge(defaults, opts))
+    start_supervised({Native, Keyword.merge(defaults, opts)})
   end
 
   defp start_provider_subscriber(owner, store) do
@@ -160,7 +160,10 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       {:agent_provider_event, event} -> collect_until_end([event | acc])
       {:agent_provider_lifecycle_event, event} -> collect_until_end([event | acc])
     after
-      @receive_timeout -> flunk("provider did not emit AgentEnd")
+      @receive_timeout ->
+        flunk(
+          "provider did not emit AgentEnd; received events: #{inspect(Enum.reverse(acc))}; linked processes: #{inspect(Process.info(self(), :links))}"
+        )
     end
   end
 

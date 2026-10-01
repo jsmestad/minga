@@ -1369,7 +1369,16 @@ defmodule MingaAgent.SessionStoreTest do
           )
         end)
 
-      assert_receive {:candidate_pinned, writer_pid}
+      # The test timeout bounds this handshake; pinning has no one-second latency contract.
+      writer_pid =
+        receive do
+          {:candidate_pinned, writer_pid} ->
+            writer_pid
+
+          {ref, result} when ref == writer.ref ->
+            flunk("snapshot writer returned before candidate pinning: #{inspect(result)}")
+        end
+
       assert :ok = DynamicSupervisor.terminate_child(runtime.store_supervisor, store)
       send(writer_pid, :resume_snapshot)
       assert :ok = Task.await(writer)

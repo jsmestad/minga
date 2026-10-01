@@ -13,4 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Native agent model changes now resolve an exact model, wire protocol, endpoint, credential profile, reasoning controls, limits, and capabilities before activation. The model picker and slash completion expose exact route evidence; unsupported tool, image, and thinking requests are rejected before transport; and saved sessions restore the same secret-free route identity without credential fallback. See `docs/AGENT-MODEL-SELECTION.md`.
 - Native agent reads, discovery, searches, shell results, and tool results now distinguish visible truncation from bounded durable capture, support binary-safe exact record-scoped retrieval across restart, preserve source revisions and timeout prefixes, reconcile interrupted delivery outputs without replay, and explicitly refuse retention quota failures. Image reads deliver retained bytes through exact model and protocol support or return a visible limitation before full capture. Combined snapshots preserve output ownership and migrate separate model-selection and retained-output records safely.
 
+### Fixed
+
+- Bounded agent command collection now terminates live producers before closing their Ports on timeout or capture exhaustion. Search and shell commands no longer continue consuming CPU after returning an incomplete result.
+
 <!-- RELEASE_MARKER: new releases are prepended above this line -->
