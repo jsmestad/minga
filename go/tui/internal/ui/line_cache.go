@@ -212,46 +212,55 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 	// returns a stable digest of the palette's resolved colors.
 	writeUint(m.paletteFingerprint())
 
+	residentSemantics := m.residentSemanticsFor(window)
+
 	// Per-window scroll and cursorline.
 	writeUint(uint64(window.ScrollLeft))
 	writeUint(uint64(m.presentationScrollEffectiveLeft(window)))
-	writeBool(window.Cursorline.Visible)
-	writeUint(uint64(window.Cursorline.Row))
-	writeUint(uint64(window.Cursorline.BG))
+	if residentSemantics != nil {
+		writeUint(uint64(residentSemantics.revision))
+		writeUint(uint64(residentSemantics.rowRevision))
+	} else {
+		writeBool(window.Cursorline.Visible)
+		writeUint(uint64(window.Cursorline.Row))
+		writeUint(uint64(window.Cursorline.BG))
+	}
 
 	// Per-window overlays. These shift a row's background/foreground per
 	// column, so any change recomposes the affected window's lines.
-	writeUint(uint64(window.Selection.Type))
-	writeUint(uint64(window.Selection.StartRow))
-	writeUint(uint64(window.Selection.StartCol))
-	writeUint(uint64(window.Selection.EndRow))
-	writeUint(uint64(window.Selection.EndCol))
-	for _, hl := range window.Highlights {
-		writeUint(uint64(hl.Kind))
-		writeUint(uint64(hl.StartRow))
-		writeUint(uint64(hl.StartCol))
-		writeUint(uint64(hl.EndRow))
-		writeUint(uint64(hl.EndCol))
-	}
-	for _, match := range window.SearchMatches {
-		writeUint(uint64(match.Row))
-		writeUint(uint64(match.StartCol))
-		writeUint(uint64(match.EndCol))
-		writeBool(match.Current)
-	}
-	for _, diag := range window.Diagnostics {
-		writeUint(uint64(diag.Severity))
-		writeUint(uint64(diag.StartRow))
-		writeUint(uint64(diag.StartCol))
-		writeUint(uint64(diag.EndRow))
-		writeUint(uint64(diag.EndCol))
-	}
-	for _, ann := range window.Annotations {
-		writeUint(uint64(ann.Row))
-		writeUint(uint64(ann.Kind))
-		writeUint(uint64(ann.FG))
-		writeUint(uint64(ann.BG))
-		writeStr(ann.Text)
+	if residentSemantics == nil {
+		writeUint(uint64(window.Selection.Type))
+		writeUint(uint64(window.Selection.StartRow))
+		writeUint(uint64(window.Selection.StartCol))
+		writeUint(uint64(window.Selection.EndRow))
+		writeUint(uint64(window.Selection.EndCol))
+		for _, hl := range window.Highlights {
+			writeUint(uint64(hl.Kind))
+			writeUint(uint64(hl.StartRow))
+			writeUint(uint64(hl.StartCol))
+			writeUint(uint64(hl.EndRow))
+			writeUint(uint64(hl.EndCol))
+		}
+		for _, match := range window.SearchMatches {
+			writeUint(uint64(match.Row))
+			writeUint(uint64(match.StartCol))
+			writeUint(uint64(match.EndCol))
+			writeBool(match.Current)
+		}
+		for _, diag := range window.Diagnostics {
+			writeUint(uint64(diag.Severity))
+			writeUint(uint64(diag.StartRow))
+			writeUint(uint64(diag.StartCol))
+			writeUint(uint64(diag.EndRow))
+			writeUint(uint64(diag.EndCol))
+		}
+		for _, ann := range window.Annotations {
+			writeUint(uint64(ann.Row))
+			writeUint(uint64(ann.Kind))
+			writeUint(uint64(ann.FG))
+			writeUint(uint64(ann.BG))
+			writeStr(ann.Text)
+		}
 	}
 
 	// Gutter (line numbers, signs, cursor line) renders to the left of each row
@@ -291,14 +300,16 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 
 	// Indent guides are indexed by row and column and change the rendered glyph
 	// of whitespace cells, so fold their full identity in too.
-	if guides, ok := m.indentGuides[window.ID]; ok {
-		writeUint(uint64(guides.TabWidth))
-		writeUint(uint64(guides.ActiveGuideCol))
-		for _, col := range guides.GuideCols {
-			writeUint(uint64(col))
-		}
-		for _, level := range guides.IndentLevels {
-			writeUint(uint64(level))
+	if residentSemantics == nil {
+		if guides, ok := m.indentGuides[window.ID]; ok {
+			writeUint(uint64(guides.TabWidth))
+			writeUint(uint64(guides.ActiveGuideCol))
+			for _, col := range guides.GuideCols {
+				writeUint(uint64(col))
+			}
+			for _, level := range guides.IndentLevels {
+				writeUint(uint64(level))
+			}
 		}
 	}
 

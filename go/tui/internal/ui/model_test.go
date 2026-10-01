@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"image/color"
 	"reflect"
@@ -1950,6 +1951,40 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "bottom") || !strings.Contains(scrolled, "below") || strings.Contains(scrolled, "top") {
 		t.Fatalf("local presentation scroll should shift into overscan rows immediately, got %q", scrolled)
+	}
+}
+
+func TestPresentationScrollConsumesProducerResetAtCommit(t *testing.T) {
+	const encodedWindow = "gAAAA/kKAQAAAA4AAQEAWAAAAAAAAAAAAgIAAALzAAAADQAQAAAAAAAAAAAAAAAGe7ZOAAAAEnJvdyAwMDEgdmFsdWVfMCDOuwABAAAAEQAAAAAAAAACAAAQAAAAEAAAAAAAAAECLvILAAAAFCAgcm93IDAwMiB2YWx1ZV8xIM67AAEAAAATAAAAAAAAAAIAABAAAAAgAAAAAAAAAgPaHdcAAAAWICAgIHJvdyAwMDMgdmFsdWVfMiDOuwABAAAAFQAAAAAAAAACAAAQAAAAMAAAAAAAAAMCtGT4AAAAGCAgICAgIHJvdyAwMDQgdmFsdWVfMyDOuwABAAAAFwAAAAAAAAACAAAQAAAAQAAAAAAAAAQEn7M6AAAAGiAgICAgICAgcm93IDAwNSB2YWx1ZV80IM67AAEAAAAZAAAAAAAAAAIAABAAAABQAAAAAAAABQLzlZAAAAAScm93IDAwNiB2YWx1ZV81IM67AAEAAAARAAAAAAAAAAIAABAAAABgAAAAAAAABgcR/TkAAAAUICByb3cgMDA3IHZhbHVlXzYgzrsAAQAAABMAAAAAAAAAAgAAEAAAAHAAAAAAAAAHAZ6zIQAAABYgICAgcm93IDAwOCB2YWx1ZV83IM67AAEAAAAVAAAAAAAAAAIAABAAAACAAAAAAAAACAe4FDMAAAAYICAgICAgcm93IDAwOSB2YWx1ZV84IM67AAEAAAAXAAAAAAAAAAIAABAAAACQAAAAAAAACQHbNpYAAAAaICAgICAgICByb3cgMDEwIHZhbHVlXzkgzrsAAQAAABkAAAAAAAAAAgAAEAAAAKAAAAAAAAAKAptyggAAABNyb3cgMDExIHZhbHVlXzEwIM67AAEAAAASAAAAAAAAAAIAABAAAACwAAAAAAAACwG2l2sAAAAVICByb3cgMDEyIHZhbHVlXzExIM67AAEAAAAUAAAAAAAAAAIAABAAAADAAAAAAAAADAW13t0AAAAXICAgIHJvdyAwMTMgdmFsdWVfMTIgzrsAAQAAABYAAAAAAAAAAgADAAAAAQAEAAAAAgAABQAAAAIAAAYAAAACAAAHAAAAAgAACAAAAGQAAQAAAAAASAAMAAAAAABIAAwAAAAHAEEADAAAAAAABwAMAAAABwBBAAwAAAAAAAAADABBAAAAeAAAAAAAeAAEAAMDAQAAAAcAQQAMAAECAAAAAAAHAAwAAQMAAAACAAEADAABCgAAACcAAQEAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAA0AAAACBoEJ2AAAAAAMAAAAMQAAAAAAAAAD////////AAAAH21pbmdhLTM0MjQtcmVzaWRlbnQtZml4dHVyZS50eHQ="
+
+	raw, err := base64.StdEncoding.DecodeString(encodedWindow)
+	if err != nil {
+		t.Fatalf("decode producer window fixture: %v", err)
+	}
+	command, err := protocol.DecodeCommand(raw)
+	if err != nil {
+		t.Fatalf("decode producer window command: %v", err)
+	}
+	window := command.Window
+	if !window.ScrollSet || !window.Scroll.ResetRequired {
+		t.Fatalf("producer fixture must carry reset_required: %+v", window.Scroll)
+	}
+
+	model := New(80, 24, nil, nil)
+	model.putWindow(window)
+	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{
+		Button: tea.MouseWheelDown,
+		X:      int(window.Geometry.ContentRect.Col) + 1,
+		Y:      model.layout.header.Height + int(window.Geometry.ContentRect.Row) + 1,
+	}), 1)
+
+	scroll, ok := model.localPresentation.scrolls[window.ID]
+	if !ok || scroll.rowOffset != 1 {
+		t.Fatalf("local scroll after producer reset frame = %+v, present=%v", scroll, ok)
+	}
+	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[window.ID])), "|")
+	if strings.Contains(rendered, "row 001") || !strings.Contains(rendered, "row 013") {
+		t.Fatalf("producer reset remained a permanent input gate: %q", rendered)
 	}
 }
 

@@ -24,8 +24,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.Core.IndentGuide
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
-  alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
+  alias Minga.Editing
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
@@ -40,6 +40,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.RenderModel.Window.ContentDigest
   alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderModel.Window.ResidentBuild
+  alias MingaEditor.RenderModel.Window.ResidentSemanticState
   alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.RenderModel.Window.VisualRow
   alias Minga.RenderModel.Window.Annotation
@@ -65,7 +66,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
   alias MingaEditor.WindowTree
-  alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.FontRegistry
 
@@ -260,12 +260,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
-    cursor_shape =
-      if is_active do
-        Minga.Editing.cursor_shape(state)
-      else
-        :block
-      end
+    cursor_shape = active_cursor_shape(state, is_active)
+    cursor_eligible = cursor_eligible?(state, is_active)
 
     display_cursor_col =
       adjust_cursor_col_for_shape(
@@ -295,12 +291,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # eval, search_prompt modes). The native SwiftUI minibuffer shows its
     # own cursor; having two cursors visible is confusing. Also hide it when the
     # cursor has scrolled off-viewport (#2684).
-    cursor_visible =
-      if is_active do
-        cursor_on_screen? and not Minga.Editing.minibuffer_mode?(state)
-      else
-        false
-      end
+    cursor_visible = cursor_visible?(cursor_eligible, cursor_on_screen?)
 
     raw_selection =
       ContentHelpers.visual_selection_bounds(state, {cursor_line, scroll.cursor_byte_col})
@@ -350,13 +341,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # Diagnostic inline ranges in display coordinates
     diagnostic_ranges =
       build_diagnostic_ranges(
-        snapshot.file_path,
+        elem(ctx.diagnostics_snapshot, 1),
         viewport,
         visible_row_count,
         visual_entries,
         wrapped_coordinates?,
         lines,
-        first_line
+        first_line,
+        resident_build_state
       )
 
     # Document highlights in display coordinates
@@ -417,6 +409,30 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         text_rows
       )
 
+    {resident_semantic_state, resident_semantics} =
+      build_resident_semantics(
+        Keyword.get(opts, :resident_semantic_state),
+        resident_build_state,
+        resident_result,
+        %{
+          window_id: win_id,
+          content_epoch: scroll.content_epoch,
+          keyframe?:
+            state.intent.frame.force_keyframe? or adapter_full_snapshot_pending?(state, win_id),
+          cursor_eligible: cursor_eligible,
+          cursor_row: cursor_line,
+          cursor_col:
+            Decorations.buf_col_to_display_col(ctx.decorations, cursor_line, cursor_col),
+          cursorline_bg: ctx.cursorline_bg,
+          selection: ctx.visual_selection,
+          diagnostics_snapshot: ctx.diagnostics_snapshot,
+          annotations_revision: ctx.decorations.annotation_version,
+          decorations: ctx.decorations,
+          tab_width: ctx.tab_width,
+          guides_enabled?: indent_guides_enabled?()
+        }
+      )
+
     render_window = %RenderWindow{
       window_id: win_id,
       text_presentation_id: text_presentation.presentation_id,
@@ -440,7 +456,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       gutter: build_gutter(scroll, ctx, content_kind, resident_entries, row_store_mode),
       cursorline:
         build_cursorline(content_row, display_cursor_row, is_active, cursor_on_screen?, ctx),
-      indent_guides: build_indent_guides(scroll, ctx, content_kind),
+      indent_guides: build_indent_guides(scroll, ctx, content_kind, visual_entries),
       geometry: geometry,
       content_epoch: scroll.content_epoch,
       full_refresh: scroll.full_refresh,
@@ -452,7 +468,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       # frame-emit on it instead of hashing the full rows list (#2658).
       content_digest: content_digest,
       row_delta: if(resident_result, do: resident_result.row_delta, else: nil),
-      row_store_mode: row_store_mode
+      row_store_mode: row_store_mode,
+      resident_semantics: resident_semantics
     }
 
     {render_window,
@@ -461,10 +478,27 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        retained_rows: new_retained,
        retained_wrap_lines: new_retained_wrap,
        resident_build: resident_build_state,
+       resident_semantic_state: resident_semantic_state,
        resident_rows_spliced: resident_rows_spliced,
        row_slot_allocator: row_slot_allocator,
        text_presentation: text_presentation
      }, font_registry}
+  end
+
+  @spec build_resident_semantics(
+          ResidentSemanticState.t() | nil,
+          ResidentBuild.t() | nil,
+          map() | nil,
+          map()
+        ) ::
+          {ResidentSemanticState.t() | nil, Minga.RenderModel.Window.ResidentSemantics.t() | nil}
+  defp build_resident_semantics(_previous, nil, _result, _input), do: {nil, nil}
+
+  defp build_resident_semantics(previous, %ResidentBuild{} = resident, result, input) do
+    ResidentSemanticState.build(
+      previous,
+      Map.merge(input, %{resident_build: resident, resident_result: result})
+    )
   end
 
   @spec accessibility_label(Minga.Buffer.RenderSnapshot.t()) :: String.t()
@@ -2229,6 +2263,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           RenderWindow.cursor_shape(),
           [Row.t()]
         ) :: non_neg_integer()
+  defp active_cursor_shape(state, true), do: Editing.cursor_shape(state)
+  defp active_cursor_shape(_state, false), do: :block
+
+  defp cursor_eligible?(state, true), do: not Editing.minibuffer_mode?(state)
+  defp cursor_eligible?(_state, false), do: false
+
+  defp cursor_visible?(eligible, on_screen?), do: eligible and on_screen?
+
   defp adjust_cursor_col_for_shape(row, col, :block, visual_rows) do
     row_width = visual_rows |> Enum.at(row) |> visual_row_width()
 
@@ -2738,17 +2780,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   # ── Indent guides ──────────────────────────────────────────────────────
 
-  @spec build_indent_guides(WindowScroll.t(), Context.t(), RenderWindow.content_kind()) ::
+  @spec build_indent_guides(WindowScroll.t(), Context.t(), RenderWindow.content_kind(), [
+          visual_row_entry()
+        ]) ::
           IndentGuides.t()
-  defp build_indent_guides(%WindowScroll{} = scroll, _ctx, content_kind)
+  defp build_indent_guides(%WindowScroll{} = scroll, _ctx, content_kind, _entries)
        when content_kind != :buffer,
        do: IndentGuides.empty(scroll.window.id)
 
-  defp build_indent_guides(%WindowScroll{} = scroll, %Context{} = ctx, :buffer) do
+  defp build_indent_guides(%WindowScroll{} = scroll, %Context{} = ctx, :buffer, entries) do
     if indent_guides_enabled?() do
-      lines =
-        scroll.lines
-        |> Enum.slice(scroll.visible_row_start_index, Viewport.content_rows(scroll.viewport))
+      lines = Enum.map(entries, &guide_source_line/1)
 
       {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
       indent_guides_from_guides(scroll.window.id, ctx.tab_width, guides, levels)
@@ -2756,6 +2798,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       IndentGuides.empty(scroll.window.id)
     end
   end
+
+  @spec guide_source_line(visual_row_entry()) :: String.t()
+  defp guide_source_line(%VisualRow{row: %Row{row_type: :wrap_continuation}} = entry) do
+    source =
+      binary_part(
+        entry.source_text,
+        entry.source_start_byte,
+        entry.source_end_byte - entry.source_start_byte
+      )
+
+    String.duplicate(" ", entry.indent_width) <> source
+  end
+
+  defp guide_source_line(%VisualRow{source_text: text}), do: text
 
   @spec indent_guides_enabled?() :: boolean()
   defp indent_guides_enabled? do
@@ -3040,44 +3096,32 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   end
 
   @spec build_diagnostic_ranges(
-          String.t() | nil,
+          [Diagnostic.t()],
           Viewport.t(),
           pos_integer(),
           [visual_row_entry()],
           boolean(),
           [String.t()],
-          non_neg_integer()
+          non_neg_integer(),
+          ResidentBuild.t() | nil
         ) :: [DiagnosticRange.t()]
   defp build_diagnostic_ranges(
-         nil,
-         _viewport,
-         _visible_rows,
-         _visual_entries,
-         _wrapped?,
-         _lines,
-         _first_line
-       ),
-       do: []
-
-  defp build_diagnostic_ranges(
-         path,
+         diagnostics,
          viewport,
          visible_rows,
          visual_entries,
          wrapped?,
          lines,
-         first_line
-       )
-       when is_binary(path) do
-    uri = SyncServer.path_to_uri(path)
-
-    case Diagnostics.for_uri(uri) do
+         first_line,
+         resident_build
+       ) do
+    case source_backed_diagnostics(diagnostics, resident_build) do
       [] ->
         []
 
       diagnostics ->
         viewport_bottom = viewport.top + visible_rows
-        line_cache = diagnostic_line_cache(diagnostics, lines, first_line)
+        line_cache = diagnostic_line_cache(diagnostics, lines, first_line, resident_build)
 
         if wrapped? do
           Enum.flat_map(
@@ -3090,15 +3134,46 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end
   end
 
-  @spec diagnostic_line_cache([Diagnostic.t()], [String.t()], non_neg_integer()) :: %{
+  @spec source_backed_diagnostics([Diagnostic.t()], ResidentBuild.t() | nil) :: [Diagnostic.t()]
+  defp source_backed_diagnostics(diagnostics, nil), do: diagnostics
+
+  defp source_backed_diagnostics(diagnostics, %ResidentBuild{line_count: count}) do
+    Enum.filter(diagnostics, fn %{range: range} ->
+      range.start_line < count and range.end_line < count
+    end)
+  end
+
+  @spec diagnostic_line_cache(
+          [Diagnostic.t()],
+          [String.t()],
+          non_neg_integer(),
+          ResidentBuild.t() | nil
+        ) :: %{
           non_neg_integer() => String.t()
         }
-  defp diagnostic_line_cache(diagnostics, lines, first_line) do
+  defp diagnostic_line_cache(diagnostics, lines, first_line, resident_build) do
     diagnostics
     |> Enum.flat_map(fn diag -> [diag.range.start_line, diag.range.end_line] end)
     |> Enum.uniq()
-    |> Map.new(fn line -> {line, line_at(lines, line, first_line)} end)
+    |> Map.new(fn line ->
+      {line, diagnostic_source_line(line, lines, first_line, resident_build)}
+    end)
   end
+
+  @spec diagnostic_source_line(
+          non_neg_integer(),
+          [String.t()],
+          non_neg_integer(),
+          ResidentBuild.t() | nil
+        ) :: String.t()
+  defp diagnostic_source_line(line, _lines, _first_line, %ResidentBuild{store: store}) do
+    case ResidentStore.payload_at(store, line) do
+      {:ok, %VisualRow{source_text: text}} -> text
+      :error -> raise ArgumentError, "diagnostic source line is outside the resident store"
+    end
+  end
+
+  defp diagnostic_source_line(line, lines, first_line, nil), do: line_at(lines, line, first_line)
 
   @spec diagnostic_to_wrapped_ranges(Diagnostic.t(), [visual_row_entry()], %{
           non_neg_integer() => String.t()

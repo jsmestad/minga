@@ -14,7 +14,9 @@ defmodule MingaEditor.State.Search.Projection do
     :whole_word,
     :regex,
     :replace_mode,
-    :status
+    :status,
+    :generation,
+    :query_revision
   ]
   defstruct @enforce_keys
 
@@ -29,6 +31,8 @@ defmodule MingaEditor.State.Search.Projection do
           whole_word: boolean(),
           regex: boolean(),
           replace_mode: boolean(),
-          status: status()
+          status: status(),
+          generation: Minga.Search.IndexGeneration.t() | nil,
+          query_revision: non_neg_integer()
         }
 end

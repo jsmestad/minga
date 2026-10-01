@@ -24,6 +24,7 @@ const (
 	CommandSetWindowBg
 	CommandWindowContent
 	CommandWindowDelta
+	CommandResidentSemantics
 	CommandTextPresentation
 	CommandChrome
 	CommandClipboardWrite
@@ -52,15 +53,16 @@ type Command struct {
 	Generation uint32
 	// InputSeq is the echoed input correlation sequence carried by a
 	// CommandCommitFrame (ticket #2215, wire field input_seq). 0 means "no correlation".
-	InputSeq         uint32
-	CursorShape      byte
-	Title            string
-	WindowBg         uint32
-	Window           WindowContent
-	TextPresentation TextPresentation
-	Chrome           ChromePayload
-	ClipboardText    string
-	ExtensionRuntime ExtensionRuntimePayload
+	InputSeq          uint32
+	CursorShape       byte
+	Title             string
+	WindowBg          uint32
+	Window            WindowContent
+	ResidentSemantics ResidentSemantics
+	TextPresentation  TextPresentation
+	Chrome            ChromePayload
+	ClipboardText     string
+	ExtensionRuntime  ExtensionRuntimePayload
 	// ProtocolError carries the UTF-8 reason from a protocol_error (0x18)
 	// command. The BEAM emits it when a frontend's handshake protocol_version
 	// does not match the BEAM's, so the frontend shows a blocking error instead
@@ -254,6 +256,8 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return decodeClipboardWrite(payload)
 	case generated.OPGuiWindowContent, generated.OPGuiWindowViewportDelta, generated.OPGuiWindowRowsDelta:
 		return decodeWindowContent(payload)
+	case generated.OPGuiResidentSemantics:
+		return decodeResidentSemantics(payload)
 	case generated.OPGuiTextPresentation:
 		if len(payload) < 11 {
 			return Command{}, fmt.Errorf("short text presentation")

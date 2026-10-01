@@ -4,6 +4,10 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.EditDelta
+  alias Minga.Editing.Search.Index
+  alias Minga.Events.BufferChangedEvent
+  alias Minga.Search.IndexOwner
   alias MingaEditor.Layout
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.Gutter.ResidentRows
@@ -22,6 +26,9 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.GuiSearchWorkflow
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.Search
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -336,7 +343,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       {model, state} = build_frame(state)
       fresh = fresh_resident_frame(state.editor)
       assert Enum.at(model.rows, 220).spans == Enum.at(fresh.rows, 220).spans
-      assert Enum.any?(Enum.at(model.rows, 220).spans, &(&1.bg != nil))
+      assert Enum.any?(Enum.at(model.rows, 220).spans, &(&1.bg not in [nil, 0]))
       {reused, state} = build_frame(state)
       assert reused.row_delta.splices == []
 
@@ -344,6 +351,47 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         trace_buffer_calls(state.editor.workspace.buffers.active, fn -> build_frame(state) end)
 
       refute Enum.any?(calls.messages, &match?({:render_lines, _, 0, 300}, &1))
+    end
+
+    test "indexed GUI search survives an unrelated edit and a query generation replaces it" do
+      state = resident_state(300) |> install_gui_search("line 221:") |> warm()
+      buffer = state.editor.workspace.buffers.active
+
+      assert resident_row_has_background?(state, 220)
+
+      BufferProcess.move_to(buffer, {100, 0})
+      :ok = BufferProcess.insert_text(buffer, "Z")
+      {version, sequence} = BufferProcess.sync_revision(buffer)
+      delta = EditDelta.insertion(0, {100, 0}, "Z", {100, 1})
+
+      editor =
+        GuiSearchWorkflow.buffer_changed(
+          state.editor,
+          %BufferChangedEvent{
+            buffer: buffer,
+            source: :user,
+            delta: delta,
+            version: version,
+            sequence: sequence
+          }
+        )
+
+      {edited, state} = build_frame(%{state | editor: editor})
+      assert Enum.map(edited.row_delta.splices, & &1.start_index) == [100]
+      assert resident_row_has_background?(state, 220)
+
+      old_generation = state.editor.workspace.search.gui_search.result |> elem(1)
+      pending = begin_gui_query(state, "line 222:")
+      {_cleared, pending} = build_frame(pending)
+      refute resident_row_has_background?(pending, 220)
+
+      state = complete_gui_query(pending)
+      assert IndexOwner.matches_in_range(old_generation, 220, 220) == :stale
+
+      {recomposed, state} = build_frame(state)
+      assert recomposed.row_delta == nil
+      refute resident_row_has_background?(state, 220)
+      assert resident_row_has_background?(state, 221)
     end
 
     test "hydration reapplies substitute preview to the complete source" do
@@ -447,6 +495,93 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     search = %Minga.Mode.SearchState{input: "line 221:", direction: :forward}
     workspace = MingaEditor.Session.State.transition_mode(state.editor.workspace, :search, search)
     %{state | editor: %{state.editor | workspace: workspace}}
+  end
+
+  defp install_gui_search(editor, query) do
+    buffer = editor.workspace.buffers.active
+
+    search =
+      editor.workspace.search
+      |> Search.focus_gui_search(false)
+      |> Search.begin_gui_build(buffer)
+
+    {:accepted, search} =
+      Search.apply_gui_search_edit(
+        search,
+        search.gui_search.session_id,
+        1,
+        query,
+        true,
+        false,
+        false
+      )
+
+    search = Search.begin_gui_build(search, buffer)
+    {version, sequence} = BufferProcess.sync_revision(buffer)
+    lines = :binary.split(BufferProcess.content(buffer), "\n", [:global])
+    index = Index.build(lines, query, case_sensitive: true)
+
+    {:ok, generation} =
+      IndexOwner.install(
+        buffer,
+        Search.gui_query_revision(search),
+        version,
+        sequence,
+        index
+      )
+
+    {:accepted, search} =
+      Search.accept_gui_generation(search, search.gui_search.revision, buffer, generation)
+
+    %{editor | workspace: SessionState.set_search(editor.workspace, search)}
+  end
+
+  defp begin_gui_query(%{editor: editor} = state, query) do
+    buffer = editor.workspace.buffers.active
+    session = editor.workspace.search.gui_search
+
+    {:accepted, search} =
+      Search.apply_gui_search_edit(
+        editor.workspace.search,
+        session.session_id,
+        session.acknowledged_edit_seq + 1,
+        query,
+        true,
+        false,
+        false
+      )
+
+    search = Search.begin_gui_build(search, buffer)
+
+    %{state | editor: %{editor | workspace: SessionState.set_search(editor.workspace, search)}}
+  end
+
+  defp complete_gui_query(%{editor: editor} = state) do
+    buffer = editor.workspace.buffers.active
+    search = editor.workspace.search
+    query = search.gui_search.query
+    {version, sequence} = BufferProcess.sync_revision(buffer)
+    lines = :binary.split(BufferProcess.content(buffer), "\n", [:global])
+
+    {:ok, generation} =
+      IndexOwner.install(
+        buffer,
+        Search.gui_query_revision(search),
+        version,
+        sequence,
+        Index.build(lines, query, case_sensitive: true)
+      )
+
+    {:accepted, search} =
+      Search.accept_gui_generation(search, search.gui_search.revision, buffer, generation)
+
+    %{state | editor: %{editor | workspace: SessionState.set_search(editor.workspace, search)}}
+  end
+
+  defp resident_row_has_background?(state, row) do
+    window = Map.fetch!(state.renderer.resident_windows, state.editor.workspace.windows.active)
+    {:ok, payload} = ResidentStore.payload_at(window.render_cache.resident_build.store, row)
+    Enum.any?(payload.row.spans, &(&1.bg not in [nil, 0]))
   end
 
   defp apply_row_update(_rows, %{row_delta: nil, rows: rows}), do: rows

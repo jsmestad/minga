@@ -61,6 +61,162 @@ defmodule Minga.Integration.GUIProtocolTest do
     GUIHarness.round_trip!(harness, command, expected_type)
   end
 
+  describe "resident semantic production encoder round-trip" do
+    test "keyframe preserves positive row revision and all absolute semantic layers", %{
+      harness: harness
+    } do
+      semantics = resident_semantic_fixture()
+
+      decoded =
+        round_trip(
+          harness,
+          WindowEncoder.encode_resident_semantics(semantics),
+          "gui_resident_semantics"
+        )
+
+      assert decoded["mode"] == 0
+      assert decoded["base_revision"] == 0
+      assert decoded["row_revision"] == 7
+      assert decoded["row_count"] == 120
+      assert decoded["first_row_id"] == "11"
+      assert decoded["last_row_id"] == "22"
+      assert decoded["cursor"] == %{"eligible" => true, "row" => 88, "col" => 5}
+      assert decoded["cursorline"] == %{"row" => 88, "bg" => 0x223344}
+      assert decoded["selection"]["start_row"] == 76
+      assert decoded["selection"]["end_row"] == 88
+      assert decoded["guide_cols"] == [2, 4]
+
+      assert decoded["guide_replacements"] == [
+               %{
+                 "start" => 0,
+                 "end" => 120,
+                 "runs" => [%{"start" => 0, "end" => 120, "level" => 2}]
+               }
+             ]
+
+      assert decoded["diagnostic_mode"] == "replace"
+
+      assert decoded["diagnostics"] == [
+               %{
+                 "start_row" => 84,
+                 "start_col" => 8,
+                 "end_row" => 85,
+                 "end_col" => 18,
+                 "severity" => 0
+               }
+             ]
+
+      assert decoded["annotation_mode"] == "replace"
+      assert hd(decoded["annotations"])["text"] == "resident αβ"
+    end
+
+    test "delta round-trips diagnostic and annotation ranges after row splices", %{
+      harness: harness
+    } do
+      alias Minga.RenderModel.Window.ResidentSemantics
+      semantics = resident_semantic_fixture()
+
+      header = %{
+        semantics.header
+        | mode: :delta,
+          base_revision: 3,
+          revision: 4,
+          target_row_revision: 8
+      }
+
+      semantics = %{
+        semantics
+        | header: header,
+          row_splices: [
+            %ResidentSemantics.RowSplice{start_row: 90, delete_count: 1, insert_count: 1}
+          ],
+          guide_replacements: [],
+          diagnostics:
+            {:replace_ranges,
+             [%ResidentSemantics.DiagnosticReplace{start_row: 84, end_row: 85, diagnostics: []}]},
+          annotations:
+            {:replace_ranges,
+             [%ResidentSemantics.AnnotationReplace{start_row: 82, end_row: 83, annotations: []}]}
+      }
+
+      decoded =
+        round_trip(
+          harness,
+          WindowEncoder.encode_resident_semantics(semantics),
+          "gui_resident_semantics"
+        )
+
+      assert decoded["mode"] == 1
+      assert decoded["base_revision"] == 3
+      assert decoded["row_revision"] == 8
+      assert decoded["row_splices"] == [%{"start" => 90, "delete" => 1, "insert" => 1}]
+      assert decoded["diagnostic_mode"] == "ranges"
+      assert decoded["diagnostic_ranges"] == [%{"start" => 84, "end" => 85, "count" => 0}]
+      assert decoded["annotation_mode"] == "ranges"
+      assert decoded["annotation_ranges"] == [%{"start" => 82, "end" => 83, "count" => 0}]
+    end
+  end
+
+  defp resident_semantic_fixture do
+    alias Minga.RenderModel.Window.{Annotation, DiagnosticRange, ResidentSemantics}
+
+    %ResidentSemantics{
+      header: %ResidentSemantics.Header{
+        window_id: 1,
+        content_epoch: 42,
+        mode: :keyframe,
+        base_revision: 0,
+        revision: 3,
+        target_row_revision: 7,
+        row_count: 120,
+        first_row_id: 11,
+        last_row_id: 22
+      },
+      cursor: %ResidentSemantics.Cursor{eligible: true, row: 88, col: 5},
+      cursorline: %ResidentSemantics.Cursorline{row: 88, bg_rgb: 0x223344},
+      selection: %ResidentSemantics.Selection{
+        type: :char,
+        start_row: 76,
+        start_col: 0,
+        end_row: 88,
+        end_col: 6
+      },
+      tab_width: 2,
+      active_guide_col: 2,
+      guide_cols: [2, 4],
+      row_splices: [],
+      guide_replacements: [
+        %ResidentSemantics.GuideReplace{
+          start_row: 0,
+          end_row: 120,
+          runs: [%ResidentSemantics.GuideRun{start_row: 0, end_row: 120, level: 2}]
+        }
+      ],
+      diagnostics:
+        {:replace,
+         [
+           %DiagnosticRange{
+             start_row: 84,
+             start_col: 8,
+             end_row: 85,
+             end_col: 18,
+             severity: :error
+           }
+         ]},
+      annotations:
+        {:replace,
+         [
+           %Annotation{
+             row: 82,
+             kind: :inline_pill,
+             fg: 0xFFFFFF,
+             bg: 0x334455,
+             text: "resident αβ"
+           }
+         ]}
+    }
+  end
+
   # Encodes agent-chat chrome through the core semantic encoder, accepting the
   # data-map shape these round-trip tests use.
   defp encode_gui_agent_chat(data) do

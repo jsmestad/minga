@@ -108,9 +108,13 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 		return m
 	}
 	window := m.windows[windowID]
-	if !window.ScrollSet || window.Scroll.ResetRequired {
+	if !window.ScrollSet {
 		return m
 	}
+	// reset_required is a one-shot instruction consumed by
+	// reconcilePresentationScroll when the frame commits. The committed window
+	// retains the wire metadata, so gating input on that field would permanently
+	// disable local scrolling after a reset frame.
 	scroll := m.localPresentation.scrolls[windowID]
 	if !scroll.keysMatch(window.Scroll) {
 		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration, scrollSeq: window.Scroll.ScrollSeq}

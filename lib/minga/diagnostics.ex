@@ -49,12 +49,12 @@ defmodule Minga.Diagnostics do
   @typedoc "A file URI string (e.g., `\"file:///path/to/file.ex\"`)."
   @type uri :: String.t()
 
-  @typedoc "Internal state: ETS table references, merge cache, and generation counter."
+  @typedoc "Internal state: ETS table references, merge cache, and per-URI revisions."
   @type state :: %{
           table: :ets.table(),
           uri_index: :ets.table(),
           merge_cache: :ets.table(),
-          generation: non_neg_integer()
+          uri_generations: %{optional(uri()) => non_neg_integer()}
         }
 
   # ── Client API: Lifecycle ──────────────────────────────────────────────────
@@ -112,6 +112,12 @@ defmodule Minga.Diagnostics do
     server
     |> table_name()
     |> merged_for_uri(uri)
+  end
+
+  @doc "Returns one serialized diagnostic revision and its merged URI snapshot."
+  @spec snapshot(GenServer.server(), uri()) :: {non_neg_integer(), [Diagnostic.t()]}
+  def snapshot(server \\ __MODULE__, uri) when is_binary(uri) do
+    GenServer.call(server, {:snapshot, uri})
   end
 
   @doc "Counts diagnostics by severity."
@@ -290,7 +296,7 @@ defmodule Minga.Diagnostics do
        table: table,
        uri_index: uri_index,
        merge_cache: merge_cache,
-       generation: 0
+       uri_generations: %{}
      }}
   end
 
@@ -298,18 +304,20 @@ defmodule Minga.Diagnostics do
   def handle_call({:publish, source, uri, diagnostics}, _from, state) do
     store_published_diagnostics(state, source, uri, diagnostics)
     invalidate_cache(state.merge_cache, uri)
-    gen = state.generation + 1
     broadcast_diagnostics_updated(uri, source)
-    {:reply, :ok, %{state | generation: gen}}
+    {:reply, :ok, bump_uri_generation(state, uri)}
+  end
+
+  def handle_call({:snapshot, uri}, _from, state) do
+    {:reply, {Map.get(state.uri_generations, uri, 0), merged_for_uri(state.table, uri)}, state}
   end
 
   def handle_call({:clear, source, uri}, _from, state) do
     :ets.delete(state.table, {source, uri})
     update_uri_index(state.uri_index, uri, source, :remove)
     invalidate_cache(state.merge_cache, uri)
-    gen = state.generation + 1
     broadcast_diagnostics_updated(uri, source)
-    {:reply, :ok, %{state | generation: gen}}
+    {:reply, :ok, bump_uri_generation(state, uri)}
   end
 
   def handle_call(:table_name, _from, state) do
@@ -339,12 +347,18 @@ defmodule Minga.Diagnostics do
       invalidate_cache(state.merge_cache, uri)
     end)
 
-    gen = state.generation + 1
     Enum.each(affected_uris, &broadcast_diagnostics_updated(&1, source))
-    {:reply, :ok, %{state | generation: gen}}
+
+    state = Enum.reduce(affected_uris, state, &bump_uri_generation(&2, &1))
+    {:reply, :ok, state}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec bump_uri_generation(state(), uri()) :: state()
+  defp bump_uri_generation(state, uri) do
+    %{state | uri_generations: Map.update(state.uri_generations, uri, 1, &(&1 + 1))}
+  end
 
   @spec store_published_diagnostics(state(), source(), uri(), [Diagnostic.t()]) :: :ok
   defp store_published_diagnostics(state, source, uri, []) do

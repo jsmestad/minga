@@ -2,11 +2,14 @@ defmodule MingaEditor.State.Search.Session do
   @moduledoc false
 
   alias Minga.Buffer.EditDelta
-  alias Minga.Editing.Search.Index
+  alias Minga.Search.IndexGeneration
   alias MingaEditor.State.Search.Projection
 
   @type result ::
-          :loading | {:ready, Index.t()} | {:rebuilding, Index.t()} | {:failed, String.t()}
+          :loading
+          | {:ready, IndexGeneration.t()}
+          | {:rebuilding, IndexGeneration.t()}
+          | {:failed, String.t()}
 
   @enforce_keys [
     :active,
@@ -18,6 +21,7 @@ defmodule MingaEditor.State.Search.Session do
     :whole_word,
     :regex,
     :revision,
+    :query_revision,
     :target_buffer,
     :accepted_version,
     :accepted_sequence,
@@ -36,6 +40,7 @@ defmodule MingaEditor.State.Search.Session do
           whole_word: boolean(),
           regex: boolean(),
           revision: non_neg_integer(),
+          query_revision: non_neg_integer(),
           target_buffer: pid() | nil,
           accepted_version: non_neg_integer() | nil,
           accepted_sequence: non_neg_integer() | nil,
@@ -55,6 +60,7 @@ defmodule MingaEditor.State.Search.Session do
       whole_word: false,
       regex: false,
       revision: 1,
+      query_revision: 1,
       target_buffer: nil,
       accepted_version: nil,
       accepted_sequence: nil,
@@ -122,6 +128,7 @@ defmodule MingaEditor.State.Search.Session do
          whole_word: whole_word,
          regex: regex,
          revision: session.revision + 1,
+         query_revision: session.query_revision + 1,
          accepted_version: nil,
          accepted_sequence: nil,
          result: prior_result(session.result),
@@ -144,43 +151,52 @@ defmodule MingaEditor.State.Search.Session do
     }
   end
 
-  @spec accept_index(
+  @spec accepts_generation?(t(), non_neg_integer(), pid()) :: boolean()
+  def accepts_generation?(
+        %__MODULE__{active: true, revision: revision, target_buffer: buffer},
+        revision,
+        buffer
+      ),
+      do: true
+
+  def accepts_generation?(%__MODULE__{}, _revision, _buffer), do: false
+
+  @spec accept_generation(
           t(),
           non_neg_integer(),
           pid(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Index.t()
+          IndexGeneration.t()
         ) ::
           {:accepted, t()} | :stale
-  def accept_index(
+  def accept_generation(
         %__MODULE__{active: true, revision: revision, target_buffer: buffer} = session,
         revision,
         buffer,
-        version,
-        sequence,
-        %Index{} = index
+        %IndexGeneration{version: version, sequence: sequence} = generation
       ) do
     {:accepted,
      %{
        session
        | accepted_version: version,
          accepted_sequence: sequence,
-         result: {:ready, index},
+         result: {:ready, generation},
          pending_deltas: []
      }}
   end
 
-  def accept_index(%__MODULE__{}, _revision, _buffer, _version, _sequence, %Index{}),
+  def accept_generation(%__MODULE__{}, _revision, _buffer, %IndexGeneration{}),
     do: :stale
 
-  @spec accept_incremental(t(), non_neg_integer(), non_neg_integer(), Index.t()) :: t()
-  def accept_incremental(%__MODULE__{} = session, version, sequence, %Index{} = index) do
+  @spec accept_incremental(t(), IndexGeneration.t()) :: t()
+  def accept_incremental(
+        %__MODULE__{} = session,
+        %IndexGeneration{version: version, sequence: sequence} = generation
+      ) do
     %{
       session
       | accepted_version: version,
         accepted_sequence: sequence,
-        result: {:ready, index},
+        result: {:ready, generation},
         pending_deltas: []
     }
   end
@@ -224,41 +240,46 @@ defmodule MingaEditor.State.Search.Session do
     }
   end
 
-  @spec projection(t(), pid() | nil, {non_neg_integer(), non_neg_integer()}) :: Projection.t()
-  def projection(%__MODULE__{} = session, active_buffer, cursor) do
-    {status, index} = projection_result(session, active_buffer)
+  @spec projection(t(), pid() | nil, {:ok, map()} | :stale) :: Projection.t()
+  def projection(%__MODULE__{} = session, active_buffer, summary) do
+    {status, generation} = projection_result(session, active_buffer)
+
+    {status, generation, match_count, current_index} =
+      projection_summary(status, generation, summary)
 
     %Projection{
       active: session.active,
       query: session.query,
       session_id: session.session_id,
       acknowledged_edit_seq: session.acknowledged_edit_seq,
-      match_count: if(index, do: Index.count(index), else: 0),
-      current_index: if(index, do: Index.current_ordinal(index, cursor), else: 0),
+      match_count: match_count,
+      current_index: current_index,
       case_sensitive: session.case_sensitive,
       whole_word: session.whole_word,
       regex: session.regex,
       replace_mode: session.replace_mode,
-      status: status
+      status: status,
+      generation: generation,
+      query_revision: session.query_revision
     }
   end
 
-  @spec ready_index(t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
-          {:ok, Index.t()} | :stale
-  def ready_index(
+  @spec ready_generation(t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
+          {:ok, IndexGeneration.t()} | :stale
+  def ready_generation(
         %__MODULE__{
           active: true,
           target_buffer: buffer,
           accepted_version: version,
           accepted_sequence: sequence,
-          result: {:ready, %Index{} = index}
+          result: {:ready, %IndexGeneration{} = generation}
         },
         buffer,
         {version, sequence}
       ),
-      do: {:ok, index}
+      do: {:ok, generation}
 
-  def ready_index(%__MODULE__{}, _buffer, _revision), do: :stale
+  def ready_generation(%__MODULE__{}, _buffer, _revision), do: :stale
 
   @spec options(t()) :: Minga.Editing.Search.search_opts()
   def options(%__MODULE__{} = session) do
@@ -274,7 +295,8 @@ defmodule MingaEditor.State.Search.Session do
   defp prior_result({:rebuilding, index}), do: {:rebuilding, index}
   defp prior_result(_result), do: :loading
 
-  @spec projection_result(t(), pid() | nil) :: {Projection.status(), Index.t() | nil}
+  @spec projection_result(t(), pid() | nil) ::
+          {Projection.status(), IndexGeneration.t() | nil}
   defp projection_result(%__MODULE__{active: false}, _active_buffer), do: {:ready, nil}
 
   defp projection_result(%__MODULE__{target_buffer: target}, active_buffer)
@@ -291,6 +313,25 @@ defmodule MingaEditor.State.Search.Session do
 
   defp projection_result(%__MODULE__{result: {:failed, _reason}}, _active_buffer),
     do: {:failed, nil}
+
+  @spec projection_summary(
+          Projection.status(),
+          IndexGeneration.t() | nil,
+          {:ok, map()} | :stale
+        ) ::
+          {Projection.status(), IndexGeneration.t() | nil, non_neg_integer(), non_neg_integer()}
+  defp projection_summary(:ready, generation, {:ok, summary}) when generation != nil,
+    do: {:ready, generation, summary.match_count, summary.current_index}
+
+  defp projection_summary(:ready, nil, _summary), do: {:ready, nil, 0, 0}
+
+  defp projection_summary(:ready, _generation, :stale),
+    do: {:rebuilding, nil, 0, 0}
+
+  defp projection_summary(:rebuilding, generation, {:ok, summary}) when generation != nil,
+    do: {:rebuilding, nil, summary.match_count, summary.current_index}
+
+  defp projection_summary(status, _generation, _summary), do: {status, nil, 0, 0}
 
   @spec append_pending_delta([EditDelta.t()], EditDelta.t()) :: [EditDelta.t()]
   defp append_pending_delta([], delta), do: [delta]

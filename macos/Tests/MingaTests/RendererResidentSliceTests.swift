@@ -323,10 +323,74 @@ struct RendererResidentSliceTests {
         #expect(ResidentRenderPreparation.clip(row: wide, scrollLeft: 0, viewportCols: 3).text == "a界")
     }
 
-    private func content(rowCount: Int, visibleStart: Int, visibleRows: Int, visualOffset: Int = 0) throws -> GUIWindowContent {
+    @Test("resident selection projects continuation edges into a local slice")
+    func residentSelectionProjection() throws {
+        let selection = GUIResidentSelection(type: .char, startRow: 2, startCol: 7, endRow: 12, endCol: 3)
+        let projected = try #require(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 5, visibleRows: 4, visibleCols: 80))
+        #expect(projected.startRow == 0)
+        #expect(projected.startCol == 0)
+        #expect(projected.endRow == 3)
+        #expect(projected.endCol == 80)
+        #expect(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 20, visibleRows: 4, visibleCols: 80) == nil)
+    }
+
+    @Test("resident semantics feed every prepared surface after local scrolling")
+    func residentSemanticPresentationAfterLocalScroll() throws {
+        let content = try content(
+            rowCount: 8, visibleStart: 0, visibleRows: 3,
+            rowStoreMode: .sequential
+        )
+        let update = GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 1, contentEpoch: 8,
+            baseRevision: 0, revision: 1, targetRowRevision: 1,
+            rowCount: 8, firstRowId: 1, lastRowId: 8,
+            cursor: GUIResidentCursor(eligible: true, row: 4, col: 3),
+            cursorline: GUIResidentCursorline(row: 4, bg: 0x223344),
+            selection: GUIResidentSelection(type: .char, startRow: 4, startCol: 2, endRow: 6, endCol: 1),
+            tabWidth: 2, activeGuideCol: 0, guideCols: [0], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: 8, runs: [
+                GUIResidentGuideRun(start: 0, end: 4, level: 0),
+                GUIResidentGuideRun(start: 4, end: 6, level: 2),
+                GUIResidentGuideRun(start: 6, end: 8, level: 0)
+            ])],
+            diagnostics: .replace([GUIResidentDiagnostic(startRow: 4, startCol: 4, endRow: 5, endCol: 1, severity: .error)]),
+            annotations: .replace((0..<5).map { index in
+                GUIResidentAnnotation(row: 4, kind: .inlineText, fg: 0xABCDEF, bg: 0, text: "hint \(index)")
+            })
+        )
+        let semantics = try ResidentSemanticStore().applying(update, content: content)
+        let rect = GUICellRect(row: 0, col: 0, width: 12, height: 3)
+        let geometry = GUIPaneGeometry(
+            windowId: 1, totalRect: rect, contentRect: rect, textRect: rect,
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 3), clipRect: rect,
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: 3, cols: 12, totalLines: 8, visualRowOffset: 0, totalVisualRows: 8),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0), hitRegions: []
+        )
+        let surface = PresentedWindowSurface(content: content, residentSemantics: semantics, gutter: .none, paneGeometry: geometry, indentGuides: nil)
+        let prepared = ResidentRenderPreparation.prepare(content: content, fallbackVisibleRows: 3, overscanRows: 2, localOffsetRows: 3)
+        let presented = PreparedPresentedSurface(surface: surface, prepared: prepared)
+        let semanticRow = try #require(presented.residentSemanticRows.first { $0.absoluteRow == 4 })
+
+        #expect(semanticRow.presentationRow == 4)
+        #expect(semanticRow.guideLevel == 2)
+        #expect(semanticRow.annotations.map(\.text) == ["hint 0", "hint 1", "hint 2", "hint 3", "hint 4"])
+        #expect(semanticRow.diagnostics.map(\.severity) == [.error])
+        #expect(presented.residentSemanticSlice?.cursorline?.row == 4)
+        #expect(CoreTextMetalRenderer.projectedSelection(semantics.selection, visibleStart: 3, visibleRows: 3, visibleCols: 12)?.startRow == 1)
+        #expect(CoreTextMetalRenderer.resolveCursor(preparedSurfaces: [presented], activeWindowId: 1, cellW: 8, displayCellH: 20, scale: 1, gutterLeftMarginPx: 0, gutterPaddingPx: 0)?.y == 80)
+        #expect(CoreTextMetalRenderer.atlasSlotDemand(
+            frameState: FrameState(cols: 12, rows: 3), preparedSurfaces: [presented]
+        ) == presented.slice.rows.count + semanticRow.annotations.count + 32)
+    }
+
+    private func content(
+        rowCount: Int, visibleStart: Int, visibleRows: Int,
+        visualOffset: Int = 0, rowStoreMode: ResidentRowStoreMode = .windowed
+    ) throws -> GUIWindowContent {
         try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: 8,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rowStoreMode: rowStoreMode,
             rows: (0..<rowCount).map { row(id: UInt64($0 + 1), line: UInt32($0)) },
             selection: GUISelectionOverlay(type: .char,
                 startRow: 0, startCol: 0,

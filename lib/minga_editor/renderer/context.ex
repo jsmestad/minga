@@ -34,6 +34,7 @@ defmodule MingaEditor.Renderer.Context do
             editor_bg: 0x282C34,
             has_sign_column: true,
             diagnostic_signs: %{},
+            diagnostics_snapshot: {0, []},
             git_signs: %{},
             git_colors: %MingaEditor.UI.Theme.Git{
               added_fg: 0x98BE65,
@@ -94,6 +95,7 @@ defmodule MingaEditor.Renderer.Context do
           editor_bg: MingaEditor.UI.Theme.color(),
           has_sign_column: boolean(),
           diagnostic_signs: %{non_neg_integer() => Diagnostic.severity() | :diag_advisory},
+          diagnostics_snapshot: {non_neg_integer(), [Diagnostic.t()]},
           git_signs: %{non_neg_integer() => Minga.Core.Diff.hunk_type()},
           decorations: Decorations.t(),
           composition_key: tuple() | nil,

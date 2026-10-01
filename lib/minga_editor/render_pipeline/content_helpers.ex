@@ -165,6 +165,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       decorations: decorations,
       composition_key: composition_key,
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
+      diagnostics_snapshot: diagnostics_snapshot(Map.get(params, :file_path)),
       git_signs: prefetched_git_signs(params, state, window),
       gutter_colors: frame.theme.gutter,
       git_colors: frame.theme.git,
@@ -188,6 +189,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     }
 
     {ctx, state}
+  end
+
+  @spec diagnostics_snapshot(String.t() | nil) ::
+          {non_neg_integer(), [Minga.Diagnostics.Diagnostic.t()]}
+  defp diagnostics_snapshot(nil), do: {0, []}
+
+  defp diagnostics_snapshot(path) do
+    path
+    |> SyncServer.path_to_uri()
+    |> Diagnostics.snapshot()
   end
 
   @spec extract_hover_row(state()) :: non_neg_integer() | nil
@@ -432,6 +443,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     |> InlineAskRender.merge_decorations(state, buf)
     |> InlineEditRender.merge_decorations(state, buf)
     |> maybe_build_vt_line_cache()
+    |> maybe_build_ann_line_cache()
   end
 
   def window_decorations(_state, _window, _decorations), do: Decorations.new()
@@ -441,6 +453,12 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   defp maybe_build_vt_line_cache(%Decorations{} = decorations),
     do: Decorations.build_vt_line_cache(decorations)
+
+  @spec maybe_build_ann_line_cache(Decorations.t()) :: Decorations.t()
+  defp maybe_build_ann_line_cache(%Decorations{annotations: []} = decorations), do: decorations
+
+  defp maybe_build_ann_line_cache(%Decorations{} = decorations),
+    do: Decorations.build_ann_line_cache(decorations)
 
   @doc "Returns the highlight state for a window's buffer."
   @spec window_highlight(state(), window()) :: MingaEditor.UI.Highlight.t() | nil

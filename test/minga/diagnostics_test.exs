@@ -33,6 +33,20 @@ defmodule Minga.DiagnosticsTest do
   @uri2 "file:///tmp/other.ex"
 
   describe "publish/4 and for_uri/2" do
+    test "snapshot revisions change only for the requested URI", %{server: s} do
+      assert Diagnostics.snapshot(s, @uri) == {0, []}
+
+      Diagnostics.publish(s, :server_a, @uri2, [make_diag()])
+      assert Diagnostics.snapshot(s, @uri) == {0, []}
+
+      diagnostic = make_diag(message: "current")
+      Diagnostics.publish(s, :server_a, @uri, [diagnostic])
+      assert Diagnostics.snapshot(s, @uri) == {1, [diagnostic]}
+
+      Diagnostics.clear(s, :server_a, @uri)
+      assert Diagnostics.snapshot(s, @uri) == {2, []}
+    end
+
     test "publishes and retrieves diagnostics", %{server: s} do
       d1 = make_diag(line: 0, message: "error on line 0")
       d2 = make_diag(line: 5, message: "error on line 5")

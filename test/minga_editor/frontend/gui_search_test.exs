@@ -3,7 +3,8 @@ defmodule MingaEditor.Frontend.GUISearchTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
-  alias Minga.Editing.Search.Index
+  alias Minga.Search.IndexGeneration
+  alias Minga.Search.IndexOwner
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
@@ -367,8 +368,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       ctx = start_editor(Enum.join(List.duplicate("foo and text", 2_000), "\n"))
       send_search_query(ctx, "foo")
 
-      before = ready_index(ctx)
-      before_metrics = Index.metrics(before)
+      before_stats = ready_stats(ctx)
 
       for col <- 0..20 do
         Buffer.move_to(ctx.buffer, {0, col})
@@ -377,13 +377,13 @@ defmodule MingaEditor.Frontend.GUISearchTest do
         refute Map.has_key?(Map.from_struct(intent.workspace.search), :root)
       end
 
-      assert Index.metrics(ready_index(ctx)) == before_metrics
+      assert ready_stats(ctx) == before_stats
     end
 
     test "line-local edits scan only affected current lines and undo rebuilds exactly" do
       ctx = start_editor("foo\nnone\nfoo")
       send_search_query(ctx, "foo")
-      initial_metrics = Index.metrics(ready_index(ctx))
+      initial_metrics = ready_stats(ctx).metrics
 
       Buffer.move_to(ctx.buffer, {1, 0})
       :ok = Buffer.insert_text(ctx.buffer, "foo")
@@ -396,10 +396,10 @@ defmodule MingaEditor.Frontend.GUISearchTest do
         )
       end)
 
-      updated = ready_index(ctx)
-      assert Index.count(updated) == 3
-      assert Index.metrics(updated).scanned_lines == initial_metrics.scanned_lines + 1
-      assert Index.metrics(updated).updated_lines == 1
+      updated = ready_stats(ctx)
+      assert updated.count == 3
+      assert updated.metrics.scanned_lines == initial_metrics.scanned_lines + 1
+      assert updated.metrics.updated_lines == 1
 
       :ok = Buffer.undo(ctx.buffer)
       {undo_version, undo_sequence} = Buffer.sync_revision(ctx.buffer)
@@ -415,7 +415,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
         )
       end)
 
-      assert Index.count(ready_index(ctx)) == 2
+      assert ready_stats(ctx).count == 2
     end
 
     test "uses the exact committed Unicode query and options for actions" do
@@ -441,7 +441,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       assert search.query == "foo"
       assert search.case_sensitive
       assert search.replace_mode
-      assert match?({:ready, %Index{}}, search.result)
+      assert match?({:ready, %IndexGeneration{}}, search.result)
 
       send_search_action(ctx, {:replace, "bar"})
       assert Buffer.content(ctx.buffer) == "FOO bar"
@@ -776,11 +776,19 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     assert model.current_index == index
   end
 
-  defp ready_index(ctx) do
+  defp ready_generation(ctx) do
     state = editor_state(ctx)
     revision = Buffer.sync_revision(ctx.buffer)
-    assert {:ok, index} = SearchData.ready_gui_index(state.workspace.search, ctx.buffer, revision)
-    index
+
+    assert {:ok, generation} =
+             SearchData.ready_gui_generation(state.workspace.search, ctx.buffer, revision)
+
+    generation
+  end
+
+  defp ready_stats(ctx) do
+    assert {:ok, stats} = IndexOwner.stats(ready_generation(ctx))
+    stats
   end
 
   defp replace_active_buffer(ctx, buffer) do

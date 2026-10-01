@@ -3755,8 +3755,10 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         let content = surface.content
         let scrollLeft = CGFloat(content.scrollLeft) * cellWidth
         let localOffset = visibleLocalScrollPresentation?.windowId == surface.windowId ? visibleLocalScrollPresentation?.offset ?? .zero : .zero
-        let x = CGFloat(surface.paneGeometry.textRect.col) * cellWidth + CGFloat(content.cursorCol) * cellWidth - scrollLeft - localOffset.x
-        let y = CGFloat(surface.paneGeometry.textRect.row) * effectiveCellHeight + CGFloat(content.cursorRow) * effectiveCellHeight - localOffset.y
+        let cursorCol = surface.residentSemantics.map { UInt32($0.cursor.col) } ?? UInt32(content.cursorCol)
+        let cursorRow = surface.residentSemantics.map { UInt32(clamping: Int($0.cursor.row) - surface.visibleRowRange.lowerBound) } ?? UInt32(content.cursorRow)
+        let x = CGFloat(surface.paneGeometry.textRect.col) * cellWidth + CGFloat(cursorCol) * cellWidth - scrollLeft - localOffset.x
+        let y = CGFloat(surface.paneGeometry.textRect.row) * effectiveCellHeight + CGFloat(cursorRow) * effectiveCellHeight - localOffset.y
         return NSRect(x: x, y: y, width: cellWidth, height: effectiveCellHeight)
     }
 

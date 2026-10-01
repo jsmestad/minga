@@ -23,6 +23,16 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
+  alias Minga.RenderModel.Window.ResidentSemantics
+
+  alias Minga.RenderModel.Window.ResidentSemantics.{
+    Cursor,
+    DiagnosticReplace,
+    GuideReplace,
+    GuideRun,
+    Header
+  }
+
   alias Minga.RenderModel.Window.Viewport
   alias Minga.Test.GUIWindowDecoder
 
@@ -45,6 +55,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       gutter: Keyword.get(opts, :gutter, nil),
       cursorline: Keyword.get(opts, :cursorline, nil),
       indent_guides: Keyword.get(opts, :indent_guides, nil),
+      row_store_mode: Keyword.get(opts, :row_store_mode, :windowed),
+      row_delta: Keyword.get(opts, :row_delta, nil),
+      content_digest: Keyword.get(opts, :content_digest, nil),
+      resident_semantics: Keyword.get(opts, :resident_semantics, nil),
       geometry: Keyword.get(opts, :geometry, nil),
       content_epoch: Keyword.get(opts, :content_epoch, 0),
       full_refresh: Keyword.get(opts, :full_refresh, true),
@@ -111,6 +125,224 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert byte_size(encoded) == 17
     assert Bitwise.band(flags, 0x01) != 0
     assert Bitwise.band(flags, 0x02) == 0
+  end
+
+  test "encodes bounded resident diagnostic range replacements with the documented flag" do
+    semantics = %ResidentSemantics{
+      header: %Header{
+        window_id: 2,
+        content_epoch: 3,
+        mode: :delta,
+        base_revision: 4,
+        revision: 5,
+        target_row_revision: 6,
+        row_count: 10,
+        first_row_id: 7,
+        last_row_id: 8
+      },
+      cursor: %Cursor{eligible: false, row: 1, col: 2},
+      diagnostics:
+        {:replace_ranges,
+         [
+           %DiagnosticReplace{
+             start_row: 4,
+             end_row: 5,
+             diagnostics: [
+               %DiagnosticRange{
+                 start_row: 4,
+                 start_col: 6,
+                 end_row: 4,
+                 end_col: 9,
+                 severity: :warning
+               }
+             ]
+           }
+         ]},
+      annotations: :retain,
+      tab_width: 4,
+      active_guide_col: 0xFFFF,
+      guide_cols: [],
+      row_splices: [],
+      guide_replacements: [
+        %GuideReplace{
+          start_row: 4,
+          end_row: 5,
+          runs: [%GuideRun{start_row: 4, end_row: 5, level: 0}]
+        }
+      ]
+    }
+
+    encoded = WindowEncoder.encode_resident_semantics(semantics)
+
+    assert <<opcode::8, payload_size::32, payload::binary-size(payload_size)>> = encoded
+    assert opcode == Opcodes.gui_resident_semantics()
+
+    assert <<1::8, 1::8, 2::16, 3::32, 4::32, 5::32, 6::32, 10::32, 7::64, 8::64, flags::8, 1::32,
+             2::16, rest::binary>> = payload
+
+    assert Bitwise.band(flags, 0x08) == 0
+    assert Bitwise.band(flags, 0x40) == 0x40
+
+    assert :binary.match(rest, <<1::16, 4::32, 5::32, 1::32, 4::32, 6::16, 4::32, 9::16, 1::8>>) !=
+             :nomatch
+  end
+
+  test "encodes empty resident keyframes with zero boundary row ids" do
+    semantics = %ResidentSemantics{
+      header: resident_header(0, :keyframe, 0, 1, 9),
+      cursor: %Cursor{eligible: false, row: 0, col: 0},
+      diagnostics: {:replace, []},
+      annotations: {:replace, []},
+      tab_width: 4,
+      active_guide_col: 0xFFFF,
+      guide_cols: [],
+      row_splices: [],
+      guide_replacements: [%GuideReplace{start_row: 0, end_row: 0, runs: []}]
+    }
+
+    assert <<_opcode::8, _payload_size::32, 1::8, 0::8, 1::16, 9::32, 0::32, 1::32, 1::32, 0::32,
+             0::64, 0::64, _rest::binary>> =
+             WindowEncoder.encode_resident_semantics(semantics)
+  end
+
+  test "encodes 65,536 guide runs without truncating the run count" do
+    runs =
+      for row <- 0..65_535 do
+        %GuideRun{start_row: row, end_row: row + 1, level: rem(row, 2)}
+      end
+
+    semantics = %ResidentSemantics{
+      header: resident_header(65_536, :keyframe, 0, 1),
+      cursor: %Cursor{eligible: false, row: 0, col: 0},
+      diagnostics: {:replace, []},
+      annotations: {:replace, []},
+      tab_width: 4,
+      active_guide_col: 0xFFFF,
+      guide_cols: [],
+      row_splices: [],
+      guide_replacements: [%GuideReplace{start_row: 0, end_row: 65_536, runs: runs}]
+    }
+
+    encoded = WindowEncoder.encode_resident_semantics(semantics)
+
+    assert <<_opcode::8, payload_size::32, payload::binary-size(payload_size)>> = encoded
+
+    assert <<_version::8, _mode::8, _window_id::16, _content_epoch::32, _base_revision::32,
+             _revision::32, _target_row_revision::32, 65_536::32, _first_row_id::64,
+             _last_row_id::64, _flags::8, _cursor_row::32, _cursor_col::16, _tab_width::8,
+             _active_guide_col::16, 0::16, 0::16, 1::16, 0::32, 65_536::32, 65_536::32,
+             _runs::binary>> = payload
+  end
+
+  test "resident frames omit replaced viewport overlays and legacy guide metadata" do
+    semantics = %ResidentSemantics{
+      header: resident_header(0, :keyframe, 0, 1),
+      cursor: %Cursor{eligible: false, row: 0, col: 0},
+      diagnostics: {:replace, []},
+      annotations: {:replace, []},
+      tab_width: 4,
+      active_guide_col: 0xFFFF,
+      guide_cols: [],
+      row_splices: [],
+      guide_replacements: [%GuideReplace{start_row: 0, end_row: 0, runs: []}]
+    }
+
+    model =
+      window(
+        row_store_mode: {:resident, 1},
+        resident_semantics: semantics,
+        selection: %Selection{type: :line, start_row: 0, start_col: 0, end_row: 0, end_col: 0},
+        diagnostic_ranges: [
+          %DiagnosticRange{
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+            severity: :error
+          }
+        ],
+        cursorline: %Cursorline{row: 0, bg_rgb: 0x112233},
+        indent_guides: %IndentGuides{
+          window_id: 1,
+          tab_width: 4,
+          guide_cols: [4],
+          active_guide_col: 4,
+          line_indent_levels: [1]
+        }
+      )
+
+    commands = WindowEncoder.encode_frame_metadata(model)
+
+    assert opcodes(commands) == [Opcodes.gui_resident_semantics()]
+
+    decoded = model |> WindowEncoder.encode_window_content() |> GUIWindowDecoder.decode()
+    assert decoded.selection == nil
+    assert decoded.diagnostic_ranges == []
+  end
+
+  test "semantic-only resident updates retain text rows and hashes" do
+    keyframe = empty_resident_semantics(:keyframe, 0, 1)
+    delta = empty_resident_semantics(:delta, 1, 2)
+    {:ok, empty_delta} = RowDelta.new(0, 0, [])
+
+    first =
+      window(
+        row_store_mode: {:resident, 1},
+        content_digest: 123,
+        resident_semantics: keyframe,
+        full_refresh: false
+      )
+
+    second =
+      window(
+        row_store_mode: {:resident, 1},
+        row_delta: empty_delta,
+        content_digest: 123,
+        resident_semantics: delta,
+        full_refresh: false,
+        selection: %Selection{type: :line, start_row: 0, start_col: 0, end_row: 0, end_col: 0}
+      )
+
+    {_first_commands, caches} = AdapterGUI.encode_windows([first], Caches.new())
+    {second_commands, _caches} = AdapterGUI.encode_windows([second], caches)
+    emitted = opcodes(second_commands)
+
+    assert Opcodes.gui_resident_semantics() in emitted
+    refute WindowEncoder.opcode() in emitted
+    refute Opcodes.gui_window_rows_delta() in emitted
+    refute Opcodes.gui_window_viewport_delta() in emitted
+  end
+
+  defp empty_resident_semantics(mode, base_revision, revision) do
+    %ResidentSemantics{
+      header: resident_header(0, mode, base_revision, revision),
+      cursor: %Cursor{eligible: false, row: 0, col: 0},
+      diagnostics: if(mode == :keyframe, do: {:replace, []}, else: :retain),
+      annotations: if(mode == :keyframe, do: {:replace, []}, else: :retain),
+      tab_width: 4,
+      active_guide_col: 0xFFFF,
+      guide_cols: [],
+      row_splices: [],
+      guide_replacements:
+        if(mode == :keyframe,
+          do: [%GuideReplace{start_row: 0, end_row: 0, runs: []}],
+          else: []
+        )
+    }
+  end
+
+  defp resident_header(row_count, mode, base_revision, revision, content_epoch \\ 1) do
+    %Header{
+      window_id: 1,
+      content_epoch: content_epoch,
+      mode: mode,
+      base_revision: base_revision,
+      revision: revision,
+      target_row_revision: 1,
+      row_count: row_count,
+      first_row_id: if(row_count == 0, do: 0, else: 1),
+      last_row_id: row_count
+    }
   end
 
   defp gutter_model do

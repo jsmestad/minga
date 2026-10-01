@@ -36,20 +36,21 @@ type Model struct {
 	windows  map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
-	residentRows     map[uint16]residentRows
-	windowOrder      []uint16
-	chrome           map[byte]protocol.ChromePayload
-	activePalette    palette
-	themeApplied     bool
-	gutters          map[uint16]protocol.Gutter
-	indentGuides     map[uint16]protocol.IndentGuides
-	cursorRow        uint16
-	cursorCol        uint16
-	cursorShape      byte
-	title            string
-	bg               uint32
-	cursorlineChrome protocol.CursorlineChrome
-	pendingClipboard string
+	residentRows      map[uint16]residentRows
+	residentSemantics map[uint16]*residentSemanticStore
+	windowOrder       []uint16
+	chrome            map[byte]protocol.ChromePayload
+	activePalette     palette
+	themeApplied      bool
+	gutters           map[uint16]protocol.Gutter
+	indentGuides      map[uint16]protocol.IndentGuides
+	cursorRow         uint16
+	cursorCol         uint16
+	cursorShape       byte
+	title             string
+	bg                uint32
+	cursorlineChrome  protocol.CursorlineChrome
+	pendingClipboard  string
 	// protocolError holds the reason from a protocol_error (0x18) command. The
 	// BEAM emits it when this frontend's handshake protocol_version does not
 	// match the BEAM's, so the frontend never reaches ready. While set, the UI
@@ -186,6 +187,7 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		zones:                          newZoneManager(),
 		windows:                        map[uint16]protocol.WindowContent{},
 		residentRows:                   map[uint16]residentRows{},
+		residentSemantics:              map[uint16]*residentSemanticStore{},
 		chrome:                         map[byte]protocol.ChromePayload{},
 		activePalette:                  bootstrapPalette(),
 		gutters:                        map[uint16]protocol.Gutter{},
@@ -527,7 +529,11 @@ func (m Model) View() tea.View {
 		parts = append(parts, m.footerLines()...)
 		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
-	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence() + m.cursorPositionSequence()
+	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence()
+	residentCursor, residentCursorAuthority := m.residentCursor()
+	if !residentCursorAuthority {
+		out += m.cursorPositionSequence()
+	}
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
 	}
@@ -537,7 +543,51 @@ func (m Model) View() tea.View {
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
+	view.Cursor = residentCursor
 	return view
+}
+
+func (m Model) residentCursor() (*tea.Cursor, bool) {
+	authority := false
+	for _, id := range m.windowOrder {
+		window := m.windows[id]
+		semantics := m.residentSemanticsFor(window)
+		if semantics == nil {
+			continue
+		}
+		authority = true
+		if !semantics.cursor.Eligible {
+			continue
+		}
+		_, height := m.windowRenderDimensions(window, false, protocol.Gutter{})
+		start := m.presentationSourceStart(window, height)
+		row := int(semantics.cursor.Row)
+		if row < start || row >= start+height {
+			continue
+		}
+		scrollLeft := m.presentationScrollEffectiveLeft(window)
+		col := int(semantics.cursor.Col) - scrollLeft
+		if col < 0 {
+			continue
+		}
+		textWidth := int(window.Geometry.TextRect.Width)
+		if textWidth > 0 && col >= textWidth {
+			continue
+		}
+		x := int(window.Geometry.TextRect.Col) + col
+		y := int(window.Geometry.TextRect.Row) + (row - start)
+		cursor := tea.NewCursor(x, y)
+		switch window.CursorShape {
+		case 1:
+			cursor.Shape = tea.CursorBar
+		case 2:
+			cursor.Shape = tea.CursorUnderline
+		default:
+			cursor.Shape = tea.CursorBlock
+		}
+		return cursor, true
+	}
+	return nil, authority
 }
 
 // protocolErrorView renders the blocking full-screen surface shown when a
@@ -772,6 +822,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	// Gutter state is prepared as a detached frame candidate so retain updates,
 	// keyframe clears, and structural replacements publish atomically.
 	m.gutters = gutterCandidate
+	m.residentSemantics = windowSnapshot.semantics
 	if transcriptCandidate != nil {
 		m.transcript = transcriptCandidate
 	}
@@ -889,8 +940,9 @@ type windowReferenceFailure struct {
 }
 
 type windowReferenceSnapshot struct {
-	windows map[uint16]protocol.WindowContent
-	stores  map[uint16]residentRows
+	windows   map[uint16]protocol.WindowContent
+	stores    map[uint16]residentRows
+	semantics map[uint16]*residentSemanticStore
 }
 
 type gutterReferenceFailure struct {
@@ -905,11 +957,18 @@ type gutterReferenceFailure struct {
 func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowReferenceFailure) {
 	working := make(map[uint16]protocol.WindowContent, len(m.windows))
 	stores := make(map[uint16]residentRows, len(m.residentRows))
+	semantics := make(map[uint16]*residentSemanticStore, len(m.residentSemantics))
+	initializedSemantics := make(map[uint16]bool, len(m.residentSemantics))
+	pendingSemantics := make(map[uint16]bool)
 	for id, window := range m.windows {
 		working[id] = window
 	}
 	for id, store := range m.residentRows {
 		stores[id] = store
+	}
+	for id, semantic := range m.residentSemantics {
+		semantics[id] = semantic
+		initializedSemantics[id] = true
 	}
 	for _, command := range m.staging.commands {
 		switch command.Kind {
@@ -920,6 +979,12 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 			}
 			working[command.Window.ID] = command.Window
 			stores[command.Window.ID] = store
+			if !command.Window.SequentialRows {
+				delete(semantics, command.Window.ID)
+				delete(pendingSemantics, command.Window.ID)
+			} else if initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil {
+				pendingSemantics[command.Window.ID] = true
+			}
 		case protocol.CommandWindowDelta:
 			previous, ok := working[command.Window.ID]
 			if !ok {
@@ -942,6 +1007,9 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 				}
 				stores[command.Window.ID] = next
 				previous.Rows = compatibilityRows(next)
+				if next.sequential && (initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil) {
+					pendingSemantics[command.Window.ID] = true
+				}
 			} else if command.Window.Rows != nil {
 				store, exists := stores[command.Window.ID]
 				if !exists {
@@ -953,12 +1021,29 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 				}
 				stores[command.Window.ID] = next
 				previous.Rows = compatibilityRows(next)
+				if next.sequential && (initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil) {
+					pendingSemantics[command.Window.ID] = true
+				}
 			}
 			if command.Window.GeometrySet {
 				previous.Geometry = command.Window.Geometry
 				previous.GeometrySet = true
 			}
 			working[command.Window.ID] = previous
+		case protocol.CommandResidentSemantics:
+			wire := command.ResidentSemantics
+			window, windowOK := working[wire.WindowID]
+			store, storeOK := stores[wire.WindowID]
+			if !windowOK || !storeOK {
+				return nil, &windowReferenceFailure{windowID: wire.WindowID, reason: protocol.RejectInvalidRetainedRows}
+			}
+			next, err := applyResidentSemantics(semantics[wire.WindowID], wire, window, store)
+			if err != nil {
+				return nil, &windowReferenceFailure{windowID: wire.WindowID, reason: protocol.RejectInvalidRetainedRows}
+			}
+			semantics[wire.WindowID] = next
+			initializedSemantics[wire.WindowID] = true
+			delete(pendingSemantics, wire.WindowID)
 		}
 	}
 	for id, window := range working {
@@ -966,8 +1051,33 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 		if store.sequential && (!window.GeometrySet || store.count() != int(window.Geometry.TotalLines) || window.Geometry.TotalVisualRows != window.Geometry.TotalLines) {
 			return nil, &windowReferenceFailure{windowID: id, reason: protocol.RejectInvalidRetainedRows}
 		}
+		if semantic, ok := semantics[id]; ok {
+			firstID, lastID := uint64(0), uint64(0)
+			if store.count() > 0 {
+				first, firstOK := store.get(0)
+				last, lastOK := store.get(store.count() - 1)
+				if !firstOK || !lastOK {
+					return nil, &windowReferenceFailure{windowID: id, reason: protocol.RejectInvalidRetainedRows}
+				}
+				firstID, lastID = first.ID, last.ID
+			}
+			if semantic.rowCount != uint32(store.count()) || semantic.firstRowID != firstID || semantic.lastRowID != lastID {
+				return nil, &windowReferenceFailure{windowID: id, reason: protocol.RejectInvalidRetainedRows}
+			}
+		}
 	}
-	return &windowReferenceSnapshot{windows: working, stores: stores}, nil
+	var pendingWindowID uint16
+	hasPendingWindow := false
+	for id := range pendingSemantics {
+		if !hasPendingWindow || id < pendingWindowID {
+			pendingWindowID = id
+			hasPendingWindow = true
+		}
+	}
+	if hasPendingWindow {
+		return nil, &windowReferenceFailure{windowID: pendingWindowID, reason: protocol.RejectInvalidRetainedRows}
+	}
+	return &windowReferenceSnapshot{windows: working, stores: stores, semantics: semantics}, nil
 }
 
 // prepareGutterCandidate resolves resident gutter updates against the frame's
@@ -1258,6 +1368,7 @@ func (m *Model) refreshCursorFromWindows() {
 
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
+	delete(m.residentSemantics, id)
 	delete(m.residentRows, id)
 	m.localPresentation.removeWindow(id)
 	m.lineCache.dropWindow(id)

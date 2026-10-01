@@ -17,6 +17,7 @@ defmodule Minga.Services.Independent do
       ├── Minga.Command.Registry         Named command lookup
       ├── MingaAgent.StatusCommand       Cached agent status command output
       ├── Minga.Diagnostics              ETS-backed diagnostics store
+      ├── Minga.Search.IndexOwner        Source-owned current GUI search indexes
       ├── Minga.Session.EventRecorder            Persistent editor event log (SQLite via exqlite)
       ├── MingaAgent.EventLog                    Persistent agent session event log
       └── Minga.Tool.Manager             Tool install/uninstall manager
@@ -57,6 +58,7 @@ defmodule Minga.Services.Independent do
       StartupTimer.timed_child_spec(:ind_status_cmd, MingaAgent.StatusCommand),
       StartupTimer.timed_child_spec(:ind_conn_mgr, Minga.Distribution.ConnectionManager),
       StartupTimer.timed_child_spec(:ind_diagnostics, Minga.Diagnostics),
+      StartupTimer.timed_child_spec(:ind_search_index, Minga.Search.IndexOwner),
       StartupTimer.timed_child_spec(:ind_event_recorder, Minga.Session.EventRecorder),
       StartupTimer.timed_child_spec(:ind_agent_event_log, MingaAgent.EventLog),
       StartupTimer.timed_child_spec(:ind_oauth_flow, MingaAgent.OAuth.PendingFlow),

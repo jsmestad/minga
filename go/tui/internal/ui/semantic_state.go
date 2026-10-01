@@ -422,9 +422,20 @@ func pickerItemIndexByID(picker protocol.Picker, itemID string) int {
 	return -1
 }
 
-func (m Model) applyIndentGuide(window protocol.WindowContent, style lipgloss.Style, rowIndex int, col int, text string) (lipgloss.Style, string) {
+func (m Model) applyIndentGuide(window protocol.WindowContent, style lipgloss.Style, sourceRowIndex int, contentRowIndex int, col int, text string) (lipgloss.Style, string) {
+	if semantics := m.residentSemanticsFor(window); semantics != nil {
+		level, ok := semantics.guideLevel(uint32(sourceRowIndex))
+		if !ok || text != " " || semantics.tabWidth == 0 || !residentGuideColumnVisible(semantics.guideCols, col) || col/int(semantics.tabWidth) >= int(level) {
+			return style, text
+		}
+		guideStyle := style.Foreground(m.palette().GutterText())
+		if uint16(col) == semantics.activeGuideCol {
+			guideStyle = guideStyle.Foreground(m.palette().GutterCurrentText())
+		}
+		return guideStyle, "│"
+	}
 	guides, ok := m.indentGuides[window.ID]
-	if !ok || text != " " || !guideColumnVisible(guides, col) || !guideEnabledOnRow(guides, rowIndex, col) {
+	if !ok || text != " " || !guideColumnVisible(guides, col) || !guideEnabledOnRow(guides, contentRowIndex, col) {
 		return style, text
 	}
 	guideStyle := style.Foreground(m.palette().GutterText())
@@ -432,6 +443,15 @@ func (m Model) applyIndentGuide(window protocol.WindowContent, style lipgloss.St
 		guideStyle = guideStyle.Foreground(m.palette().GutterCurrentText())
 	}
 	return guideStyle, "│"
+}
+
+func residentGuideColumnVisible(cols []uint16, col int) bool {
+	for _, guideCol := range cols {
+		if int(guideCol) == col {
+			return true
+		}
+	}
+	return false
 }
 
 func guideColumnVisible(guides protocol.IndentGuides, col int) bool {

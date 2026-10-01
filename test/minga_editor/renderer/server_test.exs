@@ -290,6 +290,43 @@ defmodule MingaEditor.Renderer.ServerTest do
     refute renderer_busy?(renderer)
   end
 
+  test "stale search rejects atomically without retrying and advances to the latest intent" do
+    parent = self()
+    generation = Minga.Search.IndexGeneration.new(self(), 1, 0, 0)
+
+    pipeline = fn input ->
+      send(parent, {:search_generation_attempt, input.frame_seq})
+
+      case input.frame_seq do
+        10 -> raise MingaEditor.Renderer.StaleSearchError, generation: generation
+        11 -> input
+        42 -> raise MingaEditor.Renderer.StaleSearchError, generation: generation
+      end
+    end
+
+    renderer = start_renderer(self(), pipeline: pipeline)
+    before = :sys.get_state(renderer)
+
+    assert {:error, %MingaEditor.Renderer.StaleSearchError{}} =
+             RendererServer.render_sync(renderer, Submission.full(stub_intent()), 42)
+
+    after_rejection = :sys.get_state(renderer)
+    assert after_rejection.caches == before.caches
+    assert_receive {:search_generation_attempt, 42}, @async_render_timeout
+    refute_receive {:search_generation_attempt, 42}, 50
+
+    :ok = :sys.suspend(renderer)
+    RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 10)
+    RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 11)
+    :ok = :sys.resume(renderer)
+
+    assert_receive {:search_generation_attempt, 10}, @async_render_timeout
+    refute_receive {:search_generation_attempt, 10}, 50
+    assert_receive {:search_generation_attempt, 11}, @async_render_timeout
+    assert_receive {:render_done, %RenderReceipt{frame_seq: 11}}, @async_render_timeout
+    refute renderer_busy?(renderer)
+  end
+
   test "exhausted async stale retries advance to the latest pending intent" do
     parent = self()
 
@@ -2039,6 +2076,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       cmd_hover_link: nil,
       mouse: %MingaEditor.State.Mouse{},
       search: %MingaEditor.State.Search{},
+      last_search_pattern: nil,
       keymap_scope: :editor,
       launchpad: nil
     }

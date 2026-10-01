@@ -57,7 +57,7 @@ version = "2.0.0"
 # completion/picker selection echoes, and one semantic activation action whose
 # opaque item identity is validated by the owning BEAM surface.
 # protocol_version 26 binds editor text input to retained presentation rows and adds an ordered input-presentation lifecycle.
-protocol_version = 26
+protocol_version = 27
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -934,6 +934,19 @@ name = "gui_text_presentation"
 value = 0xA8
 direction = "beam_to_frontend"
 framing = "fixed:11"
+
+# Atomic resident semantics paired with the retained text candidate in the same
+# frame transaction. Coordinates are absolute u32 resident ranks. Keyframes
+# replace complete sparse layers and guide coverage; deltas name their semantic
+# base/result revisions, target row revision, row extent and boundary row ids.
+# Flag 0x40 adds bounded diagnostic start-rank replacements after row splices.
+# See GUI_PROTOCOL.md "0xA9 - gui_resident_semantics" for the payload contract.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_resident_semantics"
+value = 0xA9
+direction = "beam_to_frontend"
+framing = "len32"
 
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]

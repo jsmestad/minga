@@ -230,10 +230,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	sourceStart := m.presentationSourceStart(window, height)
 	overscanBefore := m.presentationPayloadStart(window)
 	lines := make([]string, 0, height)
-	m.renderWork.decorationVisits += len(window.SearchMatches) + len(window.Diagnostics) +
-		len(window.Highlights) + len(window.Annotations)
-	if window.SelectionSet {
-		m.renderWork.decorationVisits++
+	if semantics := m.residentSemanticsFor(window); semantics == nil {
+		m.renderWork.decorationVisits += len(window.SearchMatches) + len(window.Diagnostics) + len(window.Highlights) + len(window.Annotations)
+		if window.SelectionSet {
+			m.renderWork.decorationVisits++
+		}
 	}
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
 		m.renderWork.editorRowVisits++
@@ -252,11 +253,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 			}
 		}
 
-		cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
+		cursorline, cursorlineBG := m.cursorlineForRow(window, sourceRowIndex, contentRowIndex)
 		contentWidth := width
 		gutterText := ""
 		if hasGutter {
-			gutterText = m.renderGutterEntry(gutter, sourceRowIndex, cursorline, window.Cursorline.BG)
+			gutterText = m.renderGutterEntry(gutter, sourceRowIndex, cursorline, cursorlineBG)
 			contentWidth = max(width-lipgloss.Width(gutterText), 1)
 		}
 
@@ -488,19 +489,19 @@ func (m Model) lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lin
 	position := 0
 	_, hasGutter := m.gutters[window.ID]
 	_, hasIndentGuides := m.indentGuides[window.ID]
-	if hasGutter || hasIndentGuides || window.Cursorline.Visible || window.SelectionSet || window.SearchSet || window.DiagnosticsSet || window.HighlightsSet || window.AnnotationsSet {
+	if m.residentSemanticsFor(window) != nil || hasGutter || hasIndentGuides || window.Cursorline.Visible || window.SelectionSet || window.SearchSet || window.DiagnosticsSet || window.HighlightsSet || window.AnnotationsSet {
 		position = rowIndex
 	}
 	return lineCacheKey{rowID: row.ID, hash: row.ContentHash, rowIndex: position}, true
 }
 
 func (m Model) renderSemanticContentRow(window protocol.WindowContent, sourceRowIndex int, contentRowIndex int, width int) string {
-	cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
+	cursorline, cursorlineBG := m.cursorlineForRow(window, sourceRowIndex, contentRowIndex)
 	row, ok := m.windowRow(window, sourceRowIndex)
 	if !ok {
-		return m.renderTildeRow(width, cursorline, window.Cursorline.BG)
+		return m.renderTildeRow(width, cursorline, cursorlineBG)
 	}
-	return m.renderRow(window, row, contentRowIndex, width, cursorline, window.Cursorline.BG)
+	return m.renderRowAt(window, row, sourceRowIndex, contentRowIndex, width, cursorline, cursorlineBG)
 }
 
 func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) string {
@@ -512,6 +513,10 @@ func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) s
 }
 
 func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, rowIndex int, width int, cursorline bool, cursorlineBG uint32) string {
+	return m.renderRowAt(window, row, rowIndex, rowIndex, width, cursorline, cursorlineBG)
+}
+
+func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow, sourceRowIndex int, contentRowIndex int, width int, cursorline bool, cursorlineBG uint32) string {
 	base := m.editorStyle().Width(width)
 	if cursorline && cursorlineBG != 0 {
 		base = base.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
@@ -533,19 +538,38 @@ func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, 
 		if cursorline && span.BG == 0 && cursorlineBG != 0 {
 			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
 		}
-		style = m.applyWindowOverlays(style, window, rowIndex, col)
-		style, text = m.applyIndentGuide(window, style, rowIndex, col, text)
+		style = m.applyWindowOverlaysAt(style, window, sourceRowIndex, contentRowIndex, col)
+		style, text = m.applyIndentGuide(window, style, sourceRowIndex, contentRowIndex, col, text)
 		builder.WriteString(style.Render(text))
 		col += spanWidth
 	}
-	if annotation := m.renderRowAnnotations(window, rowIndex); annotation != "" {
+	if annotation := m.renderRowAnnotationsAt(window, sourceRowIndex, contentRowIndex); annotation != "" {
 		builder.WriteString(annotation)
 	}
 	return base.Render(fitStyled(builder.String(), width))
 }
 
 func (m Model) applyWindowOverlays(style lipgloss.Style, window protocol.WindowContent, rowIndex int, col int) lipgloss.Style {
-	row := uint16(rowIndex)
+	return m.applyWindowOverlaysAt(style, window, rowIndex, rowIndex, col)
+}
+
+func (m Model) applyWindowOverlaysAt(style lipgloss.Style, window protocol.WindowContent, sourceRowIndex int, contentRowIndex int, col int) lipgloss.Style {
+	if semantics := m.residentSemanticsFor(window); semantics != nil {
+		row := uint32(sourceRowIndex)
+		column := uint16(col)
+		selection := semantics.selection
+		if selection.Present && residentSelectionContains(selection, row, column) {
+			style = style.Background(m.palette().Selection())
+		}
+		for _, diagnostic := range semantics.rowDiagnostics(row) {
+			if residentRangeContains(diagnostic.StartRow, diagnostic.StartCol, diagnostic.EndRow, diagnostic.EndCol, row, column) {
+				style = style.Underline(true).Foreground(m.palette().Diagnostic(diagnostic.Severity))
+				break
+			}
+		}
+		return style
+	}
+	row := uint16(contentRowIndex)
 	column := uint16(col)
 	if window.Selection.Type != 0 && rangeContains(window.Selection.StartRow, window.Selection.StartCol, window.Selection.EndRow, window.Selection.EndCol, row, column) {
 		style = style.Background(m.palette().Selection())
@@ -572,9 +596,20 @@ func (m Model) applyWindowOverlays(style lipgloss.Style, window protocol.WindowC
 }
 
 func (m Model) renderRowAnnotations(window protocol.WindowContent, rowIndex int) string {
+	return m.renderRowAnnotationsAt(window, rowIndex, rowIndex)
+}
+
+func (m Model) renderRowAnnotationsAt(window protocol.WindowContent, sourceRowIndex int, contentRowIndex int) string {
 	parts := make([]string, 0, 1)
-	for _, annotation := range window.Annotations {
-		if annotation.Row != uint16(rowIndex) || annotation.Text == "" || annotation.Kind == 2 {
+	annotations := window.Annotations
+	if semantics := m.residentSemanticsFor(window); semantics != nil {
+		annotations = make([]protocol.LineAnnotation, 0)
+		for _, annotation := range semantics.rowAnnotations(uint32(sourceRowIndex)) {
+			annotations = append(annotations, protocol.LineAnnotation{Kind: annotation.Kind, FG: annotation.FG, BG: annotation.BG, Text: annotation.Text})
+		}
+	}
+	for _, annotation := range annotations {
+		if (m.residentSemanticsFor(window) == nil && annotation.Row != uint16(contentRowIndex)) || annotation.Text == "" || annotation.Kind == 2 {
 			continue
 		}
 		style := lipgloss.NewStyle().Foreground(m.palette().Accent()).Background(m.editorBackground())
@@ -587,6 +622,41 @@ func (m Model) renderRowAnnotations(window protocol.WindowContent, rowIndex int)
 		parts = append(parts, style.Render(" "+annotation.Text))
 	}
 	return strings.Join(parts, "")
+}
+
+func (m Model) residentSemanticsFor(window protocol.WindowContent) *residentSemanticStore {
+	store, ok := m.residentRows[window.ID]
+	if !ok || !store.sequential {
+		return nil
+	}
+	return m.residentSemantics[window.ID]
+}
+
+func (m Model) cursorlineForRow(window protocol.WindowContent, sourceRowIndex int, contentRowIndex int) (bool, uint32) {
+	if semantics := m.residentSemanticsFor(window); semantics != nil {
+		return semantics.cursorline.Present && uint32(sourceRowIndex) == semantics.cursorline.Row, semantics.cursorline.BG
+	}
+	return window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row), window.Cursorline.BG
+}
+
+func residentSelectionContains(selection protocol.ResidentSelection, row uint32, col uint16) bool {
+	if selection.Type == 2 {
+		return row >= selection.StartRow && row <= selection.EndRow
+	}
+	return residentRangeContains(selection.StartRow, selection.StartCol, selection.EndRow, selection.EndCol, row, col)
+}
+
+func residentRangeContains(startRow uint32, startCol uint16, endRow uint32, endCol uint16, row uint32, col uint16) bool {
+	if row < startRow || row > endRow {
+		return false
+	}
+	if row == startRow && col < startCol {
+		return false
+	}
+	if row == endRow && col >= endCol {
+		return false
+	}
+	return true
 }
 
 func rangeContains(startRow uint16, startCol uint16, endRow uint16, endCol uint16, row uint16, col uint16) bool {

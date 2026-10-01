@@ -62,6 +62,7 @@ defmodule Minga.RenderModel.Window do
             content_digest: nil,
             row_delta: nil,
             row_store_mode: :windowed,
+            resident_semantics: nil,
             scroll_seq: 0
 
   @type t :: %__MODULE__{
@@ -96,6 +97,7 @@ defmodule Minga.RenderModel.Window do
           content_digest: Minga.RenderModel.Window.ContentDigest.t() | nil,
           row_delta: Minga.RenderModel.Window.RowDelta.t() | nil,
           row_store_mode: :windowed | {:resident, non_neg_integer()},
+          resident_semantics: Minga.RenderModel.Window.ResidentSemantics.t() | nil,
           scroll_seq: non_neg_integer()
         }
 end

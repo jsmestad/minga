@@ -350,7 +350,7 @@ defmodule Minga.Core.DecorationsTest do
   end
 
   describe "annotations" do
-    test "adds annotations with ids, options, version bumps, and cache invalidation" do
+    test "adds annotations with ids, options, version bumps, and cache maintenance" do
       decs = Decorations.new()
       version = decs.version
 
@@ -370,7 +370,7 @@ defmodule Minga.Core.DecorationsTest do
       decs = Decorations.build_ann_line_cache(decs)
       assert decs.ann_line_cache != nil
       decs = add_annotation(decs, 10, "second")
-      assert decs.ann_line_cache == nil
+      assert Map.keys(decs.ann_line_cache) |> Enum.sort() == [3, 10]
 
       [ann] = Decorations.annotations_for_line(decs, 3)
       assert ann.kind == :inline_text

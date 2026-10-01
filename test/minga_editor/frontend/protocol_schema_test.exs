@@ -186,7 +186,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_empty_state: 0xA5,
       gui_completion_selection: 0xA6,
       gui_picker_selection: 0xA7,
-      gui_text_presentation: 0xA8
+      gui_text_presentation: 0xA8,
+      gui_resident_semantics: 0xA9
     )
   end
 

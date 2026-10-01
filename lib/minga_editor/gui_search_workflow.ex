@@ -4,7 +4,8 @@ defmodule MingaEditor.GuiSearchWorkflow do
   alias Minga.Buffer
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.RenderSnapshot
-  alias Minga.Editing.Search.Index
+  alias Minga.Search.IndexGeneration
+  alias Minga.Search.IndexOwner
   alias Minga.Events.BufferChangedEvent
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.GuiSearchBuild
@@ -83,7 +84,7 @@ defmodule MingaEditor.GuiSearchWorkflow do
                 target_buffer: buffer,
                 accepted_version: accepted_version,
                 accepted_sequence: accepted_sequence,
-                result: {:ready, %Index{} = index}
+                result: {:ready, %IndexGeneration{} = generation}
               }
             }
           }
@@ -97,7 +98,7 @@ defmodule MingaEditor.GuiSearchWorkflow do
       )
       when is_integer(accepted_version) and is_integer(accepted_sequence) and
              sequence == accepted_sequence + 1 and is_integer(version) do
-    apply_incremental(state, buffer, index, delta, version, sequence)
+    apply_incremental(state, buffer, generation, delta, version, sequence)
   end
 
   def buffer_changed(
@@ -133,8 +134,10 @@ defmodule MingaEditor.GuiSearchWorkflow do
   def navigate(%EditorState{workspace: %{buffers: %{active: buffer}}} = state, direction)
       when is_pid(buffer) and direction in [:forward, :backward] do
     with revision when revision != :unavailable <- current_revision(buffer),
-         {:ok, index} <- Search.ready_gui_index(state.workspace.search, buffer, revision),
-         %{line: line, col: col} <- Index.next(index, Buffer.cursor(buffer), direction) do
+         {:ok, generation} <-
+           Search.ready_gui_generation(state.workspace.search, buffer, revision),
+         {:ok, %{line: line, col: col}} <-
+           IndexOwner.next(generation, Buffer.cursor(buffer), direction) do
       Buffer.move_to(buffer, {line, col})
       state
     else
@@ -149,11 +152,13 @@ defmodule MingaEditor.GuiSearchWorkflow do
   def replace(%EditorState{workspace: %{buffers: %{active: buffer}}} = state, replacement)
       when is_pid(buffer) and is_binary(replacement) do
     with {version, _sequence} = revision <- current_revision(buffer),
-         {:ok, index} <- Search.ready_gui_index(state.workspace.search, buffer, revision),
-         %{line: line, col: col, length: length} <- Index.match_at(index, Buffer.cursor(buffer)),
+         {:ok, generation} <-
+           Search.ready_gui_generation(state.workspace.search, buffer, revision),
+         {:ok, %{line: line, col: col, length: length}} <-
+           IndexOwner.match_at(generation, Buffer.cursor(buffer)),
          {:ok, new_version} <-
            Buffer.replace_byte_range_if_version(buffer, version, {line, col}, length, replacement) do
-      finish_replace(state, buffer, index, line, col, length, replacement, new_version)
+      finish_replace(state, buffer, generation, line, col, length, replacement, new_version)
     else
       {:error, :read_only} -> NoticeWorkflow.publish(state, "Buffer is read-only")
       _reason -> stale_match(state)
@@ -167,7 +172,9 @@ defmodule MingaEditor.GuiSearchWorkflow do
   def replace_all(%EditorState{workspace: %{buffers: %{active: buffer}}} = state, replacement)
       when is_pid(buffer) and is_binary(replacement) do
     with revision when revision != :unavailable <- current_revision(buffer),
-         {:ok, _index} <- Search.ready_gui_index(state.workspace.search, buffer, revision),
+         {:ok, generation} <-
+           Search.ready_gui_generation(state.workspace.search, buffer, revision),
+         true <- IndexOwner.current?(generation),
          %Session{query: query} when query != "" <- state.workspace.search.gui_search,
          {content, version} <- Buffer.content_with_version(buffer),
          {^version, _sequence} <- revision do
@@ -233,12 +240,12 @@ defmodule MingaEditor.GuiSearchWorkflow do
   @spec apply_incremental(
           state(),
           pid(),
-          Index.t(),
+          IndexGeneration.t(),
           EditDelta.t(),
           non_neg_integer(),
           non_neg_integer()
         ) :: state()
-  defp apply_incremental(state, buffer, index, delta, version, sequence) do
+  defp apply_incremental(state, buffer, generation, delta, version, sequence) do
     {first_line, last_line} = EditDelta.affected_line_range([delta])
     count = last_line - first_line + 1
 
@@ -250,12 +257,23 @@ defmodule MingaEditor.GuiSearchWorkflow do
          first_line: ^first_line,
          lines: lines
        }} ->
-        updated = Index.apply_edits(index, [delta], first_line, lines)
+        case IndexOwner.apply_edits(
+               generation,
+               version,
+               sequence,
+               [delta],
+               first_line,
+               lines
+             ) do
+          {:ok, next_generation} ->
+            put_search(
+              state,
+              Search.accept_gui_incremental(state.workspace.search, next_generation)
+            )
 
-        put_search(
-          state,
-          Search.accept_gui_incremental(state.workspace.search, version, sequence, updated)
-        )
+          :stale ->
+            rebuild(state, delta)
+        end
 
       _stale ->
         rebuild(state, delta)
@@ -267,14 +285,23 @@ defmodule MingaEditor.GuiSearchWorkflow do
   @spec finish_replace(
           state(),
           pid(),
-          Index.t(),
+          IndexGeneration.t(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
           non_neg_integer()
         ) :: state()
-  defp finish_replace(state, buffer, index, line, col, old_length, replacement, version) do
+  defp finish_replace(
+         state,
+         buffer,
+         generation,
+         line,
+         col,
+         old_length,
+         replacement,
+         version
+       ) do
     {_version, sequence} = Buffer.sync_revision(buffer)
 
     case Buffer.render_lines(buffer, version, line, 1) do
@@ -295,10 +322,25 @@ defmodule MingaEditor.GuiSearchWorkflow do
             {line, col + byte_size(replacement)}
           )
 
-        updated = Index.apply_edits(index, [delta], line, lines)
-        search = Search.accept_gui_incremental(state.workspace.search, version, sequence, updated)
-        state = put_search(state, search)
-        advance_after_replace(state, buffer, updated, old_length)
+        case IndexOwner.apply_edits(
+               generation,
+               version,
+               sequence,
+               [delta],
+               line,
+               lines
+             ) do
+          {:ok, next_generation} ->
+            search =
+              Search.accept_gui_incremental(state.workspace.search, next_generation)
+
+            state
+            |> put_search(search)
+            |> advance_after_replace(buffer, next_generation, old_length)
+
+          :stale ->
+            rebuild(state, nil)
+        end
 
       _stale ->
         rebuild(state, nil)
@@ -307,21 +349,39 @@ defmodule MingaEditor.GuiSearchWorkflow do
     :exit, _reason -> rebuild(state, nil)
   end
 
-  @spec advance_after_replace(state(), pid(), Index.t(), non_neg_integer()) :: state()
-  defp advance_after_replace(state, buffer, index, old_length) do
+  @spec advance_after_replace(state(), pid(), IndexGeneration.t(), non_neg_integer()) :: state()
+  defp advance_after_replace(state, buffer, generation, old_length) do
     cursor = Buffer.cursor(buffer)
 
-    if old_length > 0 and Index.match_at(index, cursor) != nil do
-      state
-    else
-      case Index.next(index, cursor, :forward) do
-        nil ->
-          state
+    case IndexOwner.match_at(generation, cursor) do
+      {:ok, %Minga.Editing.Search.Match{}} when old_length > 0 ->
+        state
 
-        %{line: line, col: col} ->
-          Buffer.move_to(buffer, {line, col})
-          state
-      end
+      {:ok, _match} ->
+        advance_to_next(state, buffer, generation, cursor)
+
+      :stale ->
+        rebuild(state, nil)
+    end
+  end
+
+  @spec advance_to_next(
+          state(),
+          pid(),
+          IndexGeneration.t(),
+          Minga.Editing.Search.position()
+        ) :: state()
+  defp advance_to_next(state, buffer, generation, cursor) do
+    case IndexOwner.next(generation, cursor, :forward) do
+      {:ok, nil} ->
+        state
+
+      {:ok, %{line: line, col: col}} ->
+        Buffer.move_to(buffer, {line, col})
+        state
+
+      :stale ->
+        rebuild(state, nil)
     end
   end
 
