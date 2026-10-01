@@ -47,14 +47,19 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
   test "cache options follow the executing protocol rather than the model source owner" do
     for {request_provider, owner, expected_cache?} <- [
-          {:anthropic, "local", true},
+          {:anthropic, "openai", true},
           {:openai, "anthropic", false}
         ] do
       selection =
         ModelSelectionFixture.selection(request_provider: request_provider, model_provider: owner)
 
       assert {:ok, opts} =
-               ReqLLMAdapter.stream_opts(selection, [], %AgentConfig{prompt_cache: true})
+               ReqLLMAdapter.stream_opts(selection, [], %AgentConfig{prompt_cache: true},
+                 env: %{
+                   "OPENAI_API_KEY" => "fixture-openai-key",
+                   "ANTHROPIC_API_KEY" => "fixture-anthropic-key"
+                 }
+               )
 
       assert get_in(opts, [:provider_options, :anthropic_prompt_cache]) == true == expected_cache?
     end
@@ -73,7 +78,11 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
       {:ok, build_stream_response([ReqLLM.StreamChunk.text("summary")])}
     end
 
-    summary = ReqLLMAdapter.summary_client(client, selection, %AgentConfig{})
+    summary =
+      ReqLLMAdapter.summary_client(client, selection, %AgentConfig{},
+        env: %{"OPENAI_API_KEY" => "fixture-openai-key"}
+      )
+
     assert {:ok, "summary"} = summary.(nil, [], max_tokens: 4_096)
     assert_receive {:summary_budget, 80}
     assert {:ok, "summary"} = summary.(nil, [], max_tokens: 40)
@@ -258,7 +267,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
     selection = ModelSelectionFixture.selection()
 
-    summary_client = ReqLLMAdapter.summary_client(client, selection, %AgentConfig{})
+    summary_client =
+      ReqLLMAdapter.summary_client(client, selection, %AgentConfig{},
+        env: %{"OPENAI_API_KEY" => "fixture-openai-key"}
+      )
 
     assert {:ok, "compacted"} =
              summary_client.(selection.request_model, [:message], max_tokens: 500)
@@ -267,8 +279,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert model == selection.request_model
     assert opts[:max_tokens] == 500
     refute Keyword.has_key?(opts, :base_url)
-    assert opts[:auth_mode] == :none
-    refute Keyword.has_key?(opts, :api_key)
+    assert opts[:auth_mode] == :api_key
+    assert opts[:api_key] == "fixture-openai-key"
   end
 
   test "assistant_tool_call keeps ReqLLM message compatibility" do

@@ -206,26 +206,7 @@ defmodule MingaAgent.FileMentionTest do
 
   describe "resolve_prompt/2 with images" do
     setup do
-      config = %MingaAgent.Config{
-        api_endpoints: %{
-          "local" => %{
-            "url" => "http://localhost:9000/v1",
-            "protocol" => "openai_chat",
-            "auth_mode" => "none",
-            "models" => %{"vision" => %{"capabilities" => %{"images" => true}}}
-          }
-        }
-      }
-
-      {:ok, selection} =
-        MingaAgent.ModelResolver.resolve("local:vision",
-          config: config,
-          backend_spec: MingaAgent.ProviderPacks.Native.spec(),
-          credential_snapshot: MingaAgent.Credentials.Snapshot.new(%{}, nil, "http://localhost"),
-          models: []
-        )
-
-      %{selection: selection}
+      %{selection: MingaAgent.Test.ModelSelectionFixture.selection()}
     end
 
     test "returns captured image bytes on an image-capable route", %{

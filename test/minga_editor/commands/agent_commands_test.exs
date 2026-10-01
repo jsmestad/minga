@@ -59,28 +59,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
-  defmodule PendingModelSession do
-    use GenServer
-
-    @spec start_link(pid()) :: GenServer.on_start()
-    def start_link(test_pid), do: GenServer.start_link(__MODULE__, test_pid)
-
-    @impl GenServer
-    def init(test_pid), do: {:ok, test_pid}
-
-    @impl GenServer
-    def handle_call({:set_model, model}, _from, test_pid) do
-      send(test_pid, {:pending_model_accepted, model})
-      {:reply, {:pending, :credential_discovery}, test_pid}
-    end
-
-    @impl GenServer
-    def handle_cast({:add_system_message, message, :info}, test_pid) do
-      send(test_pid, {:pending_model_message, message})
-      {:noreply, test_pid}
-    end
-  end
-
   defmodule RejectingModelSession do
     use GenServer
 
@@ -462,7 +440,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                "draft prompt"
     end
 
-    test "blocks submit and preserves the draft while credential discovery is pending" do
+    test "blocks submit and preserves the draft while hosted credential status is pending" do
       {:ok, session} =
         ReadinessSession.start_link(
           provider: nil,
@@ -477,14 +455,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
-          |> Panel.set_model_name("ollama:llama3")
-          |> Panel.set_provider_name("ollama")
+          |> Panel.set_model_name("openai:gpt-4")
+          |> Panel.set_provider_name("openai")
         end)
 
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_runtime.state.notice.message ==
-               "Checking local Ollama availability. Your prompt was preserved."
+               "Checking hosted provider credentials. Your prompt was preserved."
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
                "draft prompt"
@@ -642,7 +620,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       for {error, expected_message} <- [
             {:provider_not_ready, "Agent provider still starting"},
             {:credentials_not_configured, "No provider credentials are configured"},
-            {:credential_discovery_pending, "Checking local Ollama availability"}
+            {:credentials_pending, "Checking hosted provider credentials"}
           ] do
         {:ok, session} =
           Session.start_link(
@@ -1031,36 +1009,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert new_state.workspace.agent_ui.panel.model_name == "openai:o4-mini"
       assert new_state.workspace.agent_ui.panel.thinking_level == "high"
     end
-
-    test "keeps the active model visible while a cycled local route is pending" do
-      {:ok, session} = StubServer.start_link(cycle_model: {:pending, :credential_discovery})
-
-      state = base_state(session: session) |> with_model_name("Active Model")
-      new_state = AgentCommands.cycle_model(state)
-
-      assert new_state.workspace.agent_ui.panel.model_name == "Active Model"
-      assert new_state.shell_runtime.state.notice.message =~ "current model remains active"
-    end
   end
 
   describe "set_model/2" do
-    test "keeps the prior model visible while local route discovery is pending" do
-      {:ok, session} = PendingModelSession.start_link(self())
-
-      state = base_state(session: session) |> with_model_name("Prior Model")
-
-      state = AgentCommands.set_model(state, "ollama:model-b")
-
-      assert_receive {:pending_model_accepted, "ollama:model-b"}
-
-      message =
-        "Checking exact route availability for ollama:model-b. The current model remains active."
-
-      assert_receive {:pending_model_message, ^message}
-      assert state.workspace.agent_ui.panel.model_name == "Prior Model"
-      assert state.shell_runtime.state.notice.message == message
-    end
-
     test "preserves the prior model and shows an actionable rejection" do
       message = "Model \"missing\" is unavailable. Open /model and choose an exact route."
       {:ok, session} = RejectingModelSession.start_link(message)

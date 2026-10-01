@@ -23,7 +23,8 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
                model: MingaAgent.Test.ModelSelectionFixture.model_intent(),
                provider_opts: [
                  llm_client: native_write_client("child.txt", "from native\n", "native wrote"),
-                 config: MingaAgent.Test.ModelSelectionFixture.config(),
+                 credential_opts: [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}],
+                 model_resolver_opts: MingaAgent.Test.ModelSelectionFixture.resolver_opts(),
                  skip_api_key_env: true
                ]
              )

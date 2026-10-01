@@ -109,6 +109,7 @@ defmodule MingaAgent.Providers.Native do
           project_root: String.t(),
           project_view: ProjectView.t() | nil,
           max_retries: non_neg_integer(),
+          credential_opts: keyword(),
           llm_client: llm_client(),
           hook_runner: hook_runner(),
           task: Task.t() | nil,
@@ -350,6 +351,7 @@ defmodule MingaAgent.Providers.Native do
       tools: tools,
       project_root: project_root,
       max_retries: max_retries,
+      credential_opts: Keyword.get(opts, :credential_opts, []),
       llm_client: llm_client,
       hook_runner: hook_runner,
       task: nil,
@@ -884,7 +886,13 @@ defmodule MingaAgent.Providers.Native do
         compact_opts = [
           model: state.selection.request_model,
           context_limit: state.selection.policy.limits.context,
-          llm_client: summary_client(state.llm_client, state.selection, state.config)
+          llm_client:
+            summary_client(
+              state.llm_client,
+              state.selection,
+              state.config,
+              state.credential_opts
+            )
         ]
 
         case Compaction.compact(context, compact_opts) do
@@ -923,7 +931,13 @@ defmodule MingaAgent.Providers.Native do
           compact_opts = [
             model: state.selection.request_model,
             context_limit: state.selection.policy.limits.context,
-            llm_client: summary_client(state.llm_client, state.selection, state.config),
+            llm_client:
+              summary_client(
+                state.llm_client,
+                state.selection,
+                state.config,
+                state.credential_opts
+              ),
             threshold: threshold,
             keep_recent: Keyword.get(opts, :keep_recent, state.config.compaction_keep_recent)
           ]
@@ -1056,6 +1070,7 @@ defmodule MingaAgent.Providers.Native do
       changeset: state.changeset,
       tool_metadata: state.tool_metadata,
       max_retries: state.max_retries,
+      credential_opts: state.credential_opts,
       llm_client: state.llm_client,
       hook_runner: state.hook_runner,
       max_turns: state.max_turns,
@@ -1671,7 +1686,12 @@ defmodule MingaAgent.Providers.Native do
 
   @spec do_agent_loop_validated(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp do_agent_loop_validated(lctx, context) do
-    case ReqLLMAdapter.stream_opts(lctx.selection, lctx.tools, lctx.config) do
+    case ReqLLMAdapter.stream_opts(
+           lctx.selection,
+           lctx.tools,
+           lctx.config,
+           lctx.credential_opts
+         ) do
       {:ok, stream_opts} -> execute_stream_request(lctx, context, stream_opts)
       {:error, reason} -> reported_error(lctx, ModelResolver.message(reason), reason)
     end
@@ -3113,10 +3133,10 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t()) ::
+  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t(), keyword()) ::
           Compaction.summary_fn()
-  defp summary_client(llm_client, selection, config) do
-    ReqLLMAdapter.summary_client(llm_client, selection, config)
+  defp summary_client(llm_client, selection, config, credential_opts) do
+    ReqLLMAdapter.summary_client(llm_client, selection, config, credential_opts)
   end
 
   @spec maybe_compact_with_opts(Context.t(), keyword()) ::
@@ -3451,7 +3471,7 @@ defmodule MingaAgent.Providers.Native do
   @spec error_event(String.t(), term(), ModelSelection.t()) :: Event.Error.t()
   defp error_event(message, reason, %ModelSelection{} = selection) do
     kind = classify_error_reason(reason)
-    provider = selection.route.model_provider
+    provider = Atom.to_string(selection.route.request_provider)
 
     %Event.Error{
       message:

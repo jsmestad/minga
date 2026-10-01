@@ -3,7 +3,7 @@ defmodule MingaAgent.ModelSelection.Route do
 
   alias MingaAgent.ModelSelection.TextExecution
 
-  @providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek ollama)a
+  @providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
 
   @enforce_keys [
     :origin,
@@ -17,7 +17,7 @@ defmodule MingaAgent.ModelSelection.Route do
   ]
   defstruct @enforce_keys
 
-  @type origin :: {:catalog, String.t(), String.t()} | {:custom, String.t(), String.t()}
+  @type origin :: {:catalog, String.t(), String.t()}
   @type request_provider ::
           :anthropic
           | :openai
@@ -27,7 +27,6 @@ defmodule MingaAgent.ModelSelection.Route do
           | :groq
           | :mistral
           | :deepseek
-          | :ollama
   @type t :: %__MODULE__{
           origin: origin(),
           request_provider: request_provider(),
@@ -192,15 +191,14 @@ defmodule MingaAgent.ModelSelection.Route do
          wire_protocol: "openai_chat",
          path: "/chat/completions"
        })
-       when provider in [:openrouter, :groq, :mistral, :deepseek, :ollama],
+       when provider in [:openrouter, :groq, :mistral, :deepseek],
        do: true
 
   defp compatible?(_provider, _execution), do: false
 
   @spec valid_origin?(term()) :: boolean()
-  defp valid_origin?({kind, owner, model_id})
-       when kind in [:catalog, :custom] and is_binary(owner) and owner != "" and
-              is_binary(model_id) and model_id != "",
+  defp valid_origin?({:catalog, owner, model_id})
+       when is_binary(owner) and owner != "" and is_binary(model_id) and model_id != "",
        do: true
 
   defp valid_origin?(_origin), do: false
@@ -274,10 +272,6 @@ defmodule MingaAgent.ModelSelection.Route do
   defp decode_origin(%{"kind" => "catalog", "owner" => owner, "model_id" => model_id})
        when is_binary(owner) and owner != "" and is_binary(model_id) and model_id != "",
        do: {:ok, {:catalog, owner, model_id}}
-
-  defp decode_origin(%{"kind" => "custom", "owner" => owner, "model_id" => model_id})
-       when is_binary(owner) and owner != "" and is_binary(model_id) and model_id != "",
-       do: {:ok, {:custom, owner, model_id}}
 
   defp decode_origin(_origin), do: {:error, :invalid_route}
 

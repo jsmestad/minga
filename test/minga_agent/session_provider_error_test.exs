@@ -51,11 +51,12 @@ defmodule MingaAgent.SessionProviderErrorTest do
             model: MingaAgent.Test.ModelSelectionFixture.model_intent(),
             project_root: dir,
             tools: [mcp_session_builtin_tool()],
-            config:
-              MingaAgent.Test.ModelSelectionFixture.config(%MingaAgent.Config{
-                mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
-                tool_approval: :none
-              }),
+            config: %MingaAgent.Config{
+              mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
+              tool_approval: :none
+            },
+            model_resolver_opts: MingaAgent.Test.ModelSelectionFixture.resolver_opts(),
+            credential_opts: [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}],
             mcp_enabled?: true,
             mcp_transport: FakeTransport,
             mcp_transport_opts: [

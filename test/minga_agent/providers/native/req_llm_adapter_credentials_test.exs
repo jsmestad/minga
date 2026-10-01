@@ -70,7 +70,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
     {:ok, selection} =
       ModelResolver.resolve("anthropic:fixture",
         backend_spec: Native.spec(),
-        credential_snapshot: Snapshot.new(%{"anthropic" => source}, nil, "http://localhost"),
+        credential_snapshot: Snapshot.new(%{"anthropic" => source}, nil),
         models: [model],
         providers: [
           %{id: :anthropic, runtime: %{base_url: "https://anthropic.example/v1"}}

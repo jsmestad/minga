@@ -19,7 +19,6 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Agent.AuthStatusEffect
   alias MingaEditor.Remote.SessionClient
   alias Minga.Config
   alias Minga.Log
@@ -760,7 +759,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec auth_status(state(), keyword()) :: state()
   def auth_status(state, opts \\ []) do
     snapshot = Keyword.get_lazy(opts, :snapshot, &Credentials.snapshot/0)
-    statuses = Credentials.status(snapshot, :pending)
+    statuses = Credentials.status(snapshot)
 
     lines =
       Enum.map_join(statuses, "\n", fn s ->
@@ -770,14 +769,10 @@ defmodule MingaEditor.Agent.SlashCommand do
         "  #{icon} #{provider_display_name(s.provider)}#{source_hint}#{url_hint}"
       end)
 
-    endpoint_info = format_endpoint_info()
-
     message =
-      "API key status:\n#{lines}#{endpoint_info}\n\nUse /auth <provider> <key> to add a key.\nUse /auth revoke <provider> to remove one."
+      "API key status:\n#{lines}\n\nUse /auth <provider> <key> to add a key.\nUse /auth revoke <provider> to remove one."
 
-    state = emit_system_message(state, message)
-    session = Runtime.active_session(state.shell_runtime)
-    AuthStatusEffect.schedule(state, snapshot, session, Keyword.get(opts, :effect_opts, []))
+    emit_system_message(state, message)
   end
 
   @spec do_auth(state(), String.t()) :: state()
@@ -1085,16 +1080,13 @@ defmodule MingaEditor.Agent.SlashCommand do
     custom_base = read_config_string(:agent_system_prompt)
     append = read_config_string(:agent_append_system_prompt)
 
-    endpoint = active_endpoint_display()
-
     summary_parts = [
       "**Base prompt:** #{if custom_base == "", do: "(default)", else: "custom"}",
       if(instructions,
         do: "**Instructions:** #{String.length(instructions)} chars from AGENTS.md files",
         else: nil
       ),
-      if(append != "", do: "**Append:** #{String.length(append)} chars from config", else: nil),
-      if(endpoint, do: "**API endpoint:** #{endpoint}", else: nil)
+      if(append != "", do: "**Append:** #{String.length(append)} chars from config", else: nil)
     ]
 
     summary = Enum.reject(summary_parts, &is_nil/1) |> Enum.join("\n")
@@ -1524,75 +1516,6 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
-
-  @spec active_endpoint_display() :: String.t() | nil
-  defp active_endpoint_display do
-    env = System.get_env("MINGA_API_BASE_URL")
-    if env && env != "", do: "#{env} (env)", else: active_endpoint_from_config()
-  rescue
-    _ -> nil
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec active_endpoint_from_config() :: String.t() | nil
-  defp active_endpoint_from_config do
-    global = read_config_string(:agent_api_base_url)
-    if global != "", do: global, else: nil
-  end
-
-  @spec format_endpoint_info() :: String.t()
-  defp format_endpoint_info do
-    parts =
-      []
-      |> maybe_add_env_endpoint()
-      |> maybe_add_per_provider_endpoints()
-      |> maybe_add_global_endpoint()
-
-    case parts do
-      [] -> ""
-      _ -> "\n\n" <> Enum.join(parts, "\n")
-    end
-  rescue
-    _ -> ""
-  catch
-    :exit, _ -> ""
-  end
-
-  @spec maybe_add_env_endpoint([String.t()]) :: [String.t()]
-  defp maybe_add_env_endpoint(parts) do
-    case System.get_env("MINGA_API_BASE_URL") do
-      env when is_binary(env) and env != "" -> Enum.concat(parts, ["  Endpoint (env): #{env}"])
-      _ -> parts
-    end
-  end
-
-  @spec maybe_add_per_provider_endpoints([String.t()]) :: [String.t()]
-  defp maybe_add_per_provider_endpoints(parts) do
-    case Config.get(:agent_api_endpoints) do
-      m when is_map(m) and map_size(m) > 0 ->
-        lines = Enum.map_join(m, "\n", fn {p, u} -> "    #{p}: #{u}" end)
-        Enum.concat(parts, ["  Endpoints (per-provider):\n#{lines}"])
-
-      _ ->
-        parts
-    end
-  rescue
-    _ -> parts
-  catch
-    :exit, _ -> parts
-  end
-
-  @spec maybe_add_global_endpoint([String.t()]) :: [String.t()]
-  defp maybe_add_global_endpoint(parts) do
-    global = read_config_string(:agent_api_base_url)
-
-    case {global, parts} do
-      {"", _} -> parts
-      {url, []} -> Enum.concat(parts, ["  Endpoint: #{url}"])
-      {url, _} -> Enum.concat(parts, ["  Endpoint (global fallback): #{url}"])
-    end
-  end
 
   @spec parse_command(String.t()) :: {String.t(), String.t()}
   defp parse_command(text) do

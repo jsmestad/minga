@@ -3,13 +3,11 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
   alias MingaAgent.Memory
   alias MingaAgent.ModelCandidate
-  alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaAgent.TurnUsage
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaEditor.Agent.SlashCommand
-  alias MingaEditor.Agent.AuthStatusEffect
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
@@ -17,8 +15,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.VimState
-  alias MingaEditor.Effect.Outcome
-  alias MingaEditor.EffectScheduler
 
   @moduletag :tmp_dir
 
@@ -77,18 +73,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
-  defmodule HeldAuthProbe do
-    @spec availability(CredentialSnapshot.t(), pid()) ::
-            MingaAgent.Credentials.ollama_availability()
-    def availability(_snapshot, test_pid) do
-      send(test_pid, {:auth_probe_started, self()})
-
-      receive do
-        {:auth_probe_result, result} -> result
-      end
-    end
-  end
-
   defp start_session(opts \\ []) do
     dir =
       Path.join(
@@ -111,13 +95,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       )
 
     start_supervised!(Supervisor.child_spec({Session, session_opts}, id: {Session, make_ref()}))
-  end
-
-  defp start_effect_scheduler do
-    task_supervisor = start_supervised!(Task.Supervisor)
-    scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
-    :ok = EffectScheduler.attach(scheduler, self())
-    scheduler
   end
 
   defp model_candidate(model_id, display_name \\ nil) do
@@ -252,7 +229,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert completion.label == id
       assert completion.insert == "model #{id}"
       assert completion.description =~ "GPT-4o"
-      assert completion.description =~ "test:none"
+      assert completion.description =~ "test:env"
       assert completion.description =~ "tools yes, images yes, streaming yes"
     end
 
@@ -412,212 +389,21 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
     end
 
-    test "/auth publishes local pending status while its held probe leaves Editor work responsive" do
+    test "/auth publishes hosted credential status synchronously" do
       session = start_session()
-      scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{"openai" => :env}, nil, "http://ollama.test")
-      state = %{mock_state(session: session) | effect_scheduler: scheduler}
+      snapshot = MingaAgent.Credentials.Snapshot.new(%{"openai" => :env}, nil)
 
-      state =
-        SlashCommand.auth_status(state,
-          snapshot: snapshot,
-          effect_opts: [probe: {HeldAuthProbe, :availability, [self()]}]
-        )
+      state = SlashCommand.auth_status(mock_state(session: session), snapshot: snapshot)
 
-      assert_receive {:effect_lifecycle, %Outcome{value: :running}}, 1_000
-      assert_receive {:auth_probe_started, worker}, 1_000
+      assert state.shell_runtime.state.notice.message == "API key status:"
 
       assert Enum.any?(Session.messages(session), fn
                {:system, message, :info} ->
-                 message =~ "API key status" and message =~ "Openai (env)" and
-                   message =~ "Ollama"
+                 message =~ "API key status" and message =~ "Openai (env)"
 
                _other ->
                  false
              end)
-
-      assert {:ok, help_state} = SlashCommand.execute(state, "/help")
-      assert help_state.shell_runtime.state.notice.message == "Commands listed in chat"
-
-      send(worker, {:auth_probe_result, :available})
-      assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
-      assert :ok = EffectScheduler.claim(scheduler, outcome)
-      {state, final_outcome} = AuthStatusEffect.apply(state, outcome)
-      EffectScheduler.finalize(scheduler, final_outcome)
-
-      assert state.shell_runtime.state.notice.message == "Ollama available"
-
-      assert Enum.any?(Session.messages(session), fn
-               {:system, "Ollama availability: ✓ available (local)", :info} -> true
-               _other -> false
-             end)
-    end
-
-    test "/auth ignores a late result after active-session replacement" do
-      original_session = start_session()
-
-      replacement_session = start_session()
-
-      scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
-      original_state = %{mock_state(session: original_session) | effect_scheduler: scheduler}
-
-      _state =
-        SlashCommand.auth_status(original_state,
-          snapshot: snapshot,
-          effect_opts: [probe: {HeldAuthProbe, :availability, [self()]}]
-        )
-
-      assert_receive {:effect_lifecycle, %Outcome{value: :running}}, 1_000
-      assert_receive {:auth_probe_started, worker}, 1_000
-      send(worker, {:auth_probe_result, :available})
-      assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
-      assert :ok = EffectScheduler.claim(scheduler, outcome)
-
-      replacement_state = %{
-        mock_state(session: replacement_session)
-        | effect_scheduler: scheduler
-      }
-
-      {_state, final_outcome} = AuthStatusEffect.apply(replacement_state, outcome)
-      assert {:stale, :agent_session_changed} = final_outcome.value
-      EffectScheduler.finalize(scheduler, final_outcome)
-
-      refute Enum.any?(Session.messages(original_session), fn
-               {:system, message, :info} -> message =~ "Ollama availability: ✓"
-               _other -> false
-             end)
-    end
-
-    test "/auth ignores a late result after new_session reuses the active PID" do
-      session = start_session()
-      scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
-      state = %{mock_state(session: session) | effect_scheduler: scheduler}
-      original_session_id = Session.session_id(session)
-
-      _state =
-        SlashCommand.auth_status(state,
-          snapshot: snapshot,
-          effect_opts: [probe: {HeldAuthProbe, :availability, [self()]}]
-        )
-
-      assert_receive {:effect_lifecycle, %Outcome{value: :running}}, 1_000
-      assert_receive {:auth_probe_started, worker}, 1_000
-      assert :ok = Session.new_session(session)
-      refute Session.session_id(session) == original_session_id
-
-      send(worker, {:auth_probe_result, :available})
-      assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
-      assert :ok = EffectScheduler.claim(scheduler, outcome)
-      {_state, final_outcome} = AuthStatusEffect.apply(state, outcome)
-      assert {:stale, :agent_session_changed} = final_outcome.value
-      EffectScheduler.finalize(scheduler, final_outcome)
-
-      refute Enum.any?(Session.messages(session), fn
-               {:system, message, :info} -> message =~ "Ollama availability: ✓"
-               _other -> false
-             end)
-    end
-
-    test "/auth ignores a late result after load_session reuses the active PID", %{tmp_dir: dir} do
-      assert :ok =
-               SessionStore.save(
-                 %{
-                   id: "auth-loaded-session",
-                   timestamp: "2026-09-16T00:00:00Z",
-                   model_name: "test-model",
-                   provider_name: "test",
-                   messages: [{:system, "Loaded auth session", :info}],
-                   continuation: MingaAgent.Session.Continuation.new(),
-                   usage: %TurnUsage{}
-                 },
-                 dir
-               )
-
-      session = start_session(session_store_dir: dir, persist?: false)
-      scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
-      state = %{mock_state(session: session) | effect_scheduler: scheduler}
-
-      _state =
-        SlashCommand.auth_status(state,
-          snapshot: snapshot,
-          effect_opts: [probe: {HeldAuthProbe, :availability, [self()]}]
-        )
-
-      assert_receive {:effect_lifecycle, %Outcome{value: :running}}, 1_000
-      assert_receive {:auth_probe_started, worker}, 1_000
-      assert :ok = Session.load_session(session, "auth-loaded-session")
-      assert Session.session_id(session) == "auth-loaded-session"
-
-      send(worker, {:auth_probe_result, :available})
-      assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
-      assert :ok = EffectScheduler.claim(scheduler, outcome)
-      {_state, final_outcome} = AuthStatusEffect.apply(state, outcome)
-      assert {:stale, :agent_session_changed} = final_outcome.value
-      EffectScheduler.finalize(scheduler, final_outcome)
-
-      refute Enum.any?(Session.messages(session), fn
-               {:system, message, :info} -> message =~ "Ollama availability: ✓"
-               _other -> false
-             end)
-    end
-
-    test "/auth timeout kills its worker and publishes terminal unavailable status" do
-      session = start_session()
-      scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
-      state = %{mock_state(session: session) | effect_scheduler: scheduler}
-
-      _state =
-        SlashCommand.auth_status(state,
-          snapshot: snapshot,
-          effect_opts: [probe: {HeldAuthProbe, :availability, [self()]}]
-        )
-
-      assert_receive {:effect_lifecycle, %Outcome{request: request, value: :running}}, 1_000
-      assert_receive {:auth_probe_started, worker}, 1_000
-      worker_monitor = Process.monitor(worker)
-
-      send(scheduler, {:effect_timeout, request.id})
-
-      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_000
-
-      assert_receive {:effect_result, ^scheduler, %Outcome{value: {:failed, :timeout}} = outcome},
-                     1_000
-
-      assert :ok = EffectScheduler.claim(scheduler, outcome)
-      {state, final_outcome} = AuthStatusEffect.apply(state, outcome)
-      EffectScheduler.finalize(scheduler, final_outcome)
-      assert state.shell_runtime.state.notice.message == "Ollama unavailable"
-    end
-
-    test "repeated /auth status requests keep only the newest probe" do
-      session = start_session()
-      scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
-      state = %{mock_state(session: session) | effect_scheduler: scheduler}
-      effect_opts = [probe: {HeldAuthProbe, :availability, [self()]}]
-
-      state = SlashCommand.auth_status(state, snapshot: snapshot, effect_opts: effect_opts)
-      assert_receive {:effect_lifecycle, %Outcome{value: :running}}, 1_000
-      assert_receive {:auth_probe_started, first_worker}, 1_000
-      first_monitor = Process.monitor(first_worker)
-
-      _state = SlashCommand.auth_status(state, snapshot: snapshot, effect_opts: effect_opts)
-
-      assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 1_000
-      assert_receive {:effect_lifecycle, %Outcome{value: {:canceled, :superseded}}}, 1_000
-      assert_receive {:effect_lifecycle, %Outcome{value: :running}}, 1_000
-      assert_receive {:auth_probe_started, second_worker}, 1_000
-      assert Process.alive?(second_worker)
-
-      send(second_worker, {:auth_probe_result, {:unavailable, :newest}})
-      assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
-      assert :ok = EffectScheduler.claim(scheduler, outcome)
-      {_state, final_outcome} = AuthStatusEffect.apply(state, outcome)
-      EffectScheduler.finalize(scheduler, final_outcome)
     end
 
     test "/plan enters plan mode for the active session" do

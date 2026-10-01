@@ -49,11 +49,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp format_candidate(%ModelCandidate{selection: selection} = candidate) do
     route = selection.route
 
-    status =
-      if selection.evidence.custom,
-        do: "unverified custom route",
-        else: "unverified catalog route"
-
     endpoint = endpoint_label(route.execution.base_url, route.execution.path)
     context = format_context(selection.policy.limits.context)
     cost = format_cost(selection.policy.cost)
@@ -66,7 +61,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
         "#{route.model_provider} via #{route.execution.wire_protocol}",
         endpoint,
         credential,
-        status,
+        "unverified catalog route",
         context,
         thinking,
         capabilities,

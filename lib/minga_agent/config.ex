@@ -69,11 +69,6 @@ defmodule MingaAgent.Config do
     system_prompt: "",
     append_system_prompt: "",
 
-    # API endpoint
-    api_base_url: "",
-    api_base_url_override: nil,
-    api_endpoints: nil,
-
     # MCP
     mcp_servers: [],
 
@@ -126,9 +121,6 @@ defmodule MingaAgent.Config do
           agent_hooks: [Hook.t()],
           system_prompt: String.t(),
           append_system_prompt: String.t(),
-          api_base_url: String.t(),
-          api_base_url_override: String.t() | nil,
-          api_endpoints: map() | nil,
           mcp_servers: [MingaAgent.MCP.ServerConfig.t() | map()],
           compaction_threshold: float() | nil,
           compaction_keep_recent: pos_integer(),
@@ -179,9 +171,6 @@ defmodule MingaAgent.Config do
       agent_hooks: merged_agent_hooks(get(:agent_hooks, [])),
       system_prompt: get(:agent_system_prompt, ""),
       append_system_prompt: get(:agent_append_system_prompt, ""),
-      api_base_url: get(:agent_api_base_url, ""),
-      api_base_url_override: non_empty_env("MINGA_API_BASE_URL"),
-      api_endpoints: get(:agent_api_endpoints, nil),
       mcp_servers: get(:agent_mcp_servers, []),
       compaction_threshold: get(:agent_compaction_threshold, 0.80),
       compaction_keep_recent: get(:agent_compaction_keep_recent, 6),
@@ -391,10 +380,7 @@ defmodule MingaAgent.Config do
       model: @unconfigured_model,
       selection_intent: nil,
       model_favorites: get(:agent_model_favorites, []),
-      max_tokens: get(:agent_max_tokens, 16_384),
-      api_base_url: get(:agent_api_base_url, ""),
-      api_base_url_override: non_empty_env("MINGA_API_BASE_URL"),
-      api_endpoints: get(:agent_api_endpoints, nil)
+      max_tokens: get(:agent_max_tokens, 16_384)
     }
 
     case MingaAgent.ModelResolver.candidates(config: config) do
@@ -408,14 +394,6 @@ defmodule MingaAgent.Config do
     _ -> nil
   catch
     :exit, _ -> nil
-  end
-
-  @spec non_empty_env(String.t()) :: String.t() | nil
-  defp non_empty_env(name) do
-    case System.get_env(name) do
-      value when is_binary(value) and value != "" -> value
-      _ -> nil
-    end
   end
 
   # Reads a single option from the Options ETS table, falling back to the

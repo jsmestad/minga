@@ -18,7 +18,8 @@ defmodule Minga.Extension.AI do
   """
 
   alias MingaAgent.Config
-  alias MingaAgent.ProviderResolver
+  alias MingaAgent.Credentials
+  alias MingaAgent.ModelResolver
 
   @default_max_tokens 1024
 
@@ -35,6 +36,7 @@ defmodule Minga.Extension.AI do
   @type opts :: keyword()
 
   @type error :: :empty_response | {:provider_error, term()}
+  @typep prepared_request :: {LLMDB.Model.t(), [message()], keyword(), function()}
 
   @typedoc "Events delivered to `reply_to` by `stream/2`, tagged with the call's `ref`."
   @type event :: {:chunk, String.t()} | {:done, String.t()} | {:error, error()}
@@ -50,11 +52,12 @@ defmodule Minga.Extension.AI do
   @spec stream([message()], opts()) :: {:ok, reference()}
   def stream(messages, opts \\ []) when is_list(messages) do
     reply_to = Keyword.get(opts, :reply_to, self())
-    {model, req_messages, stream_opts, client} = prepare(messages, opts)
     ref = make_ref()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      run_stream(client, model, req_messages, stream_opts, reply_to, ref)
+      messages
+      |> prepare(opts)
+      |> run_stream(reply_to, ref)
     end)
 
     {:ok, ref}
@@ -68,29 +71,43 @@ defmodule Minga.Extension.AI do
   """
   @spec complete([message()], opts()) :: {:ok, String.t()} | {:error, error()}
   def complete(messages, opts \\ []) when is_list(messages) do
-    {model, req_messages, stream_opts, client} = prepare(messages, opts)
-
-    with {:ok, stream_response} <- request(client, model, req_messages, stream_opts) do
+    with {:ok, {model, req_messages, stream_opts, client}} <- prepare(messages, opts),
+         {:ok, stream_response} <- request(client, model, req_messages, stream_opts) do
       collect_text(stream_response)
     end
   end
 
-  @spec prepare([message()], opts()) :: {String.t(), [message()], keyword(), function()}
+  @spec prepare([message()], opts()) :: {:ok, prepared_request()} | {:error, error()}
   defp prepare(messages, opts) do
-    model = resolve_model(opts)
-    config = Config.resolve()
-    client = Keyword.get(opts, :client, &ReqLLM.stream_text/3)
+    config = Keyword.get_lazy(opts, :config, &Config.resolve/0)
+    credentials_opts = Keyword.get(opts, :credentials_opts, [])
+    resolver_opts = resolver_opts(config, credentials_opts)
 
-    stream_opts =
-      [max_tokens: Keyword.get(opts, :max_tokens, @default_max_tokens)]
-      |> maybe_add_base_url(config)
+    with {:ok, selection} <- ModelResolver.resolve(resolve_model(opts, config), resolver_opts),
+         {:ok, credential_opts} <-
+           Credentials.request_options(selection.credential, credentials_opts) do
+      request_opts =
+        Keyword.put_new(
+          credential_opts,
+          :max_tokens,
+          Keyword.get(opts, :max_tokens, @default_max_tokens)
+        )
 
-    {model, prepend_system(messages, opts), stream_opts, client}
+      {:ok,
+       {selection.request_model, prepend_system(messages, opts), request_opts,
+        Keyword.get(opts, :client, &ReqLLM.stream_text/3)}}
+    else
+      {:error, reason} -> {:error, {:provider_error, reason}}
+    end
   end
 
-  @spec resolve_model(opts()) :: String.t()
-  defp resolve_model(opts) do
-    Keyword.get(opts, :model) || ProviderResolver.configured_model() || Config.default_model()
+  @spec resolver_opts(Config.t(), keyword()) :: keyword()
+  defp resolver_opts(config, credentials_opts),
+    do: [config: config, credential_snapshot: Credentials.snapshot(credentials_opts)]
+
+  @spec resolve_model(opts(), Config.t()) :: ModelResolver.intent()
+  defp resolve_model(opts, config) do
+    Keyword.get(opts, :model) || config.selection_intent || config.model
   end
 
   @spec prepend_system([message()], opts()) :: [message()]
@@ -104,13 +121,17 @@ defmodule Minga.Extension.AI do
     end
   end
 
-  @spec run_stream(function(), String.t(), [message()], keyword(), pid(), reference()) :: :ok
-  defp run_stream(client, model, messages, stream_opts, reply_to, ref) do
+  @spec run_stream({:ok, prepared_request()} | {:error, error()}, pid(), reference()) :: :ok
+  defp run_stream({:ok, {model, messages, stream_opts, client}}, reply_to, ref) do
     client
     |> request(model, messages, stream_opts)
     |> deliver_stream_result(reply_to, ref)
 
     :ok
+  end
+
+  defp run_stream({:error, reason}, reply_to, ref) do
+    deliver_stream_result({:error, reason}, reply_to, ref)
   end
 
   @spec deliver_stream_result(
@@ -179,7 +200,7 @@ defmodule Minga.Extension.AI do
     e -> {:error, {:provider_error, Exception.message(e)}}
   end
 
-  @spec request(function(), String.t(), [message()], keyword()) ::
+  @spec request(function(), LLMDB.Model.t(), [message()], keyword()) ::
           {:ok, ReqLLM.StreamResponse.t()} | {:error, error()}
   defp request(client, model, messages, stream_opts) do
     case client.(model, messages, stream_opts) do
@@ -189,17 +210,4 @@ defmodule Minga.Extension.AI do
   rescue
     e -> {:error, {:provider_error, Exception.message(e)}}
   end
-
-  @spec maybe_add_base_url(keyword(), Config.t()) :: keyword()
-  defp maybe_add_base_url(opts, config) do
-    case non_empty(config.api_base_url_override) || non_empty(config.api_base_url) do
-      nil -> opts
-      url -> Keyword.put(opts, :base_url, url)
-    end
-  end
-
-  @spec non_empty(String.t() | nil) :: String.t() | nil
-  defp non_empty(nil), do: nil
-  defp non_empty(""), do: nil
-  defp non_empty(s) when is_binary(s), do: s
 end

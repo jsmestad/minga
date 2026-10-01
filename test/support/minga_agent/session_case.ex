@@ -186,7 +186,7 @@ defmodule Minga.Test.SessionCase do
     case Keyword.get(opts, :provider) do
       MingaAgent.Providers.Native ->
         Keyword.put_new(opts, :credentials_snapshot_fn, fn ->
-          MingaAgent.Credentials.Snapshot.new(%{}, nil, "http://127.0.0.1:1")
+          MingaAgent.Credentials.Snapshot.new(%{"openai" => :env}, nil)
         end)
 
       _provider ->
@@ -196,15 +196,16 @@ defmodule Minga.Test.SessionCase do
 
   @spec native_provider_opts(module(), keyword()) :: keyword()
   defp native_provider_opts(MingaAgent.Providers.Native, provider_opts) do
-    config =
-      provider_opts
-      |> Keyword.get(:config, %MingaAgent.Config{})
-      |> MingaAgent.Test.ModelSelectionFixture.config()
-
     provider_opts
-    |> Keyword.put(:provider, "test")
+    |> Keyword.put(:provider, "openai")
     |> Keyword.put(:model, MingaAgent.Test.ModelSelectionFixture.model_intent())
-    |> Keyword.put(:config, config)
+    |> Keyword.put_new(
+      :model_resolver_opts,
+      MingaAgent.Test.ModelSelectionFixture.resolver_opts()
+    )
+    |> Keyword.put_new(:credential_opts,
+      env: %{"OPENAI_API_KEY" => "fixture-openai-key"}
+    )
   end
 
   defp native_provider_opts(_provider, provider_opts), do: provider_opts
