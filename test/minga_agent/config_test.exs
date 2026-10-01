@@ -61,6 +61,33 @@ defmodule MingaAgent.ConfigTest do
     end
   end
 
+  describe "retained artifact config" do
+    test "owns finite production defaults and reads the typed capacity options" do
+      server = start_supervised!({Options, name: nil})
+      Process.put(:minga_config_options, server)
+
+      assert {:ok, 64 * 1024 * 1024} =
+               Options.set(server, :agent_artifact_root_bytes, 64 * 1024 * 1024)
+
+      assert {:ok, 32 * 1024 * 1024} =
+               Options.set(server, :agent_artifact_session_bytes, 32 * 1024 * 1024)
+
+      assert {:ok, 8 * 1024 * 1024} =
+               Options.set(server, :agent_artifact_capture_bytes, 8 * 1024 * 1024)
+
+      assert {:ok, 4 * 1024 * 1024} =
+               Options.set(server, :agent_artifact_image_bytes, 4 * 1024 * 1024)
+
+      limits = Config.artifact_limits()
+      assert limits.root_bytes == 64 * 1024 * 1024
+      assert limits.session_bytes == 32 * 1024 * 1024
+      assert limits.capture_bytes == 8 * 1024 * 1024
+      assert limits.image_bytes == 4 * 1024 * 1024
+      assert limits.append_bytes == 64 * 1024
+      assert limits.root_namespaces == 123
+    end
+  end
+
   describe "MCP config" do
     test "defaults to an empty list" do
       config = Config.resolve()

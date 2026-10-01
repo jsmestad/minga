@@ -116,9 +116,21 @@ defmodule MingaAgent.Tools.Shell do
     else
       state = %{state | acc: retain_output(state.acc, data), last_data: now}
       state = retain_pending(data, state)
-      maybe_flush_pending_and_continue(port, now, state)
+      continue_or_finish_quota(port, now, state)
     end
   end
+
+  @spec continue_or_finish_quota(port(), integer(), collect_state()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp continue_or_finish_quota(port, _now, %{acc: {_chunks, _bytes, true}} = state) do
+    flush_if_needed(state)
+    close_port(port)
+    output = state.acc |> output_state_to_binary() |> String.trim_trailing()
+    {:ok, output}
+  end
+
+  defp continue_or_finish_quota(port, now, state),
+    do: maybe_flush_pending_and_continue(port, now, state)
 
   @spec handle_port_exit(integer(), collect_state()) :: {:ok, String.t()}
   defp handle_port_exit(exit_code, state) do
@@ -334,10 +346,24 @@ defmodule MingaAgent.Tools.Shell do
 
   @spec close_port(port()) :: :ok
   defp close_port(port) do
-    Port.close(port)
-    :ok
-  rescue
-    ArgumentError -> :ok
+    try do
+      Port.close(port)
+    rescue
+      ArgumentError -> :ok
+    end
+
+    drain_port(port)
+  end
+
+  @spec drain_port(port()) :: :ok
+  defp drain_port(port) do
+    receive do
+      {^port, {:data, _data}} -> drain_port(port)
+      {^port, {:exit_status, _status}} -> drain_port(port)
+      {:EXIT, ^port, _reason} -> drain_port(port)
+    after
+      0 -> :ok
+    end
   end
 
   @spec safe_env_charlist([{String.t(), String.t()}]) :: [{charlist(), charlist()}]

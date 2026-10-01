@@ -26,6 +26,19 @@ defmodule Minga.Buffer.ForkTest do
       refute Fork.dirty?(fork)
       assert Fork.version(fork) == 0
     end
+
+    test "bounded line snapshots include the fork version" do
+      parent = start_parent!("zero\none\ntwo")
+      {:ok, fork} = Fork.create(parent)
+
+      assert {"one", 1, 3, 0, true} =
+               Fork.content_on_lines_with_version(fork, 1, 1, 100)
+
+      GenServer.call(fork, {:replace_content, "zero\nchanged\ntwo", :agent})
+
+      assert {"chang", 1, 3, 1, false} =
+               Fork.content_on_lines_with_version(fork, 1, 1, 5)
+    end
   end
 
   describe "editing" do

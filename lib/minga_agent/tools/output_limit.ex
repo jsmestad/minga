@@ -3,12 +3,13 @@ defmodule MingaAgent.Tools.OutputLimit do
   UTF-8-safe output truncation for model-facing agent tool results.
   """
 
+  alias MingaAgent.Tools.OutputLimit.Result
+
   @default_max_bytes 51_200
   @default_timeout_ms 10_000
 
-  @type command_status :: non_neg_integer() | :timeout
-  @type command_result ::
-          {output :: String.t(), status :: command_status(), truncated? :: boolean()}
+  @type command_status :: Result.status()
+  @type command_result :: Result.t()
   @type command_opts :: [
           cd: String.t(),
           stderr_to_stdout: boolean(),
@@ -27,7 +28,7 @@ defmodule MingaAgent.Tools.OutputLimit do
   @spec default_timeout_ms() :: pos_integer()
   def default_timeout_ms, do: @default_timeout_ms
 
-  @doc "Runs a command through a Port and retains at most `max_bytes` of output."
+  @doc "Runs a command through a Port, terminating it when the finite capture allowance is exhausted."
   @spec collect_command(String.t(), [String.t()], command_opts()) :: command_result()
   def collect_command(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
     max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes)
@@ -97,18 +98,33 @@ defmodule MingaAgent.Tools.OutputLimit do
       {^port, {:data, data}} ->
         if expired?(deadline_ms) do
           close_port(port)
-          {output_state_to_binary(output_state), :timeout, elem(output_state, 2)}
+          Result.new(output_state_to_binary(output_state), :timeout, {:incomplete, :timeout})
         else
-          collect_port(port, retain_output(output_state, data, max_bytes), max_bytes, deadline_ms)
+          next_state = retain_output(output_state, data, max_bytes)
+          collect_after_data(port, next_state, max_bytes, deadline_ms)
         end
 
       {^port, {:exit_status, exit_code}} ->
-        {output_state_to_binary(output_state), exit_code, elem(output_state, 2)}
+        Result.new(output_state_to_binary(output_state), exit_code, :complete)
     after
       remaining_ms(deadline_ms) ->
         close_port(port)
-        {output_state_to_binary(output_state), :timeout, elem(output_state, 2)}
+        Result.new(output_state_to_binary(output_state), :timeout, {:incomplete, :timeout})
     end
+  end
+
+  @spec collect_after_data(port(), output_state(), pos_integer(), integer()) :: command_result()
+  defp collect_after_data(port, {_chunks, _bytes, true} = output_state, _max_bytes, _deadline) do
+    close_port(port)
+    Result.new(
+      output_state_to_binary(output_state),
+      :terminated,
+      {:incomplete, :capture_byte_limit}
+    )
+  end
+
+  defp collect_after_data(port, output_state, max_bytes, deadline_ms) do
+    collect_port(port, output_state, max_bytes, deadline_ms)
   end
 
   @spec retain_output(output_state(), binary(), pos_integer()) :: output_state()
@@ -149,9 +165,23 @@ defmodule MingaAgent.Tools.OutputLimit do
 
   @spec close_port(port()) :: :ok
   defp close_port(port) do
-    Port.close(port)
-    :ok
-  rescue
-    ArgumentError -> :ok
+    try do
+      Port.close(port)
+    rescue
+      ArgumentError -> :ok
+    end
+
+    drain_port(port)
+  end
+
+  @spec drain_port(port()) :: :ok
+  defp drain_port(port) do
+    receive do
+      {^port, {:data, _data}} -> drain_port(port)
+      {^port, {:exit_status, _status}} -> drain_port(port)
+      {:EXIT, ^port, _reason} -> drain_port(port)
+    after
+      0 -> :ok
+    end
   end
 end

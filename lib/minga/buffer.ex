@@ -163,6 +163,16 @@ defmodule Minga.Buffer do
   @spec content_on_lines(t(), non_neg_integer(), non_neg_integer()) :: String.t()
   defdelegate content_on_lines(server, start_line, end_line), to: BufferProcess
 
+  @doc "A byte-bounded line range and mutation version captured atomically."
+  @spec content_on_lines_with_version(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer(), pos_integer(), non_neg_integer(), boolean()}
+  defdelegate content_on_lines_with_version(server, start_line, line_count, max_bytes),
+    to: BufferProcess
+
   @doc "Text between two positions (end inclusive, includes the character at end_pos)."
   @spec text_between_inclusive(t(), position(), position()) :: String.t()
   defdelegate text_between_inclusive(server, start_pos, end_pos), to: BufferProcess

@@ -28,7 +28,8 @@ defmodule MingaAgent.Changeset.Server do
           deletions: MapSet.t(String.t()),
           history: %{String.t() => [binary() | :unmodified | :deleted]},
           budget: pos_integer() | :unlimited,
-          attempts: non_neg_integer()
+          attempts: non_neg_integer(),
+          revision: non_neg_integer()
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -52,7 +53,8 @@ defmodule MingaAgent.Changeset.Server do
           deletions: MapSet.new(),
           history: %{},
           budget: budget,
-          attempts: 0
+          attempts: 0,
+          revision: 0
         }
 
         {:ok, state}
@@ -76,7 +78,7 @@ defmodule MingaAgent.Changeset.Server do
           state = push_history(state, path)
           state = put_in(state.modifications[path], content)
           state = %{state | deletions: MapSet.delete(state.deletions, path)}
-          {:reply, :ok, state}
+          {:reply, :ok, bump_revision(state)}
         else
           {:error, reason} ->
             {:reply, {:error, reason}, state}
@@ -91,7 +93,7 @@ defmodule MingaAgent.Changeset.Server do
     case normalize_path(state, relative_path) do
       {:ok, path} ->
         case apply_edit(state, path, old_text, new_text) do
-          {:ok, new_state} -> {:reply, :ok, new_state}
+          {:ok, new_state} -> {:reply, :ok, bump_revision(new_state)}
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
 
@@ -109,7 +111,7 @@ defmodule MingaAgent.Changeset.Server do
             state = push_history(state, path)
             state = %{state | deletions: MapSet.put(state.deletions, path)}
             state = %{state | modifications: Map.delete(state.modifications, path)}
-            {:reply, :ok, state}
+            {:reply, :ok, bump_revision(state)}
 
           {:error, reason} ->
             {:reply, {:error, reason}, state}
@@ -131,6 +133,30 @@ defmodule MingaAgent.Changeset.Server do
     case normalize_path(state, relative_path) do
       {:ok, path} -> {:reply, current_content(state, path), state}
       {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:read_file_with_version, relative_path}, _from, state) do
+    case normalize_path(state, relative_path) do
+      {:ok, path} ->
+        case current_content(state, path) do
+          {:ok, content} -> {:reply, {:ok, content, state.revision}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:read_source_with_version, relative_path}, _from, state) do
+    case normalize_path(state, relative_path) do
+      {:ok, path} ->
+        result = source_descriptor(state, path)
+        {:reply, append_source_revision(result, state.revision), state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -207,10 +233,10 @@ defmodule MingaAgent.Changeset.Server do
   def handle_call(:reset, _from, state) do
     case restore_all(state) do
       {:ok, new_state} ->
-        {:reply, :ok, new_state}
+        {:reply, :ok, bump_revision(new_state)}
 
       {:error, reason, new_state} ->
-        {:reply, {:error, reason}, new_state}
+        {:reply, {:error, reason}, bump_if_sources_changed(new_state, state)}
     end
   end
 
@@ -227,7 +253,7 @@ defmodule MingaAgent.Changeset.Server do
                 history: Map.delete(state.history, path)
             }
 
-            {:reply, :ok, state}
+            {:reply, :ok, bump_revision(state)}
 
           {true, {:error, reason}} ->
             {:reply, {:error, reason}, state}
@@ -255,7 +281,7 @@ defmodule MingaAgent.Changeset.Server do
         {:stop, :normal, :ok, state}
 
       details ->
-        state = prune_successful_merge_results(state, details.results)
+        state = state |> prune_successful_merge_results(details.results) |> bump_if_sources_changed(state)
         {:reply, {:conflict, details}, state}
     end
   rescue
@@ -442,7 +468,7 @@ defmodule MingaAgent.Changeset.Server do
                 state = put_in(state.history[path], rest)
                 state = %{state | modifications: Map.delete(state.modifications, path)}
                 state = %{state | deletions: MapSet.delete(state.deletions, path)}
-                {:reply, :ok, state}
+                {:reply, :ok, bump_revision(state)}
 
               {:error, reason} ->
                 {:reply, {:error, reason}, state}
@@ -454,7 +480,7 @@ defmodule MingaAgent.Changeset.Server do
                 state = put_in(state.history[path], rest)
                 state = %{state | modifications: Map.delete(state.modifications, path)}
                 state = %{state | deletions: MapSet.put(state.deletions, path)}
-                {:reply, :ok, state}
+                {:reply, :ok, bump_revision(state)}
 
               {:error, reason} ->
                 {:reply, {:error, reason}, state}
@@ -466,7 +492,7 @@ defmodule MingaAgent.Changeset.Server do
                 state = put_in(state.history[path], rest)
                 state = put_in(state.modifications[path], prev)
                 state = %{state | deletions: MapSet.delete(state.deletions, path)}
-                {:reply, :ok, state}
+                {:reply, :ok, bump_revision(state)}
 
               {:error, reason} ->
                 {:reply, {:error, reason}, state}
@@ -476,6 +502,18 @@ defmodule MingaAgent.Changeset.Server do
       _ ->
         {:reply, {:error, :nothing_to_undo}, state}
     end
+  end
+
+  @spec bump_revision(state()) :: state()
+  defp bump_revision(state), do: %{state | revision: state.revision + 1}
+
+  @spec bump_if_sources_changed(state(), state()) :: state()
+  defp bump_if_sources_changed(new_state, previous_state) do
+    changed? =
+      new_state.modifications != previous_state.modifications or
+        new_state.deletions != previous_state.deletions
+
+    if changed?, do: bump_revision(new_state), else: new_state
   end
 
   @spec apply_edit(state(), String.t(), String.t(), String.t()) ::
@@ -493,6 +531,25 @@ defmodule MingaAgent.Changeset.Server do
       end
     end
   end
+
+  @spec source_descriptor(state(), String.t()) ::
+          {:ok, {:memory, binary()} | {:disk, String.t()}} | {:error, :deleted}
+  defp source_descriptor(state, path) do
+    case {MapSet.member?(state.deletions, path), Map.fetch(state.modifications, path)} do
+      {true, _} -> {:error, :deleted}
+      {_, {:ok, content}} -> {:ok, {:memory, content}}
+      {_, :error} -> {:ok, {:disk, Path.join(state.project_root, path)}}
+    end
+  end
+
+  @spec append_source_revision(
+          {:ok, {:memory, binary()} | {:disk, String.t()}} | {:error, term()},
+          non_neg_integer()
+        ) ::
+          {:ok, {:memory, binary()} | {:disk, String.t()}, non_neg_integer()}
+          | {:error, term()}
+  defp append_source_revision({:ok, source}, revision), do: {:ok, source, revision}
+  defp append_source_revision({:error, _reason} = error, _revision), do: error
 
   @spec current_content(state(), String.t()) :: {:ok, binary()} | {:error, term()}
   defp current_content(state, path) do

@@ -81,6 +81,21 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, {:read_file, relative_path})
   end
 
+  @doc "Reads changeset content and its monotonic mutation revision atomically."
+  @spec read_file_with_version(changeset(), String.t()) ::
+          {:ok, binary(), non_neg_integer()} | {:error, term()}
+  def read_file_with_version(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:read_file_with_version, relative_path})
+  end
+
+  @doc "Returns an atomic memory-or-disk source descriptor with the changeset revision."
+  @spec read_source_with_version(changeset(), String.t()) ::
+          {:ok, {:memory, binary()} | {:disk, String.t()}, non_neg_integer()}
+          | {:error, term()}
+  def read_source_with_version(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:read_source_with_version, relative_path})
+  end
+
   @doc "Undoes the last edit to a specific file."
   @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo | term()}
   def undo(cs, relative_path) when is_binary(relative_path) do

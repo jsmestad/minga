@@ -8,16 +8,27 @@ defmodule MingaAgent.Tool.Context do
   alias MingaAgent.ToolRouter
   alias MingaAgent.ToolRouter.Context, as: RouterContext
 
+  @type capture_key :: {:delivery, String.t(), String.t()}
+
   @typedoc "Opaque-ish runtime context passed to source-owned tool builders."
   @type t :: %__MODULE__{
           project_root: String.t(),
           router_context: RouterContext.t(),
+          artifact_store: GenServer.server() | nil,
+          capture_key: capture_key() | nil,
           session_id: String.t() | nil,
           metadata: map()
         }
 
   @enforce_keys [:project_root, :router_context]
-  defstruct [:project_root, :router_context, :session_id, metadata: %{}]
+  defstruct [
+    :project_root,
+    :router_context,
+    :artifact_store,
+    :capture_key,
+    :session_id,
+    metadata: %{}
+  ]
 
   @doc "Builds a tool context from runtime values."
   @spec new(keyword()) :: t()
@@ -36,9 +47,18 @@ defmodule MingaAgent.Tool.Context do
     %__MODULE__{
       project_root: project_root,
       router_context: router_context,
+      artifact_store: Keyword.get(attrs, :artifact_store),
+      capture_key: Keyword.get(attrs, :capture_key),
       session_id: Keyword.get(attrs, :session_id),
       metadata: Keyword.get(attrs, :metadata, %{})
     }
+  end
+
+  @doc "Scopes the record-owned artifact capability to one admitted tool call."
+  @spec for_tool_call(t(), String.t(), String.t()) :: t()
+  def for_tool_call(%__MODULE__{} = context, checkpoint_id, tool_call_id)
+      when is_binary(checkpoint_id) and is_binary(tool_call_id) do
+    %{context | capture_key: {:delivery, checkpoint_id, tool_call_id}}
   end
 
   @doc "Returns opts accepted by `MingaAgent.Tools.all/1`."
@@ -50,7 +70,9 @@ defmodule MingaAgent.Tool.Context do
       fork_store: context.router_context.fork_store,
       changeset: context.router_context.changeset,
       parent_session: Map.get(context.metadata, :parent_session),
-      shell_output_callback: Map.get(context.metadata, :shell_output_callback)
+      shell_output_callback: Map.get(context.metadata, :shell_output_callback),
+      artifact_store: context.artifact_store,
+      capture_key: context.capture_key
     ]
   end
 
@@ -58,6 +80,30 @@ defmodule MingaAgent.Tool.Context do
   @spec read_file(t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%__MODULE__{} = context, path) do
     ToolRouter.read_file(context.router_context, path)
+  end
+
+  @doc "Captures a routed file with exact retained bytes and source revision."
+  @spec capture_file(t(), String.t(), keyword()) ::
+          {:ok, MingaAgent.Tool.Output.t()}
+          | {:error, MingaAgent.Tool.Output.t() | term()}
+  def capture_file(%__MODULE__{} = context, path, opts \\ []) when is_binary(path) do
+    ToolRouter.capture_file(
+      context.router_context,
+      path,
+      context.artifact_store,
+      context.capture_key,
+      opts
+    )
+  end
+
+  @doc "Fetches exact retained bytes from this record's artifact owner without replaying a tool."
+  @spec fetch_output(t(), MingaAgent.Tool.Output.Reference.t(), MingaAgent.Tool.Output.Range.t()) ::
+          {:ok, term()} | {:error, term()}
+  def fetch_output(%__MODULE__{artifact_store: nil}, _reference, _range),
+    do: {:error, :retention_unavailable}
+
+  def fetch_output(%__MODULE__{} = context, reference, range) do
+    MingaAgent.ArtifactStore.fetch(context.artifact_store, reference, range)
   end
 
   @doc "Writes a file through the session router."

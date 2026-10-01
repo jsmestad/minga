@@ -28,6 +28,7 @@ defmodule MingaAgent.ToolRouter do
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter.Context
   alias MingaAgent.ToolRouter.SearchContext
+  alias MingaAgent.ToolRouter.SourceCapture
 
   @typedoc "Fork store reference (nil when fork routing is disabled)."
   @type fork_store :: pid() | nil
@@ -80,6 +81,20 @@ defmodule MingaAgent.ToolRouter do
   end
 
   def read_file(ctx, path), do: read_file_changeset_or_passthrough(ctx, path)
+
+  @doc "Captures a routed source with exact retained bytes and an atomic revision."
+  @spec capture_file(
+          context(),
+          String.t(),
+          GenServer.server() | nil,
+          MingaAgent.Tool.Context.capture_key() | nil,
+          keyword()
+        ) ::
+          {:ok, MingaAgent.Tool.Output.t()}
+          | {:error, MingaAgent.Tool.Output.t() | term()}
+  def capture_file(%Context{} = context, path, artifact_store, capture_key, opts \\ []) do
+    SourceCapture.capture(context, path, artifact_store, capture_key, opts)
+  end
 
   @doc """
   Writes a file, routing through fork or changeset if active.

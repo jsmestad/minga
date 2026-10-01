@@ -866,6 +866,21 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:content_on_lines, start_line, end_line})
   end
 
+  @doc "Returns a byte-bounded line range, total lines, and mutation version atomically."
+  @spec content_on_lines_with_version(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer(), pos_integer(), non_neg_integer(), boolean()}
+  def content_on_lines_with_version(server, start_line, line_count, max_bytes)
+      when start_line >= 0 and line_count >= 0 and max_bytes >= 0 do
+    GenServer.call(
+      server,
+      {:content_on_lines_with_version, start_line, line_count, max_bytes}
+    )
+  end
+
   @doc "Returns the content and cursor position in a single GenServer call."
   @spec content_and_cursor(GenServer.server()) :: {String.t(), Document.position()}
   def content_and_cursor(server) do
@@ -1935,6 +1950,17 @@ defmodule Minga.Buffer.Process do
   def handle_call({:content_on_lines, start_line, end_line}, _from, state) do
     result = Document.content_on_lines(state.document, start_line, end_line)
     {:reply, result, state}
+  end
+
+  def handle_call(
+        {:content_on_lines_with_version, start_line, line_count, max_bytes},
+        _from,
+        state
+      ) do
+    {content, selected_count, total, complete?} =
+      Lines.bounded_contents(state.document, start_line, line_count, max_bytes)
+
+    {:reply, {content, selected_count, total, BufState.version(state), complete?}, state}
   end
 
   def handle_call({:delete_lines, _start_line, _end_line}, _from, %{read_only: true} = state) do

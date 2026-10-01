@@ -12,13 +12,19 @@ defmodule MingaAgent.Tools.ProcessBackend.System do
   @impl true
   @spec find(String.t(), String.t(), map(), keyword()) :: MingaAgent.Tools.ProcessBackend.result()
   def find(pattern, path, opts, exec_opts) do
-    Find.execute(pattern, path, opts, exec_opts)
+    case Keyword.fetch(exec_opts, :artifact_store) do
+      {:ok, _store} -> Find.capture(pattern, path, opts, exec_opts)
+      :error -> Find.execute(pattern, path, opts, exec_opts)
+    end
   end
 
   @impl true
   @spec grep(String.t(), String.t(), map(), keyword()) :: MingaAgent.Tools.ProcessBackend.result()
   def grep(pattern, path, opts, exec_opts) do
-    Grep.execute(pattern, path, opts, exec_opts)
+    case Keyword.fetch(exec_opts, :artifact_store) do
+      {:ok, _store} -> Grep.capture(pattern, path, opts, exec_opts)
+      :error -> Grep.execute(pattern, path, opts, exec_opts)
+    end
   end
 
   @impl true

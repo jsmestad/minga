@@ -65,6 +65,10 @@ defmodule Minga.Application do
       │       ├── MingaEditor.Frontend.Manager
       │       ├── MingaEditor.Renderer.Server
       │       └── MingaEditor
+      ├── MingaAgent.ArtifactSupervisor (rest_for_one)
+      │   ├── MingaAgent.ArtifactQuota
+      │   ├── MingaAgent.ArtifactStores.Registry
+      │   └── MingaAgent.ArtifactStores.StoreSupervisor
       └── Minga.SystemObserver               (always-on process observer)
 
   In standalone Burrito mode, or when the macOS app's bundled TUI wrapper is
@@ -150,11 +154,14 @@ defmodule Minga.Application do
         []
       end
 
-    # SystemObserver is last: it monitors all other supervisors and needs
-    # the full tree to be up. With rest_for_one, its crash restarts nothing
-    # (nothing comes after it), and any upstream crash restarts it too
-    # (correct: re-establishes monitors).
-    children = base_children ++ Enum.concat(editor_children, [Minga.SystemObserver])
+    artifact_children = if minimal?, do: [], else: [MingaAgent.ArtifactSupervisor]
+
+    # Artifact storage starts after sessions and editor runtime. Its internal
+    # rest-for-one restarts quota/registry/store actors together without a
+    # storage failure restarting an editor or agent session.
+    children =
+      base_children ++
+        Enum.concat(editor_children, artifact_children ++ [Minga.SystemObserver])
 
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     StartupTimer.mark(:children_built)

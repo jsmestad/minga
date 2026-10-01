@@ -9,12 +9,16 @@ defmodule MingaAgent.Session.ContinuationCodec do
 
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Request
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
+  alias MingaAgent.Tool.Output.Reference
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
   alias ReqLLM.Message.ReasoningDetails
   alias ReqLLM.ToolCall
 
-  @version 2
+  @version 3
+  @legacy_version 2
 
   @doc "Encodes a continuation boundary and any in-flight effect checkpoint into JSON-safe values."
   @spec encode(Continuation.t()) :: map()
@@ -39,9 +43,9 @@ defmodule MingaAgent.Session.ContinuationCodec do
     }
   end
 
-  @doc "Decodes a supported lossless continuation version."
+  @doc "Decodes the current lossless format and the previous one-way-import format."
   @spec decode(map()) :: {:ok, Continuation.t()} | {:error, term()}
-  def decode(%{"version" => @version} = encoded) do
+  def decode(%{"version" => version} = encoded) when version in [@legacy_version, @version] do
     required_fields = [
       "provenance",
       "messages",
@@ -56,6 +60,7 @@ defmodule MingaAgent.Session.ContinuationCodec do
     with true <-
            Enum.all?(required_fields, &Map.has_key?(encoded, &1)) ||
              {:error, :invalid_continuation},
+         :ok <- validate_version_tags(encoded, version),
          {:ok, provenance} <- decode_provenance(encoded["provenance"]),
          {:ok, messages} <- decode_terms(encoded["messages"]),
          {:ok, active_request} <- decode_request(encoded["active_request"]),
@@ -81,6 +86,84 @@ defmodule MingaAgent.Session.ContinuationCodec do
 
   def decode(%{"version" => version}), do: {:error, {:unknown_continuation_version, version}}
   def decode(_encoded), do: {:error, :invalid_continuation}
+
+  @spec validate_version_tags(map(), pos_integer()) :: :ok | {:error, :invalid_continuation}
+  defp validate_version_tags(encoded, @legacy_version) do
+    if output_tag?(encoded), do: {:error, :invalid_continuation}, else: :ok
+  end
+
+  defp validate_version_tags(_encoded, @version), do: :ok
+
+  @spec output_tag?(term()) :: boolean()
+  defp output_tag?(%{"$" => "output"}), do: true
+  defp output_tag?(value) when is_map(value), do: Enum.any?(Map.values(value), &output_tag?/1)
+  defp output_tag?(value) when is_list(value), do: Enum.any?(value, &output_tag?/1)
+  defp output_tag?(_value), do: false
+
+  @doc "Returns the unique retained references reachable from known continuation message locations."
+  @spec references(map()) :: [Reference.t()]
+  def references(%{
+        "messages" => messages,
+        "active_request" => active_request,
+        "tool_checkpoint" => checkpoint,
+        "branches" => branches
+      })
+      when is_list(messages) and is_map(branches) do
+    messages
+    |> Enum.concat(request_messages(active_request))
+    |> Enum.concat(checkpoint_messages(checkpoint))
+    |> Enum.concat(branch_messages(branches))
+    |> Enum.flat_map(&term_references/1)
+    |> Enum.uniq_by(& &1.token)
+  end
+
+  def references(_encoded), do: []
+
+  @spec request_messages(term()) :: [term()]
+  defp request_messages(%{"messages" => messages}) when is_list(messages), do: messages
+  defp request_messages(_request), do: []
+
+  @spec checkpoint_messages(term()) :: [term()]
+  defp checkpoint_messages(%{"messages" => messages, "calls" => calls})
+       when is_list(messages) and is_list(calls) do
+    completed =
+      Enum.flat_map(calls, fn
+        %{"status" => %{"kind" => "completed", "result_message" => result}} -> [result]
+        _call -> []
+      end)
+
+    messages ++ completed
+  end
+
+  defp checkpoint_messages(_checkpoint), do: []
+
+  @spec branch_messages(term()) :: [term()]
+  defp branch_messages(branches) when is_map(branches) do
+    Enum.flat_map(branches, fn
+      {_name, %{"messages" => messages}} when is_list(messages) -> messages
+      _branch -> []
+    end)
+  end
+
+  defp branch_messages(_branches), do: []
+
+  @spec term_references(term()) :: [Reference.t()]
+  defp term_references(%{"$" => "output", "value" => encoded}) do
+    case OutputCodec.decode(encoded) do
+      {:ok, output} -> Output.references(output)
+      {:error, _reason} -> []
+    end
+  end
+
+  defp term_references(value) when is_map(value) do
+    value
+    |> Map.values()
+    |> Enum.flat_map(&term_references/1)
+  end
+
+  defp term_references(value) when is_list(value), do: Enum.flat_map(value, &term_references/1)
+  defp term_references(_value), do: []
+
   @spec encode_request(Request.t() | nil) :: map() | nil
   defp encode_request(nil), do: nil
 
@@ -268,6 +351,10 @@ defmodule MingaAgent.Session.ContinuationCodec do
   defp decode_branches(_branches), do: {:error, :invalid_continuation_branches}
 
   @spec encode_term(term()) :: term()
+  defp encode_term(%Output{} = output) do
+    %{"$" => "output", "value" => OutputCodec.encode(output)}
+  end
+
   defp encode_term(%Message{} = message) do
     %{
       "$" => "message",
@@ -344,6 +431,10 @@ defmodule MingaAgent.Session.ContinuationCodec do
   defp decode_terms(_values), do: {:error, :invalid_continuation_messages}
 
   @spec decode_term(term()) :: {:ok, term()} | {:error, term()}
+  defp decode_term(%{"$" => "output", "value" => encoded}) do
+    OutputCodec.decode(encoded)
+  end
+
   defp decode_term(%{"$" => "message"} = value) do
     with {:ok, role} <- decode_term(value["role"]),
          {:ok, content} <- decode_term(value["content"]),

@@ -179,10 +179,9 @@ defmodule MingaAgent.Tools.GrepTest do
       lines = for index <- 1..100, do: "needle #{index} " <> String.duplicate("é", 400)
       File.write!(Path.join(dir, "huge.txt"), Enum.join(lines, "\n") <> "\n")
 
-      assert {:ok, output} = Grep.execute("needle", dir)
-      assert byte_size(output) < 52_200
+      assert {:error, output} = Grep.execute("needle", dir)
       assert String.valid?(output)
-      assert output =~ "truncated at 51KB"
+      assert output =~ "capture incomplete (capture_byte_limit)"
     end
 
     test "does not walk a directly requested ignored search root", %{dir: dir} do
@@ -205,7 +204,8 @@ defmodule MingaAgent.Tools.GrepTest do
       """
 
       with_fake_path(%{"rg" => rg}, fn ->
-        assert {:ok, output} = Grep.execute("token", dir, %{}, max_output_bytes: 30)
+        assert {:error, output} = Grep.execute("token", dir, %{}, max_output_bytes: 30)
+        assert output =~ "capture incomplete (capture_byte_limit)"
         assert output =~ "visible.txt:1:public"
         refute output =~ "ignored_"
         refute output =~ "private"
@@ -219,7 +219,8 @@ defmodule MingaAgent.Tools.GrepTest do
       """
 
       with_fake_path(%{"rg" => rg}, fn ->
-        assert {:ok, output} = Grep.execute("token", dir, %{}, max_output_bytes: 36)
+        assert {:error, output} = Grep.execute("token", dir, %{}, max_output_bytes: 36)
+        assert output =~ "capture incomplete (capture_byte_limit)"
         assert output =~ "visible.txt:1:public"
         refute output =~ "visible.txt:2:"
         refute output =~ "private"
@@ -230,13 +231,13 @@ defmodule MingaAgent.Tools.GrepTest do
       rg = """
       #!/bin/sh
       printf 'visible.txt:1:public\n'
-      sleep 2
+      while :; do :; done
       """
 
       with_fake_path(%{"rg" => rg}, fn ->
         assert {:error, message} = Grep.execute("token", dir, %{}, timeout_ms: 50)
-        assert message == "Search timed out"
-        refute message =~ "visible"
+        assert message =~ "Search capture incomplete (timeout)"
+        assert message =~ "visible.txt"
       end)
     end
 
@@ -247,11 +248,12 @@ defmodule MingaAgent.Tools.GrepTest do
       """
 
       with_fake_path(%{"rg" => capped_rg}, fn ->
-        assert {:ok, output} =
+        assert {:error, output} =
                  Grep.execute("token", dir, %{"_max_output_bytes" => 100_000},
                    max_output_bytes: 36
                  )
 
+        assert output =~ "capture incomplete (capture_byte_limit)"
         assert output =~ "visible.txt:1:public"
         refute output =~ "visible.txt:2:"
         refute output =~ "private"
@@ -260,15 +262,15 @@ defmodule MingaAgent.Tools.GrepTest do
       slow_rg = """
       #!/bin/sh
       printf 'visible.txt:1:public\nvisible.txt:2:private_secret'
-      sleep 2
+      while :; do :; done
       """
 
       with_fake_path(%{"rg" => slow_rg}, fn ->
         assert {:error, message} =
                  Grep.execute("token", dir, %{"_timeout_ms" => 100_000}, timeout_ms: 50)
 
-        assert message == "Search timed out"
-        refute message =~ "visible"
+        assert message =~ "Search capture incomplete (timeout)"
+        assert message =~ "visible.txt"
       end)
     end
 

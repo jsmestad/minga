@@ -23,6 +23,24 @@ defmodule MingaAgent.Config do
 
   @unconfigured_model "unknown"
 
+  @artifact_limit_defaults %{
+    root_bytes: 1024 * 1024 * 1024,
+    session_bytes: 128 * 1024 * 1024,
+    capture_bytes: 16 * 1024 * 1024,
+    append_bytes: 64 * 1024,
+    image_bytes: 5 * 1024 * 1024,
+    root_namespaces: 123,
+    root_artifacts: 4096,
+    session_artifacts: 512,
+    root_open_captures: 32,
+    session_open_captures: 8,
+    session_pin_sets: 128,
+    session_pin_refs: 4096,
+    root_items: 4_194_304,
+    session_items: 524_288,
+    capture_items: 65_536
+  }
+
   defstruct [
     # Provider & model
     provider: :auto,
@@ -171,6 +189,29 @@ defmodule MingaAgent.Config do
       diff_size_threshold: get(:agent_diff_size_threshold, 1_048_576),
       session_retention_days: get(:agent_session_retention_days, 30),
       auto_context: get(:agent_auto_context, true)
+    }
+  end
+
+  @doc "Returns the private production root for retained agent output."
+  @spec artifact_root() :: String.t()
+  def artifact_root do
+    config_home = System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config")
+    Path.join([config_home, "minga", "agent", "artifacts"])
+  end
+
+  @doc "Returns the complete production retained-output limit policy."
+  @spec artifact_limits() :: %{required(atom()) => pos_integer()}
+  def artifact_limits do
+    %{
+      @artifact_limit_defaults
+      | root_bytes:
+          get(:agent_artifact_root_bytes, @artifact_limit_defaults.root_bytes),
+        session_bytes:
+          get(:agent_artifact_session_bytes, @artifact_limit_defaults.session_bytes),
+        capture_bytes:
+          get(:agent_artifact_capture_bytes, @artifact_limit_defaults.capture_bytes),
+        image_bytes:
+          get(:agent_artifact_image_bytes, @artifact_limit_defaults.image_bytes)
     }
   end
 

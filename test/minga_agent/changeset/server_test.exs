@@ -1,6 +1,7 @@
 defmodule MingaAgent.Changeset.ServerTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Changeset
   alias MingaAgent.Changeset.Server
 
   setup do
@@ -16,6 +17,24 @@ defmodule MingaAgent.Changeset.ServerTest do
 
   defp start_server(project, opts \\ []) do
     start_supervised!({Server, Keyword.merge([project_root: project], opts)})
+  end
+
+  describe "read_source_with_version" do
+    test "atomically identifies disk and overlay sources across mutations", %{project: project} do
+      server = start_server(project)
+
+      assert {:ok, {:disk, disk_path}, first_revision} =
+               Changeset.read_source_with_version(server, "hello.txt")
+
+      assert disk_path == Path.join(project, "hello.txt")
+
+      assert :ok = GenServer.call(server, {:write_file, "hello.txt", "changed"})
+
+      assert {:ok, {:memory, "changed"}, second_revision} =
+               Changeset.read_source_with_version(server, "hello.txt")
+
+      assert second_revision > first_revision
+    end
   end
 
   describe "write_file" do

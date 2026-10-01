@@ -7,7 +7,9 @@ defmodule MingaAgent.Tools.ProcessBackend do
 
   @type search_opts :: keyword()
   @type shell_opts :: keyword()
-  @type result :: {:ok, String.t()} | {:error, String.t()}
+  @type result ::
+          {:ok, String.t() | MingaAgent.Tool.Output.t()}
+          | {:error, String.t() | MingaAgent.Tool.Output.t() | term()}
 
   @callback find(String.t(), String.t(), map(), search_opts()) :: result()
   @callback grep(String.t(), String.t(), map(), search_opts()) :: result()

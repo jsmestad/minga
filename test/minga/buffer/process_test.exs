@@ -905,6 +905,18 @@ defmodule Minga.Buffer.ProcessTest do
       assert next_version == version + 1
     end
 
+    test "content_on_lines_with_version atomically bounds a selected range" do
+      pid = start_supervised!({BufferProcess, content: "zero\none\ntwo\nthree"})
+
+      assert {"one\ntwo", 2, 4, version, true} =
+               Buffer.content_on_lines_with_version(pid, 1, 2, 100)
+
+      assert version == Buffer.version(pid)
+
+      assert {"one", 2, 4, ^version, false} =
+               Buffer.content_on_lines_with_version(pid, 1, 2, 3)
+    end
+
     test "replace_content_if_version atomically replaces the expected version" do
       pid = start_supervised!({BufferProcess, content: "hello\nworld"})
       Buffer.move_to(pid, {1, 4})
