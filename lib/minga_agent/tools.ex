@@ -84,7 +84,8 @@ defmodule MingaAgent.Tools do
           shell_output_callback: (String.t() -> :ok) | nil,
           process_backend: module(),
           artifact_store: GenServer.server() | nil,
-          capture_key: Context.capture_key() | nil
+          capture_key: Context.capture_key() | nil,
+          image_tool_result_delivery: Context.image_tool_result_delivery()
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
@@ -814,7 +815,7 @@ defmodule MingaAgent.Tools do
       name: "shell",
       description: """
       Run a shell command in the project root directory. Returns the combined
-      stdout and stderr output, capped at 64KB for the model. Commands time out
+      stdout and stderr output, capped at 51KB for the model. Commands time out
       after 30 seconds. Use this for running tests, linters, git commands, etc.
       Use find and grep for broad file discovery and content search.
       Do not use for interactive commands that require user input.
@@ -847,24 +848,22 @@ defmodule MingaAgent.Tools do
         fn args ->
           timeout_secs = normalize_shell_timeout(args["timeout"])
 
-          run_shell_with_timeout(timeout_secs, fn ->
-            with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
-                 {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
-              shell_root = cwd || root
+          with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
+               {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
+            shell_root = cwd || root
 
-              if is_nil(cwd) do
-                flush_before_shell()
-              end
-
-              process_backend.shell(args["command"], shell_root, timeout_secs,
-                env: env,
-                on_output: shell_output_callback
-              )
-              |> retained_process_result(context)
-            else
-              {:error, reason} -> {:error, inspect(reason)}
+            if is_nil(cwd) do
+              flush_before_shell()
             end
-          end)
+
+            process_backend.shell(args["command"], shell_root, timeout_secs,
+              env: env,
+              on_output: shell_output_callback
+            )
+            |> retained_process_result(context)
+          else
+            {:error, reason} -> {:error, inspect(reason)}
+          end
         end
       end
     )
@@ -1219,6 +1218,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
+
           LspDefinition.execute(path, args["line"], args["column"])
           |> retained_process_result(context)
         end
@@ -1265,6 +1265,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
+
           LspReferences.execute(path, args["line"], args["column"])
           |> retained_process_result(context)
         end
@@ -1310,6 +1311,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
+
           LspHover.execute(path, args["line"], args["column"])
           |> retained_process_result(context)
         end
@@ -1538,74 +1540,11 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  # ── Shell execution guard ─────────────────────────────────────────────────
+  # ── Shell execution ───────────────────────────────────────────────────────
 
   @spec normalize_shell_timeout(term()) :: pos_integer()
   defp normalize_shell_timeout(value) when is_integer(value), do: value |> max(1) |> min(300)
   defp normalize_shell_timeout(_value), do: 30
-
-  @spec run_shell_with_timeout(
-          pos_integer(),
-          (-> {:ok, String.t()} | {:error, String.t()})
-        ) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_shell_with_timeout(timeout_secs, callback) do
-    parent = self()
-    result_ref = make_ref()
-
-    {pid, monitor_ref} =
-      spawn_monitor(fn -> coordinate_shell_worker(parent, result_ref, callback) end)
-
-    receive do
-      {^result_ref, result} ->
-        Process.demonitor(monitor_ref, [:flush])
-        result
-
-      {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
-        receive_shell_result_after_down(result_ref, reason)
-    after
-      timeout_secs * 1_000 ->
-        Process.exit(pid, :kill)
-        await_shell_worker_down(monitor_ref, pid)
-        {:error, "command timed out"}
-    end
-  end
-
-  @spec coordinate_shell_worker(pid(), reference(), (-> term())) :: term()
-  defp coordinate_shell_worker(parent, result_ref, callback) do
-    parent_monitor = Process.monitor(parent)
-    coordinator = self()
-    callback_pid = spawn_link(fn -> send(coordinator, {:shell_callback_result, callback.()}) end)
-
-    receive do
-      {:shell_callback_result, result} ->
-        Process.demonitor(parent_monitor, [:flush])
-        send(parent, {result_ref, result})
-
-      {:DOWN, ^parent_monitor, :process, ^parent, _reason} ->
-        Process.exit(callback_pid, :kill)
-    end
-  end
-
-  @spec receive_shell_result_after_down(reference(), term()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp receive_shell_result_after_down(result_ref, reason) do
-    receive do
-      {^result_ref, result} -> result
-    after
-      0 -> {:error, "command failed: #{inspect(reason)}"}
-    end
-  end
-
-  @spec await_shell_worker_down(reference(), pid()) :: :ok
-  defp await_shell_worker_down(monitor_ref, pid) do
-    receive do
-      {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
-    after
-      1_000 ->
-        Process.demonitor(monitor_ref, [:flush])
-        :ok
-    end
-  end
 
   # ── Pre-shell buffer flush ─────────────────────────────────────────────────
 
@@ -1656,13 +1595,22 @@ defmodule MingaAgent.Tools do
 
   # ── ProjectView routing helpers ────────────────────────────────────────────
 
-
   @spec retained_process_result(
           {:ok, String.t() | Output.t()} | {:error, term()},
           Context.t()
         ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
   defp retained_process_result({:ok, %Output{}} = result, _context), do: result
   defp retained_process_result({:error, %Output{}} = result, _context), do: result
+
+  defp retained_process_result(
+         {:error, {:incomplete, reason, bytes}},
+         %Context{} = context
+       )
+       when is_atom(reason) and is_binary(bytes) do
+    OutputCapture.bytes(context.artifact_store, context.capture_key, bytes,
+      capture_status: {:incomplete, reason}
+    )
+  end
 
   defp retained_process_result({:ok, message}, %Context{} = context) when is_binary(message) do
     {captured, capture_status} = legacy_capture(message)
@@ -1689,7 +1637,6 @@ defmodule MingaAgent.Tools do
       {message, :complete}
     end
   end
-
 
   @spec append_workspace_context(ToolRouter.context(), String.t()) :: String.t()
   defp append_workspace_context(router_ctx, message) do
@@ -1926,7 +1873,6 @@ defmodule MingaAgent.Tools do
 
     :ok
   end
-
 
   # Applies multiple edits to a file through the tool router by reading,
   # applying each edit sequentially, then writing the result back.

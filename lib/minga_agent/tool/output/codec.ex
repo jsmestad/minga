@@ -214,10 +214,12 @@ defmodule MingaAgent.Tool.Output.Codec do
          "media_type" => media_type,
          "filename" => filename
        }) do
-    with {:ok, %Reference{media_type: ^media_type} = reference} <- decode_reference(encoded) do
-      Attachment.image(reference, filename)
-    else
-      _ -> {:error, :invalid_output}
+    case decode_reference(encoded) do
+      {:ok, %Reference{media_type: ^media_type} = reference} ->
+        Attachment.image(reference, filename)
+
+      _other ->
+        {:error, :invalid_output}
     end
   end
 

@@ -14,7 +14,14 @@ defmodule MingaAgent.ArtifactQuota.Usage do
   defstruct @enforce_keys
 
   @doc false
-  @spec new(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) :: t()
+  @spec new(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: t()
   def new(bytes, items, artifacts, open_captures, namespaces, limit_bytes),
     do: %__MODULE__{
       bytes: bytes,

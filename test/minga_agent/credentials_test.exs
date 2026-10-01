@@ -2,6 +2,7 @@ defmodule MingaAgent.CredentialsTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Credentials
+  alias MingaAgent.ModelSelection.Credential.OAuth
 
   @test_dir "test/tmp/credentials_test"
 
@@ -28,7 +29,6 @@ defmodule MingaAgent.CredentialsTest do
     opts = [
       config_dir: parent_dir,
       env: @nil_env,
-      oauth_probe: fn -> false end,
       ollama_probe: fn -> false end
     ]
 
@@ -160,12 +160,20 @@ defmodule MingaAgent.CredentialsTest do
     end
 
     test "malformed storage remains unconfigured and OAuth remains independently configured", %{
-      opts: opts
+      opts: opts,
+      dir: dir
     } do
+      oauth_path = Path.join(dir, "oauth.json")
+
+      File.write!(
+        oauth_path,
+        JSON.encode!(%{"openai-codex" => %{"accountId" => "account-exact"}})
+      )
+
       malformed_opts =
         opts
         |> Keyword.put(:credentials_reader, fn _path -> {:error, :malformed_json} end)
-        |> Keyword.put(:oauth_probe, fn -> true end)
+        |> Keyword.put(:oauth_path, oauth_path)
 
       snapshot = Credentials.snapshot(malformed_opts)
       statuses = Credentials.status(snapshot, {:unavailable, :connection_refused})
@@ -215,18 +223,6 @@ defmodule MingaAgent.CredentialsTest do
     end
   end
 
-  describe "provider_from_model/1" do
-    test "extracts provider from prefixed model string" do
-      assert "anthropic" = Credentials.provider_from_model("anthropic:claude-sonnet-4-20250514")
-      assert "openai" = Credentials.provider_from_model("openai:gpt-4o")
-      assert "google" = Credentials.provider_from_model("google:gemini-pro")
-    end
-
-    test "defaults to anthropic for bare model names" do
-      assert "anthropic" = Credentials.provider_from_model("claude-sonnet-4-20250514")
-    end
-  end
-
   describe "env_var_for/1" do
     test "returns correct env var names" do
       assert "ANTHROPIC_API_KEY" = Credentials.env_var_for("anthropic")
@@ -236,6 +232,48 @@ defmodule MingaAgent.CredentialsTest do
 
     test "returns nil for unknown provider" do
       assert nil == Credentials.env_var_for("unknown")
+    end
+  end
+
+  describe "request_options/2 OAuth pinning" do
+    test "uses the request-local token only for the pinned account and path", %{dir: dir} do
+      path = Path.join(dir, "oauth.json")
+
+      credential = OAuth.new("account-a", path)
+
+      resolver = fn :openai_codex, oauth_file: requested_path ->
+        {:ok,
+         %{
+           provider_key: "openai-codex",
+           account_id: "account-a",
+           oauth_file: requested_path,
+           token: "request-token"
+         }}
+      end
+
+      assert {:ok, options} =
+               Credentials.request_options(credential, oauth_resolver: resolver)
+
+      assert options[:auth_mode] == :oauth
+      assert options[:access_token] == "request-token"
+      assert options[:chatgpt_account_id] == "account-a"
+    end
+
+    test "rejects a token resolved for a different account", %{dir: dir} do
+      credential = OAuth.new("account-a", Path.join(dir, "oauth.json"))
+
+      resolver = fn :openai_codex, oauth_file: requested_path ->
+        {:ok,
+         %{
+           provider_key: "openai-codex",
+           account_id: "account-b",
+           oauth_file: requested_path,
+           token: "other-token"
+         }}
+      end
+
+      assert {:error, {:credential_unavailable, "openai-codex:account-a"}} =
+               Credentials.request_options(credential, oauth_resolver: resolver)
     end
   end
 end

@@ -19,21 +19,38 @@ defmodule MingaAgent.Changeset.ServerTest do
     start_supervised!({Server, Keyword.merge([project_root: project], opts)})
   end
 
-  describe "read_source_with_version" do
+  describe "bounded source reads" do
     test "atomically identifies disk and overlay sources across mutations", %{project: project} do
       server = start_server(project)
 
       assert {:ok, {:disk, disk_path}, first_revision} =
-               Changeset.read_source_with_version(server, "hello.txt")
+               Changeset.read_source_prefix_with_version(server, "hello.txt", 12)
 
       assert disk_path == Path.join(project, "hello.txt")
 
       assert :ok = GenServer.call(server, {:write_file, "hello.txt", "changed"})
 
-      assert {:ok, {:memory, "changed"}, second_revision} =
-               Changeset.read_source_with_version(server, "hello.txt")
+      assert {:ok, {:memory, "changed", true}, second_revision} =
+               Changeset.read_source_prefix_with_version(server, "hello.txt", 12)
 
       assert second_revision > first_revision
+    end
+
+    test "retrieves late Unicode lines without returning the omitted resident source", %{
+      project: project
+    } do
+      server = start_server(project)
+      bytes = :binary.copy("skip\n", 20_000) <> "å\n尾\n" <> :binary.copy("unused\n", 20_000)
+      assert :ok = Changeset.write_file(server, "hello.txt", bytes)
+
+      assert {:ok, {:memory, "skip\nsk", false}, revision} =
+               Changeset.read_source_prefix_with_version(server, "hello.txt", 7)
+
+      assert {:ok, {:memory, "å\n尾", 2, :unknown, true}, ^revision} =
+               Changeset.read_source_lines_with_version(server, "hello.txt", 20_000, 2, 64)
+
+      assert {:ok, {:memory, "å", 2, :unknown, false}, ^revision} =
+               Changeset.read_source_lines_with_version(server, "hello.txt", 20_000, 2, 2)
     end
   end
 

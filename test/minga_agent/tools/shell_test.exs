@@ -3,6 +3,7 @@ defmodule MingaAgent.Tools.ShellTest do
   use ExUnit.Case, async: false
 
   alias MingaAgent.Tools.Shell
+  alias MingaAgent.Tools.OutputLimit
 
   @moduletag :tmp_dir
   # Real OS commands with wall-clock timeouts make these inherently slow (~500-1000ms).
@@ -254,14 +255,18 @@ defmodule MingaAgent.Tools.ShellTest do
       assert Path.expand(output) == Path.expand(dir)
     end
 
-    test "times out long-running commands", %{tmp_dir: dir} do
-      assert {:error, msg} = Shell.execute("sleep 60", dir, 1)
-      assert msg =~ "timed out"
+    test "times out long-running commands with their bounded partial output", %{tmp_dir: dir} do
+      assert {:error, {:incomplete, :timeout, output}} =
+               Shell.execute("printf 'before timeout'; sleep 60", dir, 1)
+
+      assert output == "before timeout"
     end
 
-    test "times out commands that continuously write output", %{tmp_dir: dir} do
-      assert {:error, msg} = Shell.execute("yes x", dir, 1)
-      assert msg =~ "timed out"
+    test "times out commands that continuously write below the capture cap", %{tmp_dir: dir} do
+      command = "while true; do printf x; sleep 0.01; done"
+      assert {:error, {:incomplete, :timeout, output}} = Shell.execute(command, dir, 1)
+      assert output != ""
+      assert byte_size(output) <= OutputLimit.default_max_bytes()
     end
 
     test "supports shell features like pipes", %{tmp_dir: dir} do

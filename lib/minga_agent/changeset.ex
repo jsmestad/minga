@@ -88,12 +88,27 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, {:read_file_with_version, relative_path})
   end
 
-  @doc "Returns an atomic memory-or-disk source descriptor with the changeset revision."
-  @spec read_source_with_version(changeset(), String.t()) ::
-          {:ok, {:memory, binary()} | {:disk, String.t()}, non_neg_integer()}
-          | {:error, term()}
-  def read_source_with_version(cs, relative_path) when is_binary(relative_path) do
-    GenServer.call(cs, {:read_source_with_version, relative_path})
+  @doc "Returns an atomic bounded memory prefix or disk descriptor with the changeset revision."
+  @spec read_source_prefix_with_version(changeset(), String.t(), pos_integer()) ::
+          MingaAgent.Changeset.SourceRead.prefix_result()
+  def read_source_prefix_with_version(cs, relative_path, max_bytes)
+      when is_binary(relative_path) and is_integer(max_bytes) and max_bytes > 0 do
+    GenServer.call(cs, {:read_source_prefix_with_version, relative_path, max_bytes})
+  end
+
+  @doc "Returns requested bounded memory lines or a disk descriptor with the atomic revision."
+  @spec read_source_lines_with_version(
+          changeset(),
+          String.t(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer()
+        ) ::
+          MingaAgent.Changeset.SourceRead.lines_result()
+  def read_source_lines_with_version(cs, relative_path, start, count, max_bytes)
+      when is_binary(relative_path) and is_integer(start) and start >= 0 and is_integer(count) and
+             count > 0 and is_integer(max_bytes) and max_bytes > 0 do
+    GenServer.call(cs, {:read_source_lines_with_version, relative_path, start, count, max_bytes})
   end
 
   @doc "Undoes the last edit to a specific file."

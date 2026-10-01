@@ -72,6 +72,12 @@ defmodule Minga.Buffer.Fork do
   @doc "Returns content and mutation version atomically in one call."
   @spec content_with_version(GenServer.server()) :: {String.t(), non_neg_integer()}
   def content_with_version(server), do: GenServer.call(server, :content_with_version)
+  @doc "Returns a byte-bounded prefix, mutation version, and whether it is the whole fork."
+  @spec content_prefix_with_version(GenServer.server(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), boolean()}
+  def content_prefix_with_version(server, max_bytes) when max_bytes >= 0 do
+    GenServer.call(server, {:content_prefix_with_version, max_bytes})
+  end
 
   @doc "Returns a byte-bounded line range, total lines, and mutation version atomically."
   @spec content_on_lines_with_version(
@@ -171,6 +177,13 @@ defmodule Minga.Buffer.Fork do
 
   def handle_call(:content_with_version, _from, state) do
     {:reply, {Document.content(state.document), state.version}, state}
+  end
+
+  def handle_call({:content_prefix_with_version, max_bytes}, _from, state) do
+    total = Document.content_byte_size(state.document)
+    count = min(total, max_bytes)
+    prefix = Document.slice_byte_range(state.document, 0, count)
+    {:reply, {prefix, state.version, count == total}, state}
   end
 
   def handle_call(

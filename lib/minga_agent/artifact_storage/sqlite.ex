@@ -8,6 +8,7 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
 
   @enforce_keys [:connection, :path]
   defstruct [:connection, :path]
+
   @type transaction_result(value) ::
           {:ok, value}
           | {:error, term()}
@@ -99,7 +100,9 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
   @spec checkpoint(db()) :: :ok | {:error, term()}
   def checkpoint(db) do
     case query(db, "PRAGMA wal_checkpoint(TRUNCATE)") do
-      {:ok, [[0, 0, 0]]} -> :ok
+      {:ok, [[0, 0, 0]]} ->
+        :ok
+
       {:ok, [[busy, log_pages, checkpointed]]} ->
         {:error, {:wal_not_truncated, busy, log_pages, checkpointed}}
 
@@ -127,6 +130,7 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
           {:ok, db()} | {:error, term()}
   defp setup_opened(connection, path, schema, lock) do
     db = %__MODULE__{connection: connection, path: path}
+
     statements = [
       "PRAGMA page_size=4096",
       "PRAGMA journal_mode=WAL",
@@ -147,7 +151,9 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
       end
 
     case result do
-      {:ok, _db} = ok -> ok
+      {:ok, _db} = ok ->
+        ok
+
       {:error, _reason} = error ->
         _ = close(db)
         error
@@ -212,7 +218,9 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
         when value: term()
   defp finish_transaction(db, {:ok, value}, before_checkpoint) do
     case execute(db, "COMMIT") do
-      :ok -> checkpoint_committed(db, value, before_checkpoint.())
+      :ok ->
+        checkpoint_committed(db, value, before_checkpoint.())
+
       {:error, reason} ->
         _ = execute(db, "ROLLBACK")
         {:error, reason}
@@ -247,6 +255,7 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
 
   defp lock_conflict?(reason) when is_binary(reason) do
     normalized = String.downcase(reason)
+
     String.contains?(normalized, "database is locked") or
       String.contains?(normalized, "database table is locked") or
       String.contains?(normalized, "database is busy")

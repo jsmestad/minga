@@ -16,6 +16,7 @@ defmodule MingaAgent.Changeset.Server do
   alias Minga.Buffer.Replace
   alias MingaAgent.Changeset.MergedEvent
   alias MingaAgent.Changeset.Overlay
+  alias MingaAgent.Changeset.SourceRead
 
   @tombstone_suffix ".__changeset_deleted__"
 
@@ -149,15 +150,22 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
-  def handle_call({:read_source_with_version, relative_path}, _from, state) do
-    case normalize_path(state, relative_path) do
-      {:ok, path} ->
-        result = source_descriptor(state, path)
-        {:reply, append_source_revision(result, state.revision), state}
+  def handle_call({:read_source_prefix_with_version, relative_path, max_bytes}, _from, state) do
+    source =
+      with {:ok, path} <- normalize_path(state, relative_path), do: source_descriptor(state, path)
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+    {:reply, SourceRead.prefix(source, state.revision, max_bytes), state}
+  end
+
+  def handle_call(
+        {:read_source_lines_with_version, relative_path, start, count, max_bytes},
+        _from,
+        state
+      ) do
+    source =
+      with {:ok, path} <- normalize_path(state, relative_path), do: source_descriptor(state, path)
+
+    {:reply, SourceRead.lines(source, state.revision, start, count, max_bytes), state}
   end
 
   def handle_call(:overlay_path, _from, state) do
@@ -281,7 +289,11 @@ defmodule MingaAgent.Changeset.Server do
         {:stop, :normal, :ok, state}
 
       details ->
-        state = state |> prune_successful_merge_results(details.results) |> bump_if_sources_changed(state)
+        state =
+          state
+          |> prune_successful_merge_results(details.results)
+          |> bump_if_sources_changed(state)
+
         {:reply, {:conflict, details}, state}
     end
   rescue
@@ -541,15 +553,6 @@ defmodule MingaAgent.Changeset.Server do
       {_, :error} -> {:ok, {:disk, Path.join(state.project_root, path)}}
     end
   end
-
-  @spec append_source_revision(
-          {:ok, {:memory, binary()} | {:disk, String.t()}} | {:error, term()},
-          non_neg_integer()
-        ) ::
-          {:ok, {:memory, binary()} | {:disk, String.t()}, non_neg_integer()}
-          | {:error, term()}
-  defp append_source_revision({:ok, source}, revision), do: {:ok, source, revision}
-  defp append_source_revision({:error, _reason} = error, _revision), do: error
 
   @spec current_content(state(), String.t()) :: {:ok, binary()} | {:error, term()}
   defp current_content(state, path) do

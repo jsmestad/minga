@@ -13,7 +13,8 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Instructions
   alias MingaAgent.Memory
-  alias MingaAgent.ModelCatalog
+  alias MingaAgent.ModelCandidate
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
@@ -21,6 +22,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaEditor.Agent.AuthStatusEffect
   alias MingaEditor.Remote.SessionClient
   alias Minga.Config
+  alias Minga.Log
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Runtime
@@ -135,12 +137,12 @@ defmodule MingaEditor.Agent.SlashCommand do
   def unknown_command_message(_text), do: "Not a slash command"
 
   @doc "Returns completion candidates for the current slash input, without the leading slash."
-  @spec completion_candidates(state(), String.t(), [String.t()] | nil) :: [completion_candidate()]
-  def completion_candidates(state, input, configured_models \\ nil) when is_binary(input) do
+  @spec completion_candidates(state(), String.t()) :: [completion_candidate()]
+  def completion_candidates(state, input) when is_binary(input) do
     if model_argument_input?(input) do
       input
       |> model_argument_prefix()
-      |> model_completion_candidates(state, configured_models)
+      |> model_completion_candidates(state)
     else
       input
       |> completions()
@@ -179,11 +181,10 @@ defmodule MingaEditor.Agent.SlashCommand do
     |> String.trim_leading()
   end
 
-  @spec model_completion_candidates(String.t(), state(), [String.t()] | nil) ::
-          [completion_candidate()]
-  defp model_completion_candidates(prefix, state, configured_models) do
+  @spec model_completion_candidates(String.t(), state()) :: [completion_candidate()]
+  defp model_completion_candidates(prefix, state) do
     state
-    |> available_model_entries(configured_models)
+    |> available_model_entries()
     |> filter_model_entries(prefix)
     |> Enum.map(&model_completion_candidate/1)
   end
@@ -244,73 +245,66 @@ defmodule MingaEditor.Agent.SlashCommand do
     end)
   end
 
-  @spec available_model_entries(state(), [String.t()] | nil) :: [map()]
-  defp available_model_entries(state, configured_models) do
-    current_model = current_model(state)
-
-    session_models =
-      case Runtime.active_session(state.shell_runtime) do
-        session when is_pid(session) -> safe_session_models(session)
-        _ -> []
-      end
-
-    configured_model_entries(configured_models)
-    |> Kernel.++(session_models)
-    |> Kernel.++(ModelCatalog.available_models(current_model))
-    |> uniq_model_entries()
+  @spec available_model_entries(state()) :: [map()]
+  defp available_model_entries(state) do
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) -> safe_session_models(session)
+      _no_session -> []
+    end
   end
 
   @spec safe_session_models(pid()) :: [map()]
   defp safe_session_models(session) do
     case Session.get_available_models(session) do
-      {:ok, models} when is_list(models) -> models
-      _ -> []
+      {:ok, candidates} when is_list(candidates) ->
+        Enum.flat_map(candidates, fn
+          %ModelCandidate{selection: selection, favorite: favorite} ->
+            route = selection.route
+
+            [
+              %{
+                "id" => ModelSelection.id(selection),
+                "name" => route.display_name,
+                "provider" => route.model_provider,
+                "protocol" => route.execution.wire_protocol,
+                "endpoint" => route.execution.base_url <> route.execution.path,
+                "credential" => ModelSelection.credential_id(selection.credential),
+                "support" => :unverified,
+                "favorite" => favorite,
+                "context_window" => selection.policy.limits.context,
+                "cost" => selection.policy.cost,
+                "capabilities" => selection.policy.capabilities
+              }
+            ]
+
+          _invalid ->
+            []
+        end)
+
+      {:error, reason} ->
+        Log.warning(
+          :agent,
+          "Slash model completion failed for session #{inspect(session)}: #{inspect(reason)}"
+        )
+
+        []
+
+      unexpected ->
+        Log.warning(
+          :agent,
+          "Slash model completion returned an invalid result for session #{inspect(session)}: #{inspect(unexpected)}"
+        )
+
+        []
     end
   catch
-    :exit, _ -> []
-  end
+    :exit, reason ->
+      Log.warning(
+        :agent,
+        "Slash model completion lost session #{inspect(session)}: #{inspect(reason)}"
+      )
 
-  @spec configured_model_entries([String.t()] | nil) :: [map()]
-  defp configured_model_entries(nil), do: configured_model_entries(Config.get(:agent_models))
-
-  defp configured_model_entries(models) do
-    models
-    |> List.wrap()
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&configured_model_entry/1)
-  end
-
-  @spec configured_model_entry(String.t()) :: map()
-  defp configured_model_entry(entry) do
-    model = entry |> String.split("|", parts: 2) |> hd() |> String.trim()
-
-    %{
-      "id" => model,
-      "name" => model,
-      "provider" => provider_label(model),
-      "context_window" => nil,
-      "cost" => nil
-    }
-  end
-
-  @spec current_model(state()) :: String.t()
-  defp current_model(state) do
-    state.workspace.agent_ui.panel.model_name
-  end
-
-  @spec provider_label(String.t()) :: String.t()
-  defp provider_label(model) do
-    case String.split(model, ":", parts: 2) do
-      [provider, _] -> provider
-      [_] -> "custom"
-    end
-  end
-
-  @spec uniq_model_entries([map()]) :: [map()]
-  defp uniq_model_entries(entries) do
-    entries
-    |> Enum.reject(&(model_id(&1) == ""))
-    |> Enum.uniq_by(&model_id/1)
+      []
   end
 
   @spec filter_model_entries([map()], String.t()) :: [map()]
@@ -349,7 +343,22 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec model_description(map()) :: String.t()
   defp model_description(model) do
-    [model_name(model), model_provider(model), model_context(model)]
+    route =
+      case {Map.get(model, "protocol"), Map.get(model, "support")} do
+        {protocol, :verified} when is_binary(protocol) -> "#{protocol} verified"
+        {protocol, _support} when is_binary(protocol) -> "#{protocol} unverified"
+        _other -> ""
+      end
+
+    [
+      model_name(model),
+      model_provider(model),
+      route,
+      model_endpoint(model),
+      model_credential(model),
+      model_capabilities(model),
+      model_context(model)
+    ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("  ")
   end
@@ -362,6 +371,28 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec model_provider(map()) :: String.t()
   defp model_provider(model), do: model |> Map.get("provider", "") |> to_string()
+
+  @spec model_endpoint(map()) :: String.t()
+  defp model_endpoint(model), do: model |> Map.get("endpoint", "") |> to_string()
+
+  @spec model_credential(map()) :: String.t()
+  defp model_credential(model), do: model |> Map.get("credential", "") |> to_string()
+
+  @spec model_capabilities(map()) :: String.t()
+  defp model_capabilities(%{"capabilities" => capabilities}) do
+    tools = capability_label(Map.get(capabilities, :tools))
+    images = capability_label(Map.get(capabilities, :images))
+    streaming = capability_label(Map.get(capabilities, :streaming))
+    "tools #{tools}, images #{images}, streaming #{streaming}"
+  end
+
+  defp model_capabilities(_model), do: ""
+
+  @spec capability_label(ModelSelection.capability() | nil) :: String.t()
+  defp capability_label(true), do: "yes"
+  defp capability_label(false), do: "no"
+  defp capability_label(:unknown), do: "unknown"
+  defp capability_label(nil), do: "unknown"
 
   @spec model_context(map()) :: String.t()
   defp model_context(%{"context_window" => ctx}) when is_integer(ctx) and ctx >= 1000,
@@ -1111,9 +1142,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     if is_pid(session) do
       messages = Session.messages(session)
       root = detect_project_root()
-
-      model = read_config_string(:agent_model)
-      model = if model == "", do: "unknown", else: model
+      model = export_model_identity(session)
 
       case SessionExport.export_to_file(messages,
              project_root: root,
@@ -1130,6 +1159,28 @@ defmodule MingaEditor.Agent.SlashCommand do
     else
       {:error, "No active agent session"}
     end
+  end
+
+  @spec export_model_identity(pid()) :: String.t()
+  defp export_model_identity(session) do
+    case Session.model_selection(session) do
+      %ModelSelection{} = selection ->
+        route = selection.route
+        execution = route.execution
+
+        "#{ModelSelection.id(selection)} · #{route.model_provider}/#{execution.provider_model_id} via #{execution.wire_protocol}"
+
+      nil ->
+        "unknown"
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :agent,
+        "Session export could not read active model selection from #{inspect(session)}: #{inspect(reason)}"
+      )
+
+      "unknown"
   end
 
   @spec parse_skill_command(String.t()) ::

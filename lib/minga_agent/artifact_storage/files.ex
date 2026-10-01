@@ -133,9 +133,8 @@ defmodule MingaAgent.ArtifactStorage.Files do
     with {:ok, entries} <- File.ls(path),
          :ok <- validate_regular_entries(path, entries),
          :ok <- remove_regular_entries(path, deletion_order(entries)),
-         :ok <- File.rmdir(path),
-         :ok <- sync_directory(Path.dirname(path)) do
-      :ok
+         :ok <- File.rmdir(path) do
+      sync_directory(Path.dirname(path))
     end
   end
 
@@ -145,9 +144,14 @@ defmodule MingaAgent.ArtifactStorage.Files do
       candidate = Path.join(path, entry)
 
       case File.lstat(candidate) do
-        {:ok, %File.Stat{type: :regular}} -> {:cont, :ok}
-        {:ok, %File.Stat{type: type}} -> {:halt, {:error, {:unsafe_artifact_file, candidate, type}}}
-        {:error, reason} -> {:halt, {:error, reason}}
+        {:ok, %File.Stat{type: :regular}} ->
+          {:cont, :ok}
+
+        {:ok, %File.Stat{type: type}} ->
+          {:halt, {:error, {:unsafe_artifact_file, candidate, type}}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
@@ -197,7 +201,7 @@ defmodule MingaAgent.ArtifactStorage.Files do
   defp require_regular(path) do
     case File.lstat(path) do
       {:ok, %File.Stat{type: :regular}} ->
-        with :ok <- File.chmod(path, 0o600), do: :ok
+        File.chmod(path, 0o600)
 
       {:ok, %File.Stat{type: type}} ->
         {:error, {:unsafe_artifact_file, path, type}}
@@ -220,9 +224,8 @@ defmodule MingaAgent.ArtifactStorage.Files do
           {:ok, io_device()} | {:error, term()}
   defp initialize_created_file(path, io, header) do
     result =
-      with :ok <- File.chmod(path, 0o600),
-           :ok <- :file.write(io, header) do
-        :ok
+      with :ok <- File.chmod(path, 0o600) do
+        :file.write(io, header)
       end
 
     case result do

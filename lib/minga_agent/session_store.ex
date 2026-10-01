@@ -12,8 +12,11 @@ defmodule MingaAgent.SessionStore do
   picker calls `list/0` to scan the directory for past sessions.
   """
 
+  alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores
+  alias MingaAgent.ModelSelection
+  alias MingaAgent.ArtifactStorage.FaultInjector
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Transcript
@@ -22,8 +25,10 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Reference
 
-  @version 3
+  @version 5
   @legacy_version 2
+
+  @typep snapshot_schema :: 2 | 4 | 5 | :model_v3 | :retention_v3
 
   @typedoc "Session metadata for the picker (without full message content)."
   @type session_meta :: %{
@@ -49,6 +54,8 @@ defmodule MingaAgent.SessionStore do
           required(:messages) => [MingaAgent.Message.t()],
           required(:usage) => MingaAgent.TurnUsage.t(),
           required(:continuation) => Continuation.t(),
+          optional(:model_selection) => ModelSelection.t() | ModelSelection.Stored.t() | nil,
+          optional(:selection_intent) => map(),
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
           optional(:provider_name) => String.t(),
@@ -65,6 +72,8 @@ defmodule MingaAgent.SessionStore do
            required(:title) => String.t(),
            required(:model_name) => String.t(),
            required(:provider_name) => String.t(),
+           optional(:model_selection) => ModelSelection.Stored.t() | nil,
+           optional(:selection_intent) => map(),
            required(:messages) => [MingaAgent.Message.t()],
            required(:message_ids) => [pos_integer()],
            required(:pinned_ids) => MapSet.t(pos_integer()),
@@ -96,18 +105,56 @@ defmodule MingaAgent.SessionStore do
   @spec save(session_data(), String.t() | nil, keyword()) :: :ok | {:error, term()}
   def save(%{id: id} = data, config_dir \\ nil, opts \\ [])
       when is_binary(id) and is_list(opts) do
-    path = Path.join(sessions_dir(config_dir), "#{id}.json")
-    previous_generation = persisted_generation(path)
+    path = session_record_path(id, config_dir)
 
-    with {:ok, json, references, generation} <- encode_snapshot(data),
-         {:ok, store} <- pin_candidate(id, generation, references, opts),
-         :ok <- atomic_write_private(path, json) do
-      release_previous_pin(id, store, previous_generation, generation, opts)
-      :ok
-    else
+    result =
+      with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
+           {:ok, json, references, generation} <- encode_snapshot(data) do
+        with_record_workflow(path, fn ->
+          save_record(path, id, {json, references, generation}, opts)
+        end)
+      end
+
+    case result do
+      :ok ->
+        :ok
+
       {:error, reason} ->
         Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  @spec session_record_path(String.t(), String.t() | nil) :: String.t()
+  defp session_record_path(id, config_dir),
+    do: config_dir |> sessions_dir() |> Path.join("#{id}.json") |> Path.expand()
+
+  @spec with_record_workflow(String.t(), (-> result)) :: result | {:error, term()}
+        when result: var
+  defp with_record_workflow(path, operation) do
+    case :global.trans({{__MODULE__, path}, self()}, operation, [node()], :infinity) do
+      :aborted -> {:error, :session_record_lock_aborted}
+      result -> result
+    end
+  end
+
+  @spec save_record(String.t(), String.t(), {String.t(), [Reference.t()], String.t()}, keyword()) ::
+          :ok | {:error, term()}
+  defp save_record(path, id, {json, references, generation}, opts) do
+    with :ok <- ensure_private_dir(Path.dirname(path)),
+         {:ok, previous_generation} <- previous_generation(path, id, opts),
+         {:ok, store} <- pin_candidate(id, generation, references, opts) do
+      case atomic_write_private_result(path, json, fault_injector(opts)) do
+        {:ok, :durable} ->
+          finish_committed_snapshot(id, store, generation, references)
+
+        {:error, reason, :before_rename} ->
+          release_failed_candidate(id, store, previous_generation, generation)
+          {:error, reason}
+
+        {:error, reason, :after_rename} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -118,7 +165,12 @@ defmodule MingaAgent.SessionStore do
     references = snapshot_references(candidate)
     generation = snapshot_generation(references)
     candidate = Map.put(candidate, "artifact_generation", generation)
-    {:ok, JSON.encode!(candidate), references, generation}
+    json = JSON.encode!(candidate)
+
+    with {:ok, encoded_record} <- decode_json(json),
+         {:ok, _validated_session} <- load_versioned_record(encoded_record, data.id) do
+      {:ok, json, references, generation}
+    end
   rescue
     error -> {:error, {:snapshot_encode_failed, Exception.message(error)}}
   end
@@ -160,44 +212,46 @@ defmodule MingaAgent.SessionStore do
 
   @spec pin_candidate(String.t(), String.t(), [Reference.t()], keyword()) ::
           {:ok, GenServer.server() | nil} | {:error, term()}
-  defp pin_candidate(_id, _generation, [], opts) do
-    if valid_artifact_opts?(opts), do: {:ok, nil}, else: {:error, :invalid_artifact_options}
-  end
-
   defp pin_candidate(id, generation, references, opts) do
-    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
-         {:ok, store} <- ensure_artifact_store(id, opts),
-         :ok <-
-           ArtifactStore.pin(store, {:snapshot, generation}, references,
-             transfer_delivery: true
-           ) do
+    with {:ok, store} <- artifact_store_for_reconciliation(id, references, opts),
+         :ok <- pin_snapshot(store, generation, references) do
       {:ok, store}
     end
+  catch
+    :exit, reason -> {:error, {:artifact_store_unavailable, reason}}
   end
 
-  @spec release_previous_pin(
-          String.t(),
-          GenServer.server() | nil,
-          String.t() | nil,
-          String.t(),
-          keyword()
-        ) :: :ok
-  defp release_previous_pin(_id, _store, nil, _generation, _opts), do: :ok
+  @spec pin_snapshot(GenServer.server() | nil, String.t(), [Reference.t()]) ::
+          :ok | {:error, term()}
+  defp pin_snapshot(_store, _generation, []), do: :ok
 
-  defp release_previous_pin(_id, _store, generation, generation, _opts), do: :ok
+  defp pin_snapshot(store, generation, references),
+    do: ArtifactStore.pin(store, {:snapshot, generation}, references)
 
-  defp release_previous_pin(id, nil, previous_generation, _generation, opts) do
-    result =
-      with {:ok, store} <- ensure_artifact_store(id, opts) do
-        ArtifactStore.release(store, {:snapshot, previous_generation})
-      end
-
-    log_release_failure(id, previous_generation, result)
+  @spec finish_committed_snapshot(String.t(), GenServer.server() | nil, String.t(), [
+          Reference.t()
+        ]) :: :ok
+  defp finish_committed_snapshot(id, store, generation, references) do
+    result = repair_snapshot_ownership(store, generation, references)
+    log_release_failure(id, generation, result)
+  catch
+    :exit, reason ->
+      log_release_failure(id, generation, {:error, {:artifact_store_unavailable, reason}})
   end
 
-  defp release_previous_pin(id, store, previous_generation, _generation, _opts) do
-    result = ArtifactStore.release(store, {:snapshot, previous_generation})
-    log_release_failure(id, previous_generation, result)
+  @spec repair_snapshot_ownership(GenServer.server() | nil, String.t() | nil, [Reference.t()]) ::
+          :ok | {:error, term()}
+  defp repair_snapshot_ownership(nil, _generation, []), do: :ok
+
+  defp repair_snapshot_ownership(store, generation, []) do
+    ArtifactStore.reconcile_snapshot_pins(store, generation)
+  end
+
+  defp repair_snapshot_ownership(store, generation, references) do
+    with :ok <-
+           ArtifactStore.pin(store, {:snapshot, generation}, references, transfer_delivery: true) do
+      ArtifactStore.reconcile_snapshot_pins(store, generation)
+    end
   end
 
   @spec log_release_failure(String.t(), String.t(), :ok | {:error, term()}) :: :ok
@@ -206,10 +260,27 @@ defmodule MingaAgent.SessionStore do
   defp log_release_failure(id, generation, {:error, reason}) do
     Minga.Log.warning(
       :agent,
-      "[SessionStore] retained snapshot pin leak for #{id} generation #{generation}: #{inspect(reason)}"
+      "[SessionStore] retained ownership leak for #{id} generation #{generation}: #{inspect(reason)}"
     )
 
     :ok
+  end
+
+  @spec release_failed_candidate(
+          String.t(),
+          GenServer.server() | nil,
+          String.t() | nil,
+          String.t()
+        ) :: :ok
+  defp release_failed_candidate(_id, nil, _previous, _candidate), do: :ok
+  defp release_failed_candidate(_id, _store, generation, generation), do: :ok
+
+  defp release_failed_candidate(id, store, _previous, candidate) do
+    result = ArtifactStore.release(store, {:snapshot, candidate})
+    log_release_failure(id, candidate, result)
+  catch
+    :exit, reason ->
+      log_release_failure(id, candidate, {:error, {:artifact_store_unavailable, reason}})
   end
 
   @spec ensure_artifact_store(String.t(), keyword()) ::
@@ -222,20 +293,116 @@ defmodule MingaAgent.SessionStore do
   end
 
   @spec valid_artifact_opts?(term()) :: boolean()
-  defp valid_artifact_opts?(opts),
-    do: Keyword.keyword?(opts) and Keyword.keys(opts) -- [:artifact_runtime] == []
+  defp valid_artifact_opts?(opts) do
+    Keyword.keyword?(opts) and
+      Keyword.keys(opts) -- [:artifact_runtime, :fault_injector] == []
+  end
 
-  @spec persisted_generation(String.t()) :: String.t() | nil
-  defp persisted_generation(path) do
-    with {:ok, json} <- File.read(path),
-         {:ok, %{"artifact_generation" => generation} = record} <- decode_json(json),
-         true <- valid_generation?(generation),
-         true <- is_list(record["messages"]) and is_list(record["branches"]),
-         true <- is_map(record["continuation"]),
-         [_reference | _rest] <- snapshot_references(record) do
-      generation
+  @spec fault_injector(keyword()) :: FaultInjector.t()
+  defp fault_injector(opts), do: Keyword.get(opts, :fault_injector)
+
+  @spec previous_generation(String.t(), String.t(), keyword()) ::
+          {:ok, String.t() | nil} | {:error, term()}
+  defp previous_generation(path, id, opts) do
+    case read_durable_record(path, opts) do
+      {:ok, data} -> previous_record_authority(data, id)
+      {:error, :enoent} -> {:ok, nil}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec previous_record_authority(map(), String.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp previous_record_authority(data, id) do
+    case Map.get(data, "version") do
+      version when version in [nil, 1] ->
+        with true <- valid_legacy_authority?(data, id),
+             %{} <- deserialize_legacy(data) do
+          {:ok, nil}
+        else
+          _invalid -> {:error, :invalid_session_record}
+        end
+
+      _version ->
+        with {:ok, _session, generation, _references} <- validated_record_authority(data, id),
+             do: {:ok, generation}
+    end
+  rescue
+    _error -> {:error, :invalid_session_record}
+  end
+
+  @spec valid_legacy_authority?(map(), String.t()) :: boolean()
+  defp valid_legacy_authority?(
+         %{"id" => id, "timestamp" => timestamp, "messages" => messages} = data,
+         id
+       ) do
+    non_empty_string?(id) and not Map.has_key?(data, "artifact_generation") and
+      valid_timestamp?(timestamp) and valid_legacy_messages?(messages) and
+      valid_legacy_branches?(Map.get(data, "branches", []))
+  end
+
+  defp valid_legacy_authority?(_data, _id), do: false
+
+  @spec valid_legacy_messages?(term()) :: boolean()
+  defp valid_legacy_messages?(messages) when is_list(messages),
+    do: Enum.all?(messages, &valid_snapshot_message?(&1, @legacy_version))
+
+  defp valid_legacy_messages?(_messages), do: false
+
+  @spec valid_legacy_branches?(term()) :: boolean()
+  defp valid_legacy_branches?(nil), do: true
+
+  defp valid_legacy_branches?(branches) when is_list(branches) do
+    Enum.all?(branches, fn
+      %{"name" => name, "created_at" => created_at, "messages" => messages} ->
+        non_empty_string?(name) and valid_timestamp?(created_at) and
+          valid_legacy_messages?(messages)
+
+      _invalid ->
+        false
+    end)
+  end
+
+  defp valid_legacy_branches?(_branches), do: false
+
+  @spec read_durable_record(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  defp read_durable_record(path, opts) do
+    with :ok <- FaultInjector.run(fault_injector(opts), :before_session_snapshot_recovery_sync),
+         :ok <- sync_existing_directory(Path.dirname(path)),
+         {:ok, json} <- File.read(path),
+         {:ok, data} when is_map(data) <- decode_json(json) do
+      {:ok, data}
     else
-      _missing_or_invalid -> nil
+      {:ok, _other} -> {:error, :invalid_session_record}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec validated_record_authority(map(), String.t()) ::
+          {:ok, session_data(), String.t() | nil, [Reference.t()]} | {:error, term()}
+  defp validated_record_authority(data, id) do
+    with {:ok, session} <- load_versioned_record(data, id),
+         {:ok, generation, references} <- artifact_authority(data) do
+      {:ok, session, generation, references}
+    end
+  rescue
+    _error -> {:error, :invalid_session_record}
+  end
+
+  @spec artifact_authority(map()) ::
+          {:ok, String.t() | nil, [Reference.t()]} | {:error, :invalid_session_record}
+  defp artifact_authority(%{"version" => version, "artifact_generation" => generation} = data)
+       when version in [3, @version] do
+    references = snapshot_references(data)
+
+    if generation == snapshot_generation(references),
+      do: {:ok, generation, references},
+      else: {:error, :invalid_session_record}
+  end
+
+  defp artifact_authority(%{"version" => version} = data) when version in [2, 3, 4] do
+    case {Map.has_key?(data, "artifact_generation"), snapshot_references(data)} do
+      {false, []} -> {:ok, nil, []}
+      _other -> {:error, :invalid_session_record}
     end
   end
 
@@ -318,22 +485,70 @@ defmodule MingaAgent.SessionStore do
   `load_legacy/2`; unknown future versions are never guessed.
   """
   @spec load(String.t(), String.t() | nil) :: {:ok, session_data()} | {:error, term()}
-  def load(session_id, config_dir \\ nil) when is_binary(session_id) do
-    with {:ok, data} <- read_record(session_id, config_dir) do
-      load_versioned_record(data, session_id)
+  def load(session_id, config_dir \\ nil) when is_binary(session_id),
+    do: load(session_id, config_dir, [])
+
+  @doc "Loads a session and reconciles retained snapshot pin generations."
+  @spec load(String.t(), String.t() | nil, keyword()) ::
+          {:ok, session_data()} | {:error, term()}
+  def load(session_id, config_dir, opts) when is_binary(session_id) and is_list(opts) do
+    path = session_record_path(session_id, config_dir)
+
+    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn -> load_record(path, session_id, opts) end)
+    end
+  end
+
+  @spec load_record(String.t(), String.t(), keyword()) :: {:ok, session_data()} | {:error, term()}
+  defp load_record(path, id, opts) do
+    with {:ok, data} <- read_durable_record(path, opts),
+         {:ok, session, generation, references} <- validated_record_authority(data, id),
+         {:ok, store} <- artifact_store_for_reconciliation(id, references, opts),
+         :ok <- repair_snapshot_ownership(store, generation, references) do
+      {:ok, session}
+    end
+  catch
+    :exit, reason -> {:error, {:artifact_store_unavailable, reason}}
+  end
+
+  @spec artifact_store_for_reconciliation(String.t(), [Reference.t()], keyword()) ::
+          {:ok, GenServer.server() | nil} | {:error, term()}
+  defp artifact_store_for_reconciliation(session_id, [_reference | _rest], opts),
+    do: ensure_artifact_store(session_id, opts)
+
+  defp artifact_store_for_reconciliation(session_id, [], opts) do
+    runtime = Keyword.get(opts, :artifact_runtime, ArtifactStores.default_runtime())
+
+    case Registry.lookup(runtime.registry, session_id) do
+      [{store, _value}] ->
+        {:ok, store}
+
+      [] ->
+        namespace = Reference.namespace(session_id)
+
+        case ArtifactQuota.namespace_registered?(runtime.quota, runtime.root, namespace) do
+          {:ok, true} -> ensure_artifact_store(session_id, opts)
+          {:ok, false} -> {:ok, nil}
+          {:error, _reason} = error -> error
+        end
     end
   rescue
-    _error -> {:error, :invalid_session_record}
+    ArgumentError -> {:error, :artifact_runtime_unavailable}
+  catch
+    :exit, reason -> {:error, {:artifact_runtime_unavailable, reason}}
   end
 
   @spec load_versioned_record(map(), String.t()) :: {:ok, session_data()} | {:error, term()}
   defp load_versioned_record(%{"version" => version} = data, session_id)
-       when version in [@legacy_version, @version] do
-    with :ok <- validate_versioned_record(data, session_id), do: deserialize(data)
+       when version in [2, 3, 4, @version] do
+    with :ok <- validate_versioned_record(data, session_id),
+         {:ok, session} <- deserialize(data) do
+      restore_selection_data(version, data, session)
+    end
   end
 
   defp load_versioned_record(%{"version" => version}, _session_id)
-       when version not in [nil, 1, @legacy_version, @version],
+       when version not in [nil, 1, 2, 3, 4, @version],
        do: {:error, {:unknown_session_version, version}}
 
   defp load_versioned_record(_data, _session_id), do: {:error, :legacy_import_required}
@@ -371,6 +586,7 @@ defmodule MingaAgent.SessionStore do
   @spec validate_versioned_record(map(), String.t()) :: :ok | {:error, atom()}
   defp validate_versioned_record(data, requested_id) do
     version = data["version"]
+    schema = snapshot_schema(data)
 
     with true <- data["id"] == requested_id,
          true <- non_empty_string?(data["id"]),
@@ -379,11 +595,12 @@ defmodule MingaAgent.SessionStore do
          true <- non_empty_string?(data["title"]),
          true <- non_empty_string?(data["model_name"]),
          true <- non_empty_string?(data["provider_name"]),
+         true <- valid_model_selection_field?(data),
          true <-
            is_list(data["messages"]) and
-             Enum.all?(data["messages"], &valid_snapshot_message?(&1, version)),
+             Enum.all?(data["messages"], &valid_snapshot_message?(&1, schema)),
          true <- valid_v2_message_ids?(data["message_ids"], data["messages"]),
-         true <- valid_snapshot_branches?(data["branches"], version),
+         true <- valid_snapshot_branches?(data["branches"], schema),
          true <- valid_v2_pins?(data["pinned_ids"], data["message_ids"], data["branches"]),
          true <- valid_v2_usage?(data["usage"]),
          true <- is_nil(data["memory"]) or is_binary(data["memory"]),
@@ -395,8 +612,29 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
+  @spec snapshot_schema(map()) :: snapshot_schema()
+  defp snapshot_schema(%{"version" => 3, "artifact_generation" => _generation}), do: :retention_v3
+  defp snapshot_schema(%{"version" => 3}), do: :model_v3
+  defp snapshot_schema(%{"version" => version}) when version in [2, 4, @version], do: version
+
   @spec non_empty_string?(term()) :: boolean()
   defp non_empty_string?(value), do: is_binary(value) and value != ""
+
+  @spec valid_model_selection_field?(map()) :: boolean()
+  defp valid_model_selection_field?(%{"version" => 2}), do: true
+
+  defp valid_model_selection_field?(
+         %{"version" => 3, "artifact_generation" => _generation} = data
+       ),
+       do:
+         not Map.has_key?(data, "model_selection") and not Map.has_key?(data, "selection_intent")
+
+  defp valid_model_selection_field?(%{"version" => version} = data)
+       when version in [3, 4, @version] do
+    is_map(data["model_selection"]) or is_map(data["selection_intent"])
+  end
+
+  defp valid_model_selection_field?(_data), do: false
 
   @spec valid_timestamp?(term()) :: boolean()
   defp valid_timestamp?(value) when is_binary(value) do
@@ -405,7 +643,7 @@ defmodule MingaAgent.SessionStore do
 
   defp valid_timestamp?(_value), do: false
 
-  @spec valid_snapshot_message?(term(), pos_integer()) :: boolean()
+  @spec valid_snapshot_message?(term(), snapshot_schema()) :: boolean()
   defp valid_snapshot_message?(%{"type" => "user", "text" => text} = message, _version)
        when is_binary(text) do
     case Map.get(message, "attachments", []) do
@@ -443,16 +681,19 @@ defmodule MingaAgent.SessionStore do
 
   defp valid_snapshot_message?(_message, _version), do: false
 
-  @spec valid_persisted_output?(map(), pos_integer()) :: boolean()
-  defp valid_persisted_output?(message, @legacy_version),
+  @spec valid_persisted_output?(map(), snapshot_schema()) :: boolean()
+  defp valid_persisted_output?(message, schema) when schema in [@legacy_version, 4, :model_v3],
     do: not Map.has_key?(message, "output")
 
-  defp valid_persisted_output?(%{"output" => nil}, @version), do: true
+  defp valid_persisted_output?(%{"output" => nil}, schema)
+       when schema in [:retention_v3, @version],
+       do: true
 
-  defp valid_persisted_output?(%{"output" => encoded}, @version) when is_map(encoded),
-    do: match?({:ok, %Output{}}, OutputCodec.decode(encoded))
+  defp valid_persisted_output?(%{"output" => encoded}, schema)
+       when schema in [:retention_v3, @version] and is_map(encoded),
+       do: match?({:ok, %Output{}}, OutputCodec.decode(encoded))
 
-  defp valid_persisted_output?(_message, @version), do: false
+  defp valid_persisted_output?(_message, _version), do: false
 
   @spec valid_attachment?(term()) :: boolean()
   defp valid_attachment?(%{"filename" => filename, "size_kb" => size_kb}),
@@ -486,7 +727,7 @@ defmodule MingaAgent.SessionStore do
 
   defp valid_v2_pins?(_pins, _ids, _branches), do: false
 
-  @spec valid_snapshot_branches?(term(), pos_integer()) :: boolean()
+  @spec valid_snapshot_branches?(term(), snapshot_schema()) :: boolean()
   defp valid_snapshot_branches?(branches, version) when is_list(branches) do
     Enum.all?(branches, fn
       %{"name" => name, "messages" => messages, "message_ids" => ids, "created_at" => created_at} ->
@@ -503,10 +744,18 @@ defmodule MingaAgent.SessionStore do
   defp valid_snapshot_branches?(_branches, _version), do: false
 
   @spec valid_record_generation?(map(), pos_integer()) :: boolean()
-  defp valid_record_generation?(data, @legacy_version),
+  defp valid_record_generation?(data, version) when version in [@legacy_version, 4],
     do: not Map.has_key?(data, "artifact_generation")
 
-  defp valid_record_generation?(data, @version), do: valid_generation?(data["artifact_generation"])
+  defp valid_record_generation?(data, 3) do
+    case Map.fetch(data, "artifact_generation") do
+      {:ok, generation} -> valid_generation?(generation)
+      :error -> true
+    end
+  end
+
+  defp valid_record_generation?(data, @version),
+    do: valid_generation?(data["artifact_generation"])
 
   @spec valid_v2_usage?(term()) :: boolean()
   defp valid_v2_usage?(usage) when is_map(usage) do
@@ -554,9 +803,8 @@ defmodule MingaAgent.SessionStore do
       {:ok, io} ->
         result =
           with :ok <- :file.write(io, contents),
-               :ok <- File.chmod(path, 0o600),
-               :ok <- :file.sync(io) do
-            :ok
+               :ok <- File.chmod(path, 0o600) do
+            :file.sync(io)
           end
 
         _closed = :file.close(io)
@@ -577,18 +825,38 @@ defmodule MingaAgent.SessionStore do
 
   @spec atomic_write_private(String.t(), String.t()) :: :ok | {:error, term()}
   defp atomic_write_private(path, contents) do
+    case atomic_write_private_result(path, contents, nil) do
+      {:ok, :durable} -> :ok
+      {:error, reason, _phase} -> {:error, reason}
+    end
+  end
+
+  @spec atomic_write_private_result(String.t(), String.t(), FaultInjector.t()) ::
+          {:ok, :durable} | {:error, term(), :before_rename | :after_rename}
+  defp atomic_write_private_result(path, contents, fault_injector) do
     tmp_path = path <> ".tmp"
     directory = Path.dirname(path)
 
-    with :ok <- ensure_private_dir(directory),
-         :ok <- write_private_file(tmp_path, contents),
-         :ok <- File.rename(tmp_path, path),
-         :ok <- sync_directory(directory) do
-      :ok
-    else
-      {:error, _reason} = error ->
+    before_rename =
+      with :ok <- ensure_private_dir(directory),
+           :ok <- write_private_file(tmp_path, contents),
+           :ok <- FaultInjector.run(fault_injector, :before_session_snapshot_rename),
+           :ok <- File.rename(tmp_path, path) do
+        :renamed
+      end
+
+    case before_rename do
+      :renamed ->
+        with :ok <- FaultInjector.run(fault_injector, :after_session_snapshot_rename),
+             :ok <- sync_directory(directory) do
+          {:ok, :durable}
+        else
+          {:error, reason} -> {:error, reason, :after_rename}
+        end
+
+      {:error, reason} ->
         File.rm(tmp_path)
-        error
+        {:error, reason, :before_rename}
     end
   end
 
@@ -609,12 +877,17 @@ defmodule MingaAgent.SessionStore do
   @spec delete(String.t(), String.t() | nil, keyword()) :: :ok | {:error, term()}
   def delete(session_id, config_dir \\ nil, opts \\ [])
       when is_binary(session_id) and is_list(opts) do
-    path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
+    path = session_record_path(session_id, config_dir)
 
-    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
-         :ok <- remove_session_record(path),
-         :ok <- delete_artifact_record(session_id, opts) do
-      :ok
+    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn -> delete_record(path, session_id, opts) end)
+    end
+  end
+
+  @spec delete_record(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  defp delete_record(path, id, opts) do
+    with :ok <- remove_session_record(path) do
+      delete_artifact_record(id, opts)
     end
   end
 
@@ -622,8 +895,16 @@ defmodule MingaAgent.SessionStore do
   defp remove_session_record(path) do
     case File.rm(path) do
       :ok -> sync_directory(Path.dirname(path))
-      {:error, :enoent} -> :ok
+      {:error, :enoent} -> sync_existing_directory(Path.dirname(path))
       {:error, _reason} = error -> error
+    end
+  end
+
+  @spec sync_existing_directory(String.t()) :: :ok | {:error, term()}
+  defp sync_existing_directory(path) do
+    case sync_directory(path) do
+      {:error, :enoent} -> :ok
+      result -> result
     end
   end
 
@@ -703,6 +984,12 @@ defmodule MingaAgent.SessionStore do
       "title" => Map.get(data, :title) || title_from_messages(messages),
       "model_name" => data.model_name,
       "provider_name" => Map.get(data, :provider_name, "unknown"),
+      "model_selection" => serialize_model_selection(Map.get(data, :model_selection)),
+      "selection_intent" =>
+        Map.get(data, :selection_intent, %{
+          "model" => data.model_name,
+          "provider" => Map.get(data, :provider_name, "unknown")
+        }),
       "messages" => Enum.map(messages, &serialize_message/1),
       "message_ids" => message_ids,
       "pinned_ids" => serialize_pinned_ids(Map.get(data, :pinned_ids)),
@@ -712,6 +999,12 @@ defmodule MingaAgent.SessionStore do
       "continuation" => ContinuationCodec.encode(data.continuation)
     }
   end
+
+  @spec serialize_model_selection(ModelSelection.t() | nil) :: map() | nil
+  defp serialize_model_selection(%ModelSelection{} = selection),
+    do: ModelSelection.encode(selection)
+
+  defp serialize_model_selection(nil), do: nil
 
   @spec default_message_ids([term()]) :: [pos_integer()]
   defp default_message_ids(messages) when messages == [], do: []
@@ -746,10 +1039,6 @@ defmodule MingaAgent.SessionStore do
     }
   end
 
-  @spec serialize_output(Output.t() | nil) :: map() | nil
-  defp serialize_output(nil), do: nil
-  defp serialize_output(%Output{} = output), do: OutputCodec.encode(output)
-
   defp serialize_message({:system, text, level}) do
     %{"type" => "system", "text" => text, "level" => Atom.to_string(level)}
   end
@@ -757,6 +1046,9 @@ defmodule MingaAgent.SessionStore do
   defp serialize_message({:usage, %MingaAgent.TurnUsage{} = usage}),
     do: %{"type" => "usage", "data" => serialize_usage(usage)}
 
+  @spec serialize_output(Output.t() | nil) :: map() | nil
+  defp serialize_output(nil), do: nil
+  defp serialize_output(%Output{} = output), do: OutputCodec.encode(output)
   @spec serialize_pinned_ids(MapSet.t() | list() | nil) :: [pos_integer()]
   defp serialize_pinned_ids(%MapSet{} = set), do: set |> MapSet.to_list() |> Enum.sort()
   defp serialize_pinned_ids(list) when is_list(list), do: Enum.sort(list)
@@ -782,6 +1074,44 @@ defmodule MingaAgent.SessionStore do
         |> Map.put(:continuation, continuation)
 
       {:ok, session}
+    end
+  end
+
+  @spec restore_selection_data(2 | 3 | 4 | 5, map(), session_data()) ::
+          {:ok, session_data()} | {:error, term()}
+  defp restore_selection_data(2, data, session) do
+    {:ok,
+     session
+     |> Map.put(:model_selection, nil)
+     |> Map.put(:selection_intent, %{
+       "model" => data["model_name"],
+       "provider" => data["provider_name"]
+     })}
+  end
+
+  defp restore_selection_data(3, data, session)
+       when not is_map_key(data, "model_selection") and not is_map_key(data, "selection_intent"),
+       do: restore_selection_data(2, data, session)
+
+  defp restore_selection_data(version, data, session) when version in [3, 4, @version] do
+    case data["model_selection"] do
+      selection when is_map(selection) ->
+        case ModelSelection.decode(selection) do
+          {:ok, selection} ->
+            {:ok,
+             session
+             |> Map.put(:model_selection, selection)
+             |> Map.put(:selection_intent, data["selection_intent"])}
+
+          {:error, reason} ->
+            {:error, {:invalid_saved_model_selection, reason}}
+        end
+
+      nil ->
+        {:ok,
+         session
+         |> Map.put(:model_selection, nil)
+         |> Map.put(:selection_intent, data["selection_intent"])}
     end
   end
 
@@ -875,16 +1205,6 @@ defmodule MingaAgent.SessionStore do
     {:tool_call, tool_call}
   end
 
-  @spec deserialize_output(map() | nil) :: Output.t() | nil
-  defp deserialize_output(nil), do: nil
-
-  defp deserialize_output(encoded) when is_map(encoded) do
-    case OutputCodec.decode(encoded) do
-      {:ok, output} -> output
-      {:error, reason} -> raise ArgumentError, "invalid persisted output: #{inspect(reason)}"
-    end
-  end
-
   defp deserialize_message(%{"type" => "system", "text" => text, "level" => level}) do
     {:system, text, deserialize_system_level(level)}
   end
@@ -895,6 +1215,16 @@ defmodule MingaAgent.SessionStore do
 
   defp deserialize_message(%{"type" => type}) do
     raise ArgumentError, "unsupported persisted message type: #{inspect(type)}"
+  end
+
+  @spec deserialize_output(map() | nil) :: Output.t() | nil
+  defp deserialize_output(nil), do: nil
+
+  defp deserialize_output(encoded) when is_map(encoded) do
+    case OutputCodec.decode(encoded) do
+      {:ok, output} -> output
+      {:error, reason} -> raise ArgumentError, "invalid persisted output: #{inspect(reason)}"
+    end
   end
 
   @spec deserialize_attachment(map()) :: MingaAgent.Message.image_attachment()
@@ -1011,7 +1341,7 @@ defmodule MingaAgent.SessionStore do
   defp load_meta(path) do
     with {:ok, json} <- File.read(path),
          {:ok, data} when is_map(data) <- decode_json(json),
-         true <- data["version"] in [nil, 1, @legacy_version, @version] do
+         true <- data["version"] in [nil, 1, 2, 3, 4, @version] do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
       timestamp = data["timestamp"] || ""
@@ -1042,11 +1372,11 @@ defmodule MingaAgent.SessionStore do
          "version" => version,
          "continuation" => %{"provenance" => "legacy_reconstructed"}
        })
-       when version in [@legacy_version, @version],
+       when version in [2, 3, 4, @version],
        do: :legacy_reconstructed
 
   defp continuation_kind(%{"version" => version})
-       when version in [@legacy_version, @version],
+       when version in [2, 3, 4, @version],
        do: :lossless
 
   defp continuation_kind(_data), do: :legacy_import_required

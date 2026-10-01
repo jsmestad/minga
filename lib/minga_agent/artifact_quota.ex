@@ -66,11 +66,34 @@ defmodule MingaAgent.ArtifactQuota do
     GenServer.call(server, {:finish_capture, namespace})
   end
 
+  @doc "Releases every reservation for one durably canceled open capture."
+  @spec cancel_capture(server(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          :ok | {:error, error_reason()}
+  def cancel_capture(server, namespace, bytes, items) do
+    GenServer.call(server, {:cancel_capture, namespace, bytes, items})
+  end
+
   @doc "Releases conservative artifact reservations after owned files are deleted."
   @spec release_artifact(server(), String.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, error_reason()}
   def release_artifact(server, namespace, bytes, items) do
     GenServer.call(server, {:release_artifact, namespace, bytes, items})
+  end
+
+  @doc "Reconciles aggregate counters to exact durable namespace manifest facts."
+  @spec reconcile_namespace(
+          server(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :ok | {:error, error_reason()}
+  def reconcile_namespace(server, namespace, bytes, items, artifacts, open_captures) do
+    GenServer.call(
+      server,
+      {:reconcile_namespace, namespace, bytes, items, artifacts, open_captures}
+    )
   end
 
   @doc "Reports whether a valid record namespace already has a durable quota row."
@@ -93,6 +116,8 @@ defmodule MingaAgent.ArtifactQuota do
   @impl GenServer
   @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
   def init(opts) do
+    Process.flag(:trap_exit, true)
+
     with {:ok, limits} <-
            Limits.new(
              Keyword.get(opts, :limits, []),
@@ -132,6 +157,11 @@ defmodule MingaAgent.ArtifactQuota do
     {:reply, reply, next_state}
   end
 
+  def handle_call({:cancel_capture, namespace, bytes, items}, _from, state) do
+    {reply, next_state} = State.cancel_capture(state, namespace, bytes, items)
+    {:reply, reply, next_state}
+  end
+
   def handle_call({:release_artifact, namespace, bytes, items}, _from, state) do
     {reply, next_state} = State.release_artifact(state, namespace, bytes, items)
     {:reply, reply, next_state}
@@ -139,6 +169,17 @@ defmodule MingaAgent.ArtifactQuota do
 
   def handle_call({:release_reservation, namespace, bytes, items}, _from, state) do
     {reply, next_state} = State.release_reservation(state, namespace, bytes, items)
+    {:reply, reply, next_state}
+  end
+
+  def handle_call(
+        {:reconcile_namespace, namespace, bytes, items, artifacts, open_captures},
+        _from,
+        state
+      ) do
+    {reply, next_state} =
+      State.reconcile_namespace(state, namespace, bytes, items, artifacts, open_captures)
+
     {:reply, reply, next_state}
   end
 
@@ -151,5 +192,16 @@ defmodule MingaAgent.ArtifactQuota do
 
   @impl GenServer
   @spec terminate(term(), State.t()) :: :ok
-  def terminate(_reason, state), do: State.close(state)
+  def terminate(_reason, state) do
+    case State.close(state) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.error(
+          :agent,
+          "Retained artifact quota root #{state.root} failed to close: #{inspect(reason)}"
+        )
+    end
+  end
 end

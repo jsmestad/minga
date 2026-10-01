@@ -4,7 +4,9 @@ defmodule MingaAgent.ArtifactStores do
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores.Runtime
+  alias MingaAgent.ArtifactStores.Copy
   alias MingaAgent.Tool.Output.Reference
+  alias MingaAgent.Tool.Output
 
   @doc "Returns the process names, root, and policy owned by the production artifact subtree."
   @spec default_runtime() :: Runtime.t()
@@ -35,6 +37,33 @@ defmodule MingaAgent.ArtifactStores do
   end
 
   def ensure_record(_record_id, %Runtime{}), do: {:error, :invalid_record_id}
+
+  @doc """
+  Copies retained output into another record and rewrites every foreign token.
+
+  The copy ID must be stable for retries of the same fork operation.
+  """
+  @spec copy_output(String.t(), String.t(), Output.t(), String.t(), Runtime.t()) ::
+          {:ok, Output.t()} | {:error, term()}
+  def copy_output(source_record, target_record, output, copy_id, runtime \\ default_runtime())
+
+  def copy_output(record, record, %Output{} = output, copy_id, %Runtime{})
+      when is_binary(record) and byte_size(record) > 0 and is_binary(copy_id) and
+             byte_size(copy_id) > 0,
+      do: {:ok, output}
+
+  def copy_output(source_record, target_record, %Output{} = output, copy_id, %Runtime{} = runtime)
+      when is_binary(source_record) and byte_size(source_record) > 0 and
+             is_binary(target_record) and byte_size(target_record) > 0 and
+             is_binary(copy_id) and byte_size(copy_id) > 0 do
+    with {:ok, source} <- ensure_record(source_record, runtime),
+         {:ok, target} <- ensure_record(target_record, runtime) do
+      Copy.output(source, target, output, copy_id)
+    end
+  end
+
+  def copy_output(_source_record, _target_record, _output, _copy_id, %Runtime{}),
+    do: {:error, :invalid_artifact_copy}
 
   @doc "Explicitly deletes one durable record and its quota row; missing records are already deleted."
   @spec delete_record(String.t(), Runtime.t()) :: :ok | {:error, term()}
@@ -119,9 +148,9 @@ defmodule MingaAgent.ArtifactStores do
 
   @spec lookup(atom(), String.t()) :: {:ok, pid()} | :error
   defp lookup(registry, record_id) do
-    case Registry.lookup(registry, record_id) do
-      [{store, _value}] -> {:ok, store}
-      [] -> :error
+    case Registry.whereis_name({registry, record_id}) do
+      store when is_pid(store) -> {:ok, store}
+      :undefined -> :error
     end
   end
 end

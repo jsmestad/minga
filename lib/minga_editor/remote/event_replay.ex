@@ -5,6 +5,7 @@ defmodule MingaEditor.Remote.EventReplay do
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
 
   @type event :: term()
 
@@ -36,8 +37,14 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   def to_agent_event(%EventRecord{event_type: :tool_call_finished, payload: payload}) do
-    {:tool_ended, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
-     string_payload(payload, "result"), tool_status(payload)}
+    event =
+      {:tool_ended, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
+       string_payload(payload, "result"), tool_status(payload)}
+
+    case output_payload(payload) do
+      nil -> event
+      output -> Tuple.insert_at(event, tuple_size(event), output)
+    end
   end
 
   def to_agent_event(%EventRecord{event_type: :tool_call_interrupted, payload: payload}) do
@@ -156,6 +163,20 @@ defmodule MingaEditor.Remote.EventReplay do
     case string_payload(payload, "status") do
       "done" -> :done
       _ -> :error
+    end
+  end
+
+  @spec output_payload(map()) :: MingaAgent.Tool.Output.t() | nil
+  defp output_payload(payload) do
+    case payload_value(payload, "output") do
+      value when is_map(value) ->
+        case OutputCodec.decode(value) do
+          {:ok, output} -> output
+          {:error, _reason} -> nil
+        end
+
+      _value ->
+        nil
     end
   end
 

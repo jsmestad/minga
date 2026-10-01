@@ -28,7 +28,8 @@ defmodule MingaAgent.Provider do
   """
 
   alias MingaAgent.Event
-
+  alias MingaAgent.ModelCandidate
+  alias MingaAgent.ModelSelection
   @typedoc "Provider configuration options."
   @type opts :: keyword()
 
@@ -49,6 +50,7 @@ defmodule MingaAgent.Provider do
           optional(:active_skill_names) => [String.t()],
           optional(:project_root) => String.t() | nil,
           optional(:mcp_status) => [map()],
+          optional(:model_selection) => ModelSelection.t(),
           model: model_info() | String.t() | nil,
           is_streaming: boolean(),
           token_usage: Event.token_usage() | nil
@@ -81,8 +83,9 @@ defmodule MingaAgent.Provider do
   @doc "Returns the current session state (model info, streaming status, etc.)."
   @callback get_state(provider()) :: {:ok, session_state()} | {:error, term()}
 
-  @doc "Returns available models from the provider."
-  @callback get_available_models(provider()) :: {:ok, [map()]} | {:error, term()}
+  @doc "Returns exact resolved model route candidates from the provider."
+  @callback get_available_models(provider()) ::
+              {:ok, [ModelCandidate.t()]} | {:error, term()}
 
   @doc "Returns available commands (extensions, skills, prompts) from the provider."
   @callback get_commands(provider()) :: {:ok, [map()]} | {:error, term()}
@@ -93,11 +96,11 @@ defmodule MingaAgent.Provider do
   @doc "Cycles to the next thinking level and returns the new level."
   @callback cycle_thinking_level(provider()) :: {:ok, term()} | {:error, term()}
 
-  @doc "Cycles to the next model in the configured model rotation."
+  @doc "Requests cycling; Session-owned resolvers should normally perform this transition."
   @callback cycle_model(provider()) :: {:ok, map()} | {:error, term()}
 
-  @doc "Sets the model without resetting conversation context."
-  @callback set_model(provider(), String.t()) :: :ok | {:error, term()}
+  @doc "Installs an already-resolved model selection without resetting conversation context."
+  @callback set_model(provider(), ModelSelection.t()) :: :ok | {:error, term()}
 
   @optional_callbacks [
     get_available_models: 1,

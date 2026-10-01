@@ -28,6 +28,7 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
       Native.start_link(
         subscriber: self(),
         model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
         project_root: dir,
         tools: [],
         config: %AgentConfig{mcp_servers: [], tool_approval: :none},
@@ -47,6 +48,7 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
       Native.start_link(
         subscriber: self(),
         model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
         project_root: dir,
         tools: [],
         config: %AgentConfig{mcp_servers: [], tool_approval: :none},
@@ -72,6 +74,7 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
       Native.start_link(
         subscriber: self(),
         model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
         project_root: dir,
         tools: [],
         config: %AgentConfig{mcp_servers: [], tool_approval: :none},
@@ -97,6 +100,7 @@ defmodule MingaAgent.Providers.NativeMCPRegistryTest do
       Native.start_link(
         subscriber: self(),
         model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
         project_root: dir,
         tools: [],
         config: %AgentConfig{mcp_servers: [], tool_approval: :none},

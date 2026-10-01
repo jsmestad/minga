@@ -49,8 +49,8 @@ defmodule MingaEditor.Frontend.NativeMenuUndoRedoTest do
 
   test "native menu Undo and Redo use buffer history in CUA without changing editing model" do
     ctx = start_editor("", editing_model: :cua)
-    send_key_sync(ctx, ?a)
-    before_undo = send_key_sync(ctx, ?b)
+    assert :ok = Buffer.insert_text(ctx.buffer, "ab")
+    before_undo = editor_state(ctx)
 
     assert Buffer.content(ctx.buffer) == "ab"
     assert Buffer.cursor(ctx.buffer) == {0, 2}

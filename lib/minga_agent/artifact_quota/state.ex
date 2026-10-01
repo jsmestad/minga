@@ -67,13 +67,10 @@ defmodule MingaAgent.ArtifactQuota.State do
   defp normalize_limits(values), do: Limits.new(values || %{})
 
   @doc "Closes the durable ledger when this cold-started actor acquired it."
-  @spec close(t()) :: :ok
+  @spec close(t()) :: :ok | {:error, term()}
   def close(%__MODULE__{storage: :cold}), do: :ok
 
-  def close(%__MODULE__{storage: {:open, db}}) do
-    _ = Ledger.close(db)
-    :ok
-  end
+  def close(%__MODULE__{storage: {:open, db}}), do: Ledger.close(db)
 
   @doc "Reserves one namespace envelope before namespace files are created."
   @spec register_namespace(t(), String.t(), String.t(), keyword() | map()) ::
@@ -137,7 +134,9 @@ defmodule MingaAgent.ArtifactQuota.State do
     with {:ok, row} <- fetch_row(state, namespace),
          :ok <- check_bytes(state, row, bytes),
          :ok <- check_items(state, row, items) do
-      mutation = Ledger.reserve(opened_db(state), namespace, bytes, items, 0, 0, fault_opts(state))
+      mutation =
+        Ledger.reserve(opened_db(state), namespace, bytes, items, 0, 0, fault_opts(state))
+
       apply_reservation(state, row, bytes, items, 0, 0, mutation)
     else
       {:error, _reason} = error -> {error, state}
@@ -159,6 +158,31 @@ defmodule MingaAgent.ArtifactQuota.State do
       apply_finish(state, row, mutation)
     else
       false -> {{:error, :invalid_open_capture_release}, state}
+      {:error, _reason} = error -> {error, state}
+    end
+  end
+
+  @doc "Releases every reservation for one durably canceled open capture."
+  @spec cancel_capture(t(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok | {:error, term()}, t()}
+  def cancel_capture(%__MODULE__{storage: :cold} = state, _namespace, _bytes, _items),
+    do: {{:error, :storage_unavailable}, state}
+
+  def cancel_capture(%__MODULE__{blocked: true} = state, _namespace, _bytes, _items),
+    do: {{:error, :storage_unavailable}, state}
+
+  def cancel_capture(%__MODULE__{} = state, namespace, bytes, items)
+      when is_integer(bytes) and bytes >= 0 and is_integer(items) and items >= 0 do
+    with {:ok, row} <- fetch_row(state, namespace),
+         true <-
+           row.charged_bytes >= bytes and row.items >= items and row.artifacts > 0 and
+             row.open_captures > 0 do
+      mutation =
+        Ledger.cancel_capture(opened_db(state), namespace, bytes, items, fault_opts(state))
+
+      apply_capture_cancel(state, row, bytes, items, mutation)
+    else
+      false -> {{:error, :invalid_quota_release}, state}
       {:error, _reason} = error -> {error, state}
     end
   end
@@ -207,6 +231,67 @@ defmodule MingaAgent.ArtifactQuota.State do
     end
   end
 
+  @doc "Reconciles aggregate counters to one manifest's exact durable accounting."
+  @spec reconcile_namespace(
+          t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {:ok | {:error, term()}, t()}
+  def reconcile_namespace(
+        %__MODULE__{storage: :cold} = state,
+        _namespace,
+        _bytes,
+        _items,
+        _artifacts,
+        _open
+      ),
+      do: {{:error, :storage_unavailable}, state}
+
+  def reconcile_namespace(
+        %__MODULE__{blocked: true} = state,
+        _namespace,
+        _bytes,
+        _items,
+        _artifacts,
+        _open
+      ),
+      do: {{:error, :storage_unavailable}, state}
+
+  def reconcile_namespace(state, namespace, artifact_bytes, items, artifacts, open)
+      when is_integer(artifact_bytes) and artifact_bytes >= 0 and is_integer(items) and
+             items >= 0 and is_integer(artifacts) and artifacts >= 0 and is_integer(open) and
+             open >= 0 do
+    with {:ok, row} <- fetch_row(state, namespace),
+         charged_bytes = Limits.sqlite_envelope_bytes() + artifact_bytes,
+         :ok <- validate_reconciliation(state, row, charged_bytes, items, artifacts, open) do
+      mutation =
+        Ledger.reconcile(
+          opened_db(state),
+          namespace,
+          charged_bytes,
+          items,
+          artifacts,
+          open,
+          fault_opts(state)
+        )
+
+      apply_reconciliation(
+        state,
+        row,
+        charged_bytes,
+        items,
+        artifacts,
+        open,
+        mutation
+      )
+    else
+      {:error, _reason} = error -> {error, state}
+    end
+  end
+
   @doc "Decharges one explicitly deleted record after all owned files are durably absent."
   @spec delete_namespace(t(), String.t()) :: {:ok | {:error, term()}, t()}
   def delete_namespace(%__MODULE__{storage: :cold} = state, _namespace),
@@ -221,8 +306,17 @@ defmodule MingaAgent.ArtifactQuota.State do
         {:ok, state}
 
       {:ok, %{open_captures: 0} = row} ->
-        mutation = Ledger.delete_namespace(opened_db(state), namespace, fault_opts(state))
-        apply_namespace_release(state, row, mutation)
+        case File.lstat(Path.join([state.root, "namespaces", namespace])) do
+          {:error, :enoent} ->
+            mutation = Ledger.delete_namespace(opened_db(state), namespace, fault_opts(state))
+            apply_namespace_release(state, row, mutation)
+
+          {:ok, _exists} ->
+            {{:error, :namespace_not_empty}, state}
+
+          {:error, reason} ->
+            {{:error, reason}, state}
+        end
 
       {:ok, _row} ->
         {{:error, :record_in_use}, state}
@@ -290,10 +384,17 @@ defmodule MingaAgent.ArtifactQuota.State do
   @spec reject_orphaned_namespaces(String.t()) :: :ok | {:error, term()}
   defp reject_orphaned_namespaces(namespaces_path) do
     case File.lstat(namespaces_path) do
-      {:error, :enoent} -> :ok
-      {:ok, %File.Stat{type: :directory}} -> {:error, :missing_artifact_quota_ledger}
-      {:ok, %File.Stat{type: type}} -> {:error, {:unsafe_artifact_directory, namespaces_path, type}}
-      {:error, reason} -> {:error, reason}
+      {:error, :enoent} ->
+        :ok
+
+      {:ok, %File.Stat{type: :directory}} ->
+        {:error, :missing_artifact_quota_ledger}
+
+      {:ok, %File.Stat{type: type}} ->
+        {:error, {:unsafe_artifact_directory, namespaces_path, type}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -310,7 +411,7 @@ defmodule MingaAgent.ArtifactQuota.State do
   end
 
   @spec from_rows(t(), Ledger.db(), [Ledger.namespace_row()]) :: t()
-  defp from_rows(state, db, rows) do
+  defp from_rows(%__MODULE__{} = state, db, rows) do
     by_namespace = Map.new(rows, &{&1.namespace, &1})
 
     %__MODULE__{
@@ -336,25 +437,27 @@ defmodule MingaAgent.ArtifactQuota.State do
 
   @spec cap_existing_namespace(t(), Ledger.namespace_row(), Limits.t()) ::
           {{:ok, Limits.t()}, t()}
-  defp cap_existing_namespace(%__MODULE__{} = state, row, limits) do capped =
-    Limits.cap_session(
-      limits,
-      row.session_bytes,
-      row.session_items,
-      row.session_artifacts,
-      row.session_open_captures
-    )
-  
-  capped_row = %{
-    row
-    | session_bytes: capped.session_bytes,
-      session_items: capped.session_items,
-      session_artifacts: capped.session_artifacts,
-      session_open_captures: capped.session_open_captures
-  }
-  
-  next_state = %__MODULE__{state | rows: Map.put(state.rows, row.namespace, capped_row)}
-  {{:ok, capped}, next_state} end
+  defp cap_existing_namespace(%__MODULE__{} = state, row, limits) do
+    capped =
+      Limits.cap_session(
+        limits,
+        row.session_bytes,
+        row.session_items,
+        row.session_artifacts,
+        row.session_open_captures
+      )
+
+    capped_row = %{
+      row
+      | session_bytes: capped.session_bytes,
+        session_items: capped.session_items,
+        session_artifacts: capped.session_artifacts,
+        session_open_captures: capped.session_open_captures
+    }
+
+    next_state = %__MODULE__{state | rows: Map.put(state.rows, row.namespace, capped_row)}
+    {{:ok, capped}, next_state}
+  end
 
   @spec admit_new_namespace(t(), String.t(), Limits.t()) ::
           {{:ok, Limits.t()} | {:error, term()}, t()}
@@ -390,6 +493,8 @@ defmodule MingaAgent.ArtifactQuota.State do
   end
 
   @spec check_bytes(t(), Ledger.namespace_row(), non_neg_integer()) :: :ok | {:error, atom()}
+  defp check_bytes(_state, _row, 0), do: :ok
+
   defp check_bytes(state, row, bytes) do
     checks = [
       {row.charged_bytes + bytes <= row.session_bytes, :session_disk_quota},
@@ -400,6 +505,8 @@ defmodule MingaAgent.ArtifactQuota.State do
   end
 
   @spec check_items(t(), Ledger.namespace_row(), non_neg_integer()) :: :ok | {:error, atom()}
+  defp check_items(_state, _row, 0), do: :ok
+
   defp check_items(state, row, items) do
     checks = [
       {row.items + items <= row.session_items, :session_item_quota},
@@ -417,6 +524,18 @@ defmodule MingaAgent.ArtifactQuota.State do
     end
   end
 
+  @spec validate_reconciliation(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :ok | {:error, atom()}
+  defp validate_reconciliation(_state, _row, _bytes, _items, artifacts, open) do
+    if open <= artifacts, do: :ok, else: {:error, :invalid_quota_reconciliation}
+  end
+
   @spec fetch_row(t(), String.t()) :: {:ok, Ledger.namespace_row()} | {:error, :unknown_namespace}
   defp fetch_row(state, namespace) do
     case Map.fetch(state.rows, namespace) do
@@ -427,29 +546,59 @@ defmodule MingaAgent.ArtifactQuota.State do
 
   @spec fault_opts(t()) :: keyword()
   defp fault_opts(state) do
-    [before_checkpoint: fn -> FaultInjector.run(state.fault_injector, :before_quota_checkpoint) end]
+    [
+      before_checkpoint: fn ->
+        FaultInjector.run(state.fault_injector, :before_quota_checkpoint)
+      end
+    ]
   end
 
-  @spec apply_namespace_insert(t(), Ledger.namespace_row(), Limits.t(), Ledger.mutation(:inserted)) ::
+  @spec apply_namespace_insert(
+          t(),
+          Ledger.namespace_row(),
+          Limits.t(),
+          Ledger.mutation(:inserted)
+        ) ::
           {{:ok, Limits.t()} | {:error, term()}, t()}
   defp apply_namespace_insert(state, row, limits, {:ok, :inserted}) do
     {{:ok, limits}, put_new_row(state, row)}
   end
 
-  defp apply_namespace_insert(state, row, _limits, {:error, {:checkpoint_failed, _}, {:committed, :inserted}}) do
+  defp apply_namespace_insert(
+         state,
+         row,
+         _limits,
+         {:error, {:checkpoint_failed, _}, {:committed, :inserted}}
+       ) do
     {{:error, :storage_unavailable}, block(put_new_row(state, row))}
   end
 
   defp apply_namespace_insert(state, _row, _limits, {:error, reason}),
     do: {{:error, reason}, state}
 
-  @spec apply_reservation(t(), Ledger.namespace_row(), non_neg_integer(), non_neg_integer(), integer(), integer(), Ledger.mutation(:reserved)) ::
+  @spec apply_reservation(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          integer(),
+          integer(),
+          Ledger.mutation(:reserved)
+        ) ::
           {:ok | {:error, term()}, t()}
   defp apply_reservation(state, row, bytes, items, artifacts, open, {:ok, :reserved}) do
     {:ok, reserve_counters(state, row, bytes, items, artifacts, open)}
   end
 
-  defp apply_reservation(state, row, bytes, items, artifacts, open, {:error, {:checkpoint_failed, _}, {:committed, :reserved}}) do
+  defp apply_reservation(
+         state,
+         row,
+         bytes,
+         items,
+         artifacts,
+         open,
+         {:error, {:checkpoint_failed, _}, {:committed, :reserved}}
+       ) do
     updated = reserve_counters(state, row, bytes, items, artifacts, open)
     {{:error, :storage_unavailable}, block(updated)}
   end
@@ -466,37 +615,126 @@ defmodule MingaAgent.ArtifactQuota.State do
 
   defp apply_finish(state, _row, {:error, reason}), do: {{:error, reason}, state}
 
-  @spec apply_reservation_release(t(), Ledger.namespace_row(), non_neg_integer(), non_neg_integer(), Ledger.mutation(:released)) ::
+  @spec apply_reservation_release(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Ledger.mutation(:released)
+        ) ::
           {:ok | {:error, term()}, t()}
   defp apply_reservation_release(state, row, bytes, items, {:ok, :released}),
     do: {:ok, release_reservation_counters(state, row, bytes, items)}
 
-  defp apply_reservation_release(state, row, bytes, items, {:error, {:checkpoint_failed, _}, {:committed, :released}}),
-    do:
-      {{:error, :storage_unavailable},
-       block(release_reservation_counters(state, row, bytes, items))}
+  defp apply_reservation_release(
+         state,
+         row,
+         bytes,
+         items,
+         {:error, {:checkpoint_failed, _}, {:committed, :released}}
+       ),
+       do:
+         {{:error, :storage_unavailable},
+          block(release_reservation_counters(state, row, bytes, items))}
 
   defp apply_reservation_release(state, _row, _bytes, _items, {:error, reason}),
     do: {{:error, reason}, state}
 
-  @spec apply_release(t(), Ledger.namespace_row(), non_neg_integer(), non_neg_integer(), Ledger.mutation(:released)) ::
+  @spec apply_release(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Ledger.mutation(:released)
+        ) ::
           {:ok | {:error, term()}, t()}
   defp apply_release(state, row, bytes, items, {:ok, :released}),
     do: {:ok, release_counters(state, row, bytes, items)}
 
-  defp apply_release(state, row, bytes, items, {:error, {:checkpoint_failed, _}, {:committed, :released}}),
-    do: {{:error, :storage_unavailable}, block(release_counters(state, row, bytes, items))}
+  defp apply_release(
+         state,
+         row,
+         bytes,
+         items,
+         {:error, {:checkpoint_failed, _}, {:committed, :released}}
+       ),
+       do: {{:error, :storage_unavailable}, block(release_counters(state, row, bytes, items))}
 
   defp apply_release(state, _row, _bytes, _items, {:error, reason}),
     do: {{:error, reason}, state}
+
+  @spec apply_capture_cancel(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Ledger.mutation(:canceled)
+        ) :: {:ok | {:error, term()}, t()}
+  defp apply_capture_cancel(state, row, bytes, items, {:ok, :canceled}),
+    do: {:ok, cancel_capture_counters(state, row, bytes, items)}
+
+  defp apply_capture_cancel(
+         state,
+         row,
+         bytes,
+         items,
+         {:error, {:checkpoint_failed, _}, {:committed, :canceled}}
+       ),
+       do:
+         {{:error, :storage_unavailable},
+          block(cancel_capture_counters(state, row, bytes, items))}
+
+  defp apply_capture_cancel(state, _row, _bytes, _items, {:error, reason}),
+    do: {{:error, reason}, state}
+
+  @spec apply_reconciliation(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Ledger.mutation(:reconciled)
+        ) :: {:ok | {:error, term()}, t()}
+  defp apply_reconciliation(state, row, bytes, items, artifacts, open, {:ok, :reconciled}) do
+    {:ok, reconcile_counters(state, row, bytes, items, artifacts, open)}
+  end
+
+  defp apply_reconciliation(
+         state,
+         row,
+         bytes,
+         items,
+         artifacts,
+         open,
+         {:error, {:checkpoint_failed, _}, {:committed, :reconciled}}
+       ) do
+    updated = reconcile_counters(state, row, bytes, items, artifacts, open)
+    {{:error, :storage_unavailable}, block(updated)}
+  end
+
+  defp apply_reconciliation(
+         state,
+         _row,
+         _bytes,
+         _items,
+         _artifacts,
+         _open,
+         {:error, reason}
+       ),
+       do: {{:error, reason}, state}
 
   @spec apply_namespace_release(t(), Ledger.namespace_row(), Ledger.mutation(:deleted)) ::
           {:ok | {:error, term()}, t()}
   defp apply_namespace_release(state, row, {:ok, :deleted}),
     do: {:ok, drop_row(state, row)}
 
-  defp apply_namespace_release(state, row, {:error, {:checkpoint_failed, _}, {:committed, :deleted}}),
-    do: {{:error, :storage_unavailable}, block(drop_row(state, row))}
+  defp apply_namespace_release(
+         state,
+         row,
+         {:error, {:checkpoint_failed, _}, {:committed, :deleted}}
+       ),
+       do: {{:error, :storage_unavailable}, block(drop_row(state, row))}
 
   defp apply_namespace_release(state, _row, {:error, reason}),
     do: {{:error, reason}, state}
@@ -517,68 +755,142 @@ defmodule MingaAgent.ArtifactQuota.State do
   end
 
   @spec put_new_row(t(), Ledger.namespace_row()) :: t()
-  defp put_new_row(%__MODULE__{} = state, row) do %__MODULE__{
-    state
-    | rows: Map.put(state.rows, row.namespace, row),
-      total_bytes: state.total_bytes + row.charged_bytes
-  } end
+  defp put_new_row(%__MODULE__{} = state, row) do
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, row),
+        total_bytes: state.total_bytes + row.charged_bytes
+    }
+  end
 
-  @spec reserve_counters(t(), Ledger.namespace_row(), non_neg_integer(), non_neg_integer(), integer(), integer()) :: t()
-  defp reserve_counters(%__MODULE__{} = state, row, bytes, items, artifacts, open) do updated_row = %{
-    row
-    | charged_bytes: row.charged_bytes + bytes,
-      items: row.items + items,
-      artifacts: row.artifacts + artifacts,
-      open_captures: row.open_captures + open
-  }
-  
-  %__MODULE__{
-    state
-    | rows: Map.put(state.rows, row.namespace, updated_row),
-      total_bytes: state.total_bytes + bytes,
-      total_items: state.total_items + items,
-      total_artifacts: state.total_artifacts + artifacts,
-      total_open_captures: state.total_open_captures + open
-  } end
+  @spec reserve_counters(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          integer(),
+          integer()
+        ) :: t()
+  defp reserve_counters(%__MODULE__{} = state, row, bytes, items, artifacts, open) do
+    updated_row = %{
+      row
+      | charged_bytes: row.charged_bytes + bytes,
+        items: row.items + items,
+        artifacts: row.artifacts + artifacts,
+        open_captures: row.open_captures + open
+    }
+
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, updated_row),
+        total_bytes: state.total_bytes + bytes,
+        total_items: state.total_items + items,
+        total_artifacts: state.total_artifacts + artifacts,
+        total_open_captures: state.total_open_captures + open
+    }
+  end
 
   @spec finish_counters(t(), Ledger.namespace_row()) :: t()
-  defp finish_counters(%__MODULE__{} = state, row) do updated_row = %{row | open_captures: row.open_captures - 1}
-  
-  %__MODULE__{
-    state
-    | rows: Map.put(state.rows, row.namespace, updated_row),
-      total_open_captures: state.total_open_captures - 1
-  } end
+  defp finish_counters(%__MODULE__{} = state, row) do
+    updated_row = %{row | open_captures: row.open_captures - 1}
 
-  @spec release_reservation_counters(t(), Ledger.namespace_row(), non_neg_integer(), non_neg_integer()) :: t()
-  defp release_reservation_counters(%__MODULE__{} = state, row, bytes, items) do updated_row = %{
-    row
-    | charged_bytes: row.charged_bytes - bytes,
-      items: row.items - items
-  }
-  
-  %__MODULE__{
-    state
-    | rows: Map.put(state.rows, row.namespace, updated_row),
-      total_bytes: state.total_bytes - bytes,
-      total_items: state.total_items - items
-  } end
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, updated_row),
+        total_open_captures: state.total_open_captures - 1
+    }
+  end
+
+  @spec release_reservation_counters(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  defp release_reservation_counters(%__MODULE__{} = state, row, bytes, items) do
+    updated_row = %{
+      row
+      | charged_bytes: row.charged_bytes - bytes,
+        items: row.items - items
+    }
+
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, updated_row),
+        total_bytes: state.total_bytes - bytes,
+        total_items: state.total_items - items
+    }
+  end
 
   @spec release_counters(t(), Ledger.namespace_row(), non_neg_integer(), non_neg_integer()) :: t()
-  defp release_counters(%__MODULE__{} = state, row, bytes, items) do updated_row = %{
-    row
-    | charged_bytes: row.charged_bytes - bytes,
-      items: row.items - items,
-      artifacts: row.artifacts - 1
-  }
-  
-  %__MODULE__{
-    state
-    | rows: Map.put(state.rows, row.namespace, updated_row),
-      total_bytes: state.total_bytes - bytes,
-      total_items: state.total_items - items,
-      total_artifacts: state.total_artifacts - 1
-  } end
+  defp release_counters(%__MODULE__{} = state, row, bytes, items) do
+    updated_row = %{
+      row
+      | charged_bytes: row.charged_bytes - bytes,
+        items: row.items - items,
+        artifacts: row.artifacts - 1
+    }
+
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, updated_row),
+        total_bytes: state.total_bytes - bytes,
+        total_items: state.total_items - items,
+        total_artifacts: state.total_artifacts - 1
+    }
+  end
+
+  @spec cancel_capture_counters(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  defp cancel_capture_counters(%__MODULE__{} = state, row, bytes, items) do
+    updated_row = %{
+      row
+      | charged_bytes: row.charged_bytes - bytes,
+        items: row.items - items,
+        artifacts: row.artifacts - 1,
+        open_captures: row.open_captures - 1
+    }
+
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, updated_row),
+        total_bytes: state.total_bytes - bytes,
+        total_items: state.total_items - items,
+        total_artifacts: state.total_artifacts - 1,
+        total_open_captures: state.total_open_captures - 1
+    }
+  end
+
+  @spec reconcile_counters(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  defp reconcile_counters(%__MODULE__{} = state, row, bytes, items, artifacts, open) do
+    updated_row = %{
+      row
+      | charged_bytes: bytes,
+        items: items,
+        artifacts: artifacts,
+        open_captures: open
+    }
+
+    %__MODULE__{
+      state
+      | rows: Map.put(state.rows, row.namespace, updated_row),
+        total_bytes: state.total_bytes - row.charged_bytes + bytes,
+        total_items: state.total_items - row.items + items,
+        total_artifacts: state.total_artifacts - row.artifacts + artifacts,
+        total_open_captures: state.total_open_captures - row.open_captures + open
+    }
+  end
 
   @spec drop_row(t(), Ledger.namespace_row()) :: t()
   defp drop_row(%__MODULE__{} = state, row) do

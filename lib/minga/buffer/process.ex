@@ -466,6 +466,13 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :content_with_version)
   end
 
+  @doc "Returns a byte-bounded prefix, mutation version, and whether it is the whole buffer."
+  @spec content_prefix_with_version(GenServer.server(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), boolean()}
+  def content_prefix_with_version(server, max_bytes) when max_bytes >= 0 do
+    GenServer.call(server, {:content_prefix_with_version, max_bytes})
+  end
+
   @doc "Returns the buffer-owned merge conflict entries."
   @spec conflicts(GenServer.server()) :: [Minga.Git.MergeConflict.Entry.t()]
   def conflicts(server), do: GenServer.call(server, :conflicts)
@@ -1662,6 +1669,13 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:content_with_version, _from, state) do
     {:reply, {Document.content(state.document), BufState.version(state)}, state}
+  end
+
+  def handle_call({:content_prefix_with_version, max_bytes}, _from, state) do
+    total = Document.content_byte_size(state.document)
+    count = min(total, max_bytes)
+    prefix = Document.slice_byte_range(state.document, 0, count)
+    {:reply, {prefix, BufState.version(state), count == total}, state}
   end
 
   def handle_call(:conflicts, _from, state) do

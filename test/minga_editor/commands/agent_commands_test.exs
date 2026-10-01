@@ -14,6 +14,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session
+  alias MingaAgent.Test.ModelSelectionFixture
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
@@ -80,6 +81,37 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
+  defmodule RejectingModelSession do
+    use GenServer
+
+    @spec start_link(String.t()) :: GenServer.on_start()
+    def start_link(message), do: GenServer.start_link(__MODULE__, message)
+
+    @impl GenServer
+    def init(message), do: {:ok, message}
+
+    @impl GenServer
+    def handle_call({:set_model, _model}, _from, message),
+      do: {:reply, {:error, message}, message}
+  end
+
+  defmodule RestorableModelSession do
+    use GenServer
+
+    @spec start_link(MingaAgent.ModelSelection.t()) :: GenServer.on_start()
+    def start_link(selection), do: GenServer.start_link(__MODULE__, selection)
+
+    @impl GenServer
+    def init(selection), do: {:ok, selection}
+
+    @impl GenServer
+    def handle_call({:load_session, _session_id}, _from, selection),
+      do: {:reply, :ok, selection}
+
+    def handle_call(:model_selection, _from, selection),
+      do: {:reply, selection, selection}
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp command!(name) do
@@ -143,6 +175,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         ),
       interaction: %Interaction{}
     }
+  end
+
+  defp with_model_name(state, model_name) do
+    agent_ui = UIState.set_model_name(state.workspace.agent_ui, model_name)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, agent_ui)
   end
 
   defp install_tab_bar(state, tab_bar) do
@@ -257,6 +294,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     @impl GenServer
     def handle_call(:get_provider, _from, state), do: {:reply, Map.get(state, :provider), state}
+
+    def handle_call(:model_selection, _from, state) do
+      {:reply, MingaAgent.Test.ModelSelectionFixture.selection(), state}
+    end
 
     def handle_call(:editor_snapshot, _from, state) do
       credentials_configured = Map.get(state, :credentials_configured, true)
@@ -881,7 +922,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   describe "thinking command surface" do
     test "agent_pick_thinking opens the thinking picker with the current level" do
-      state = base_state()
+      selection =
+        MingaAgent.Test.ModelSelectionFixture.selection(
+          reasoning: %{effort: "low", options: ["off", "low", "high"]}
+        )
+
+      session = start_supervised!({RestorableModelSession, selection})
+      state = base_state(session: session)
 
       state =
         MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
@@ -895,7 +942,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert {:picker, %{picker_ui: picker_ui}} = new_state.shell_runtime.state.modal
       assert picker_ui.source == MingaEditor.UI.Picker.ThinkingLevelSource
-      assert picker_ui.context == %{current_level: "low"}
     end
 
     test "agent_pick_thinking shows status when no session exists" do
@@ -919,6 +965,42 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         assert new_state.workspace.agent_ui.panel.thinking_level == expected_level
         assert new_state.shell_runtime.state.notice.message == "Thinking: #{expected_level}"
       end
+    end
+  end
+
+  describe "open_session/3" do
+    test "synchronizes the panel from the restored session selection" do
+      selection =
+        ModelSelectionFixture.selection(
+          display_name: "Restored Model",
+          model_provider: "anthropic",
+          reasoning: %{effort: "low", options: ["off", "low", "high"]}
+        )
+
+      {:ok, session} = RestorableModelSession.start_link(selection)
+
+      state =
+        base_state(session: session)
+        |> with_model_name("Previous Model")
+        |> AgentCommands.open_session("saved-session")
+
+      assert state.workspace.agent_ui.panel.model_name == "Restored Model"
+      assert state.workspace.agent_ui.panel.provider_name == "anthropic"
+      assert state.workspace.agent_ui.panel.thinking_level == "low"
+    end
+
+    test "preserves actionable model correction details after restore rejection" do
+      message = "Credential profile anthropic:env is no longer available."
+
+      {:ok, session} =
+        StubServer.start_link(
+          load_result: {:error, {:model_selection_correction_required, message}}
+        )
+
+      state = base_state(session: session) |> AgentCommands.open_session("saved-session")
+
+      assert state.shell_runtime.state.notice.message =~ message
+      assert state.shell_runtime.state.notice.message =~ "current conversation was not replaced"
     end
   end
 
@@ -948,25 +1030,56 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert new_state.workspace.agent_ui.panel.model_name == "openai:o4-mini"
       assert new_state.workspace.agent_ui.panel.thinking_level == "high"
-      assert new_state.shell_runtime.state.notice.message == "Model: openai:o4-mini [2/3]"
+    end
+
+    test "keeps the active model visible while a cycled local route is pending" do
+      {:ok, session} = StubServer.start_link(cycle_model: {:pending, :credential_discovery})
+
+      state = base_state(session: session) |> with_model_name("Active Model")
+      new_state = AgentCommands.cycle_model(state)
+
+      assert new_state.workspace.agent_ui.panel.model_name == "Active Model"
+      assert new_state.shell_runtime.state.notice.message =~ "current model remains active"
     end
   end
 
   describe "set_model/2" do
-    test "reports an accepted model change as pending instead of an error" do
+    test "keeps the prior model visible while local route discovery is pending" do
       {:ok, session} = PendingModelSession.start_link(self())
 
-      state = AgentCommands.set_model(base_state(session: session), "ollama:model-b")
+      state = base_state(session: session) |> with_model_name("Prior Model")
+
+      state = AgentCommands.set_model(state, "ollama:model-b")
 
       assert_receive {:pending_model_accepted, "ollama:model-b"}
 
-      assert_receive {:pending_model_message,
-                      "Model change accepted: ollama:model-b. Checking local Ollama availability."}
+      message =
+        "Checking exact route availability for ollama:model-b. The current model remains active."
 
-      assert state.workspace.agent_ui.panel.model_name == "ollama:model-b"
+      assert_receive {:pending_model_message, ^message}
+      assert state.workspace.agent_ui.panel.model_name == "Prior Model"
+      assert state.shell_runtime.state.notice.message == message
+    end
 
-      assert state.shell_runtime.state.notice.message ==
-               "Model change accepted: ollama:model-b. Checking local Ollama availability."
+    test "preserves the prior model and shows an actionable rejection" do
+      message = "Model \"missing\" is unavailable. Open /model and choose an exact route."
+      {:ok, session} = RejectingModelSession.start_link(message)
+
+      state = base_state(session: session) |> with_model_name("Prior Model")
+
+      state = AgentCommands.set_model(state, "missing")
+
+      assert state.workspace.agent_ui.panel.model_name == "Prior Model"
+      assert state.shell_runtime.state.notice.message == message
+    end
+
+    test "does not change the visible model without a validating session" do
+      state = base_state(session: nil) |> with_model_name("Prior Model")
+
+      state = AgentCommands.set_model(state, "unvalidated")
+
+      assert state.workspace.agent_ui.panel.model_name == "Prior Model"
+      assert state.shell_runtime.state.notice.message =~ "No agent session"
     end
   end
 

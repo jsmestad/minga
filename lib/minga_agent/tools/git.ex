@@ -652,8 +652,7 @@ defmodule MingaAgent.Tools.Git do
           {:error, "git diff --no-index timed out"}
 
         %Result{output: output, status: :terminated} ->
-          {:error,
-           "git diff --no-index capture incomplete at #{max_bytes} bytes:\n#{output}"}
+          {:error, "git diff --no-index capture incomplete at #{max_bytes} bytes:\n#{output}"}
 
         %Result{output: output} ->
           {:error, "git diff --no-index failed: #{String.trim(output)}"}
@@ -670,7 +669,6 @@ defmodule MingaAgent.Tools.Git do
       git -> {:ok, git}
     end
   end
-
 
   @spec normalize_diff_paths(String.t()) :: String.t()
   defp normalize_diff_paths(output) do

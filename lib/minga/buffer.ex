@@ -122,6 +122,10 @@ defmodule Minga.Buffer do
   @doc "Content and mutation version captured atomically in one call."
   @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
   defdelegate content_with_version(server), to: BufferProcess
+  @doc "A byte-bounded content prefix and mutation version captured atomically."
+  @spec content_prefix_with_version(t(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), boolean()}
+  defdelegate content_prefix_with_version(server, max_bytes), to: BufferProcess
 
   @doc "Returns the buffer-owned merge conflict entries."
   @spec conflicts(t()) :: [Minga.Git.MergeConflict.Entry.t()]

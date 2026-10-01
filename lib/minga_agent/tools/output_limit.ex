@@ -19,6 +19,8 @@ defmodule MingaAgent.Tools.OutputLimit do
 
   @typep output_state ::
            {chunks :: [binary()], retained_bytes :: non_neg_integer(), truncated? :: boolean()}
+  @typep collecting_output_state ::
+           {chunks :: [binary()], retained_bytes :: non_neg_integer(), false}
 
   @doc "Returns the default byte cap used for model-facing tool output."
   @spec default_max_bytes() :: pos_integer()
@@ -92,8 +94,9 @@ defmodule MingaAgent.Tools.OutputLimit do
   defp maybe_drop_truncated_tail([] = lines, false), do: lines
   defp maybe_drop_truncated_tail(lines, false), do: Enum.drop(lines, -1)
 
-  @spec collect_port(port(), output_state(), pos_integer(), integer()) :: command_result()
-  defp collect_port(port, output_state, max_bytes, deadline_ms) do
+  @spec collect_port(port(), collecting_output_state(), pos_integer(), integer()) ::
+          command_result()
+  defp collect_port(port, {_chunks, _bytes, false} = output_state, max_bytes, deadline_ms) do
     receive do
       {^port, {:data, data}} ->
         if expired?(deadline_ms) do
@@ -116,6 +119,7 @@ defmodule MingaAgent.Tools.OutputLimit do
   @spec collect_after_data(port(), output_state(), pos_integer(), integer()) :: command_result()
   defp collect_after_data(port, {_chunks, _bytes, true} = output_state, _max_bytes, _deadline) do
     close_port(port)
+
     Result.new(
       output_state_to_binary(output_state),
       :terminated,
@@ -123,14 +127,16 @@ defmodule MingaAgent.Tools.OutputLimit do
     )
   end
 
-  defp collect_after_data(port, output_state, max_bytes, deadline_ms) do
+  defp collect_after_data(
+         port,
+         {_chunks, _bytes, false} = output_state,
+         max_bytes,
+         deadline_ms
+       ) do
     collect_port(port, output_state, max_bytes, deadline_ms)
   end
 
-  @spec retain_output(output_state(), binary(), pos_integer()) :: output_state()
-  defp retain_output({_chunks, _retained_bytes, true} = output_state, _data, _max_bytes),
-    do: output_state
-
+  @spec retain_output(collecting_output_state(), binary(), pos_integer()) :: output_state()
   defp retain_output({chunks, retained_bytes, false}, data, max_bytes) do
     remaining = max_bytes - retained_bytes
 
@@ -163,8 +169,9 @@ defmodule MingaAgent.Tools.OutputLimit do
   @spec remaining_ms(integer()) :: non_neg_integer()
   defp remaining_ms(deadline_ms), do: max(deadline_ms - System.monotonic_time(:millisecond), 0)
 
+  @doc "Closes a command Port if needed and drains already-delivered Port messages."
   @spec close_port(port()) :: :ok
-  defp close_port(port) do
+  def close_port(port) do
     try do
       Port.close(port)
     rescue

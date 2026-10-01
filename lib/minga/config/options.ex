@@ -69,6 +69,7 @@ defmodule Minga.Config.Options do
           | :breakindent
           | :agent_provider
           | :agent_model
+          | :agent_model_favorites
           | :agent_tool_approval
           | :agent_destructive_tools
           | :agent_tool_permissions
@@ -287,6 +288,8 @@ defmodule Minga.Config.Options do
     {:agent_provider, {:enum, [:auto, :native]}, :auto,
      "Agent provider backend selection. Accepts :auto, :native, or a registered provider id string."},
     {:agent_model, :string_or_nil, nil, "Default model used by new agent sessions."},
+    {:agent_model_favorites, :string_list, [],
+     "Stable model-route ids or legacy provider:model ids pinned to the top of the picker."},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive,
      "When agent tool calls require user approval."},
     {:agent_destructive_tools, :string_list,

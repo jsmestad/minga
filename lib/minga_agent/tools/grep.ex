@@ -16,7 +16,6 @@ defmodule MingaAgent.Tools.Grep do
   alias MingaAgent.Tools.SearchRoot
 
   @capture_bytes 16 * 1_024 * 1_024
-  @plain_bytes 51_200
 
   @type exec_opts :: [
           filter_root: String.t(),
@@ -31,16 +30,26 @@ defmodule MingaAgent.Tools.Grep do
           {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
       when is_binary(pattern) and is_binary(path) do
-    exec_opts = Keyword.put_new(exec_opts, :max_output_bytes, @plain_bytes)
-    SearchRoot.run(pattern, path, public_opts(opts), exec_opts, &execute_plain/4)
+    SearchRoot.run(
+      pattern,
+      path,
+      public_opts(opts),
+      exec_opts,
+      &execute_plain/4
+    )
   end
 
   @doc "Captures filtered canonical search records once for stable item pagination."
-  @spec capture(String.t(), String.t(), map(), exec_opts()) ::
-          {:ok, Output.t()} | {:error, Output.t() | term()}
-  def capture(pattern, path, opts, exec_opts)
-      when is_binary(pattern) and is_binary(path) and is_map(opts) and is_list(exec_opts) do
-    SearchRoot.run(pattern, path, public_opts(opts), exec_opts, &execute_capture/4)
+  @spec capture(String.t(), String.t(), map(), exec_opts()) :: SearchRoot.capture_result()
+  def capture(pattern, path, %{} = opts, exec_opts) when is_list(exec_opts) do
+    SearchRoot.capture(
+      pattern,
+      path,
+      public_opts(opts),
+      exec_opts,
+      &collect/4,
+      &retain_records/5
+    )
   end
 
   @spec public_opts(map()) :: map()
@@ -50,8 +59,12 @@ defmodule MingaAgent.Tools.Grep do
           {:ok, String.t()} | {:error, String.t()}
   defp execute_plain(pattern, path, opts, exec_opts) do
     case collect(pattern, path, opts, exec_opts) do
-      {:ok, [], :complete} -> {:ok, "No matches found."}
-      {:ok, records, :complete} -> {:ok, records |> Enum.take(100) |> Enum.join("\n")}
+      {:ok, [], :complete} ->
+        {:ok, "No matches found."}
+
+      {:ok, records, :complete} ->
+        {:ok, records |> Enum.take(100) |> Enum.join("\n")}
+
       {:ok, records, {:incomplete, reason}} ->
         {:error, incomplete_message(reason, records)}
 
@@ -60,11 +73,15 @@ defmodule MingaAgent.Tools.Grep do
     end
   end
 
-  @spec execute_capture(String.t(), String.t(), map(), exec_opts()) ::
-          {:ok, Output.t()} | {:error, Output.t() | term()}
-  defp execute_capture(pattern, path, opts, exec_opts) do
-    with {:ok, records, capture} <- collect(pattern, path, opts, exec_opts),
-         {:ok, selection} <- item_range(records, capture),
+  @spec retain_records(
+          String.t(),
+          String.t(),
+          map(),
+          exec_opts(),
+          {[String.t()], Output.capture_status()}
+        ) :: SearchRoot.capture_result()
+  defp retain_records(pattern, path, opts, exec_opts, {records, capture}) do
+    with {:ok, selection} <- item_range(records, capture),
          {:ok, revision} <- query_revision(pattern, path, opts, records, selection) do
       output_opts = [
         visible_items: records,
@@ -102,7 +119,8 @@ defmodule MingaAgent.Tools.Grep do
            max_bytes: max_bytes,
            timeout_ms: timeout_ms
          ) do
-      %Result{output: output, status: status, capture: capture} when status in [0, 1, :terminated] ->
+      %Result{output: output, status: status, capture: capture}
+      when status in [0, 1, :terminated] ->
         {:ok, filtered_records(output, filter_root, capture), capture}
 
       %Result{status: :timeout, output: output, capture: capture} ->
@@ -118,9 +136,10 @@ defmodule MingaAgent.Tools.Grep do
   @spec filtered_records(binary(), String.t(), Output.capture_status()) :: [String.t()]
   defp filtered_records(output, filter_root, capture) do
     records =
-      output
-      |> OutputLimit.complete_lines(capture != :complete)
-      |> PathIgnore.filter_grep_lines(filter_root)
+      PathIgnore.filter_grep_lines(
+        filter_root,
+        OutputLimit.complete_lines(output, capture != :complete)
+      )
 
     if Enum.any?(records, &grep_result_line?/1), do: records, else: []
   end
@@ -139,7 +158,12 @@ defmodule MingaAgent.Tools.Grep do
   defp build_rg_command(rg, pattern, glob, case_sensitive, context_lines) do
     args = ["--no-heading", "--line-number", "--color", "never"]
     args = if case_sensitive, do: args, else: args ++ ["--ignore-case"]
-    args = if context_lines > 0, do: args ++ ["--context", Integer.to_string(context_lines)], else: args
+
+    args =
+      if context_lines > 0,
+        do: args ++ ["--context", Integer.to_string(context_lines)],
+        else: args
+
     args = if glob, do: args ++ ["--glob", glob], else: args
     args = args ++ rg_ignore_args()
     {rg, args ++ ["--", pattern, "."]}
@@ -181,7 +205,8 @@ defmodule MingaAgent.Tools.Grep do
 
   @spec item_range([String.t()], Output.capture_status()) ::
           {:ok, Range.t()} | {:error, :invalid_range}
-  defp item_range(records, :complete), do: Range.new(:full, :items, 0, length(records), length(records))
+  defp item_range(records, :complete),
+    do: Range.new(:full, :items, 0, length(records), length(records))
 
   defp item_range(records, {:incomplete, _reason}),
     do: Range.new(:captured_prefix, :items, 0, length(records), :unknown)

@@ -2,6 +2,9 @@ defmodule MingaAgent.SessionExportTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.SessionExport
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.Tool.Output.Reference
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
 
@@ -78,6 +81,36 @@ defmodule MingaAgent.SessionExportTest do
       assert md =~ "<details>"
       assert md =~ "read_file"
       assert md =~ "defmodule Foo"
+    end
+
+    test "exports retained reference facts without artifact payload bytes" do
+      payload = "private retained payload"
+      artifact_id = String.duplicate("a", 32)
+      {:ok, token} = Reference.token("export-record", artifact_id)
+
+      {:ok, reference} =
+        Reference.new(
+          token: token,
+          media_type: "text/plain",
+          bytes: byte_size(payload),
+          sha256: Reference.digest(payload)
+        )
+
+      {:ok, range} = Range.new(:full, :bytes, 0, byte_size(payload), byte_size(payload))
+      {:ok, output} = Output.new("visible", :complete, range, reference: reference)
+
+      message = %Message{
+        role: :tool,
+        name: "read_file",
+        tool_call_id: "tc-retained",
+        content: [ContentPart.text("visible")],
+        metadata: %{output: output}
+      }
+
+      assert {:ok, markdown, _filename} = SessionExport.to_markdown([message], [])
+      assert markdown =~ token
+      assert markdown =~ "reference metadata only"
+      refute markdown =~ payload
     end
 
     test "formats assistant messages with thinking" do

@@ -25,7 +25,10 @@ defmodule MingaAgent.ArtifactQuotaTest do
     ]
 
     quota = start_quota(root, {:byte_quota, make_ref()}, limits: byte_limits)
-    store = start_store(root, quota, "byte-session", {:byte_store, make_ref()}, limits: byte_limits)
+
+    store =
+      start_store(root, quota, "byte-session", {:byte_store, make_ref()}, limits: byte_limits)
+
     spec = capture_spec("byte-limit", expected_bytes: 64)
     assert {:error, :session_disk_quota} = ArtifactStore.begin(store, spec)
 
@@ -43,12 +46,14 @@ defmodule MingaAgent.ArtifactQuotaTest do
       )
 
     first = begin_capture(count_store, "first")
+
     assert {:error, :session_open_capture_limit} =
              ArtifactStore.begin(count_store, capture_spec("second-open"))
 
     assert {:ok, %{reference: _reference}} = ArtifactStore.finish(count_store, first, :complete)
     second = begin_capture(count_store, "second")
     assert {:ok, %{reference: _reference}} = ArtifactStore.finish(count_store, second, :complete)
+
     assert {:error, :session_artifact_limit} =
              ArtifactStore.begin(count_store, capture_spec("third-artifact"))
   end
@@ -68,6 +73,7 @@ defmodule MingaAgent.ArtifactQuotaTest do
     :ok = stop_supervised(quota_id)
 
     restarted = start_quota(root, quota_id)
+
     assert %{bytes: 0, artifacts: 0, open_captures: 0, namespaces: 0} =
              ArtifactQuota.usage(restarted)
 
@@ -81,6 +87,7 @@ defmodule MingaAgent.ArtifactQuotaTest do
     assert after_admission.open_captures == 1
     assert after_admission.namespaces == 1
   end
+
   test "root aggregate and item reservations refuse before append writes", %{tmp_dir: root} do
     envelope = Limits.sqlite_envelope_bytes()
 
@@ -101,6 +108,7 @@ defmodule MingaAgent.ArtifactQuotaTest do
     assert {:ok, _capture} = ArtifactStore.begin(first, first_spec)
 
     second = start_store(root, quota, "root-two", {:store_two, make_ref()}, limits: limits)
+
     assert {:error, :root_disk_quota} =
              ArtifactStore.begin(second, capture_spec("root-second"))
 
@@ -127,17 +135,20 @@ defmodule MingaAgent.ArtifactQuotaTest do
     assert {:ok, item_capture} = ArtifactStore.begin(item_store, item_spec)
 
     assert {:error, :session_item_quota} =
-             ArtifactStore.append(item_store, item_capture, "a\\nb\\nc\\n",
-               item_ends: [2, 4, 6]
-             )
+             ArtifactStore.append(item_store, item_capture, "a\\nb\\nc\\n", item_ends: [2, 4, 6])
 
     assert {:error, {:capture_incomplete, :session_item_quota}} =
              ArtifactStore.finish(item_store, item_capture, :complete)
   end
 
-
   test "owner limits cannot increase root policy and pin set count is finite", %{tmp_dir: root} do
-    root_limits = [capture_bytes: 1024, append_bytes: 1024, image_bytes: 1024, session_pin_sets: 1]
+    root_limits = [
+      capture_bytes: 1024,
+      append_bytes: 1024,
+      image_bytes: 1024,
+      session_pin_sets: 1
+    ]
+
     quota = start_quota(root, {:quota, make_ref()}, limits: root_limits)
 
     assert {:error, {:invalid_limits, _child}} =
@@ -166,17 +177,16 @@ defmodule MingaAgent.ArtifactQuotaTest do
     assert {:ok, %{reference: reference}} = ArtifactStore.finish(store, capture, :complete)
 
     assert :ok =
-             ArtifactStore.pin(store, {:snapshot, "one"}, [reference],
-               transfer_delivery: true
-             )
+             ArtifactStore.pin(store, {:snapshot, "one"}, [reference], transfer_delivery: true)
 
     assert {:error, :pin_set_limit} =
              ArtifactStore.pin(store, {:snapshot, "two"}, [reference])
   end
 
-  test "cold quota actors take the lock only after valid same-root admission and can retry later", %{
-    tmp_dir: root
-  } do
+  test "cold quota actors take the lock only after valid same-root admission and can retry later",
+       %{
+         tmp_dir: root
+       } do
     first = start_quota(root, {:first_quota, make_ref()})
     second = start_quota(root, {:second_quota, make_ref()})
     first_namespace = Reference.namespace("first-record")
@@ -184,12 +194,15 @@ defmodule MingaAgent.ArtifactQuotaTest do
 
     assert %{bytes: 0, namespaces: 0} = ArtifactQuota.usage(first)
     assert %{bytes: 0, namespaces: 0} = ArtifactQuota.usage(second)
-    assert {:error, :invalid_namespace} = ArtifactQuota.register_namespace(first, root, "not-a-hash")
+
+    assert {:error, :invalid_namespace} =
+             ArtifactQuota.register_namespace(first, root, "not-a-hash")
 
     assert {:error, :invalid_artifact_root} =
              ArtifactQuota.register_namespace(first, Path.join(root, "foreign"), first_namespace)
 
     assert {:ok, _limits} = ArtifactQuota.register_namespace(second, root, second_namespace)
+
     assert {:error, :artifact_root_in_use} =
              ArtifactQuota.register_namespace(first, root, first_namespace)
 
@@ -280,6 +293,69 @@ defmodule MingaAgent.ArtifactQuotaTest do
     )
   end
 
+  test "reconciliation admits retained facts above lowered limits while refusing new growth", %{
+    tmp_dir: root
+  } do
+    envelope = Limits.sqlite_envelope_bytes()
+
+    original_limits = [
+      root_bytes: envelope * 3 + 4_096,
+      session_bytes: envelope + 2_048,
+      capture_bytes: 2_048,
+      append_bytes: 2_048,
+      image_bytes: 2_048
+    ]
+
+    quota_id = {:quota, make_ref()}
+    store_id = {:store, make_ref()}
+    quota = start_quota(root, quota_id, limits: original_limits)
+
+    store =
+      start_store(root, quota, "lowered-limit-session", store_id, limits: original_limits)
+
+    capture = begin_capture(store, "retained-before-lower")
+    payload = :binary.copy("x", 1_024)
+    assert {:ok, %{bytes: 1_024}} = ArtifactStore.append(store, capture, payload)
+    assert {:ok, %{reference: reference}} = ArtifactStore.finish(store, capture, :complete)
+    :ok = stop_supervised(store_id)
+    :ok = stop_supervised(quota_id)
+
+    lowered_limits = [
+      root_bytes: envelope * 2 + 512,
+      session_bytes: envelope + 512,
+      capture_bytes: 1_024,
+      append_bytes: 1_024,
+      image_bytes: 1_024
+    ]
+
+    reopened_quota = start_quota(root, quota_id, limits: lowered_limits)
+
+    reopened_store =
+      start_store(
+        root,
+        reopened_quota,
+        "lowered-limit-session",
+        store_id,
+        limits: lowered_limits
+      )
+
+    assert reference.bytes == 1_024
+    {:ok, full} = MingaAgent.Tool.Output.Range.new(:full, :bytes, 0, 1_024, 1_024)
+    assert {:ok, %{bytes: ^payload}} = ArtifactStore.fetch(reopened_store, reference, full)
+
+    assert {:error, :session_disk_quota} =
+             ArtifactStore.begin(reopened_store, capture_spec("growth-after-lower"))
+
+    assert :ok =
+             ArtifactStore.release(
+               reopened_store,
+               {:delivery, "checkpoint-1", "retained-before-lower"}
+             )
+
+    assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(reopened_store)
+    assert {:error, :expired} = ArtifactStore.fetch(reopened_store, reference, full)
+  end
+
   defp start_quota(root, id, opts \\ []) do
     child =
       Supervisor.child_spec(
@@ -294,8 +370,7 @@ defmodule MingaAgent.ArtifactQuotaTest do
   defp start_store(root, quota, session_id, id, opts \\ []) do
     child =
       Supervisor.child_spec(
-        {ArtifactStore,
-         Keyword.merge([root: root, quota: quota, session_id: session_id], opts)},
+        {ArtifactStore, Keyword.merge([root: root, quota: quota, session_id: session_id], opts)},
         id: id,
         restart: :temporary
       )

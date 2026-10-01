@@ -65,11 +65,11 @@ defmodule MingaAgent.ArtifactStore.ActiveCapture do
     }
   end
 
-
   @doc "Returns sealed full blocks awaiting their progress mutation."
   @spec pending_integrity_rows(t()) :: [Integrity.block_row()]
   def pending_integrity_rows(%__MODULE__{} = active),
     do: Integrity.pending_rows(active.integrity)
+
   @doc "Clears sealed rows after their progress checkpoint is acknowledged."
   @spec commit_integrity_rows(t()) :: t()
   def commit_integrity_rows(%__MODULE__{} = active),

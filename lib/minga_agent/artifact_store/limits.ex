@@ -38,7 +38,6 @@ defmodule MingaAgent.ArtifactStore.Limits do
   ]
   defstruct @enforce_keys
 
-
   @doc "Builds limits from an owner-supplied complete policy plus bounded overrides."
   @spec new(keyword() | map(), keyword() | map()) :: {:ok, t()} | {:error, :invalid_limits}
   def new(overrides, defaults \\ %{}) do

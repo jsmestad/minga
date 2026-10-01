@@ -108,7 +108,15 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
   end
 
   @doc "Durably increments one namespace and aggregate reservation."
-  @spec reserve(db(), String.t(), non_neg_integer(), non_neg_integer(), integer(), integer(), keyword()) ::
+  @spec reserve(
+          db(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          integer(),
+          integer(),
+          keyword()
+        ) ::
           mutation(:reserved)
   def reserve(db, namespace, bytes, items, artifacts, open_captures, opts \\ []) do
     sql = """
@@ -128,7 +136,14 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
   end
 
   @doc "Durably releases counters only after owned files have been removed."
-  @spec release(db(), String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), keyword()) ::
+  @spec release(
+          db(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) ::
           mutation(:released)
   def release(db, namespace, bytes, items, artifacts, opts \\ []) do
     sql = """
@@ -142,16 +157,20 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
       AND artifacts >= ?4
     """
 
-    SQLite.transaction(db, fn ->
-      with :ok <- SQLite.execute(db, sql, [namespace, bytes, items, artifacts]),
-           {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-           true <- changes == 1 do
-        {:ok, :released}
-      else
-        false -> {:error, :invalid_quota_release}
-        {:error, _reason} = error -> error
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <- SQLite.execute(db, sql, [namespace, bytes, items, artifacts]),
+             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
+             true <- changes == 1 do
+          {:ok, :released}
+        else
+          false -> {:error, :invalid_quota_release}
+          {:error, _reason} = error -> error
+        end
+      end,
+      opts
+    )
   end
 
   @doc "Durably releases unused conservative bytes/items while retaining the artifact."
@@ -169,37 +188,116 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
     WHERE namespace = ?1 AND open_captures > 0
     """
 
-    SQLite.transaction(db, fn ->
-      with :ok <- SQLite.execute(db, sql, [namespace]),
-           {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-           true <- changes == 1 do
-        {:ok, :finished}
-      else
-        false -> {:error, :invalid_open_capture_release}
-        {:error, _reason} = error -> error
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <- SQLite.execute(db, sql, [namespace]),
+             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
+             true <- changes == 1 do
+          {:ok, :finished}
+        else
+          false -> {:error, :invalid_open_capture_release}
+          {:error, _reason} = error -> error
+        end
+      end,
+      opts
+    )
   end
 
-  @doc "Removes an empty namespace and its envelope reservation."
+  @doc "Durably removes every counter reserved for one canceled open capture."
+  @spec cancel_capture(
+          db(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) :: mutation(:canceled)
+  def cancel_capture(db, namespace, bytes, items, opts \\ []) do
+    sql = """
+    UPDATE namespaces
+    SET charged_bytes = charged_bytes - ?2,
+        items = items - ?3,
+        artifacts = artifacts - 1,
+        open_captures = open_captures - 1
+    WHERE namespace = ?1
+      AND charged_bytes >= ?2
+      AND items >= ?3
+      AND artifacts > 0
+      AND open_captures > 0
+    """
+
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <- SQLite.execute(db, sql, [namespace, bytes, items]),
+             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
+             true <- changes == 1 do
+          {:ok, :canceled}
+        else
+          false -> {:error, :invalid_quota_release}
+          {:error, _reason} = error -> error
+        end
+      end,
+      opts
+    )
+  end
+
+  @doc "Reconciles one namespace aggregate to facts owned by its durable manifest."
+  @spec reconcile(
+          db(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) :: mutation(:reconciled)
+  def reconcile(db, namespace, bytes, items, artifacts, open_captures, opts \\ []) do
+    sql = """
+    UPDATE namespaces
+    SET charged_bytes = ?2,
+        items = ?3,
+        artifacts = ?4,
+        open_captures = ?5
+    WHERE namespace = ?1
+    """
+
+    SQLite.transaction(
+      db,
+      fn ->
+        mutation(
+          db,
+          sql,
+          [namespace, bytes, items, artifacts, open_captures],
+          :reconciled
+        )
+      end,
+      opts
+    )
+  end
+
+  @doc "Removes a durably deleted namespace and all of its conservative reservations."
   @spec delete_namespace(db(), String.t(), keyword()) :: mutation(:deleted)
   def delete_namespace(db, namespace, opts \\ []) do
     sql = """
     DELETE FROM namespaces
-    WHERE namespace = ?1 AND charged_bytes = ?2 AND items = 0
-      AND artifacts = 0 AND open_captures = 0
+    WHERE namespace = ?1 AND open_captures = 0
     """
 
-    SQLite.transaction(db, fn ->
-      with :ok <- SQLite.execute(db, sql, [namespace, Limits.sqlite_envelope_bytes()]),
-           {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-           true <- changes == 1 do
-        {:ok, :deleted}
-      else
-        false -> {:error, :namespace_not_empty}
-        {:error, _reason} = error -> error
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <- SQLite.execute(db, sql, [namespace]),
+             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
+             true <- changes == 1 do
+          {:ok, :deleted}
+        else
+          false -> {:error, :namespace_not_empty}
+          {:error, _reason} = error -> error
+        end
+      end,
+      opts
+    )
   end
 
   @spec mutation(db(), String.t(), [term()], value) :: {:ok, value} | {:error, term()}

@@ -10,6 +10,25 @@ defmodule MingaEditor.Remote.EventReplayTest do
   alias MingaAgent.EventLog.Taxonomy
   alias MingaAgent.TodoItem
   alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
+  alias MingaAgent.Tool.Output.Range
+
+  test "tool completion replay carries typed retained output facts" do
+    {:ok, range} = Range.new(:full, :bytes, 0, 2, 2)
+    {:ok, output} = Output.new("ok", :complete, range)
+
+    assert {:tool_ended, "tc-output", "read_file", "ok", :done, ^output} =
+             EventReplay.to_agent_event(
+               record(:tool_call_finished, %{
+                 "tool_call_id" => "tc-output",
+                 "name" => "read_file",
+                 "result" => "ok",
+                 "status" => "done",
+                 "output" => OutputCodec.encode(output)
+               })
+             )
+  end
 
   test "canonical conversion contract covers every persisted event family" do
     expected_events =

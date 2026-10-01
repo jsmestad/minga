@@ -6,12 +6,22 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
   The `result` field is truncated to avoid massive payloads from verbose tools.
   """
 
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   @max_result_bytes 10_240
 
   @derive {JSON.Encoder,
-           only: [:event, :tool_call_id, :tool_name, :arguments, :result, :is_error]}
+           only: [:event, :tool_call_id, :tool_name, :arguments, :result, :output, :is_error]}
   @enforce_keys [:tool_call_id, :tool_name, :arguments, :result, :is_error]
-  defstruct [:tool_call_id, :tool_name, :arguments, :result, :is_error, event: "PostToolUse"]
+  defstruct [
+    :tool_call_id,
+    :tool_name,
+    :arguments,
+    :result,
+    :output,
+    :is_error,
+    event: "PostToolUse"
+  ]
 
   @typedoc "Payload for a tool call that just finished executing."
   @type t :: %__MODULE__{
@@ -20,19 +30,27 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
           tool_name: String.t(),
           arguments: map(),
           result: String.t(),
+          output: map() | nil,
           is_error: boolean()
         }
 
   @doc "Builds a payload from explicit tool call fields."
   @spec new(String.t(), String.t(), map(), String.t(), boolean()) :: t()
-  def new(tool_call_id, tool_name, arguments, result, is_error)
+  def new(tool_call_id, tool_name, arguments, result, is_error),
+    do: new(tool_call_id, tool_name, arguments, result, is_error, nil)
+
+  @doc "Builds a payload with provider-neutral retained output facts."
+  @spec new(String.t(), String.t(), map(), String.t(), boolean(), Output.t() | nil) :: t()
+  def new(tool_call_id, tool_name, arguments, result, is_error, output)
       when is_binary(tool_call_id) and is_binary(tool_name) and is_map(arguments) and
-             is_binary(result) and is_boolean(is_error) do
+             is_binary(result) and is_boolean(is_error) and
+             (is_struct(output, Output) or is_nil(output)) do
     %__MODULE__{
       tool_call_id: tool_call_id,
       tool_name: tool_name,
       arguments: arguments,
       result: truncate_result(result),
+      output: encode_output(output),
       is_error: is_error
     }
   end
@@ -45,6 +63,7 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
       tool_name: to_string(value(attrs, :tool_name) || value(attrs, :name)),
       arguments: normalize_arguments(value(attrs, :arguments) || value(attrs, :args)),
       result: truncate_result(to_string(value(attrs, :result) || "")),
+      output: normalize_output(value(attrs, :output)),
       is_error: value(attrs, :is_error) == true
     }
   end
@@ -58,6 +77,7 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
       "tool_name" => payload.tool_name,
       "arguments" => payload.arguments,
       "result" => payload.result,
+      "output" => payload.output,
       "is_error" => payload.is_error
     }
   end
@@ -72,6 +92,15 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
   @spec normalize_arguments(term()) :: map()
   defp normalize_arguments(args) when is_map(args), do: args
   defp normalize_arguments(_args), do: %{}
+
+  @spec normalize_output(term()) :: map() | nil
+  defp normalize_output(%Output{} = output), do: OutputCodec.encode(output)
+  defp normalize_output(output) when is_map(output), do: output
+  defp normalize_output(_output), do: nil
+
+  @spec encode_output(Output.t() | nil) :: map() | nil
+  defp encode_output(nil), do: nil
+  defp encode_output(%Output{} = output), do: OutputCodec.encode(output)
 
   @spec truncate_result(String.t()) :: String.t()
   defp truncate_result(result) when byte_size(result) <= @max_result_bytes, do: result

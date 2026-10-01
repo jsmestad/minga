@@ -21,6 +21,15 @@ defmodule MingaAgent.ArtifactStore.Metadata do
           limit_reason: atom() | nil
         }
   @type mutation(value) :: SQLite.transaction_result(value)
+  @typep finish_operation :: %{
+           capture: :complete | {:incomplete, atom()},
+           bytes: non_neg_integer(),
+           items: non_neg_integer(),
+           sha256: String.t(),
+           charged_bytes: non_neg_integer(),
+           delivery_key: String.t(),
+           rows: [Integrity.block_row()]
+         }
 
   @bootstrap_schema [
     "CREATE TABLE IF NOT EXISTS artifact_schema (version INTEGER NOT NULL)",
@@ -131,6 +140,40 @@ defmodule MingaAgent.ArtifactStore.Metadata do
     end
   end
 
+  @doc "Returns exact aggregate counters owned by every durable manifest row."
+  @spec accounting(db()) ::
+          {:ok,
+           %{
+             bytes: non_neg_integer(),
+             items: non_neg_integer(),
+             artifacts: non_neg_integer(),
+             open_captures: non_neg_integer()
+           }}
+          | {:error, term()}
+  def accounting(db) do
+    sql = """
+    SELECT COALESCE(SUM(charged_bytes), 0),
+           COALESCE(SUM(items), 0),
+           COUNT(*),
+           COALESCE(SUM(CASE WHEN state = 'open' THEN 1 ELSE 0 END), 0)
+    FROM artifacts
+    """
+
+    case SQLite.query(db, sql) do
+      {:ok, [[bytes, items, artifacts, open_captures]]} ->
+        {:ok,
+         %{
+           bytes: bytes,
+           items: items,
+           artifacts: artifacts,
+           open_captures: open_captures
+         }}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   @doc "Durably records progress and every newly sealed full block in one mutation."
   @spec update_progress(
           db(),
@@ -142,22 +185,26 @@ defmodule MingaAgent.ArtifactStore.Metadata do
           keyword()
         ) :: mutation(:updated)
   def update_progress(db, id, bytes, items, charged_bytes, rows, opts \\ []) do
-    SQLite.transaction(db, fn ->
-      with :ok <-
-             SQLite.execute(
-               db,
-               """
-               UPDATE artifacts SET bytes = ?2, items = ?3, charged_bytes = ?4
-               WHERE id = ?1 AND state = 'open'
-               """,
-               [id, bytes, items, charged_bytes]
-             ),
-           :ok <- require_one_change(db),
-           :ok <- validate_progress_rows(rows, bytes, items),
-           :ok <- insert_block_rows(db, id, rows) do
-        {:ok, :updated}
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <-
+               SQLite.execute(
+                 db,
+                 """
+                 UPDATE artifacts SET bytes = ?2, items = ?3, charged_bytes = ?4
+                 WHERE id = ?1 AND state = 'open'
+                 """,
+                 [id, bytes, items, charged_bytes]
+               ),
+             :ok <- require_one_change(db),
+             :ok <- validate_progress_rows(rows, bytes, items),
+             :ok <- insert_block_rows(db, id, rows) do
+          {:ok, :updated}
+        end
+      end,
+      opts
+    )
   end
 
   @doc "Marks an open capture so it can no longer claim complete status."
@@ -167,100 +214,103 @@ defmodule MingaAgent.ArtifactStore.Metadata do
     transaction_execute(db, sql, [id, Atom.to_string(reason)], :marked, opts)
   end
 
+  @doc "Durably removes one open manifest after all of its owned files are absent."
+  @spec cancel_open(db(), String.t(), keyword()) :: mutation(:canceled)
+  def cancel_open(db, id, opts \\ []) do
+    transaction_execute(
+      db,
+      "DELETE FROM artifacts WHERE id = ?1 AND state = 'open'",
+      [id],
+      :canceled,
+      opts
+    )
+  end
+
   @doc "Atomically seals clean integrity coverage, terminal status, and its delivery pin."
-  @spec finish(
-          db(),
-          String.t(),
-          :complete | {:incomplete, atom()},
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t(),
-          non_neg_integer(),
-          String.t(),
-          [Integrity.block_row()],
-          keyword()
-        ) :: mutation(:finished)
+  @spec finish(db(), String.t(), finish_operation(), keyword()) :: mutation(:finished)
   def finish(
         db,
         id,
-        capture,
-        bytes,
-        items,
-        sha256,
-        charged_bytes,
-        delivery_key,
-        rows,
+        %{
+          capture: capture,
+          bytes: bytes,
+          items: items,
+          sha256: sha256,
+          charged_bytes: charged_bytes,
+          delivery_key: delivery_key,
+          rows: rows
+        },
         opts \\ []
       ) do
-    SQLite.transaction(db, fn ->
-      with :ok <- validate_terminal_rows(rows, bytes, items),
-           :ok <- insert_block_rows(db, id, rows),
-           :ok <- require_exact_coverage(db, id, bytes, items),
-           :ok <-
-             terminalize(
-               db,
-               id,
-               capture,
-               bytes,
-               items,
-               sha256,
-               charged_bytes,
-               delivery_key
-             ) do
-        {:ok, :finished}
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <- validate_terminal_rows(rows, bytes, items),
+             :ok <- insert_block_rows(db, id, rows),
+             :ok <- require_exact_coverage(db, id, bytes, items),
+             :ok <-
+               terminalize(
+                 db,
+                 id,
+                 capture,
+                 bytes,
+                 items,
+                 sha256,
+                 charged_bytes,
+                 delivery_key
+               ) do
+          {:ok, :finished}
+        end
+      end,
+      opts
+    )
   end
 
   @doc "Atomically replaces provisional rows with rebuilt prefix coverage and terminalizes it."
-  @spec finish_recovered(
-          db(),
-          String.t(),
-          :complete | {:incomplete, atom()},
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t(),
-          non_neg_integer(),
-          String.t(),
-          [Integrity.block_row()],
-          keyword()
-        ) :: mutation(:finished)
+  @spec finish_recovered(db(), String.t(), finish_operation(), keyword()) ::
+          mutation(:finished)
   def finish_recovered(
         db,
         id,
-        capture,
-        bytes,
-        items,
-        sha256,
-        charged_bytes,
-        delivery_key,
-        rows,
+        %{
+          capture: capture,
+          bytes: bytes,
+          items: items,
+          sha256: sha256,
+          charged_bytes: charged_bytes,
+          delivery_key: delivery_key,
+          rows: rows
+        },
         opts \\ []
       ) do
-    SQLite.transaction(db, fn ->
-      with :ok <-
-             SQLite.execute(
-               db,
-               "DELETE FROM artifact_blocks WHERE artifact_id = ?1",
-               [id]
-             ),
-           :ok <- validate_terminal_rows(rows, bytes, items),
-           :ok <- insert_block_rows(db, id, rows),
-           :ok <- require_exact_coverage(db, id, bytes, items),
-           :ok <-
-             terminalize(
-               db,
-               id,
-               capture,
-               bytes,
-               items,
-               sha256,
-               charged_bytes,
-               delivery_key
-             ) do
-        {:ok, :finished}
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <-
+               SQLite.execute(
+                 db,
+                 "DELETE FROM artifact_blocks WHERE artifact_id = ?1",
+                 [id]
+               ),
+             :ok <- validate_terminal_rows(rows, bytes, items),
+             :ok <- insert_block_rows(db, id, rows),
+             :ok <- require_exact_coverage(db, id, bytes, items),
+             :ok <-
+               terminalize(
+                 db,
+                 id,
+                 capture,
+                 bytes,
+                 items,
+                 sha256,
+                 charged_bytes,
+                 delivery_key
+               ) do
+          {:ok, :finished}
+        end
+      end,
+      opts
+    )
   end
 
   @doc "Returns every requested trusted block hash in block order or reports corruption."
@@ -275,12 +325,14 @@ defmodule MingaAgent.ArtifactStore.Metadata do
   def block_hashes(db, id, kind, block_numbers) do
     requested = Enum.sort(Enum.uniq(block_numbers))
     placeholders = Enum.map_join(2..(length(requested) + 1), ",", &"?#{&1}")
+
     sql = """
     SELECT block_number, sha256 FROM artifact_blocks
     WHERE artifact_id = ?1 AND file_kind = ?#{length(requested) + 2}
       AND block_number IN (#{placeholders})
     ORDER BY block_number
     """
+
     params = [id | requested] ++ [encode_file_kind(kind)]
 
     case SQLite.query(db, sql, params) do
@@ -290,45 +342,67 @@ defmodule MingaAgent.ArtifactStore.Metadata do
   end
 
   @doc "Replaces one snapshot/task pin set atomically and optionally transfers delivery pins."
-  @spec replace_pin_set(db(), String.t(), :snapshot | :task, [String.t()], boolean(), pos_integer(), pos_integer(), keyword()) ::
+  @spec replace_pin_set(
+          db(),
+          String.t(),
+          :snapshot | :task,
+          [String.t()],
+          boolean(),
+          pos_integer(),
+          pos_integer(),
+          keyword()
+        ) ::
           mutation(:replaced)
-  def replace_pin_set(db, pin_key, kind, artifact_ids, transfer_delivery, max_sets, max_refs, opts \\ []) do
-    SQLite.transaction(db, fn ->
-      with {:ok, [[set_count]]} <-
-             SQLite.query(db, "SELECT COUNT(*) FROM pin_sets WHERE kind != 'delivery'"),
-           {:ok, [[existing_set]]} <-
-             SQLite.query(
-               db,
-               "SELECT COUNT(*) FROM pin_sets WHERE pin_key = ?1 AND kind != 'delivery'",
-               [pin_key]
-             ),
-           :ok <- ensure_pin_set_limit(set_count, existing_set, max_sets),
-           {:ok, [[ref_count]]} <- SQLite.query(db, "SELECT COUNT(*) FROM pin_refs"),
-           {:ok, [[old_refs]]} <-
-             SQLite.query(db, "SELECT COUNT(*) FROM pin_refs WHERE pin_key = ?1", [pin_key]),
-           {:ok, delivery_refs} <-
-             delivery_ref_count(db, artifact_ids, transfer_delivery),
-           :ok <-
-             ensure_pin_ref_limit(
-               ref_count,
-               old_refs,
-               delivery_refs,
-               length(artifact_ids),
-               max_refs
-             ),
-           :ok <- maybe_transfer_delivery(db, artifact_ids, transfer_delivery),
-           :ok <- SQLite.execute(db, "DELETE FROM pin_sets WHERE pin_key = ?1", [pin_key]),
-           :ok <-
-             SQLite.execute(db, "INSERT INTO pin_sets(pin_key, kind) VALUES (?1, ?2)", [
-               pin_key,
-               Atom.to_string(kind)
-             ]),
-           :ok <- insert_pin_refs(db, pin_key, kind, artifact_ids) do
-        {:ok, :replaced}
-      else
-        {:error, _reason} = error -> error
-      end
-    end, opts)
+  def replace_pin_set(
+        db,
+        pin_key,
+        kind,
+        artifact_ids,
+        transfer_delivery,
+        max_sets,
+        max_refs,
+        opts \\ []
+      ) do
+    SQLite.transaction(
+      db,
+      fn ->
+        with {:ok, [[set_count]]} <-
+               SQLite.query(db, "SELECT COUNT(*) FROM pin_sets WHERE kind != 'delivery'"),
+             {:ok, [[existing_set]]} <-
+               SQLite.query(
+                 db,
+                 "SELECT COUNT(*) FROM pin_sets WHERE pin_key = ?1 AND kind != 'delivery'",
+                 [pin_key]
+               ),
+             :ok <- ensure_pin_set_limit(set_count, existing_set, max_sets),
+             {:ok, [[ref_count]]} <- SQLite.query(db, "SELECT COUNT(*) FROM pin_refs"),
+             {:ok, [[old_refs]]} <-
+               SQLite.query(db, "SELECT COUNT(*) FROM pin_refs WHERE pin_key = ?1", [pin_key]),
+             {:ok, delivery_refs} <-
+               delivery_ref_count(db, artifact_ids, transfer_delivery),
+             :ok <-
+               ensure_pin_ref_limit(
+                 ref_count,
+                 old_refs,
+                 delivery_refs,
+                 length(artifact_ids),
+                 max_refs
+               ),
+             :ok <- maybe_transfer_delivery(db, artifact_ids, transfer_delivery),
+             :ok <- SQLite.execute(db, "DELETE FROM pin_sets WHERE pin_key = ?1", [pin_key]),
+             :ok <-
+               SQLite.execute(db, "INSERT INTO pin_sets(pin_key, kind) VALUES (?1, ?2)", [
+                 pin_key,
+                 Atom.to_string(kind)
+               ]),
+             :ok <- insert_pin_refs(db, pin_key, kind, artifact_ids) do
+          {:ok, :replaced}
+        else
+          {:error, _reason} = error -> error
+        end
+      end,
+      opts
+    )
   end
 
   @doc "Idempotently releases one complete pin set."
@@ -337,6 +411,22 @@ defmodule MingaAgent.ArtifactStore.Metadata do
     transaction_execute(db, "DELETE FROM pin_sets WHERE pin_key = ?1", [pin_key], :released, opts,
       require_change?: false
     )
+  end
+
+  @doc "Releases snapshot generations other than the generation in durable session JSON."
+  @spec reconcile_snapshot_pin_sets(db(), String.t() | nil, keyword()) ::
+          mutation(:reconciled)
+  def reconcile_snapshot_pin_sets(db, durable_pin_key, opts \\ []) do
+    {sql, params} =
+      case durable_pin_key do
+        nil ->
+          {"DELETE FROM pin_sets WHERE kind = 'snapshot'", []}
+
+        pin_key when is_binary(pin_key) ->
+          {"DELETE FROM pin_sets WHERE kind = 'snapshot' AND pin_key != ?1", [pin_key]}
+      end
+
+    transaction_execute(db, sql, params, :reconciled, opts, require_change?: false)
   end
 
   @doc "Lists terminal artifacts with no pin, bounded by the session artifact limit."
@@ -357,24 +447,28 @@ defmodule MingaAgent.ArtifactStore.Metadata do
   @doc "Deletes one still-unpinned artifact and records a bounded expiration tombstone."
   @spec expire_unreferenced(db(), String.t(), pos_integer(), keyword()) :: mutation(:expired)
   def expire_unreferenced(db, id, max_tombstones, opts \\ []) do
-    SQLite.transaction(db, fn ->
-      with :ok <-
-             SQLite.execute(
-               db,
-               "DELETE FROM artifacts WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM pin_refs WHERE artifact_id = ?1)",
-               [id]
-             ),
-           :ok <- require_one_change(db),
-           :ok <-
-             SQLite.execute(
-               db,
-               "INSERT INTO tombstones(artifact_id) VALUES (?1) ON CONFLICT(artifact_id) DO NOTHING",
-               [id]
-             ),
-           :ok <- trim_tombstones(db, max_tombstones) do
-        {:ok, :expired}
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <-
+               SQLite.execute(
+                 db,
+                 "DELETE FROM artifacts WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM pin_refs WHERE artifact_id = ?1)",
+                 [id]
+               ),
+             :ok <- require_one_change(db),
+             :ok <-
+               SQLite.execute(
+                 db,
+                 "INSERT INTO tombstones(artifact_id) VALUES (?1) ON CONFLICT(artifact_id) DO NOTHING",
+                 [id]
+               ),
+             :ok <- trim_tombstones(db, max_tombstones) do
+          {:ok, :expired}
+        end
+      end,
+      opts
+    )
   end
 
   @doc "Returns whether explicit cleanup previously expired an identifier."
@@ -402,7 +496,9 @@ defmodule MingaAgent.ArtifactStore.Metadata do
     case validate_schema(db) do
       {:ok, validated} ->
         case install_schema(validated) do
-          :ok -> {:ok, validated}
+          :ok ->
+            {:ok, validated}
+
           {:error, reason} ->
             _ = close(validated)
             {:error, reason}
@@ -425,9 +521,8 @@ defmodule MingaAgent.ArtifactStore.Metadata do
 
     case result do
       :ok ->
-        with :ok <- SQLite.checkpoint(db),
-             :ok <- SQLite.ensure_private_files(db.path) do
-          :ok
+        with :ok <- SQLite.checkpoint(db) do
+          SQLite.ensure_private_files(db.path)
         end
 
       {:error, _reason} = error ->
@@ -487,15 +582,20 @@ defmodule MingaAgent.ArtifactStore.Metadata do
     transaction_execute(db, sql, params, value, opts, require_change?: true)
   end
 
-  @spec transaction_execute(db(), String.t(), [term()], value, keyword(), keyword()) :: mutation(value)
+  @spec transaction_execute(db(), String.t(), [term()], value, keyword(), keyword()) ::
+          mutation(value)
         when value: term()
   defp transaction_execute(db, sql, params, value, opts, execute_opts) do
-    SQLite.transaction(db, fn ->
-      with :ok <- SQLite.execute(db, sql, params),
-           :ok <- maybe_require_change(db, Keyword.fetch!(execute_opts, :require_change?)) do
-        {:ok, value}
-      end
-    end, opts)
+    SQLite.transaction(
+      db,
+      fn ->
+        with :ok <- SQLite.execute(db, sql, params),
+             :ok <- maybe_require_change(db, Keyword.fetch!(execute_opts, :require_change?)) do
+          {:ok, value}
+        end
+      end,
+      opts
+    )
   end
 
   @spec maybe_require_change(db(), boolean()) :: :ok | {:error, term()}
@@ -603,9 +703,8 @@ defmodule MingaAgent.ArtifactStore.Metadata do
           non_neg_integer()
         ) :: :ok | {:error, :artifact_corrupt | term()}
   defp require_exact_coverage(db, artifact_id, bytes, items) do
-    with :ok <- require_file_coverage(db, artifact_id, :blob, block_count(bytes)),
-         :ok <- require_file_coverage(db, artifact_id, :index, block_count(items * 8)) do
-      :ok
+    with :ok <- require_file_coverage(db, artifact_id, :blob, block_count(bytes)) do
+      require_file_coverage(db, artifact_id, :index, block_count(items * 8))
     end
   end
 
@@ -678,14 +777,12 @@ defmodule MingaAgent.ArtifactStore.Metadata do
              db,
              "INSERT INTO pin_sets(pin_key, kind) VALUES (?1, 'delivery') ON CONFLICT(pin_key) DO NOTHING",
              [delivery_key]
-           ),
-         :ok <-
-           SQLite.execute(
-             db,
-             "INSERT INTO pin_refs(pin_key, artifact_id, pin_kind) VALUES (?1, ?2, 'delivery') ON CONFLICT(pin_key, artifact_id) DO NOTHING",
-             [delivery_key, id]
            ) do
-      :ok
+      SQLite.execute(
+        db,
+        "INSERT INTO pin_refs(pin_key, artifact_id, pin_kind) VALUES (?1, ?2, 'delivery') ON CONFLICT(pin_key, artifact_id) DO NOTHING",
+        [delivery_key, id]
+      )
     end
   end
 
@@ -782,7 +879,8 @@ defmodule MingaAgent.ArtifactStore.Metadata do
   defp decode_reason("timeout"), do: :timeout
   defp decode_reason("capture_failed"), do: :capture_failed
 
-  @spec insert_pin_refs(db(), String.t(), :snapshot | :task, [String.t()]) :: :ok | {:error, term()}
+  @spec insert_pin_refs(db(), String.t(), :snapshot | :task, [String.t()]) ::
+          :ok | {:error, term()}
   defp insert_pin_refs(db, pin_key, kind, artifact_ids) do
     Enum.reduce_while(artifact_ids, :ok, fn artifact_id, :ok ->
       case SQLite.execute(
@@ -804,7 +902,13 @@ defmodule MingaAgent.ArtifactStore.Metadata do
       else: {:error, :pin_set_limit}
   end
 
-  @spec ensure_pin_ref_limit(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) ::
+  @spec ensure_pin_ref_limit(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) ::
           :ok | {:error, :pin_ref_limit}
   defp ensure_pin_ref_limit(ref_count, old_refs, delivery_refs, new_refs, max_refs) do
     if ref_count - old_refs - delivery_refs + new_refs <= max_refs,
@@ -849,7 +953,6 @@ defmodule MingaAgent.ArtifactStore.Metadata do
       )
     end
   end
-
 
   @spec trim_tombstones(db(), pos_integer()) :: :ok | {:error, term()}
   defp trim_tombstones(db, max_tombstones) do

@@ -114,7 +114,12 @@ defmodule MingaAgent.ArtifactStore.Integrity do
     pending =
       integrity.pending
       |> seal_partial(:blob, integrity.blob_number, integrity.blob_bytes, integrity.blob_context)
-      |> seal_partial(:index, integrity.index_number, integrity.index_bytes, integrity.index_context)
+      |> seal_partial(
+        :index,
+        integrity.index_number,
+        integrity.index_bytes,
+        integrity.index_context
+      )
       |> Enum.reverse()
 
     digest = integrity.payload_context |> :crypto.hash_final() |> Base.encode16(case: :lower)
@@ -139,13 +144,11 @@ defmodule MingaAgent.ArtifactStore.Integrity do
     next_context = :crypto.hash_update(context, part)
     next_bytes = bytes + take
 
-    case next_bytes == Limits.integrity_block_bytes() do
-      true ->
-        row = {kind, number, :crypto.hash_final(next_context)}
-        feed_blocks(kind, hash_init(), 0, number + 1, [row | pending], rest)
-
-      false ->
-        feed_blocks(kind, next_context, next_bytes, number, pending, rest)
+    if next_bytes == Limits.integrity_block_bytes() do
+      row = {kind, number, :crypto.hash_final(next_context)}
+      feed_blocks(kind, hash_init(), 0, number + 1, [row | pending], rest)
+    else
+      feed_blocks(kind, next_context, next_bytes, number, pending, rest)
     end
   end
 

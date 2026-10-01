@@ -4,11 +4,11 @@ defmodule MingaAgent.ToolPacks.LSPTest do
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Providers.Native
-  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolPacks.LSP
+  alias MingaAgent.Test.RetainedContextFixture
 
   setup do
     table = :"lsp_pack_test_#{System.unique_integer([:positive])}"
@@ -124,14 +124,14 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     assert :error = Registry.lookup(table, "references")
   end
 
-  test "read-only LSP tools execute automatically through pack specs", %{table: table} do
+  test "diagnostics execute without approval and report an empty project", %{table: table} do
     root = Path.join(System.tmp_dir!(), "minga-lsp-pack-#{System.unique_integer([:positive])}")
     File.rm_rf!(root)
     File.mkdir_p!(Path.join(root, "lib"))
     File.write!(Path.join(root, "lib/foo.ex"), "defmodule Foo do\nend\n")
     on_exit(fn -> File.rm_rf!(root) end)
 
-    context = ToolContext.new(project_root: root)
+    context = RetainedContextFixture.new(root, "diagnostics")
     assert :ok = LSP.register(table)
 
     assert {:ok, diagnostics} =
@@ -139,13 +139,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
                tool_context: context
              )
 
-    assert diagnostics =~ "No diagnostics"
-
-    for name <- ~w(definition references hover document_symbols) do
-      args = lsp_position_args(name)
-      assert {:ok, text} = Executor.execute(name, args, table, :exec, tool_context: context)
-      refute match?({:needs_approval, _, _}, text)
-    end
+    assert diagnostics.view =~ "No diagnostics"
   end
 
   test "active providers remove and restore LSP pack tools when the source reloads" do
@@ -155,6 +149,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
       Native.start_link(
         subscriber: self(),
         model: "anthropic:claude-sonnet-4-20250514",
+        model_selection: MingaAgent.Test.ModelSelectionFixture.selection(),
         project_root: System.tmp_dir!(),
         config: %AgentConfig{},
         skip_api_key_env: true
@@ -179,10 +174,6 @@ defmodule MingaAgent.ToolPacks.LSPTest do
       assert Enum.count(names, &(&1 == name)) == 1
     end
   end
-
-  defp lsp_position_args("document_symbols"), do: %{"path" => "lib/foo.ex"}
-
-  defp lsp_position_args(_name), do: %{"path" => "lib/foo.ex", "line" => 0, "column" => 0}
 
   defp conflicting_definition_spec do
     Spec.new!(

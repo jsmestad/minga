@@ -16,7 +16,6 @@ defmodule MingaAgent.Tools.Find do
   alias MingaAgent.Tools.SearchRoot
 
   @capture_bytes 16 * 1_024 * 1_024
-  @plain_bytes 51_200
 
   @type exec_opts :: [
           filter_root: String.t(),
@@ -31,16 +30,26 @@ defmodule MingaAgent.Tools.Find do
           {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
       when is_binary(pattern) and is_binary(path) do
-    exec_opts = Keyword.put_new(exec_opts, :max_output_bytes, @plain_bytes)
-    SearchRoot.run(pattern, path, public_opts(opts), exec_opts, &execute_plain/4)
+    SearchRoot.run(
+      pattern,
+      path,
+      public_opts(opts),
+      exec_opts,
+      &execute_plain/4
+    )
   end
 
   @doc "Captures all filtered canonical records once for stable item pagination."
-  @spec capture(String.t(), String.t(), map(), exec_opts()) ::
-          {:ok, Output.t()} | {:error, Output.t() | term()}
-  def capture(pattern, path, opts, exec_opts)
-      when is_binary(pattern) and is_binary(path) and is_map(opts) and is_list(exec_opts) do
-    SearchRoot.run(pattern, path, public_opts(opts), exec_opts, &execute_capture/4)
+  @spec capture(String.t(), String.t(), map(), exec_opts()) :: SearchRoot.capture_result()
+  def capture(pattern, path, %{} = opts, exec_opts) when is_list(exec_opts) do
+    SearchRoot.capture(
+      pattern,
+      path,
+      public_opts(opts),
+      exec_opts,
+      &collect/4,
+      &retain_records/5
+    )
   end
 
   @spec public_opts(map()) :: map()
@@ -50,8 +59,12 @@ defmodule MingaAgent.Tools.Find do
           {:ok, String.t()} | {:error, String.t()}
   defp execute_plain(pattern, path, opts, exec_opts) do
     case collect(pattern, path, opts, exec_opts) do
-      {:ok, [], :complete} -> {:ok, "No matches found."}
-      {:ok, records, :complete} -> {:ok, plain_records(records)}
+      {:ok, [], :complete} ->
+        {:ok, "No matches found."}
+
+      {:ok, records, :complete} ->
+        {:ok, plain_records(records)}
+
       {:ok, records, {:incomplete, reason}} ->
         {:error, incomplete_message("Find", reason, records)}
 
@@ -62,7 +75,7 @@ defmodule MingaAgent.Tools.Find do
 
   @spec plain_records([String.t()]) :: String.t()
   defp plain_records(records) do
-    if length(records) > 1_000 do
+    if Enum.count_until(records, 1_001) > 1_000 do
       Enum.join(Enum.take(records, 1_000), "\n") <>
         "\n... (truncated, refine the pattern or path for fewer results)"
     else
@@ -70,11 +83,15 @@ defmodule MingaAgent.Tools.Find do
     end
   end
 
-  @spec execute_capture(String.t(), String.t(), map(), exec_opts()) ::
-          {:ok, Output.t()} | {:error, Output.t() | term()}
-  defp execute_capture(pattern, path, opts, exec_opts) do
-    with {:ok, records, capture} <- collect(pattern, path, opts, exec_opts),
-         {:ok, selection} <- item_range(records, capture),
+  @spec retain_records(
+          String.t(),
+          String.t(),
+          map(),
+          exec_opts(),
+          {[String.t()], Output.capture_status()}
+        ) :: SearchRoot.capture_result()
+  defp retain_records(pattern, path, opts, exec_opts, {records, capture}) do
+    with {:ok, selection} <- item_range(records, capture),
          {:ok, revision} <- query_revision("find", pattern, path, opts, records, selection) do
       output_opts = [
         visible_items: records,
@@ -111,20 +128,20 @@ defmodule MingaAgent.Tools.Find do
            max_bytes: max_bytes,
            timeout_ms: timeout_ms
          ) do
-      %Result{output: output, status: status, capture: capture} when status in [0, 1, :terminated] ->
+      %Result{output: output, status: status, capture: capture}
+      when status in [0, 1, :terminated] ->
         records =
-          output
-          |> OutputLimit.complete_lines(capture != :complete)
-          |> PathIgnore.filter_paths(filter_root)
+          PathIgnore.filter_paths(
+            filter_root,
+            OutputLimit.complete_lines(output, capture != :complete)
+          )
           |> Enum.sort()
 
         {:ok, records, capture}
 
       %Result{status: :timeout, output: output, capture: capture} ->
         records =
-          output
-          |> OutputLimit.complete_lines(true)
-          |> PathIgnore.filter_paths(filter_root)
+          PathIgnore.filter_paths(filter_root, OutputLimit.complete_lines(output, true))
           |> Enum.sort()
 
         {:ok, records, capture}
@@ -188,11 +205,14 @@ defmodule MingaAgent.Tools.Find do
 
   @spec find_name_expression([String.t()]) :: [String.t()]
   defp find_name_expression([name]), do: ["-name", name]
-  defp find_name_expression([name | rest]), do: ["-name", name, "-o"] ++ find_name_expression(rest)
+
+  defp find_name_expression([name | rest]),
+    do: ["-name", name, "-o"] ++ find_name_expression(rest)
 
   @spec item_range([String.t()], Output.capture_status()) ::
           {:ok, Range.t()} | {:error, :invalid_range}
-  defp item_range(records, :complete), do: Range.new(:full, :items, 0, length(records), length(records))
+  defp item_range(records, :complete),
+    do: Range.new(:full, :items, 0, length(records), length(records))
 
   defp item_range(records, {:incomplete, _reason}),
     do: Range.new(:captured_prefix, :items, 0, length(records), :unknown)

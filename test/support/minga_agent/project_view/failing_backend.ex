@@ -6,6 +6,10 @@ defmodule MingaAgent.Test.ProjectView.FailingBackend do
   alias MingaAgent.ProjectView
 
   @impl true
+  @spec resolve_source(ProjectView.t(), String.t()) :: {:error, term()}
+  def resolve_source(%ProjectView{}, _relative_path), do: {:error, :unsupported}
+
+  @impl true
   @spec read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%ProjectView{}, _relative_path), do: {:error, :unsupported}
 

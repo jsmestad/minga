@@ -102,10 +102,11 @@ defmodule MingaAgent.Tools.OutputCapture do
           capture_opts()
         ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
   defp append_items(store, capture, [], pending, pending_bytes, accepted_items, opts) do
-    with {:ok, accepted_items} <- flush_items(store, capture, pending, pending_bytes, accepted_items) do
-      status = Keyword.get(opts, :capture_status, :complete)
-      finish_items(store, capture, accepted_items, status, opts)
-    else
+    case flush_items(store, capture, pending, pending_bytes, accepted_items) do
+      {:ok, accepted_items} ->
+        status = Keyword.get(opts, :capture_status, :complete)
+        finish_items(store, capture, accepted_items, status, opts)
+
       {:error, reason, accepted_items} ->
         finish_items(store, capture, accepted_items, incomplete(reason), opts)
     end
@@ -124,7 +125,16 @@ defmodule MingaAgent.Tools.OutputCapture do
           finish_items(store, capture, next_accepted, incomplete(reason), opts)
       end
     else
-      append_item_record(store, capture, record, rest, pending, pending_bytes, accepted_items, opts)
+      append_item_record(
+        store,
+        capture,
+        record,
+        rest,
+        pending,
+        pending_bytes,
+        accepted_items,
+        opts
+      )
     end
   end
 
@@ -138,7 +148,16 @@ defmodule MingaAgent.Tools.OutputCapture do
           non_neg_integer(),
           capture_opts()
         ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
-  defp append_item_record(store, capture, record, rest, pending, pending_bytes, accepted_items, opts)
+  defp append_item_record(
+         store,
+         capture,
+         record,
+         rest,
+         pending,
+         pending_bytes,
+         accepted_items,
+         opts
+       )
        when byte_size(record) <= @append_bytes do
     append_items(
       store,
@@ -151,7 +170,16 @@ defmodule MingaAgent.Tools.OutputCapture do
     )
   end
 
-  defp append_item_record(store, capture, _record, _rest, pending, pending_bytes, accepted_items, opts) do
+  defp append_item_record(
+         store,
+         capture,
+         _record,
+         _rest,
+         pending,
+         pending_bytes,
+         accepted_items,
+         opts
+       ) do
     case flush_items(store, capture, pending, pending_bytes, accepted_items) do
       {:ok, next_accepted} ->
         finish_items(store, capture, next_accepted, {:incomplete, :capture_byte_limit}, opts)
@@ -261,7 +289,12 @@ defmodule MingaAgent.Tools.OutputCapture do
     end
   end
 
-  @spec selection(capture_opts(), Output.capture_status(), non_neg_integer(), non_neg_integer() | nil) ::
+  @spec selection(
+          capture_opts(),
+          Output.capture_status(),
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) ::
           Range.t()
   defp selection(opts, :complete, bytes, items) do
     case Keyword.get(opts, :selection) do
@@ -286,7 +319,13 @@ defmodule MingaAgent.Tools.OutputCapture do
   defp count(bytes, nil), do: bytes
   defp count(_bytes, items), do: items
 
-  @spec new_range!(Range.kind(), Range.unit(), non_neg_integer(), non_neg_integer(), Range.total()) ::
+  @spec new_range!(
+          Range.kind(),
+          Range.unit(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Range.total()
+        ) ::
           Range.t()
   defp new_range!(kind, unit, start, count, total) do
     {:ok, range} = Range.new(kind, unit, start, count, total)

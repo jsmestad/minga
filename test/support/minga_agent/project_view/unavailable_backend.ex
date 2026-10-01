@@ -5,6 +5,10 @@ defmodule MingaAgent.ProjectView.UnavailableBackend do
 
   alias MingaAgent.ProjectView
 
+  @impl true
+  @spec resolve_source(ProjectView.t(), String.t()) :: {:error, term()}
+  def resolve_source(%ProjectView{}, _relative_path), do: {:error, :read_failed}
+
   @spec create(String.t(), keyword()) :: {:ok, ProjectView.t()}
   def create(project_root, opts) do
     {:ok, ProjectView.new(__MODULE__, project_root, %{ref: self()}, opts)}

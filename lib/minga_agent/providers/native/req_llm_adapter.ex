@@ -8,6 +8,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
+  alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.Providers.Native.ReqLLMAdapter.TurnResult
   alias MingaAgent.Tool.Spec, as: ToolSpec
   alias ReqLLM.Message
@@ -18,7 +20,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   alias ReqLLM.ToolCall, as: ReqLLMToolCall
 
   @typedoc "Streaming LLM client compatible with ReqLLM.stream_text/3."
-  @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
+  @type llm_client :: (LLMDB.Model.t(), [ReqLLM.Message.t()], keyword() ->
                          {:ok, StreamResponse.t()} | {:error, term()})
 
   @typedoc "Neutralized tool-call payload emitted by ReqLLM streaming."
@@ -57,33 +59,31 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @type turn_result :: TurnResult.t()
 
   @thinking_efforts %{
+    "none" => :none,
+    "minimal" => :minimal,
     "low" => :low,
     "medium" => :medium,
     "high" => :high,
-    "think" => :medium,
-    "think-hard" => :high,
-    "ultrathink" => :high
+    "xhigh" => :xhigh,
+    "max" => :max
   }
 
   @doc "Returns the default ReqLLM streaming client."
   @spec default_client() :: llm_client()
   def default_client, do: &ReqLLM.stream_text/3
 
-  @doc "Validates the model string before ReqLLM sees it."
-  @spec validate_model(String.t()) :: :ok | {:error, String.t(), :invalid_format}
-  def validate_model(model) when is_binary(model) do
-    case parse_provider(model) do
-      {:ok, _provider} ->
-        :ok
+  @doc "Validates an already-resolved model selection before ReqLLM sees it."
+  @spec validate_selection(ModelSelection.t()) ::
+          :ok | {:error, String.t(), :invalid_selection}
+  def validate_selection(%ModelSelection{
+        request_model: %LLMDB.Model{},
+        route: %{execution: %{supported: true}}
+      }),
+      do: :ok
 
-      :error ->
-        message =
-          ~s|Model "#{model}" is invalid. | <>
-            ~s|Expected "provider:model" (e.g., "anthropic:claude") or "model@provider". | <>
-            "Check :agent_model in your config."
-
-        {:error, message, :invalid_format}
-    end
+  def validate_selection(%ModelSelection{}) do
+    {:error, "The selected model route is incomplete. Open /model and choose the route again.",
+     :invalid_selection}
   end
 
   @doc "Builds the provider-specific tool value for a canonical tool declaration."
@@ -99,23 +99,37 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     )
   end
 
-  @doc "Builds ReqLLM stream options for one native provider request."
-  @spec stream_opts(String.t(), [Tool.t()], String.t(), pos_integer(), AgentConfig.t()) ::
-          keyword()
-  def stream_opts(model, tools, thinking_level, max_tokens, %AgentConfig{} = config) do
-    opts = [tools: tools, max_tokens: max_tokens]
+  @doc "Builds request-local options from one immutable resolved selection."
+  @spec stream_opts(ModelSelection.t(), [Tool.t()], AgentConfig.t(), keyword()) ::
+          {:ok, keyword()} | {:error, {:credential_unavailable, String.t()}}
+  def stream_opts(
+        %ModelSelection{} = selection,
+        tools,
+        %AgentConfig{} = config,
+        credential_opts \\ []
+      ) do
+    with {:ok, auth_opts} <- Credentials.request_options(selection.credential, credential_opts) do
+      opts = [
+        tools: tools,
+        max_tokens: selection.policy.limits.request_output
+      ]
 
-    opts
-    |> maybe_add_base_url(model, config)
-    |> maybe_add_prompt_cache(model, config)
-    |> maybe_add_codex_oauth(model)
-    |> maybe_add_reasoning_effort(thinking_level)
+      opts =
+        opts
+        |> Keyword.merge(auth_opts)
+        |> maybe_add_prompt_cache(selection.route.request_provider, config)
+        |> maybe_add_codex_originator(selection)
+        |> maybe_add_reasoning_effort(selection.policy.reasoning.effort)
+
+      {:ok, opts}
+    end
   end
 
   @doc "Runs one ReqLLM streaming request attempt. Retry ownership stays in Native."
-  @spec stream(llm_client(), String.t(), [ReqLLM.Message.t()], keyword()) ::
+  @spec stream(llm_client(), LLMDB.Model.t(), [ReqLLM.Message.t()], keyword()) ::
           {:ok, StreamResponse.t()} | {:error, term()}
-  def stream(llm_client, model, messages, opts) when is_function(llm_client, 3) do
+  def stream(llm_client, %LLMDB.Model{} = model, messages, opts)
+      when is_function(llm_client, 3) do
     llm_client.(model, messages, opts)
   end
 
@@ -292,33 +306,30 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   defp content_event_to_part({:content_part, part}), do: part
 
-  @doc "Runs a non-streaming text request through ReqLLM stream processing."
-  @spec call_sync(llm_client(), String.t(), [ReqLLM.Message.t()], keyword(), AgentConfig.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  def call_sync(llm_client, model, messages, opts, %AgentConfig{} = config) do
-    stream_opts =
-      opts
-      |> Keyword.take([:max_tokens])
-      |> maybe_add_base_url(model, config)
-
-    with {:ok, stream_response} <- stream(llm_client, model, messages, stream_opts),
-         {:ok, response} <- StreamResponse.process_stream(stream_response) do
-      {:ok, Response.text(response) || ""}
-    end
-  end
-
   @doc "Builds the summary callback expected by the compaction subsystem."
-  @spec summary_client(llm_client(), AgentConfig.t()) :: MingaAgent.Compaction.summary_fn()
-  def summary_client(llm_client, %AgentConfig{} = config) do
-    fn model, messages, opts ->
-      opts = maybe_add_base_url(opts, model, config)
-
-      with {:ok, stream_response} <- stream(llm_client, model, messages, opts),
+  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t()) ::
+          MingaAgent.Compaction.summary_fn()
+  def summary_client(llm_client, %ModelSelection{} = selection, %AgentConfig{} = config) do
+    fn _model, messages, opts ->
+      with {:ok, auth_opts} <- Credentials.request_options(selection.credential, []),
+           request_opts <-
+             opts
+             |> Keyword.take([:max_tokens])
+             |> limit_summary_tokens(selection.policy.limits.request_output)
+             |> Keyword.merge(auth_opts)
+             |> maybe_add_prompt_cache(selection.route.request_provider, config)
+             |> maybe_add_codex_originator(selection),
+           {:ok, stream_response} <-
+             stream(llm_client, selection.request_model, messages, request_opts),
            {:ok, response} <- StreamResponse.process_stream(stream_response) do
         {:ok, Response.text(response) || ""}
       end
     end
   end
+
+  @spec limit_summary_tokens(keyword(), pos_integer()) :: keyword()
+  defp limit_summary_tokens(opts, limit),
+    do: Keyword.update(opts, :max_tokens, limit, &min(&1, limit))
 
   @doc "Creates a ReqLLM tool-call value for assistant messages."
   @spec assistant_tool_call(String.t(), String.t(), map()) :: ReqLLMToolCall.t()
@@ -326,24 +337,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     ReqLLMToolCall.new(id, name, JSON.encode!(arguments))
   end
 
-  @doc "Returns true for Anthropic-compatible models."
-  @spec anthropic_model?(String.t()) :: boolean()
-  def anthropic_model?(model) do
-    provider_from_model(model) == "anthropic"
-  end
-
-  @doc "Returns true for OpenAI Codex OAuth-backed models."
-  @spec openai_codex_model?(String.t()) :: boolean()
-  def openai_codex_model?(model), do: provider_from_model(model) == "openai_codex"
-
-  @doc "Sets the provider API key env var when credentials are file-backed."
-  @spec ensure_api_key_in_env(String.t(), keyword()) :: :ok
-  def ensure_api_key_in_env(model, opts \\ []) do
-    case parse_provider(model) do
-      {:ok, provider} -> ensure_provider_api_key_in_env(provider, opts)
-      :error -> :ok
-    end
-  end
+  @doc "Returns true when the exact route's source model provider is Anthropic."
+  @spec anthropic_model?(ModelSelection.t()) :: boolean()
+  def anthropic_model?(%ModelSelection{route: %{model_provider: "anthropic"}}), do: true
+  def anthropic_model?(%ModelSelection{}), do: false
 
   @spec response_to_turn_result(Response.t(), [content_event()]) ::
           {:ok, turn_result()} | {:error, term()}
@@ -445,147 +442,45 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     :ok
   end
 
-  @spec maybe_add_prompt_cache(keyword(), String.t(), AgentConfig.t()) :: keyword()
-  defp maybe_add_prompt_cache(opts, model, config) do
-    if anthropic_model?(model) and config.prompt_cache do
-      # anthropic_cache_messages adds a cache_control breakpoint on the last
-      # conversation message so the growing transcript is a rolling cache-read
-      # prefix rather than re-sent at full input price every turn.
-      Keyword.put(opts, :provider_options,
-        anthropic_prompt_cache: true,
-        anthropic_cache_messages: true
+  @spec maybe_add_reasoning_effort(keyword(), String.t()) :: keyword()
+  defp maybe_add_reasoning_effort(opts, thinking_level) do
+    case Map.get(@thinking_efforts, thinking_level) do
+      effort when is_atom(effort) and not is_nil(effort) ->
+        Keyword.put(opts, :reasoning_effort, effort)
+
+      nil ->
+        opts
+    end
+  end
+
+  @spec maybe_add_prompt_cache(keyword(), atom(), AgentConfig.t()) :: keyword()
+  defp maybe_add_prompt_cache(opts, :anthropic, config) do
+    if config.prompt_cache do
+      Keyword.update(
+        opts,
+        :provider_options,
+        [anthropic_prompt_cache: true, anthropic_cache_messages: true],
+        &Keyword.merge(&1,
+          anthropic_prompt_cache: true,
+          anthropic_cache_messages: true
+        )
       )
     else
       opts
     end
   end
 
-  @spec maybe_add_codex_oauth(keyword(), String.t()) :: keyword()
-  defp maybe_add_codex_oauth(opts, model) do
-    if openai_codex_model?(model) do
-      provider_options =
-        Keyword.get(opts, :provider_options, [])
-        |> Keyword.put(:auth_mode, :oauth)
-        |> Keyword.put(:oauth_file, Credentials.oauth_path())
-        |> Keyword.put(:codex_originator, "minga")
+  defp maybe_add_prompt_cache(opts, _provider, _config), do: opts
 
-      Keyword.put(opts, :provider_options, provider_options)
-    else
-      opts
-    end
+  @spec maybe_add_codex_originator(keyword(), ModelSelection.t()) :: keyword()
+  defp maybe_add_codex_originator(
+         opts,
+         %ModelSelection{credential: %OAuth{provider: :openai_codex}}
+       ) do
+    Keyword.update(opts, :provider_options, [codex_originator: "minga"], fn provider_options ->
+      Keyword.put(provider_options, :codex_originator, "minga")
+    end)
   end
 
-  @spec maybe_add_reasoning_effort(keyword(), String.t()) :: keyword()
-  defp maybe_add_reasoning_effort(opts, thinking_level) do
-    case Map.get(@thinking_efforts, thinking_level) do
-      effort when effort in [:low, :medium, :high] -> Keyword.put(opts, :reasoning_effort, effort)
-      nil -> opts
-    end
-  end
-
-  @spec maybe_add_base_url(keyword(), String.t(), AgentConfig.t()) :: keyword()
-  defp maybe_add_base_url(opts, model, %AgentConfig{} = config) do
-    url =
-      non_empty(config.api_base_url_override) ||
-        per_provider_url(model, config) ||
-        non_empty(config.api_base_url)
-
-    if url, do: Keyword.put(opts, :base_url, url), else: opts
-  end
-
-  @spec per_provider_url(String.t(), AgentConfig.t()) :: String.t() | nil
-  defp per_provider_url(model, config) do
-    provider = provider_from_model(model)
-
-    case config.api_endpoints do
-      endpoints when is_map(endpoints) -> non_empty(Map.get(endpoints, provider))
-      _other -> nil
-    end
-  end
-
-  @spec ensure_provider_api_key_in_env(String.t(), keyword()) :: :ok
-  defp ensure_provider_api_key_in_env(provider, opts) do
-    case Credentials.resolve(provider, opts) do
-      {:ok, key, :file} -> put_file_backed_key_in_env(provider, key, opts)
-      {:ok, _key, :env} -> :ok
-      :error -> warn_missing_credentials(provider)
-    end
-  end
-
-  @spec put_file_backed_key_in_env(String.t(), String.t(), keyword()) :: :ok
-  defp put_file_backed_key_in_env(provider, key, opts) do
-    case Credentials.env_var_for(provider) do
-      nil ->
-        :ok
-
-      var_name ->
-        case Keyword.get(opts, :on_env_set) do
-          fun when is_function(fun, 2) -> fun.(var_name, key)
-          nil -> System.put_env(var_name, key)
-        end
-
-        :ok
-    end
-  end
-
-  @spec warn_missing_credentials(String.t()) :: :ok
-  defp warn_missing_credentials(provider) do
-    case Credentials.env_var_for(provider) do
-      nil ->
-        :ok
-
-      var_name ->
-        Minga.Log.warning(
-          :agent,
-          "[Agent.Native] No API key found for #{provider}. " <>
-            "Use /auth to configure one, or set #{var_name}."
-        )
-    end
-  end
-
-  @spec provider_from_model(String.t()) :: String.t() | nil
-  defp provider_from_model(model) do
-    case parse_provider(model) do
-      {:ok, provider} -> provider
-      :error -> nil
-    end
-  end
-
-  @spec parse_provider(String.t()) :: {:ok, String.t()} | :error
-  defp parse_provider(model) do
-    parse_provider(model, String.contains?(model, "@"), String.contains?(model, ":"))
-  end
-
-  @spec parse_provider(String.t(), boolean(), boolean()) :: {:ok, String.t()} | :error
-  defp parse_provider(model, true, false) do
-    with {:ok, _model_name, provider} <- split_once(model, "@") do
-      {:ok, String.downcase(provider)}
-    end
-  end
-
-  defp parse_provider(model, false, true) do
-    with {:ok, provider, _model_name} <- split_once(model, ":") do
-      {:ok, String.downcase(provider)}
-    end
-  end
-
-  defp parse_provider(_model, _at?, _colon?), do: :error
-
-  @spec split_once(String.t(), String.t()) :: {:ok, String.t(), String.t()} | :error
-  defp split_once(value, separator) do
-    case String.split(value, separator) do
-      [left, right] -> non_empty_pair(left, right)
-      _other -> :error
-    end
-  end
-
-  @spec non_empty_pair(String.t(), String.t()) :: {:ok, String.t(), String.t()} | :error
-  defp non_empty_pair("", _right), do: :error
-  defp non_empty_pair(_left, ""), do: :error
-  defp non_empty_pair(left, right), do: {:ok, left, right}
-
-  @spec non_empty(String.t() | nil) :: String.t() | nil
-  defp non_empty(nil), do: nil
-  defp non_empty(""), do: nil
-  defp non_empty(str) when is_binary(str), do: str
+  defp maybe_add_codex_originator(opts, %ModelSelection{}), do: opts
 end

@@ -67,9 +67,8 @@ defmodule MingaAgent.ArtifactStore.Blob do
   @spec promote(Paths.t(), String.t()) :: :ok | {:error, term()}
   def promote(%Paths{} = paths, directory) do
     with :ok <- promote_one(paths.blob_partial, paths.blob),
-         :ok <- promote_one(paths.index_partial, paths.index),
-         :ok <- Files.sync_directory(directory) do
-      :ok
+         :ok <- promote_one(paths.index_partial, paths.index) do
+      Files.sync_directory(directory)
     end
   end
 
@@ -93,10 +92,10 @@ defmodule MingaAgent.ArtifactStore.Blob do
   def recover_open(%Paths{} = paths, mode) do
     with {:ok, blob_path} <- existing_path(paths.blob, paths.blob_partial),
          {:ok, index_path} <- existing_path(paths.index, paths.index_partial),
-         {:ok, bytes} <- validated_size(blob_path, @blob_header),
+         {:ok, blob_bytes} <- validated_size(blob_path, @blob_header),
          {:ok, index_size} <- validated_size(index_path, @index_header),
-         {:ok, items} <- repair_index(index_path, index_size, bytes, mode),
-         :ok <- Files.sync_regular(blob_path),
+         {:ok, bytes, items} <-
+           repair_open_files(blob_path, index_path, index_size, blob_bytes, mode),
          {:ok, sha256, blob_rows} <- hash_file(blob_path, @blob_header, bytes, :blob, true),
          {:ok, _unused, index_rows} <-
            hash_file(index_path, @index_header, items * 8, :index, false) do
@@ -128,8 +127,11 @@ defmodule MingaAgent.ArtifactStore.Blob do
     numbers = [div(last_entry * 8, Limits.integrity_block_bytes())]
 
     case start do
-      0 -> numbers
-      _positive -> Enum.sort(Enum.uniq([div((start - 1) * 8, Limits.integrity_block_bytes()) | numbers]))
+      0 ->
+        numbers
+
+      _positive ->
+        Enum.sort(Enum.uniq([div((start - 1) * 8, Limits.integrity_block_bytes()) | numbers]))
     end
   end
 
@@ -144,9 +146,8 @@ defmodule MingaAgent.ArtifactStore.Blob do
           [block_hash()]
         ) :: {:ok, binary()} | {:error, term()}
   def fetch_bytes(paths, start, count, mode, total_bytes, total_items, hashes) do
-    with :ok <- validate_final(paths, mode, total_bytes, total_items),
-         {:ok, bytes} <- verified_slice(paths.blob, @blob_header, start, count, total_bytes, hashes) do
-      {:ok, bytes}
+    with :ok <- validate_final(paths, mode, total_bytes, total_items) do
+      verified_slice(paths.blob, @blob_header, start, count, total_bytes, hashes)
     end
   end
 
@@ -161,9 +162,8 @@ defmodule MingaAgent.ArtifactStore.Blob do
         ) :: {:ok, {non_neg_integer(), non_neg_integer()}} | {:error, term()}
   def fetch_item_bounds(paths, start, count, total_bytes, total_items, hashes) do
     with :ok <- validate_final(paths, :items, total_bytes, total_items),
-         {:ok, blocks} <- verified_blocks(paths.index, @index_header, total_items * 8, hashes),
-         {:ok, bounds} <- decode_item_bounds(blocks, start, count, total_bytes) do
-      {:ok, bounds}
+         {:ok, blocks} <- verified_blocks(paths.index, @index_header, total_items * 8, hashes) do
+      decode_item_bounds(blocks, start, count, total_bytes)
     end
   end
 
@@ -207,36 +207,39 @@ defmodule MingaAgent.ArtifactStore.Blob do
   @spec encode_offsets(non_neg_integer(), [pos_integer()]) :: binary()
   defp encode_offsets(existing_bytes, item_ends) do
     for item_end <- item_ends, into: <<>> do
-      <<(existing_bytes + item_end)::unsigned-big-64>>
+      <<existing_bytes + item_end::unsigned-big-64>>
     end
   end
 
   @spec sync_handles(ActiveCapture.t()) :: :ok | {:error, term()}
   defp sync_handles(active) do
-    with :ok <- :file.sync(active.data_io),
-         :ok <- :file.sync(active.index_io) do
-      :ok
+    with :ok <- :file.sync(active.data_io) do
+      :file.sync(active.index_io)
     end
   end
 
   @spec promote_one(String.t(), String.t()) :: :ok | {:error, term()}
   defp promote_one(partial, final) do
     case {File.lstat(partial), File.lstat(final)} do
-      {{:ok, %File.Stat{type: :regular}}, {:error, :enoent}} -> Files.rename(partial, final)
-      {{:error, :enoent}, {:ok, %File.Stat{type: :regular}}} -> :ok
+      {{:ok, %File.Stat{type: :regular}}, {:error, :enoent}} ->
+        Files.rename(partial, final)
+
+      {{:error, :enoent}, {:ok, %File.Stat{type: :regular}}} ->
+        :ok
+
       {{:ok, %File.Stat{type: :regular}}, {:ok, %File.Stat{type: :regular}}} ->
         Files.remove_regular(partial)
 
-      {{:ok, %File.Stat{type: type}}, _} ->
+      {{:ok, %File.Stat{type: type}}, _} when type != :regular ->
         {:error, {:unsafe_artifact_file, partial, type}}
 
-      {_, {:ok, %File.Stat{type: type}}} ->
+      {_, {:ok, %File.Stat{type: type}}} when type != :regular ->
         {:error, {:unsafe_artifact_file, final, type}}
 
       {{:error, reason}, _} ->
         {:error, reason}
 
-      {_, {:error, reason}} ->
+      {{:ok, _stat}, {:error, reason}} ->
         {:error, reason}
     end
   end
@@ -280,19 +283,31 @@ defmodule MingaAgent.ArtifactStore.Blob do
   defp validate_terminal_index_size(:items, size, items) when size == items * 8, do: :ok
   defp validate_terminal_index_size(_mode, _size, _items), do: {:error, :artifact_corrupt}
 
-  @spec repair_index(String.t(), non_neg_integer(), non_neg_integer(), :bytes | :items) ::
-          {:ok, non_neg_integer()} | {:error, term()}
-  defp repair_index(path, index_size, _blob_size, :bytes), do: truncate_index(path, index_size, 0)
+  @spec repair_open_files(
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          :bytes | :items
+        ) :: {:ok, non_neg_integer(), non_neg_integer()} | {:error, term()}
+  defp repair_open_files(blob_path, index_path, index_size, blob_size, :bytes) do
+    with {:ok, 0} <- truncate_index(index_path, index_size, 0),
+         :ok <- Files.sync_regular(blob_path) do
+      {:ok, blob_size, 0}
+    end
+  end
 
-  defp repair_index(path, index_size, blob_size, :items) do
+  defp repair_open_files(blob_path, index_path, index_size, blob_size, :items) do
     complete_bytes = index_size - rem(index_size, 8)
 
-    case Files.open_read_write(path) do
+    case Files.open_read_write(index_path) do
       {:ok, io} ->
         result =
-          with {:ok, valid_items} <- scan_offset_chunks(io, 0, complete_bytes, 0, 0, blob_size),
-               {:ok, ^valid_items} <- truncate_open_index(io, index_size, valid_items) do
-            {:ok, valid_items}
+          with {:ok, valid_items, last_offset} <-
+                 scan_offset_chunks(io, 0, complete_bytes, 0, 0, blob_size),
+               {:ok, ^valid_items} <- truncate_open_index(io, index_size, valid_items),
+               :ok <- truncate_payload(blob_path, blob_size, last_offset) do
+            {:ok, last_offset, valid_items}
           end
 
         _ = Files.close(io)
@@ -317,6 +332,34 @@ defmodule MingaAgent.ArtifactStore.Blob do
     end
   end
 
+  @spec truncate_payload(String.t(), non_neg_integer(), non_neg_integer()) ::
+          :ok | {:error, term()}
+  defp truncate_payload(path, current_size, desired_size) do
+    case Files.open_read_write(path) do
+      {:ok, io} ->
+        result =
+          with :ok <- maybe_truncate_payload(io, current_size, desired_size) do
+            :file.sync(io)
+          end
+
+        _ = Files.close(io)
+        result
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec maybe_truncate_payload(Files.io_device(), non_neg_integer(), non_neg_integer()) ::
+          :ok | {:error, term()}
+  defp maybe_truncate_payload(_io, size, size), do: :ok
+
+  defp maybe_truncate_payload(io, _current_size, desired_size) do
+    with {:ok, _position} <- :file.position(io, byte_size(@blob_header) + desired_size) do
+      :file.truncate(io)
+    end
+  end
+
   @spec truncate_open_index(Files.io_device(), non_neg_integer(), non_neg_integer()) ::
           {:ok, non_neg_integer()} | {:error, term()}
   defp truncate_open_index(io, current_size, items) do
@@ -333,9 +376,8 @@ defmodule MingaAgent.ArtifactStore.Blob do
   defp maybe_truncate(_io, size, size), do: :ok
 
   defp maybe_truncate(io, _current_size, desired_size) do
-    with {:ok, _position} <- :file.position(io, Limits.index_header_bytes() + desired_size),
-         :ok <- :file.truncate(io) do
-      :ok
+    with {:ok, _position} <- :file.position(io, Limits.index_header_bytes() + desired_size) do
+      :file.truncate(io)
     end
   end
 
@@ -346,10 +388,10 @@ defmodule MingaAgent.ArtifactStore.Blob do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: {:ok, non_neg_integer()} | {:error, term()}
-  defp scan_offset_chunks(_io, position, complete_bytes, _previous, items, _blob_size)
+        ) :: {:ok, non_neg_integer(), non_neg_integer()} | {:error, term()}
+  defp scan_offset_chunks(_io, position, complete_bytes, previous, items, _blob_size)
        when position == complete_bytes,
-       do: {:ok, items}
+       do: {:ok, items, previous}
 
   defp scan_offset_chunks(io, position, complete_bytes, previous, items, blob_size) do
     count = min(Limits.integrity_block_bytes(), complete_bytes - position)
@@ -366,21 +408,23 @@ defmodule MingaAgent.ArtifactStore.Blob do
             blob_size
           )
 
-        {:stop, valid_items} ->
-          {:ok, valid_items}
+        {:stop, valid_items, last_offset} ->
+          {:ok, valid_items, last_offset}
       end
     end
   end
 
   @spec scan_offset_entries(binary(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          {:continue, non_neg_integer(), non_neg_integer()} | {:stop, non_neg_integer()}
+          {:continue, non_neg_integer(), non_neg_integer()}
+          | {:stop, non_neg_integer(), non_neg_integer()}
   defp scan_offset_entries(<<>>, previous, items, _blob_size),
     do: {:continue, previous, items}
 
   defp scan_offset_entries(<<offset::unsigned-big-64, rest::binary>>, previous, items, blob_size) do
-    case offset > previous and offset <= blob_size do
-      true -> scan_offset_entries(rest, offset, items + 1, blob_size)
-      false -> {:stop, items}
+    if offset > previous and offset <= blob_size do
+      scan_offset_entries(rest, offset, items + 1, blob_size)
+    else
+      {:stop, items, previous}
     end
   end
 
@@ -390,7 +434,10 @@ defmodule MingaAgent.ArtifactStore.Blob do
     case Files.open_read(path) do
       {:ok, io} ->
         context = initial_whole_context(whole_payload?)
-        result = hash_file_blocks(io, byte_size(header), total, kind, 0, context, [], whole_payload?)
+
+        result =
+          hash_file_blocks(io, byte_size(header), total, kind, 0, context, [], whole_payload?)
+
         _ = Files.close(io)
         result
 
@@ -420,7 +467,17 @@ defmodule MingaAgent.ArtifactStore.Blob do
     with {:ok, bytes} <- read_exact(io, offset, count) do
       next_context = maybe_hash_whole(context, bytes, whole?)
       row = {kind, number, :crypto.hash(:sha256, bytes)}
-      hash_file_blocks(io, header_size, remaining - count, kind, number + 1, next_context, [row | rows], whole?)
+
+      hash_file_blocks(
+        io,
+        header_size,
+        remaining - count,
+        kind,
+        number + 1,
+        next_context,
+        [row | rows],
+        whole?
+      )
     end
   end
 
@@ -640,6 +697,7 @@ defmodule MingaAgent.ArtifactStore.Blob do
 
   @spec normalize_artifact_error({:error, term()}) :: {:error, term()}
   defp normalize_artifact_error({:error, :artifact_corrupt} = error), do: error
+
   defp normalize_artifact_error({:error, {:unsafe_artifact_file, _path, _type}}),
     do: {:error, :artifact_corrupt}
 

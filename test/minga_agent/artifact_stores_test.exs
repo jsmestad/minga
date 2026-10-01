@@ -7,10 +7,15 @@ defmodule MingaAgent.ArtifactStoresTest do
   alias MingaAgent.ArtifactStore.Limits
   alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactSupervisor
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Attachment
+  alias MingaAgent.Tool.Output.Range
 
   @moduletag :tmp_dir
 
-  test "record actors are lazy and concurrent admission returns one namespace writer", %{tmp_dir: root} do
+  test "record actors are lazy and concurrent admission returns one namespace writer", %{
+    tmp_dir: root
+  } do
     {_supervisor, runtime} = start_runtime(root)
     assert Registry.lookup(runtime.registry, "shared-record") == []
 
@@ -27,6 +32,7 @@ defmodule MingaAgent.ArtifactStoresTest do
     assert [_entry] = Registry.lookup(runtime.registry, "shared-record")
     assert %{namespaces: 1} = ArtifactQuota.usage(runtime.quota)
   end
+
   test "one record open failure does not crash the runtime or block another record", %{
     tmp_dir: root
   } do
@@ -84,6 +90,7 @@ defmodule MingaAgent.ArtifactStoresTest do
 
     assert %{bytes: ^envelope, namespaces: 0, artifacts: 0, open_captures: 0} =
              ArtifactQuota.usage(runtime.quota)
+
     assert :ok = ArtifactStores.delete_record("deleted-record", runtime)
 
     assert {:ok, _replacement} = ArtifactStores.ensure_record("replacement-record", runtime)
@@ -143,6 +150,97 @@ defmodule MingaAgent.ArtifactStoresTest do
     assert %{namespaces: 0, artifacts: 0} = ArtifactQuota.usage(quota)
   end
 
+  test "cross-record copy rewrites foreign tokens and preserves exact bounded bytes", %{
+    tmp_dir: root
+  } do
+    {_supervisor, runtime} = start_runtime(root)
+    {:ok, source} = ArtifactStores.ensure_record("copy-source", runtime)
+    capture = begin_capture(source, "copy-call")
+    bytes = String.duplicate("copy-safe-å", 8_000)
+
+    for chunk <- Enum.chunk_every(:binary.bin_to_list(bytes), 65_536) do
+      assert {:ok, _progress} =
+               ArtifactStore.append(source, capture, :binary.list_to_bin(chunk), item_ends: [])
+    end
+
+    assert {:ok, stored} = ArtifactStore.finish(source, capture, :complete)
+    assert {:ok, selection} = Range.new(:full, :bytes, 0, byte_size(bytes), byte_size(bytes))
+
+    assert {:ok, output} =
+             Output.new("copy-safe", :complete, selection, reference: stored.reference)
+
+    assert {:ok, copied} =
+             ArtifactStores.copy_output(
+               "copy-source",
+               "copy-target",
+               output,
+               "fork-operation-1",
+               runtime
+             )
+
+    refute copied.reference.token == stored.reference.token
+    assert copied.reference.sha256 == stored.reference.sha256
+    {:ok, target} = ArtifactStores.ensure_record("copy-target", runtime)
+    assert {:ok, fetched} = ArtifactStore.fetch(target, copied.reference, selection)
+    assert fetched.bytes == bytes
+    assert {:error, :unauthorized} = ArtifactStore.fetch(target, stored.reference, selection)
+  end
+
+  test "failed multi-reference copy releases prior deliveries and cancels the active capture", %{
+    tmp_dir: root
+  } do
+    {_supervisor, runtime} = start_runtime(root)
+    {:ok, source} = ArtifactStores.ensure_record("copy-failure-source", runtime)
+    primary = store_reference(source, "copy-primary", "primary bytes", "text/plain")
+    image = store_reference(source, "copy-image", <<137, 80, 78, 71>>, "image/png")
+    {:ok, attachment} = Attachment.image(image, "copied.png")
+    {:ok, selection} = Range.new(:full, :bytes, 0, primary.bytes, primary.bytes)
+
+    assert {:ok, output} =
+             Output.new("copy failure", :complete, selection,
+               reference: primary,
+               attachments: [attachment]
+             )
+
+    fault_counter = :atomics.new(1, signed: false)
+
+    target =
+      start_runtime_store(runtime, "copy-failure-target", fn
+        :before_capture_files ->
+          case :atomics.add_get(fault_counter, 1, 1) do
+            2 -> {:error, :enospc}
+            _first_capture -> :ok
+          end
+
+        _point ->
+          :ok
+      end)
+
+    usage_before = ArtifactQuota.usage(runtime.quota)
+    copy_id = "copy-failure-operation"
+
+    assert {:error, {:artifact_copy_failed, :disk_full}} =
+             ArtifactStores.copy_output(
+               "copy-failure-source",
+               "copy-failure-target",
+               output,
+               copy_id,
+               runtime
+             )
+
+    assert ArtifactQuota.usage(runtime.quota) == usage_before
+    operation = MingaAgent.Tool.Output.Reference.digest(copy_id)
+
+    for reference <- [primary, image] do
+      delivery =
+        {:delivery, operation, MingaAgent.Tool.Output.Reference.digest(reference.token)}
+
+      assert {:error, :unknown_delivery} = ArtifactStore.lookup_delivery(target, delivery)
+    end
+
+    assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(target)
+  end
+
   defp start_runtime(root, opts \\ []) do
     suffix = System.unique_integer([:positive])
 
@@ -179,13 +277,31 @@ defmodule MingaAgent.ArtifactStoresTest do
   defp start_store(root, quota, record_id, id, opts \\ []) do
     child =
       Supervisor.child_spec(
-        {ArtifactStore,
-         Keyword.merge([root: root, quota: quota, session_id: record_id], opts)},
+        {ArtifactStore, Keyword.merge([root: root, quota: quota, session_id: record_id], opts)},
         id: id,
         restart: :temporary
       )
 
     start_supervised!(child)
+  end
+
+  defp start_runtime_store(runtime, session_id, fault_injector) do
+    name = {:via, Registry, {runtime.registry, session_id}}
+
+    child =
+      Supervisor.child_spec(
+        {ArtifactStore,
+         root: runtime.root,
+         quota: runtime.quota,
+         session_id: session_id,
+         limits: runtime.limits,
+         name: name,
+         fault_injector: fault_injector},
+        restart: :transient
+      )
+
+    {:ok, store} = DynamicSupervisor.start_child(runtime.store_supervisor, child)
+    store
   end
 
   defp begin_capture(store, call_id) do
@@ -199,5 +315,20 @@ defmodule MingaAgent.ArtifactStoresTest do
 
     {:ok, capture} = ArtifactStore.begin(store, spec)
     capture
+  end
+
+  defp store_reference(store, call_id, bytes, media_type) do
+    {:ok, spec} =
+      CaptureSpec.new(
+        media_type: media_type,
+        mode: :bytes,
+        owner_pid: self(),
+        delivery_key: {:delivery, "checkpoint-1", call_id}
+      )
+
+    {:ok, capture} = ArtifactStore.begin(store, spec)
+    assert {:ok, _progress} = ArtifactStore.append(store, capture, bytes)
+    assert {:ok, stored} = ArtifactStore.finish(store, capture, :complete)
+    stored.reference
   end
 end

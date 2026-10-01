@@ -9,6 +9,7 @@ defmodule MingaAgent.Tool.Context do
   alias MingaAgent.ToolRouter.Context, as: RouterContext
 
   @type capture_key :: {:delivery, String.t(), String.t()}
+  @type image_tool_result_delivery :: MingaAgent.ModelSelection.image_tool_result_delivery()
 
   @typedoc "Opaque-ish runtime context passed to source-owned tool builders."
   @type t :: %__MODULE__{
@@ -16,6 +17,7 @@ defmodule MingaAgent.Tool.Context do
           router_context: RouterContext.t(),
           artifact_store: GenServer.server() | nil,
           capture_key: capture_key() | nil,
+          image_tool_result_delivery: image_tool_result_delivery(),
           session_id: String.t() | nil,
           metadata: map()
         }
@@ -26,6 +28,7 @@ defmodule MingaAgent.Tool.Context do
     :router_context,
     :artifact_store,
     :capture_key,
+    :image_tool_result_delivery,
     :session_id,
     metadata: %{}
   ]
@@ -49,16 +52,27 @@ defmodule MingaAgent.Tool.Context do
       router_context: router_context,
       artifact_store: Keyword.get(attrs, :artifact_store),
       capture_key: Keyword.get(attrs, :capture_key),
+      image_tool_result_delivery:
+        Keyword.get(
+          attrs,
+          :image_tool_result_delivery,
+          {:unsupported, :tool_result_transport}
+        ),
       session_id: Keyword.get(attrs, :session_id),
       metadata: Keyword.get(attrs, :metadata, %{})
     }
   end
 
-  @doc "Scopes the record-owned artifact capability to one admitted tool call."
-  @spec for_tool_call(t(), String.t(), String.t()) :: t()
-  def for_tool_call(%__MODULE__{} = context, checkpoint_id, tool_call_id)
-      when is_binary(checkpoint_id) and is_binary(tool_call_id) do
-    %{context | capture_key: {:delivery, checkpoint_id, tool_call_id}}
+  @doc "Scopes a record-owned artifact capability to one durably admitted tool call."
+  @spec for_tool_call(t(), GenServer.server(), String.t(), String.t()) :: t()
+  def for_tool_call(%__MODULE__{} = context, artifact_store, checkpoint_id, tool_call_id)
+      when (is_pid(artifact_store) or is_atom(artifact_store) or is_tuple(artifact_store)) and
+             is_binary(checkpoint_id) and is_binary(tool_call_id) do
+    %{
+      context
+      | artifact_store: artifact_store,
+        capture_key: {:delivery, checkpoint_id, tool_call_id}
+    }
   end
 
   @doc "Returns opts accepted by `MingaAgent.Tools.all/1`."
@@ -72,7 +86,8 @@ defmodule MingaAgent.Tool.Context do
       parent_session: Map.get(context.metadata, :parent_session),
       shell_output_callback: Map.get(context.metadata, :shell_output_callback),
       artifact_store: context.artifact_store,
-      capture_key: context.capture_key
+      capture_key: context.capture_key,
+      image_tool_result_delivery: context.image_tool_result_delivery
     ]
   end
 
@@ -87,12 +102,15 @@ defmodule MingaAgent.Tool.Context do
           {:ok, MingaAgent.Tool.Output.t()}
           | {:error, MingaAgent.Tool.Output.t() | term()}
   def capture_file(%__MODULE__{} = context, path, opts \\ []) when is_binary(path) do
+    capture_opts =
+      Keyword.put(opts, :image_tool_result_delivery, context.image_tool_result_delivery)
+
     ToolRouter.capture_file(
       context.router_context,
       path,
       context.artifact_store,
       context.capture_key,
-      opts
+      capture_opts
     )
   end
 

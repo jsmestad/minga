@@ -39,7 +39,7 @@ defmodule MingaAgent.Tools.Shell do
     - `:env` — additional environment variables to include in the command process.
   """
   @spec execute(String.t(), String.t(), pos_integer(), execute_opts()) ::
-          {:ok, String.t()} | {:error, String.t()}
+          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
   def execute(command, cwd, timeout_secs, opts \\ [])
       when is_binary(command) and is_binary(cwd) and is_integer(timeout_secs) do
     on_output = Keyword.get(opts, :on_output)
@@ -93,7 +93,8 @@ defmodule MingaAgent.Tools.Shell do
            stream_state: stream_state()
          }
 
-  @spec collect_output(port(), collect_state()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec collect_output(port(), collect_state()) ::
+          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
   defp collect_output(port, state) do
     remaining = max(state.deadline - System.monotonic_time(:millisecond), 0)
     wait_ms = min(remaining, @debounce_ms)
@@ -107,7 +108,7 @@ defmodule MingaAgent.Tools.Shell do
   end
 
   @spec handle_port_data(port(), binary(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t()}
+          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
   defp handle_port_data(port, data, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -121,10 +122,10 @@ defmodule MingaAgent.Tools.Shell do
   end
 
   @spec continue_or_finish_quota(port(), integer(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t()}
+          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
   defp continue_or_finish_quota(port, _now, %{acc: {_chunks, _bytes, true}} = state) do
     flush_if_needed(state)
-    close_port(port)
+    OutputLimit.close_port(port)
     output = state.acc |> output_state_to_binary() |> String.trim_trailing()
     {:ok, output}
   end
@@ -141,7 +142,8 @@ defmodule MingaAgent.Tools.Shell do
     {:ok, result}
   end
 
-  @spec handle_port_wait(port(), collect_state()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec handle_port_wait(port(), collect_state()) ::
+          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
   defp handle_port_wait(port, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -169,11 +171,13 @@ defmodule MingaAgent.Tools.Shell do
     end
   end
 
-  @spec timeout_result(port(), collect_state()) :: {:error, String.t()}
+  @spec timeout_result(port(), collect_state()) ::
+          {:error, {:incomplete, :timeout, String.t()}}
   defp timeout_result(port, state) do
     flush_if_needed(state)
-    close_port(port)
-    {:error, "command timed out"}
+    OutputLimit.close_port(port)
+    output = state.acc |> output_state_to_binary() |> String.trim_trailing()
+    {:error, {:incomplete, :timeout, output}}
   end
 
   @spec flush_if_needed(collect_state()) :: :ok
@@ -193,7 +197,7 @@ defmodule MingaAgent.Tools.Shell do
   end
 
   @spec maybe_flush_pending_and_continue(port(), integer(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t()}
+          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
   defp maybe_flush_pending_and_continue(port, now, state) do
     if state.on_output != nil and now - state.last_flush >= @debounce_ms do
       stream_state = flush_pending(state.on_output, state.pending, state.stream_state)
@@ -341,28 +345,6 @@ defmodule MingaAgent.Tools.Shell do
         "\n\n[truncated at #{div(@max_output_bytes, 1000)}KB]"
     else
       output
-    end
-  end
-
-  @spec close_port(port()) :: :ok
-  defp close_port(port) do
-    try do
-      Port.close(port)
-    rescue
-      ArgumentError -> :ok
-    end
-
-    drain_port(port)
-  end
-
-  @spec drain_port(port()) :: :ok
-  defp drain_port(port) do
-    receive do
-      {^port, {:data, _data}} -> drain_port(port)
-      {^port, {:exit_status, _status}} -> drain_port(port)
-      {:EXIT, ^port, _reason} -> drain_port(port)
-    after
-      0 -> :ok
     end
   end
 

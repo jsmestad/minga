@@ -44,8 +44,7 @@ defmodule MingaAgent.FileMention do
         }
 
   alias Minga.Project.Root
-  alias MingaAgent.Config, as: AgentConfig
-  alias MingaAgent.ModelLimits
+  alias MingaAgent.ModelSelection
   alias ReqLLM.Message.ContentPart
 
   @max_candidates 50
@@ -152,7 +151,7 @@ defmodule MingaAgent.FileMention do
   Resolves mentions with options.
 
   Options:
-    - `:model` — the model string for vision capability checking
+    - `:model_selection` — the resolved selection used for exact image capability admission
   """
   @spec resolve_prompt(String.t(), Root.t() | nil, keyword()) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
@@ -177,17 +176,27 @@ defmodule MingaAgent.FileMention do
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   defp maybe_check_vision(mentions, text, workspace_root, opts) do
     has_images = Enum.any?(mentions, fn %{path: path} -> image_path?(path) end)
-    model = Keyword.get(opts, :model)
+    selection = Keyword.get(opts, :model_selection)
 
-    bare_model = if model, do: AgentConfig.strip_provider_prefix(model), else: nil
+    if has_images and not image_capable?(selection) do
+      route = selection_label(selection)
 
-    if has_images and bare_model != nil and not ModelLimits.vision_capable?(bare_model) do
       {:error,
-       "Model #{model} does not support image input. Use a vision-capable model (Claude, GPT-4o, Gemini)."}
+       "#{route} does not explicitly support image input. Pick a route with verified image capability."}
     else
       resolve_all(mentions, text, workspace_root)
     end
   end
+
+  @spec image_capable?(ModelSelection.t() | nil) :: boolean()
+  defp image_capable?(%ModelSelection{} = selection), do: ModelSelection.images?(selection)
+  defp image_capable?(_selection), do: false
+
+  @spec selection_label(ModelSelection.t() | nil) :: String.t()
+  defp selection_label(%ModelSelection{} = selection),
+    do: "Selected route #{selection.route.model_provider}:#{selection.route.model_id}"
+
+  defp selection_label(nil), do: "The selected route"
 
   @doc "Returns true if the path has an image file extension."
   @spec image_path?(String.t()) :: boolean()

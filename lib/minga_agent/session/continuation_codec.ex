@@ -100,52 +100,15 @@ defmodule MingaAgent.Session.ContinuationCodec do
   defp output_tag?(value) when is_list(value), do: Enum.any?(value, &output_tag?/1)
   defp output_tag?(_value), do: false
 
-  @doc "Returns the unique retained references reachable from known continuation message locations."
+  @doc "Returns the unique retained references reachable anywhere in a validated encoded continuation."
   @spec references(map()) :: [Reference.t()]
-  def references(%{
-        "messages" => messages,
-        "active_request" => active_request,
-        "tool_checkpoint" => checkpoint,
-        "branches" => branches
-      })
-      when is_list(messages) and is_map(branches) do
-    messages
-    |> Enum.concat(request_messages(active_request))
-    |> Enum.concat(checkpoint_messages(checkpoint))
-    |> Enum.concat(branch_messages(branches))
-    |> Enum.flat_map(&term_references/1)
+  def references(encoded) when is_map(encoded) do
+    encoded
+    |> term_references()
     |> Enum.uniq_by(& &1.token)
   end
 
   def references(_encoded), do: []
-
-  @spec request_messages(term()) :: [term()]
-  defp request_messages(%{"messages" => messages}) when is_list(messages), do: messages
-  defp request_messages(_request), do: []
-
-  @spec checkpoint_messages(term()) :: [term()]
-  defp checkpoint_messages(%{"messages" => messages, "calls" => calls})
-       when is_list(messages) and is_list(calls) do
-    completed =
-      Enum.flat_map(calls, fn
-        %{"status" => %{"kind" => "completed", "result_message" => result}} -> [result]
-        _call -> []
-      end)
-
-    messages ++ completed
-  end
-
-  defp checkpoint_messages(_checkpoint), do: []
-
-  @spec branch_messages(term()) :: [term()]
-  defp branch_messages(branches) when is_map(branches) do
-    Enum.flat_map(branches, fn
-      {_name, %{"messages" => messages}} when is_list(messages) -> messages
-      _branch -> []
-    end)
-  end
-
-  defp branch_messages(_branches), do: []
 
   @spec term_references(term()) :: [Reference.t()]
   defp term_references(%{"$" => "output", "value" => encoded}) do

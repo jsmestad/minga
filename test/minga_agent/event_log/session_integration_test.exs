@@ -114,7 +114,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
            Enum.concat(request.messages, [assistant_tool_message]), calls}
         )
 
-      :ok =
+      {:ok, _artifact_store} =
         GenServer.call(
           state.subscriber,
           {:admit_tool_effect, request.request_id, checkpoint_id, "tool-1", "read_file", args}
@@ -247,6 +247,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "hello")
+    :sys.get_state(Session.get_provider(session))
     assert_receive {:replay_provider_finished, "hello"}
     :sys.get_state(session)
     :sys.get_state(log_pid)

@@ -24,7 +24,12 @@ defmodule MingaAgent.ArtifactStore.PinKey do
   def task(task_id, generation), do: build(:task, task_id, generation)
 
   @doc "Normalizes the public tuple forms accepted by ArtifactStore."
-  @spec new(t() | {:delivery, component(), component()} | {:snapshot, component()} | {:task, component(), component()}) ::
+  @spec new(
+          t()
+          | {:delivery, component(), component()}
+          | {:snapshot, component()}
+          | {:task, component(), component()}
+        ) ::
           {:ok, t()} | {:error, :invalid_pin_key}
   def new(%__MODULE__{} = key), do: validate(key)
   def new({:delivery, checkpoint, call_id}), do: delivery(checkpoint, call_id)
@@ -56,8 +61,13 @@ defmodule MingaAgent.ArtifactStore.PinKey do
        when is_binary(generation),
        do: valid_components(key, [generation])
 
+  defp validate(%__MODULE__{kind: :delivery, id: checkpoint, generation: call_id} = key)
+       when is_binary(checkpoint) and byte_size(checkpoint) in 1..128 and
+              is_binary(call_id) and byte_size(call_id) in 1..64,
+       do: {:ok, key}
+
   defp validate(%__MODULE__{kind: kind, id: id, generation: generation} = key)
-       when kind in [:delivery, :task] and is_binary(id) and is_binary(generation),
+       when kind == :task and is_binary(id) and is_binary(generation),
        do: valid_components(key, [id, generation])
 
   defp validate(_key), do: {:error, :invalid_pin_key}
@@ -76,7 +86,10 @@ defmodule MingaAgent.ArtifactStore.PinKey do
 
   @spec normalize_component(component()) :: {:ok, String.t()} | {:error, :invalid_pin_key}
   defp normalize_component(value) when is_binary(value), do: {:ok, value}
-  defp normalize_component(value) when is_integer(value) and value >= 0, do: {:ok, Integer.to_string(value)}
+
+  defp normalize_component(value) when is_integer(value) and value >= 0,
+    do: {:ok, Integer.to_string(value)}
+
   defp normalize_component(_value), do: {:error, :invalid_pin_key}
 
   @spec encode_component(String.t()) :: String.t()

@@ -57,6 +57,12 @@ defmodule MingaAgent.ArtifactStore do
     GenServer.call(server, {:finish, capture, status})
   end
 
+  @doc "Durably cancels one open capture and releases all of its quota reservations."
+  @spec cancel(server(), Capture.t()) :: :ok | {:error, error_reason()}
+  def cancel(server, %Capture{} = capture) do
+    GenServer.call(server, {:cancel, capture}, :infinity)
+  end
+
   @doc "Fetches exact immutable captured bytes for an authorized bounded range."
   @spec fetch(server(), Reference.t(), Range.t()) ::
           {:ok, Fetched.t()} | {:error, error_reason()}
@@ -89,6 +95,12 @@ defmodule MingaAgent.ArtifactStore do
   @doc "Releases one complete pin set without deleting retained content."
   @spec release(server(), PinKey.t() | tuple()) :: :ok | {:error, error_reason()}
   def release(server, pin_key), do: GenServer.call(server, {:release, pin_key})
+  @doc "Releases snapshot pins not named by the durable session JSON generation."
+  @spec reconcile_snapshot_pins(server(), String.t() | nil) ::
+          :ok | {:error, error_reason()}
+  def reconcile_snapshot_pins(server, durable_generation) do
+    GenServer.call(server, {:reconcile_snapshot_pins, durable_generation})
+  end
 
   @doc "Explicitly removes only unpinned artifacts and returns the deletion count."
   @spec cleanup_unreferenced(server()) ::
@@ -102,6 +114,8 @@ defmodule MingaAgent.ArtifactStore do
   @impl GenServer
   @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
   def init(opts) do
+    Process.flag(:trap_exit, true)
+
     case State.open(opts) do
       {:ok, state} -> {:ok, state}
       {:error, reason} -> {:stop, reason}
@@ -126,6 +140,11 @@ defmodule MingaAgent.ArtifactStore do
     {:reply, reply, next_state}
   end
 
+  def handle_call({:cancel, capture}, _from, state) do
+    {reply, next_state} = State.cancel(state, capture)
+    {:reply, reply, next_state}
+  end
+
   def handle_call({:fetch, reference, range}, _from, state) do
     {reply, next_state} = State.fetch(state, reference, range)
     {:reply, reply, next_state}
@@ -143,6 +162,11 @@ defmodule MingaAgent.ArtifactStore do
 
   def handle_call({:release, pin_key}, _from, state) do
     {reply, next_state} = State.release(state, pin_key)
+    {:reply, reply, next_state}
+  end
+
+  def handle_call({:reconcile_snapshot_pins, durable_generation}, _from, state) do
+    {reply, next_state} = State.reconcile_snapshot_pins(state, durable_generation)
     {:reply, reply, next_state}
   end
 
@@ -168,5 +192,16 @@ defmodule MingaAgent.ArtifactStore do
 
   @impl GenServer
   @spec terminate(term(), State.t()) :: :ok
-  def terminate(_reason, state), do: State.close(state)
+  def terminate(_reason, state) do
+    case State.close(state) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.error(
+          :agent,
+          "Retained artifact namespace #{state.namespace} failed to close: #{inspect(reason)}"
+        )
+    end
+  end
 end

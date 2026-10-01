@@ -22,7 +22,19 @@ defmodule MingaAgent.ProviderPacks.NativeTest do
     assert spec.source == {:bundle, :native_provider}
     assert spec.id == "native"
     assert spec.module == Native
-    assert spec.model_prefixes == ["anthropic:", "openai:", "ollama:", "groq:", "bedrock:"]
+
+    assert spec.model_prefixes == [
+             "anthropic:",
+             "openai:",
+             "openai_codex:",
+             "google:",
+             "openrouter:",
+             "groq:",
+             "mistral:",
+             "deepseek:",
+             "ollama:"
+           ]
+
     assert :streaming in spec.capabilities
     assert :model_switching in spec.capabilities
     assert spec.credential_requirements == [:llm]

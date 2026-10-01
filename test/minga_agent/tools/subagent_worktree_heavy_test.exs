@@ -20,9 +20,10 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
                isolation: "worktree",
                project_root: root,
                provider: MingaAgent.Providers.Native,
-               model: "anthropic:claude-sonnet-4-20250514",
+               model: MingaAgent.Test.ModelSelectionFixture.model_intent(),
                provider_opts: [
                  llm_client: native_write_client("child.txt", "from native\n", "native wrote"),
+                 config: MingaAgent.Test.ModelSelectionFixture.config(),
                  skip_api_key_env: true
                ]
              )

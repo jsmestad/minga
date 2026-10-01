@@ -29,6 +29,19 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   end
 
   @impl true
+  @spec resolve_source(ProjectView.t(), String.t()) :: {:ok, MingaAgent.ProjectView.Source.t()}
+  def resolve_source(%ProjectView{} = view, relative_path) do
+    record(view, {:resolve_source, relative_path})
+    source_id = Path.join(view.project_root, relative_path)
+
+    {:ok,
+     MingaAgent.ProjectView.Source.disk(
+       source_id,
+       Path.join(working_dir_path(view), relative_path)
+     )}
+  end
+
+  @impl true
   @spec read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%ProjectView{} = view, relative_path) do
     record(view, {:read_file, relative_path})

@@ -68,6 +68,7 @@ defmodule Minga.MixProject do
           "docs/GETTING-STARTED.md",
           # Using Minga
           "docs/CONFIGURATION.md",
+          "docs/AGENT-MODEL-SELECTION.md",
           "docs/PROJECTS.md",
           # Coming From...
           "docs/FOR-NEOVIM-USERS.md",
@@ -92,6 +93,7 @@ defmodule Minga.MixProject do
           ],
           "Using Minga": [
             "docs/CONFIGURATION.md",
+            "docs/AGENT-MODEL-SELECTION.md",
             "docs/PROJECTS.md"
           ],
           "Coming From...": [
@@ -260,7 +262,9 @@ defmodule Minga.MixProject do
       {:stream_data, "~> 1.0", only: :test},
       {:propcheck, "~> 1.5", only: :test},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
-      {:req_llm, "~> 1.26"},
+      {:req_llm,
+       git: "https://github.com/jsmestad/req_llm.git",
+       ref: "3b36796b94f0919e880ebecf2bea45a9a138914e"},
       {:req, "~> 0.6.2"},
       {:vibe_kit, "~> 0.1.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

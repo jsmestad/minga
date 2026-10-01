@@ -19,10 +19,8 @@ defmodule MingaAgent.Tools.FetchOutput do
   @spec execute(Context.t(), map()) :: {:ok, Output.t()} | {:error, Output.t() | term()}
   def execute(%Context{} = context, args) when is_map(args) do
     with {:ok, reference} <- reference(args["reference"]),
-         :ok <- validate_media_type(reference),
          {:ok, range} <- range(reference, args),
          {:ok, fetched} <- Context.fetch_output(context, reference, range),
-         :ok <- validate_text(fetched.bytes),
          {:ok, output} <- output(fetched) do
       Output.result(output)
     end
@@ -70,29 +68,29 @@ defmodule MingaAgent.Tools.FetchOutput do
   defp unit("items"), do: :items
   defp unit(_unit), do: :invalid
 
-  @spec validate_media_type(Reference.t()) :: :ok | {:error, :unsupported_binary_output}
-  defp validate_media_type(%Reference{media_type: "image/" <> _format}),
-    do: {:error, :unsupported_binary_output}
-
-  defp validate_media_type(%Reference{}), do: :ok
-
-  @spec validate_text(binary()) :: :ok | {:error, :unsupported_binary_output}
-  defp validate_text(bytes) do
-    if String.valid?(bytes), do: :ok, else: {:error, :unsupported_binary_output}
-  end
-
   @spec output(term()) :: {:ok, Output.t()} | {:error, :invalid_output}
   defp output(fetched) do
-    view = OutputLimit.utf8_prefix(fetched.bytes, @max_bytes)
-
-    presentation =
-      if byte_size(view) == byte_size(fetched.bytes),
-        do: :complete,
-        else: {:truncated, byte_size(fetched.bytes) - byte_size(view)}
+    view = fetched_view(fetched.bytes, fetched.selection.unit, fetched.reference.media_type)
 
     Output.new(view, fetched.capture, fetched.selection,
       reference: fetched.reference,
-      presentation: presentation
+      presentation: :complete
     )
   end
+
+  @spec fetched_view(binary(), :bytes | :items, String.t()) :: String.t()
+  defp fetched_view(bytes, :items, _media_type) when is_binary(bytes) do
+    if String.valid?(bytes), do: bytes, else: base64_view(bytes)
+  end
+
+  defp fetched_view(bytes, :bytes, "text/" <> _subtype) when is_binary(bytes) do
+    if String.valid?(bytes) and :binary.match(bytes, <<0>>) == :nomatch,
+      do: OutputLimit.utf8_prefix(bytes, @max_bytes),
+      else: base64_view(bytes)
+  end
+
+  defp fetched_view(bytes, :bytes, _media_type) when is_binary(bytes), do: base64_view(bytes)
+
+  @spec base64_view(binary()) :: String.t()
+  defp base64_view(bytes), do: "[base64; bytes=#{byte_size(bytes)}]\n" <> Base.encode64(bytes)
 end

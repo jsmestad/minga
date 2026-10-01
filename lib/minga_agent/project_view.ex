@@ -8,6 +8,7 @@ defmodule MingaAgent.ProjectView do
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Direct
   alias MingaAgent.ProjectView.Overlay
+  alias MingaAgent.ProjectView.Source
 
   @typedoc "Project view handle."
   @type t :: %__MODULE__{
@@ -38,6 +39,14 @@ defmodule MingaAgent.ProjectView do
   def read_file(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
     with {:ok, path} <- normalize_relative_path(relative_path) do
       view.backend.read_file(view, path)
+    end
+  end
+
+  @doc "Resolves one source owner without reading bytes or changing routing during capture."
+  @spec resolve_source(t(), String.t()) :: {:ok, Source.t()} | {:error, term()}
+  def resolve_source(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path) do
+      view.backend.resolve_source(view, path)
     end
   end
 

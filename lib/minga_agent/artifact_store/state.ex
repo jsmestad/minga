@@ -96,15 +96,11 @@ defmodule MingaAgent.ArtifactStore.State do
   end
 
   @doc "Closes handles and metadata without expiring or cleaning retained artifacts."
-  @spec close(t()) :: :ok
+  @spec close(t()) :: :ok | {:error, term()}
   def close(%__MODULE__{} = state) do
     Enum.each(state.active, fn {_id, active} -> ActiveCapture.close(active) end)
 
-    if state.db != nil do
-      _ = Metadata.close(state.db)
-    end
-
-    :ok
+    if state.db != nil, do: Metadata.close(state.db), else: :ok
   end
 
   @doc "Begins or resumes the capture identified by a stable delivery key."
@@ -162,6 +158,37 @@ defmodule MingaAgent.ArtifactStore.State do
     end
   end
 
+  @doc "Durably cancels one open capture and releases its complete quota reservation."
+  @spec cancel(t(), Capture.t()) :: {:ok | {:error, term()}, t()}
+  def cancel(%__MODULE__{blocked: true} = state, _capture),
+    do: {{:error, :storage_unavailable}, state}
+
+  def cancel(%__MODULE__{} = state, %Capture{} = capture) do
+    with :ok <- authorize_capture(state, capture),
+         {:ok, row} <- Metadata.get(state.db, capture.id) do
+      case row do
+        nil ->
+          {{:error, :unknown_capture}, state}
+
+        %{state: :terminal} ->
+          {{:error, :capture_not_open}, state}
+
+        %{state: :open} ->
+          cancel_row(state, row)
+      end
+    else
+      {:error, _reason} = error -> {error, state}
+    end
+  end
+
+  @spec cancel_row(t(), Metadata.row()) :: {:ok | {:error, term()}, t()}
+  defp cancel_row(state, row) do
+    case cancel_open_row(state, row) do
+      {:ok, next_state} -> {:ok, next_state}
+      {:error, reason, next_state} -> {{:error, reason}, next_state}
+    end
+  end
+
   @doc "Fetches an exact bounded byte or item range from immutable captured files."
   @spec fetch(t(), Reference.t(), Range.t()) ::
           {{:ok, Fetched.t()} | {:error, term()}, t()}
@@ -185,15 +212,17 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec lookup_delivery(t(), {:delivery, PinKey.component(), PinKey.component()}) ::
           {{:ok, Stored.t()} | {:error, term()}, t()}
   def lookup_delivery(%__MODULE__{} = state, {:delivery, _checkpoint, _call_id} = delivery_key) do
-    with {:ok, %PinKey{kind: :delivery} = key} <- PinKey.new(delivery_key) do
-      case Metadata.by_delivery(state.db, PinKey.encode(key)) do
-        {:ok, nil} -> {{:error, :unknown_delivery}, state}
-        {:ok, %{state: :terminal} = row} -> stored_reply(state, row)
-        {:ok, %{state: :open} = row} -> lookup_open_delivery(state, row)
-        {:error, reason} -> {{:error, {:io, reason}}, state}
-      end
-    else
-      {:error, _reason} -> {{:error, :unknown_delivery}, state}
+    case PinKey.new(delivery_key) do
+      {:ok, %PinKey{kind: :delivery} = key} ->
+        case Metadata.by_delivery(state.db, PinKey.encode(key)) do
+          {:ok, nil} -> {{:error, :unknown_delivery}, state}
+          {:ok, %{state: :terminal} = row} -> stored_reply(state, row)
+          {:ok, %{state: :open} = row} -> lookup_open_delivery(state, row)
+          {:error, reason} -> {{:error, {:io, reason}}, state}
+        end
+
+      {:error, _reason} ->
+        {{:error, :unknown_delivery}, state}
     end
   end
 
@@ -241,13 +270,44 @@ defmodule MingaAgent.ArtifactStore.State do
     do: {{:error, :storage_unavailable}, state}
 
   def release(%__MODULE__{} = state, pin_key) do
-    with {:ok, key} <- PinKey.new(pin_key) do
-      mutation = Metadata.release_pin_set(state.db, PinKey.encode(key), metadata_fault_opts(state))
-      metadata_reply(state, mutation, :ok)
-    else
-      {:error, _reason} = error -> {error, state}
+    case PinKey.new(pin_key) do
+      {:ok, key} ->
+        mutation =
+          Metadata.release_pin_set(state.db, PinKey.encode(key), metadata_fault_opts(state))
+
+        metadata_reply(state, mutation, :ok)
+
+      {:error, _reason} = error ->
+        {error, state}
     end
   end
+
+  @doc "Releases snapshot pin generations that are not named by durable session JSON."
+  @spec reconcile_snapshot_pins(t(), String.t() | nil) ::
+          {:ok | {:error, term()}, t()}
+  def reconcile_snapshot_pins(%__MODULE__{blocked: true} = state, _generation),
+    do: {{:error, :storage_unavailable}, state}
+
+  def reconcile_snapshot_pins(%__MODULE__{} = state, generation)
+      when is_binary(generation) or is_nil(generation) do
+    case snapshot_pin_key(generation) do
+      {:ok, durable_key} ->
+        mutation =
+          Metadata.reconcile_snapshot_pin_sets(
+            state.db,
+            durable_key,
+            metadata_fault_opts(state)
+          )
+
+        metadata_reply(state, mutation, :ok)
+
+      {:error, _reason} = error ->
+        {error, state}
+    end
+  end
+
+  def reconcile_snapshot_pins(%__MODULE__{} = state, _generation),
+    do: {{:error, :invalid_pin_set}, state}
 
   @doc "Explicitly deletes only artifacts with no pins, then releases their quota."
   @spec cleanup_unreferenced(t()) :: {{:ok, non_neg_integer()} | {:error, term()}, t()}
@@ -299,40 +359,89 @@ defmodule MingaAgent.ArtifactStore.State do
     with :ok <- validate_expected(spec, state.limits),
          id = random_id(),
          initial_charge = Limits.capture_header_bytes() + (spec.expected_bytes || 0),
-         :ok <- ArtifactQuota.reserve_capture(state.quota, state.namespace, initial_charge),
-         row = new_open_row(id, delivery_key, spec, initial_charge),
-         {:ok, :inserted} <-
-           Metadata.insert_capture(state.db, row, metadata_fault_opts(state)),
-         {:ok, paths} <- Paths.new(state.directory, id),
-         :ok <- FaultInjector.run(state.fault_injector, :before_capture_files),
-         {:ok, data_io, index_io} <- Blob.create(paths) do
-      monitor = Process.monitor(spec.owner_pid)
-
-      active =
-        ActiveCapture.new(
-          id: id,
-          media_type: spec.media_type,
-          mode: spec.mode,
-          data_io: data_io,
-          index_io: index_io,
-          owner_pid: spec.owner_pid,
-          monitor: monitor,
-          bytes: 0,
-          items: 0,
-          charged_bytes: initial_charge,
-          charged_items: 0,
-          reserved_data: spec.expected_bytes || 0,
-          integrity: Integrity.new()
-        )
-
-      next_state = put_active(state, active)
-      {{:ok, Capture.new(id, state.namespace)}, next_state}
+         :ok <- ArtifactQuota.reserve_capture(state.quota, state.namespace, initial_charge) do
+      row = new_open_row(id, delivery_key, spec, initial_charge)
+      begin_reserved_capture(state, spec, row)
     else
-      {:error, {:checkpoint_failed, _reason}, {:committed, :inserted}} ->
-        {{:error, :storage_unavailable}, block(state)}
-
       {:error, reason} ->
         {{:error, normalize_write_error(reason)}, state}
+    end
+  end
+
+  @spec begin_reserved_capture(t(), CaptureSpec.t(), Metadata.row()) ::
+          {{:ok, Capture.t()} | {:error, term()}, t()}
+  defp begin_reserved_capture(state, spec, row) do
+    case FaultInjector.run(state.fault_injector, :before_capture_metadata) do
+      :ok ->
+        case Metadata.insert_capture(state.db, row, metadata_fault_opts(state)) do
+          {:ok, :inserted} ->
+            create_reserved_capture_files(state, spec, row)
+
+          {:error, {:checkpoint_failed, _reason}, {:committed, :inserted}} ->
+            {{:error, :storage_unavailable}, block(state)}
+
+          {:error, reason} ->
+            compensate_unmanifested_reservation(state, row.charged_bytes, reason)
+        end
+
+      {:error, reason} ->
+        compensate_unmanifested_reservation(state, row.charged_bytes, reason)
+    end
+  end
+
+  @spec create_reserved_capture_files(t(), CaptureSpec.t(), Metadata.row()) ::
+          {{:ok, Capture.t()} | {:error, term()}, t()}
+  defp create_reserved_capture_files(state, spec, row) do
+    result =
+      with {:ok, paths} <- Paths.new(state.directory, row.id),
+           :ok <- FaultInjector.run(state.fault_injector, :before_capture_files) do
+        Blob.create(paths)
+      end
+
+    case result do
+      {:ok, data_io, index_io} ->
+        monitor = Process.monitor(spec.owner_pid)
+
+        active =
+          ActiveCapture.new(
+            id: row.id,
+            media_type: spec.media_type,
+            mode: spec.mode,
+            data_io: data_io,
+            index_io: index_io,
+            owner_pid: spec.owner_pid,
+            monitor: monitor,
+            bytes: 0,
+            items: 0,
+            charged_bytes: row.charged_bytes,
+            charged_items: 0,
+            reserved_data: spec.expected_bytes || 0,
+            integrity: Integrity.new()
+          )
+
+        next_state = put_active(state, active)
+        {{:ok, Capture.new(row.id, state.namespace)}, next_state}
+
+      {:error, reason} ->
+        case cancel_open_row(state, row) do
+          {:ok, next_state} ->
+            {{:error, normalize_write_error(reason)}, next_state}
+
+          {:error, _cancel_reason, next_state} ->
+            {{:error, :storage_unavailable}, block(next_state)}
+        end
+    end
+  end
+
+  @spec compensate_unmanifested_reservation(t(), non_neg_integer(), term()) ::
+          {{:error, term()}, t()}
+  defp compensate_unmanifested_reservation(state, charged_bytes, original_reason) do
+    case ArtifactQuota.cancel_capture(state.quota, state.namespace, charged_bytes, 0) do
+      :ok ->
+        {{:error, normalize_write_error(original_reason)}, state}
+
+      {:error, _reason} ->
+        {{:error, :storage_unavailable}, block(state)}
     end
   end
 
@@ -352,12 +461,10 @@ defmodule MingaAgent.ArtifactStore.State do
     do: {{:ok, Capture.new(row.id, state.namespace)}, state}
 
   defp resume_existing_capture(state, spec, %{state: :open} = row) do
-    case Map.has_key?(state.active, row.id) do
-      true ->
-        {{:ok, Capture.new(row.id, state.namespace)}, state}
-
-      false ->
-        resume_recovered_capture(state, spec, row)
+    if Map.has_key?(state.active, row.id) do
+      {{:ok, Capture.new(row.id, state.namespace)}, state}
+    else
+      resume_recovered_capture(state, spec, row)
     end
   end
 
@@ -381,6 +488,7 @@ defmodule MingaAgent.ArtifactStore.State do
         {{:error, reason}, recovered}
     end
   end
+
   @spec admitted_append(t(), ActiveCapture.t(), binary(), [pos_integer()], non_neg_integer()) ::
           {{:ok, CaptureProgress.t()} | {:error, term()}, t()}
   defp admitted_append(state, active, <<>>, [], 0) do
@@ -400,8 +508,12 @@ defmodule MingaAgent.ArtifactStore.State do
     case ArtifactQuota.reserve_append(state.quota, state.namespace, newly_charged, item_count) do
       :ok ->
         write_admitted_append(state, active, chunk, item_ends, item_count, newly_charged)
-      {:error, reason} when reason in @incomplete_reasons -> mark_refused_append(state, active, reason)
-      {:error, reason} -> {{:error, reason}, state}
+
+      {:error, reason} when reason in @incomplete_reasons ->
+        mark_refused_append(state, active, reason)
+
+      {:error, reason} ->
+        {{:error, reason}, state}
     end
   end
 
@@ -513,7 +625,9 @@ defmodule MingaAgent.ArtifactStore.State do
     mutation = Metadata.mark_limit(state.db, active.id, reason, metadata_fault_opts(state))
 
     case mutation do
-      {:ok, :marked} -> {{:error, reason}, replace_active(state, marked)}
+      {:ok, :marked} ->
+        {{:error, reason}, replace_active(state, marked)}
+
       {:error, {:checkpoint_failed, _}, {:committed, :marked}} ->
         {{:error, :storage_unavailable}, state |> replace_active(marked) |> block()}
 
@@ -585,20 +699,10 @@ defmodule MingaAgent.ArtifactStore.State do
           :complete | {:incomplete, atom()}
         ) :: {{:ok, Stored.t()} | {:error, term()}, t()}
   defp finish_synced_active(state, row, active, status) do
-    case ActiveCapture.integrity_rebuild?(active) do
-      true ->
-        recovered_finish_reply(
-          finalize_recovered_open_row(
-            state,
-            row,
-            status,
-            active.charged_bytes,
-            active.charged_items
-          )
-        )
-
-      false ->
-        clean_finish_reply(finalize_clean_open_row(state, row, status, active))
+    if ActiveCapture.integrity_rebuild?(active) do
+      recovered_finish_reply(finalize_recovered_open_row(state, row, status))
+    else
+      clean_finish_reply(finalize_clean_open_row(state, row, status, active))
     end
   end
 
@@ -607,30 +711,20 @@ defmodule MingaAgent.ArtifactStore.State do
   defp finish_dormant(state, row, requested_status) do
     case effective_status(row.limit_reason, requested_status) do
       {:ok, effective} ->
-        recovered_finish_reply(
-          finalize_recovered_open_row(
-            state,
-            row,
-            effective,
-            row.charged_bytes,
-            row.items
-          )
-        )
+        recovered_finish_reply(finalize_recovered_open_row(state, row, effective))
 
       {:error, reason} ->
         {{:error, reason}, state}
     end
   end
 
-  @spec clean_finish_reply(
-          {:ok, Stored.t(), t()} | {:error, term(), t()}
-        ) :: {{:ok, Stored.t()} | {:error, term()}, t()}
+  @spec clean_finish_reply({:ok, Stored.t(), t()} | {:error, term(), t()}) ::
+          {{:ok, Stored.t()} | {:error, term()}, t()}
   defp clean_finish_reply({:ok, stored, state}), do: {{:ok, stored}, state}
   defp clean_finish_reply({:error, reason, state}), do: {{:error, reason}, state}
 
-  @spec recovered_finish_reply(
-          {:ok, Stored.t(), t()} | {:error, term(), t()}
-        ) :: {{:ok, Stored.t()} | {:error, term()}, t()}
+  @spec recovered_finish_reply({:ok, Stored.t(), t()} | {:error, term(), t()}) ::
+          {{:ok, Stored.t()} | {:error, term()}, t()}
   defp recovered_finish_reply({:ok, stored, state}), do: {{:ok, stored}, state}
   defp recovered_finish_reply({:error, reason, state}), do: {{:error, reason}, state}
 
@@ -647,36 +741,26 @@ defmodule MingaAgent.ArtifactStore.State do
          :ok <- Blob.validate_final(paths, active.mode, active.bytes, active.items),
          {:ok, sha256, rows} <- ActiveCapture.seal_integrity(active),
          actual_charge = Limits.capture_header_bytes() + active.bytes + active.items * 8,
-         mutation =
+         {:ok, :finished} <-
            Metadata.finish(
              state.db,
              row.id,
-             status,
-             active.bytes,
-             active.items,
-             sha256,
-             actual_charge,
-             row.delivery_key,
-             rows,
+             %{
+               capture: status,
+               bytes: active.bytes,
+               items: active.items,
+               sha256: sha256,
+               charged_bytes: actual_charge,
+               delivery_key: row.delivery_key,
+               rows: rows
+             },
              metadata_fault_opts(state)
-           ),
-         {:ok, :finished} <- mutation,
-         terminal =
-           terminal_row(row, status, active.bytes, active.items, sha256, actual_charge),
-         {:ok, value} <- stored(state, terminal) do
-      _ = ArtifactQuota.finish_capture(state.quota, state.namespace)
-      release_excess(
-        state,
-        active.charged_bytes,
-        active.charged_items,
-        actual_charge,
-        active.items
-      )
-
-      {:ok, value, state}
+           ) do
+      terminal = terminal_row(row, status, active.bytes, active.items, sha256, actual_charge)
+      finish_terminal_commit(state, terminal)
     else
       {:error, {:checkpoint_failed, _}, {:committed, :finished}} ->
-        {:error, :storage_unavailable, block(state)}
+        {:error, :storage_unavailable, reconcile_committed_accounting(state, :finish)}
 
       {:error, reason} ->
         {:error, normalize_write_error(reason), state}
@@ -686,61 +770,44 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec finalize_recovered_open_row(
           t(),
           Metadata.row(),
-          :complete | {:incomplete, atom()},
-          non_neg_integer(),
-          non_neg_integer()
+          :complete | {:incomplete, atom()}
         ) :: {:ok, Stored.t(), t()} | {:error, term(), t()}
-  defp finalize_recovered_open_row(
-         state,
-         row,
-         status,
-         conservative_charge,
-         conservative_items
-       ) do
+  defp finalize_recovered_open_row(state, row, status) do
     with {:ok, paths} <- Paths.new(state.directory, row.id),
          {:ok, recovered} <- Blob.recover_open(paths, row.mode),
          :ok <- FaultInjector.run(state.fault_injector, :before_blob_rename),
          :ok <- Blob.promote(paths, state.directory),
          actual_charge =
            Limits.capture_header_bytes() + recovered.bytes + recovered.items * 8,
-         mutation =
+         {:ok, :finished} <-
            Metadata.finish_recovered(
              state.db,
              row.id,
-             status,
-             recovered.bytes,
-             recovered.items,
-             recovered.sha256,
-             actual_charge,
-             row.delivery_key,
-             recovered.rows,
+             %{
+               capture: status,
+               bytes: recovered.bytes,
+               items: recovered.items,
+               sha256: recovered.sha256,
+               charged_bytes: actual_charge,
+               delivery_key: row.delivery_key,
+               rows: recovered.rows
+             },
              metadata_fault_opts(state)
-           ),
-         {:ok, :finished} <- mutation,
-         terminal =
-           terminal_row(
-             row,
-             status,
-             recovered.bytes,
-             recovered.items,
-             recovered.sha256,
-             actual_charge
-           ),
-         {:ok, value} <- stored(state, terminal) do
-      _ = ArtifactQuota.finish_capture(state.quota, state.namespace)
+           ) do
+      terminal =
+        terminal_row(
+          row,
+          status,
+          recovered.bytes,
+          recovered.items,
+          recovered.sha256,
+          actual_charge
+        )
 
-      release_excess(
-        state,
-        conservative_charge,
-        conservative_items,
-        actual_charge,
-        recovered.items
-      )
-
-      {:ok, value, state}
+      finish_terminal_commit(state, terminal)
     else
       {:error, {:checkpoint_failed, _}, {:committed, :finished}} ->
-        {:error, :storage_unavailable, block(state)}
+        {:error, :storage_unavailable, reconcile_committed_accounting(state, :finish)}
 
       {:error, reason} ->
         {:error, normalize_write_error(reason), state}
@@ -749,10 +816,10 @@ defmodule MingaAgent.ArtifactStore.State do
 
   @spec recover_opened_state(t()) :: {:ok, t()} | {:error, term()}
   defp recover_opened_state(state) do
-    case recover_open_captures(state) do
-      {:ok, recovered} ->
-        {:ok, recovered}
-
+    with {:ok, recovered} <- recover_open_captures(state),
+         {:ok, reconciled} <- reconcile_quota(recovered) do
+      {:ok, reconciled}
+    else
       {:error, reason} ->
         _ = Metadata.close(state.db)
         {:error, reason}
@@ -762,35 +829,43 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec recover_open_captures(t()) :: {:ok, t()} | {:error, term()}
   defp recover_open_captures(state) do
     with {:ok, rows} <- Metadata.open_captures(state.db) do
-      Enum.reduce_while(rows, {:ok, state}, fn row, {:ok, current} ->
-        case recover_row(current, row) do
-          {:ok, recovered} -> {:cont, {:ok, recovered}}
-          {:error, reason, _recovered} -> {:halt, {:error, reason}}
-        end
-      end)
+      recover_rows(rows, state)
     end
+  end
+
+  @spec recover_rows([Metadata.row()], t()) :: {:ok, t()} | {:error, term()}
+  defp recover_rows(rows, state) do
+    Enum.reduce_while(rows, {:ok, state}, fn row, {:ok, current} ->
+      case recover_row(current, row) do
+        {:ok, recovered} -> {:cont, {:ok, recovered}}
+        {:error, reason, _recovered} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   @spec recover_row(t(), Metadata.row()) :: {:ok, t()} | {:error, term(), t()}
   defp recover_row(state, row) do
-    case finalize_recovered_open_row(
-           state,
-           row,
-           {:incomplete, :interrupted},
-           row.charged_bytes,
-           row.items
-         ) do
-      {:ok, _stored, recovered} -> {:ok, recovered}
-      {:error, reason, recovered} -> {:error, reason, recovered}
+    case finalize_recovered_open_row(state, row, {:incomplete, :interrupted}) do
+      {:ok, _stored, recovered} ->
+        {:ok, recovered}
+
+      {:error, {:io, :enoent}, recovered} ->
+        cancel_open_row(recovered, row)
+
+      {:error, reason, recovered} ->
+        {:error, reason, recovered}
     end
   end
 
   @spec lookup_open_delivery(t(), Metadata.row()) ::
           {{:ok, Stored.t()} | {:error, term()}, t()}
+  defp lookup_open_delivery(%__MODULE__{blocked: true} = state, _row),
+    do: {{:error, :storage_unavailable}, state}
+
   defp lookup_open_delivery(state, row) do
     case Map.fetch(state.active, row.id) do
       {:ok, active} -> lookup_active_delivery(state, row, active)
-      :error -> {{:error, :delivery_in_progress}, state}
+      :error -> finish_dormant(state, row, {:incomplete, :interrupted})
     end
   end
 
@@ -800,7 +875,7 @@ defmodule MingaAgent.ArtifactStore.State do
     monitored_capture? = Map.get(state.monitors, active.monitor) == row.id
 
     if monitored_capture? and not Process.alive?(active.owner_pid) do
-      finish_active(state, row, active, {:incomplete, :interrupted}, true)
+      finalize_abandoned_active(state, row, active)
     else
       {{:error, :delivery_in_progress}, state}
     end
@@ -891,6 +966,7 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec strictly_increasing?([integer()]) :: boolean()
   defp strictly_increasing?([]), do: true
   defp strictly_increasing?([_one]), do: true
+
   defp strictly_increasing?([first, second | rest]) when first < second,
     do: strictly_increasing?([second | rest])
 
@@ -1026,8 +1102,8 @@ defmodule MingaAgent.ArtifactStore.State do
 
     if reference.media_type == row.media_type and reference.bytes == row.bytes and
          reference.items == expected_items and reference.sha256 == row.sha256,
-      do: :ok,
-      else: {:error, :artifact_corrupt}
+       do: :ok,
+       else: {:error, :artifact_corrupt}
   end
 
   @spec validate_pin_references(t(), [Reference.t()]) :: {:ok, [String.t()]} | {:error, term()}
@@ -1063,10 +1139,35 @@ defmodule MingaAgent.ArtifactStore.State do
 
   @spec cleanup_row(t(), Metadata.row()) :: {:ok, t()} | {:skip, t()} | {:error, term(), t()}
   defp cleanup_row(state, row) do
-    with {:ok, false} <- Metadata.pinned?(state.db, row.id),
-         {:ok, paths} <- Paths.new(state.directory, row.id),
-         :ok <- FaultInjector.run(state.fault_injector, :before_blob_delete),
-         :ok <- Blob.delete(paths),
+    case Metadata.pinned?(state.db, row.id) do
+      {:ok, true} ->
+        {:skip, state}
+
+      {:ok, false} ->
+        delete_unreferenced_row(state, row)
+
+      {:error, reason} ->
+        {:error, normalize_write_error(reason), state}
+    end
+  end
+
+  @spec delete_unreferenced_row(t(), Metadata.row()) :: {:ok, t()} | {:error, term(), t()}
+  defp delete_unreferenced_row(state, row) do
+    with {:ok, paths} <- Paths.new(state.directory, row.id),
+         :ok <- FaultInjector.run(state.fault_injector, :before_blob_delete) do
+      case Blob.delete(paths) do
+        :ok -> expire_deleted_row(state, row)
+        {:error, reason} -> {:error, normalize_write_error(reason), block(state)}
+      end
+    else
+      {:error, reason} -> {:error, normalize_write_error(reason), state}
+    end
+  end
+
+  @spec expire_deleted_row(t(), Metadata.row()) :: {:ok, t()} | {:error, term(), t()}
+  defp expire_deleted_row(state, row) do
+    with :ok <- FaultInjector.run(state.fault_injector, :before_blob_delete_sync),
+         :ok <- Files.sync_directory(state.directory),
          {:ok, :expired} <-
            Metadata.expire_unreferenced(
              state.db,
@@ -1074,15 +1175,20 @@ defmodule MingaAgent.ArtifactStore.State do
              state.limits.session_artifacts,
              metadata_fault_opts(state)
            ) do
-      _ = ArtifactQuota.release_artifact(state.quota, state.namespace, row.charged_bytes, row.items)
-      {:ok, state}
+      case reconcile_quota(state) do
+        {:ok, reconciled} ->
+          {:ok, reconciled}
+
+        {:error, reason} ->
+          log_accounting_degradation(:expire, state, reason)
+          {:error, :storage_unavailable, block(state)}
+      end
     else
-      {:ok, true} -> {:skip, state}
       {:error, {:checkpoint_failed, _}, {:committed, :expired}} ->
-        {:error, :storage_unavailable, block(state)}
+        {:error, :storage_unavailable, reconcile_committed_accounting(state, :expire)}
 
       {:error, reason} ->
-        {:error, normalize_write_error(reason), state}
+        {:error, normalize_write_error(reason), block(state)}
     end
   end
 
@@ -1090,37 +1196,159 @@ defmodule MingaAgent.ArtifactStore.State do
   defp finish_owner_down(state, id, owner_pid) do
     case {Map.fetch(state.active, id), Metadata.get(state.db, id)} do
       {{:ok, %ActiveCapture{owner_pid: ^owner_pid} = active}, {:ok, %{state: :open} = row}} ->
-        case finish_active(state, row, active, {:incomplete, :interrupted}, true) do
-          {{:ok, _stored}, next_state} -> next_state
-          {{:error, _reason}, next_state} -> next_state
-        end
+        {_reply, next_state} = finalize_abandoned_active(state, row, active)
+        next_state
+
+      {{:ok, %ActiveCapture{owner_pid: ^owner_pid} = active}, metadata_result} ->
+        _ = sync_active(active, true)
+        next_state = drop_active(state, active)
+        log_owner_down_failure(state, {:metadata_unavailable, metadata_result})
+        block(next_state)
 
       _ ->
         state
     end
   end
 
+  @spec finalize_abandoned_active(t(), Metadata.row(), ActiveCapture.t()) ::
+          {{:ok, Stored.t()} | {:error, term()}, t()}
+  defp finalize_abandoned_active(state, row, active) do
+    case finish_active(state, row, active, {:incomplete, :interrupted}, true) do
+      {{:ok, _stored}, _next_state} = success ->
+        success
+
+      {{:error, reason}, next_state} ->
+        log_owner_down_failure(state, reason)
+        {{:error, reason}, block(next_state)}
+    end
+  end
+
+  @spec log_owner_down_failure(t(), term()) :: :ok
+  defp log_owner_down_failure(state, reason) do
+    Minga.Log.error(
+      :agent,
+      "[ArtifactStore] owner-down finalization failed for #{state.namespace}: #{inspect(reason)}"
+    )
+  end
+
   @spec sync_active(ActiveCapture.t(), boolean()) :: :ok | {:error, term()}
   defp sync_active(active, true), do: Blob.sync_and_close_after_down(active)
   defp sync_active(active, false), do: Blob.sync_and_close(active)
 
-  @spec release_excess(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp release_excess(state, conservative_charge, conservative_items, actual_charge, actual_items) do
-    excess_bytes = max(conservative_charge - actual_charge, 0)
-    excess_items = max(conservative_items - actual_items, 0)
+  @spec cancel_open_row(t(), Metadata.row()) :: {:ok, t()} | {:error, term(), t()}
+  defp cancel_open_row(state, row) do
+    state = close_active_for_cancel(state, row.id)
 
-    if excess_bytes == 0 and excess_items == 0 do
-      :ok
+    case Paths.new(state.directory, row.id) do
+      {:ok, paths} ->
+        case Blob.delete(paths) do
+          :ok -> finish_deleted_cancel(state, row)
+          {:error, reason} -> {:error, normalize_write_error(reason), block(state)}
+        end
+
+      {:error, reason} ->
+        {:error, normalize_write_error(reason), state}
+    end
+  end
+
+  @spec finish_deleted_cancel(t(), Metadata.row()) :: {:ok, t()} | {:error, term(), t()}
+  defp finish_deleted_cancel(state, row) do
+    with :ok <- Files.sync_directory(state.directory),
+         {:ok, :canceled} <-
+           Metadata.cancel_open(state.db, row.id, metadata_fault_opts(state)) do
+      case reconcile_quota(state) do
+        {:ok, reconciled} ->
+          {:ok, reconciled}
+
+        {:error, reason} ->
+          log_accounting_degradation(:cancel, state, reason)
+          {:error, :storage_unavailable, block(state)}
+      end
     else
-      _ =
-        ArtifactQuota.release_reservation(
-          state.quota,
-          state.namespace,
-          excess_bytes,
-          excess_items
-        )
+      {:error, {:checkpoint_failed, _reason}, {:committed, :canceled}} ->
+        {:error, :storage_unavailable, reconcile_committed_accounting(state, :cancel)}
 
-      :ok
+      {:error, reason} ->
+        {:error, normalize_write_error(reason), block(state)}
+    end
+  end
+
+  @spec close_active_for_cancel(t(), String.t()) :: t()
+  defp close_active_for_cancel(state, id) do
+    case Map.fetch(state.active, id) do
+      {:ok, active} ->
+        :ok = ActiveCapture.close(active)
+        drop_active(state, active)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec reconcile_quota(t()) :: {:ok, t()} | {:error, term()}
+  defp reconcile_quota(state) do
+    with {:ok, accounting} <- Metadata.accounting(state.db),
+         :ok <-
+           ArtifactQuota.reconcile_namespace(
+             state.quota,
+             state.namespace,
+             accounting.bytes,
+             accounting.items,
+             accounting.artifacts,
+             accounting.open_captures
+           ) do
+      {:ok, state}
+    end
+  catch
+    :exit, reason -> {:error, {:artifact_quota_unavailable, reason}}
+  end
+
+  @spec reconcile_committed_accounting(t(), :finish | :expire | :cancel) :: t()
+  defp reconcile_committed_accounting(state, operation) do
+    case reconcile_quota(state) do
+      {:ok, reconciled} ->
+        block(reconciled)
+
+      {:error, reason} ->
+        log_accounting_degradation(operation, state, reason)
+        block(state)
+    end
+  end
+
+  @spec finish_terminal_commit(t(), Metadata.row()) ::
+          {:ok, Stored.t(), t()} | {:error, term(), t()}
+  defp finish_terminal_commit(state, terminal) do
+    stored_result = stored(state, terminal)
+
+    case reconcile_quota(state) do
+      {:ok, reconciled} ->
+        finish_terminal_value(stored_result, reconciled)
+
+      {:error, reason} ->
+        log_accounting_degradation(:finish, state, reason)
+        finish_terminal_value(stored_result, block(state))
+    end
+  end
+
+  @spec finish_terminal_value({:ok, Stored.t()} | {:error, term()}, t()) ::
+          {:ok, Stored.t(), t()} | {:error, term(), t()}
+  defp finish_terminal_value({:ok, stored}, state), do: {:ok, stored, state}
+  defp finish_terminal_value({:error, reason}, state), do: {:error, reason, block(state)}
+
+  @spec log_accounting_degradation(:finish | :expire | :cancel, t(), term()) :: :ok
+  defp log_accounting_degradation(operation, state, reason) do
+    Minga.Log.error(
+      :agent,
+      "[ArtifactStore] #{operation} committed for #{state.namespace}, but quota accounting reconciliation failed: #{inspect(reason)}"
+    )
+  end
+
+  @spec snapshot_pin_key(String.t() | nil) :: {:ok, String.t() | nil} | {:error, term()}
+  defp snapshot_pin_key(nil), do: {:ok, nil}
+
+  defp snapshot_pin_key(generation) do
+    with {:ok, key} <- PinKey.new({:snapshot, generation}) do
+      {:ok, PinKey.encode(key)}
     end
   end
 
@@ -1134,7 +1362,11 @@ defmodule MingaAgent.ArtifactStore.State do
 
   @spec metadata_fault_opts(t()) :: keyword()
   defp metadata_fault_opts(state) do
-    [before_checkpoint: fn -> FaultInjector.run(state.fault_injector, :before_metadata_checkpoint) end]
+    [
+      before_checkpoint: fn ->
+        FaultInjector.run(state.fault_injector, :before_metadata_checkpoint)
+      end
+    ]
   end
 
   @spec fetch_active(t(), String.t()) :: {:ok, ActiveCapture.t()} | {:error, term()}
@@ -1146,21 +1378,26 @@ defmodule MingaAgent.ArtifactStore.State do
   end
 
   @spec put_active(t(), ActiveCapture.t()) :: t()
-  defp put_active(%__MODULE__{} = state, active) do %__MODULE__{
-    state
-    | active: Map.put(state.active, active.id, active),
-      monitors: Map.put(state.monitors, active.monitor, active.id)
-  } end
+  defp put_active(%__MODULE__{} = state, active) do
+    %__MODULE__{
+      state
+      | active: Map.put(state.active, active.id, active),
+        monitors: Map.put(state.monitors, active.monitor, active.id)
+    }
+  end
 
   @spec replace_active(t(), ActiveCapture.t()) :: t()
-  defp replace_active(%__MODULE__{} = state, active), do: %__MODULE__{state | active: Map.put(state.active, active.id, active)}
+  defp replace_active(%__MODULE__{} = state, active),
+    do: %__MODULE__{state | active: Map.put(state.active, active.id, active)}
 
   @spec drop_active(t(), ActiveCapture.t()) :: t()
-  defp drop_active(%__MODULE__{} = state, active) do %__MODULE__{
-    state
-    | active: Map.delete(state.active, active.id),
-      monitors: Map.delete(state.monitors, active.monitor)
-  } end
+  defp drop_active(%__MODULE__{} = state, active) do
+    %__MODULE__{
+      state
+      | active: Map.delete(state.active, active.id),
+        monitors: Map.delete(state.monitors, active.monitor)
+    }
+  end
 
   @spec block(t()) :: t()
   defp block(%__MODULE__{} = state), do: %__MODULE__{state | blocked: true}
