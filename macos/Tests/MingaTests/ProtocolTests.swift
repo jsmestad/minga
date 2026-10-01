@@ -101,6 +101,50 @@ private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
+    @Test("Resident semantics decode all 65,536 guide runs")
+    func decodeMaximumResidentGuideRunCount() throws {
+        var body = Data()
+        body.append(1)
+        body.append(0)
+        appendWireU16(&body, 7)
+        appendWireU32(&body, 9)
+        appendWireU32(&body, 0)
+        appendWireU32(&body, 1)
+        appendWireU32(&body, 1)
+        appendWireU32(&body, 65_536)
+        appendWireU64(&body, 1)
+        appendWireU64(&body, 65_536)
+        body.append(0x18)
+        appendWireU32(&body, 0)
+        appendWireU16(&body, 0)
+        body.append(2)
+        appendWireU16(&body, 0)
+        appendWireU16(&body, 0)
+        appendWireU16(&body, 0)
+        appendWireU16(&body, 1)
+        appendWireU32(&body, 0)
+        appendWireU32(&body, 65_536)
+        appendWireU32(&body, 65_536)
+        for row in UInt32(0)..<65_536 {
+            appendWireU32(&body, row)
+            appendWireU32(&body, row + 1)
+            appendWireU16(&body, UInt16(row % 8))
+        }
+        appendWireU32(&body, 0)
+        appendWireU32(&body, 0)
+
+        var data = Data([OP_GUI_RESIDENT_SEMANTICS])
+        appendWireU32(&data, UInt32(body.count))
+        data.append(body)
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiResidentSemantics(let semantics) = command else {
+            Issue.record("expected resident semantics command")
+            return
+        }
+        #expect(size == data.count)
+        #expect(semantics.guideReplacements.first?.runs.count == 65_536)
+    }
+
     @Test("Parser commands accept their exact 12-byte fixed payloads")
     func decodeExactLengthParserCommands() throws {
         var parseBuffer = Data([OP_PARSE_BUFFER])

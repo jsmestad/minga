@@ -16,7 +16,7 @@ extension GUIFrameImpact {
             return .all
 
         case .guiWindowContent, .guiWindowOverlayDelta, .guiWindowViewportDelta,
-             .guiWindowRowsDelta, .guiLineSpacing, .setFont, .setFontFallback,
+             .guiWindowRowsDelta, .guiResidentSemantics, .guiLineSpacing, .setFont, .setFontFallback,
              .registerFont:
             return [.editor, .editorOverlay]
 
@@ -340,6 +340,9 @@ struct PreparedFrameTransactionBuilder {
     private var theme: PreparedThemeUpdate?
     private var semanticImpact: GUIFrameImpact = []
     private var workingWindows: [UInt16: GUIWindowContent]
+    private var workingResidentSemantics: [UInt16: ResidentSemanticStore]
+    private let initializedResidentSemanticWindowIds: Set<UInt16>
+    private var pendingResidentSemanticWindowIds: Set<UInt16> = []
     private let committedGutters: [UInt16: Wire.WindowGutter]
     private var workingGutters: [UInt16: Wire.WindowGutter]
     private var workingIndentGuides: [UInt16: IndentGuideData]
@@ -372,6 +375,7 @@ struct PreparedFrameTransactionBuilder {
         baseFrameSeq: UInt32,
         generation: UInt32,
         committedWindows: [UInt16: GUIWindowContent],
+        committedResidentSemantics: [UInt16: ResidentSemanticStore] = [:],
         committedGutters: [UInt16: Wire.WindowGutter],
         committedIndentGuides: [UInt16: IndentGuideData],
         committedMetadata: EditorSnapshotMetadata = .empty,
@@ -384,6 +388,8 @@ struct PreparedFrameTransactionBuilder {
         self.baseFrameSeq = baseFrameSeq
         self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
+        self.workingResidentSemantics = baseFrameSeq == 0 ? [:] : committedResidentSemantics
+        self.initializedResidentSemanticWindowIds = Set(committedResidentSemantics.keys)
         self.committedGutters = committedGutters
         self.workingGutters = baseFrameSeq == 0 ? [:] : committedGutters
         self.workingIndentGuides = baseFrameSeq == 0 ? [:] : committedIndentGuides
@@ -430,6 +436,12 @@ struct PreparedFrameTransactionBuilder {
             }
             let aggregated = aggregatingOperationCounters(for: content)
             guard stageWindow(aggregated) else { return }
+            if content.rowStore.mode == .sequential,
+               initializedResidentSemanticWindowIds.contains(content.windowId) || workingResidentSemantics[content.windowId] != nil {
+                pendingResidentSemanticWindowIds.insert(content.windowId)
+            } else if content.rowStore.mode != .sequential {
+                pendingResidentSemanticWindowIds.remove(content.windowId)
+            }
             touchedWindowIds.insert(content.windowId)
             recordFontResources(in: content)
 
@@ -438,6 +450,14 @@ struct PreparedFrameTransactionBuilder {
 
         case .guiWindowViewportDelta(let delta), .guiWindowRowsDelta(let delta):
             resolveRowsDelta(delta)
+
+        case .guiResidentSemantics(let update):
+            touchedWindowIds.insert(update.windowId)
+            guard let content = workingWindows[update.windowId] else { rejection = .invalidRetainedRows(windowId: update.windowId, contentEpoch: update.contentEpoch); return }
+            do {
+                workingResidentSemantics[update.windowId] = try (workingResidentSemantics[update.windowId] ?? ResidentSemanticStore()).applying(update, content: content)
+                pendingResidentSemanticWindowIds.remove(update.windowId)
+            } catch { rejection = .invalidRetainedRows(windowId: update.windowId, contentEpoch: update.contentEpoch) }
 
         case .guiGutter(let data):
             referencedWindowIds.insert(data.windowId)
@@ -553,6 +573,15 @@ struct PreparedFrameTransactionBuilder {
                 return .failure(.invalidRetainedRows(windowId: content.windowId, contentEpoch: content.contentEpoch))
             }
         }
+        for (windowId, semantics) in workingResidentSemantics {
+            guard let content = workingWindows[windowId], content.rowStore.mode == .sequential,
+                  semantics.contentEpoch == content.contentEpoch,
+                  Int(semantics.rowCount) == content.rowStore.count,
+                  (semantics.rowCount == 0 ? semantics.firstRowId == 0 && semantics.lastRowId == 0 : content.rowStore.row(at: 0)?.rowId == semantics.firstRowId && content.rowStore.row(at: content.rowStore.count - 1)?.rowId == semantics.lastRowId) else { return .failure(.invalidRetainedRows(windowId: windowId, contentEpoch: semantics.contentEpoch)) }
+        }
+        if let windowId = pendingResidentSemanticWindowIds.min(), let content = workingWindows[windowId] {
+            return .failure(.invalidRetainedRows(windowId: windowId, contentEpoch: content.contentEpoch))
+        }
         if let residentGutterFailure = residentGutterFailure() {
             return .failure(residentGutterFailure)
         }
@@ -580,6 +609,7 @@ struct PreparedFrameTransactionBuilder {
                 frameState: snapshotFrameState,
                 themeColors: preparedThemeColors,
                 windowContents: workingWindows,
+                windowResidentSemantics: workingResidentSemantics,
                 windowGutters: workingGutters,
                 windowIndentGuides: workingIndentGuides,
                 metadata: preparedMetadata()
@@ -802,6 +832,10 @@ struct PreparedFrameTransactionBuilder {
         }
         let aggregated = aggregatingOperationCounters(for: updated)
         guard stageWindow(aggregated) else { return }
+        if updated.rowStore.mode == .sequential,
+           initializedResidentSemanticWindowIds.contains(delta.windowId) || workingResidentSemantics[delta.windowId] != nil {
+            pendingResidentSemanticWindowIds.insert(delta.windowId)
+        }
         recordFontResources(in: delta)
     }
 
@@ -916,6 +950,7 @@ struct PreparedFrameTransactionBuilder {
             removing: previousWeight, adding: residentWeight
         ) else { return false }
         workingWindows[content.windowId] = content
+        if content.rowStore.mode != .sequential { workingResidentSemantics.removeValue(forKey: content.windowId) }
         changedWindows[content.windowId] = content
         return true
     }
@@ -986,6 +1021,7 @@ private extension RenderCommand {
         case .guiWindowOverlayDelta: 29
         case .guiWindowViewportDelta: 30
         case .guiWindowRowsDelta: 31
+        case .guiResidentSemantics: 63
         case .guiMinibuffer: 33
         case .guiHoverPopup: 34
         case .guiHoverAction: 35

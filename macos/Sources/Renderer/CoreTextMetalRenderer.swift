@@ -77,18 +77,83 @@ struct PreparedPresentedSurface {
     let surface: PresentedWindowSurface
     let prepared: ResidentRenderPreparationResult
     let slice: RendererRowSlice
+    let residentSemanticSlice: ResidentSemanticSlice?
+    let residentSemanticRows: [PreparedResidentSemanticRow]
 
     init(surface: PresentedWindowSurface, prepared: ResidentRenderPreparationResult) {
         self.surface = surface
         self.prepared = prepared
         self.slice = RendererSignposts.rowSlice(for: prepared)
+        self.residentSemanticSlice = surface.residentSemantics?.slice(prepared.range)
+        self.residentSemanticRows = surface.residentSemantics.map { semantics in
+            prepared.commands.map { command in
+                PreparedResidentSemanticRow(
+                    absoluteRow: command.rowIndex,
+                    presentationRow: command.presentationRow,
+                    guideLevel: semantics.guideLevel(at: Int(command.rowIndex)),
+                    annotations: semantics.annotations(at: Int(command.rowIndex)),
+                    diagnostics: semantics.diagnostics(at: Int(command.rowIndex))
+                )
+            }
+        } ?? []
     }
 
     var content: GUIWindowContent { surface.content }
     var renderGutter: Wire.WindowGutter { surface.renderGutter }
     var paneGeometry: GUIPaneGeometry { surface.paneGeometry }
-    var indentGuides: IndentGuideData? { surface.indentGuides }
+    var indentGuides: IndentGuideData? { surface.residentSemantics == nil ? surface.indentGuides : nil }
     var windowId: UInt16 { surface.windowId }
+}
+
+struct PreparedResidentSemanticRow: Sendable {
+    let absoluteRow: UInt32
+    let presentationRow: Int
+    let guideLevel: UInt16?
+    let annotations: [GUIResidentAnnotation]
+    let diagnostics: [GUIResidentDiagnostic]
+}
+
+private struct PreparedResidentGuideRow {
+    let presentationRow: Int
+    let level: UInt16
+}
+
+private struct PreparedIndentGuidePresentation {
+    let windowId: UInt16
+    let tabWidth: UInt8
+    let activeGuideCol: UInt16
+    let guideCols: [UInt16]
+    /// `nil` preserves the legacy full-height guide form. Resident semantics always provides bounded rows.
+    let rows: [PreparedResidentGuideRow]?
+}
+
+private extension PreparedPresentedSurface {
+    var presentedIndentGuides: PreparedIndentGuidePresentation? {
+        if let semantics = surface.residentSemantics {
+            guard !semantics.guideCols.isEmpty else { return nil }
+            return PreparedIndentGuidePresentation(
+                windowId: windowId,
+                tabWidth: semantics.tabWidth,
+                activeGuideCol: semantics.activeGuideCol,
+                guideCols: semantics.guideCols,
+                rows: residentSemanticRows.compactMap { row in
+                    row.guideLevel.map {
+                        PreparedResidentGuideRow(presentationRow: row.presentationRow, level: $0)
+                    }
+                }
+            )
+        }
+        guard let guides = surface.indentGuides, !guides.guideCols.isEmpty else { return nil }
+        return PreparedIndentGuidePresentation(
+            windowId: windowId,
+            tabWidth: guides.tabWidth,
+            activeGuideCol: guides.activeGuideCol,
+            guideCols: guides.guideCols,
+            rows: guides.lineIndentLevels.isEmpty ? nil : guides.lineIndentLevels.enumerated().map {
+                PreparedResidentGuideRow(presentationRow: $0.offset, level: UInt16($0.element))
+            }
+        )
+    }
 }
 
 /// Default background clear color (dark gray matching the default bg).
@@ -579,7 +644,7 @@ final class CoreTextMetalRenderer {
         }
 
         var resolvedCursor = CoreTextMetalRenderer.resolveCursor(
-            surfaces: surfaces,
+            preparedSurfaces: preparedSurfaces,
             activeWindowId: snapshot.activeSurface?.windowId,
             cellW: cellW,
             displayCellH: displayCellH,
@@ -681,16 +746,20 @@ final class CoreTextMetalRenderer {
                     bgQuads.append(bgFill)
                 }
 
-                if let cursorline = content.cursorline, cursorline.bg != 0 {
+                let residentCursorline = preparedSurface.residentSemanticSlice?.cursorline
+                let cursorlineRow = residentCursorline.map { Int($0.row) - visibleSlice.visibleStartIndex }
+                    ?? content.cursorline.map { Int($0.row) }
+                let cursorlineBG = residentCursorline?.bg ?? content.cursorline?.bg ?? 0
+                if let cursorlineRow, cursorlineBG != 0 {
                     let yPos = CoreTextMetalRenderer.viewportLocalRowY(
-                        localRow: Int(cursorline.row), origin: scrollableWindowRowOffset,
+                        localRow: cursorlineRow, origin: scrollableWindowRowOffset,
                         cellHeight: displayCellH, scale: scale
                     )
                     if let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) {
                         var clQuad = QuadGPU()
                         clQuad.position = SIMD2<Float>(textBounds.x, clipped.y)
                         clQuad.size = SIMD2<Float>(textBounds.width, clipped.height)
-                        clQuad.color = colorFromU24(cursorline.bg, default: defaultBg)
+                        clQuad.color = colorFromU24(cursorlineBG, default: defaultBg)
                         clQuad.alpha = 1.0
                         bgQuads.append(clQuad)
                     }
@@ -711,10 +780,16 @@ final class CoreTextMetalRenderer {
                 )
 
                 // Selection overlay quads (drawn before text).
-                if let sel = content.selection, content.accessibilitySelectionRanges.isEmpty || sel.type == .line {
+                let integralLocalRowOffset = Int(floor(presentationScrollOffsetPx.y / (displayCellH * scale)))
+                let residentSelection = preparedSurface.surface.residentSemantics.flatMap {
+                    CoreTextMetalRenderer.projectedSelection($0.selection, visibleStart: visibleSlice.visibleStartIndex + integralLocalRowOffset, visibleRows: committedVisibleRows, visibleCols: contentCols)
+                }
+                if let sel = residentSelection ?? content.selection,
+                   preparedSurface.surface.residentSemantics != nil || content.accessibilitySelectionRanges.isEmpty || sel.type == .line {
+                    let selectionRowOffset = residentSelection == nil ? scrollableWindowRowOffset : windowRowOffset - (presentationScrollOffsetPx.y - Float(integralLocalRowOffset) * displayCellH * scale)
                     appendSelectionQuads(
                         selection: sel,
-                        rowOffset: scrollableWindowRowOffset,
+                        rowOffset: selectionRowOffset,
                         colOffset: contentColOffset - scrollableWindowColOffset,
                         scrollLeft: scrollLeftInt,
                         visibleRows: committedVisibleRows,
@@ -730,7 +805,7 @@ final class CoreTextMetalRenderer {
 
                 // Document highlight overlay quads (drawn before search matches,
                 // so search matches paint over them when they overlap).
-                for highlight in content.documentHighlights {
+                for highlight in preparedSurface.surface.residentSemantics == nil ? content.documentHighlights : [] {
                     guard highlight.endCol > highlight.startCol else { continue }
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
@@ -758,7 +833,7 @@ final class CoreTextMetalRenderer {
                 }
 
                 // Search match overlay quads (drawn before text).
-                for match in content.searchMatches {
+                for match in preparedSurface.surface.residentSemantics == nil ? content.searchMatches : [] {
                     guard match.endCol > match.startCol else { continue }
                     let matchY = CoreTextMetalRenderer.viewportLocalRowY(
                         localRow: Int(match.row), origin: scrollableWindowRowOffset,
@@ -790,7 +865,7 @@ final class CoreTextMetalRenderer {
                 // Reuse the shared Metal-free CoreText commands prepared once
                 // at the start of this frame.
                 let preparedRows = preparedSurface.prepared
-                var visibleRowWidths: [UInt16: Int] = [:]
+                var visibleRowWidths: [Int: Int] = [:]
                 var textRows: [PresentedTextLayout.Row] = []
                 for command in preparedRows.commands {
                     let displayRow = command.displayRow
@@ -826,9 +901,7 @@ final class CoreTextMetalRenderer {
                     }
 
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
-                        if presentationRow >= 0 && presentationRow < committedVisibleRows {
-                            visibleRowWidths[UInt16(presentationRow)] = entry.pixelWidth
-                        }
+                        visibleRowWidths[presentationRow] = entry.pixelWidth
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         let rawLineX = contentColOffset - localClipXOffset - scrollableWindowColOffset
@@ -862,10 +935,17 @@ final class CoreTextMetalRenderer {
                 }
 
                 // Line annotation pills/text (drawn after line content).
-                if !content.lineAnnotations.isEmpty, let atlas {
-                    var annotationsByRow: [UInt16: [GUILineAnnotation]] = [:]
-                    for ann in content.lineAnnotations where Int(ann.row) < committedVisibleRows {
-                        annotationsByRow[ann.row, default: []].append(ann)
+                let residentAnnotations = preparedSurface.surface.residentSemantics
+                if (residentAnnotations != nil || !content.lineAnnotations.isEmpty), let atlas {
+                    var annotationsByRow: [Int: [GUILineAnnotation]] = [:]
+                    if residentAnnotations != nil {
+                        for row in preparedSurface.residentSemanticRows {
+                            for ann in row.annotations {
+                                annotationsByRow[row.presentationRow, default: []].append(GUILineAnnotation(row: UInt16(row.absoluteRow), kind: ann.kind, fg: ann.fg, bg: ann.bg, text: ann.text))
+                            }
+                        }
+                    } else {
+                        for ann in content.lineAnnotations where Int(ann.row) < committedVisibleRows { annotationsByRow[Int(ann.row), default: []].append(ann) }
                     }
 
                     for (rowIndex, rowAnnotations) in annotationsByRow {
@@ -879,7 +959,7 @@ final class CoreTextMetalRenderer {
                             + Float(wcr.annotationGap) * scale)
 
                         for (annIdx, ann) in rowAnnotations.enumerated() {
-                            let annKey = AtlasKey.lineAnnotation(windowId: content.windowId, row: rowIndex, subIndex: UInt16(min(annIdx, Int(UInt16.max))))
+                            let annKey = AtlasKey.lineAnnotation(windowId: content.windowId, row: ann.row, subIndex: UInt16(min(annIdx, Int(UInt16.max))))
 
                             guard let annEntry = wcr.renderAnnotationToAtlas(
                                 annotation: ann, key: annKey, atlas: atlas, metrics: &frameMetrics
@@ -910,7 +990,17 @@ final class CoreTextMetalRenderer {
                 }
 
                 // Diagnostic underline quads (drawn after text).
-                for diag in content.diagnosticUnderlines {
+                let residentDiagnostics: [(row: Int, underline: GUIDiagnosticUnderline)]
+                if preparedSurface.surface.residentSemantics != nil {
+                    residentDiagnostics = preparedSurface.residentSemanticRows.flatMap { row in
+                        row.diagnostics.map { diagnostic in
+                            let underline = GUIDiagnosticUnderline(startRow: 0, startCol: diagnostic.startRow < row.absoluteRow ? 0 : diagnostic.startCol, endRow: 0, endCol: diagnostic.endRow > row.absoluteRow ? UInt16.max : diagnostic.endCol, severity: diagnostic.severity)
+                            return (row.presentationRow, underline)
+                        }
+                    }
+                } else { residentDiagnostics = content.diagnosticUnderlines.map { (Int($0.startRow), $0) } }
+                for residentDiagnostic in residentDiagnostics {
+                    let diag = residentDiagnostic.underline
                     guard diag.endCol > diag.startCol else { continue }
                     let diagColor: SIMD3<Float> = switch diag.severity {
                     case .error:   SIMD3<Float>(1.0, 0.42, 0.42)   // red
@@ -920,7 +1010,7 @@ final class CoreTextMetalRenderer {
                     }
 
                     let diagY = CoreTextMetalRenderer.viewportLocalRowY(
-                        localRow: Int(diag.startRow), origin: scrollableWindowRowOffset,
+                        localRow: residentDiagnostic.row, origin: scrollableWindowRowOffset,
                         cellHeight: displayCellH, scale: scale
                     ) + displayCellH * scale - 2.0 * scale
                     let rawDiagX = contentColOffset + Float(diag.startCol) * cellW * scale - hScrollPx - scrollableWindowColOffset
@@ -987,7 +1077,7 @@ final class CoreTextMetalRenderer {
                                          default: SIMD3<Float>(0.3, 0.3, 0.3))
         )
         let guidePassCounts = indentGuideQuadCounts(
-            frameState: frameState, surfaces: surfaces,
+            frameState: frameState, preparedSurfaces: preparedSurfaces,
             cellW: cellW, displayCellH: displayCellH, scale: scale,
             gutterLeftMarginPx: gutterLeftMarginPx, gutterPaddingPx: gutterPaddingPx,
             viewportSize: viewportSize, scrollTargetWindowId: scrollTargetWindowId,
@@ -1189,8 +1279,9 @@ final class CoreTextMetalRenderer {
         // Drawn after bg fills but before text, cursor, and selection overlays.
         // When per-line indent levels are available, draw segments only in
         // leading whitespace so guides don't bleed through text content.
-        for surface in surfaces {
-            guard let guideData = surface.indentGuides, !guideData.guideCols.isEmpty else { continue }
+        for preparedSurface in preparedSurfaces {
+            let surface = preparedSurface.surface
+            guard let guideData = preparedSurface.presentedIndentGuides else { continue }
 
             let gutter = surface.renderGutter
             let paneGeometry = surface.paneGeometry
@@ -1225,7 +1316,7 @@ final class CoreTextMetalRenderer {
 
             var guideQuads: [QuadGPU] = []
 
-            if guideData.lineIndentLevels.isEmpty {
+            if guideData.rows == nil {
                 guideQuads.reserveCapacity(guideData.guideCols.count)
                 let baseY = guideTopY - guideScrollOffsetY
                 for col in guideData.guideCols {
@@ -1240,14 +1331,14 @@ final class CoreTextMetalRenderer {
                     quad.alpha = isActive ? 0.4 : 0.15
                     guideQuads.append(quad)
                 }
-            } else {
-                guideQuads.reserveCapacity(guideData.guideCols.count * guideData.lineIndentLevels.count)
-                for (lineIdx, level) in guideData.lineIndentLevels.enumerated() {
-                    let lineY = guideTopY + Float(lineIdx) * lineCellH - guideScrollOffsetY
+            } else if let guideRows = guideData.rows {
+                guideQuads.reserveCapacity(guideData.guideCols.count * guideRows.count)
+                for guideRow in guideRows {
+                    let lineY = guideTopY + Float(guideRow.presentationRow) * lineCellH - guideScrollOffsetY
                     for col in guideData.guideCols {
                         let guideLevel = col / tabW
                         // Strict < so guides appear only in whitespace, not at the text-start column.
-                        guard guideLevel < level else { continue }
+                        guard guideLevel < guideRow.level else { continue }
                         let guideX = windowContentColOffset - guideScrollOffsetX + Float(col) * cellW * scale
                         guard let vertical = CoreTextMetalRenderer.clipVerticalQuad(y: lineY, height: lineCellH, top: guideTopY, bottom: guideBottomY),
                               let horizontal = CoreTextMetalRenderer.clipHorizontalRect(x: guideX, width: 1.0 * scale, left: windowContentColOffset, right: textRightPx) else { continue }
@@ -1285,7 +1376,7 @@ final class CoreTextMetalRenderer {
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
         let candidateTextLayout = PresentedTextLayout(panes: textPanes)
-        if let surface = snapshot.activeSurface, let cursor = surface.content.accessibilityCursor,
+        if let surface = snapshot.activeSurface, surface.residentSemantics == nil, let cursor = surface.content.accessibilityCursor,
            let point = candidateTextLayout.cursor(windowID: surface.windowId, row: cursor.row, utf16: cursor.utf16),
            surface.content.cursorVisible {
             resolvedCursor = RenderCursor(x: Float(point.x) * scale, y: Float(point.y) * scale, shape: surface.content.cursorShape, windowId: surface.windowId)
@@ -2150,16 +2241,16 @@ final class CoreTextMetalRenderer {
     }
 
     private func indentGuideQuadCounts(
-        frameState: FrameState, surfaces: [PresentedWindowSurface],
+        frameState: FrameState, preparedSurfaces: [PreparedPresentedSurface],
         cellW: Float, displayCellH: Float, scale: Float,
         gutterLeftMarginPx: Float, gutterPaddingPx: Float,
         viewportSize: CGSize, scrollTargetWindowId: UInt16?,
         smoothScrollOffsetPx: SIMD2<Float>
     ) -> [Int] {
         var counts: [Int] = []
-        for surface in surfaces {
-            guard let guideData = surface.indentGuides,
-                  !guideData.guideCols.isEmpty else { continue }
+        for preparedSurface in preparedSurfaces {
+            let surface = preparedSurface.surface
+            guard let guideData = preparedSurface.presentedIndentGuides else { continue }
             let gutter = surface.renderGutter
             let paneGeometry = surface.paneGeometry
             let contentLeft = Float(paneGeometry.textRect.col) * cellW * scale
@@ -2182,7 +2273,7 @@ final class CoreTextMetalRenderer {
             let bottom = min(top + height, Float(viewportSize.height))
             let tabWidth = max(UInt16(guideData.tabWidth), 1)
             var count = 0
-            if guideData.lineIndentLevels.isEmpty {
+            if guideData.rows == nil {
                 let baseY = top - scroll.y
                 for col in guideData.guideCols {
                     let x = contentLeft - scroll.x + Float(col) * cellW * scale
@@ -2190,10 +2281,10 @@ final class CoreTextMetalRenderer {
                        Self.clipHorizontalRect(x: x, width: scale, left: contentLeft,
                                                right: contentRight) != nil { count += 1 }
                 }
-            } else {
-                for (lineIndex, level) in guideData.lineIndentLevels.enumerated() {
-                    let y = top + Float(lineIndex) * lineCellH - scroll.y
-                    for col in guideData.guideCols where col / tabWidth < level {
+            } else if let guideRows = guideData.rows {
+                for guideRow in guideRows {
+                    let y = top + Float(guideRow.presentationRow) * lineCellH - scroll.y
+                    for col in guideData.guideCols where col / tabWidth < guideRow.level {
                         let x = contentLeft - scroll.x + Float(col) * cellW * scale
                         if Self.clipVerticalQuad(y: y, height: lineCellH, top: top, bottom: bottom) != nil,
                            Self.clipHorizontalRect(x: x, width: scale, left: contentLeft,
@@ -2378,6 +2469,11 @@ final class CoreTextMetalRenderer {
         let bufferRows = preparedSurfaces.reduce(0) { $0 + $1.slice.rows.count }
 
         let lineAnnotations = preparedSurfaces.reduce(0) { total, preparedSurface in
+            if preparedSurface.surface.residentSemantics != nil {
+                return total + preparedSurface.residentSemanticRows.reduce(0) {
+                    $0 + $1.annotations.count
+                }
+            }
             let content = preparedSurface.surface.content
             let slice = preparedSurface.slice
             let fallback = max(slice.rows.count - slice.overscanBeforeRows, 0)
@@ -3025,6 +3121,56 @@ final class CoreTextMetalRenderer {
     /// Resolve the cursor position in the same coordinate system as the text renderer.
     /// Cursor authority lives in the active presented window surface. There is no legacy `FrameState` fallback because drawing a cursor from a different semantic source would recreate the #2999 split-brain presentation bug.
     nonisolated static func resolveCursor(
+        preparedSurfaces: [PreparedPresentedSurface],
+        activeWindowId: UInt16? = nil,
+        cellW: Float,
+        displayCellH: Float,
+        scale: Float,
+        gutterLeftMarginPx: Float,
+        gutterPaddingPx: Float
+    ) -> RenderCursor? {
+        let surfaces = preparedSurfaces.map(\.surface)
+        let orderedSurfaces: [PresentedWindowSurface]
+        if let activeWindowId,
+           let activeSurface = surfaces.first(where: { $0.windowId == activeWindowId }) {
+            orderedSurfaces = [activeSurface]
+        } else {
+            let activeSurfaces = surfaces.filter(\.renderGutter.isActive).sorted {
+                let leftPriority = semanticCursorPriority(windowId: $0.windowId)
+                let rightPriority = semanticCursorPriority(windowId: $1.windowId)
+                return leftPriority == rightPriority ? $0.windowId < $1.windowId : leftPriority < rightPriority
+            }
+            orderedSurfaces = activeSurfaces.isEmpty ? surfaces.sorted { $0.windowId < $1.windowId } : activeSurfaces
+        }
+
+        for surface in orderedSurfaces {
+            guard let prepared = preparedSurfaces.first(where: { $0.windowId == surface.windowId }) else { continue }
+            if let semantics = surface.residentSemantics {
+                let cursor = semantics.cursor
+                let presentationRow = Int(cursor.row) - prepared.slice.visibleStartIndex
+                let localCol = Int(cursor.col) - Int(surface.content.scrollLeft)
+                guard cursor.eligible, prepared.prepared.range.contains(Int(cursor.row)) else { continue }
+                let contentColOffset = Float(surface.paneGeometry.textRect.col) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+                let x = contentColOffset + Float(localCol) * cellW * scale
+                let y = viewportLocalRowY(
+                    localRow: presentationRow,
+                    origin: Float(surface.paneGeometry.textRect.row) * displayCellH * scale,
+                    cellHeight: displayCellH,
+                    scale: scale
+                )
+                return RenderCursor(x: x, y: y, shape: surface.content.cursorShape, windowId: surface.windowId)
+            }
+            guard surface.content.cursorVisible else { continue }
+            let content = surface.content
+            let contentColOffset = Float(surface.paneGeometry.textRect.col) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let x = contentColOffset + Float(resolvedSemanticCursorCol(content)) * cellW * scale - Float(content.scrollLeft) * cellW * scale
+            let y = viewportLocalRowY(localRow: Int(content.cursorRow), origin: Float(surface.paneGeometry.textRect.row) * displayCellH * scale, cellHeight: displayCellH, scale: scale)
+            return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: surface.windowId)
+        }
+        return nil
+    }
+
+    nonisolated static func resolveCursor(
         surfaces: [PresentedWindowSurface],
         activeWindowId: UInt16? = nil,
         cellW: Float,
@@ -3159,6 +3305,28 @@ final class CoreTextMetalRenderer {
     ///
     /// Char selection: one quad per row (partial for first/last rows).
     /// Line selection: full-width quads for each row in the range.
+    nonisolated static func projectedSelection(
+        _ selection: GUIResidentSelection?,
+        visibleStart: Int,
+        visibleRows: Int,
+        visibleCols: Int
+    ) -> GUISelectionOverlay? {
+        guard let selection, visibleRows > 0, visibleCols > 0 else { return nil }
+        let visibleEnd = visibleStart + visibleRows - 1
+        let start = Int(selection.startRow)
+        let end = Int(selection.endRow)
+        guard start <= visibleEnd, end >= visibleStart else { return nil }
+        let projectedStart = max(start, visibleStart)
+        let projectedEnd = min(end, visibleEnd)
+        return GUISelectionOverlay(
+            type: selection.type,
+            startRow: UInt16(clamping: projectedStart - visibleStart),
+            startCol: start < visibleStart ? 0 : selection.startCol,
+            endRow: UInt16(clamping: projectedEnd - visibleStart),
+            endCol: end > visibleEnd ? UInt16(clamping: visibleCols) : selection.endCol
+        )
+    }
+
     private func appendSelectionQuads(
         selection sel: GUISelectionOverlay,
         rowOffset: Float, colOffset: Float,

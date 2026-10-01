@@ -119,6 +119,26 @@ defmodule Minga.Editing.Search.Index do
   @spec to_matches(t()) :: [Match.t()]
   def to_matches(%__MODULE__{root: root}), do: collect_matches(root, [])
 
+  @doc "Returns matches on the inclusive line range in logarithmic plus returned-match work."
+  @spec matches_in_range(t(), non_neg_integer(), non_neg_integer()) :: [Match.t()]
+  def matches_in_range(%__MODULE__{root: root}, first_line, last_line)
+      when is_integer(first_line) and first_line >= 0 and is_integer(last_line) and
+             last_line >= first_line do
+    {matches, _visited} = collect_range(root, first_line, last_line, [], 0)
+    Enum.reverse(matches)
+  end
+
+  @doc "Returns a bounded range query with visited-node work for performance tests."
+  @spec matches_in_range_with_metrics(t(), non_neg_integer(), non_neg_integer()) ::
+          {[Match.t()], %{visited_nodes: non_neg_integer(), returned_matches: non_neg_integer()}}
+  def matches_in_range_with_metrics(%__MODULE__{root: root}, first_line, last_line)
+      when is_integer(first_line) and first_line >= 0 and is_integer(last_line) and
+             last_line >= first_line do
+    {matches, visited} = collect_range(root, first_line, last_line, [], 0)
+    matches = Enum.reverse(matches)
+    {matches, %{visited_nodes: visited, returned_matches: length(matches)}}
+  end
+
   @doc "Returns cumulative matching work for performance evidence."
   @spec metrics(t()) :: metrics()
   def metrics(%__MODULE__{metrics: metrics}), do: metrics
@@ -305,6 +325,43 @@ defmodule Minga.Editing.Search.Index do
   defp shift_suffix(root, first_line, shift) do
     {before, suffix} = split(root, first_line)
     merge(before, add_shift(suffix, shift))
+  end
+
+  @spec collect_range(
+          tree_node(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [Match.t()],
+          non_neg_integer()
+        ) :: {[Match.t()], non_neg_integer()}
+  defp collect_range(nil, _first_line, _last_line, acc, visited), do: {acc, visited}
+
+  defp collect_range(root, first_line, last_line, acc, visited) do
+    {line, matches, _priority, left, right, _lazy, _count} = push(root)
+    visited = visited + 1
+
+    {acc, visited} =
+      if line > first_line,
+        do: collect_range(left, first_line, last_line, acc, visited),
+        else: {acc, visited}
+
+    acc =
+      if line >= first_line and line <= last_line,
+        do: prepend_line_matches(matches, line, acc),
+        else: acc
+
+    if line < last_line,
+      do: collect_range(right, first_line, last_line, acc, visited),
+      else: {acc, visited}
+  end
+
+  @spec prepend_line_matches(line_matches(), non_neg_integer(), [Match.t()]) :: [Match.t()]
+  defp prepend_line_matches(matches, line, acc) do
+    matches
+    |> Tuple.to_list()
+    |> Enum.reduce(acc, fn {col, length}, matches_acc ->
+      [%Match{line: line, col: col, length: length} | matches_acc]
+    end)
   end
 
   @spec first_at_or_after_with_rank(tree_node(), Search.position(), non_neg_integer()) ::

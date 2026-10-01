@@ -1,5 +1,5 @@
 defmodule Minga.Conformance.ProductionRenderCorpusTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Minga.Frontend.Adapter.GUI
   alias Minga.Frontend.Adapter.GUI.Caches

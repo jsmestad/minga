@@ -1,5 +1,851 @@
 import Foundation
 
+public struct GUIResidentCursor: Sendable, Equatable {
+    public let eligible: Bool
+    public let row: UInt32
+    public let col: UInt16
+
+    public init(eligible: Bool, row: UInt32, col: UInt16) {
+        self.eligible = eligible
+        self.row = row
+        self.col = col
+    }
+}
+
+public struct GUIResidentCursorline: Sendable, Equatable {
+    public let row: UInt32
+    public let bg: UInt32
+
+    public init(row: UInt32, bg: UInt32) {
+        self.row = row
+        self.bg = bg
+    }
+}
+
+public struct GUIResidentSelection: Sendable, Equatable {
+    public let type: GUISelectionType
+    public let startRow: UInt32
+    public let startCol: UInt16
+    public let endRow: UInt32
+    public let endCol: UInt16
+
+    public init(type: GUISelectionType, startRow: UInt32, startCol: UInt16, endRow: UInt32, endCol: UInt16) {
+        self.type = type
+        self.startRow = startRow
+        self.startCol = startCol
+        self.endRow = endRow
+        self.endCol = endCol
+    }
+}
+
+public struct GUIResidentRowSplice: Sendable, Equatable {
+    public let start: UInt32
+    public let deleteCount: UInt32
+    public let insertCount: UInt32
+
+    public init(start: UInt32, deleteCount: UInt32, insertCount: UInt32) {
+        self.start = start
+        self.deleteCount = deleteCount
+        self.insertCount = insertCount
+    }
+}
+
+public struct GUIResidentGuideRun: Sendable, Equatable {
+    public let start: UInt32
+    public let end: UInt32
+    public let level: UInt16
+
+    public init(start: UInt32, end: UInt32, level: UInt16) {
+        self.start = start
+        self.end = end
+        self.level = level
+    }
+}
+
+public struct GUIResidentGuideReplacement: Sendable, Equatable {
+    public let start: UInt32
+    public let end: UInt32
+    public let runs: [GUIResidentGuideRun]
+
+    public init(start: UInt32, end: UInt32, runs: [GUIResidentGuideRun]) {
+        self.start = start
+        self.end = end
+        self.runs = runs
+    }
+}
+
+public struct GUIResidentDiagnostic: Sendable, Equatable {
+    public let startRow: UInt32
+    public let startCol: UInt16
+    public let endRow: UInt32
+    public let endCol: UInt16
+    public let severity: GUIDiagnosticSeverity
+
+    public init(startRow: UInt32, startCol: UInt16, endRow: UInt32, endCol: UInt16, severity: GUIDiagnosticSeverity) {
+        self.startRow = startRow
+        self.startCol = startCol
+        self.endRow = endRow
+        self.endCol = endCol
+        self.severity = severity
+    }
+}
+
+public struct GUIResidentDiagnosticReplacement: Sendable, Equatable {
+    public let start: UInt32
+    public let end: UInt32
+    public let diagnostics: [GUIResidentDiagnostic]
+
+    public init(start: UInt32, end: UInt32, diagnostics: [GUIResidentDiagnostic]) {
+        self.start = start
+        self.end = end
+        self.diagnostics = diagnostics
+    }
+}
+
+public struct GUIResidentAnnotation: Sendable, Equatable {
+    public let row: UInt32
+    public let kind: GUILineAnnotationKind
+    public let fg: UInt32
+    public let bg: UInt32
+    public let text: String
+
+    public init(row: UInt32, kind: GUILineAnnotationKind, fg: UInt32, bg: UInt32, text: String) {
+        self.row = row
+        self.kind = kind
+        self.fg = fg
+        self.bg = bg
+        self.text = text
+    }
+}
+
+public struct GUIResidentAnnotationReplacement: Sendable, Equatable {
+    public let start: UInt32
+    public let end: UInt32
+    public let annotations: [GUIResidentAnnotation]
+
+    public init(start: UInt32, end: UInt32, annotations: [GUIResidentAnnotation]) {
+        self.start = start
+        self.end = end
+        self.annotations = annotations
+    }
+}
+
+public enum GUIResidentAnnotationUpdate: Sendable, Equatable {
+    case retain
+    case replace([GUIResidentAnnotation])
+    case replaceRanges([GUIResidentAnnotationReplacement])
+}
+
+public enum GUIResidentDiagnosticUpdate: Sendable, Equatable {
+    case retain
+    case replace([GUIResidentDiagnostic])
+    case replaceRanges([GUIResidentDiagnosticReplacement])
+}
+
+public struct GUIResidentSemanticsHeader: Sendable, Equatable {
+    public let version: UInt8
+    public let mode: UInt8
+    public let windowId: UInt16
+    public let contentEpoch: UInt32
+    public let baseRevision: UInt32
+    public let revision: UInt32
+    public let targetRowRevision: UInt32
+    public let rowCount: UInt32
+    public let firstRowId: UInt64
+    public let lastRowId: UInt64
+
+    public init(
+        version: UInt8, mode: UInt8, windowId: UInt16, contentEpoch: UInt32, baseRevision: UInt32, revision: UInt32,
+        targetRowRevision: UInt32, rowCount: UInt32, firstRowId: UInt64, lastRowId: UInt64
+    ) {
+        self.version = version
+        self.mode = mode
+        self.windowId = windowId
+        self.contentEpoch = contentEpoch
+        self.baseRevision = baseRevision
+        self.revision = revision
+        self.targetRowRevision = targetRowRevision
+        self.rowCount = rowCount
+        self.firstRowId = firstRowId
+        self.lastRowId = lastRowId
+    }
+}
+
+public struct GUIResidentGuideUpdate: Sendable, Equatable {
+    public let tabWidth: UInt8
+    public let activeGuideCol: UInt16
+    public let guideCols: [UInt16]
+    public let rowSplices: [GUIResidentRowSplice]
+    public let replacements: [GUIResidentGuideReplacement]
+
+    public init(
+        tabWidth: UInt8, activeGuideCol: UInt16, guideCols: [UInt16], rowSplices: [GUIResidentRowSplice],
+        replacements: [GUIResidentGuideReplacement]
+    ) {
+        self.tabWidth = tabWidth
+        self.activeGuideCol = activeGuideCol
+        self.guideCols = guideCols
+        self.rowSplices = rowSplices
+        self.replacements = replacements
+    }
+}
+
+public struct GUIResidentSemanticsUpdate: Sendable, Equatable {
+    public let header: GUIResidentSemanticsHeader
+    public let cursor: GUIResidentCursor
+    public let cursorline: GUIResidentCursorline?
+    public let selection: GUIResidentSelection?
+    public let guides: GUIResidentGuideUpdate
+    public let diagnostics: GUIResidentDiagnosticUpdate
+    public let annotations: GUIResidentAnnotationUpdate
+
+    public var version: UInt8 { header.version }
+    public var mode: UInt8 { header.mode }
+    public var windowId: UInt16 { header.windowId }
+    public var contentEpoch: UInt32 { header.contentEpoch }
+    public var baseRevision: UInt32 { header.baseRevision }
+    public var revision: UInt32 { header.revision }
+    public var targetRowRevision: UInt32 { header.targetRowRevision }
+    public var rowCount: UInt32 { header.rowCount }
+    public var firstRowId: UInt64 { header.firstRowId }
+    public var lastRowId: UInt64 { header.lastRowId }
+    public var tabWidth: UInt8 { guides.tabWidth }
+    public var activeGuideCol: UInt16 { guides.activeGuideCol }
+    public var guideCols: [UInt16] { guides.guideCols }
+    public var rowSplices: [GUIResidentRowSplice] { guides.rowSplices }
+    public var guideReplacements: [GUIResidentGuideReplacement] { guides.replacements }
+
+    public init(
+        header: GUIResidentSemanticsHeader, cursor: GUIResidentCursor, cursorline: GUIResidentCursorline?,
+        selection: GUIResidentSelection?, guides: GUIResidentGuideUpdate, diagnostics: GUIResidentDiagnosticUpdate,
+        annotations: GUIResidentAnnotationUpdate
+    ) {
+        self.header = header
+        self.cursor = cursor
+        self.cursorline = cursorline
+        self.selection = selection
+        self.guides = guides
+        self.diagnostics = diagnostics
+        self.annotations = annotations
+    }
+
+    public init(
+        version: UInt8, mode: UInt8, windowId: UInt16, contentEpoch: UInt32, baseRevision: UInt32, revision: UInt32,
+        targetRowRevision: UInt32, rowCount: UInt32, firstRowId: UInt64, lastRowId: UInt64, cursor: GUIResidentCursor,
+        cursorline: GUIResidentCursorline?, selection: GUIResidentSelection?, tabWidth: UInt8, activeGuideCol: UInt16,
+        guideCols: [UInt16], rowSplices: [GUIResidentRowSplice], guideReplacements: [GUIResidentGuideReplacement],
+        diagnostics: GUIResidentDiagnosticUpdate, annotations: GUIResidentAnnotationUpdate
+    ) {
+        self.init(
+            header: GUIResidentSemanticsHeader(
+                version: version, mode: mode, windowId: windowId, contentEpoch: contentEpoch,
+                baseRevision: baseRevision, revision: revision, targetRowRevision: targetRowRevision,
+                rowCount: rowCount, firstRowId: firstRowId, lastRowId: lastRowId),
+            cursor: cursor,
+            cursorline: cursorline,
+            selection: selection,
+            guides: GUIResidentGuideUpdate(
+                tabWidth: tabWidth, activeGuideCol: activeGuideCol, guideCols: guideCols, rowSplices: rowSplices,
+                replacements: guideReplacements),
+            diagnostics: diagnostics,
+            annotations: annotations
+        )
+    }
+}
+
+public enum ResidentSemanticStoreError: Error, Sendable, Equatable {
+    case invalid
+}
+
+private final class ResidentGuideNode: @unchecked Sendable {
+    let start: Int
+    let end: Int
+    let level: UInt16
+    let priority: UInt64
+    let left: ResidentGuideNode?
+    let right: ResidentGuideNode?
+    let lazy: Int
+    let covered: Int
+    let first: Int
+    let last: Int
+    init(
+        start: Int, end: Int, level: UInt16, left: ResidentGuideNode? = nil, right: ResidentGuideNode? = nil,
+        lazy: Int = 0, priority: UInt64? = nil, covered: Int? = nil, first: Int? = nil, last: Int? = nil
+    ) {
+        self.start = start
+        self.end = end
+        self.level = level
+        self.left = left
+        self.right = right
+        self.lazy = lazy
+        self.priority = priority ?? ResidentSemanticStore.priority(UInt64(start) << 16 | UInt64(level))
+        self.covered = covered ?? ((left?.covered ?? 0) + end - start + (right?.covered ?? 0))
+        self.first = first ?? (left?.first ?? start)
+        self.last = last ?? (right?.last ?? end)
+    }
+}
+
+private final class ResidentAnnotationNode: @unchecked Sendable {
+    let row: Int
+    let values: [GUIResidentAnnotation]
+    let priority: UInt64
+    let left: ResidentAnnotationNode?
+    let right: ResidentAnnotationNode?
+    let lazy: Int
+    init(
+        row: Int, values: [GUIResidentAnnotation], left: ResidentAnnotationNode? = nil,
+        right: ResidentAnnotationNode? = nil, lazy: Int = 0, priority: UInt64? = nil
+    ) {
+        self.row = row
+        self.values = values
+        self.left = left
+        self.right = right
+        self.lazy = lazy
+        self.priority = priority ?? ResidentSemanticStore.priority(UInt64(row))
+    }
+}
+
+private final class ResidentDiagnosticNode: @unchecked Sendable {
+    let start: Int
+    let values: [GUIResidentDiagnostic]
+    let priority: UInt64
+    let left: ResidentDiagnosticNode?
+    let right: ResidentDiagnosticNode?
+    let lazy: Int
+    let maxEnd: Int
+    init(
+        start: Int, values: [GUIResidentDiagnostic], left: ResidentDiagnosticNode? = nil,
+        right: ResidentDiagnosticNode? = nil, lazy: Int = 0, priority: UInt64? = nil, maxEnd: Int? = nil
+    ) {
+        self.start = start
+        self.values = values
+        self.left = left
+        self.right = right
+        self.lazy = lazy
+        self.priority = priority ?? ResidentSemanticStore.priority(UInt64(start))
+        self.maxEnd =
+            maxEnd
+            ?? max(values.map { Int($0.endRow) }.max() ?? start, max(left?.maxEnd ?? start, right?.maxEnd ?? start))
+    }
+}
+
+public struct ResidentSemanticSlice: Sendable {
+    public let absoluteRange: Range<Int>
+    public let cursor: GUIResidentCursor?
+    public let cursorline: GUIResidentCursorline?
+    public let selection: GUIResidentSelection?
+}
+
+public struct ResidentSemanticStore: Sendable {
+    public static let maximumRows = 65_536
+    public private(set) var contentEpoch: UInt32 = 0
+    public private(set) var revision: UInt32 = 0
+    public private(set) var rowRevision: UInt32 = 0
+    public private(set) var rowCount: UInt32 = 0
+    public private(set) var firstRowId: UInt64 = 0
+    public private(set) var lastRowId: UInt64 = 0
+    public private(set) var cursor = GUIResidentCursor(eligible: false, row: 0, col: 0)
+    public private(set) var cursorline: GUIResidentCursorline?
+    public private(set) var selection: GUIResidentSelection?
+    public private(set) var tabWidth: UInt8 = 1
+    public private(set) var activeGuideCol: UInt16 = 0
+    public private(set) var guideCols: [UInt16] = []
+    private var guides: ResidentGuideNode?
+    private var diagnostics: ResidentDiagnosticNode?
+    private var annotations: ResidentAnnotationNode?
+
+    public init() {}
+
+    public func applying(_ update: GUIResidentSemanticsUpdate, content: GUIWindowContent) throws
+        -> ResidentSemanticStore
+    {
+        guard update.version == 1, update.mode == 0 || update.mode == 1,
+            content.rowStore.mode == .sequential, update.contentEpoch == content.contentEpoch,
+            update.rowCount <= Self.maximumRows, Int(update.rowCount) == content.rowStore.count,
+            update.revision > 0
+        else { throw ResidentSemanticStoreError.invalid }
+        try Self.validateBoundary(update, store: content.rowStore)
+        var next: ResidentSemanticStore
+        if update.mode == 0 {
+            guard update.baseRevision == 0, update.targetRowRevision > 0, update.rowSplices.isEmpty else {
+                throw ResidentSemanticStoreError.invalid
+            }
+            next = ResidentSemanticStore()
+        } else {
+            guard revision > 0, contentEpoch == update.contentEpoch, revision == update.baseRevision,
+                update.revision > update.baseRevision
+            else { throw ResidentSemanticStoreError.invalid }
+            let expected = rowRevision.addingReportingOverflow(update.rowSplices.isEmpty ? 0 : 1)
+            guard !expected.overflow, update.targetRowRevision == expected.partialValue else {
+                throw ResidentSemanticStoreError.invalid
+            }
+            next = self
+        }
+        try Self.validateScalars(update)
+        let baseCount = update.mode == 0 ? Int(update.rowCount) : Int(next.rowCount)
+        var count = baseCount
+        var offset = 0
+        var previousStart: Int?
+        var previousEnd = 0
+        for splice in update.rowSplices {
+            let start = Int(splice.start)
+            let deleted = Int(splice.deleteCount)
+            let inserted = Int(splice.insertCount)
+            guard start <= baseCount, deleted <= baseCount - start, previousStart.map({ start > $0 }) ?? true,
+                start >= previousEnd, deleted > 0 || inserted > 0
+            else { throw ResidentSemanticStoreError.invalid }
+            previousStart = start
+            previousEnd = start + deleted
+            let actual = start + offset
+            guard actual >= 0, actual <= count, deleted <= count - actual else {
+                throw ResidentSemanticStoreError.invalid
+            }
+            next.guides = Self.deleteGuideRange(
+                next.guides, actual..<(actual + deleted), shiftingSuffixBy: inserted - deleted)
+            next.diagnostics = Self.spliceDiagnostics(
+                next.diagnostics, at: actual, deleting: deleted, inserting: inserted)
+            next.annotations = Self.deleteAnnotationRange(
+                next.annotations, actual..<(actual + deleted), shiftingSuffixBy: inserted - deleted)
+            count = count - deleted + inserted
+            offset += inserted - deleted
+            guard count <= Self.maximumRows else { throw ResidentSemanticStoreError.invalid }
+        }
+        guard count == Int(update.rowCount) else { throw ResidentSemanticStoreError.invalid }
+        next.guides = try Self.replacingGuides(
+            next.guides, with: update.guideReplacements, rowCount: Int(update.rowCount), keyframe: update.mode == 0)
+        switch update.diagnostics {
+        case .retain:
+            if update.mode == 0 { throw ResidentSemanticStoreError.invalid }
+        case .replace(let replacement):
+            try Self.validateDiagnostics(replacement, rowCount: update.rowCount)
+            next.diagnostics = Self.buildDiagnostics(replacement)
+        case .replaceRanges(let replacements):
+            next.diagnostics = try Self.replaceDiagnosticRanges(
+                next.diagnostics, replacements: replacements, rowCount: update.rowCount)
+        }
+        switch update.annotations {
+        case .retain:
+            if update.mode == 0 { throw ResidentSemanticStoreError.invalid }
+        case .replace(let values):
+            try Self.validateAnnotations(values, range: 0..<Int(update.rowCount))
+            next.annotations = Self.buildAnnotations(values)
+        case .replaceRanges(let replacements):
+            var priorEnd = 0
+            for replacement in replacements {
+                let range = Int(replacement.start)..<Int(replacement.end)
+                guard range.lowerBound >= priorEnd, range.lowerBound <= range.upperBound,
+                    range.upperBound <= Int(update.rowCount)
+                else { throw ResidentSemanticStoreError.invalid }
+                try Self.validateAnnotations(replacement.annotations, range: range)
+                priorEnd = range.upperBound
+                let (left, tail) = Self.splitAnnotations(next.annotations, at: range.lowerBound)
+                let (_, right) = Self.splitAnnotations(tail, at: range.upperBound)
+                next.annotations = Self.mergeAnnotations(
+                    Self.mergeAnnotations(left, Self.buildAnnotations(replacement.annotations)), right)
+            }
+        }
+        next.contentEpoch = update.contentEpoch
+        next.revision = update.revision
+        next.rowRevision = update.targetRowRevision
+        next.rowCount = update.rowCount
+        next.firstRowId = update.firstRowId
+        next.lastRowId = update.lastRowId
+        next.cursor = update.cursor
+        next.cursorline = update.cursorline
+        next.selection = update.selection
+        next.tabWidth = update.tabWidth
+        next.activeGuideCol = update.activeGuideCol
+        next.guideCols = update.guideCols
+        return next
+    }
+
+    public func slice(_ range: Range<Int>) -> ResidentSemanticSlice {
+        let cursorValue = cursor.eligible && range.contains(Int(cursor.row)) ? cursor : nil
+        let cursorlineValue = cursorline.flatMap { range.contains(Int($0.row)) ? $0 : nil }
+        return ResidentSemanticSlice(
+            absoluteRange: range, cursor: cursorValue, cursorline: cursorlineValue, selection: selection)
+    }
+    public func guideLevel(at row: Int) -> UInt16? { Self.guideLevel(guides, at: row, ancestorShift: 0) }
+    public func annotations(at row: Int) -> [GUIResidentAnnotation] {
+        Self.annotationValues(annotations, at: row, ancestorShift: 0)
+    }
+    public func diagnostics(at row: Int) -> [GUIResidentDiagnostic] {
+        var result: [GUIResidentDiagnostic] = []
+        Self.collectDiagnostics(diagnostics, row: UInt32(row), into: &result)
+        return result
+    }
+
+    fileprivate static func priority(_ value: UInt64) -> UInt64 {
+        var x = value &+ 0x9e37_79b9_7f4a_7c15
+        x = (x ^ (x >> 30)) &* 0xbf58_476d_1ce4_e5b9
+        x = (x ^ (x >> 27)) &* 0x94d0_49bb_1331_11eb
+        return x ^ (x >> 31)
+    }
+    private static func validateBoundary(_ update: GUIResidentSemanticsUpdate, store: ResidentRowStore) throws {
+        if update.rowCount == 0 {
+            guard update.firstRowId == 0, update.lastRowId == 0 else { throw ResidentSemanticStoreError.invalid }
+            return
+        }
+        guard let first = store.row(at: 0), let last = store.row(at: store.count - 1), first.rowId != 0,
+            first.rowId == update.firstRowId, last.rowId != 0, last.rowId == update.lastRowId
+        else { throw ResidentSemanticStoreError.invalid }
+    }
+    private static func validateScalars(_ update: GUIResidentSemanticsUpdate) throws {
+        guard update.tabWidth > 0, zip(update.guideCols, update.guideCols.dropFirst()).allSatisfy({ $0.0 < $0.1 })
+        else { throw ResidentSemanticStoreError.invalid }
+        if update.rowCount == 0 {
+            guard !update.cursor.eligible, update.cursorline == nil, update.selection == nil else {
+                throw ResidentSemanticStoreError.invalid
+            }
+            return
+        }
+        guard update.cursor.row < update.rowCount else { throw ResidentSemanticStoreError.invalid }
+        if let line = update.cursorline {
+            guard line.row < update.rowCount else { throw ResidentSemanticStoreError.invalid }
+        }
+        if let selection = update.selection {
+            guard selection.startRow < update.rowCount, selection.endRow < update.rowCount,
+                selection.startRow <= selection.endRow
+            else { throw ResidentSemanticStoreError.invalid }
+        }
+    }
+    private static func validateDiagnostics(_ values: [GUIResidentDiagnostic], rowCount: UInt32) throws {
+        for value in values {
+            guard value.startRow < rowCount, value.endRow < rowCount, value.startRow <= value.endRow,
+                value.startRow != value.endRow || value.startCol <= value.endCol
+            else { throw ResidentSemanticStoreError.invalid }
+        }
+    }
+    private static func validateAnnotations(_ values: [GUIResidentAnnotation], range: Range<Int>) throws {
+        for value in values { guard range.contains(Int(value.row)) else { throw ResidentSemanticStoreError.invalid } }
+    }
+
+    private static func shiftedGuide(_ node: ResidentGuideNode?, by delta: Int) -> ResidentGuideNode? {
+        guard let node else { return nil }
+        guard delta != 0 else { return node }
+        return ResidentGuideNode(
+            start: node.start + delta, end: node.end + delta, level: node.level, left: node.left, right: node.right,
+            lazy: node.lazy + delta, priority: node.priority, covered: node.covered, first: node.first + delta,
+            last: node.last + delta)
+    }
+    private static func pushedGuide(_ node: ResidentGuideNode) -> ResidentGuideNode {
+        guard node.lazy != 0 else { return node }
+        return ResidentGuideNode(
+            start: node.start, end: node.end, level: node.level, left: shiftedGuide(node.left, by: node.lazy),
+            right: shiftedGuide(node.right, by: node.lazy), priority: node.priority)
+    }
+    private static func mergeGuides(_ left: ResidentGuideNode?, _ right: ResidentGuideNode?) -> ResidentGuideNode? {
+        guard let left else { return right }
+        guard let right else { return left }
+        let l = pushedGuide(left)
+        let r = pushedGuide(right)
+        if l.priority >= r.priority {
+            return ResidentGuideNode(
+                start: l.start, end: l.end, level: l.level, left: l.left, right: mergeGuides(l.right, r),
+                priority: l.priority)
+        }
+        return ResidentGuideNode(
+            start: r.start, end: r.end, level: r.level, left: mergeGuides(l, r.left), right: r.right,
+            priority: r.priority)
+    }
+    private static func splitGuides(_ node: ResidentGuideNode?, at rank: Int) -> (
+        ResidentGuideNode?, ResidentGuideNode?
+    ) {
+        guard let original = node else { return (nil, nil) }
+        let node = pushedGuide(original)
+        if rank <= node.start {
+            let (left, remainder) = splitGuides(node.left, at: rank)
+            return (
+                left,
+                ResidentGuideNode(
+                    start: node.start, end: node.end, level: node.level, left: remainder, right: node.right,
+                    priority: node.priority)
+            )
+        }
+        if rank >= node.end {
+            let (prefix, right) = splitGuides(node.right, at: rank)
+            return (
+                ResidentGuideNode(
+                    start: node.start, end: node.end, level: node.level, left: node.left, right: prefix,
+                    priority: node.priority), right
+            )
+        }
+        let left = mergeGuides(node.left, ResidentGuideNode(start: node.start, end: rank, level: node.level))
+        let right = mergeGuides(ResidentGuideNode(start: rank, end: node.end, level: node.level), node.right)
+        return (left, right)
+    }
+    private static func deleteGuideRange(_ root: ResidentGuideNode?, _ range: Range<Int>, shiftingSuffixBy delta: Int)
+        -> ResidentGuideNode?
+    {
+        let (left, tail) = splitGuides(root, at: range.lowerBound)
+        let (_, right) = splitGuides(tail, at: range.upperBound)
+        return mergeGuides(left, shiftedGuide(right, by: delta))
+    }
+    private static func buildGuides(_ runs: [GUIResidentGuideRun]) -> ResidentGuideNode? {
+        runs.reduce(nil) { mergeGuides($0, ResidentGuideNode(start: Int($1.start), end: Int($1.end), level: $1.level)) }
+    }
+    private static func replacingGuides(
+        _ original: ResidentGuideNode?, with replacements: [GUIResidentGuideReplacement], rowCount: Int, keyframe: Bool
+    ) throws -> ResidentGuideNode? {
+        if keyframe {
+            guard replacements.count == 1, replacements[0].start == 0, replacements[0].end == UInt32(rowCount) else {
+                throw ResidentSemanticStoreError.invalid
+            }
+        }
+        var root = original
+        var previousEnd = 0
+        for replacement in replacements {
+            let range = Int(replacement.start)..<Int(replacement.end)
+            guard range.lowerBound >= previousEnd, range.lowerBound <= range.upperBound, range.upperBound <= rowCount
+            else { throw ResidentSemanticStoreError.invalid }
+            var cursor = range.lowerBound
+            for run in replacement.runs {
+                guard Int(run.start) == cursor, run.end > run.start, Int(run.end) <= range.upperBound else {
+                    throw ResidentSemanticStoreError.invalid
+                }
+                cursor = Int(run.end)
+            }
+            guard cursor == range.upperBound else { throw ResidentSemanticStoreError.invalid }
+            previousEnd = range.upperBound
+            let (left, tail) = splitGuides(root, at: range.lowerBound)
+            let (_, right) = splitGuides(tail, at: range.upperBound)
+            root = mergeGuides(mergeGuides(left, buildGuides(replacement.runs)), right)
+        }
+        if rowCount == 0 {
+            guard root == nil else { throw ResidentSemanticStoreError.invalid }
+        } else {
+            guard let root, root.first == 0, root.last == rowCount, root.covered == rowCount else {
+                throw ResidentSemanticStoreError.invalid
+            }
+        }
+        return root
+    }
+    private static func guideLevel(_ node: ResidentGuideNode?, at row: Int, ancestorShift: Int) -> UInt16? {
+        guard let node else { return nil }
+        let start = node.start + ancestorShift
+        let end = node.end + ancestorShift
+        if row < start { return guideLevel(node.left, at: row, ancestorShift: ancestorShift + node.lazy) }
+        if row >= end { return guideLevel(node.right, at: row, ancestorShift: ancestorShift + node.lazy) }
+        return node.level
+    }
+
+    private static func shiftedAnnotation(_ node: ResidentAnnotationNode?, by delta: Int) -> ResidentAnnotationNode? {
+        guard let node else { return nil }
+        guard delta != 0 else { return node }
+        return ResidentAnnotationNode(
+            row: node.row + delta, values: node.values, left: node.left, right: node.right, lazy: node.lazy + delta,
+            priority: node.priority)
+    }
+    private static func pushedAnnotation(_ node: ResidentAnnotationNode) -> ResidentAnnotationNode {
+        guard node.lazy != 0 else { return node }
+        return ResidentAnnotationNode(
+            row: node.row, values: node.values, left: shiftedAnnotation(node.left, by: node.lazy),
+            right: shiftedAnnotation(node.right, by: node.lazy), priority: node.priority)
+    }
+    private static func mergeAnnotations(_ left: ResidentAnnotationNode?, _ right: ResidentAnnotationNode?)
+        -> ResidentAnnotationNode?
+    {
+        guard let left else { return right }
+        guard let right else { return left }
+        let l = pushedAnnotation(left)
+        let r = pushedAnnotation(right)
+        if l.priority >= r.priority {
+            return ResidentAnnotationNode(
+                row: l.row, values: l.values, left: l.left, right: mergeAnnotations(l.right, r), priority: l.priority)
+        }
+        return ResidentAnnotationNode(
+            row: r.row, values: r.values, left: mergeAnnotations(l, r.left), right: r.right, priority: r.priority)
+    }
+    private static func splitAnnotations(_ node: ResidentAnnotationNode?, at row: Int) -> (
+        ResidentAnnotationNode?, ResidentAnnotationNode?
+    ) {
+        guard let original = node else { return (nil, nil) }
+        let node = pushedAnnotation(original)
+        if row <= node.row {
+            let (left, remainder) = splitAnnotations(node.left, at: row)
+            return (
+                left,
+                ResidentAnnotationNode(
+                    row: node.row, values: node.values, left: remainder, right: node.right, priority: node.priority)
+            )
+        }
+        let (prefix, right) = splitAnnotations(node.right, at: row)
+        return (
+            ResidentAnnotationNode(
+                row: node.row, values: node.values, left: node.left, right: prefix, priority: node.priority), right
+        )
+    }
+    private static func deleteAnnotationRange(
+        _ root: ResidentAnnotationNode?, _ range: Range<Int>, shiftingSuffixBy delta: Int
+    ) -> ResidentAnnotationNode? {
+        let (left, tail) = splitAnnotations(root, at: range.lowerBound)
+        let (_, right) = splitAnnotations(tail, at: range.upperBound)
+        return mergeAnnotations(left, shiftedAnnotation(right, by: delta))
+    }
+    private static func buildAnnotations(_ values: [GUIResidentAnnotation]) -> ResidentAnnotationNode? {
+        let groups = Dictionary(grouping: values, by: { Int($0.row) })
+        return groups.keys.sorted().reduce(nil) {
+            mergeAnnotations($0, ResidentAnnotationNode(row: $1, values: groups[$1] ?? []))
+        }
+    }
+    private static func annotationValues(_ node: ResidentAnnotationNode?, at row: Int, ancestorShift: Int)
+        -> [GUIResidentAnnotation]
+    {
+        guard let node else { return [] }
+        let effective = node.row + ancestorShift
+        if row < effective { return annotationValues(node.left, at: row, ancestorShift: ancestorShift + node.lazy) }
+        if row > effective { return annotationValues(node.right, at: row, ancestorShift: ancestorShift + node.lazy) }
+        return node.values.map {
+            GUIResidentAnnotation(row: UInt32(row), kind: $0.kind, fg: $0.fg, bg: $0.bg, text: $0.text)
+        }
+    }
+
+    private static func shiftedDiagnostic(_ node: ResidentDiagnosticNode?, by delta: Int) -> ResidentDiagnosticNode? {
+        guard let node else { return nil }
+        guard delta != 0 else { return node }
+        let values = node.values.map {
+            GUIResidentDiagnostic(
+                startRow: UInt32(Int($0.startRow) + delta), startCol: $0.startCol,
+                endRow: UInt32(Int($0.endRow) + delta), endCol: $0.endCol, severity: $0.severity)
+        }
+        return ResidentDiagnosticNode(
+            start: node.start + delta, values: values, left: node.left, right: node.right, lazy: node.lazy + delta,
+            priority: node.priority, maxEnd: node.maxEnd + delta)
+    }
+    private static func pushedDiagnostic(_ node: ResidentDiagnosticNode) -> ResidentDiagnosticNode {
+        guard node.lazy != 0 else { return node }
+        return ResidentDiagnosticNode(
+            start: node.start, values: node.values, left: shiftedDiagnostic(node.left, by: node.lazy),
+            right: shiftedDiagnostic(node.right, by: node.lazy), priority: node.priority)
+    }
+    private static func mergeDiagnostics(_ left: ResidentDiagnosticNode?, _ right: ResidentDiagnosticNode?)
+        -> ResidentDiagnosticNode?
+    {
+        guard let left else { return right }
+        guard let right else { return left }
+        let l = pushedDiagnostic(left)
+        let r = pushedDiagnostic(right)
+        if l.priority >= r.priority {
+            return ResidentDiagnosticNode(
+                start: l.start, values: l.values, left: l.left, right: mergeDiagnostics(l.right, r),
+                priority: l.priority)
+        }
+        return ResidentDiagnosticNode(
+            start: r.start, values: r.values, left: mergeDiagnostics(l, r.left), right: r.right, priority: r.priority)
+    }
+    private static func splitDiagnostics(_ node: ResidentDiagnosticNode?, at row: Int) -> (
+        ResidentDiagnosticNode?, ResidentDiagnosticNode?
+    ) {
+        guard let original = node else { return (nil, nil) }
+        let node = pushedDiagnostic(original)
+        if row <= node.start {
+            let (left, remainder) = splitDiagnostics(node.left, at: row)
+            return (
+                left,
+                ResidentDiagnosticNode(
+                    start: node.start, values: node.values, left: remainder, right: node.right, priority: node.priority)
+            )
+        }
+        let (prefix, right) = splitDiagnostics(node.right, at: row)
+        return (
+            ResidentDiagnosticNode(
+                start: node.start, values: node.values, left: node.left, right: prefix, priority: node.priority), right
+        )
+    }
+    private static func diagnosticValues(_ node: ResidentDiagnosticNode?, at start: Int) -> [GUIResidentDiagnostic] {
+        guard let original = node else { return [] }
+        let node = pushedDiagnostic(original)
+        if start < node.start { return diagnosticValues(node.left, at: start) }
+        if start > node.start { return diagnosticValues(node.right, at: start) }
+        return node.values
+    }
+    private static func setDiagnostics(_ root: ResidentDiagnosticNode?, at start: Int, values: [GUIResidentDiagnostic])
+        -> ResidentDiagnosticNode?
+    {
+        let (left, tail) = splitDiagnostics(root, at: start)
+        let (_, right) = splitDiagnostics(tail, at: start + 1)
+        let middle = values.isEmpty ? nil : ResidentDiagnosticNode(start: start, values: values)
+        return mergeDiagnostics(mergeDiagnostics(left, middle), right)
+    }
+    private static func collectCrossingDiagnosticStarts(
+        _ node: ResidentDiagnosticNode?, spliceStart: Int, into result: inout [Int]
+    ) {
+        guard let original = node, original.maxEnd >= spliceStart else { return }
+        let node = pushedDiagnostic(original)
+        collectCrossingDiagnosticStarts(node.left, spliceStart: spliceStart, into: &result)
+        if node.start < spliceStart {
+            if node.values.contains(where: { Int($0.endRow) >= spliceStart }) { result.append(node.start) }
+            collectCrossingDiagnosticStarts(node.right, spliceStart: spliceStart, into: &result)
+        }
+    }
+    private static func spliceDiagnostics(
+        _ original: ResidentDiagnosticNode?, at start: Int, deleting deleted: Int, inserting inserted: Int
+    ) -> ResidentDiagnosticNode? {
+        var root = original
+        let deleteEnd = start + deleted
+        let delta = inserted - deleted
+        var crossing: [Int] = []
+        collectCrossingDiagnosticStarts(root, spliceStart: start, into: &crossing)
+        for diagnosticStart in crossing {
+            let transformed = diagnosticValues(root, at: diagnosticStart).map { diagnostic -> GUIResidentDiagnostic in
+                let end: Int
+                if deleted == 0 || Int(diagnostic.endRow) >= deleteEnd {
+                    end = Int(diagnostic.endRow) + delta
+                } else if inserted > 0 {
+                    end = start + inserted - 1
+                } else {
+                    end = start - 1
+                }
+                return GUIResidentDiagnostic(
+                    startRow: diagnostic.startRow, startCol: diagnostic.startCol, endRow: UInt32(end),
+                    endCol: diagnostic.endCol, severity: diagnostic.severity)
+            }
+            root = setDiagnostics(root, at: diagnosticStart, values: transformed)
+        }
+        let (left, tail) = splitDiagnostics(root, at: start)
+        let (_, right) = splitDiagnostics(tail, at: deleteEnd)
+        return mergeDiagnostics(left, shiftedDiagnostic(right, by: delta))
+    }
+    private static func replaceDiagnosticRanges(
+        _ original: ResidentDiagnosticNode?, replacements: [GUIResidentDiagnosticReplacement], rowCount: UInt32
+    ) throws -> ResidentDiagnosticNode? {
+        var root = original
+        var previousEnd = 0
+        for (index, replacement) in replacements.enumerated() {
+            let range = Int(replacement.start)..<Int(replacement.end)
+            guard range.lowerBound <= range.upperBound, range.upperBound <= Int(rowCount),
+                index == 0 || range.lowerBound >= previousEnd
+            else { throw ResidentSemanticStoreError.invalid }
+            try validateDiagnostics(replacement.diagnostics, rowCount: rowCount)
+            guard replacement.diagnostics.allSatisfy({ range.contains(Int($0.startRow)) }) else {
+                throw ResidentSemanticStoreError.invalid
+            }
+            previousEnd = range.upperBound
+            let (left, tail) = splitDiagnostics(root, at: range.lowerBound)
+            let (_, right) = splitDiagnostics(tail, at: range.upperBound)
+            root = mergeDiagnostics(mergeDiagnostics(left, buildDiagnostics(replacement.diagnostics)), right)
+        }
+        return root
+    }
+    private static func buildDiagnostics(_ values: [GUIResidentDiagnostic]) -> ResidentDiagnosticNode? {
+        let groups = Dictionary(grouping: values, by: { Int($0.startRow) })
+        return groups.keys.sorted().reduce(nil) {
+            mergeDiagnostics($0, ResidentDiagnosticNode(start: $1, values: groups[$1] ?? []))
+        }
+    }
+    private static func collectDiagnostics(
+        _ node: ResidentDiagnosticNode?, row: UInt32, into result: inout [GUIResidentDiagnostic]
+    ) {
+        guard let original = node, original.maxEnd >= Int(row) else { return }
+        let node = pushedDiagnostic(original)
+        if let left = node.left, left.maxEnd >= Int(row) { collectDiagnostics(left, row: row, into: &result) }
+        if node.start <= Int(row) {
+            result.append(contentsOf: node.values.filter { $0.endRow >= row })
+            collectDiagnostics(node.right, row: row, into: &result)
+        }
+    }
+}
+
 /// Deterministic work counters for resident-row updates and viewport reads.
 public struct ResidentRowStoreCounters: Sendable, Equatable {
     /// Rows read while validating or serving a changed region.

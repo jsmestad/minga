@@ -101,6 +101,7 @@ defmodule MingaEditor.RenderPipeline.Content do
           retained_rows: Window.retained_rows(window),
           retained_wrap_lines: Window.retained_wrap_lines(window),
           resident_build: Window.resident_build(window),
+          resident_semantic_state: Window.resident_semantic_state(window),
           resident_plan: plan,
           hydration_reason: Window.hydration_reason(window),
           edit_deltas: Window.pending_edit_deltas(window),
@@ -263,6 +264,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       |> Window.put_retained_rows(build_result.retained_rows)
       |> Window.put_retained_wrap_lines(build_result.retained_wrap_lines)
       |> Window.put_resident_build(build_result.resident_build)
+      |> Window.put_resident_semantic_state(build_result.resident_semantic_state)
       |> Window.put_text_presentation(build_result.text_presentation)
       |> Window.put_row_slot_allocator(build_result.row_slot_allocator)
 

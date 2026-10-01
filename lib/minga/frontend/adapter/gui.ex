@@ -384,6 +384,24 @@ defmodule Minga.Frontend.Adapter.GUI do
     do: Caches.record_window_rows(caches, window)
 
   @spec window_content_fingerprint(RenderModel.Window.t()) :: integer()
+  defp window_content_fingerprint(
+         %RenderModel.Window{row_store_mode: {:resident, _count}} = window
+       ) do
+    :erlang.phash2({
+      window.window_id,
+      window.content_kind,
+      window.row_store_mode,
+      window.accessibility_label,
+      window.accessibility_generation,
+      window.rect,
+      window.content_epoch,
+      window.full_refresh,
+      window.scroll_left,
+      row_content_key(window),
+      window.geometry
+    })
+  end
+
   defp window_content_fingerprint(%RenderModel.Window{} = window) do
     :erlang.phash2({
       window.window_id,
@@ -425,6 +443,11 @@ defmodule Minga.Frontend.Adapter.GUI do
     do: {:resident_digest, digest}
 
   @spec window_overlay_fingerprint(RenderModel.Window.t()) :: integer()
+  defp window_overlay_fingerprint(
+         %RenderModel.Window{row_store_mode: {:resident, _count}} = window
+       ),
+       do: :erlang.phash2(window.cursor_shape)
+
   defp window_overlay_fingerprint(%RenderModel.Window{} = window) do
     :erlang.phash2({
       Map.get(window, :cursor_visible, true),

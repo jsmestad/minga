@@ -15,9 +15,14 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           store: ResidentStore.t(),
           compose_fp: integer() | nil,
           highlight_fp: integer() | nil,
-          line_count: non_neg_integer()
+          line_count: non_neg_integer(),
+          revision: pos_integer()
         }
-  defstruct store: %ResidentStore{}, compose_fp: nil, highlight_fp: nil, line_count: 0
+  defstruct store: %ResidentStore{},
+            compose_fp: nil,
+            highlight_fp: nil,
+            line_count: 0,
+            revision: 1
 
   @type plan ::
           :reuse
@@ -50,7 +55,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
     {state, result, font_registry} =
       case inputs.plan do
         {:hydrate, reason} ->
-          hydrate(inputs, reason)
+          hydrate(prev, inputs, reason)
 
         :reuse ->
           reuse(prev, inputs.font_registry)
@@ -149,7 +154,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
 
   defp in_place_edit_lines(_deltas, _lines), do: :structural
 
-  defp hydrate(%{source: {:complete, lines}, line_count: count} = inputs, reason) do
+  defp hydrate(prev, %{source: {:complete, lines}, line_count: count} = inputs, reason) do
     if length(lines) != count do
       raise ArgumentError, "resident hydration requires a complete source from line zero"
     end
@@ -167,7 +172,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
       store: store,
       compose_fp: inputs.compose_fp,
       highlight_fp: inputs.highlight_fp,
-      line_count: inputs.line_count
+      line_count: inputs.line_count,
+      revision: if(prev == nil, do: 1, else: prev.revision + 1)
     }
 
     {state,
@@ -183,7 +189,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
      }, font_registry}
   end
 
-  defp hydrate(_inputs, _reason),
+  defp hydrate(_prev, _inputs, _reason),
     do: raise(ArgumentError, "resident hydration requires a complete source from line zero")
 
   defp reuse(prev, font_registry) do
@@ -245,7 +251,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
         RowSplice.new(start, delete_count, Enum.map(inserted_payloads, & &1.row))
       ])
 
-    state = %{prev | store: store, line_count: result_count}
+    state = %{prev | store: store, line_count: result_count, revision: prev.revision + 1}
 
     {state,
      %{
@@ -279,7 +285,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
     {:ok, row_delta} = RowDelta.new(prev.line_count, prev.line_count, Enum.reverse(splices))
     work = ResidentStore.work(store)
     Minga.Telemetry.execute([:minga, :render, :resident_work], work, %{operation: :splices})
-    state = %{prev | store: store}
+    state = %{prev | store: store, revision: prev.revision + 1}
 
     {state,
      %{

@@ -225,6 +225,73 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   end
 
   describe "GUI content stage" do
+    test "resident guides use displayed source on warm and partial edit frames" do
+      lines =
+        Enum.map(0..119, fn n -> String.duplicate("  ", rem(n, 5)) <> "value_#{n} = #{n}" end)
+
+      state = gui_state(rows: 12, content: Enum.join(lines, "\n")) |> detach_scroll(34)
+      buffer = state.workspace.buffers.active
+      assert {:ok, 2} = BufferProcess.set_option(buffer, :tab_width, 2)
+      :ok = BufferProcess.move_to(buffer, {38, 0})
+      state = detach_scroll(state, 34)
+      {[arming], _, state} = build_content(state)
+      assert_guide_source(arming.window_model, buffer)
+      {[hydrated], _, state} = build_content(state)
+      assert_guide_source(hydrated.window_model, buffer)
+      {[warm], _, state} = build_content(state)
+      assert_guide_source(warm.window_model, buffer)
+      :ok = BufferProcess.insert_text(buffer, "x")
+      {[edited], _, state} = build_content(state)
+      assert_guide_source(edited.window_model, buffer)
+      {[idle], _, state} = build_content(state)
+      assert_guide_source(idle.window_model, buffer)
+      :ok = BufferProcess.insert_text(buffer, "\n  pasted\n    pasted")
+      {[pasted], _, state} = build_content(state)
+      assert_guide_source(pasted.window_model, buffer)
+      :ok = BufferProcess.undo(buffer)
+      {[undone], _, state} = build_content(state)
+      assert_guide_source(undone.window_model, buffer)
+      :ok = BufferProcess.redo(buffer)
+      {[redone], _, _state} = build_content(state)
+      assert_guide_source(redone.window_model, buffer)
+    end
+
+    @tag :tmp_dir
+    test "resident diagnostics retain encoded endpoints on unrelated edit frames", %{
+      tmp_dir: tmp_dir
+    } do
+      for {encoding, start_col, end_col} <- [{:utf8, 8, 11}, {:utf16, 5, 8}, {:utf32, 4, 7}] do
+        lines = List.duplicate("  😀évalue", 120)
+        state = gui_state(rows: 12, content: Enum.join(lines, "\n"))
+        buffer = state.workspace.buffers.active
+        path = Path.join(tmp_dir, "#{encoding}.txt")
+        :ok = Buffer.save_as(buffer, path)
+        assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+        uri = SyncServer.path_to_uri(path)
+
+        Diagnostics.publish(:builder_test, uri, [
+          %Diagnostic{
+            range: %{start_line: 3, start_col: start_col, end_line: 4, end_col: end_col},
+            severity: :warning,
+            message: "encoded",
+            encoding: encoding
+          }
+        ])
+
+        on_exit(fn -> Diagnostics.clear(:builder_test, uri) end)
+        {[_arming], _, state} = build_content(state)
+        {[hydrated], _, state} = build_content(state)
+        expected = hydrated.window_model.diagnostic_ranges
+        assert [%{start_row: 3, start_col: 8, end_row: 4, end_col: 11}] = expected
+        :ok = BufferProcess.move_to(buffer, {8, 0})
+        :ok = BufferProcess.insert_text(buffer, "x")
+        {[edited], _, state} = build_content(state)
+        assert_diagnostic_source(edited.window_model)
+        {[idle], _, _state} = build_content(state)
+        assert_diagnostic_source(idle.window_model)
+      end
+    end
+
     test "ordinary and virtual rows share one explicit font registry in encounter order" do
       state = gui_state(content: "hello")
       buffer = state.workspace.buffers.active
@@ -1311,6 +1378,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(model.rows, & &1.text) == ["EFGHIJklmnopqr", "stKLMNOPQRST", "tail"]
       assert Enum.map(model.rows, & &1.visual_index) == [1, 2, 0]
       assert model.geometry.viewport.visual_row_offset == 1
+      assert model.indent_guides.guide_cols == []
       assert presentation.anchor_visual_row_offset == 0
       assert presentation.visible_start_line == 0
       assert presentation.overscan_start_line == 0
@@ -1365,6 +1433,9 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       state = %{state | workspace: %{state.workspace | windows: windows}}
 
       model = build_window_model(state, visual_selection: {:char, {0, 0}, {0, 17}})
+
+      assert model.indent_guides.guide_cols == [2]
+      assert model.indent_guides.line_indent_levels == [1, 1]
 
       assert hd(model.rows).row_type == :wrap_continuation
       assert model.selection.start_row == 0
@@ -1525,6 +1596,22 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert wf.window_model.gutter.entries != []
       assert wf.window_model.indent_guides.window_id == state.workspace.windows.active
     end
+  end
+
+  defp assert_diagnostic_source(model) do
+    assert [%{start_row: start_row, start_col: 8, end_row: end_row, end_col: 11}] =
+             model.diagnostic_ranges
+
+    assert start_row + model.geometry.viewport.top == 3
+    assert end_row + model.geometry.viewport.top == 4
+  end
+
+  defp assert_guide_source(model, buffer) do
+    viewport = model.geometry.viewport
+    source = BufferProcess.lines(buffer, viewport.top, viewport.rows)
+    {guides, levels} = Minga.Core.IndentGuide.compute_with_levels(source, 2, 0)
+    assert model.indent_guides.line_indent_levels == levels
+    assert model.indent_guides.guide_cols == Enum.map(guides, & &1.col)
   end
 
   defp resident_row_ids(%Input{windows: windows}) do

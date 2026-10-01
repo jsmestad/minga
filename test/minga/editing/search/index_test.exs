@@ -71,6 +71,28 @@ defmodule Minga.Editing.Search.IndexTest do
     end
   end
 
+  describe "matches_in_range/3" do
+    test "returns ordered matches only from the inclusive line range" do
+      index = Index.build(["foo foo", "foo", "none", "foo foo"], "foo")
+
+      assert Enum.map(Index.matches_in_range(index, 1, 3), &{&1.line, &1.col}) == [
+               {1, 0},
+               {3, 0},
+               {3, 4}
+             ]
+    end
+
+    test "visits logarithmic nodes plus the dense requested result" do
+      index = Index.build(List.duplicate("foo", 10_000), "foo")
+
+      {matches, metrics} = Index.matches_in_range_with_metrics(index, 5_000, 5_000)
+
+      assert Enum.map(matches, &{&1.line, &1.col}) == [{5_000, 0}]
+      assert metrics.returned_matches == 1
+      assert metrics.visited_nodes < 100
+    end
+  end
+
   describe "apply_edits/4" do
     test "updates one line without rescanning an unchanged suffix" do
       index = Index.build(["foo", "none", "foo", "foo"], "foo")

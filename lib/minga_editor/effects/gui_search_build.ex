@@ -6,6 +6,8 @@ defmodule MingaEditor.Effects.GuiSearchBuild do
   alias Minga.Buffer
   alias Minga.Buffer.SyncSnapshot
   alias Minga.Editing.Search.Index
+  alias Minga.Search.IndexGeneration
+  alias Minga.Search.IndexOwner
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
@@ -156,20 +158,35 @@ defmodule MingaEditor.Effects.GuiSearchBuild do
          outcome,
          {version, sequence}
        ) do
-    case Search.accept_gui_index(
-           state.workspace.search,
-           result.search_revision,
-           result.buffer,
-           result.version,
-           result.sequence,
-           result.index
-         ) do
-      {:accepted, search} ->
-        state = put_search(state, search)
-        {maybe_select_first(state, effect, result.index), outcome}
+    if Search.accepts_gui_generation?(
+         state.workspace.search,
+         result.search_revision,
+         result.buffer
+       ) do
+      {:ok, generation} =
+        IndexOwner.install(
+          result.buffer,
+          Search.gui_query_revision(state.workspace.search),
+          result.version,
+          result.sequence,
+          result.index
+        )
 
-      {:stale, _search} ->
-        {state, Outcome.stale(outcome, :superseded_search)}
+      case Search.accept_gui_generation(
+             state.workspace.search,
+             result.search_revision,
+             result.buffer,
+             generation
+           ) do
+        {:accepted, search} ->
+          state = put_search(state, search)
+          {maybe_select_first(state, effect, generation), outcome}
+
+        {:stale, _search} ->
+          {state, Outcome.stale(outcome, :superseded_search)}
+      end
+    else
+      {state, Outcome.stale(outcome, :superseded_search)}
     end
   end
 
@@ -184,16 +201,19 @@ defmodule MingaEditor.Effects.GuiSearchBuild do
     :exit, _reason -> :unavailable
   end
 
-  @spec maybe_select_first(EditorState.t(), t(), Index.t()) :: EditorState.t()
-  defp maybe_select_first(state, %__MODULE__{select_first?: false}, _index), do: state
+  @spec maybe_select_first(EditorState.t(), t(), IndexGeneration.t()) :: EditorState.t()
+  defp maybe_select_first(state, %__MODULE__{select_first?: false}, _generation), do: state
 
-  defp maybe_select_first(state, %__MODULE__{buffer: buffer}, index) do
-    case Index.next(index, Buffer.cursor(buffer), :forward) do
-      nil ->
+  defp maybe_select_first(state, %__MODULE__{buffer: buffer}, generation) do
+    case IndexOwner.next(generation, Buffer.cursor(buffer), :forward) do
+      {:ok, nil} ->
         state
 
-      %{line: line, col: col} ->
+      {:ok, %{line: line, col: col}} ->
         Buffer.move_to(buffer, {line, col})
+        state
+
+      :stale ->
         state
     end
   catch

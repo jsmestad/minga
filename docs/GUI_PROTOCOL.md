@@ -70,6 +70,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0xA3 | gui_extension_runtime | Generic frontend-extension runtime envelope. Uses a 32-bit payload length so extension-owned payloads can grow without changing the shared envelope. |
 | 0xA6 | gui_completion_selection | Narrow completion selection and documentation update. |
 | 0xA7 | gui_picker_selection | Narrow picker item and action selection update. |
+| 0xA9 | gui_resident_semantics | Atomic absolute-rank semantics for retained editor rows. |
 
 ### 0xA3 — gui_extension_runtime
 
@@ -1455,6 +1456,53 @@ The frontend uses this to compute `displayCellH = cellH * (spacing_x100 / 100.0)
 A client reports text hits using that presentation ID, the absolute row-store rank, the row ID, and row-local composed UTF-16 offset. See `editor_text_event` and `text_presentation_state` in [PROTOCOL.md](PROTOCOL.md). Native drawing must publish its row hit geometry together with the exact snapshot that produced the displayed pixels. Committing a newer snapshot does not replace the input geometry of an older visible snapshot.
 
 For a windowed wrapped payload, `ScrollPresentation.anchor_visual_row_offset` counts continuation rows retained before the visible anchor in that payload. Rows already trimmed from the payload are not counted again. The document viewport's visual-row offset can therefore differ from the payload-relative offset.
+
+## Resident Semantics (0xA9)
+
+`gui_resident_semantics` publishes renderer-owned semantics beside a sequential resident row store. It uses a u32 length envelope. All row coordinates are absolute u32 ranks in the retained store. Clients clip and rebase the committed model for the locally displayed slice; they do not recompute indentation, diagnostics, annotations, selection, or cursor policy.
+
+Resident `gui_window_content` commands omit the viewport selection, search, diagnostics, document highlight, annotation, and cursorline sections, and resident frame metadata omits legacy `gui_cursorline` and `gui_indent_guides`. Their legacy cursor and accessibility cursor fields are absent or hidden; the client projects cursor and selection accessibility from the committed resident semantics and local text slice. Search and document highlight colors remain part of each retained row's composed spans. Windowed frames keep the legacy viewport sections and metadata.
+
+Search span coverage uses the source-owned current search-index generation for GUI Find and line-local matching for classic Vim search. Initial residence, changed resident rows, and query-generation replacement therefore compose the correct search spans before any viewport acknowledgement. Document highlights were already retained correctly because their ranges are part of the source decoration snapshot used for resident composition.
+
+```
+opcode:u8 = 0xA9
+payload_len:u32
+version:u8 = 1
+mode:u8                         # 0 keyframe, 1 delta
+window_id:u16
+content_epoch:u32
+base_semantic_revision:u32      # 0 for keyframe
+result_semantic_revision:u32
+target_row_revision:u32          # positive current/final resident text revision
+row_count:u32                   # maximum 65,536
+first_row_id:u64                # 0 only when row_count is zero
+last_row_id:u64                 # 0 only when row_count is zero
+flags:u8
+cursor_row:u32
+cursor_col:u16
+optional cursorline
+optional selection
+guide configuration
+row-rank splices
+guide range replacements
+optional diagnostic replacement
+optional annotation replacement
+```
+
+Flags are `0x01` cursor eligible, `0x02` cursorline present, `0x04` selection present, `0x08` diagnostics full replace, `0x10` annotations full replace, `0x20` annotation range replacements, and `0x40` diagnostic range replacements. Each layer's full and range replacement flags are mutually exclusive.
+
+Cursorline is `row:u32, bg:u24`. Selection is `type:u8` (`1` character, `2` line), `start_row:u32, start_col:u16, end_row:u32, end_col:u16`. Cursor visibility is a query over the committed model: the cursor must be eligible and its absolute rank must fall inside the displayed local slice. Cursorline follows the same target rank, which prevents a committed viewport clip from creating a ghost line during local scrolling.
+
+Guide configuration is `tab_width:u8, active_guide_col:u16, guide_col_count:u16, guide_cols:u16[]`. It is followed by `row_splice_count:u16` entries of `start_row:u32, delete_count:u32, insert_count:u32`. Splices use immutable-base coordinates, are strictly ordered, do not overlap, and must produce exactly `row_count`. Clients apply them to retained guide, diagnostic, and annotation ranks before replacements. A diagnostic whose start rank is deleted is removed. A diagnostic that starts before a splice keeps its start; its end rank shifts with an insertion or suffix deletion and maps to the nearest inserted rank when its old end is deleted. A transformed diagnostic with an endpoint outside the final resident extent is removed.
+
+Guide replacements are `count:u16`, then `start_row:u32, end_row:u32, run_count:u32` and runs of `start_row:u32, end_row:u32, level:u16`. Ranges and runs are half-open. Runs must be ordered, non-overlapping, contained by their replacement, and completely cover the replacement. A keyframe has one replacement covering `[0, row_count)`. Compressed runs let a blank range inherit the next nonblank level without visiting or transmitting each blank row on an edit.
+
+When flag `0x08` is set, diagnostics replace as `count:u32` followed by `start_row:u32, start_col:u16, end_row:u32, end_col:u16, severity:u8`. With flag `0x40`, the payload begins with `replace_count:u16`; each half-open start-rank replacement carries `start_row:u32, end_row:u32, diagnostic_count:u32` and its diagnostics. Producer revision changes use a full replacement. In-place edits use sparse replacements for diagnostic start groups whose start or end touches an edited row, including multiline diagnostics that start before the edit. Structural row splices shift retained diagnostics without traversing or retransmitting an unchanged suffix. Stale diagnostics outside the current resident extent are omitted.
+
+When flag `0x10` is set, annotations replace as `count:u32` followed by `row:u32, kind:u8, fg:u24, bg:u24, text:string16`. With flag `0x20`, the payload begins with `replace_count:u16`; each half-open replacement carries `start_row:u32, end_row:u32, annotation_count:u32` and its annotations. Structural row splices shift retained annotation ranks, then bounded replacements reconcile the edited ranges.
+
+The command is part of the existing frame transaction. The frontend stages text and semantics, validates the complete candidate, and publishes both in one commit. `base_semantic_revision` is zero for a keyframe, while `target_row_revision` names the positive revision of the staged or retained resident text store and can be greater than one during recovery. The frontend rejects the entire candidate and requests a keyframe for an unsupported version or mode, missing resident window, epoch or base revision mismatch, invalid row revision transition, row count or boundary row ID mismatch, malformed or overlapping splices, overflow, out-of-range sparse entry, or invalid guide coverage. Rejection preserves both previously committed stores. A semantic-only delta retains text row objects and hashes.
 
 ## Behavioral Contract
 

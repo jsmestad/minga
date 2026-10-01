@@ -451,6 +451,119 @@ struct ResidentRowStoreTests {
         #expect(splice.counters == committed.counters)
     }
 
+    @Test("resident semantics remain absolute across local slices")
+    func residentSemanticsQueries() throws {
+        let content = try semanticContent(rows: rows(0..<8))
+        let update = GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 7, contentEpoch: 9,
+            baseRevision: 0, revision: 1, targetRowRevision: 1,
+            rowCount: 8, firstRowId: 1, lastRowId: 8,
+            cursor: GUIResidentCursor(eligible: true, row: 4, col: 3),
+            cursorline: GUIResidentCursorline(row: 4, bg: 0x223344),
+            selection: GUIResidentSelection(type: .char, startRow: 4, startCol: 2, endRow: 6, endCol: 1),
+            tabWidth: 2, activeGuideCol: 0, guideCols: [0], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: 8, runs: [
+                GUIResidentGuideRun(start: 0, end: 4, level: 0),
+                GUIResidentGuideRun(start: 4, end: 6, level: 2),
+                GUIResidentGuideRun(start: 6, end: 8, level: 0)
+            ])],
+            diagnostics: .replace([GUIResidentDiagnostic(startRow: 4, startCol: 1, endRow: 5, endCol: 2, severity: .error)]),
+            annotations: .replace([GUIResidentAnnotation(row: 4, kind: .inlineText, fg: 1, bg: 0, text: "hint")])
+        )
+        let store = try ResidentSemanticStore().applying(update, content: content)
+        let slice = store.slice(3..<6)
+
+        #expect(slice.cursor?.row == 4)
+        #expect(slice.cursorline?.row == 4)
+        #expect(slice.selection?.endRow == 6)
+        #expect(store.guideLevel(at: 4) == 2)
+        #expect(store.annotations(at: 4).map(\.text) == ["hint"])
+        #expect(store.diagnostics(at: 5).count == 1)
+    }
+
+    @Test("recovery keyframes accept a positive row revision and point diagnostics")
+    func residentSemanticRecoveryKeyframe() throws {
+        let content = try semanticContent(rows: rows(0..<2))
+        let update = GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 7, contentEpoch: 9,
+            baseRevision: 0, revision: 2, targetRowRevision: 7,
+            rowCount: 2, firstRowId: 1, lastRowId: 2,
+            cursor: GUIResidentCursor(eligible: true, row: 0, col: 0),
+            cursorline: nil,
+            selection: nil,
+            tabWidth: 2, activeGuideCol: 0, guideCols: [], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: 2, runs: [GUIResidentGuideRun(start: 0, end: 2, level: 0)])],
+            diagnostics: .replace([GUIResidentDiagnostic(startRow: 0, startCol: 3, endRow: 0, endCol: 3, severity: .warning)]),
+            annotations: .replace([])
+        )
+
+        let recovered = try ResidentSemanticStore().applying(update, content: content)
+
+        #expect(recovered.rowRevision == 7)
+        #expect(recovered.diagnostics(at: 0).count == 1)
+    }
+
+    @Test("structural splices shift retained semantics before sparse replacements")
+    func residentSemanticSplice() throws {
+        let originalRows = rows(0..<8)
+        let original = try semanticContent(rows: originalRows)
+        let keyframe = GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 7, contentEpoch: 9, baseRevision: 0, revision: 1, targetRowRevision: 1,
+            rowCount: 8, firstRowId: 1, lastRowId: 8, cursor: GUIResidentCursor(eligible: true, row: 4, col: 0), cursorline: nil, selection: nil,
+            tabWidth: 2, activeGuideCol: 0, guideCols: [0], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: 8, runs: [GUIResidentGuideRun(start: 0, end: 8, level: 1)])],
+            diagnostics: .replace([GUIResidentDiagnostic(startRow: 4, startCol: 0, endRow: 5, endCol: 1, severity: .warning)]),
+            annotations: .replace([GUIResidentAnnotation(row: 4, kind: .inlineText, fg: 1, bg: 0, text: "hint")])
+        )
+        let committed = try ResidentSemanticStore().applying(keyframe, content: original)
+        var changedRows = originalRows
+        changedRows.insert(row(99, bufferLine: 2), at: 2)
+        let changed = try semanticContent(rows: changedRows)
+        let delta = GUIResidentSemanticsUpdate(
+            version: 1, mode: 1, windowId: 7, contentEpoch: 9, baseRevision: 1, revision: 2, targetRowRevision: 2,
+            rowCount: 9, firstRowId: 1, lastRowId: 8, cursor: GUIResidentCursor(eligible: true, row: 5, col: 0), cursorline: nil, selection: nil,
+            tabWidth: 2, activeGuideCol: 0, guideCols: [0], rowSplices: [GUIResidentRowSplice(start: 2, deleteCount: 0, insertCount: 1)],
+            guideReplacements: [GUIResidentGuideReplacement(start: 2, end: 3, runs: [GUIResidentGuideRun(start: 2, end: 3, level: 0)])],
+            diagnostics: .replaceRanges([GUIResidentDiagnosticReplacement(start: 5, end: 6, diagnostics: [GUIResidentDiagnostic(startRow: 5, startCol: 1, endRow: 6, endCol: 1, severity: .info)])]),
+            annotations: .replaceRanges([])
+        )
+        let next = try committed.applying(delta, content: changed)
+
+        #expect(next.annotations(at: 5).map(\.text) == ["hint"])
+        #expect(next.diagnostics(at: 5).map(\.severity) == [.info])
+        #expect(committed.annotations(at: 4).map(\.text) == ["hint"])
+    }
+
+    @Test("invalid resident semantic candidates preserve the committed value")
+    func residentSemanticRejection() throws {
+        let content = try semanticContent(rows: rows(0..<2))
+        let keyframe = GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 7, contentEpoch: 9, baseRevision: 0, revision: 1, targetRowRevision: 1,
+            rowCount: 2, firstRowId: 1, lastRowId: 2, cursor: GUIResidentCursor(eligible: true, row: 0, col: 0), cursorline: nil, selection: nil,
+            tabWidth: 2, activeGuideCol: 0, guideCols: [], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: 2, runs: [GUIResidentGuideRun(start: 0, end: 2, level: 0)])],
+            diagnostics: .replace([]), annotations: .replace([])
+        )
+        let committed = try ResidentSemanticStore().applying(keyframe, content: content)
+        let invalid = GUIResidentSemanticsUpdate(
+            version: 1, mode: 1, windowId: 7, contentEpoch: 10, baseRevision: 1, revision: 2, targetRowRevision: 1,
+            rowCount: 2, firstRowId: 1, lastRowId: 2, cursor: GUIResidentCursor(eligible: true, row: 0, col: 0), cursorline: nil, selection: nil,
+            tabWidth: 2, activeGuideCol: 0, guideCols: [], rowSplices: [], guideReplacements: [], diagnostics: .retain, annotations: .retain
+        )
+
+        #expect(throws: ResidentSemanticStoreError.invalid) { try committed.applying(invalid, content: content) }
+        #expect(committed.revision == 1)
+        #expect(committed.rowCount == 2)
+    }
+
+    private func semanticContent(rows: [GUIVisualRow]) throws -> GUIWindowContent {
+        try GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 9, cursorVisible: false,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rowStoreMode: .sequential,
+            rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )
+    }
+
     private func rows(_ range: Range<Int>, bufferLine: UInt32? = nil) -> [GUIVisualRow] {
         range.map { row(UInt64($0 + 1), bufferLine: bufferLine ?? UInt32($0)) }
     }

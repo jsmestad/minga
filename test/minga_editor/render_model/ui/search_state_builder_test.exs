@@ -84,7 +84,9 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilderTest do
       whole_word: false,
       regex: false,
       replace_mode: false,
-      status: :ready
+      status: :ready,
+      generation: nil,
+      query_revision: 0
     }
 
     struct!(Projection, Map.merge(defaults, Map.new(overrides)))

@@ -354,6 +354,46 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
+    case .guiResidentSemantics(let update):
+        var result: [String: Any] = [
+            "type": "gui_resident_semantics", "version": Int(update.version),
+            "mode": Int(update.mode), "window_id": Int(update.windowId),
+            "content_epoch": Int(update.contentEpoch), "base_revision": Int(update.baseRevision),
+            "revision": Int(update.revision), "row_revision": Int(update.targetRowRevision),
+            "row_count": Int(update.rowCount), "first_row_id": String(update.firstRowId),
+            "last_row_id": String(update.lastRowId),
+            "cursor": ["eligible": update.cursor.eligible, "row": Int(update.cursor.row), "col": Int(update.cursor.col)],
+            "tab_width": Int(update.tabWidth), "active_guide_col": Int(update.activeGuideCol),
+            "guide_cols": update.guideCols.map { Int($0) },
+            "row_splices": update.rowSplices.map { ["start": Int($0.start), "delete": Int($0.deleteCount), "insert": Int($0.insertCount)] },
+            "guide_replacements": update.guideReplacements.map { replacement in
+                ["start": Int(replacement.start), "end": Int(replacement.end), "runs": replacement.runs.map { ["start": Int($0.start), "end": Int($0.end), "level": Int($0.level)] }] as [String: Any]
+            }
+        ]
+        if let line = update.cursorline { result["cursorline"] = ["row": Int(line.row), "bg": Int(line.bg)] }
+        if let selection = update.selection {
+            result["selection"] = ["type": Int(selection.type.rawValue), "start_row": Int(selection.startRow), "start_col": Int(selection.startCol), "end_row": Int(selection.endRow), "end_col": Int(selection.endCol)]
+        }
+        switch update.diagnostics {
+        case .retain: result["diagnostic_mode"] = "retain"
+        case .replace(let values):
+            result["diagnostic_mode"] = "replace"
+            result["diagnostics"] = values.map { ["start_row": Int($0.startRow), "start_col": Int($0.startCol), "end_row": Int($0.endRow), "end_col": Int($0.endCol), "severity": Int($0.severity.rawValue)] }
+        case .replaceRanges(let ranges):
+            result["diagnostic_mode"] = "ranges"
+            result["diagnostic_ranges"] = ranges.map { ["start": Int($0.start), "end": Int($0.end), "count": $0.diagnostics.count] }
+        }
+        switch update.annotations {
+        case .retain: result["annotation_mode"] = "retain"
+        case .replace(let values):
+            result["annotation_mode"] = "replace"
+            result["annotations"] = values.map { ["row": Int($0.row), "kind": Int($0.kind.rawValue), "fg": Int($0.fg), "bg": Int($0.bg), "text": $0.text] as [String: Any] }
+        case .replaceRanges(let ranges):
+            result["annotation_mode"] = "ranges"
+            result["annotation_ranges"] = ranges.map { ["start": Int($0.start), "end": Int($0.end), "count": $0.annotations.count] }
+        }
+        return result
+
     case .guiWindowOverlayDelta(let delta):
         var result: [String: Any] = [
             "type": "gui_window_overlay_delta",

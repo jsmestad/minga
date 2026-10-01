@@ -11,6 +11,7 @@ struct EditorAccessibilityIdentity: Hashable, Sendable {
 /// One immutable accessibility projection derived from the visible presentation.
 struct EditorAccessibilityProjection: Sendable {
     struct Row: Sendable {
+        let absoluteRow: Int
         let viewportRow: Int
         let valueRange: NSRange
         let sourceDisplayRange: Range<Int>
@@ -104,14 +105,19 @@ struct EditorAccessibilityProjection: Sendable {
         )
         let offset = localTransform?.windowId == surface.windowId ? localTransform?.offset ?? .zero : .zero
         let baseRange = surface.visibleRowRange
-        let extraRows = Int(ceil(abs(offset.y) / max(cellHeight, 1))) + 1
-        let candidateRange = max(0, baseRange.lowerBound - extraRows)..<min(content.rowStore.count, baseRange.upperBound + extraRows)
+        let rowOffset = offset.y / max(cellHeight, 1)
+        let localLower = Int(floor(CGFloat(baseRange.lowerBound) + rowOffset))
+        let localUpper = Int(ceil(CGFloat(baseRange.upperBound) + rowOffset))
+        let candidateLower = min(max(0, localLower - 1), content.rowStore.count)
+        let candidateUpper = min(max(localUpper + 1, candidateLower), content.rowStore.count)
+        let candidateRange = candidateLower..<candidateUpper
         let resident = content.rowStore.rows(in: candidateRange)
         let textOriginX = paneFrame.minX - CGFloat(content.scrollLeft) * cellWidth - offset.x
         let clipStart = Int(floor((paneFrame.minX - textOriginX) / max(cellWidth, 1)))
         let clipEnd = Int(ceil((paneFrame.maxX - textOriginX) / max(cellWidth, 1)))
 
         struct PendingRow {
+            let absoluteRow: Int
             let viewportRow: Int
             let text: String
             let sourceDisplayRange: Range<Int>
@@ -136,6 +142,7 @@ struct EditorAccessibilityProjection: Sendable {
             let sourceStart = map.displayColumn(atUTF16Offset: exposedUTF16.lowerBound)
             let sourceEnd = map.displayColumn(atUTF16Offset: exposedUTF16.upperBound)
             pending.append(PendingRow(
+                absoluteRow: residentIndex,
                 viewportRow: viewportRow,
                 text: text,
                 sourceDisplayRange: sourceStart..<sourceEnd,
@@ -154,6 +161,7 @@ struct EditorAccessibilityProjection: Sendable {
             valueParts.append(row.text)
             let length = row.text.utf16.count
             rows.append(Row(
+                absoluteRow: row.absoluteRow,
                 viewportRow: row.viewportRow,
                 valueRange: NSRange(location: valueOffset, length: length),
                 sourceDisplayRange: row.sourceDisplayRange,
@@ -167,8 +175,9 @@ struct EditorAccessibilityProjection: Sendable {
         }
 
         let value = valueParts.joined(separator: "\n")
-        let selectedRanges = selectionRanges(content: content, rows: rows)
-        let insertion = content.selection == nil ? insertionRange(content: content, rows: rows) : nil
+        let selectedRanges = selectionRanges(surface: surface, rows: rows)
+        let hasSelection = surface.residentSemantics?.selection != nil || content.selection != nil
+        let insertion = hasSelection ? nil : insertionRange(surface: surface, rows: rows)
         let insertionLine = insertion.flatMap { insertion in
             rows.firstIndex { NSLocationInRange(insertion.location, $0.valueRange) || insertion.location == NSMaxRange($0.valueRange) }
         }
@@ -182,7 +191,7 @@ struct EditorAccessibilityProjection: Sendable {
             frameInView: paneFrame,
             rows: rows,
             selectedRanges: selectedRanges,
-            hasSelection: content.selection != nil,
+            hasSelection: hasSelection,
             insertionRange: insertion,
             insertionPointLineNumber: insertionLine,
             isActivePane: isActivePane,
@@ -191,14 +200,31 @@ struct EditorAccessibilityProjection: Sendable {
         )
     }
 
-    private static func insertionRange(content: GUIWindowContent, rows: [Row]) -> NSRange? {
+    private static func insertionRange(surface: PresentedWindowSurface, rows: [Row]) -> NSRange? {
+        let content = surface.content
+        if let semantics = surface.residentSemantics {
+            guard semantics.cursor.eligible,
+                  let row = rows.first(where: { $0.absoluteRow == Int(semantics.cursor.row) }) else { return nil }
+            return row.insertionRange(atSourceUTF16Offset: row.sourceMap.utf16Offset(at: Int(semantics.cursor.col)))
+        }
         guard content.cursorVisible,
               let cursor = content.accessibilityCursor,
               let row = rows.first(where: { $0.viewportRow == Int(cursor.row) }) else { return nil }
         return row.insertionRange(atSourceUTF16Offset: Int(cursor.utf16))
     }
 
-    private static func selectionRanges(content: GUIWindowContent, rows: [Row]) -> [NSRange] {
+    private static func selectionRanges(surface: PresentedWindowSurface, rows: [Row]) -> [NSRange] {
+        let content = surface.content
+        if let selection = surface.residentSemantics?.selection {
+            let ranges = rows.compactMap { row -> (row: Row, range: NSRange)? in
+                guard row.absoluteRow >= Int(selection.startRow), row.absoluteRow <= Int(selection.endRow) else { return nil }
+                let startColumn = selection.type == .line || row.absoluteRow > Int(selection.startRow) ? 0 : Int(selection.startCol)
+                let endColumn = selection.type == .line || row.absoluteRow < Int(selection.endRow) ? row.sourceMap.displayWidth : Int(selection.endCol)
+                guard let range = row.valueRange(forSourceUTF16Range: row.sourceMap.utf16Offset(at: startColumn)..<row.sourceMap.utf16Offset(at: endColumn)) else { return nil }
+                return (row, range)
+            }
+            return contiguousRanges(ranges)
+        }
         guard let selection = content.selection else { return [] }
         let ranges = content.accessibilitySelectionRanges.compactMap { sourceRange -> (row: Row, range: NSRange)? in
             guard let row = rows.first(where: { $0.viewportRow == Int(sourceRange.row) }) else { return nil }

@@ -89,6 +89,9 @@ var minimalBodyOverrides = map[byte][]byte{
 	// opcode + section_count(2) + header section(14-byte payload) + empty rows section.
 	generated.OPGuiWindowViewportDelta: minimalWindowDelta(generated.OPGuiWindowViewportDelta, 8, 0x01),
 	generated.OPGuiWindowRowsDelta:     minimalWindowDelta(generated.OPGuiWindowRowsDelta, 7, 0x00),
+	// gui_resident_semantics (len32): its fixed header through the empty guide
+	// replacement count is 56 bytes, larger than the generic zero probe bound.
+	generated.OPGuiResidentSemantics: append([]byte{generated.OPGuiResidentSemantics, 0x00, 0x00, 0x00, 0x38}, make([]byte, 56)...),
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {

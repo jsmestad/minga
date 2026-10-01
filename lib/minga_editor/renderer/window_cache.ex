@@ -92,6 +92,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           applied_change_sequence: non_neg_integer(),
           row_slot_allocator: RowSlotAllocator.t(),
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
+          resident_semantic_state: MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil,
           text_presentation: TextPresentation.t() | nil,
           pending_edit_deltas: [Minga.Buffer.EditDelta.t()],
           changed_snapshot: RenderSnapshot.t() | nil,
@@ -123,6 +124,7 @@ defmodule MingaEditor.Renderer.WindowCache do
             applied_change_sequence: 0,
             row_slot_allocator: RowSlotAllocator.new(),
             resident_build: nil,
+            resident_semantic_state: nil,
             text_presentation: nil,
             pending_edit_deltas: [],
             changed_snapshot: nil,
@@ -169,6 +171,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         retained_rows: %{},
         retained_wrap_lines: %{},
         resident_build: nil,
+        resident_semantic_state: nil,
         text_presentation: nil,
         pending_edit_deltas: [],
         changed_snapshot: nil,
@@ -468,6 +471,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         content_epoch: ContentEpoch.next(),
         row_slot_allocator: RowSlotAllocator.new(),
         resident_build: nil,
+        resident_semantic_state: nil,
         pending_edit_deltas: [],
         changed_snapshot: nil,
         hydration_reason: :identity_reset,
@@ -652,6 +656,11 @@ defmodule MingaEditor.Renderer.WindowCache do
   @spec resident_build(t()) :: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
   def resident_build(%__MODULE__{resident_build: state}), do: state
 
+  @doc "Returns the persistent resident semantic state, or nil off residence."
+  @spec resident_semantic_state(t()) ::
+          MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
+  def resident_semantic_state(%__MODULE__{resident_semantic_state: state}), do: state
+
   @doc "Returns renderer-consumed deltas pending resident composition."
   @spec pending_edit_deltas(t()) :: [Minga.Buffer.EditDelta.t()]
   def pending_edit_deltas(%__MODULE__{pending_edit_deltas: deltas}), do: deltas
@@ -671,6 +680,14 @@ defmodule MingaEditor.Renderer.WindowCache do
         hydration_reason: nil
     }
   end
+
+  @doc "Stores the persistent resident semantic state from the last build."
+  @spec put_resident_semantic_state(
+          t(),
+          MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
+        ) :: t()
+  def put_resident_semantic_state(%__MODULE__{} = cache, state),
+    do: %{cache | resident_semantic_state: state}
 
   @doc "Returns the immutable text presentation produced by the current cache state."
   @spec text_presentation(t()) :: TextPresentation.t() | nil

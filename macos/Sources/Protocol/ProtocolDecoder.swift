@@ -115,6 +115,7 @@ enum RenderCommand: Sendable {
     case guiWindowOverlayDelta(data: GUIWindowOverlayDelta)
     case guiWindowViewportDelta(data: GUIWindowRowsDelta)
     case guiWindowRowsDelta(data: GUIWindowRowsDelta)
+    case guiResidentSemantics(data: GUIResidentSemanticsUpdate)
     case guiMinibuffer(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
     case guiHoverAction(visible: Bool, actionName: String)
@@ -2121,6 +2122,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: true)
         return (.guiWindowRowsDelta(data: delta), consumed)
 
+    case OP_GUI_RESIDENT_SEMANTICS:
+        let (semantics, consumed) = try decodeResidentSemantics(data: data, offset: offset)
+        return (.guiResidentSemantics(data: semantics), consumed)
+
 
     case OP_GUI_MINIBUFFER:
         // visible(1)
@@ -3099,6 +3104,98 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)
     }
+}
+
+private struct ResidentSemanticWireCursor {
+    let data: Data
+    let end: Int
+    var position: Int
+    mutating func uint8() throws -> UInt8 { guard position < end else { throw ProtocolDecodeError.malformed }; defer { position += 1 }; return data[position] }
+    mutating func uint16() throws -> UInt16 { guard end - position >= 2 else { throw ProtocolDecodeError.malformed }; defer { position += 2 }; return try readU16(data, position) }
+    mutating func uint24() throws -> UInt32 { guard end - position >= 3 else { throw ProtocolDecodeError.malformed }; defer { position += 3 }; return try readU24(data, position) }
+    mutating func uint32() throws -> UInt32 { guard end - position >= 4 else { throw ProtocolDecodeError.malformed }; defer { position += 4 }; return try readU32(data, position) }
+    mutating func uint64() throws -> UInt64 { guard end - position >= 8 else { throw ProtocolDecodeError.malformed }; defer { position += 8 }; return try readU64(data, position) }
+    mutating func string16() throws -> String { let count = Int(try uint16()); guard end - position >= count, let value = try decodeUTF8(data[position..<(position + count)]) else { throw ProtocolDecodeError.malformed }; position += count; return value }
+}
+
+private func decodeResidentSemantics(data: Data, offset: Int) throws -> (GUIResidentSemanticsUpdate, Int) {
+    guard data.count - offset >= 5 else { throw ProtocolDecodeError.malformed }
+    let payloadLength = Int(try readU32(data, offset + 1))
+    guard payloadLength <= data.count - offset - 5 else { throw ProtocolDecodeError.malformed }
+    let end = offset + 5 + payloadLength
+    var cursor = ResidentSemanticWireCursor(data: data, end: end, position: offset + 5)
+    let version = try cursor.uint8(), mode = try cursor.uint8(), windowId = try cursor.uint16()
+    let contentEpoch = try cursor.uint32(), baseRevision = try cursor.uint32(), revision = try cursor.uint32()
+    let targetRowRevision = try cursor.uint32(), rowCount = try cursor.uint32()
+    let firstRowId = try cursor.uint64(), lastRowId = try cursor.uint64(), flags = try cursor.uint8()
+    guard flags & 0x80 == 0, flags & 0x48 != 0x48, flags & 0x30 != 0x30 else { throw ProtocolDecodeError.malformed }
+    let residentCursor = GUIResidentCursor(eligible: flags & 0x01 != 0, row: try cursor.uint32(), col: try cursor.uint16())
+    let cursorline = flags & 0x02 == 0 ? nil : GUIResidentCursorline(row: try cursor.uint32(), bg: try cursor.uint24())
+    let selection: GUIResidentSelection?
+    if flags & 0x04 != 0 {
+        guard let type = GUISelectionType(rawValue: try cursor.uint8()), type != .block else { throw ProtocolDecodeError.malformed }
+        selection = GUIResidentSelection(type: type, startRow: try cursor.uint32(), startCol: try cursor.uint16(), endRow: try cursor.uint32(), endCol: try cursor.uint16())
+    } else { selection = nil }
+    let tabWidth = try cursor.uint8(), activeGuideCol = try cursor.uint16()
+    let guideColCount = Int(try cursor.uint16())
+    guard guideColCount <= (end - cursor.position) / 2 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.arrayEntries, guideColCount)
+    var guideCols: [UInt16] = []; guideCols.reserveCapacity(guideColCount)
+    for _ in 0..<guideColCount { guideCols.append(try cursor.uint16()) }
+    let spliceCount = Int(try cursor.uint16())
+    guard spliceCount <= (end - cursor.position) / 12 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.arrayEntries, spliceCount)
+    var splices: [GUIResidentRowSplice] = []; splices.reserveCapacity(spliceCount)
+    for _ in 0..<spliceCount { splices.append(GUIResidentRowSplice(start: try cursor.uint32(), deleteCount: try cursor.uint32(), insertCount: try cursor.uint32())) }
+    let guideReplacementCount = Int(try cursor.uint16())
+    try FrameDecodeAccounting.reserve(.arrayEntries, guideReplacementCount)
+    var guideReplacements: [GUIResidentGuideReplacement] = []; guideReplacements.reserveCapacity(guideReplacementCount)
+    for _ in 0..<guideReplacementCount {
+        let start = try cursor.uint32(), replacementEnd = try cursor.uint32(), runCount = Int(try cursor.uint32())
+        guard runCount <= (end - cursor.position) / 10 else { throw ProtocolDecodeError.malformed }
+        try FrameDecodeAccounting.reserve(.arrayEntries, runCount)
+        var runs: [GUIResidentGuideRun] = []; runs.reserveCapacity(runCount)
+        for _ in 0..<runCount { runs.append(GUIResidentGuideRun(start: try cursor.uint32(), end: try cursor.uint32(), level: try cursor.uint16())) }
+        guideReplacements.append(GUIResidentGuideReplacement(start: start, end: replacementEnd, runs: runs))
+    }
+    let diagnostics: GUIResidentDiagnosticUpdate
+    if flags & 0x08 != 0 {
+        diagnostics = .replace(try decodeResidentDiagnostics(cursor: &cursor, count: Int(try cursor.uint32())))
+    } else if flags & 0x40 != 0 {
+        let count = Int(try cursor.uint16()); try FrameDecodeAccounting.reserve(.arrayEntries, count)
+        var replacements: [GUIResidentDiagnosticReplacement] = []; replacements.reserveCapacity(count)
+        for _ in 0..<count { let start = try cursor.uint32(), replacementEnd = try cursor.uint32(); let values = try decodeResidentDiagnostics(cursor: &cursor, count: Int(try cursor.uint32())); replacements.append(GUIResidentDiagnosticReplacement(start: start, end: replacementEnd, diagnostics: values)) }
+        diagnostics = .replaceRanges(replacements)
+    } else { diagnostics = .retain }
+    let annotations: GUIResidentAnnotationUpdate
+    if flags & 0x10 != 0 {
+        annotations = .replace(try decodeResidentAnnotations(cursor: &cursor, count: Int(try cursor.uint32())))
+    } else if flags & 0x20 != 0 {
+        let count = Int(try cursor.uint16()); try FrameDecodeAccounting.reserve(.arrayEntries, count)
+        var replacements: [GUIResidentAnnotationReplacement] = []; replacements.reserveCapacity(count)
+        for _ in 0..<count { let start = try cursor.uint32(), replacementEnd = try cursor.uint32(); let values = try decodeResidentAnnotations(cursor: &cursor, count: Int(try cursor.uint32())); replacements.append(GUIResidentAnnotationReplacement(start: start, end: replacementEnd, annotations: values)) }
+        annotations = .replaceRanges(replacements)
+    } else { annotations = .retain }
+    guard cursor.position == end else { throw ProtocolDecodeError.malformed }
+    let header = GUIResidentSemanticsHeader(version: version, mode: mode, windowId: windowId, contentEpoch: contentEpoch, baseRevision: baseRevision, revision: revision, targetRowRevision: targetRowRevision, rowCount: rowCount, firstRowId: firstRowId, lastRowId: lastRowId)
+    let guides = GUIResidentGuideUpdate(tabWidth: tabWidth, activeGuideCol: activeGuideCol, guideCols: guideCols, rowSplices: splices, replacements: guideReplacements)
+    return (GUIResidentSemanticsUpdate(header: header, cursor: residentCursor, cursorline: cursorline, selection: selection, guides: guides, diagnostics: diagnostics, annotations: annotations), 5 + payloadLength)
+}
+
+private func decodeResidentDiagnostics(cursor: inout ResidentSemanticWireCursor, count: Int) throws -> [GUIResidentDiagnostic] {
+    guard count >= 0, count <= (cursor.end - cursor.position) / 13 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
+    var values: [GUIResidentDiagnostic] = []; values.reserveCapacity(count)
+    for _ in 0..<count { let startRow = try cursor.uint32(); let startCol = try cursor.uint16(); let endRow = try cursor.uint32(); let endCol = try cursor.uint16(); guard let severity = GUIDiagnosticSeverity(rawValue: try cursor.uint8()) else { throw ProtocolDecodeError.malformed }; values.append(GUIResidentDiagnostic(startRow: startRow, startCol: startCol, endRow: endRow, endCol: endCol, severity: severity)) }
+    return values
+}
+
+private func decodeResidentAnnotations(cursor: inout ResidentSemanticWireCursor, count: Int) throws -> [GUIResidentAnnotation] {
+    guard count >= 0, count <= (cursor.end - cursor.position) / 15 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
+    var values: [GUIResidentAnnotation] = []; values.reserveCapacity(count)
+    for _ in 0..<count { let row = try cursor.uint32(); guard let kind = GUILineAnnotationKind(rawValue: try cursor.uint8()) else { throw ProtocolDecodeError.malformed }; values.append(GUIResidentAnnotation(row: row, kind: kind, fg: try cursor.uint24(), bg: try cursor.uint24(), text: try cursor.string16())) }
+    return values
 }
 
 // MARK: - Notification decoder

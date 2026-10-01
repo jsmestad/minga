@@ -105,6 +105,7 @@ defmodule Minga.Core.Decorations do
           pending:
             [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, term()}] | nil,
           version: non_neg_integer(),
+          annotation_version: non_neg_integer(),
           vt_line_cache: %{non_neg_integer() => [VirtualText.t()]} | nil,
           ann_line_cache: %{non_neg_integer() => [LineAnnotation.t()]} | nil
         }
@@ -117,8 +118,9 @@ defmodule Minga.Core.Decorations do
             conceal_ranges: [],
             pending: nil,
             version: 0,
+            annotation_version: 0,
             vt_line_cache: nil,
-            ann_line_cache: nil
+            ann_line_cache: %{}
 
   # ── Construction ─────────────────────────────────────────────────────────
 
@@ -215,16 +217,20 @@ defmodule Minga.Core.Decorations do
     # During a batch, defer highlight removal to pending (processed by apply_pending).
     # But immediately remove non-highlight types since they don't participate
     # in the pending queue system.
+    new_annotations = Enum.reject(decs.annotations, &(&1.group == group))
+
     %{
       decs
       | pending: [{:remove_group, group} | pending],
         virtual_texts: Enum.reject(decs.virtual_texts, &(&1.group == group)),
-        annotations: Enum.reject(decs.annotations, &(&1.group == group)),
+        annotations: new_annotations,
+        annotation_version:
+          bump_if_changed(decs.annotation_version, decs.annotations, new_annotations),
         block_decorations: Enum.reject(decs.block_decorations, &(&1.group == group)),
         fold_regions: Enum.reject(decs.fold_regions, &(&1.group == group)),
         conceal_ranges: Enum.reject(decs.conceal_ranges, &(&1.group == group)),
         vt_line_cache: nil,
-        ann_line_cache: nil
+        ann_line_cache: annotation_cache(new_annotations)
     }
   end
 
@@ -243,12 +249,14 @@ defmodule Minga.Core.Decorations do
       | highlights: new_highlights,
         virtual_texts: new_virtual_texts,
         annotations: new_annotations,
+        annotation_version:
+          bump_if_changed(decs.annotation_version, decs.annotations, new_annotations),
         block_decorations: new_blocks,
         fold_regions: new_folds,
         conceal_ranges: new_conceals,
         version: decs.version + 1,
         vt_line_cache: nil,
-        ann_line_cache: nil
+        ann_line_cache: annotation_cache(new_annotations)
     }
   end
 
@@ -258,12 +266,21 @@ defmodule Minga.Core.Decorations do
     if interval.value.group == group, do: :remove, else: {:keep, interval}
   end
 
+  @spec bump_if_changed(non_neg_integer(), term(), term()) :: non_neg_integer()
+  defp bump_if_changed(version, value, value), do: version
+  defp bump_if_changed(version, _before, _after), do: version + 1
+
   @doc """
   Removes all decorations. Returns a fresh empty store with bumped version.
   """
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = decs) do
-    %__MODULE__{version: decs.version + 1, pending: decs.pending}
+    %__MODULE__{
+      version: decs.version + 1,
+      annotation_version:
+        if(decs.annotations == [], do: decs.annotation_version, else: decs.annotation_version + 1),
+      pending: decs.pending
+    }
   end
 
   # ── Virtual text API ──────────────────────────────────────────────────────
@@ -763,7 +780,15 @@ defmodule Minga.Core.Decorations do
     }
 
     new_anns = [ann | decs.annotations]
-    {id, %{decs | annotations: new_anns, version: decs.version + 1, ann_line_cache: nil}}
+
+    {id,
+     %{
+       decs
+       | annotations: new_anns,
+         version: decs.version + 1,
+         annotation_version: decs.annotation_version + 1,
+         ann_line_cache: put_annotation_cache(decs.ann_line_cache, ann)
+     }}
   end
 
   @doc "Removes a line annotation by ID."
@@ -774,11 +799,40 @@ defmodule Minga.Core.Decorations do
         decs
 
       {_, remaining} ->
-        %{decs | annotations: remaining, version: decs.version + 1, ann_line_cache: nil}
+        %{
+          decs
+          | annotations: remaining,
+            version: decs.version + 1,
+            annotation_version: decs.annotation_version + 1,
+            ann_line_cache: annotation_cache(remaining)
+        }
     end
   end
 
   # ── Line annotation queries ──────────────────────────────────────────────
+
+  @spec put_annotation_cache(
+          %{non_neg_integer() => [LineAnnotation.t()]} | nil,
+          LineAnnotation.t()
+        ) :: %{non_neg_integer() => [LineAnnotation.t()]} | nil
+  defp put_annotation_cache(nil, _annotation), do: nil
+
+  defp put_annotation_cache(cache, %LineAnnotation{} = annotation) do
+    Map.update(cache, annotation.line, [annotation], fn line_annotations ->
+      Enum.sort_by([annotation | line_annotations], & &1.priority)
+    end)
+  end
+
+  @spec annotation_cache([LineAnnotation.t()]) :: %{
+          non_neg_integer() => [LineAnnotation.t()]
+        }
+  defp annotation_cache(annotations) do
+    annotations
+    |> Enum.group_by(& &1.line)
+    |> Map.new(fn {line, line_annotations} ->
+      {line, Enum.sort_by(line_annotations, & &1.priority)}
+    end)
+  end
 
   @doc """
   Returns all annotations for a specific line, sorted by priority.
@@ -792,6 +846,23 @@ defmodule Minga.Core.Decorations do
     anns
     |> Enum.filter(fn %LineAnnotation{line: l} -> l == line end)
     |> Enum.sort_by(fn %LineAnnotation{priority: p} -> p end)
+  end
+
+  @doc "Returns annotations in a half-open line range, ordered by line and priority."
+  @spec annotations_for_range(t(), non_neg_integer(), non_neg_integer()) :: [LineAnnotation.t()]
+  def annotations_for_range(%__MODULE__{}, start_line, end_line) when start_line >= end_line,
+    do: []
+
+  def annotations_for_range(%__MODULE__{ann_line_cache: cache}, start_line, end_line)
+      when cache != nil do
+    start_line..(end_line - 1)
+    |> Enum.flat_map(&Map.get(cache, &1, []))
+  end
+
+  def annotations_for_range(%__MODULE__{annotations: anns}, start_line, end_line) do
+    anns
+    |> Enum.filter(&(&1.line >= start_line and &1.line < end_line))
+    |> Enum.sort_by(&{&1.line, &1.priority})
   end
 
   @doc """
@@ -1231,7 +1302,7 @@ defmodule Minga.Core.Decorations do
         conceal_ranges: new_conceals,
         version: decs.version + 1,
         vt_line_cache: nil,
-        ann_line_cache: nil
+        ann_line_cache: annotation_cache(new_anns)
     }
   end
 

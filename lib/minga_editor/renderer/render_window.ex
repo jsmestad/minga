@@ -336,6 +336,21 @@ defmodule MingaEditor.Renderer.RenderWindow do
     %{window | render_cache: RenderCache.put_resident_build(cache, state)}
   end
 
+  @doc "Returns the persistent resident semantic state."
+  @spec resident_semantic_state(t()) ::
+          MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
+  def resident_semantic_state(%__MODULE__{render_cache: cache}),
+    do: RenderCache.resident_semantic_state(cache)
+
+  @doc "Stores the current resident semantic state."
+  @spec put_resident_semantic_state(
+          t(),
+          MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
+        ) :: t()
+  def put_resident_semantic_state(%__MODULE__{render_cache: cache} = window, state) do
+    %{window | render_cache: RenderCache.put_resident_semantic_state(cache, state)}
+  end
+
   @doc "Returns the renderer-owned immutable text presentation for this window."
   @spec text_presentation(t()) :: MingaEditor.Renderer.TextPresentation.t() | nil
   def text_presentation(%__MODULE__{render_cache: cache}),

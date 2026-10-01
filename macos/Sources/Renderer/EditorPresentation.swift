@@ -62,9 +62,14 @@ struct EditorSnapshotMetadata: Sendable {
 /// One complete editor pane surface captured at transaction publication.
 struct PresentedWindowSurface: Sendable {
     let content: GUIWindowContent
+    let residentSemantics: ResidentSemanticStore?
     let gutter: GutterPresentation
     let paneGeometry: GUIPaneGeometry
     let indentGuides: IndentGuideData?
+
+    init(content: GUIWindowContent, residentSemantics: ResidentSemanticStore? = nil, gutter: GutterPresentation, paneGeometry: GUIPaneGeometry, indentGuides: IndentGuideData?) {
+        self.content = content; self.residentSemantics = residentSemantics; self.gutter = gutter; self.paneGeometry = paneGeometry; self.indentGuides = indentGuides
+    }
 
     var windowId: UInt16 { content.windowId }
 
@@ -165,6 +170,10 @@ struct CommittedEditorSnapshot {
         })
     }
 
+    var windowResidentSemantics: [UInt16: ResidentSemanticStore] {
+        Dictionary(uniqueKeysWithValues: surfaces.compactMap { surface in surface.residentSemantics.map { (surface.windowId, $0) } })
+    }
+
     var windowIds: Set<UInt16> { Set(surfaces.map(\.windowId)) }
 
     func content(for windowId: UInt16) -> GUIWindowContent? {
@@ -181,6 +190,7 @@ struct CommittedEditorSnapshot {
         frameState: FrameState,
         themeColors: ThemeColors?,
         windowContents: [UInt16: GUIWindowContent],
+        windowResidentSemantics: [UInt16: ResidentSemanticStore] = [:],
         windowGutters: [UInt16: Wire.WindowGutter],
         windowIndentGuides: [UInt16: IndentGuideData],
         metadata: EditorSnapshotMetadata = .empty
@@ -192,6 +202,7 @@ struct CommittedEditorSnapshot {
         if let orphanGuides = Set(windowIndentGuides.keys).subtracting(liveWindowIds).min() {
             return .failure(.missingWindowReference(windowId: orphanGuides))
         }
+        if let orphanSemantics = Set(windowResidentSemantics.keys).subtracting(liveWindowIds).min() { return .failure(.missingWindowReference(windowId: orphanSemantics)) }
 
         var surfaces: [PresentedWindowSurface] = []
         surfaces.reserveCapacity(windowContents.count)
@@ -222,6 +233,7 @@ struct CommittedEditorSnapshot {
 
             surfaces.append(PresentedWindowSurface(
                 content: content,
+                residentSemantics: windowResidentSemantics[content.windowId],
                 gutter: gutterPresentation,
                 paneGeometry: paneGeometry,
                 indentGuides: windowIndentGuides[content.windowId]

@@ -77,6 +77,15 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.RowSplice
+  alias Minga.RenderModel.Window.ResidentSemantics
+
+  alias Minga.RenderModel.Window.ResidentSemantics.{
+    AnnotationReplace,
+    DiagnosticReplace,
+    GuideReplace,
+    GuideRun
+  }
+
   alias Minga.RenderModel.Window.ScrollPresentation
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
@@ -91,6 +100,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_indent_guides Opcodes.gui_indent_guides()
   @op_gui_text_presentation Opcodes.gui_text_presentation()
+  @op_gui_resident_semantics Opcodes.gui_resident_semantics()
 
   # Sectioned format section IDs
   @section_wc_header 0x01
@@ -134,12 +144,30 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @doc "Encodes a cursor and cursorline overlay delta for a retained GUI window."
   @spec encode_overlay_delta(RenderWindow.t()) :: binary()
+  def encode_overlay_delta(%RenderWindow{row_store_mode: {:resident, _count}} = window) do
+    encode_overlay_delta_payload(window, false, nil, nil)
+  end
+
   def encode_overlay_delta(%RenderWindow{} = window) do
+    encode_overlay_delta_payload(
+      window,
+      Map.get(window, :cursor_visible, true),
+      window.cursorline,
+      window.accessibility_cursor
+    )
+  end
+
+  defp encode_overlay_delta_payload(
+         window,
+         cursor_visible,
+         cursorline_model,
+         accessibility_cursor
+       ) do
     command = :gui_window_overlay_delta
-    cursorline = encode_cursorline_section(window.cursorline, window.rect, command)
+    cursorline = encode_cursorline_section(cursorline_model, window.rect, command)
 
     flags =
-      if(Map.get(window, :cursor_visible, true), do: 0x01, else: 0x00) |||
+      if(cursor_visible, do: 0x01, else: 0x00) |||
         if(cursorline != nil, do: 0x02, else: 0x00)
 
     command
@@ -154,7 +182,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     |> Writer.append(cursorline || [])
     |> Writer.uint32(
       :accessibility_cursor_utf16,
-      case window.accessibility_cursor do
+      case accessibility_cursor do
         {_row, utf16} -> utf16
         nil -> 0xFFFF_FFFF
       end
@@ -202,7 +230,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
     metadata =
       text_presentation ++
-        encode_cursorline(window.cursorline) ++ encode_indent_guides(window.indent_guides)
+        encode_legacy_cursorline(window) ++
+        encode_legacy_indent_guides(window) ++
+        encode_resident_semantics_command(window.resident_semantics)
 
     {gutter ++ metadata,
      empty_metrics()
@@ -229,6 +259,220 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   def encode_text_presentation(%RenderWindow{}), do: nil
 
+  @spec encode_legacy_indent_guides(RenderWindow.t()) :: [binary()]
+  defp encode_legacy_indent_guides(%RenderWindow{row_store_mode: {:resident, _count}}), do: []
+
+  defp encode_legacy_indent_guides(%RenderWindow{indent_guides: guides}),
+    do: encode_indent_guides(guides)
+
+  @spec encode_legacy_cursorline(RenderWindow.t()) :: [binary()]
+  defp encode_legacy_cursorline(%RenderWindow{row_store_mode: {:resident, _count}}), do: []
+
+  defp encode_legacy_cursorline(%RenderWindow{cursorline: cursorline}),
+    do: encode_cursorline(cursorline)
+
+  @doc "Encodes the atomic resident semantic model paired with this frame's retained rows."
+  @spec encode_resident_semantics(ResidentSemantics.t()) :: binary()
+  def encode_resident_semantics(%ResidentSemantics{} = semantics) do
+    command = :gui_resident_semantics
+    flags = resident_semantic_flags(semantics)
+    header = semantics.header
+
+    payload =
+      command
+      |> Writer.new()
+      |> Writer.uint8(:version, 1)
+      |> Writer.uint8(:mode, if(header.mode == :keyframe, do: 0, else: 1))
+      |> Writer.uint16(:window_id, header.window_id)
+      |> Writer.uint32(:content_epoch, header.content_epoch)
+      |> Writer.uint32(:base_revision, header.base_revision)
+      |> Writer.uint32(:result_revision, header.revision)
+      |> Writer.uint32(:target_row_revision, header.target_row_revision)
+      |> Writer.uint32(:row_count, header.row_count)
+      |> Writer.uint64(:first_row_id, header.first_row_id)
+      |> Writer.uint64(:last_row_id, header.last_row_id)
+      |> Writer.uint8(:flags, flags)
+      |> Writer.uint32(:cursor_row, semantics.cursor.row)
+      |> Writer.uint16(:cursor_col, semantics.cursor.col)
+      |> Writer.append(encode_resident_cursorline(semantics.cursorline, command))
+      |> Writer.append(encode_resident_selection(semantics.selection, command))
+      |> Writer.uint8(:guide_tab_width, semantics.tab_width)
+      |> Writer.uint16(:active_guide_col, semantics.active_guide_col)
+      |> Writer.uint16(:guide_col_count, length(semantics.guide_cols))
+      |> Writer.append(
+        Enum.map(semantics.guide_cols, fn col ->
+          command |> Writer.new() |> Writer.uint16(:guide_col, col) |> Writer.finish()
+        end)
+      )
+      |> Writer.uint16(:row_splice_count, length(semantics.row_splices))
+      |> Writer.append(Enum.map(semantics.row_splices, &encode_resident_row_splice(&1, command)))
+      |> Writer.uint16(:guide_replace_count, length(semantics.guide_replacements))
+      |> Writer.append(
+        Enum.map(semantics.guide_replacements, &encode_guide_replacement(&1, command))
+      )
+      |> Writer.append(encode_resident_diagnostics(semantics.diagnostics, command))
+      |> Writer.append(encode_resident_annotations(semantics.annotations, command))
+      |> Writer.finish()
+
+    command
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_resident_semantics>>)
+    |> Writer.payload32(:payload, payload)
+    |> Writer.finish()
+  end
+
+  @spec encode_resident_semantics_command(ResidentSemantics.t() | nil) :: [binary()]
+  defp encode_resident_semantics_command(nil), do: []
+
+  defp encode_resident_semantics_command(%ResidentSemantics{} = semantics),
+    do: [encode_resident_semantics(semantics)]
+
+  @spec resident_semantic_flags(ResidentSemantics.t()) :: non_neg_integer()
+  defp resident_semantic_flags(semantics) do
+    if(semantics.cursor.eligible, do: 0x01, else: 0) |||
+      if(semantics.cursorline != nil, do: 0x02, else: 0) |||
+      if(semantics.selection != nil, do: 0x04, else: 0) |||
+      case semantics.diagnostics do
+        {:replace, _diagnostics} -> 0x08
+        {:replace_ranges, _replacements} -> 0x40
+        :retain -> 0
+      end |||
+      case semantics.annotations do
+        {:replace, _annotations} -> 0x10
+        {:replace_ranges, _replacements} -> 0x20
+        :retain -> 0
+      end
+  end
+
+  defp encode_resident_cursorline(nil, _command), do: []
+
+  defp encode_resident_cursorline(cursorline, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:cursorline_row, cursorline.row)
+    |> Writer.rgb24(:cursorline_bg, cursorline.bg_rgb)
+    |> Writer.finish()
+  end
+
+  defp encode_resident_selection(nil, _command), do: []
+
+  defp encode_resident_selection(selection, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint8(:selection_type, if(selection.type == :char, do: 1, else: 2))
+    |> Writer.uint32(:selection_start_row, selection.start_row)
+    |> Writer.uint16(:selection_start_col, selection.start_col)
+    |> Writer.uint32(:selection_end_row, selection.end_row)
+    |> Writer.uint16(:selection_end_col, selection.end_col)
+    |> Writer.finish()
+  end
+
+  defp encode_resident_row_splice(splice, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:row_splice_start, splice.start_row)
+    |> Writer.uint32(:row_splice_delete_count, splice.delete_count)
+    |> Writer.uint32(:row_splice_insert_count, splice.insert_count)
+    |> Writer.finish()
+  end
+
+  defp encode_guide_replacement(%GuideReplace{} = replacement, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:guide_replace_start, replacement.start_row)
+    |> Writer.uint32(:guide_replace_end, replacement.end_row)
+    |> Writer.uint32(:guide_run_count, length(replacement.runs))
+    |> Writer.append(Enum.map(replacement.runs, &encode_guide_run(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_guide_run(%GuideRun{} = run, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:guide_run_start, run.start_row)
+    |> Writer.uint32(:guide_run_end, run.end_row)
+    |> Writer.uint16(:guide_run_level, run.level)
+    |> Writer.finish()
+  end
+
+  defp encode_resident_diagnostics(:retain, _command), do: []
+
+  defp encode_resident_diagnostics({:replace, diagnostics}, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:diagnostic_count, length(diagnostics))
+    |> Writer.append(Enum.map(diagnostics, &encode_resident_diagnostic(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_resident_diagnostics({:replace_ranges, replacements}, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint16(:diagnostic_replace_count, length(replacements))
+    |> Writer.append(Enum.map(replacements, &encode_diagnostic_replacement(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_diagnostic_replacement(%DiagnosticReplace{} = replacement, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:diagnostic_replace_start, replacement.start_row)
+    |> Writer.uint32(:diagnostic_replace_end, replacement.end_row)
+    |> Writer.uint32(:diagnostic_count, length(replacement.diagnostics))
+    |> Writer.append(Enum.map(replacement.diagnostics, &encode_resident_diagnostic(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_resident_diagnostic(diagnostic, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:diagnostic_start_row, diagnostic.start_row)
+    |> Writer.uint16(:diagnostic_start_col, diagnostic.start_col)
+    |> Writer.uint32(:diagnostic_end_row, diagnostic.end_row)
+    |> Writer.uint16(:diagnostic_end_col, diagnostic.end_col)
+    |> Writer.uint8(:diagnostic_severity, encode_severity(diagnostic.severity))
+    |> Writer.finish()
+  end
+
+  defp encode_resident_annotations(:retain, _command), do: []
+
+  defp encode_resident_annotations({:replace, annotations}, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:annotation_count, length(annotations))
+    |> Writer.append(Enum.map(annotations, &encode_resident_annotation(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_resident_annotations({:replace_ranges, replacements}, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint16(:annotation_replace_count, length(replacements))
+    |> Writer.append(Enum.map(replacements, &encode_annotation_replacement(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_annotation_replacement(%AnnotationReplace{} = replacement, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:annotation_replace_start, replacement.start_row)
+    |> Writer.uint32(:annotation_replace_end, replacement.end_row)
+    |> Writer.uint32(:annotation_count, length(replacement.annotations))
+    |> Writer.append(Enum.map(replacement.annotations, &encode_resident_annotation(&1, command)))
+    |> Writer.finish()
+  end
+
+  defp encode_resident_annotation(%Annotation{} = annotation, command) do
+    command
+    |> Writer.new()
+    |> Writer.uint32(:annotation_row, annotation.row)
+    |> Writer.uint8(:annotation_kind, encode_annotation_kind(annotation.kind))
+    |> Writer.rgb24(:annotation_fg, annotation.fg)
+    |> Writer.rgb24(:annotation_bg, annotation.bg)
+    |> Writer.string16(:annotation_text, annotation.text)
+    |> Writer.finish()
+  end
+
   @spec encode_window_content(RenderWindow.t()) :: binary()
   def encode_window_content(%RenderWindow{} = sw) do
     {binary, _metrics} = encode_window_content_with_metrics(sw)
@@ -242,7 +486,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible, bit 2 = sequential resident rows
     flags =
       if(sw.full_refresh, do: 1, else: 0) |||
-        if(Map.get(sw, :cursor_visible, true), do: 0x02, else: 0) |||
+        if(legacy_cursor_visible?(sw), do: 0x02, else: 0) |||
         resident_row_flags(sw.row_store_mode)
 
     header_payload =
@@ -250,8 +494,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       |> Writer.new()
       |> Writer.uint16(:window_id, sw.window_id)
       |> Writer.uint8(:flags, flags)
-      |> Writer.uint16(:cursor_row, sw.cursor_row)
-      |> Writer.uint16(:cursor_col, sw.cursor_col)
+      |> Writer.uint16(:cursor_row, legacy_cursor_row(sw))
+      |> Writer.uint16(:cursor_col, legacy_cursor_col(sw))
       |> Writer.uint8(:cursor_shape, encode_cursor_shape(sw.cursor_shape))
       |> Writer.uint16(:scroll_left, sw.scroll_left)
       |> Writer.uint32(:content_epoch, sw.content_epoch)
@@ -268,14 +512,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     rows_section = encode_section(command, @section_wc_rows, rows_payload)
     overlay = overlay_sections(sw, command)
 
-    accessibility =
-      accessibility_sections(
-        sw.accessibility_label,
-        sw.accessibility_generation,
-        sw.accessibility_cursor,
-        sw.accessibility_selection_ranges,
-        command
-      )
+    accessibility = accessibility_sections(sw, command)
 
     sections =
       [header_section, rows_section | overlay.sections] ++
@@ -448,6 +685,29 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     end)
   end
 
+  defp overlay_sections(%RenderWindow{row_store_mode: {:resident, _count}} = sw, command) do
+    section_encoder = fn section_id, payload -> encode_section(command, section_id, payload) end
+    geometry = geometry_sections(encode_geometry(sw.geometry, command), section_encoder)
+
+    scroll_presentation =
+      scroll_presentation_sections(
+        encode_scroll_presentation(ScrollPresentation.from_window(sw), command),
+        section_encoder
+      )
+
+    %{
+      sections: [],
+      selection: <<>>,
+      search: <<>>,
+      diagnostics: <<>>,
+      highlights: <<>>,
+      annotations: <<>>,
+      geometry: geometry,
+      cursorline: [],
+      scroll_presentation: scroll_presentation
+    }
+  end
+
   defp overlay_sections(%RenderWindow{} = sw, command) do
     section_encoder = fn section_id, payload -> encode_section(command, section_id, payload) end
     selection = section_encoder.(@section_wc_selection, encode_selection(sw.selection, command))
@@ -496,6 +756,17 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       scroll_presentation: scroll_presentation
     }
   end
+
+  defp legacy_cursor_visible?(%RenderWindow{row_store_mode: {:resident, _count}}), do: false
+
+  defp legacy_cursor_visible?(%RenderWindow{} = window),
+    do: Map.get(window, :cursor_visible, true)
+
+  defp legacy_cursor_row(%RenderWindow{row_store_mode: {:resident, _count}}), do: 0
+  defp legacy_cursor_row(%RenderWindow{cursor_row: row}), do: row
+
+  defp legacy_cursor_col(%RenderWindow{row_store_mode: {:resident, _count}}), do: 0
+  defp legacy_cursor_col(%RenderWindow{cursor_col: col}), do: col
 
   @spec empty_metrics() :: metrics()
   defp empty_metrics do
@@ -551,6 +822,29 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       |> Writer.finish()
 
     [encode_section(command, @section_wc_accessibility, payload)]
+  end
+
+  defp accessibility_sections(
+         %RenderWindow{row_store_mode: {:resident, _count}} = window,
+         command
+       ) do
+    accessibility_sections(
+      window.accessibility_label,
+      window.accessibility_generation,
+      nil,
+      [],
+      command
+    )
+  end
+
+  defp accessibility_sections(%RenderWindow{} = window, command) do
+    accessibility_sections(
+      window.accessibility_label,
+      window.accessibility_generation,
+      window.accessibility_cursor,
+      window.accessibility_selection_ranges,
+      command
+    )
   end
 
   @spec encode_accessibility_ranges(

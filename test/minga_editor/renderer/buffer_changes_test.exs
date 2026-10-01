@@ -194,6 +194,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :editing,
                :file_tree,
                :keymap_scope,
+               :last_search_pattern,
                :launchpad,
                :mouse,
                :search

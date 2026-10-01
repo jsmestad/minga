@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.StaleBufferError
+  alias MingaEditor.Renderer.StaleSearchError
   alias MingaEditor.Renderer.State
   alias MingaEditor.Renderer.Submission
 
@@ -86,6 +87,9 @@ defmodule MingaEditor.Renderer.FrameHandler do
       {:stale, error, retained} ->
         {:reply, {:error, error}, retained}
 
+      {:stale_search, error, retained} ->
+        {:reply, {:error, error}, retained}
+
       {:error, error, retained} ->
         {:reply, {:error, error}, retained}
     end
@@ -99,6 +103,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
     case execute_pipeline(prepared, input, attempt.intent, attempt.seq, attempt.pushed_at) do
       {:ok, committed, output} -> await_or_commit(committed, output, attempt)
       {:stale, error, retained} -> retry_stale(retained, attempt, retry_count, error)
+      {:stale_search, _error, retained} -> advance(retained)
       {:error, error, retained} -> drop_failed(retained, error, attempt.seq)
     end
   end
@@ -158,6 +163,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
   @spec execute_pipeline(State.t(), Input.t(), Intent.t(), non_neg_integer(), integer()) ::
           {:ok, State.t(), Input.t()}
           | {:stale, StaleBufferError.t(), State.t()}
+          | {:stale_search, StaleSearchError.t(), State.t()}
           | {:error, Exception.t(), State.t()}
   defp execute_pipeline(state, input, intent, seq, pushed_at) do
     output =
@@ -170,6 +176,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
     {:ok, committed, output}
   rescue
     error in [StaleBufferError] -> {:stale, error, state}
+    error in [StaleSearchError] -> {:stale_search, error, state}
     error -> {:error, error, state}
   end
 

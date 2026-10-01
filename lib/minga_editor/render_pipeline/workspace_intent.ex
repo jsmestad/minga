@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
     :cmd_hover_link,
     :mouse,
     :search,
+    :last_search_pattern,
     :keymap_scope,
     :launchpad
   ]
@@ -29,6 +30,7 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
           cmd_hover_link: term(),
           mouse: term(),
           search: MingaEditor.State.Search.Projection.t(),
+          last_search_pattern: String.t() | nil,
           keymap_scope: atom(),
           launchpad: term()
         }
@@ -44,6 +46,7 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
       cmd_hover_link: workspace.hover_observation.link,
       mouse: workspace.mouse,
       search: search,
+      last_search_pattern: workspace.search.last_pattern,
       keymap_scope: workspace.keymap_scope,
       launchpad: workspace.launchpad
     }

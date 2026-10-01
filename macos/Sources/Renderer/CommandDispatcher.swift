@@ -548,6 +548,7 @@ final class CommandDispatcher {
             baseFrameSeq: baseFrameSeq,
             generation: generation,
             committedWindows: priorSnapshot?.windowContents ?? [:],
+            committedResidentSemantics: priorSnapshot?.windowResidentSemantics ?? [:],
             committedGutters: priorSnapshot?.windowGutters ?? [:],
             committedIndentGuides: priorSnapshot?.windowIndentGuides ?? [:],
             committedMetadata: priorSnapshot?.metadata ?? .empty,
@@ -1238,7 +1239,7 @@ final class CommandDispatcher {
             frameState.cursorlineRow = row
             frameState.cursorlineBg = rgb
 
-        case .guiGutter, .guiTextPresentation:
+        case .guiGutter, .guiTextPresentation, .guiResidentSemantics:
             // Gutter geometry and the active window are owned by the committed
             // snapshot's surfaces and metadata; publication never mirrors them
             // back into FrameState (#2999 AC6).

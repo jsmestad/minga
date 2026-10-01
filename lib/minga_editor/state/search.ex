@@ -7,7 +7,8 @@ defmodule MingaEditor.State.Search do
   project search picker source), and the complete GUI search session.
   """
 
-  alias Minga.Editing.Search.Index
+  alias Minga.Search.IndexGeneration
+  alias Minga.Search.IndexOwner
   alias MingaEditor.State.Search.Projection
   alias MingaEditor.State.Search.Session
 
@@ -124,38 +125,43 @@ defmodule MingaEditor.State.Search do
   def begin_gui_build(%__MODULE__{gui_search: %Session{} = session} = search, buffer),
     do: %{search | gui_search: Session.begin_build(session, buffer)}
 
-  @doc "Accepts a fully built index only for the exact live search revision."
-  @spec accept_gui_index(
+  @doc "Checks whether a completed build still targets the exact live search revision."
+  @spec accepts_gui_generation?(t(), non_neg_integer(), pid()) :: boolean()
+  def accepts_gui_generation?(
+        %__MODULE__{gui_search: %Session{} = session},
+        revision,
+        buffer
+      ),
+      do: Session.accepts_generation?(session, revision, buffer)
+
+  def accepts_gui_generation?(%__MODULE__{}, _revision, _buffer), do: false
+
+  @doc "Accepts a source-owned generation only for the exact live search revision."
+  @spec accept_gui_generation(
           t(),
           non_neg_integer(),
           pid(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Index.t()
+          IndexGeneration.t()
         ) :: {:accepted, t()} | {:stale, t()}
-  def accept_gui_index(
+  def accept_gui_generation(
         %__MODULE__{gui_search: %Session{} = session} = search,
         revision,
         buffer,
-        version,
-        sequence,
-        index
+        generation
       ) do
-    case Session.accept_index(session, revision, buffer, version, sequence, index) do
+    case Session.accept_generation(session, revision, buffer, generation) do
       {:accepted, session} -> {:accepted, %{search | gui_search: session}}
       :stale -> {:stale, search}
     end
   end
 
   @doc "Installs an exact line-local incremental index update."
-  @spec accept_gui_incremental(t(), non_neg_integer(), non_neg_integer(), Index.t()) :: t()
+  @spec accept_gui_incremental(t(), IndexGeneration.t()) :: t()
   def accept_gui_incremental(
         %__MODULE__{gui_search: %Session{} = session} = search,
-        version,
-        sequence,
-        index
+        generation
       ),
-      do: %{search | gui_search: Session.accept_incremental(session, version, sequence, index)}
+      do: %{search | gui_search: Session.accept_incremental(session, generation)}
 
   @doc "Invalidates the accepted revision and retains prior results only for pending display."
   @spec rebuild_gui_search(t(), Minga.Buffer.EditDelta.t() | nil) :: t()
@@ -192,26 +198,52 @@ defmodule MingaEditor.State.Search do
       whole_word: false,
       regex: false,
       replace_mode: false,
-      status: :ready
+      status: :ready,
+      generation: nil,
+      query_revision: 0
     }
   end
 
-  def render_snapshot(%__MODULE__{gui_search: session}, buffer, cursor),
-    do: Session.projection(session, buffer, cursor)
+  def render_snapshot(%__MODULE__{gui_search: session}, buffer, cursor) do
+    summary = generation_summary(session, buffer, cursor)
+    Session.projection(session, buffer, summary)
+  end
 
-  @doc "Returns a ready index only at the exact active buffer revision."
-  @spec ready_gui_index(t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
-          {:ok, Index.t()} | :stale
-  def ready_gui_index(%__MODULE__{gui_search: %Session{} = session}, buffer, revision),
-    do: Session.ready_index(session, buffer, revision)
+  @doc "Returns a ready generation only at the exact active buffer revision."
+  @spec ready_gui_generation(t(), pid(), {non_neg_integer(), non_neg_integer()}) ::
+          {:ok, IndexGeneration.t()} | :stale
+  def ready_gui_generation(%__MODULE__{gui_search: %Session{} = session}, buffer, revision),
+    do: Session.ready_generation(session, buffer, revision)
 
-  def ready_gui_index(%__MODULE__{}, _buffer, _revision), do: :stale
+  def ready_gui_generation(%__MODULE__{}, _buffer, _revision), do: :stale
 
   @doc "Returns the active GUI query options."
   @spec gui_options(t()) :: Minga.Editing.Search.search_opts()
   def gui_options(%__MODULE__{gui_search: %Session{} = session}), do: Session.options(session)
   def gui_options(%__MODULE__{}), do: []
 
+  @doc "Returns the stable query revision for the active GUI search session."
+  @spec gui_query_revision(t()) :: non_neg_integer()
+  def gui_query_revision(%__MODULE__{gui_search: %Session{query_revision: revision}}),
+    do: revision
+
+  def gui_query_revision(%__MODULE__{}), do: 0
+
   defp initial_gui_query(nil), do: ""
   defp initial_gui_query(pattern), do: pattern
+
+  @spec generation_summary(Session.t(), pid() | nil, Minga.Editing.Search.position()) ::
+          {:ok, IndexOwner.summary()} | :stale
+  defp generation_summary(
+         %Session{
+           target_buffer: buffer,
+           result: {status, %IndexGeneration{} = generation}
+         },
+         buffer,
+         cursor
+       )
+       when status in [:ready, :rebuilding],
+       do: IndexOwner.summary(generation, cursor)
+
+  defp generation_summary(%Session{}, _buffer, _cursor), do: :stale
 end
