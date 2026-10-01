@@ -38,11 +38,14 @@ defmodule MingaAgent.Tools do
   | `code_actions`    | List/apply LSP code actions (apply is destructive)   |
   | `describe_runtime`| Describe the runtime's capabilities and features     |
   | `describe_tools`  | List all available tools with descriptions            |
+  | `fetch_output`    | Fetch an exact retained byte/item range              |
   """
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
+  alias MingaAgent.Tool.Context
+  alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
@@ -50,6 +53,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.ApplyDiff
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
+  alias MingaAgent.Tools.FetchOutput
   alias MingaAgent.Tools.FetchUrl
   alias MingaAgent.Tools.Git, as: GitTools
   alias MingaAgent.Tools.ListDirectory
@@ -63,6 +67,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.LspWorkspaceSymbols
   alias MingaAgent.Tools.MemoryWrite
   alias MingaAgent.Tools.MultiEditFile
+  alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.ReadFile
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Subagent
@@ -77,12 +82,15 @@ defmodule MingaAgent.Tools do
           fork_store: pid() | nil,
           parent_session: GenServer.server() | nil,
           shell_output_callback: (String.t() -> :ok) | nil,
-          process_backend: module()
+          process_backend: module(),
+          artifact_store: GenServer.server() | nil,
+          capture_key: Context.capture_key() | nil,
+          image_tool_result_delivery: Context.image_tool_result_delivery()
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
-  @read_only_tools ~w(read_file list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
+  @read_only_tools ~w(read_file fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
   @max_symlink_depth 40
 
   @doc """
@@ -130,6 +138,7 @@ defmodule MingaAgent.Tools do
   def specs do
     [
       read_file(),
+      fetch_output(),
       write_file(),
       edit_file(),
       multi_edit_file(),
@@ -231,19 +240,10 @@ defmodule MingaAgent.Tools do
       context_requirements: [:tool_context],
       build: fn context ->
         root = context.project_root
-        router_ctx = context.router_context
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
-
-          case ToolRouter.read_file(router_ctx, path) do
-            {:ok, content} ->
-              opts = build_read_opts(args)
-              routed_result(router_ctx, apply_read_slice(content, path, opts))
-
-            {:error, reason} ->
-              read_file_fallback(router_ctx, path, reason, args)
-          end
+          ReadFile.capture(context, path, build_read_opts(args))
         end
       end
     )
@@ -255,6 +255,43 @@ defmodule MingaAgent.Tools do
     opts = if args["offset"], do: [{:offset, args["offset"]} | opts], else: opts
     opts = if args["limit"], do: [{:limit, args["limit"]} | opts], else: opts
     opts
+  end
+
+  @spec fetch_output() :: Spec.t()
+  defp fetch_output do
+    Spec.new!(
+      name: "fetch_output",
+      description: """
+      Fetch an exact bounded byte or item range from retained tool output.
+      Uses immutable captured content and never re-runs the original tool.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "reference" => %{
+            "type" => "object",
+            "properties" => %{
+              "token" => %{"type" => "string"},
+              "media_type" => %{"type" => "string"},
+              "bytes" => %{"type" => "integer"},
+              "items" => %{"type" => ["integer", "null"]},
+              "sha256" => %{"type" => "string"}
+            },
+            "required" => ["token", "media_type", "bytes", "sha256"]
+          },
+          "unit" => %{"type" => "string", "enum" => ["bytes", "items"]},
+          "start" => %{"type" => "integer", "minimum" => 0},
+          "count" => %{"type" => "integer", "minimum" => 0}
+        },
+        "required" => ["reference", "unit", "start", "count"]
+      },
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :auto,
+      capabilities: [:read_project],
+      context_requirements: [:tool_context],
+      build: fn context -> fn args -> FetchOutput.execute(context, args) end end
+    )
   end
 
   @spec fetch_url() :: Spec.t()
@@ -287,10 +324,10 @@ defmodule MingaAgent.Tools do
       category: :network,
       approval_level: :auto,
       capabilities: [:network],
-      context_requirements: [],
+      context_requirements: [:tool_context],
       metadata: %{pack: :read_only_tools},
-      build: fn _context ->
-        &FetchUrl.execute/1
+      build: fn context ->
+        fn args -> FetchUrl.execute(args) |> retained_process_result(context) end
       end
     )
   end
@@ -616,17 +653,20 @@ defmodule MingaAgent.Tools do
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
 
-          case ToolRouter.list_directory(router_ctx, path) do
-            :passthrough ->
-              ListDirectory.execute(path)
+          result =
+            case ToolRouter.list_directory(router_ctx, path) do
+              :passthrough ->
+                ListDirectory.execute(path)
 
-            {:ok, entries} ->
-              {:ok,
-               append_workspace_context(router_ctx, format_project_view_entries(path, entries))}
+              {:ok, entries} ->
+                {:ok,
+                 append_workspace_context(router_ctx, format_project_view_entries(path, entries))}
 
-            {:error, reason} ->
-              {:error, inspect(reason)}
-          end
+              {:error, reason} ->
+                {:error, inspect(reason)}
+            end
+
+          retained_process_result(result, context)
         end
       end
     )
@@ -637,10 +677,10 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "find",
       description: """
-      Find files and directories by name pattern (glob). Returns at most 200
-      sorted matching paths relative to the project root. Generated, dependency,
-      build, cache, and secret env paths are omitted. Use this for broad file
-      discovery instead of shell + find.
+      Find files and directories by name pattern (glob). Returns the first 100
+      sorted matching paths and retains the canonical result for item pagination.
+      Generated, dependency, build, cache, and secret env paths are omitted.
+      Use this for broad file discovery instead of shell + find.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -684,12 +724,12 @@ defmodule MingaAgent.Tools do
             {:ok, search} ->
               public_args = Map.take(args, ["type", "max_depth"])
 
-              routed_result(
-                router_ctx,
-                process_backend.find(args["pattern"], search.exec_path, public_args,
-                  filter_root: search.filter_root
-                )
+              process_backend.find(args["pattern"], search.exec_path, public_args,
+                filter_root: search.filter_root,
+                artifact_store: context.artifact_store,
+                capture_key: context.capture_key
               )
+              |> retained_process_result(context)
 
             {:error, reason} ->
               {:error, inspect(reason)}
@@ -754,12 +794,12 @@ defmodule MingaAgent.Tools do
             {:ok, search} ->
               public_args = Map.take(args, ["glob", "case_sensitive", "context_lines"])
 
-              routed_result(
-                router_ctx,
-                process_backend.grep(args["pattern"], search.exec_path, public_args,
-                  filter_root: search.filter_root
-                )
+              process_backend.grep(args["pattern"], search.exec_path, public_args,
+                filter_root: search.filter_root,
+                artifact_store: context.artifact_store,
+                capture_key: context.capture_key
               )
+              |> retained_process_result(context)
 
             {:error, reason} ->
               {:error, inspect(reason)}
@@ -775,7 +815,7 @@ defmodule MingaAgent.Tools do
       name: "shell",
       description: """
       Run a shell command in the project root directory. Returns the combined
-      stdout and stderr output, capped at 64KB for the model. Commands time out
+      stdout and stderr output, capped at 51KB for the model. Commands time out
       after 30 seconds. Use this for running tests, linters, git commands, etc.
       Use find and grep for broad file discovery and content search.
       Do not use for interactive commands that require user input.
@@ -808,26 +848,22 @@ defmodule MingaAgent.Tools do
         fn args ->
           timeout_secs = normalize_shell_timeout(args["timeout"])
 
-          run_shell_with_timeout(timeout_secs, fn ->
-            with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
-                 {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
-              shell_root = cwd || root
+          with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
+               {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
+            shell_root = cwd || root
 
-              if is_nil(cwd) do
-                flush_before_shell()
-              end
-
-              routed_result(
-                router_ctx,
-                process_backend.shell(args["command"], shell_root, timeout_secs,
-                  env: env,
-                  on_output: shell_output_callback
-                )
-              )
-            else
-              {:error, reason} -> {:error, inspect(reason)}
+            if is_nil(cwd) do
+              flush_before_shell()
             end
-          end)
+
+            process_backend.shell(args["command"], shell_root, timeout_secs,
+              env: env,
+              on_output: shell_output_callback
+            )
+            |> retained_process_result(context)
+          else
+            {:error, reason} -> {:error, inspect(reason)}
+          end
         end
       end
     )
@@ -920,7 +956,7 @@ defmodule MingaAgent.Tools do
       context_requirements: [:tool_context],
       build: fn context ->
         root = context.project_root
-        fn _args -> GitTools.status(root) end
+        fn _args -> GitTools.status(root) |> retained_process_result(context) end
       end
     )
   end
@@ -958,7 +994,7 @@ defmodule MingaAgent.Tools do
           opts = []
           opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
           opts = if args["staged"], do: [{:staged, args["staged"]} | opts], else: opts
-          GitTools.diff(root, opts, router_ctx)
+          GitTools.diff(root, opts, router_ctx) |> retained_process_result(context)
         end
       end
     )
@@ -996,7 +1032,7 @@ defmodule MingaAgent.Tools do
           opts = []
           opts = if args["count"], do: [{:count, args["count"]} | opts], else: opts
           opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
-          GitTools.log(root, opts)
+          GitTools.log(root, opts) |> retained_process_result(context)
         end
       end
     )
@@ -1138,7 +1174,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
-          LspDiagnostics.execute(path)
+          LspDiagnostics.execute(path) |> retained_process_result(context)
         end
       end
     )
@@ -1182,7 +1218,9 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
+
           LspDefinition.execute(path, args["line"], args["column"])
+          |> retained_process_result(context)
         end
       end
     )
@@ -1227,7 +1265,9 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
+
           LspReferences.execute(path, args["line"], args["column"])
+          |> retained_process_result(context)
         end
       end
     )
@@ -1271,7 +1311,9 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
+
           LspHover.execute(path, args["line"], args["column"])
+          |> retained_process_result(context)
         end
       end
     )
@@ -1307,7 +1349,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
-          LspDocumentSymbols.execute(path)
+          LspDocumentSymbols.execute(path) |> retained_process_result(context)
         end
       end
     )
@@ -1338,9 +1380,9 @@ defmodule MingaAgent.Tools do
       capabilities: [:lsp_read],
       context_requirements: [:tool_context],
       metadata: %{pack: :lsp_tools, destructive: false},
-      build: fn _context ->
+      build: fn context ->
         fn args ->
-          LspWorkspaceSymbols.execute(args["query"])
+          LspWorkspaceSymbols.execute(args["query"]) |> retained_process_result(context)
         end
       end
     )
@@ -1442,7 +1484,8 @@ defmodule MingaAgent.Tools do
           opts = []
           opts = if args["column"], do: [{:col, args["column"]} | opts], else: opts
           opts = if args["apply"], do: [{:apply, args["apply"]} | opts], else: opts
-          LspCodeActions.execute(path, args["line"], opts)
+          result = LspCodeActions.execute(path, args["line"], opts)
+          if args["apply"], do: result, else: retained_process_result(result, context)
         end
       end
     )
@@ -1497,74 +1540,11 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  # ── Shell execution guard ─────────────────────────────────────────────────
+  # ── Shell execution ───────────────────────────────────────────────────────
 
   @spec normalize_shell_timeout(term()) :: pos_integer()
   defp normalize_shell_timeout(value) when is_integer(value), do: value |> max(1) |> min(300)
   defp normalize_shell_timeout(_value), do: 30
-
-  @spec run_shell_with_timeout(
-          pos_integer(),
-          (-> {:ok, String.t()} | {:error, String.t()})
-        ) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_shell_with_timeout(timeout_secs, callback) do
-    parent = self()
-    result_ref = make_ref()
-
-    {pid, monitor_ref} =
-      spawn_monitor(fn -> coordinate_shell_worker(parent, result_ref, callback) end)
-
-    receive do
-      {^result_ref, result} ->
-        Process.demonitor(monitor_ref, [:flush])
-        result
-
-      {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
-        receive_shell_result_after_down(result_ref, reason)
-    after
-      timeout_secs * 1_000 ->
-        Process.exit(pid, :kill)
-        await_shell_worker_down(monitor_ref, pid)
-        {:error, "command timed out"}
-    end
-  end
-
-  @spec coordinate_shell_worker(pid(), reference(), (-> term())) :: term()
-  defp coordinate_shell_worker(parent, result_ref, callback) do
-    parent_monitor = Process.monitor(parent)
-    coordinator = self()
-    callback_pid = spawn_link(fn -> send(coordinator, {:shell_callback_result, callback.()}) end)
-
-    receive do
-      {:shell_callback_result, result} ->
-        Process.demonitor(parent_monitor, [:flush])
-        send(parent, {result_ref, result})
-
-      {:DOWN, ^parent_monitor, :process, ^parent, _reason} ->
-        Process.exit(callback_pid, :kill)
-    end
-  end
-
-  @spec receive_shell_result_after_down(reference(), term()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp receive_shell_result_after_down(result_ref, reason) do
-    receive do
-      {^result_ref, result} -> result
-    after
-      0 -> {:error, "command failed: #{inspect(reason)}"}
-    end
-  end
-
-  @spec await_shell_worker_down(reference(), pid()) :: :ok
-  defp await_shell_worker_down(monitor_ref, pid) do
-    receive do
-      {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
-    after
-      1_000 ->
-        Process.demonitor(monitor_ref, [:flush])
-        :ok
-    end
-  end
 
   # ── Pre-shell buffer flush ─────────────────────────────────────────────────
 
@@ -1615,35 +1595,48 @@ defmodule MingaAgent.Tools do
 
   # ── ProjectView routing helpers ────────────────────────────────────────────
 
-  @spec read_file_fallback(ToolRouter.context(), String.t(), term(), map()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp read_file_fallback(router_ctx, path, reason, args) do
-    if routing_error?(reason) do
-      {:error, inspect(reason)}
+  @spec retained_process_result(
+          {:ok, String.t() | Output.t()} | {:error, term()},
+          Context.t()
+        ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
+  defp retained_process_result({:ok, %Output{}} = result, _context), do: result
+  defp retained_process_result({:error, %Output{}} = result, _context), do: result
+
+  defp retained_process_result(
+         {:error, {:incomplete, reason, bytes}},
+         %Context{} = context
+       )
+       when is_atom(reason) and is_binary(bytes) do
+    OutputCapture.bytes(context.artifact_store, context.capture_key, bytes,
+      capture_status: {:incomplete, reason}
+    )
+  end
+
+  defp retained_process_result({:ok, message}, %Context{} = context) when is_binary(message) do
+    {captured, capture_status} = legacy_capture(message)
+
+    OutputCapture.bytes(context.artifact_store, context.capture_key, captured,
+      capture_status: capture_status
+    )
+  end
+
+  defp retained_process_result({:error, _reason} = error, _context), do: error
+
+  @spec legacy_capture(String.t()) :: {String.t(), Output.capture_status()}
+  defp legacy_capture(message) do
+    if String.contains?(message, ["[truncated", "... (truncated", "[stream truncated"]) do
+      captured =
+        Regex.replace(
+          ~r/\n+(?:\[truncated[^\]]*\]|\.\.\. \(truncated[^)]*\))\z/,
+          message,
+          ""
+        )
+
+      {captured, {:incomplete, :capture_byte_limit}}
     else
-      if ToolRouter.project_view?(router_ctx) do
-        {:error,
-         "failed to read #{path} from #{ToolRouter.workspace_label(router_ctx)}: #{inspect(reason)}"}
-      else
-        routed_result(router_ctx, ReadFile.execute(path, build_read_opts(args)))
-      end
+      {message, :complete}
     end
   end
-
-  @spec routed_result(ToolRouter.context(), {:ok, String.t()} | {:error, String.t()}) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp routed_result(router_ctx, {:ok, message}) do
-    {:ok, append_workspace_context(router_ctx, message)}
-  end
-
-  defp routed_result(_router_ctx, {:error, _message} = error), do: error
-
-  @spec routing_error?(term()) :: boolean()
-  defp routing_error?({:fork_unavailable, _}), do: true
-  defp routing_error?({:project_view_unavailable, _}), do: true
-  defp routing_error?({:changeset_unavailable, _}), do: true
-  defp routing_error?(:deleted), do: true
-  defp routing_error?(_), do: false
 
   @spec append_workspace_context(ToolRouter.context(), String.t()) :: String.t()
   defp append_workspace_context(router_ctx, message) do
@@ -1879,26 +1872,6 @@ defmodule MingaAgent.Tools do
     end
 
     :ok
-  end
-
-  # Applies offset/limit slicing to content read from a changeset.
-  @spec apply_read_slice(String.t(), String.t(), keyword()) :: {:ok, String.t()}
-  defp apply_read_slice(content, _path, []) do
-    {:ok, content}
-  end
-
-  defp apply_read_slice(content, path, opts) do
-    lines = String.split(content, "\n")
-    total = Enum.count(lines)
-    offset = Keyword.get(opts, :offset, 1)
-    limit = Keyword.get(opts, :limit, total)
-
-    start_idx = max(offset - 1, 0)
-    sliced = Enum.slice(lines, start_idx, limit)
-    end_line = min(start_idx + limit, total)
-
-    header = "[lines #{offset}-#{end_line} of #{total}] #{path}\n"
-    {:ok, header <> Enum.join(sliced, "\n")}
   end
 
   # Applies multiple edits to a file through the tool router by reading,

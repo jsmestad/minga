@@ -602,28 +602,41 @@ defmodule MingaAgent.Session.Continuation do
 
   @doc "Turns an interrupted checkpoint into a safe exact continuation without replaying calls."
   @spec reconcile_interrupted(t(), pos_integer()) :: {t(), [map()]}
-  def reconcile_interrupted(%__MODULE__{tool_checkpoint: nil} = continuation, _transcript_id),
-    do: {continuation, []}
+  def reconcile_interrupted(%__MODULE__{} = continuation, transcript_id),
+    do: reconcile_interrupted(continuation, transcript_id, %{})
+
+  @doc "Reconciles with any separately proven durable capture facts keyed by tool call ID."
+  @spec reconcile_interrupted(t(), pos_integer(), %{optional(String.t()) => term()}) ::
+          {t(), [map()]}
+  def reconcile_interrupted(
+        %__MODULE__{tool_checkpoint: nil} = continuation,
+        _transcript_id,
+        _outputs
+      ),
+      do: {continuation, []}
 
   def reconcile_interrupted(
         %__MODULE__{tool_checkpoint: checkpoint} = continuation,
-        transcript_id
+        transcript_id,
+        outputs
       )
-      when is_integer(transcript_id) and transcript_id > 0 do
+      when is_integer(transcript_id) and transcript_id > 0 and is_map(outputs) do
     {result_messages, reversed_reconciliation} =
       Enum.map_reduce(checkpoint.calls, [], fn call, statuses ->
-        {message, status} = reconciliation_result(call)
+        {message, status} = reconciliation_result(call, Map.get(outputs, call.tool_call_id))
 
-        {message,
-         [
-           %{
-             tool_call_id: call.tool_call_id,
-             name: call.name,
-             status: status,
-             result_message: message
-           }
-           | statuses
-         ]}
+        output = Map.get(outputs, call.tool_call_id)
+
+        reconciliation =
+          %{
+            tool_call_id: call.tool_call_id,
+            name: call.name,
+            status: status,
+            result_message: message
+          }
+          |> maybe_put_output(output)
+
+        {message, [reconciliation | statuses]}
       end)
 
     reconciliation = Enum.reverse(reversed_reconciliation)
@@ -931,23 +944,27 @@ defmodule MingaAgent.Session.Continuation do
     end
   end
 
-  @spec reconciliation_result(checkpoint_call()) :: {Message.t(), atom()}
-  defp reconciliation_result(%{status: {:completed, %Message{} = message}}),
+  @spec reconciliation_result(checkpoint_call(), term()) :: {Message.t(), atom()}
+  defp reconciliation_result(%{status: {:completed, %Message{} = message}}, _output),
     do: {message, :completed}
 
-  defp reconciliation_result(%{status: :admitted} = call) do
+  defp reconciliation_result(%{status: :admitted} = call, output) do
+    metadata =
+      %{is_error: true, minga_effect_status: :indeterminate}
+      |> maybe_put_output(output)
+
     message =
       Context.tool_result_message(
         call.name,
         call.tool_call_id,
         "Tool effect outcome is indeterminate after interruption. The call was not rerun.",
-        %{is_error: true, minga_effect_status: :indeterminate}
+        metadata
       )
 
     {message, :indeterminate}
   end
 
-  defp reconciliation_result(%{status: :pending} = call) do
+  defp reconciliation_result(%{status: :pending} = call, _output) do
     message =
       Context.tool_result_message(
         call.name,
@@ -958,6 +975,10 @@ defmodule MingaAgent.Session.Continuation do
 
     {message, :not_executed}
   end
+
+  @spec maybe_put_output(map(), term()) :: map()
+  defp maybe_put_output(metadata, nil), do: metadata
+  defp maybe_put_output(metadata, output), do: Map.put(metadata, :output, output)
 
   @spec valid_message_attachments?(Message.t()) :: boolean()
   defp valid_message_attachments?(%Message{content: content}) do

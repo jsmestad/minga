@@ -2,6 +2,8 @@ defmodule MingaAgent.Hooks.PostToolUsePayloadTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Hooks.PostToolUsePayload
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
 
   test "new/5 builds a payload with all fields" do
     payload =
@@ -42,8 +44,21 @@ defmodule MingaAgent.Hooks.PostToolUsePayloadTest do
              "tool_name" => "write_file",
              "arguments" => %{"path" => "b.txt"},
              "result" => "ok",
+             "output" => nil,
              "is_error" => false
            }
+  end
+
+  test "new/6 exposes typed retained facts without payload bytes" do
+    {:ok, range} = Range.new(:full, :bytes, 0, 2, 2)
+    {:ok, output} = Output.new("ok", :complete, range)
+    payload = PostToolUsePayload.new("tc_output", "read_file", %{}, "ok", false, output)
+
+    assert %{
+             "view" => "ok",
+             "capture" => %{"status" => "complete"},
+             "reference" => nil
+           } = payload.output
   end
 
   test "result is truncated when it exceeds 10KB" do

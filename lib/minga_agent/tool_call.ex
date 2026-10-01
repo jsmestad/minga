@@ -12,6 +12,7 @@ defmodule MingaAgent.ToolCall do
   """
 
   alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.Tool.Output
 
   @typedoc "Tool call execution status."
   @type status :: :running | :complete | :error
@@ -26,6 +27,7 @@ defmodule MingaAgent.ToolCall do
           args: map(),
           status: status(),
           result: String.t(),
+          output: Output.t() | nil,
           is_error: boolean(),
           collapsed: boolean(),
           auto_approved_scope: auto_approved_scope() | nil,
@@ -40,6 +42,7 @@ defmodule MingaAgent.ToolCall do
             args: %{},
             status: :running,
             result: "",
+            output: nil,
             is_error: false,
             collapsed: true,
             auto_approved_scope: nil,
@@ -58,19 +61,33 @@ defmodule MingaAgent.ToolCall do
     }
   end
 
-  @doc "Marks the tool call as successfully completed, recording the result and duration."
-  @spec complete(t(), String.t()) :: t()
-  def complete(%__MODULE__{} = tc, result) when is_binary(result) do
-    %{tc | status: :complete, result: result, collapsed: true, duration_ms: elapsed(tc)}
+  @doc false
+  @spec restore(keyword()) :: t()
+  def restore(attrs) when is_list(attrs), do: struct!(__MODULE__, attrs)
+
+  @doc "Marks the tool call as successfully completed, recording its legacy text and typed output facts."
+  @spec complete(t(), String.t(), Output.t() | nil) :: t()
+  def complete(%__MODULE__{} = tc, result, output \\ nil)
+      when is_binary(result) and (is_struct(output, Output) or is_nil(output)) do
+    %{
+      tc
+      | status: :complete,
+        result: result,
+        output: output,
+        collapsed: true,
+        duration_ms: elapsed(tc)
+    }
   end
 
-  @doc "Marks the tool call as failed, recording the error result and duration."
-  @spec error(t(), String.t()) :: t()
-  def error(%__MODULE__{} = tc, result) when is_binary(result) do
+  @doc "Marks the tool call as failed, recording its legacy text and typed output facts."
+  @spec error(t(), String.t(), Output.t() | nil) :: t()
+  def error(%__MODULE__{} = tc, result, output \\ nil)
+      when is_binary(result) and (is_struct(output, Output) or is_nil(output)) do
     %{
       tc
       | status: :error,
         result: result,
+        output: output,
         is_error: true,
         collapsed: true,
         duration_ms: elapsed(tc)
@@ -80,7 +97,7 @@ defmodule MingaAgent.ToolCall do
   @doc "Aborts a running tool call. Only transitions `:running` calls."
   @spec abort(t()) :: t()
   def abort(%__MODULE__{status: :running} = tc) do
-    %{tc | status: :error, result: "aborted", is_error: true}
+    %{tc | status: :error, result: "aborted", output: nil, is_error: true}
   end
 
   def abort(%__MODULE__{} = tc), do: tc
@@ -88,7 +105,7 @@ defmodule MingaAgent.ToolCall do
   @doc "Updates the partial result during streaming, auto-expanding the display."
   @spec update_partial(t(), String.t()) :: t()
   def update_partial(%__MODULE__{} = tc, partial_result) when is_binary(partial_result) do
-    %{tc | result: partial_result, collapsed: false}
+    %{tc | result: partial_result, output: nil, collapsed: false}
   end
 
   @doc "Toggles the collapsed display state."

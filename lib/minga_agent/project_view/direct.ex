@@ -12,6 +12,7 @@ defmodule MingaAgent.ProjectView.Direct do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.Source
 
   @type direct_state :: %{modified: MapSet.t(String.t()), deleted: MapSet.t(String.t())}
 
@@ -32,6 +33,13 @@ defmodule MingaAgent.ProjectView.Direct do
   @spec read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%ProjectView{} = view, relative_path) do
     view |> target_path(relative_path) |> File.read()
+  end
+
+  @impl true
+  @spec resolve_source(ProjectView.t(), String.t()) :: {:ok, Source.t()}
+  def resolve_source(%ProjectView{} = view, relative_path) do
+    path = target_path(view, relative_path)
+    {:ok, Source.disk(path, path)}
   end
 
   @impl true

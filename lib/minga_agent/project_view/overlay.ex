@@ -13,6 +13,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.Source
 
   @type ref :: %{changeset: pid(), fork_store: pid() | nil, owned_fork_store?: boolean()}
 
@@ -59,6 +60,18 @@ defmodule MingaAgent.ProjectView.Overlay do
   end
 
   @impl true
+  @spec resolve_source(ProjectView.t(), String.t()) :: {:ok, Source.t()} | {:error, term()}
+  def resolve_source(%ProjectView{} = view, relative_path) do
+    case open_buffer_source(view, relative_path) do
+      :changeset ->
+        {:ok, Source.changeset(buffer_path(view, relative_path), changeset(view), relative_path)}
+
+      result ->
+        result
+    end
+  end
+
+  @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
     case write_open_buffer(view, relative_path, content) do
@@ -95,17 +108,31 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec read_open_buffer(ProjectView.t(), String.t()) ::
           {:ok, binary()} | :changeset | {:error, term()}
   defp read_open_buffer(%ProjectView{} = view, relative_path) do
+    case open_buffer_source(view, relative_path) do
+      {:ok, %Source{owner: {:buffer, pid}}} -> safe_buffer_content(pid)
+      {:ok, %Source{owner: {:fork, pid}}} -> {:ok, Minga.Buffer.Fork.content(pid)}
+      result -> result
+    end
+  catch
+    :exit, reason -> {:error, {:source_unavailable, reason}}
+  end
+
+  @spec open_buffer_source(ProjectView.t(), String.t()) ::
+          {:ok, Source.t()} | :changeset | {:error, term()}
+  defp open_buffer_source(%ProjectView{} = view, relative_path) do
     case open_buffer_pid(view, relative_path) do
-      {:ok, buf_pid} ->
+      {:ok, pid} ->
+        path = buffer_path(view, relative_path)
+
         case fork_store(view) do
-          nil -> {:ok, Minga.Buffer.content(buf_pid)}
-          fork_store -> read_fork_or_buffer(fork_store, buffer_path(view, relative_path), buf_pid)
+          nil -> {:ok, Source.buffer(path, pid)}
+          store -> resolve_fork_or_buffer(store, path, pid)
         end
 
       :not_found ->
         :changeset
 
-      {:error, _} = error ->
+      {:error, _reason} = error ->
         error
     end
   end
@@ -157,21 +184,17 @@ defmodule MingaAgent.ProjectView.Overlay do
     _ -> {:error, {:buffer_lookup_failed, relative_path}}
   end
 
-  @spec read_fork_or_buffer(pid(), String.t(), pid()) ::
-          {:ok, binary()} | :changeset | {:error, term()}
-  defp read_fork_or_buffer(fork_store, path, buf_pid) do
-    with :ok <- fork_store_available(fork_store) do
-      case BufferForkStore.get(fork_store, path) do
-        nil ->
-          case safe_buffer_content(buf_pid) do
-            {:ok, content} -> {:ok, content}
-            {:error, _} -> :changeset
-          end
-
-        fork_pid ->
-          {:ok, Minga.Buffer.Fork.content(fork_pid)}
+  @spec resolve_fork_or_buffer(pid(), String.t(), pid()) ::
+          {:ok, Source.t()} | {:error, term()}
+  defp resolve_fork_or_buffer(store, path, buffer) do
+    with :ok <- fork_store_available(store) do
+      case BufferForkStore.get(store, path) do
+        nil -> {:ok, Source.buffer(path, buffer)}
+        fork -> {:ok, Source.fork(path, fork)}
       end
     end
+  catch
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
   end
 
   @spec write_fork(pid(), String.t(), pid(), binary()) :: :forked | {:error, term()}

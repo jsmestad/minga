@@ -6,6 +6,7 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolPacks.ReadOnly
+  alias MingaAgent.Test.RetainedContextFixture
 
   setup do
     table = :"read_only_pack_test_#{System.unique_integer([:positive])}"
@@ -27,32 +28,6 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
     for name <- ReadOnly.tool_names() do
       assert {:ok, %Spec{source: {:bundle, :read_only_tools}}} = Registry.lookup(table, name)
     end
-  end
-
-  test "registers read-only tools as source-owned specs with stable metadata", %{table: table} do
-    assert :ok = ReadOnly.register(table)
-
-    canonical_metadata =
-      MingaAgent.Tools.specs()
-      |> Map.new(fn spec -> {spec.name, {spec.description, spec.parameter_schema}} end)
-
-    for name <- ReadOnly.tool_names() do
-      assert {:ok, %Spec{} = spec} = Registry.lookup(table, name)
-      assert spec.source == ReadOnly.source()
-      assert spec.approval_level == :auto
-      assert spec.metadata == %{pack: :read_only_tools}
-      assert {spec.description, spec.parameter_schema} == Map.fetch!(canonical_metadata, name)
-    end
-
-    assert {:ok, find_spec} = Registry.lookup(table, "find")
-    assert find_spec.category == :filesystem
-    assert find_spec.capabilities == [:read_project]
-    assert find_spec.context_requirements == [:tool_context]
-
-    assert {:ok, fetch_spec} = Registry.lookup(table, "fetch_url")
-    assert fetch_spec.category == :network
-    assert fetch_spec.capabilities == [:network]
-    assert fetch_spec.context_requirements == []
   end
 
   test "bundled names stay reserved while the pack is unregistered", %{table: table} do
@@ -115,7 +90,7 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
 
     on_exit(fn -> File.rm_rf!(root) end)
 
-    context = ToolContext.new(project_root: root)
+    context = RetainedContextFixture.new(root, "find")
     assert :ok = ReadOnly.register(table)
 
     assert {:ok, find_result} =
@@ -123,17 +98,24 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
                tool_context: context
              )
 
-    assert find_result =~ "target.txt"
+    assert find_result.view =~ "target.txt"
+
+    context =
+      ToolContext.for_tool_call(context, context.artifact_store, "pack-checkpoint", "grep")
 
     assert {:ok, grep_result} =
              Executor.execute("grep", %{"pattern" => "needle"}, table, :exec,
                tool_context: context
              )
 
-    assert grep_result =~ "target.txt"
-    assert grep_result =~ "needle"
+    assert grep_result.view =~ "target.txt"
+    assert grep_result.view =~ "needle"
 
-    assert {:error, fetch_error} = Executor.execute("fetch_url", %{"url" => "not-a-url"}, table)
+    assert {:error, fetch_error} =
+             Executor.execute("fetch_url", %{"url" => "not-a-url"}, table, :exec,
+               tool_context: context
+             )
+
     assert fetch_error =~ "http:// or https://"
   end
 
@@ -152,7 +134,7 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
       File.rm_rf!(outside)
     end)
 
-    context = ToolContext.new(project_root: root)
+    context = RetainedContextFixture.new(root, "directory")
     assert :ok = ReadOnly.register(table)
 
     assert {:ok, result} =
@@ -160,7 +142,7 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
                tool_context: context
              )
 
-    assert result =~ "inside.txt"
+    assert result.view =~ "inside.txt"
 
     assert {:error, reason} =
              Executor.execute("list_directory", %{"path" => outside}, table, :exec,

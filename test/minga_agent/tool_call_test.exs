@@ -2,6 +2,8 @@ defmodule MingaAgent.ToolCallTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.ToolCall
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
 
   describe "new/3" do
     test "creates a running tool call with monotonic timestamp" do
@@ -12,6 +14,7 @@ defmodule MingaAgent.ToolCallTest do
       assert tc.args == %{"command" => "ls"}
       assert tc.status == :running
       assert tc.result == ""
+      assert tc.output == nil
       assert tc.is_error == false
       assert tc.collapsed == true
       assert tc.auto_approved_scope == nil
@@ -37,6 +40,16 @@ defmodule MingaAgent.ToolCallTest do
       assert is_integer(completed.duration_ms)
       assert completed.duration_ms >= 0
     end
+
+    test "owns the transition from legacy text to typed output facts" do
+      {:ok, range} = Range.new(:full, :bytes, 0, 13, 13)
+      {:ok, output} = Output.new("file contents", :complete, range)
+
+      completed = ToolCall.new("tc-output", "read_file") |> ToolCall.complete(output.view, output)
+
+      assert completed.result == "file contents"
+      assert completed.output == output
+    end
   end
 
   describe "error/2" do
@@ -49,6 +62,17 @@ defmodule MingaAgent.ToolCallTest do
       assert errored.is_error == true
       assert errored.collapsed == true
       assert is_integer(errored.duration_ms)
+    end
+
+    test "preserves typed incomplete capture facts on an error" do
+      {:ok, range} = Range.new(:captured_prefix, :bytes, 0, 7, :unknown)
+      {:ok, output} = Output.new("partial", {:incomplete, :interrupted}, range)
+
+      errored = ToolCall.new("tc-output-error", "shell") |> ToolCall.error(output.view, output)
+
+      assert errored.result == "partial"
+      assert errored.output == output
+      assert errored.is_error
     end
   end
 

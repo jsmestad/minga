@@ -221,6 +221,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.Subagent.Handle",
     "MingaAgent.TodoItem",
     "MingaAgent.TokenEstimator",
+    "MingaAgent.Tool.Output",
     "MingaAgent.Tool.Spec",
     "MingaAgent.ToolApproval.Preview",
     "MingaAgent.ToolCall",

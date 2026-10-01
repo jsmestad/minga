@@ -122,6 +122,10 @@ defmodule Minga.Buffer do
   @doc "Content and mutation version captured atomically in one call."
   @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
   defdelegate content_with_version(server), to: BufferProcess
+  @doc "A byte-bounded content prefix and mutation version captured atomically."
+  @spec content_prefix_with_version(t(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), boolean()}
+  defdelegate content_prefix_with_version(server, max_bytes), to: BufferProcess
 
   @doc "Returns the buffer-owned merge conflict entries."
   @spec conflicts(t()) :: [Minga.Git.MergeConflict.Entry.t()]
@@ -162,6 +166,16 @@ defmodule Minga.Buffer do
   @doc "Content of lines from `start_line` to `end_line` (inclusive, 0-indexed)."
   @spec content_on_lines(t(), non_neg_integer(), non_neg_integer()) :: String.t()
   defdelegate content_on_lines(server, start_line, end_line), to: BufferProcess
+
+  @doc "A byte-bounded line range and mutation version captured atomically."
+  @spec content_on_lines_with_version(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer(), pos_integer(), non_neg_integer(), boolean()}
+  defdelegate content_on_lines_with_version(server, start_line, line_count, max_bytes),
+    to: BufferProcess
 
   @doc "Text between two positions (end inclusive, includes the character at end_pos)."
   @spec text_between_inclusive(t(), position(), position()) :: String.t()

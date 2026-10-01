@@ -7,7 +7,8 @@ defmodule MingaAgent.ModelSelection do
   materialized into one inline `LLMDB.Model`.
   """
 
-  @version 2
+  @version 3
+  @identity_version 2
 
   alias __MODULE__.Credential.{ApiKey, None, OAuth}
   alias __MODULE__.{Evidence, Policy, Route, Stored}
@@ -24,6 +25,8 @@ defmodule MingaAgent.ModelSelection do
   defstruct @enforce_keys
 
   @type capability :: Policy.capability()
+  @type image_tool_result_delivery ::
+          :supported | {:unsupported, :model_image_input | :tool_result_transport}
   @type credential_ref :: ApiKey.t() | OAuth.t() | None.t()
   @type t :: %__MODULE__{
           backend_id: String.t(),
@@ -72,11 +75,11 @@ defmodule MingaAgent.ModelSelection do
 
   @doc "Decodes and validates persisted data without making it executable."
   @spec decode(map()) :: {:ok, Stored.t()} | {:error, term()}
-  def decode(%{"version" => @version} = data) do
+  def decode(%{"version" => version} = data) when version in [2, @version] do
     with backend_id when is_binary(backend_id) and backend_id != "" <- Map.get(data, "backend_id"),
          {:ok, route} <- Route.decode(Map.get(data, "route", %{})),
          {:ok, credential} <- decode_credential(Map.get(data, "credential", %{})),
-         {:ok, policy} <- decode_policy(Map.get(data, "policy", %{})),
+         {:ok, policy} <- decode_policy(Map.get(data, "policy", %{}), version, route),
          {:ok, evidence} <- decode_evidence(Map.get(data, "evidence", %{})),
          :ok <- validate_credential(credential, route) do
       {:ok, Stored.new(backend_id, route, credential, policy, evidence)}
@@ -120,7 +123,7 @@ defmodule MingaAgent.ModelSelection do
   @spec id(t() | Stored.t()) :: String.t()
   def id(%{backend_id: backend_id, route: route, credential: credential}) do
     identity = %{
-      version: @version,
+      version: @identity_version,
       backend_id: backend_id,
       route:
         Map.take(
@@ -158,6 +161,25 @@ defmodule MingaAgent.ModelSelection do
   @spec images?(t()) :: boolean()
   def images?(%__MODULE__{policy: %Policy{capabilities: %{images: true}}}), do: true
   def images?(%__MODULE__{}), do: false
+
+  @doc "Returns true only when the exact route explicitly supports images in tool results."
+  @spec tool_result_images?(t()) :: boolean()
+  def tool_result_images?(%__MODULE__{
+        policy: %Policy{capabilities: %{tool_result_images: true}}
+      }),
+      do: true
+
+  def tool_result_images?(%__MODULE__{}), do: false
+
+  @doc "Composes image-input and tool-result transport support for the exact selection."
+  @spec image_tool_result_delivery(t()) :: image_tool_result_delivery()
+  def image_tool_result_delivery(%__MODULE__{} = selection) do
+    case {images?(selection), tool_result_images?(selection)} do
+      {false, _transport} -> {:unsupported, :model_image_input}
+      {true, true} -> :supported
+      {true, false} -> {:unsupported, :tool_result_transport}
+    end
+  end
 
   @doc "Changes reasoning effort while preserving the immutable executable route."
   @spec with_reasoning(t(), String.t()) :: {:ok, t()} | {:error, String.t()}
@@ -276,8 +298,9 @@ defmodule MingaAgent.ModelSelection do
     }
   end
 
-  @spec decode_policy(map()) :: {:ok, Policy.t()} | {:error, :invalid_policy}
-  defp decode_policy(data) when is_map(data) do
+  @spec decode_policy(map(), pos_integer(), Route.t()) ::
+          {:ok, Policy.t()} | {:error, :invalid_policy}
+  defp decode_policy(data, version, route) when is_map(data) do
     reasoning = Map.get(data, "reasoning", %{})
     limits = Map.get(data, "limits", %{})
     capabilities = Map.get(data, "capabilities", %{})
@@ -296,13 +319,31 @@ defmodule MingaAgent.ModelSelection do
       capabilities: %{
         tools: decode_capability(Map.get(capabilities, "tools")),
         images: decode_capability(Map.get(capabilities, "images")),
+        tool_result_images: decode_tool_result_images(version, capabilities, route),
         streaming: decode_capability(Map.get(capabilities, "streaming"))
       },
       cost: Map.get(data, "cost", %{})
     })
   end
 
-  defp decode_policy(_data), do: {:error, :invalid_policy}
+  defp decode_policy(_data, _version, _route), do: {:error, :invalid_policy}
+
+  @spec decode_tool_result_images(pos_integer(), map(), Route.t()) :: capability() | :invalid
+  defp decode_tool_result_images(@version, capabilities, _route),
+    do: decode_capability(Map.get(capabilities, "tool_result_images"))
+
+  defp decode_tool_result_images(2, capabilities, %Route{} = route) do
+    images = decode_capability(Map.get(capabilities, "images"))
+
+    case {images, route.origin, route.execution.wire_protocol} do
+      {true, {:catalog, _provider, _model}, protocol}
+      when protocol in ["anthropic_messages", "openai_responses", "openai_codex_responses"] ->
+        true
+
+      {_images, _origin, _protocol} ->
+        :unknown
+    end
+  end
 
   @spec decode_evidence(map()) :: {:ok, Evidence.t()} | {:error, :invalid_evidence}
   defp decode_evidence(%{

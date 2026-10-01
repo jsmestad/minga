@@ -10,7 +10,9 @@ defmodule MingaAgent.Tool.Executor do
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Tool.Context
+  alias MingaAgent.Tool.Limitation
   alias MingaAgent.Tool.PlanMode
+  alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
 
@@ -80,9 +82,10 @@ defmodule MingaAgent.Tool.Executor do
       config = Keyword.get_lazy(opts, :config, &AgentConfig.resolve/0)
       hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
       tool_context = Keyword.get(opts, :tool_context)
+      dispatch_post_hook? = Keyword.get(opts, :dispatch_post_hook, true)
 
       with :ok <- ensure_context_available(spec, tool_context) do
-        run_callback(spec, args, config, hook_runner, tool_context)
+        run_callback(spec, args, config, hook_runner, tool_context, dispatch_post_hook?)
       end
     end
   end
@@ -143,7 +146,7 @@ defmodule MingaAgent.Tool.Executor do
          hook_runner,
          tool_context
        ) do
-    run_callback(spec, args, config, hook_runner, tool_context)
+    run_callback(spec, args, config, hook_runner, tool_context, true)
   end
 
   @spec ensure_context_available(Spec.t(), Context.t() | nil) :: :ok | {:error, term()}
@@ -161,19 +164,37 @@ defmodule MingaAgent.Tool.Executor do
   defp plan_mode_blocked?(:plan, name, args), do: PlanMode.blocked?(name, args)
   defp plan_mode_blocked?(:exec, _name, _args), do: false
 
-  @spec run_callback(Spec.t(), map(), AgentConfig.t(), hook_runner(), Context.t() | nil) ::
-          {:ok, term()} | {:error, term()}
-  defp run_callback(%Spec{} = spec, args, config, hook_runner, tool_context) do
+  @spec run_callback(
+          Spec.t(),
+          map(),
+          AgentConfig.t(),
+          hook_runner(),
+          Context.t() | nil,
+          boolean()
+        ) :: {:ok, term()} | {:error, term()}
+  defp run_callback(%Spec{} = spec, args, config, hook_runner, tool_context, dispatch_post_hook?) do
     case dispatch_pre_tool_use(spec, args, config, hook_runner) do
       :ok ->
         result = run_callback_with_advice(spec, args, tool_context)
-        dispatch_post_tool_use(spec, args, result, config)
+        maybe_dispatch_post_tool_use(dispatch_post_hook?, spec, args, result, config)
         result
 
       {:error, %HookResult{} = result} ->
         {:error, {:hook_veto, HookResult.message(result)}}
     end
   end
+
+  @spec maybe_dispatch_post_tool_use(
+          boolean(),
+          Spec.t(),
+          map(),
+          {:ok, term()} | {:error, term()},
+          AgentConfig.t()
+        ) :: :ok
+  defp maybe_dispatch_post_tool_use(true, spec, args, result, config),
+    do: dispatch_post_tool_use(spec, args, result, config)
+
+  defp maybe_dispatch_post_tool_use(false, _spec, _args, _result, _config), do: :ok
 
   @spec run_callback_with_advice(Spec.t(), map(), Context.t() | nil) ::
           {:ok, term()} | {:error, term()}
@@ -196,10 +217,13 @@ defmodule MingaAgent.Tool.Executor do
   @spec dispatch_post_tool_use(Spec.t(), map(), {:ok, term()} | {:error, term()}, AgentConfig.t()) ::
           :ok
   defp dispatch_post_tool_use(%Spec{} = spec, args, result, config) do
-    {result_text, is_error} =
+    {result_text, is_error, output} =
       case result do
-        {:ok, value} -> {inspect(value), false}
-        {:error, reason} -> {inspect(reason), true}
+        {:ok, %Output{} = output} -> {output.view, false, output}
+        {:error, %Output{} = output} -> {output.view, true, output}
+        {:error, %Limitation{} = limitation} -> {Limitation.message(limitation), true, nil}
+        {:ok, value} -> {inspect(value), false, nil}
+        {:error, reason} -> {inspect(reason), true, nil}
       end
 
     payload =
@@ -208,7 +232,8 @@ defmodule MingaAgent.Tool.Executor do
         spec.name,
         args,
         result_text,
-        is_error
+        is_error,
+        output
       )
 
     HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))

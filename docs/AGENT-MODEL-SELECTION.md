@@ -80,7 +80,7 @@ Supported custom protocol mappings are:
 | `anthropic_messages` | Anthropic | `/v1/messages` |
 | `google_generate_content` | Google | `/models/{provider_model_id}:generateContent` |
 
-`auth_mode` is `api_key` by default and can be set to `none`. Anonymous routes send no authorization header. OAuth credentials are bound to the catalog OpenAI Codex endpoint and cannot be redirected to custom endpoints. A custom route is always labeled **unverified custom route**: configuring it proves that the route is intentional, not that the remote service is compatible.
+`auth_mode` is `api_key` by default. OpenAI-compatible Chat and Responses routes may use `none` and send no authorization header. Anthropic Messages and Google routes require API-key authentication; unsupported anonymous routes are rejected before activation. OAuth credentials are bound to the catalog OpenAI Codex endpoint and cannot be redirected to custom endpoints. A custom route is always labeled **unverified custom route**: configuring it proves that the route is intentional, not that the remote service is compatible.
 
 For an API-key custom endpoint, the credential owner is the endpoint ID, not the wire provider. Store a key for an endpoint named `private` with `MingaAgent.Credentials.store("private", System.fetch_env!("PRIVATE_API_KEY"))`. Native resolves that exact file profile and does not borrow an OpenAI key because the endpoint uses OpenAI's protocol.
 
@@ -94,6 +94,12 @@ Capability values are evidence, not guesses. `unknown` is displayed explicitly a
 - Rejection preserves the previous active selection and includes a corrective message.
 
 Use explicit custom endpoint capability declarations when you control and have tested the server.
+
+Retained image tool results need both `images: true` and `tool_result_images: true` on the exact route. Ordinary image-input support alone does not prove that the protocol accepts an image inside a tool result. Minga derives the transport gate for catalog Anthropic Messages and OpenAI Responses/Codex routes; OpenAI Chat and undeclared custom routes remain conservative. A custom server must declare `tool_result_images` explicitly after its transport has been tested. Google transport support also requires explicit evidence.
+
+Unsupported image tool results are recoverable, model-visible tool errors, not empty successful reads. They do not disable ordinary user image attachments when those attachments are supported. See [Session Recovery](SESSION-RECOVERY.md#retained-tool-output) for retained bytes and the actual loopback image smoke.
+
+Selection codec version 3 adds the transport capability and reads version 2 conservatively. Stable route identities keep the `ms2_` identity schema; adding a delivery capability does not rename the route.
 
 ## Native provider support matrix
 

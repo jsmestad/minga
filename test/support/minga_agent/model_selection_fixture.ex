@@ -89,7 +89,9 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
             request_output: 8_192
           }),
         capabilities:
-          Keyword.get(opts, :capabilities, %{tools: true, images: true, streaming: true}),
+          opts
+          |> Keyword.get(:capabilities, %{tools: true, images: true, streaming: true})
+          |> Map.put_new(:tool_result_images, :unknown),
         cost: %{}
       })
 
@@ -135,6 +137,16 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
       transport: "http",
       base_url: "https://chatgpt.com/backend-api",
       path: "/codex/responses"
+    }
+  end
+
+  defp execution_defaults(:google) do
+    %{
+      family: "google_generate_content",
+      wire_protocol: "google_generate_content",
+      transport: "http",
+      base_url: "https://generativelanguage.googleapis.com/v1beta",
+      path: "/models/{provider_model_id}:generateContent"
     }
   end
 

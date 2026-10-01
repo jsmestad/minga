@@ -135,6 +135,78 @@ defmodule Minga.Buffer.Lines do
     end
   end
 
+  @doc "Joins a line range up to a byte limit without copying unselected document content."
+  @spec bounded_contents(Document.t(), line_index(), non_neg_integer(), non_neg_integer()) ::
+          {String.t(), non_neg_integer(), line_count(), boolean()}
+  def bounded_contents(%Document{} = document, first_line, count, max_bytes)
+      when first_line >= 0 and count >= 0 and max_bytes >= 0 do
+    bounded_contents_index(document, clean_line_starts(document), first_line, count, max_bytes)
+  end
+
+  @spec clean_line_starts(Document.t()) :: line_starts()
+  defp clean_line_starts(%Document{line_offsets: starts})
+       when is_tuple(starts) and is_integer(elem(starts, 0)),
+       do: starts
+
+  defp clean_line_starts(%Document{
+         line_offsets: {:pending, starts, adjust_after, delta}
+       }) do
+    flush_to_tuple(starts, adjust_after, delta)
+  end
+
+  defp clean_line_starts(%Document{} = document) do
+    document |> Document.content() |> build_index()
+  end
+
+  @spec bounded_contents_index(
+          Document.t(),
+          line_starts(),
+          line_index(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer(), line_count(), boolean()}
+  defp bounded_contents_index(document, starts, first_line, count, max_bytes) do
+    total = tuple_size(starts)
+    selected_count = min(max(total - first_line, 0), count)
+    bounded_contents_range(document, starts, first_line, selected_count, total, max_bytes)
+  end
+
+  @spec bounded_contents_range(
+          Document.t(),
+          line_starts(),
+          line_index(),
+          non_neg_integer(),
+          line_count(),
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer(), line_count(), boolean()}
+  defp bounded_contents_range(_document, _starts, _first_line, 0, total, _max_bytes),
+    do: {"", 0, total, true}
+
+  defp bounded_contents_range(
+         %Document{before: before, after: after_},
+         starts,
+         first_line,
+         selected_count,
+         total,
+         max_bytes
+       ) do
+    start_byte = elem(starts, first_line)
+    last_line = first_line + selected_count - 1
+    stop_byte = selected_stop(starts, last_line, total, byte_size(before) + byte_size(after_))
+    wanted_bytes = stop_byte - start_byte
+    accepted_bytes = min(wanted_bytes, max_bytes)
+    content = extract_from_gap(before, after_, start_byte, accepted_bytes)
+    {content, selected_count, total, accepted_bytes == wanted_bytes}
+  end
+
+  @spec selected_stop(line_starts(), line_index(), line_count(), non_neg_integer()) ::
+          non_neg_integer()
+  defp selected_stop(_starts, last_line, total, text_size) when last_line + 1 == total,
+    do: text_size
+
+  defp selected_stop(starts, last_line, _total, _text_size),
+    do: elem(starts, last_line + 1) - 1
+
   @doc "Returns indexed document text so callers can answer multiple line questions without rebuilding the line index."
   @spec snapshot(Document.t()) :: snapshot()
 

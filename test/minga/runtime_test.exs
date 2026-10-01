@@ -10,7 +10,7 @@ defmodule Minga.RuntimeTest do
   # async: false because this test uses globally named runtime supervisors and registries.
   use ExUnit.Case, async: false
 
-  alias MingaAgent.Tool.Context
+  alias MingaAgent.Test.RetainedContextFixture
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
 
@@ -57,16 +57,13 @@ defmodule Minga.RuntimeTest do
 
   describe "tool execution" do
     test "executes list_directory through the Executor" do
-      # list_directory with "." is read-only and always succeeds
       result =
         Executor.execute("list_directory", %{"path" => "."}, MingaAgent.Tool.Registry, :exec,
           tool_context: tool_context()
         )
 
       assert {:ok, output} = result
-      assert is_binary(output)
-      # The project root must contain mix.exs
-      assert output =~ "mix.exs"
+      assert output.view =~ "mix.exs"
     end
 
     test "executes read_file through the Executor" do
@@ -76,8 +73,7 @@ defmodule Minga.RuntimeTest do
         )
 
       assert {:ok, content} = result
-      assert is_binary(content)
-      assert content =~ "defmodule"
+      assert content.view =~ "defmodule"
     end
 
     test "returns error for unknown tool" do
@@ -99,10 +95,6 @@ defmodule Minga.RuntimeTest do
     end
   end
 
-  defp tool_context do
-    Context.new(
-      project_root: File.cwd!(),
-      router_context: MingaAgent.ToolRouter.context(nil, nil)
-    )
-  end
+  @spec tool_context() :: MingaAgent.Tool.Context.t()
+  defp tool_context, do: RetainedContextFixture.new(File.cwd!(), "runtime-tool")
 end

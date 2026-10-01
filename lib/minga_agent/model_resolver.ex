@@ -339,7 +339,8 @@ defmodule MingaAgent.ModelResolver do
   defp stored_policy_matches?(policy, source) do
     expected_limits = limits(source)
 
-    Map.take(policy.capabilities, [:tools, :images, :streaming]) == capabilities(source) and
+    Map.take(policy.capabilities, [:tools, :images, :tool_result_images, :streaming]) ==
+      capabilities(source) and
       policy.reasoning.options == reasoning_options(source) and
       Map.take(policy.limits, [:context, :input, :output]) == expected_limits and
       saved_output_within_limit?(policy.limits.request_output, expected_limits.output)
@@ -706,7 +707,8 @@ defmodule MingaAgent.ModelResolver do
              protocol,
              endpoint,
              provider_model_id(source, model_id)
-           ) do
+           ),
+         :ok <- validate_route_auth(configured_auth, protocol) do
       route(source, %{
         provider: provider,
         model_id: model_id,
@@ -740,6 +742,18 @@ defmodule MingaAgent.ModelResolver do
       })
     end
   end
+
+  @spec validate_route_auth(:api_key | :none, String.t()) :: :ok | {:error, resolution_error()}
+  defp validate_route_auth(:api_key, _protocol), do: :ok
+
+  defp validate_route_auth(:none, protocol) when protocol in ["openai_chat", "openai_responses"],
+    do: :ok
+
+  defp validate_route_auth(:none, _protocol),
+    do:
+      route_error(
+        "The selected protocol requires API-key authentication; anonymous authentication is not supported by its request adapter."
+      )
 
   @spec route(source(), map()) :: {:ok, Route.t()} | {:error, resolution_error()}
   defp route(source, route_data) do
@@ -1174,6 +1188,7 @@ defmodule MingaAgent.ModelResolver do
   @spec capabilities(source()) :: %{
           tools: ModelSelection.capability(),
           images: ModelSelection.capability(),
+          tool_result_images: ModelSelection.capability(),
           streaming: ModelSelection.capability()
         }
   defp capabilities({:custom, model}) do
@@ -1182,6 +1197,7 @@ defmodule MingaAgent.ModelResolver do
     %{
       tools: configured_capability(configured, "tools"),
       images: configured_capability(configured, "images"),
+      tool_result_images: configured_capability(configured, "tool_result_images"),
       streaming: configured_capability(configured, "streaming")
     }
   end
@@ -1189,13 +1205,43 @@ defmodule MingaAgent.ModelResolver do
   defp capabilities({:catalog, model}) do
     caps = value(model, "capabilities")
     modalities = value(model, "modalities")
+    images = image_capability(value(modalities, "input"))
 
     %{
       tools: nested_capability(value(caps, "tools"), "enabled"),
-      images: image_capability(value(modalities, "input")),
+      images: images,
+      tool_result_images: catalog_tool_result_images(model, caps, images),
       streaming: nested_capability(value(caps, "streaming"), "text")
     }
   end
+
+  @spec catalog_tool_result_images(map(), term(), ModelSelection.capability()) ::
+          ModelSelection.capability()
+  defp catalog_tool_result_images(_model, _caps, images) when images != true, do: false
+
+  defp catalog_tool_result_images(model, caps, true) do
+    protocol =
+      model
+      |> value("execution")
+      |> value("text")
+      |> value("wire_protocol")
+
+    catalog_tool_result_images_for_protocol(
+      protocol,
+      configured_capability(caps, "tool_result_images")
+    )
+  end
+
+  @spec catalog_tool_result_images_for_protocol(String.t() | nil, ModelSelection.capability()) ::
+          ModelSelection.capability()
+  defp catalog_tool_result_images_for_protocol(protocol, _explicit)
+       when protocol in ["anthropic_messages", "openai_responses", "openai_codex_responses"],
+       do: true
+
+  defp catalog_tool_result_images_for_protocol("google_generate_content", true), do: true
+  defp catalog_tool_result_images_for_protocol("google_generate_content", _explicit), do: false
+  defp catalog_tool_result_images_for_protocol("openai_chat", _explicit), do: false
+  defp catalog_tool_result_images_for_protocol(_protocol, _explicit), do: :unknown
 
   @spec configured_capability(term(), String.t()) :: ModelSelection.capability()
   defp configured_capability(configured, key) when is_map(configured),

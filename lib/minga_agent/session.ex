@@ -36,6 +36,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Hooks.StopPayload
   alias MingaAgent.Hooks.UserPromptSubmitPayload
   alias MingaAgent.Memory
+  alias MingaAgent.ArtifactStores
+  alias MingaAgent.ArtifactStore
+  alias MingaAgent.ArtifactStores.Runtime, as: ArtifactRuntime
   alias MingaAgent.Message
   alias MingaAgent.Notifier
   alias MingaAgent.ModelCandidate
@@ -61,6 +64,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.SubagentContext
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
+  alias MingaAgent.Tool.Output.Range
   alias ReqLLM.Context
 
   @typedoc "Agent session status."
@@ -106,6 +112,7 @@ defmodule MingaAgent.Session do
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
+          artifact_runtime: ArtifactRuntime.t() | nil,
           workdir: String.t() | nil,
           event_log_server: GenServer.server(),
           event_log_failure: event_log_failure() | nil,
@@ -167,6 +174,10 @@ defmodule MingaAgent.Session do
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
   end
+
+  @doc "Returns this durable record's retained-artifact authority."
+  @spec artifact_store(GenServer.server()) :: {:ok, GenServer.server()} | {:error, term()}
+  def artifact_store(session), do: GenServer.call(session, :artifact_store)
 
   @doc """
   Sends a user prompt to the agent.
@@ -826,6 +837,7 @@ defmodule MingaAgent.Session do
 
     state = %{
       session_id: session_id,
+      artifact_runtime: Keyword.get(opts, :artifact_runtime),
       workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
       event_log_failure: nil,
@@ -1047,7 +1059,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:load_session, session_id}, from, state) do
-    case SessionStore.load(session_id, state.session_store_dir) do
+    case SessionStore.load(session_id, state.session_store_dir, artifact_store_opts(state)) do
       {:ok, data} -> begin_loaded_session_restore(state, data, from)
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -1123,6 +1135,10 @@ defmodule MingaAgent.Session do
     }
 
     {:reply, snapshot, state}
+  end
+
+  def handle_call(:artifact_store, _from, state) do
+    {:reply, ensure_artifact_store(state), state}
   end
 
   def handle_call(:metadata, _from, state) do
@@ -1619,51 +1635,26 @@ defmodule MingaAgent.Session do
       )
       when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) and
              is_binary(name) and is_map(args) do
-    with {:ok, continuation} <-
-           Continuation.admit_tool_effect(
-             state.continuation,
-             request_id,
-             checkpoint_id,
-             tool_call_id,
-             name,
-             args
-           ),
-         {:ok, committed} <-
-           commit_effect_snapshot(state, %{state | continuation: continuation}) do
-      result =
-        case EventLog.record(
-               committed.session_id,
-               :tool_call_started,
-               %{
-                 checkpoint_id: checkpoint_id,
-                 tool_call_id: tool_call_id,
-                 name: name,
-                 args: args
-               },
-               committed.event_log_server
-             ) do
-          {:queued, receipt} -> EventLog.await(receipt)
-          {:error, reason} -> {:error, reason}
-        end
+    case Continuation.admit_tool_effect(
+           state.continuation,
+           request_id,
+           checkpoint_id,
+           tool_call_id,
+           name,
+           args
+         ) do
+      {:ok, continuation} ->
+        admit_tool_effect_capture(
+          state,
+          %{state | continuation: continuation},
+          checkpoint_id,
+          tool_call_id,
+          name,
+          args
+        )
 
-      case result do
-        {:persisted, _event_id} ->
-          {:reply, :ok, committed}
-
-        {:error, reason} ->
-          message =
-            "Tool effect admission was durably saved, but its event journal record failed: #{inspect(reason)}"
-
-          state =
-            committed
-            |> append_error_message_once(message)
-            |> notify_messages_changed()
-            |> broadcast({:warning, message})
-
-          {:reply, :ok, state}
-      end
-    else
-      {:error, reason} -> {:reply, {:error, {:effect_admission_failed, reason}}, state}
+      {:error, reason} ->
+        {:reply, {:error, {:effect_admission_failed, reason}}, state}
     end
   end
 
@@ -1689,6 +1680,90 @@ defmodule MingaAgent.Session do
         {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, state}
     end
   end
+
+  @spec admit_tool_effect_capture(
+          state(),
+          state(),
+          String.t(),
+          String.t(),
+          String.t(),
+          map()
+        ) :: {:reply, term(), state()}
+  defp admit_tool_effect_capture(state, candidate, checkpoint_id, tool_call_id, name, args) do
+    case commit_effect_snapshot(state, candidate) do
+      {:ok, committed} ->
+        case ensure_artifact_store(committed) do
+          {:ok, store} ->
+            record_tool_effect_admission(
+              committed,
+              store,
+              checkpoint_id,
+              tool_call_id,
+              name,
+              args
+            )
+
+          {:error, reason} ->
+            {:reply, {:error, {:artifact_store_admission_failed, reason}}, committed}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, {:effect_admission_failed, reason}}, state}
+    end
+  end
+
+  @spec record_tool_effect_admission(
+          state(),
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          String.t(),
+          map()
+        ) :: {:reply, term(), state()}
+  defp record_tool_effect_admission(state, store, checkpoint_id, tool_call_id, name, args) do
+    result =
+      case EventLog.record(
+             state.session_id,
+             :tool_call_started,
+             %{
+               checkpoint_id: checkpoint_id,
+               tool_call_id: tool_call_id,
+               name: name,
+               args: args
+             },
+             state.event_log_server
+           ) do
+        {:queued, receipt} -> EventLog.await(receipt)
+        {:error, reason} -> {:error, reason}
+      end
+
+    case result do
+      {:persisted, _event_id} ->
+        {:reply, {:ok, store}, state}
+
+      {:error, reason} ->
+        message =
+          "Tool effect admission was durably saved, but its event journal record failed: #{inspect(reason)}"
+
+        warned =
+          state
+          |> append_error_message_once(message)
+          |> notify_messages_changed()
+          |> broadcast({:warning, message})
+
+        {:reply, {:ok, store}, warned}
+    end
+  end
+
+  @spec ensure_artifact_store(state()) :: {:ok, GenServer.server()} | {:error, term()}
+  defp ensure_artifact_store(%{artifact_runtime: nil, session_id: session_id}),
+    do: ArtifactStores.ensure_record(session_id)
+
+  defp ensure_artifact_store(%{
+         artifact_runtime: %ArtifactRuntime{} = runtime,
+         session_id: session_id
+       }),
+       do: ArtifactStores.ensure_record(session_id, runtime)
 
   @spec reply_to_seed_messages(state(), [Message.t()], [ReqLLM.Message.t()]) ::
           {:reply, term(), state()}
@@ -1727,7 +1802,7 @@ defmodule MingaAgent.Session do
   defp persist_legacy_import(state, session_id, legacy_data, from) do
     imported_data = prepare_legacy_import(legacy_data, legacy_import_id(session_id))
 
-    case SessionStore.save(imported_data, state.session_store_dir) do
+    case SessionStore.save(imported_data, state.session_store_dir, artifact_store_opts(state)) do
       :ok ->
         begin_loaded_session_restore(state, imported_data, from)
 
@@ -2341,10 +2416,29 @@ defmodule MingaAgent.Session do
        do: state
 
   defp reconcile_interrupted_checkpoint(state) do
+    case reconciliation_outputs(state) do
+      {:ok, outputs} ->
+        finish_interrupted_checkpoint_reconciliation(state, outputs)
+
+      {:error, reason} ->
+        state
+        |> append_error_message_once(
+          "Interrupted effect reconciliation could not inspect retained delivery state. The durable checkpoint was preserved; reload the session to retry safely."
+        )
+        |> broadcast({:error, "Effect reconciliation failed: #{inspect(reason)}"})
+    end
+  end
+
+  @spec finish_interrupted_checkpoint_reconciliation(
+          state(),
+          %{optional(String.t()) => Output.t()}
+        ) :: state()
+  defp finish_interrupted_checkpoint_reconciliation(state, outputs) do
     {continuation, reconciliation} =
       Continuation.reconcile_interrupted(
         state.continuation,
-        boundary_transcript_id(state.transcript)
+        boundary_transcript_id(state.transcript),
+        outputs
       )
 
     indeterminate_count = Enum.count(reconciliation, &(&1.status == :indeterminate))
@@ -2391,11 +2485,12 @@ defmodule MingaAgent.Session do
   end
 
   @spec reconcile_transcript_tool_call(ToolCall.t(), map() | nil) :: Message.t()
-  defp reconcile_transcript_tool_call(tool_call, %{status: :indeterminate}) do
+  defp reconcile_transcript_tool_call(tool_call, %{status: :indeterminate} = reconciliation) do
     {:tool_call,
      ToolCall.error(
        tool_call,
-       "Outcome indeterminate after interruption; the tool was not rerun."
+       "Outcome indeterminate after interruption; the tool was not rerun.",
+       Map.get(reconciliation, :output)
      )}
   end
 
@@ -2412,13 +2507,74 @@ defmodule MingaAgent.Session do
          }
        ) do
     result = result_message_text(result_message)
+    output = Map.get(metadata || %{}, :output)
 
     if Map.get(metadata || %{}, :is_error, false),
-      do: {:tool_call, ToolCall.error(tool_call, result)},
-      else: {:tool_call, ToolCall.complete(tool_call, result)}
+      do: {:tool_call, ToolCall.error(tool_call, result, output)},
+      else: {:tool_call, ToolCall.complete(tool_call, result, output)}
   end
 
   defp reconcile_transcript_tool_call(tool_call, _unrelated), do: {:tool_call, tool_call}
+
+  @spec reconciliation_outputs(state()) ::
+          {:ok, %{optional(String.t()) => Output.t()}} | {:error, term()}
+  defp reconciliation_outputs(%{continuation: %Continuation{tool_checkpoint: checkpoint}} = state) do
+    with {:ok, store} <- ensure_artifact_store(state) do
+      Enum.reduce_while(checkpoint.calls, {:ok, %{}}, fn call, acc ->
+        reconcile_delivery_output(call, acc, store, checkpoint.checkpoint_id)
+      end)
+    end
+  rescue
+    ArgumentError -> {:error, :artifact_runtime_unavailable}
+  catch
+    :exit, reason -> {:error, {:artifact_runtime_unavailable, reason}}
+  end
+
+  @spec reconcile_delivery_output(map(), {:ok, map()}, GenServer.server(), String.t()) ::
+          {:cont, {:ok, map()}} | {:halt, {:error, term()}}
+  defp reconcile_delivery_output(
+         %{status: :admitted} = call,
+         {:ok, outputs},
+         store,
+         checkpoint_id
+       ) do
+    case ArtifactStore.lookup_delivery(store, {:delivery, checkpoint_id, call.tool_call_id}) do
+      {:ok, stored} ->
+        {:cont, {:ok, Map.put(outputs, call.tool_call_id, indeterminate_output(stored))}}
+
+      {:error, :unknown_delivery} ->
+        {:cont, {:ok, outputs}}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
+  defp reconcile_delivery_output(_call, acc, _store, _checkpoint_id), do: {:cont, acc}
+
+  @spec indeterminate_output(MingaAgent.ArtifactStore.Stored.t()) :: Output.t()
+  defp indeterminate_output(stored) do
+    reference = stored.reference
+    count = reference.items || reference.bytes
+    unit = if reference.items == nil, do: :bytes, else: :items
+    kind = if stored.capture == :complete, do: :full, else: :captured_prefix
+    total = if stored.capture == :complete, do: count, else: :unknown
+    {:ok, selection} = Range.new(kind, unit, 0, count, total)
+
+    presentation =
+      if reference.bytes == 0, do: :complete, else: {:truncated, :unknown}
+
+    {:ok, output} =
+      Output.new(
+        "A retained producer capture exists, but effect completion is indeterminate.",
+        stored.capture,
+        selection,
+        reference: reference,
+        presentation: presentation
+      )
+
+    output
+  end
 
   @spec result_message_text(ReqLLM.Message.t()) :: String.t()
   defp result_message_text(%ReqLLM.Message{content: content}) when is_binary(content),
@@ -2676,9 +2832,9 @@ defmodule MingaAgent.Session do
     transcript =
       Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
         if event.is_error do
-          ToolCall.error(tool_call, event.result)
+          ToolCall.error(tool_call, event.result, event.output)
         else
-          ToolCall.complete(tool_call, event.result)
+          ToolCall.complete(tool_call, event.result, event.output)
         end
       end)
 
@@ -2689,6 +2845,7 @@ defmodule MingaAgent.Session do
       tool_call_id: event.tool_call_id,
       name: event.name,
       result: event.result,
+      output: encode_output(event.output),
       status: status
     })
 
@@ -2696,6 +2853,10 @@ defmodule MingaAgent.Session do
     |> broadcast({:tool_ended, event.name, event.result, status})
     |> notify_messages_changed()
   end
+
+  @spec encode_output(Output.t() | nil) :: map() | nil
+  defp encode_output(nil), do: nil
+  defp encode_output(%Output{} = output), do: OutputCodec.encode(output)
 
   @spec append_steering_messages(state(), [TurnExecution.content()]) :: state()
   defp append_steering_messages(state, []), do: state
@@ -5596,11 +5757,17 @@ defmodule MingaAgent.Session do
         continuation: state.continuation
       }
 
-      SessionStore.save(data, state.session_store_dir)
+      SessionStore.save(data, state.session_store_dir, artifact_store_opts(state))
     else
       :ok
     end
   end
+
+  @spec artifact_store_opts(state()) :: keyword()
+  defp artifact_store_opts(%{artifact_runtime: nil}), do: []
+
+  defp artifact_store_opts(%{artifact_runtime: %ArtifactRuntime{} = runtime}),
+    do: [artifact_runtime: runtime]
 
   @spec schedule_save_retry(state()) :: state()
   defp schedule_save_retry(state) do
@@ -6163,30 +6330,37 @@ defmodule MingaAgent.Session do
   end
 
   defp reconcile_loaded_checkpoint(state) do
-    {continuation, reconciliation} =
-      Continuation.reconcile_interrupted(
-        state.continuation,
-        boundary_transcript_id(state.transcript)
-      )
+    case reconciliation_outputs(state) do
+      {:ok, outputs} ->
+        {continuation, reconciliation} =
+          Continuation.reconcile_interrupted(
+            state.continuation,
+            boundary_transcript_id(state.transcript),
+            outputs
+          )
 
-    indeterminate_count = Enum.count(reconciliation, &(&1.status == :indeterminate))
-    not_executed_count = Enum.count(reconciliation, &(&1.status == :not_executed))
+        indeterminate_count = Enum.count(reconciliation, &(&1.status == :indeterminate))
+        not_executed_count = Enum.count(reconciliation, &(&1.status == :not_executed))
 
-    message =
-      "Recovered an interrupted provider tool-call group without replaying any call. " <>
-        "#{indeterminate_count} admitted call(s) now have an explicit indeterminate result; " <>
-        "#{not_executed_count} unadmitted call(s) are marked not executed. " <>
-        "The exact provider continuation was preserved for the next request."
+        message =
+          "Recovered an interrupted provider tool-call group without replaying any call. " <>
+            "#{indeterminate_count} admitted call(s) now have an explicit indeterminate result; " <>
+            "#{not_executed_count} unadmitted call(s) are marked not executed. " <>
+            "The exact provider continuation was preserved for the next request."
 
-    candidate =
-      state
-      |> Map.put(:continuation, continuation)
-      |> reconcile_transcript_tool_calls(reconciliation)
-      |> append_system_message(message, if(indeterminate_count == 0, do: :info, else: :error))
+        candidate =
+          state
+          |> Map.put(:continuation, continuation)
+          |> reconcile_transcript_tool_calls(reconciliation)
+          |> append_system_message(message, if(indeterminate_count == 0, do: :info, else: :error))
 
-    case commit_loaded_checkpoint_snapshot(state, candidate) do
-      {:ok, committed} -> {:ok, committed, true}
-      {:error, reason} -> {:error, {:checkpoint_reconciliation_failed, reason}}
+        case commit_loaded_checkpoint_snapshot(state, candidate) do
+          {:ok, committed} -> {:ok, committed, true}
+          {:error, reason} -> {:error, {:checkpoint_reconciliation_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:checkpoint_reconciliation_failed, reason}}
     end
   end
 

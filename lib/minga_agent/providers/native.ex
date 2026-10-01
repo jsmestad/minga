@@ -58,6 +58,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ModelSelection
   alias MingaAgent.ProjectView
   alias MingaAgent.Providers.Native.LoopCtx
+  alias MingaAgent.Providers.Native.OutputHydration
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Redaction
   alias MingaAgent.ToolRouter
@@ -67,6 +68,9 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Session.Request
   alias MingaAgent.Skills
   alias MingaAgent.TokenEstimator
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Limitation
+  alias MingaAgent.Tool.Output.Range
   alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tool.Executor, as: ToolExecutor
   alias MingaAgent.Tool.PlanMode
@@ -75,7 +79,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tools
   alias MingaAgent.Tools.Notebook
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
-  alias MingaAgent.Tools.Shell
+  alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.Todo
   alias Minga.Config
   alias ReqLLM.Context
@@ -392,12 +396,39 @@ defmodule MingaAgent.Providers.Native do
           map()
         ) :: ToolContext.t()
   defp native_tool_context(project_root, project_view, fork_store, changeset, metadata) do
+    native_tool_context(
+      project_root,
+      project_view,
+      fork_store,
+      changeset,
+      metadata,
+      {:unsupported, :tool_result_transport}
+    )
+  end
+
+  @spec native_tool_context(
+          String.t(),
+          ProjectView.t() | nil,
+          pid() | nil,
+          pid() | nil,
+          map(),
+          ModelSelection.image_tool_result_delivery()
+        ) :: ToolContext.t()
+  defp native_tool_context(
+         project_root,
+         project_view,
+         fork_store,
+         changeset,
+         metadata,
+         image_tool_result_delivery
+       ) do
     ToolContext.new(
       project_root: project_root,
       project_view: project_view,
       fork_store: fork_store,
       changeset: changeset,
-      metadata: metadata
+      metadata: metadata,
+      image_tool_result_delivery: image_tool_result_delivery
     )
   end
 
@@ -1665,23 +1696,62 @@ defmodule MingaAgent.Providers.Native do
       })
     end
 
-    result =
-      Retry.with_retry(
-        fn ->
-          ReqLLMAdapter.stream(
-            lctx.llm_client,
-            lctx.selection.request_model,
-            context.messages,
-            stream_opts
+    case outbound_messages(lctx, context.messages) do
+      {:ok, messages} ->
+        result =
+          Retry.with_retry(
+            fn ->
+              ReqLLMAdapter.stream(
+                lctx.llm_client,
+                lctx.selection.request_model,
+                messages,
+                stream_opts
+              )
+            end,
+            max_retries: lctx.max_retries,
+            on_retry: on_retry
           )
-        end,
-        max_retries: lctx.max_retries,
-        on_retry: on_retry
-      )
 
-    case result do
-      {:ok, stream_response} -> process_and_continue(lctx, context, stream_response)
-      {:error, reason} -> reported_error(lctx, format_error(reason), reason)
+        case result do
+          {:ok, stream_response} -> process_and_continue(lctx, context, stream_response)
+          {:error, reason} -> reported_error(lctx, format_error(reason), reason)
+        end
+
+      {:error, {:artifact_integrity_error, reason} = error} ->
+        reported_error(
+          lctx,
+          "Retained image integrity check failed: #{inspect(reason)}",
+          error
+        )
+    end
+  end
+
+  @spec outbound_messages(loop_ctx(), [ReqLLM.Message.t()]) ::
+          {:ok, [ReqLLM.Message.t()]} | {:error, OutputHydration.error_reason()}
+  defp outbound_messages(lctx, messages) do
+    if OutputHydration.required?(messages) do
+      hydrate_outbound_messages(
+        lctx,
+        messages,
+        ModelSelection.image_tool_result_delivery(lctx.selection)
+      )
+    else
+      {:ok, messages}
+    end
+  end
+
+  @spec hydrate_outbound_messages(
+          loop_ctx(),
+          [ReqLLM.Message.t()],
+          ModelSelection.image_tool_result_delivery()
+        ) :: {:ok, [ReqLLM.Message.t()]} | {:error, OutputHydration.error_reason()}
+  defp hydrate_outbound_messages(_lctx, messages, {:unsupported, _reason} = delivery),
+    do: OutputHydration.hydrate(messages, nil, delivery)
+
+  defp hydrate_outbound_messages(lctx, messages, :supported) do
+    case Session.artifact_store(lctx.session_pid) do
+      {:ok, store} -> OutputHydration.hydrate(messages, store, :supported)
+      {:error, reason} -> {:error, {:artifact_integrity_error, reason}}
     end
   end
 
@@ -1946,6 +2016,7 @@ defmodule MingaAgent.Providers.Native do
   @typep tool_execution_result :: %{
            required(:tool_call) => map(),
            required(:result_text) => String.t(),
+           required(:output) => Output.t(),
            required(:is_error) => boolean(),
            optional(:persistence_error) => term()
          }
@@ -2166,6 +2237,7 @@ defmodule MingaAgent.Providers.Native do
     %{
       tool_call: tool_call,
       result_text: result_text,
+      output: deterministic_output(result_text),
       is_error: true,
       persistence_error: {:tool_task_exit, reason}
     }
@@ -2197,10 +2269,11 @@ defmodule MingaAgent.Providers.Native do
             lctx.project_view,
             lctx.fork_store,
             lctx.changeset,
-            lctx.tool_metadata
+            lctx.tool_metadata,
+            ModelSelection.image_tool_result_delivery(lctx.selection)
           )
 
-        {result_text, is_error, _new_mode, post_dispatched?} =
+        {result_text, is_error, _new_mode, post_dispatched?, output} =
           execute_with_approval(
             lctx,
             tool_call,
@@ -2209,33 +2282,50 @@ defmodule MingaAgent.Providers.Native do
             tool_context
           )
 
+        output = output || deterministic_output(result_text)
+
         unless post_dispatched? do
-          dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
+          dispatch_post_tool_use(tool_call, result_text, is_error, output, lctx.config)
         end
 
         maybe_emit_file_changed(lctx, tool_call, before_content, is_error)
-        %{tool_call: tool_call, result_text: result_text, is_error: is_error}
+
+        %{
+          tool_call: tool_call,
+          result_text: result_text,
+          output: output,
+          is_error: is_error
+        }
       rescue
         e ->
+          result_text = "Tool '#{tool_call.name}' failed after admission; outcome is unknown."
+
           %{
             tool_call: tool_call,
-            result_text: "Tool '#{tool_call.name}' failed after admission; outcome is unknown.",
+            result_text: result_text,
+            output: deterministic_output(result_text),
             is_error: true,
             persistence_error: {:tool_execution_exception, Exception.message(e)}
           }
       catch
         :throw, {:effect_admission_failed, reason} ->
+          result_text = "Tool admission failed: #{inspect(reason)}"
+
           %{
             tool_call: tool_call,
-            result_text: "Tool admission failed: #{inspect(reason)}",
+            result_text: result_text,
+            output: deterministic_output(result_text),
             is_error: true,
             persistence_error: {:effect_admission_failed, reason}
           }
 
         kind, reason ->
+          result_text = "Tool '#{tool_call.name}' failed after admission; outcome is unknown."
+
           %{
             tool_call: tool_call,
-            result_text: "Tool '#{tool_call.name}' failed after admission; outcome is unknown.",
+            result_text: result_text,
+            output: deterministic_output(result_text),
             is_error: true,
             persistence_error: {:tool_execution_throw, kind, inspect(reason)}
           }
@@ -2248,7 +2338,7 @@ defmodule MingaAgent.Providers.Native do
       %{tool_call: tool_call} ->
         case persist_tool_execution_result(lctx, checkpoint_id, result, 3) do
           :ok ->
-            emit_tool_end(lctx, tool_call, result.result_text, result.is_error)
+            emit_tool_end(lctx, tool_call, result.result_text, result.output, result.is_error)
             result
 
           {:error, reason} ->
@@ -2257,12 +2347,12 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec require_effect_admission!(pid(), Request.t(), map()) :: :ok | no_return()
+  @spec require_effect_admission!(pid(), Request.t(), map()) :: GenServer.server() | no_return()
   defp require_effect_admission!(session_pid, request, tool_call) do
     checkpoint_id = Map.fetch!(tool_call, :effect_checkpoint_id)
 
     case admit_tool_effect(session_pid, request, checkpoint_id, tool_call) do
-      :ok -> :ok
+      {:ok, store} -> store
       {:error, reason} -> throw({:effect_admission_failed, reason})
     end
   end
@@ -2303,19 +2393,25 @@ defmodule MingaAgent.Providers.Native do
       {:error, {:tool_outcome_call_failed, reason}}
   end
 
-  @spec emit_tool_end(loop_ctx(), map(), String.t(), boolean()) :: :ok
-  defp emit_tool_end(lctx, tool_call, result_text, is_error) do
+  @spec emit_tool_end(loop_ctx(), map(), String.t(), Output.t(), boolean()) :: :ok
+  defp emit_tool_end(lctx, tool_call, result_text, output, is_error) do
     emit(lctx, %Event.ToolEnd{
       tool_call_id: tool_call.id,
       name: tool_call.name,
       result: result_text,
+      output: output,
       is_error: is_error
     })
   end
 
   @spec tool_result_message(tool_execution_result()) :: ReqLLM.Message.t()
-  defp tool_result_message(%{tool_call: tool_call, result_text: result_text, is_error: is_error}) do
-    meta = if is_error, do: %{is_error: true}, else: %{}
+  defp tool_result_message(%{
+         tool_call: tool_call,
+         result_text: result_text,
+         output: output,
+         is_error: is_error
+       }) do
+    meta = %{is_error: is_error, output: output}
     Context.tool_result_message(tool_call.name, tool_call.id, result_text, meta)
   end
 
@@ -2326,36 +2422,22 @@ defmodule MingaAgent.Providers.Native do
           approval_mode(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), approval_mode(), boolean()}
+          {String.t(), boolean(), approval_mode(), boolean(), Output.t() | nil}
   defp execute_with_approval(lctx, tool_call, available_tools, mode, tool_context) do
     args = tool_call.arguments || %{}
 
     if plan_mode_blocks_tool?(lctx.session_pid, tool_call.name, args) do
       message = PlanMode.refusal_message(tool_call.name)
       emit_plan_mode_refusal(lctx.session_pid, lctx.request, message)
-      {message, true, mode, false}
+      {message, true, mode, false, nil}
     else
       # Per-tool permissions override the global approval mode.
       case tool_permission(tool_call.name, lctx.config) do
         :allow ->
-          :ok = require_effect_admission!(lctx.session_pid, lctx.request, tool_call)
-
-          {result, is_error, post_dispatched?} =
-            run_single_tool(
-              tool_call,
-              available_tools,
-              lctx.provider_pid,
-              lctx.session_pid,
-              lctx.request,
-              lctx.config,
-              lctx.hook_runner,
-              tool_context
-            )
-
-          {result, is_error, mode, post_dispatched?}
+          execute_admitted_tool(lctx, tool_call, available_tools, mode, tool_context)
 
         :deny ->
-          {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode, false}
+          {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode, false, nil}
 
         :ask ->
           request_approval(lctx, tool_call, available_tools, mode, tool_context)
@@ -2364,7 +2446,7 @@ defmodule MingaAgent.Providers.Native do
           # No per-tool override; fall through to registry/default policy and global approval mode.
           case registered_tool_approval(tool_call.name, available_tools) do
             :deny ->
-              {"Tool '#{tool_call.name}' is denied by registry policy", true, mode, false}
+              {"Tool '#{tool_call.name}' is denied by registry policy", true, mode, false, nil}
 
             _approval ->
               execute_with_global_mode(lctx, tool_call, available_tools, mode, tool_context)
@@ -2380,24 +2462,9 @@ defmodule MingaAgent.Providers.Native do
           approval_mode(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), approval_mode(), boolean()}
-  defp execute_with_global_mode(lctx, tool_call, available_tools, :none, tool_context) do
-    :ok = require_effect_admission!(lctx.session_pid, lctx.request, tool_call)
-
-    {result, is_error, post_dispatched?} =
-      run_single_tool(
-        tool_call,
-        available_tools,
-        lctx.provider_pid,
-        lctx.session_pid,
-        lctx.request,
-        lctx.config,
-        lctx.hook_runner,
-        tool_context
-      )
-
-    {result, is_error, :none, post_dispatched?}
-  end
+          {String.t(), boolean(), approval_mode(), boolean(), Output.t() | nil}
+  defp execute_with_global_mode(lctx, tool_call, available_tools, :none, tool_context),
+    do: execute_admitted_tool(lctx, tool_call, available_tools, :none, tool_context)
 
   defp execute_with_global_mode(lctx, tool_call, available_tools, :ask_all, tool_context) do
     request_approval(lctx, tool_call, available_tools, :ask_all, tool_context)
@@ -2407,21 +2474,7 @@ defmodule MingaAgent.Providers.Native do
     if global_mode_requires_approval?(tool_call, available_tools, :ask, lctx.config) do
       request_approval(lctx, tool_call, available_tools, :ask, tool_context)
     else
-      :ok = require_effect_admission!(lctx.session_pid, lctx.request, tool_call)
-
-      {result, is_error, post_dispatched?} =
-        run_single_tool(
-          tool_call,
-          available_tools,
-          lctx.provider_pid,
-          lctx.session_pid,
-          lctx.request,
-          lctx.config,
-          lctx.hook_runner,
-          tool_context
-        )
-
-      {result, is_error, :ask, post_dispatched?}
+      execute_admitted_tool(lctx, tool_call, available_tools, :ask, tool_context)
     end
   end
 
@@ -2507,7 +2560,7 @@ defmodule MingaAgent.Providers.Native do
           approval_mode(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), approval_mode(), boolean()}
+          {String.t(), boolean(), approval_mode(), boolean(), Output.t() | nil}
   defp request_approval(lctx, tool_call, available_tools, mode, tool_context) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send_agent_event(lctx.provider_pid, lctx.request, %Event.ToolApproval{
@@ -2520,31 +2573,46 @@ defmodule MingaAgent.Providers.Native do
     # Block until the user responds (or timeout after 5 minutes)
     receive do
       {:tool_approval_response, _tool_call_id, :approve} ->
-        :ok = require_effect_admission!(lctx.session_pid, lctx.request, tool_call)
-
-        {result, is_error, post_dispatched?} =
-          run_single_tool(
-            tool_call,
-            available_tools,
-            lctx.provider_pid,
-            lctx.session_pid,
-            lctx.request,
-            lctx.config,
-            lctx.hook_runner,
-            tool_context
-          )
-
-        {result, is_error, mode, post_dispatched?}
+        execute_admitted_tool(lctx, tool_call, available_tools, mode, tool_context)
 
       {:tool_approval_response, _tool_call_id, :reject} ->
-        {"Tool rejected by user", true, mode, false}
+        {"Tool rejected by user", true, mode, false, nil}
 
       {:tool_approval_response, _tool_call_id, {:reject, message}} ->
-        {message, true, mode, false}
+        {message, true, mode, false, nil}
     after
       lctx.config.approval_timeout_ms ->
-        {"Tool approval timed out", true, mode, false}
+        {"Tool approval timed out", true, mode, false, nil}
     end
+  end
+
+  @spec execute_admitted_tool(
+          loop_ctx(),
+          map(),
+          [Tool.t()],
+          approval_mode(),
+          ToolContext.t()
+        ) :: {String.t(), boolean(), approval_mode(), boolean(), Output.t() | nil}
+  defp execute_admitted_tool(lctx, tool_call, available_tools, mode, tool_context) do
+    store = require_effect_admission!(lctx.session_pid, lctx.request, tool_call)
+    checkpoint_id = Map.fetch!(tool_call, :effect_checkpoint_id)
+
+    admitted_context =
+      ToolContext.for_tool_call(tool_context, store, checkpoint_id, to_string(tool_call.id))
+
+    {result, is_error, post_dispatched?, output} =
+      run_single_tool(
+        tool_call,
+        available_tools,
+        lctx.provider_pid,
+        lctx.session_pid,
+        lctx.request,
+        lctx.config,
+        lctx.hook_runner,
+        admitted_context
+      )
+
+    {result, is_error, mode, post_dispatched?, output}
   end
 
   @file_tools ~w(edit_file multi_edit_file apply_diff write_file delete_file)
@@ -2692,7 +2760,7 @@ defmodule MingaAgent.Providers.Native do
           hook_runner(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), boolean()}
+          {String.t(), boolean(), boolean(), Output.t() | nil}
   defp run_single_tool(
          tool_call,
          available_tools,
@@ -2708,7 +2776,7 @@ defmodule MingaAgent.Providers.Native do
     if plan_mode_blocks_tool?(session_pid, tool_call.name, args) do
       message = PlanMode.refusal_message(tool_call.name)
       emit_plan_mode_refusal(session_pid, request, message)
-      {message, true, false}
+      {message, true, false, nil}
     else
       run_single_tool_unchecked(
         tool_call,
@@ -2730,7 +2798,7 @@ defmodule MingaAgent.Providers.Native do
           AgentConfig.t(),
           hook_runner(),
           ToolContext.t()
-        ) :: {String.t(), boolean(), boolean()}
+        ) :: {String.t(), boolean(), boolean(), Output.t()}
   defp run_single_tool_unchecked(
          tool_call,
          available_tools,
@@ -2740,34 +2808,37 @@ defmodule MingaAgent.Providers.Native do
          hook_runner,
          tool_context
        ) do
-    case Enum.find(available_tools, fn t -> t.name == tool_call.name end) do
-      nil ->
-        {"Tool '#{tool_call.name}' not found", true, false}
+    result =
+      case Enum.find(available_tools, fn t -> t.name == tool_call.name end) do
+        nil ->
+          {"Tool '#{tool_call.name}' not found", true, false, nil}
 
-      tool ->
-        if registry_tool?(tool) do
-          execute_registry_tool(
-            tool,
-            tool_call,
-            provider_pid,
-            request,
-            config,
-            hook_runner,
-            tool_context
-          )
-        else
-          case dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid, request) do
-            :ok ->
-              tuple_with_post_flag(
-                execute_found_tool(tool, tool_call, provider_pid, request),
-                false
-              )
+        tool ->
+          if registry_tool?(tool) do
+            execute_registry_tool(
+              tool,
+              tool_call,
+              provider_pid,
+              request,
+              config,
+              hook_runner,
+              tool_context
+            )
+          else
+            case dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid, request) do
+              :ok ->
+                tuple_with_post_flag(
+                  execute_found_tool(tool, tool_call, provider_pid, request),
+                  false
+                )
 
-            {:error, %HookResult{} = result} ->
-              {HookResult.message(result), true, false}
+              {:error, %HookResult{} = hook_result} ->
+                {HookResult.message(hook_result), true, false, nil}
+            end
           end
-        end
-    end
+      end
+
+    retain_execution_result(result, tool_context)
   end
 
   @spec registry_tool?(Tool.t()) :: boolean()
@@ -2782,7 +2853,7 @@ defmodule MingaAgent.Providers.Native do
           AgentConfig.t(),
           hook_runner(),
           ToolContext.t()
-        ) :: {String.t(), boolean(), boolean()}
+        ) :: {String.t(), boolean(), boolean(), Output.t() | nil}
   defp execute_registry_tool(
          %Tool{provider_options: %{minga_tool_spec: %ToolSpec{} = spec}},
          tool_call,
@@ -2799,7 +2870,8 @@ defmodule MingaAgent.Providers.Native do
     |> ToolExecutor.execute_approved(args, :exec,
       config: config,
       hook_runner: hook_runner,
-      tool_context: tool_context
+      tool_context: tool_context,
+      dispatch_post_hook: false
     )
     |> format_executor_result()
   end
@@ -2835,14 +2907,56 @@ defmodule MingaAgent.Providers.Native do
        do: context
 
   @spec format_executor_result({:ok, term()} | {:error, term()}) ::
-          {String.t(), boolean(), boolean()}
-  defp format_executor_result({:ok, result}), do: {format_tool_result(result), false, true}
-  defp format_executor_result({:error, reason}), do: {format_error(reason), true, true}
+          {String.t(), boolean(), boolean(), Output.t() | nil}
+  defp format_executor_result({:ok, %Output{} = output}),
+    do: {output.view, false, false, output}
+
+  defp format_executor_result({:error, %Output{} = output}),
+    do: {output.view, true, false, output}
+
+  defp format_executor_result({:error, %Limitation{} = limitation}),
+    do: {Limitation.message(limitation), true, false, nil}
+
+  defp format_executor_result({:ok, result}),
+    do: {format_tool_result(result), false, false, nil}
+
+  defp format_executor_result({:error, reason}),
+    do: {format_error(reason), true, false, nil}
 
   @spec tuple_with_post_flag({String.t(), boolean()}, boolean()) ::
-          {String.t(), boolean(), boolean()}
+          {String.t(), boolean(), boolean(), nil}
   defp tuple_with_post_flag({result, is_error}, post_dispatched?),
-    do: {result, is_error, post_dispatched?}
+    do: {result, is_error, post_dispatched?, nil}
+
+  @spec retain_execution_result(
+          {String.t(), boolean(), boolean(), Output.t() | nil},
+          ToolContext.t()
+        ) :: {String.t(), boolean(), boolean(), Output.t()}
+  defp retain_execution_result({text, is_error, post_dispatched?, %Output{} = output}, _context),
+    do: {text, is_error, post_dispatched?, output}
+
+  defp retain_execution_result(
+         {text, is_error, post_dispatched?, nil},
+         %ToolContext{artifact_store: store, capture_key: delivery_key}
+       ) do
+    case OutputCapture.bytes(store, delivery_key, text, []) do
+      {:ok, %Output{} = output} ->
+        {output.view, is_error, post_dispatched?, output}
+
+      {:error, %Output{} = output} ->
+        {output.view, true, post_dispatched?, output}
+
+      {:error, reason} ->
+        throw({:retention_failed, reason})
+    end
+  end
+
+  @spec deterministic_output(String.t()) :: Output.t()
+  defp deterministic_output(text) when is_binary(text) do
+    {:ok, selection} = Range.new(:full, :bytes, 0, byte_size(text), byte_size(text))
+    {:ok, output} = Output.new(text, :complete, selection)
+    output
+  end
 
   @spec dispatch_pre_tool_use(map(), AgentConfig.t(), hook_runner(), pid(), Request.t()) ::
           :ok | {:error, HookResult.t()}
@@ -2859,15 +2973,22 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec dispatch_post_tool_use(map(), String.t(), boolean(), AgentConfig.t()) :: :ok
-  defp dispatch_post_tool_use(tool_call, result_text, is_error, config) do
+  @spec dispatch_post_tool_use(
+          map(),
+          String.t(),
+          boolean(),
+          Output.t(),
+          AgentConfig.t()
+        ) :: :ok
+  defp dispatch_post_tool_use(tool_call, result_text, is_error, output, config) do
     payload =
       PostToolUsePayload.new(
         to_string(tool_call.id),
         to_string(tool_call.name),
         tool_call.arguments || %{},
         result_text,
-        is_error
+        is_error,
+        output
       )
 
     HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
@@ -2922,7 +3043,8 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  @spec admit_tool_effect(pid(), Request.t(), String.t(), map()) :: :ok | {:error, term()}
+  @spec admit_tool_effect(pid(), Request.t(), String.t(), map()) ::
+          {:ok, GenServer.server()} | {:error, term()}
   defp admit_tool_effect(session_pid, request, checkpoint_id, tool_call)
        when is_pid(session_pid) and is_binary(checkpoint_id) do
     GenServer.call(
@@ -2937,37 +3059,11 @@ defmodule MingaAgent.Providers.Native do
 
   @spec execute_found_tool(Tool.t(), map(), pid() | nil, Request.t()) ::
           {String.t(), boolean()}
-  defp execute_found_tool(_tool, %{name: "shell"} = tool_call, provider_pid, request)
-       when is_pid(provider_pid) do
-    run_shell_with_streaming(tool_call, provider_pid, request)
-  end
 
   defp execute_found_tool(tool, tool_call, _provider_pid, _request) do
     case Tool.execute(tool, tool_call.arguments) do
       {:ok, result} -> {format_tool_result(result), false}
       {:error, reason} -> {format_error(reason), true}
-    end
-  end
-
-  # Runs the shell tool with incremental output streaming via ToolUpdate events.
-  @spec run_shell_with_streaming(map(), pid(), Request.t()) :: {String.t(), boolean()}
-  defp run_shell_with_streaming(tool_call, provider_pid, request) do
-    flush_before_shell()
-    args = tool_call.arguments
-    root = detect_project_root()
-    timeout_secs = min(args["timeout"] || 30, 300)
-
-    on_output = fn chunk ->
-      send_agent_event(provider_pid, request, %Event.ToolUpdate{
-        tool_call_id: tool_call.id,
-        name: "shell",
-        partial_result: chunk
-      })
-    end
-
-    case Shell.execute(args["command"], root, timeout_secs, on_output: on_output) do
-      {:ok, result} -> {result, false}
-      {:error, reason} -> {reason, true}
     end
   end
 
@@ -3678,29 +3774,4 @@ defmodule MingaAgent.Providers.Native do
 
   @spec emit(loop_ctx(), Event.t()) :: :ok
   defp emit(lctx, event), do: send_agent_event(lctx.provider_pid, lctx.request, event)
-
-  # Saves all dirty file-backed buffers to disk before running shell commands.
-  # Build tools read from the filesystem, not from buffer memory, so in-memory
-  # edits must be flushed for the build to see them.
-  @spec flush_before_shell() :: :ok
-  defp flush_before_shell do
-    if Config.get(:agent_flush_before_shell) do
-      {saved, warnings} = Minga.Buffer.save_all_dirty()
-
-      if saved > 0 do
-        Log.debug(:agent, "Flushed #{saved} dirty buffer(s) to disk before shell command")
-      end
-
-      for warning <- warnings do
-        Log.warning(:agent, "Pre-shell flush: #{warning}")
-      end
-
-      :ok
-    else
-      :ok
-    end
-  rescue
-    # Config not available (headless/test mode)
-    _ -> :ok
-  end
 end

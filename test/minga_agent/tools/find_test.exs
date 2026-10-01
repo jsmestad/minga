@@ -172,10 +172,9 @@ defmodule MingaAgent.Tools.FindTest do
         File.write!(Path.join(long_dir, "long_#{index}.txt"), "many")
       end
 
-      assert {:ok, output} = Find.execute("long_*.txt", dir, %{"max_depth" => 5})
-      assert byte_size(output) < 52_200
+      assert {:error, output} = Find.execute("long_*.txt", dir, %{"max_depth" => 5})
       assert String.valid?(output)
-      assert output =~ "truncated at 51KB"
+      assert output =~ "capture incomplete (capture_byte_limit)"
     end
 
     test "drops a truncated final line before ignore filtering", %{dir: dir} do
@@ -188,7 +187,8 @@ defmodule MingaAgent.Tools.FindTest do
       """
 
       with_fake_path(%{"fd" => fd}, fn ->
-        assert {:ok, output} = Find.execute("*", dir, %{}, max_output_bytes: 20)
+        assert {:error, output} = Find.execute("*", dir, %{}, max_output_bytes: 20)
+        assert output =~ "capture incomplete (capture_byte_limit)"
         assert output =~ "visible.txt"
         refute output =~ "ignored_"
         refute output =~ "ignored_secret_file"
@@ -199,13 +199,12 @@ defmodule MingaAgent.Tools.FindTest do
       fd = """
       #!/bin/sh
       printf 'partial.txt\n'
-      sleep 2
+      while :; do :; done
       """
 
       with_fake_path(%{"fd" => fd}, fn ->
         assert {:error, message} = Find.execute("*", dir, %{}, timeout_ms: 50)
-        assert message == "Find timed out"
-        refute message =~ "partial"
+        assert message =~ "Find capture incomplete (timeout)"
       end)
     end
 
@@ -216,9 +215,10 @@ defmodule MingaAgent.Tools.FindTest do
       """
 
       with_fake_path(%{"fd" => capped_fd}, fn ->
-        assert {:ok, output} =
+        assert {:error, output} =
                  Find.execute("*", dir, %{"_max_output_bytes" => 100_000}, max_output_bytes: 15)
 
+        assert output =~ "capture incomplete (capture_byte_limit)"
         assert output =~ "visible.txt"
         refute output =~ "private"
       end)
@@ -226,15 +226,14 @@ defmodule MingaAgent.Tools.FindTest do
       slow_fd = """
       #!/bin/sh
       printf 'visible.txt\nignored_secret_file.txt\n'
-      sleep 2
+      while :; do :; done
       """
 
       with_fake_path(%{"fd" => slow_fd}, fn ->
         assert {:error, message} =
                  Find.execute("*", dir, %{"_timeout_ms" => 100_000}, timeout_ms: 50)
 
-        assert message == "Find timed out"
-        refute message =~ "visible"
+        assert message =~ "Find capture incomplete (timeout)"
       end)
     end
 

@@ -104,6 +104,10 @@ defmodule Minga.Config.Options do
           | :agent_diagnostic_feedback
           | :agent_react_to_lsp_errors_on_save
           | :agent_flush_before_shell
+          | :agent_artifact_root_bytes
+          | :agent_artifact_session_bytes
+          | :agent_artifact_capture_bytes
+          | :agent_artifact_image_bytes
           | :confirm_quit
           | :quit_last_tab
           | :line_spacing
@@ -355,6 +359,14 @@ defmodule Minga.Config.Options do
      "Whether the agent posts a chat suggestion when saving introduces a new LSP error."},
     {:agent_flush_before_shell, :boolean, true,
      "Whether pending agent output flushes before shell tools run."},
+    {:agent_artifact_root_bytes, :pos_integer, 1_073_741_824,
+     "Logical disk budget in bytes for all retained agent tool output, including storage metadata."},
+    {:agent_artifact_session_bytes, :pos_integer, 134_217_728,
+     "Logical disk budget in bytes for retained tool output belonging to one agent record."},
+    {:agent_artifact_capture_bytes, :pos_integer, 16_777_216,
+     "Maximum retained byte count for one non-image tool output capture."},
+    {:agent_artifact_image_bytes, :pos_integer, 5_242_880,
+     "Maximum retained byte count for one image output capture."},
     {:confirm_quit, :boolean, true,
      "Whether quitting with unsaved changes asks for confirmation."},
     {:quit_last_tab, {:enum, [:quit, :empty_state]}, :quit,

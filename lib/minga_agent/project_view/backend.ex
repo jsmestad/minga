@@ -23,6 +23,8 @@ defmodule MingaAgent.ProjectView.Backend do
         }
 
   @callback read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
+  @callback resolve_source(ProjectView.t(), String.t()) ::
+              {:ok, ProjectView.Source.t()} | {:error, term()}
   @callback write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   @callback edit_file(ProjectView.t(), String.t(), String.t(), String.t()) ::
               :ok | {:error, term()}

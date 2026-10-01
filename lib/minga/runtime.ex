@@ -13,8 +13,8 @@ defmodule Minga.Runtime do
       ├── Minga.Buffer.Supervisor
       ├── Minga.Log.MessagesBuffer
       ├── Minga.Services.Supervisor
-      └── MingaAgent.Supervisor
-
+      ├── MingaAgent.Supervisor
+      └── MingaAgent.ArtifactSupervisor
   Use `start/1` to boot the headless runtime in tests or standalone scripts
   that need agent capabilities without an editor UI.
 
@@ -36,7 +36,8 @@ defmodule Minga.Runtime do
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       Minga.Log.MessagesBuffer,
       Minga.Services.Supervisor,
-      MingaAgent.Supervisor
+      MingaAgent.Supervisor,
+      MingaAgent.ArtifactSupervisor
     ]
 
     case Supervisor.start_link(children, strategy: :rest_for_one, name: Minga.Runtime.Headless) do

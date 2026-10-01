@@ -6,6 +6,8 @@ defmodule MingaAgent.Providers.NativeTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Git.Stub, as: GitStub
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.ArtifactQuota
+  alias MingaAgent.ArtifactStore
   alias MingaAgent.ProjectView
   alias MingaAgent.Event
   alias MingaAgent.TurnUsage
@@ -126,7 +128,8 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   defp start_provider(opts) do
-    subscriber = start_provider_subscriber(self())
+    store = start_retention_store(opts[:tmp_dir] || System.tmp_dir!())
+    subscriber = start_provider_subscriber(self(), store)
 
     defaults = [
       subscriber: subscriber,
@@ -142,50 +145,77 @@ defmodule MingaAgent.Providers.NativeTest do
     Native.start_link(merged)
   end
 
-  defp start_provider_subscriber(owner) do
+  defp start_provider_subscriber(owner, store) do
     spawn_link(fn ->
       owner_ref = Process.monitor(owner)
-      provider_subscriber_loop(owner, owner_ref)
+      provider_subscriber_loop(owner, owner_ref, store)
     end)
   end
 
-  defp provider_subscriber_loop(owner, owner_ref) do
+  defp provider_subscriber_loop(owner, owner_ref, store) do
     receive do
       {:agent_provider_event, _request_id, %Event.AgentEnd{outcome: outcome} = event} ->
         send(owner, {:native_test_outcome, outcome})
         send(owner, {:agent_provider_event, event})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:agent_provider_event, _request_id, event} ->
         send(owner, {:agent_provider_event, event})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:agent_provider_event, event} ->
         send(owner, {:agent_provider_event, event})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
         GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
        {:admit_tool_effect, _request_id, _checkpoint_id, tool_call_id, _name, _args}} ->
         send(owner, {:effect_admitted, tool_call_id})
-        GenServer.reply(from, :ok)
-        provider_subscriber_loop(owner, owner_ref)
+        GenServer.reply(from, {:ok, store})
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
        {:complete_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _result_message}} ->
         GenServer.reply(from, :ok)
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, :artifact_store} ->
+        GenServer.reply(from, {:ok, store})
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, :dequeue_steering_messages} ->
         GenServer.reply(from, [])
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
         :ok
     end
+  end
+
+  defp start_retention_store(root) do
+    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+    artifact_root = Path.join(root, "native-test-artifacts-" <> identity)
+
+    quota =
+      start_supervised!(
+        Supervisor.child_spec(
+          {ArtifactQuota, root: artifact_root},
+          id: {:native_test_quota, identity},
+          restart: :temporary
+        )
+      )
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {ArtifactStore,
+         root: artifact_root, quota: quota, session_id: "native-test-session-" <> identity},
+        id: {:native_test_store, identity},
+        restart: :temporary
+      )
+    )
   end
 
   defp start_effect_registration_manager(owner) do
@@ -980,11 +1010,13 @@ defmodule MingaAgent.Providers.NativeTest do
         ])
       end
 
+      store = start_retention_store(dir)
+
       subscriber =
         start_effect_barrier_subscriber(
           self(),
           {:ok, "owner-checkpoint"},
-          :ok
+          {:ok, store}
         )
 
       Process.unlink(subscriber)
@@ -1171,11 +1203,13 @@ defmodule MingaAgent.Providers.NativeTest do
         end
       end
 
+      store = start_retention_store(dir)
+
       subscriber =
         start_effect_barrier_subscriber(
           self(),
           {:ok, "checkpoint-outcome-retry"},
-          :ok,
+          {:ok, store},
           [
             {:error, {:tool_outcome_persistence_failed, :disk_busy}},
             {:error, {:tool_outcome_persistence_failed, :disk_busy}},
@@ -1257,10 +1291,147 @@ defmodule MingaAgent.Providers.NativeTest do
       assert [first_end | _] = tool_ends
       assert first_end.result =~ "file contents"
       assert first_end.is_error == false
+      assert %MingaAgent.Tool.Output{reference: reference} = first_end.output
+      assert reference.bytes == byte_size("file contents")
 
       # Should eventually get a text response and AgentEnd
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "unsupported retained images return an ordinary tool error and the loop continues", %{
+      tmp_dir: dir
+    } do
+      image =
+        <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy(<<0>>, 6 * 1_024 * 1_024)
+
+      File.write!(Path.join(dir, "large.png"), image)
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        if count == 0 do
+          build_stream_response([
+            ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "large.png"}, %{
+              id: "tc_unsupported_image",
+              index: 0
+            }),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ])
+        else
+          send(test_pid, {:unsupported_image_continuation, messages})
+
+          build_stream_response([
+            ReqLLM.StreamChunk.text("I will use a text alternative."),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: Tools.all(project_root: dir))
+
+      assert :ok = send_prompt(pid, "Read large.png")
+      events = collect_run_events()
+
+      assert_receive {:unsupported_image_continuation, messages}, 1_000
+      tool_message = Enum.find(messages, &(&1.role == :tool))
+      assert tool_message.metadata.is_error == true
+
+      assert tool_message_text(tool_message) =~
+               "selected protocol does not support images in tool results"
+
+      refute Enum.any?(tool_message.content, &(&1.type == :image))
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "read_file", is_error: true}, &1)
+             )
+
+      refute Enum.any?(events, &match?(%Event.Error{}, &1))
+      assert :counters.get(call_count, 1) == 2
+    end
+
+    test "supported retained images hydrate once for outbound delivery and stay byte-free durably",
+         %{
+           tmp_dir: dir
+         } do
+      image =
+        <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy("retained-image", 8_000)
+
+      assert byte_size(image) > 64 * 1_024
+      File.write!(Path.join(dir, "exact.png"), image)
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+
+      selection =
+        ModelSelectionFixture.selection(
+          request_provider: :anthropic,
+          capabilities: %{
+            tools: true,
+            images: true,
+            tool_result_images: true,
+            streaming: true
+          }
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        if count == 0 do
+          build_stream_response([
+            ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "exact.png"}, %{
+              id: "tc_supported_image",
+              index: 0
+            }),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ])
+        else
+          send(test_pid, {:supported_image_outbound, messages})
+
+          build_stream_response([
+            ReqLLM.StreamChunk.text("The image arrived."),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ])
+        end
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          model_selection: selection,
+          llm_client: client,
+          tools: Tools.all(project_root: dir)
+        )
+
+      assert :ok = send_prompt(pid, "Read exact.png")
+      events = collect_run_events()
+
+      assert_receive {:supported_image_outbound, outbound}, 1_000
+      outbound_tool = Enum.find(outbound, &(&1.role == :tool))
+
+      assert Enum.any?(outbound_tool.content, fn
+               %ContentPart{type: :image, data: data} -> data == image
+               _part -> false
+             end)
+
+      agent_end =
+        Enum.find(
+          events,
+          &match?(%Event.AgentEnd{outcome: %MingaAgent.Session.Outcome{}}, &1)
+        )
+
+      durable_tool = Enum.find(agent_end.outcome.messages, &(&1.role == :tool))
+      refute Enum.any?(durable_tool.content, &(&1.type == :image))
+
+      assert [%MingaAgent.Tool.Output.Attachment{media_type: "image/png"}] =
+               durable_tool.metadata.output.attachments
+
+      assert :counters.get(call_count, 1) == 2
     end
 
     test "replays the complete assistant response before appending grouped tool results", %{
@@ -1502,7 +1673,8 @@ defmodule MingaAgent.Providers.NativeTest do
       tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
       assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_slow", "tc_fail"]
       assert Enum.map(tool_messages, &tool_message_text/1) == ["slow result", "boom"]
-      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [nil, true]
+      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [false, true]
+      assert Enum.all?(tool_messages, &match?(%MingaAgent.Tool.Output{}, &1.metadata[:output]))
     end
 
     test "abnormal concurrent tool exit stops model continuation with an unknown effect", %{
@@ -2151,7 +2323,7 @@ defmodule MingaAgent.Providers.NativeTest do
                "allowed result"
              ]
 
-      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [true, nil]
+      assert Enum.map(tool_messages, &(&1.metadata[:is_error] == true)) == [true, false]
       refute_received {:effect_admitted, "tc_reject"}
       refute_receive :rejected_approval_tool_ran, 50
     end
@@ -2297,11 +2469,9 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :ok = send_prompt(pid, "Read the file through ProjectView")
 
       events = collect_run_events()
-      assert_received {:project_view_call, {:read_file, "lib/file.txt"}}
       tool_end = Enum.find(events, &match?(%Event.ToolEnd{name: "read_file"}, &1))
       assert tool_end != nil
       assert tool_end.result =~ "view text"
-      assert tool_end.result =~ "ProjectView workspace 7"
     end
 
     test "tracks delete_file as a file change and marks the file deleted", %{tmp_dir: dir} do

@@ -466,6 +466,13 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :content_with_version)
   end
 
+  @doc "Returns a byte-bounded prefix, mutation version, and whether it is the whole buffer."
+  @spec content_prefix_with_version(GenServer.server(), non_neg_integer()) ::
+          {binary(), non_neg_integer(), boolean()}
+  def content_prefix_with_version(server, max_bytes) when max_bytes >= 0 do
+    GenServer.call(server, {:content_prefix_with_version, max_bytes})
+  end
+
   @doc "Returns the buffer-owned merge conflict entries."
   @spec conflicts(GenServer.server()) :: [Minga.Git.MergeConflict.Entry.t()]
   def conflicts(server), do: GenServer.call(server, :conflicts)
@@ -864,6 +871,21 @@ defmodule Minga.Buffer.Process do
   def content_on_lines(server, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
     GenServer.call(server, {:content_on_lines, start_line, end_line})
+  end
+
+  @doc "Returns a byte-bounded line range, total lines, and mutation version atomically."
+  @spec content_on_lines_with_version(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer(), pos_integer(), non_neg_integer(), boolean()}
+  def content_on_lines_with_version(server, start_line, line_count, max_bytes)
+      when start_line >= 0 and line_count >= 0 and max_bytes >= 0 do
+    GenServer.call(
+      server,
+      {:content_on_lines_with_version, start_line, line_count, max_bytes}
+    )
   end
 
   @doc "Returns the content and cursor position in a single GenServer call."
@@ -1649,6 +1671,13 @@ defmodule Minga.Buffer.Process do
     {:reply, {Document.content(state.document), BufState.version(state)}, state}
   end
 
+  def handle_call({:content_prefix_with_version, max_bytes}, _from, state) do
+    total = Document.content_byte_size(state.document)
+    count = min(total, max_bytes)
+    prefix = Document.slice_byte_range(state.document, 0, count)
+    {:reply, {prefix, BufState.version(state), count == total}, state}
+  end
+
   def handle_call(:conflicts, _from, state) do
     {:reply, ConflictIndex.entries(state.conflict_index), state}
   end
@@ -1935,6 +1964,17 @@ defmodule Minga.Buffer.Process do
   def handle_call({:content_on_lines, start_line, end_line}, _from, state) do
     result = Document.content_on_lines(state.document, start_line, end_line)
     {:reply, result, state}
+  end
+
+  def handle_call(
+        {:content_on_lines_with_version, start_line, line_count, max_bytes},
+        _from,
+        state
+      ) do
+    {content, selected_count, total, complete?} =
+      Lines.bounded_contents(state.document, start_line, line_count, max_bytes)
+
+    {:reply, {content, selected_count, total, BufState.version(state), complete?}, state}
   end
 
   def handle_call({:delete_lines, _start_line, _end_line}, _from, %{read_only: true} = state) do

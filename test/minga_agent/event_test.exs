@@ -2,6 +2,8 @@ defmodule MingaAgent.EventTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Event
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
 
   describe "AgentStart" do
     test "creates a start event" do
@@ -75,7 +77,23 @@ defmodule MingaAgent.EventTest do
       }
 
       assert event.result == "done"
+      assert event.output == nil
       refute event.is_error
+    end
+
+    test "carries optional provider-neutral output facts without replacing legacy text" do
+      {:ok, range} = Range.new(:full, :bytes, 0, 4, 4)
+      {:ok, output} = Output.new("done", :complete, range)
+
+      event = %Event.ToolEnd{
+        tool_call_id: "call-output",
+        name: "read_file",
+        result: "done",
+        output: output
+      }
+
+      assert event.result == "done"
+      assert event.output == output
     end
 
     test "creates an error tool end" do

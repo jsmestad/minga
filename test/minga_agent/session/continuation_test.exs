@@ -4,6 +4,8 @@ defmodule MingaAgent.Session.ContinuationTest do
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Outcome
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
   alias ReqLLM.Context
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
@@ -367,14 +369,22 @@ defmodule MingaAgent.Session.ContinuationTest do
     assert restored.tool_checkpoint.messages ==
              Enum.concat(request.messages, [assistant])
 
-    {reconciled, statuses} = Continuation.reconcile_interrupted(restored, 11)
+    {:ok, output_range} = Range.new(:full, :bytes, 0, 8, 8)
+    {:ok, retained_output} = Output.new("captured", :complete, output_range)
+
+    {reconciled, statuses} =
+      Continuation.reconcile_interrupted(restored, 11, %{"call-1" => retained_output})
 
     indeterminate_result =
       Context.tool_result_message(
         "write_file",
         "call-1",
         "Tool effect outcome is indeterminate after interruption. The call was not rerun.",
-        %{is_error: true, minga_effect_status: :indeterminate}
+        %{
+          is_error: true,
+          minga_effect_status: :indeterminate,
+          output: retained_output
+        }
       )
 
     assert statuses == [
@@ -382,7 +392,8 @@ defmodule MingaAgent.Session.ContinuationTest do
                tool_call_id: "call-1",
                name: "write_file",
                status: :indeterminate,
-               result_message: indeterminate_result
+               result_message: indeterminate_result,
+               output: retained_output
              },
              %{
                tool_call_id: "call-2",

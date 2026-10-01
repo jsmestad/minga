@@ -7,6 +7,7 @@ defmodule MingaAgent.ModelResolverTest do
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.ProviderPacks.Native
+  alias MingaAgent.Test.ModelSelectionFixture
 
   @provider %{
     id: :openai,
@@ -62,7 +63,47 @@ defmodule MingaAgent.ModelResolverTest do
     assert selection.policy.limits.request_output == 2_000
     assert selection.policy.capabilities.tools == true
     assert selection.policy.capabilities.images == false
+    assert selection.policy.capabilities.tool_result_images == false
     assert selection.evidence.status == :unverified
+  end
+
+  test "catalog OpenAI Responses enables tool-result images only with image input" do
+    model = put_in(@catalog_model, [:modalities, "input"], ["text", "image"])
+    opts = resolver_opts(Snapshot.new(%{"openai" => :env}, nil, "http://localhost"))
+
+    assert {:ok, selection} =
+             ModelResolver.resolve(
+               "openai:not-a-codex-name",
+               Keyword.put(opts, :models, [model])
+             )
+
+    assert selection.policy.capabilities.images == true
+    assert selection.policy.capabilities.tool_result_images == true
+    assert ModelSelection.image_tool_result_delivery(selection) == :supported
+
+    legacy =
+      selection
+      |> ModelSelection.encode()
+      |> Map.put("version", 2)
+      |> update_in(["policy", "capabilities"], &Map.delete(&1, "tool_result_images"))
+
+    assert {:ok, restored} = ModelResolver.restore(legacy, Keyword.put(opts, :models, [model]))
+    assert ModelSelection.image_tool_result_delivery(restored) == :supported
+
+    oauth = OAuth.new("account-image", "/tmp/minga-image-oauth.json")
+    codex_snapshot = Snapshot.new(%{"openai" => :env}, oauth, "http://localhost")
+
+    codex_opts =
+      codex_snapshot
+      |> resolver_opts()
+      |> Keyword.put(:models, [model])
+      |> Keyword.put(:candidate_resolution, true)
+
+    assert {:ok, codex} =
+             ModelResolver.resolve("openai_codex:not-a-codex-name", codex_opts)
+
+    assert codex.route.execution.wire_protocol == "openai_codex_responses"
+    assert ModelSelection.image_tool_result_delivery(codex) == :supported
   end
 
   test "resolves models returned as catalog structs without enumerating them" do
@@ -247,7 +288,7 @@ defmodule MingaAgent.ModelResolverTest do
     end
   end
 
-  test "anonymous custom Anthropic and Google protocols bind the exact endpoint owner" do
+  test "custom Anthropic and Google routes reject anonymous authentication before activation" do
     for protocol <- ["anthropic_messages", "google_generate_content"] do
       config = %Config{
         api_endpoints: %{
@@ -261,16 +302,9 @@ defmodule MingaAgent.ModelResolverTest do
       }
 
       opts = resolver_opts(Snapshot.new(%{}, nil, "http://localhost"), config)
-      assert {:ok, selection} = ModelResolver.resolve("private:alias", opts)
-      assert ModelSelection.credential_id(selection.credential) == "private:none"
-      assert selection.request_model.id == "wire-model"
-      assert {:ok, _restored} = ModelResolver.restore(selection, opts)
 
-      encoded =
-        put_in(ModelSelection.encode(selection), ["credential", "provider"], "other-owner")
-
-      assert {:error, {:selection_correction_required, _message}} =
-               ModelResolver.restore(encoded, opts)
+      assert {:error, {:route_unavailable, _message}} =
+               ModelResolver.resolve("private:alias", opts)
     end
   end
 
@@ -323,8 +357,27 @@ defmodule MingaAgent.ModelResolverTest do
     assert selection.policy.limits.output == nil
     assert selection.policy.capabilities.tools == :unknown
     assert selection.policy.capabilities.images == :unknown
+    assert selection.policy.capabilities.tool_result_images == :unknown
     assert selection.policy.capabilities.streaming == :unknown
     assert selection.evidence.status == :unverified
+
+    legacy =
+      selection
+      |> ModelSelection.encode()
+      |> Map.put("version", 2)
+      |> update_in(["policy", "capabilities"], &Map.delete(&1, "tool_result_images"))
+
+    assert {:ok, legacy_stored} = ModelSelection.decode(legacy)
+    assert legacy_stored.policy.capabilities.tool_result_images == :unknown
+
+    assert {:ok, legacy_restored} =
+             ModelResolver.restore(
+               legacy,
+               resolver_opts(Snapshot.new(%{}, nil, "http://localhost"), config)
+             )
+
+    assert ModelSelection.image_tool_result_delivery(legacy_restored) ==
+             {:unsupported, :model_image_input}
   end
 
   @tag :tmp_dir
@@ -373,6 +426,79 @@ defmodule MingaAgent.ModelResolverTest do
 
     assert {:error, {:credential_unavailable, "private:file"}} =
              MingaAgent.Credentials.request_options(restored.credential, credential_opts)
+  end
+
+  test "custom image input does not authorize tool-result transport without an explicit declaration" do
+    base_model = %{
+      "name" => "Exact Custom",
+      "capabilities" => %{"tools" => true, "images" => true, "streaming" => true}
+    }
+
+    endpoint = %{
+      "url" => "http://127.0.0.1:9000/v1",
+      "protocol" => "openai_chat",
+      "auth_mode" => "none",
+      "models" => %{"exact" => base_model}
+    }
+
+    opts =
+      resolver_opts(
+        Snapshot.new(%{}, nil, "http://localhost"),
+        %Config{api_endpoints: %{"custom" => endpoint}}
+      )
+
+    assert {:ok, ordinary} = ModelResolver.resolve("custom:exact", opts)
+
+    assert ModelSelection.image_tool_result_delivery(ordinary) ==
+             {:unsupported, :tool_result_transport}
+
+    explicit_endpoint =
+      put_in(
+        endpoint,
+        ["models", "exact", "capabilities", "tool_result_images"],
+        true
+      )
+
+    explicit_opts =
+      resolver_opts(
+        Snapshot.new(%{}, nil, "http://localhost"),
+        %Config{api_endpoints: %{"custom" => explicit_endpoint}}
+      )
+
+    assert {:ok, explicit} = ModelResolver.resolve("custom:exact", explicit_opts)
+    assert ModelSelection.image_tool_result_delivery(explicit) == :supported
+    assert ModelSelection.encode(explicit)["policy"]["capabilities"]["tool_result_images"] == true
+    assert {:ok, restored} = ModelResolver.restore(ModelSelection.encode(explicit), explicit_opts)
+    assert ModelSelection.image_tool_result_delivery(restored) == :supported
+  end
+
+  test "exact image tool-result decisions compose model input and route transport gates" do
+    supported = %{tools: true, images: true, tool_result_images: true, streaming: true}
+    no_transport = %{supported | tool_result_images: false}
+    no_input = %{supported | images: false}
+
+    selections = [
+      ModelSelectionFixture.selection(request_provider: :anthropic, capabilities: supported),
+      ModelSelectionFixture.selection(
+        request_provider: :openai,
+        family: "openai_responses_compatible",
+        wire_protocol: "openai_responses",
+        path: "/responses",
+        capabilities: supported
+      ),
+      ModelSelectionFixture.selection(request_provider: :openai_codex, capabilities: supported),
+      ModelSelectionFixture.selection(request_provider: :google, capabilities: supported)
+    ]
+
+    assert Enum.all?(selections, &(ModelSelection.image_tool_result_delivery(&1) == :supported))
+
+    assert ModelSelection.image_tool_result_delivery(
+             ModelSelectionFixture.selection(capabilities: no_transport)
+           ) == {:unsupported, :tool_result_transport}
+
+    assert ModelSelection.image_tool_result_delivery(
+             ModelSelectionFixture.selection(capabilities: no_input)
+           ) == {:unsupported, :model_image_input}
   end
 
   test "legacy favorites migrate unique routes but never guess between API-key and OAuth profiles" do

@@ -114,7 +114,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
            Enum.concat(request.messages, [assistant_tool_message]), calls}
         )
 
-      :ok =
+      {:ok, _artifact_store} =
         GenServer.call(
           state.subscriber,
           {:admit_tool_effect, request.request_id, checkpoint_id, "tool-1", "read_file", args}

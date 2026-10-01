@@ -1,6 +1,8 @@
 defmodule MingaAgent.Providers.NativeMCPTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.ArtifactQuota
+  alias MingaAgent.ArtifactStore
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Event
   alias MingaAgent.MCP.FakeTransport
@@ -44,8 +46,10 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   end
 
   defp start_provider(opts) do
+    store = start_retention_store(opts[:tmp_dir] || System.tmp_dir!())
+
     defaults = [
-      subscriber: start_provider_subscriber(self()),
+      subscriber: start_provider_subscriber(self(), store),
       model: "anthropic:claude-sonnet-4-20250514",
       model_selection: ModelSelectionFixture.selection(),
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
@@ -57,48 +61,71 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       skip_api_key_env: true
     ]
 
-    Native.start_link(Keyword.merge(defaults, opts))
+    start_supervised({Native, Keyword.merge(defaults, opts)})
   end
 
-  defp start_provider_subscriber(owner) do
-    spawn_link(fn -> provider_subscriber_loop(owner, Process.monitor(owner)) end)
+  defp start_provider_subscriber(owner, store) do
+    spawn_link(fn -> provider_subscriber_loop(owner, Process.monitor(owner), store) end)
   end
 
-  defp provider_subscriber_loop(owner, owner_ref) do
+  defp provider_subscriber_loop(owner, owner_ref, store) do
     receive do
       {:agent_provider_event, _request_id, event} ->
         send(owner, {:agent_provider_event, event})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:agent_provider_event, event} ->
         send(owner, {:agent_provider_event, event})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:agent_provider_lifecycle_event, event} ->
         send(owner, {:agent_provider_lifecycle_event, event})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
         GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
        {:admit_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _name, _args}} ->
-        GenServer.reply(from, :ok)
-        provider_subscriber_loop(owner, owner_ref)
+        GenServer.reply(from, {:ok, store})
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
        {:complete_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _result_message}} ->
         GenServer.reply(from, :ok)
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, :dequeue_steering_messages} ->
         GenServer.reply(from, [])
-        provider_subscriber_loop(owner, owner_ref)
+        provider_subscriber_loop(owner, owner_ref, store)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
         :ok
     end
+  end
+
+  defp start_retention_store(root) do
+    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+    artifact_root = Path.join(root, "native-mcp-test-artifacts-" <> identity)
+
+    quota =
+      start_supervised!(
+        Supervisor.child_spec(
+          {ArtifactQuota, root: artifact_root},
+          id: {:native_mcp_test_quota, identity},
+          restart: :temporary
+        )
+      )
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {ArtifactStore,
+         root: artifact_root, quota: quota, session_id: "native-mcp-test-session-" <> identity},
+        id: {:native_mcp_test_store, identity},
+        restart: :temporary
+      )
+    )
   end
 
   defp send_prompt(provider, text) do
@@ -133,7 +160,10 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       {:agent_provider_event, event} -> collect_until_end([event | acc])
       {:agent_provider_lifecycle_event, event} -> collect_until_end([event | acc])
     after
-      @receive_timeout -> flunk("provider did not emit AgentEnd")
+      @receive_timeout ->
+        flunk(
+          "provider did not emit AgentEnd; received events: #{inspect(Enum.reverse(acc))}; linked processes: #{inspect(Process.info(self(), :links))}"
+        )
     end
   end
 

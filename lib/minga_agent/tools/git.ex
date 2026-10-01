@@ -13,6 +13,7 @@ defmodule MingaAgent.Tools.Git do
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter.Context
   alias MingaAgent.Tools.OutputLimit
+  alias MingaAgent.Tools.OutputLimit.Result
   alias MingaAgent.Tools.PathIgnore
 
   @type diff_entry :: %{path: String.t(), kind: atom()}
@@ -641,16 +642,19 @@ defmodule MingaAgent.Tools.Git do
              max_bytes: max_bytes,
              timeout_ms: Keyword.get(opts, :timeout_ms, OutputLimit.default_timeout_ms())
            ) do
-        {output, 0, truncated?} ->
-          {:ok, maybe_mark_truncated(output, truncated?, max_bytes)}
+        %Result{output: output, status: 0, capture: :complete} ->
+          {:ok, output}
 
-        {output, 1, truncated?} ->
-          {:ok, maybe_mark_truncated(output, truncated?, max_bytes)}
+        %Result{output: output, status: 1, capture: :complete} ->
+          {:ok, output}
 
-        {_output, :timeout, _truncated?} ->
+        %Result{status: :timeout} ->
           {:error, "git diff --no-index timed out"}
 
-        {output, _code, _truncated?} ->
+        %Result{output: output, status: :terminated} ->
+          {:error, "git diff --no-index capture incomplete at #{max_bytes} bytes:\n#{output}"}
+
+        %Result{output: output} ->
           {:error, "git diff --no-index failed: #{String.trim(output)}"}
       end
     end
@@ -664,13 +668,6 @@ defmodule MingaAgent.Tools.Git do
       nil -> {:error, "git executable not found"}
       git -> {:ok, git}
     end
-  end
-
-  @spec maybe_mark_truncated(String.t(), boolean(), pos_integer()) :: String.t()
-  defp maybe_mark_truncated(output, false, _max_bytes), do: output
-
-  defp maybe_mark_truncated(output, true, max_bytes) do
-    output <> "\n\n[truncated at #{div(max_bytes, 1000)}KB]"
   end
 
   @spec normalize_diff_paths(String.t()) :: String.t()

@@ -15,11 +15,20 @@ defmodule MingaAgent.Tools.ReadFile do
   """
 
   alias Minga.Buffer
+  alias MingaAgent.Tool.Context
+  alias MingaAgent.Tool.Output
 
   @max_bytes 51_200
 
   @typedoc "Options for partial file reads."
   @type read_opts :: [offset: pos_integer() | nil, limit: pos_integer() | nil]
+
+  @doc "Captures a routed source as retained output."
+  @spec capture(Context.t(), String.t(), read_opts()) ::
+          {:ok, Output.t()} | {:error, Output.t() | term()}
+  def capture(%Context{} = context, path, opts \\ []) when is_binary(path) do
+    Context.capture_file(context, path, opts)
+  end
 
   @doc """
   Reads the file at `path` and returns its content.

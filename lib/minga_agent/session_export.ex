@@ -9,6 +9,8 @@ defmodule MingaAgent.SessionExport do
   """
 
   alias ReqLLM.Message.ContentPart
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
 
   @typedoc "Options for export."
   @type export_opts :: [
@@ -194,6 +196,7 @@ defmodule MingaAgent.SessionExport do
     text = extract_text(msg.content)
     name = msg.name || "tool"
     tool_call_id = msg.tool_call_id || ""
+    retention = format_retention(msg)
 
     """
     <details>
@@ -202,7 +205,7 @@ defmodule MingaAgent.SessionExport do
     ```
     #{String.slice(text, 0, 5000)}
     ```
-
+    #{retention}
     </details>
     """
   end
@@ -211,6 +214,22 @@ defmodule MingaAgent.SessionExport do
     text = extract_text(msg.content)
     "_#{role}: #{text}_"
   end
+
+  @spec format_retention(ReqLLM.Message.t()) :: String.t()
+  defp format_retention(%{metadata: %{output: %Output{} = output}}) do
+    encoded = output |> OutputCodec.encode() |> :json.format() |> IO.iodata_to_binary()
+
+    """
+
+    Retained output facts (reference metadata only; payload bytes are not exported):
+
+    ```json
+    #{encoded}
+    ```
+    """
+  end
+
+  defp format_retention(_message), do: ""
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -38,6 +38,12 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, {:tool_update, tool_call_id, name, partial}),
     do: ToolEventWorkflow.updated(state, tool_call_id, name, partial)
 
+  def dispatch(
+        %EditorState{} = state,
+        {:tool_ended, tool_call_id, name, result, status, _output}
+      ),
+      do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
+
   def dispatch(%EditorState{} = state, {:tool_ended, tool_call_id, name, result, status}),
     do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
 

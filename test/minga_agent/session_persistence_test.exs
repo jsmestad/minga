@@ -1,6 +1,9 @@
 defmodule MingaAgent.SessionPersistenceTest do
   use Minga.Test.SessionCase, async: true
   alias MingaAgent.Branch
+  alias MingaAgent.ArtifactStore
+  alias MingaAgent.ArtifactStore.CaptureSpec
+  alias MingaAgent.ArtifactStores
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.Session.Continuation
   alias MingaAgent.ToolCall
@@ -430,6 +433,101 @@ defmodule MingaAgent.SessionPersistenceTest do
     assert Session.session_id(session) == current_id
     assert state.continuation.active_request.request_id == request_id
     assert Session.status(session) == :thinking
+  end
+
+  @tag :tmp_dir
+  test "delivery-in-progress recovery preserves the durable checkpoint and current session", %{
+    tmp_dir: dir
+  } do
+    suffix = System.unique_integer([:positive])
+
+    artifact_opts = [
+      name: Module.concat(__MODULE__, "RecoveryArtifactSupervisor#{suffix}"),
+      root: Path.join(dir, "private-artifacts"),
+      quota: Module.concat(__MODULE__, "RecoveryArtifactQuota#{suffix}"),
+      registry: Module.concat(__MODULE__, "RecoveryArtifactRegistry#{suffix}"),
+      store_supervisor: Module.concat(__MODULE__, "RecoveryArtifactStores#{suffix}")
+    ]
+
+    start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+    {:ok, runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
+    record = "delivery-in-progress-checkpoint"
+    call_id = "in-progress-call"
+    arguments = %{"path" => "README.md"}
+
+    {:ok, request, continuation} =
+      Continuation.begin_request(Continuation.new(), "in-progress-request", 1, [
+        ReqLLM.Context.user("inspect")
+      ])
+
+    assistant = %ReqLLM.Message{
+      role: :assistant,
+      tool_calls: [ReqLLM.ToolCall.new(call_id, "read_file", ~s({"path":"README.md"}))]
+    }
+
+    {:ok, checkpoint_id, checkpointed} =
+      Continuation.checkpoint_tool_group(
+        continuation,
+        request.request_id,
+        Enum.concat(request.messages, [assistant]),
+        [%{tool_call_id: call_id, name: "read_file", arguments: arguments}]
+      )
+
+    {:ok, admitted} =
+      Continuation.admit_tool_effect(
+        checkpointed,
+        request.request_id,
+        checkpoint_id,
+        call_id,
+        "read_file",
+        arguments
+      )
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: record,
+                 timestamp: "2026-01-01T00:00:00Z",
+                 model_name: "test-model",
+                 provider_name: "test",
+                 messages: [{:user, "inspect"}],
+                 continuation: admitted,
+                 usage: %MingaAgent.TurnUsage{}
+               },
+               dir,
+               artifact_runtime: runtime
+             )
+
+    {:ok, artifact_store} = ArtifactStores.ensure_record(record, runtime)
+
+    {:ok, capture_spec} =
+      CaptureSpec.new(
+        media_type: "text/plain",
+        mode: :bytes,
+        owner_pid: self(),
+        delivery_key: {:delivery, checkpoint_id, call_id}
+      )
+
+    assert {:ok, _capture} = ArtifactStore.begin(artifact_store, capture_spec)
+
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionMockProvider,
+        provider_opts: [],
+        session_store_dir: dir,
+        persist?: true,
+        artifact_runtime: runtime
+      )
+
+    current_id = Session.session_id(session)
+
+    assert {:error, {:checkpoint_reconciliation_failed, :delivery_in_progress}} =
+             Session.load_session(session, record)
+
+    assert Session.session_id(session) == current_id
+    assert {:ok, saved} = SessionStore.load(record, dir, artifact_runtime: runtime)
+    assert saved.continuation.tool_checkpoint.checkpoint_id == checkpoint_id
+    assert Enum.at(saved.continuation.tool_checkpoint.calls, 0).status == :admitted
   end
 
   @tag :tmp_dir
@@ -1045,6 +1143,64 @@ defmodule MingaAgent.SessionPersistenceTest do
   end
 
   @tag :tmp_dir
+  test "loading a retained tool result uses the session's configured artifact runtime after restart",
+       %{tmp_dir: dir} do
+    suffix = System.unique_integer([:positive])
+
+    artifact_opts = [
+      name: Module.concat(__MODULE__, "ArtifactSupervisor#{suffix}"),
+      root: Path.join(dir, "private-artifacts"),
+      quota: Module.concat(__MODULE__, "ArtifactQuota#{suffix}"),
+      registry: Module.concat(__MODULE__, "ArtifactRegistry#{suffix}"),
+      store_supervisor: Module.concat(__MODULE__, "ArtifactStores#{suffix}")
+    ]
+
+    start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+    {:ok, runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
+    record = "private-runtime-load"
+    key = {:delivery, "private-runtime-checkpoint", "read"}
+    {:ok, store} = ArtifactStores.ensure_record(record, runtime)
+    {:ok, output} = MingaAgent.Tools.OutputCapture.bytes(store, key, "original retained text", [])
+    tool_call = ToolCall.new("read", "read_file") |> ToolCall.complete(output.view, output)
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: record,
+                 timestamp: "2026-01-01T00:00:00Z",
+                 model_name: "test-model",
+                 provider_name: "test",
+                 messages: [{:tool_call, tool_call}],
+                 continuation: Continuation.new(),
+                 usage: %MingaAgent.TurnUsage{}
+               },
+               dir,
+               artifact_runtime: runtime
+             )
+
+    assert :ok = ArtifactStore.release(store, key)
+    assert :ok = DynamicSupervisor.terminate_child(artifact_opts[:store_supervisor], store)
+
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionMockProvider,
+        provider_opts: [],
+        session_store_dir: dir,
+        artifact_runtime: runtime
+      )
+
+    assert :ok = Session.load_session(session, record)
+
+    assert [{:tool_call, %ToolCall{status: :complete, output: restored}}] =
+             Session.messages(session)
+
+    {:ok, reopened} = ArtifactStores.ensure_record(record, runtime)
+
+    assert {:ok, %{bytes: "original retained text"}} =
+             ArtifactStore.fetch(reopened, restored.reference, restored.selection)
+  end
+
+  @tag :tmp_dir
   test "restart reconciles an admitted checkpoint without replay and preserves opaque provider content",
        %{tmp_dir: dir} do
     {:ok, request, continuation} =
@@ -1108,6 +1264,23 @@ defmodule MingaAgent.SessionPersistenceTest do
         arguments
       )
 
+    {:ok, artifact_store} = ArtifactStores.ensure_record("interrupted-checkpoint")
+
+    {:ok, capture_spec} =
+      CaptureSpec.new(
+        media_type: "text/plain",
+        mode: :bytes,
+        owner_pid: self(),
+        delivery_key: {:delivery, checkpoint_id, "call-interrupted"}
+      )
+
+    {:ok, capture} = ArtifactStore.begin(artifact_store, capture_spec)
+
+    assert {:ok, _progress} =
+             ArtifactStore.append(artifact_store, capture, "exact pre-crash output")
+
+    assert {:ok, retained} = ArtifactStore.finish(artifact_store, capture, :complete)
+
     assert :ok =
              SessionStore.save(
                %{
@@ -1146,6 +1319,14 @@ defmodule MingaAgent.SessionPersistenceTest do
 
     assert [indeterminate_result | _rest] = Enum.reverse(recovered.continuation.messages)
     assert indeterminate_result.metadata.minga_effect_status == :indeterminate
+    assert indeterminate_result.metadata.output.reference == retained.reference
+
+    assert {:ok, %{bytes: "exact pre-crash output"}} =
+             ArtifactStore.fetch(
+               artifact_store,
+               retained.reference,
+               indeterminate_result.metadata.output.selection
+             )
 
     recovery_turn_id =
       Enum.find_value(Session.messages_with_ids(session), fn

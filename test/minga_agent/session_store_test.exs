@@ -1,14 +1,25 @@
 defmodule MingaAgent.SessionStoreTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.ArtifactQuota
+  alias MingaAgent.ArtifactStore
+  alias MingaAgent.ArtifactStore.CaptureSpec
+  alias MingaAgent.ArtifactStores
+  alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Branch
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Attachment
+  alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.Tool.Output.Reference
+  alias MingaAgent.Tool.Output.Revision
   alias MingaAgent.SessionStore
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
+  alias ReqLLM.Context
 
   @moduletag :tmp_dir
 
@@ -76,7 +87,7 @@ defmodule MingaAgent.SessionStoreTest do
       raw = File.read!(path)
       record = JSON.decode!(raw)
 
-      assert record["version"] == 4
+      assert record["version"] == 5
 
       assert record["model_selection"]["credential"] == %{
                "kind" => "none",
@@ -104,6 +115,8 @@ defmodule MingaAgent.SessionStoreTest do
         |> Map.put("version", 2)
         |> Map.delete("model_selection")
         |> Map.delete("selection_intent")
+        |> Map.delete("artifact_generation")
+        |> Map.update!("messages", &Enum.map(&1, fn message -> Map.delete(message, "output") end))
 
       File.write!(path, JSON.encode!(record))
 
@@ -114,6 +127,46 @@ defmodule MingaAgent.SessionStoreTest do
                "model" => data.model_name,
                "provider" => data.provider_name
              }
+    end
+
+    test "version three and four executable snapshots retain their exact selection when upgraded",
+         %{tmp_dir: dir} do
+      resolve_opts = [
+        config: MingaAgent.Test.ModelSelectionFixture.config(),
+        backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+        credential_snapshot: MingaAgent.Credentials.Snapshot.new(%{}, nil, "http://127.0.0.1:1")
+      ]
+
+      {:ok, selection} = MingaAgent.ModelResolver.resolve("test:test-model", resolve_opts)
+
+      for version <- [3, 4] do
+        data = Map.put(sample_data("model-version-#{version}"), :model_selection, selection)
+        assert :ok = SessionStore.save(data, dir)
+        path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+        legacy =
+          path
+          |> File.read!()
+          |> JSON.decode!()
+          |> Map.put("version", version)
+          |> Map.delete("artifact_generation")
+          |> Map.update!(
+            "messages",
+            &Enum.map(&1, fn message -> Map.delete(message, "output") end)
+          )
+
+        File.write!(path, JSON.encode!(legacy))
+
+        assert {:ok, loaded} = SessionStore.load(data.id, dir)
+        assert ModelSelection.id(loaded.model_selection) == ModelSelection.id(selection)
+
+        assert {:ok, executable} =
+                 MingaAgent.ModelResolver.restore(loaded.model_selection, resolve_opts)
+
+        assert :ok = SessionStore.save(Map.put(loaded, :model_selection, executable), dir)
+        assert {:ok, upgraded} = SessionStore.load(data.id, dir)
+        assert ModelSelection.id(upgraded.model_selection) == ModelSelection.id(selection)
+      end
     end
 
     test "persists the exact active request for restart recovery", %{tmp_dir: dir} do
@@ -193,6 +246,134 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.status == :complete
       assert tc.auto_approved_scope == :session
       assert tc.preview == nil
+      assert tc.output == nil
+    end
+
+    test "round-trips complete and incomplete typed output without reclassifying legacy text", %{
+      tmp_dir: dir
+    } do
+      {:ok, complete_range} = Range.new(:full, :bytes, 0, 4, 4)
+      {:ok, complete_output} = Output.new("done", :complete, complete_range)
+      {:ok, incomplete_range} = Range.new(:captured_prefix, :bytes, 0, 7, :unknown)
+
+      {:ok, incomplete_output} =
+        Output.new("partial", {:incomplete, :interrupted}, incomplete_range)
+
+      complete_call =
+        ToolCall.new("complete-output", "read_file")
+        |> ToolCall.complete("done", complete_output)
+
+      incomplete_call =
+        ToolCall.new("incomplete-output", "shell")
+        |> ToolCall.error("partial [truncated]", incomplete_output)
+
+      data = %{
+        sample_data("typed-output-roundtrip")
+        | messages: [{:tool_call, complete_call}, {:tool_call, incomplete_call}],
+          message_ids: [1, 2],
+          pinned_ids: MapSet.new()
+      }
+
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+
+      assert [
+               {:tool_call, %ToolCall{result: "done", output: ^complete_output}},
+               {:tool_call, %ToolCall{result: "partial [truncated]", output: ^incomplete_output}}
+             ] = loaded.messages
+
+      encoded =
+        Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+        |> File.read!()
+        |> JSON.decode!()
+
+      assert encoded["version"] == 5
+      assert encoded["artifact_generation"] == Reference.digest("")
+    end
+
+    test "continuation codec preserves output facts and finds refs in frozen branches and checkpoints" do
+      text_output = retained_text_output("text-checkpoint", "full retained text")
+      image_output = retained_image_output("image-branch", "never serialize these PNG bytes")
+
+      frozen_result =
+        Context.tool_result_message("read_file", "frozen-call", "image available", %{
+          output: image_output
+        })
+
+      assert {:ok, continuation} =
+               Continuation.restore(
+                 [],
+                 0,
+                 0,
+                 [],
+                 %{"inactive" => %{messages: [frozen_result], boundaries: []}},
+                 :lossless
+               )
+
+      assert {:ok, request, continuation} =
+               Continuation.begin_request(continuation, "request-output", 1, "inspect")
+
+      assistant = %ReqLLM.Message{
+        role: :assistant,
+        content: [],
+        metadata: %{},
+        tool_calls: [ReqLLM.ToolCall.new("current-call", "read_file", ~s({"path":"a"}))]
+      }
+
+      assert {:ok, checkpoint_id, continuation} =
+               Continuation.checkpoint_tool_group(
+                 continuation,
+                 request.request_id,
+                 request.messages ++ [assistant],
+                 [
+                   %{
+                     tool_call_id: "current-call",
+                     name: "read_file",
+                     arguments: %{"path" => "a"}
+                   }
+                 ]
+               )
+
+      assert {:ok, continuation} =
+               Continuation.admit_tool_effect(
+                 continuation,
+                 request.request_id,
+                 checkpoint_id,
+                 "current-call",
+                 "read_file",
+                 %{"path" => "a"}
+               )
+
+      current_result =
+        Context.tool_result_message("read_file", "current-call", text_output.view, %{
+          output: text_output
+        })
+
+      assert {:ok, continuation} =
+               Continuation.complete_tool_effect(
+                 continuation,
+                 request.request_id,
+                 checkpoint_id,
+                 "current-call",
+                 current_result
+               )
+
+      encoded = ContinuationCodec.encode(continuation)
+      json = JSON.encode!(encoded)
+
+      actual_tokens =
+        encoded |> ContinuationCodec.references() |> Enum.map(& &1.token) |> Enum.sort()
+
+      [image_attachment] = image_output.attachments
+      expected_tokens = Enum.sort([image_attachment.reference.token, text_output.reference.token])
+      assert actual_tokens == expected_tokens
+
+      refute json =~ "never serialize these PNG bytes"
+      refute json =~ "payload_bytes"
+      refute json =~ "#PID"
+
+      assert {:ok, decoded} = ContinuationCodec.decode(JSON.decode!(json))
+      assert decoded == continuation
     end
 
     test "rejects unknown legacy tool status instead of inventing a completion", %{tmp_dir: dir} do
@@ -717,6 +898,757 @@ defmodule MingaAgent.SessionStoreTest do
     end
   end
 
+  describe "retained snapshot durability" do
+    test "checkpoint argument captures remain pinned after delivery ends and the store restarts",
+         %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "nested-checkpoint-output"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+
+      {output, delivery} =
+        store_output(store, "nested", "checkpoint argument bytes", "text/plain")
+
+      {:ok, request, continuation} =
+        Continuation.begin_request(Continuation.new(), "nested-request", 1, "inspect")
+
+      assistant = %ReqLLM.Message{
+        role: :assistant,
+        content: [],
+        metadata: %{},
+        tool_calls: [ReqLLM.ToolCall.new("nested-call", "inspect", "{}")]
+      }
+
+      {:ok, _checkpoint, continuation} =
+        Continuation.checkpoint_tool_group(
+          continuation,
+          request.request_id,
+          request.messages ++ [assistant],
+          [%{tool_call_id: "nested-call", name: "inspect", arguments: %{"captures" => [output]}}]
+        )
+
+      data = %{
+        sample_data(id)
+        | continuation: continuation,
+          messages: [{:user, "inspect"}],
+          message_ids: [1],
+          pinned_ids: MapSet.new()
+      }
+
+      config_dir = Path.join(dir, "config")
+      assert :ok = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+      assert :ok = ArtifactStore.release(store, delivery)
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+      assert :ok = DynamicSupervisor.terminate_child(runtime.store_supervisor, store)
+      assert {:ok, loaded} = SessionStore.load(id, config_dir, artifact_runtime: runtime)
+      assert loaded.continuation == continuation
+      {:ok, reopened} = ArtifactStores.ensure_record(id, runtime)
+
+      assert {:ok, %{bytes: "checkpoint argument bytes"}} =
+               ArtifactStore.fetch(reopened, output.reference, output.selection)
+
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+      original = File.read!(path)
+      current = JSON.decode!(original)
+      legacy = current |> Map.put("version", 3) |> Map.delete("artifact_generation")
+      File.write!(path, JSON.encode!(legacy))
+
+      assert {:error, :invalid_session_record} =
+               SessionStore.load(id, config_dir, artifact_runtime: runtime)
+
+      File.write!(path, original)
+    end
+
+    test "version three rejects hybrid model and retained schemas without replacing durable authority",
+         %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "hybrid-version-three"
+      config_dir = Path.join(dir, "config")
+
+      data = %{
+        sample_data(id)
+        | messages: [{:user, "hello"}],
+          message_ids: [1],
+          pinned_ids: MapSet.new()
+      }
+
+      assert :ok = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+      hybrid = File.read!(path) |> JSON.decode!() |> Map.put("version", 3)
+      malformed = JSON.encode!(hybrid)
+      File.write!(path, malformed)
+
+      assert {:error, :invalid_session_record} =
+               SessionStore.load(id, config_dir, artifact_runtime: runtime)
+
+      assert {:error, _reason} = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+      assert File.read!(path) == malformed
+    end
+
+    test "generationless model snapshots reject output keys in transcripts and branches", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "model-output-key"
+      config_dir = Path.join(dir, "config")
+      {:ok, range} = Range.new(:full, :bytes, 0, 6, 6)
+      {:ok, inline} = Output.new("inline", :complete, range)
+      data = data_with_output(id, inline, Continuation.new())
+      assert :ok = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+      current = File.read!(path) |> JSON.decode!()
+      [call] = current["messages"]
+
+      base =
+        current
+        |> Map.put("version", 3)
+        |> Map.delete("artifact_generation")
+        |> Map.put("messages", [Map.delete(call, "output")])
+
+      File.write!(path, JSON.encode!(base))
+      assert {:ok, _loaded} = SessionStore.load(id, config_dir, artifact_runtime: runtime)
+
+      for version <- [3, 4],
+          output <- [nil, call["output"]],
+          location <- [:transcript, :branch] do
+        message = Map.put(call, "output", output)
+
+        invalid =
+          case location do
+            :transcript ->
+              Map.put(base, "messages", [message])
+
+            :branch ->
+              Map.put(base, "branches", [
+                %{"name" => "saved", "created_at" => data.timestamp, "messages" => [message]}
+              ])
+          end
+
+        malformed = invalid |> Map.put("version", version) |> JSON.encode!()
+        File.write!(path, malformed)
+
+        assert {:error, :invalid_session_record} =
+                 SessionStore.load(id, config_dir, artifact_runtime: runtime)
+
+        assert {:error, _reason} = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+        assert File.read!(path) == malformed
+      end
+    end
+
+    test "version three retained output preserves original bytes when upgraded to the combined format",
+         %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "retained-version-three"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+
+      {output, delivery} =
+        store_output(store, "legacy-retained", "original version-three bytes", "text/plain")
+
+      data = data_with_output(id, output, Continuation.new())
+      config_dir = Path.join(dir, "config")
+      assert :ok = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+      assert :ok = ArtifactStore.release(store, delivery)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+
+      legacy =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.put("version", 3)
+        |> Map.delete("model_selection")
+        |> Map.delete("selection_intent")
+
+      File.write!(path, JSON.encode!(legacy))
+      assert :ok = DynamicSupervisor.terminate_child(runtime.store_supervisor, store)
+
+      assert {:ok, loaded} = SessionStore.load(id, config_dir, artifact_runtime: runtime)
+      assert loaded.model_selection == nil
+
+      assert loaded.selection_intent == %{
+               "model" => data.model_name,
+               "provider" => data.provider_name
+             }
+
+      assert :ok = SessionStore.save(loaded, config_dir, artifact_runtime: runtime)
+      {:ok, reopened} = ArtifactStores.ensure_record(id, runtime)
+      [{:tool_call, call}] = loaded.messages
+
+      assert {:ok, %{bytes: "original version-three bytes"}} =
+               ArtifactStore.fetch(reopened, call.output.reference, call.output.selection)
+    end
+
+    test "pins transcript, inactive branch, and checkpoint refs across store restart", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      session_id = "retained-restart"
+      {:ok, store} = ArtifactStores.ensure_record(session_id, runtime)
+
+      {transcript_output, transcript_delivery} =
+        store_output(store, "transcript", "transcript exact bytes", "text/plain")
+
+      {branch_output, branch_delivery} =
+        store_output(store, "branch", "image exact bytes", "image/png")
+
+      {checkpoint_output, checkpoint_delivery} =
+        store_output(store, "checkpoint", "checkpoint exact bytes", "text/plain")
+
+      continuation = continuation_with_outputs(branch_output, checkpoint_output)
+      data = data_with_output(session_id, transcript_output, continuation)
+      config_dir = Path.join(dir, "config")
+
+      assert :ok = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+
+      for delivery <- [transcript_delivery, branch_delivery, checkpoint_delivery] do
+        assert :ok = ArtifactStore.release(store, delivery)
+      end
+
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{session_id}.json")
+      snapshot = File.read!(path)
+      refute snapshot =~ "transcript exact bytes"
+      refute snapshot =~ "image exact bytes"
+      refute snapshot =~ "checkpoint exact bytes"
+
+      assert :ok = DynamicSupervisor.terminate_child(runtime.store_supervisor, store)
+      assert {:ok, reopened} = ArtifactStores.ensure_record(session_id, runtime)
+
+      assert {:ok, loaded} =
+               SessionStore.load(session_id, config_dir, artifact_runtime: runtime)
+
+      [{:tool_call, transcript_call}] = loaded.messages
+      assert transcript_call.output == transcript_output
+      assert loaded.continuation == continuation
+
+      for {output, bytes} <- [
+            {transcript_output, "transcript exact bytes"},
+            {branch_output, "image exact bytes"},
+            {checkpoint_output, "checkpoint exact bytes"}
+          ] do
+        assert {:ok, %{bytes: ^bytes}} =
+                 ArtifactStore.fetch(reopened, output.reference, output.selection)
+      end
+    end
+
+    test "a definite pre-rename failure releases the candidate pin and preserves old JSON", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      session_id = "pin-before-write"
+      {:ok, store} = ArtifactStores.ensure_record(session_id, runtime)
+      {old_output, old_delivery} = store_output(store, "old", "old bytes", "text/plain")
+      config_dir = Path.join(dir, "config")
+      old_data = data_with_output(session_id, old_output, Continuation.new())
+
+      assert :ok = SessionStore.save(old_data, config_dir, artifact_runtime: runtime)
+      assert :ok = ArtifactStore.release(store, old_delivery)
+
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{session_id}.json")
+      old_json = File.read!(path)
+      {new_output, new_delivery} = store_output(store, "new", "new bytes", "text/plain")
+      candidate = data_with_output(session_id, new_output, Continuation.new())
+
+      assert {:error, :injected_pre_rename_failure} =
+               SessionStore.save(candidate, config_dir,
+                 artifact_runtime: runtime,
+                 fault_injector: %{
+                   before_session_snapshot_rename: {:error, :injected_pre_rename_failure}
+                 }
+               )
+
+      assert File.read!(path) == old_json
+
+      assert {:ok, loaded} =
+               SessionStore.load(session_id, config_dir, artifact_runtime: runtime)
+
+      assert [{:tool_call, %ToolCall{output: ^old_output}}] = loaded.messages
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "old bytes"}} =
+               ArtifactStore.fetch(store, old_output.reference, old_output.selection)
+
+      assert {:ok, %{bytes: "new bytes"}} =
+               ArtifactStore.fetch(store, new_output.reference, new_output.selection)
+
+      assert :ok = SessionStore.save(candidate, config_dir, artifact_runtime: runtime)
+      assert :ok = ArtifactStore.release(store, new_delivery)
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:error, :expired} =
+               ArtifactStore.fetch(store, old_output.reference, old_output.selection)
+
+      assert {:ok, %{bytes: "new bytes"}} =
+               ArtifactStore.fetch(store, new_output.reference, new_output.selection)
+    end
+
+    test "a post-rename failure retains the ambiguous candidate until load reconciles JSON", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      session_id = "pin-after-rename"
+      {:ok, store} = ArtifactStores.ensure_record(session_id, runtime)
+      {old_output, old_delivery} = store_output(store, "old", "old bytes", "text/plain")
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(
+                 data_with_output(session_id, old_output, Continuation.new()),
+                 config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, old_delivery)
+      {new_output, _new_delivery} = store_output(store, "new", "new bytes", "text/plain")
+
+      assert {:error, :injected_post_rename_failure} =
+               SessionStore.save(
+                 data_with_output(session_id, new_output, Continuation.new()),
+                 config_dir,
+                 artifact_runtime: runtime,
+                 fault_injector: %{
+                   after_session_snapshot_rename: {:error, :injected_post_rename_failure}
+                 }
+               )
+
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      recovery_fault = %{before_session_snapshot_recovery_sync: {:error, :recovery_sync_failed}}
+
+      assert {:error, :recovery_sync_failed} =
+               SessionStore.load(session_id, config_dir,
+                 artifact_runtime: runtime,
+                 fault_injector: recovery_fault
+               )
+
+      assert {:error, :recovery_sync_failed} =
+               SessionStore.save(
+                 data_with_output(session_id, new_output, Continuation.new()),
+                 config_dir,
+                 artifact_runtime: runtime,
+                 fault_injector: recovery_fault
+               )
+
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "old bytes"}} =
+               ArtifactStore.fetch(store, old_output.reference, old_output.selection)
+
+      assert {:ok, %{bytes: "new bytes"}} =
+               ArtifactStore.fetch(store, new_output.reference, new_output.selection)
+
+      assert {:ok, loaded} =
+               SessionStore.load(session_id, config_dir, artifact_runtime: runtime)
+
+      assert [{:tool_call, %ToolCall{output: ^new_output}}] = loaded.messages
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:error, :expired} =
+               ArtifactStore.fetch(store, old_output.reference, old_output.selection)
+
+      assert {:ok, %{bytes: "new bytes"}} =
+               ArtifactStore.fetch(store, new_output.reference, new_output.selection)
+    end
+
+    test "serializable invalid candidates cannot replace a resumable snapshot or release its output",
+         %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "candidate-schema"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {output, delivery} = store_output(store, "protected", "resumable bytes", "text/plain")
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(data_with_output(id, output, Continuation.new()), config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, delivery)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+      original = File.read!(path)
+      base = sample_data(id)
+
+      candidates = [
+        %{base | title: ""},
+        %{base | timestamp: "invalid-time"},
+        %{base | message_ids: [10, 10, 30, 40, 50, 60]}
+      ]
+
+      for candidate <- candidates do
+        assert {:error, :invalid_session_record} =
+                 SessionStore.save(candidate, config_dir, artifact_runtime: runtime)
+
+        assert File.read!(path) == original
+        assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+        assert {:ok, %{bytes: "resumable bytes"}} =
+                 ArtifactStore.fetch(store, output.reference, output.selection)
+      end
+    end
+
+    test "malformed legacy message content is not authoritative absence", %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "legacy-schema"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+
+      {output, delivery} =
+        store_output(store, "protected", "legacy ambiguity bytes", "text/plain")
+
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(data_with_output(id, output, Continuation.new()), config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, delivery)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+
+      legacy = %{
+        "version" => 1,
+        "id" => id,
+        "timestamp" => "2026-01-01T00:00:00Z",
+        "model_name" => "test-model",
+        "messages" => [%{"type" => "user", "text" => "valid prompt"}]
+      }
+
+      invalid = [
+        Map.put(legacy, "messages", [%{"type" => "user", "text" => 42}]),
+        Map.put(legacy, "branches", [
+          %{
+            "name" => "branch",
+            "created_at" => "2026-01-01T00:00:00Z",
+            "messages" => [%{"type" => "assistant", "text" => 42}]
+          }
+        ])
+      ]
+
+      for record <- invalid do
+        json = JSON.encode!(record)
+        File.write!(path, json)
+
+        assert {:error, :invalid_session_record} =
+                 SessionStore.save(sample_data(id), config_dir, artifact_runtime: runtime)
+
+        assert File.read!(path) == json
+        assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+        assert {:ok, %{bytes: "legacy ambiguity bytes"}} =
+                 ArtifactStore.fetch(store, output.reference, output.selection)
+      end
+    end
+
+    test "artifact actor exit after candidate pinning does not report a durable commit as failure",
+         %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "actor-exit-after-pin"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+
+      {output, _delivery} =
+        store_output(store, "candidate", "committed despite actor exit", "text/plain")
+
+      config_dir = Path.join(dir, "config")
+      parent = self()
+
+      fault = fn
+        :before_session_snapshot_rename ->
+          send(parent, {:candidate_pinned, self()})
+
+          receive do
+            :resume_snapshot -> :ok
+          end
+
+        _point ->
+          :ok
+      end
+
+      writer =
+        Task.async(fn ->
+          SessionStore.save(data_with_output(id, output, Continuation.new()), config_dir,
+            artifact_runtime: runtime,
+            fault_injector: fault
+          )
+        end)
+
+      # The test timeout bounds this handshake; pinning has no one-second latency contract.
+      writer_pid =
+        receive do
+          {:candidate_pinned, writer_pid} ->
+            writer_pid
+
+          {ref, result} when ref == writer.ref ->
+            flunk("snapshot writer returned before candidate pinning: #{inspect(result)}")
+        end
+
+      assert :ok = DynamicSupervisor.terminate_child(runtime.store_supervisor, store)
+      send(writer_pid, :resume_snapshot)
+      assert :ok = Task.await(writer)
+      assert {:ok, loaded} = SessionStore.load(id, config_dir, artifact_runtime: runtime)
+      assert [{:tool_call, %ToolCall{output: ^output}}] = loaded.messages
+      {:ok, reopened} = ArtifactStores.ensure_record(id, runtime)
+
+      assert {:ok, %{bytes: "committed despite actor exit"}} =
+               ArtifactStore.fetch(reopened, output.reference, output.selection)
+    end
+
+    test "zero-reference records report configured runtime failures without replacing JSON", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      config_dir = Path.join(dir, "config")
+      id = "empty-output-authority"
+      data = sample_data(id)
+      assert :ok = SessionStore.save(data, config_dir, artifact_runtime: runtime)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+      original = File.read!(path)
+
+      options = [
+        root: runtime.root,
+        quota: runtime.quota,
+        registry: runtime.registry,
+        store_supervisor: runtime.store_supervisor,
+        limits: runtime.limits
+      ]
+
+      missing = Module.concat(__MODULE__, "MissingRuntime#{System.unique_integer([:positive])}")
+
+      for key <- [:quota, :registry] do
+        {:ok, unavailable} =
+          MingaAgent.ArtifactStores.Runtime.new(Keyword.put(options, key, missing))
+
+        assert {:error, _reason} =
+                 SessionStore.load(id, config_dir, artifact_runtime: unavailable)
+
+        assert {:error, _reason} =
+                 SessionStore.save(data, config_dir, artifact_runtime: unavailable)
+
+        assert File.read!(path) == original
+      end
+    end
+
+    test "invalid JSON authority never reconciles snapshot pins", %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      id = "invalid-authority"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {output, delivery} = store_output(store, "authority", "protected authority", "text/plain")
+
+      {orphan, orphan_delivery} =
+        store_output(store, "ambiguous", "protected candidate", "text/plain")
+
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(data_with_output(id, output, Continuation.new()), config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, delivery)
+      foreign = String.duplicate("0", 64)
+      assert :ok = ArtifactStore.pin(store, {:snapshot, foreign}, Output.references(orphan))
+      assert :ok = ArtifactStore.release(store, orphan_delivery)
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+      valid = path |> File.read!() |> JSON.decode!()
+
+      for invalid <- [Map.put(valid, "artifact_generation", foreign), Map.put(valid, "title", 42)] do
+        File.write!(path, JSON.encode!(invalid))
+
+        assert {:error, :invalid_session_record} =
+                 SessionStore.load(id, config_dir, artifact_runtime: runtime)
+
+        assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+        assert {:ok, %{bytes: "protected authority"}} =
+                 ArtifactStore.fetch(store, output.reference, output.selection)
+
+        assert {:ok, %{bytes: "protected candidate"}} =
+                 ArtifactStore.fetch(store, orphan.reference, orphan.selection)
+      end
+    end
+
+    test "corrupt and unreadable prior records stop save before pin mutation", %{tmp_dir: dir} do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      config_dir = Path.join(dir, "config")
+
+      for kind <- [:corrupt, :directory] do
+        id = "invalid-prior-#{kind}"
+        {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+        {old, delivery} = store_output(store, "old", "prior bytes", "text/plain")
+        {new, _delivery} = store_output(store, "new", "retry bytes", "text/plain")
+
+        assert :ok =
+                 SessionStore.save(data_with_output(id, old, Continuation.new()), config_dir,
+                   artifact_runtime: runtime
+                 )
+
+        assert :ok = ArtifactStore.release(store, delivery)
+        path = Path.join(SessionStore.sessions_dir(config_dir), "#{id}.json")
+
+        case kind do
+          :corrupt ->
+            File.write!(path, "{not JSON")
+
+          :directory ->
+            File.rm!(path)
+            File.mkdir!(path)
+        end
+
+        assert {:error, _reason} =
+                 SessionStore.save(data_with_output(id, new, Continuation.new()), config_dir,
+                   artifact_runtime: runtime
+                 )
+
+        assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+        assert {:ok, %{bytes: "prior bytes"}} =
+                 ArtifactStore.fetch(store, old.reference, old.selection)
+
+        assert {:ok, %{bytes: "retry bytes"}} =
+                 ArtifactStore.fetch(store, new.reference, new.selection)
+      end
+    end
+
+    test "a load waits for the same JSON authority while another root remains independent", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      independent_runtime = start_artifact_runtime(Path.join(dir, "independent-artifacts"))
+      id = "serialized-authority"
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {old, old_delivery} = store_output(store, "old", "old authority", "text/plain")
+      {new, _delivery} = store_output(store, "new", "new authority", "text/plain")
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(data_with_output(id, old, Continuation.new()), config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, old_delivery)
+      owner = self()
+
+      fault = fn
+        :before_session_snapshot_rename ->
+          send(owner, {:candidate_pinned, self()})
+
+          receive do
+            :resume_snapshot -> :ok
+          end
+
+        _point ->
+          :ok
+      end
+
+      writer =
+        Task.async(fn ->
+          SessionStore.save(data_with_output(id, new, Continuation.new()), config_dir,
+            artifact_runtime: runtime,
+            fault_injector: fault
+          )
+        end)
+
+      assert_receive {:candidate_pinned, writer_pid}
+
+      reader =
+        Task.async(fn ->
+          send(owner, :reader_started)
+          SessionStore.load(id, Path.join(config_dir, "."), artifact_runtime: runtime)
+        end)
+
+      assert_receive :reader_started
+
+      assert :ok =
+               SessionStore.save(sample_data(id), Path.join(dir, "independent-config"),
+                 artifact_runtime: independent_runtime
+               )
+
+      assert Task.yield(reader, 0) == nil
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+      send(writer_pid, :resume_snapshot)
+      assert :ok = Task.await(writer)
+      assert {:ok, loaded} = Task.await(reader)
+      assert [{:tool_call, %ToolCall{output: ^new}}] = loaded.messages
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "new authority"}} =
+               ArtifactStore.fetch(store, new.reference, new.selection)
+    end
+
+    test "a failed old-pin release after commit does not turn a durable save into failure", %{
+      tmp_dir: dir
+    } do
+      root = Path.join(dir, "artifacts")
+      runtime = start_artifact_runtime(root)
+      faults = :atomics.new(2, signed: false)
+      session_id = "release-leak"
+      store = start_faulted_store(runtime, session_id, release_fault(faults))
+      {old_output, old_delivery} = store_output(store, "old", "old pinned", "text/plain")
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(
+                 data_with_output(session_id, old_output, Continuation.new()),
+                 config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, old_delivery)
+      {new_output, _new_delivery} = store_output(store, "new", "new pinned", "text/plain")
+      :atomics.put(faults, 1, 1)
+      :atomics.put(faults, 2, 0)
+
+      assert :ok =
+               SessionStore.save(
+                 data_with_output(session_id, new_output, Continuation.new()),
+                 config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = DynamicSupervisor.terminate_child(runtime.store_supervisor, store)
+      assert {:ok, reopened} = ArtifactStores.ensure_record(session_id, runtime)
+
+      assert {:ok, loaded} =
+               SessionStore.load(session_id, config_dir, artifact_runtime: runtime)
+
+      assert [{:tool_call, %ToolCall{output: ^new_output}}] = loaded.messages
+
+      assert {:ok, %{bytes: "new pinned"}} =
+               ArtifactStore.fetch(reopened, new_output.reference, new_output.selection)
+    end
+
+    test "deletes JSON durably before artifact drop and leaves failed drops charged", %{
+      tmp_dir: dir
+    } do
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      session_id = "ordered-delete"
+      {:ok, store} = ArtifactStores.ensure_record(session_id, runtime)
+      {output, delivery} = store_output(store, "retained", "retained bytes", "text/plain")
+      config_dir = Path.join(dir, "config")
+
+      assert :ok =
+               SessionStore.save(
+                 data_with_output(session_id, output, Continuation.new()),
+                 config_dir,
+                 artifact_runtime: runtime
+               )
+
+      assert :ok = ArtifactStore.release(store, delivery)
+      active = begin_output_capture(store, "still-active", "text/plain")
+
+      assert {:error, :record_in_use} =
+               SessionStore.delete(session_id, config_dir, artifact_runtime: runtime)
+
+      path = Path.join(SessionStore.sessions_dir(config_dir), "#{session_id}.json")
+      refute File.exists?(path)
+      assert %{namespaces: 1, artifacts: 2} = ArtifactQuota.usage(runtime.quota)
+
+      assert {:ok, %{bytes: "retained bytes"}} =
+               ArtifactStore.fetch(store, output.reference, output.selection)
+
+      assert {:ok, _stored} = ArtifactStore.finish(store, active, :complete)
+      assert :ok = SessionStore.delete(session_id, config_dir, artifact_runtime: runtime)
+      assert %{namespaces: 0, artifacts: 0} = ArtifactQuota.usage(runtime.quota)
+    end
+  end
+
   # ── Delete ──────────────────────────────────────────────────────────────────
 
   describe "delete/2" do
@@ -761,6 +1693,67 @@ defmodule MingaAgent.SessionStoreTest do
 
       {:ok, loaded} = SessionStore.load(data1.id, dir)
       assert [{:user, "second"}] = loaded.messages
+    end
+
+    test "a non-serializable pid leaves the prior durable snapshot unchanged", %{tmp_dir: dir} do
+      data = %{
+        sample_data("pid-rejected")
+        | messages: [{:user, "durable"}],
+          message_ids: [1],
+          pinned_ids: MapSet.new()
+      }
+
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      durable_json = File.read!(path)
+
+      invalid_call = ToolCall.new("pid-call", "test", %{"owner" => self()})
+
+      invalid = %{
+        data
+        | messages: [{:tool_call, invalid_call}],
+          message_ids: [2]
+      }
+
+      assert {:error, {:snapshot_encode_failed, _reason}} = SessionStore.save(invalid, dir)
+      assert File.read!(path) == durable_json
+      refute durable_json =~ "#PID"
+      assert {:ok, %{messages: [{:user, "durable"}]}} = SessionStore.load(data.id, dir)
+    end
+
+    test "imports version two text without inventing complete output facts", %{tmp_dir: dir} do
+      tool_call =
+        ToolCall.new("legacy-truncated", "read_file")
+        |> ToolCall.complete("prefix [truncated]")
+
+      data = %{
+        sample_data("version-two-output")
+        | messages: [{:tool_call, tool_call}],
+          message_ids: [1],
+          pinned_ids: MapSet.new()
+      }
+
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      current = path |> File.read!() |> JSON.decode!()
+
+      legacy_messages =
+        Enum.map(current["messages"], fn message -> Map.delete(message, "output") end)
+
+      legacy =
+        current
+        |> Map.put("version", 2)
+        |> Map.delete("artifact_generation")
+        |> Map.put("messages", legacy_messages)
+        |> put_in(["continuation", "version"], 2)
+
+      File.write!(path, JSON.encode!(legacy))
+
+      assert {:ok, %{messages: [{:tool_call, loaded}]}} =
+               SessionStore.load(data.id, dir)
+
+      assert loaded.result == "prefix [truncated]"
+      assert loaded.output == nil
     end
   end
 
@@ -809,6 +1802,254 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:ok, "stable-token"} =
                SessionStore.establish_remote_token(session_id, "replacement-token", dir)
     end
+  end
+
+  @spec start_artifact_runtime(String.t()) :: MingaAgent.ArtifactStores.Runtime.t()
+  defp start_artifact_runtime(root) do
+    suffix = System.unique_integer([:positive])
+
+    opts = [
+      name: Module.concat(__MODULE__, "ArtifactSupervisor#{suffix}"),
+      root: root,
+      quota: Module.concat(__MODULE__, "ArtifactQuota#{suffix}"),
+      registry: Module.concat(__MODULE__, "ArtifactRegistry#{suffix}"),
+      store_supervisor: Module.concat(__MODULE__, "ArtifactStores#{suffix}")
+    ]
+
+    child =
+      Supervisor.child_spec({ArtifactSupervisor, opts},
+        id: {:session_store_artifacts, suffix},
+        restart: :temporary
+      )
+
+    _supervisor = start_supervised!(child)
+    {:ok, runtime} = ArtifactSupervisor.runtime(opts)
+    runtime
+  end
+
+  @spec start_faulted_store(
+          MingaAgent.ArtifactStores.Runtime.t(),
+          String.t(),
+          MingaAgent.ArtifactStorage.FaultInjector.t()
+        ) :: GenServer.server()
+  defp start_faulted_store(runtime, session_id, fault_injector) do
+    name = {:via, Registry, {runtime.registry, session_id}}
+
+    child =
+      Supervisor.child_spec(
+        {ArtifactStore,
+         root: runtime.root,
+         quota: runtime.quota,
+         session_id: session_id,
+         limits: runtime.limits,
+         name: name,
+         fault_injector: fault_injector},
+        restart: :transient
+      )
+
+    {:ok, store} = DynamicSupervisor.start_child(runtime.store_supervisor, child)
+    store
+  end
+
+  @spec release_fault(:atomics.atomics_ref()) :: MingaAgent.ArtifactStorage.FaultInjector.t()
+  defp release_fault(faults) do
+    fn
+      :before_metadata_checkpoint ->
+        release_fault_checkpoint(faults, :atomics.get(faults, 1))
+
+      _point ->
+        :ok
+    end
+  end
+
+  @spec release_fault_checkpoint(:atomics.atomics_ref(), 0 | 1) ::
+          :ok | {:error, :injected_old_pin_release_failure}
+  defp release_fault_checkpoint(_faults, 0), do: :ok
+
+  defp release_fault_checkpoint(faults, 1) do
+    case :atomics.add_get(faults, 2, 1) do
+      3 -> {:error, :injected_old_pin_release_failure}
+      _other -> :ok
+    end
+  end
+
+  @spec data_with_output(String.t(), Output.t(), Continuation.t()) ::
+          SessionStore.session_data()
+  defp data_with_output(session_id, output, continuation) do
+    tool_call =
+      ToolCall.new("display-call", "read_file") |> ToolCall.complete(output.view, output)
+
+    %{
+      sample_data(session_id)
+      | messages: [{:tool_call, tool_call}],
+        message_ids: [1],
+        pinned_ids: MapSet.new(),
+        continuation: continuation
+    }
+  end
+
+  @spec store_output(GenServer.server(), String.t(), binary(), String.t()) ::
+          {Output.t(), tuple()}
+  defp store_output(store, call_id, payload, media_type) do
+    capture = begin_output_capture(store, call_id, media_type)
+    assert {:ok, _progress} = ArtifactStore.append(store, capture, payload)
+    assert {:ok, stored} = ArtifactStore.finish(store, capture, :complete)
+    {:ok, range} = Range.new(:full, :bytes, 0, byte_size(payload), byte_size(payload))
+
+    attachments =
+      case media_type do
+        "image/png" ->
+          {:ok, attachment} = Attachment.image(stored.reference, "#{call_id}.png")
+          [attachment]
+
+        _text ->
+          []
+      end
+
+    {:ok, output} =
+      Output.new("#{call_id} output", stored.capture, range,
+        reference: stored.reference,
+        attachments: attachments
+      )
+
+    {output, {:delivery, "snapshot-test", call_id}}
+  end
+
+  @spec begin_output_capture(GenServer.server(), String.t(), String.t()) :: term()
+  defp begin_output_capture(store, call_id, media_type) do
+    {:ok, spec} =
+      CaptureSpec.new(
+        media_type: media_type,
+        mode: :bytes,
+        owner_pid: self(),
+        delivery_key: {:delivery, "snapshot-test", call_id}
+      )
+
+    {:ok, capture} = ArtifactStore.begin(store, spec)
+    capture
+  end
+
+  @spec continuation_with_outputs(Output.t(), Output.t()) :: Continuation.t()
+  defp continuation_with_outputs(branch_output, checkpoint_output) do
+    frozen_result =
+      Context.tool_result_message("read_file", "frozen-call", branch_output.view, %{
+        output: branch_output
+      })
+
+    {:ok, continuation} =
+      Continuation.restore(
+        [],
+        0,
+        0,
+        [],
+        %{"inactive" => %{messages: [frozen_result], boundaries: []}},
+        :lossless
+      )
+
+    {:ok, request, continuation} =
+      Continuation.begin_request(continuation, "snapshot-request", 1, "inspect")
+
+    assistant = %ReqLLM.Message{
+      role: :assistant,
+      content: [],
+      metadata: %{},
+      tool_calls: [ReqLLM.ToolCall.new("current-call", "read_file", ~s({"path":"a"}))]
+    }
+
+    {:ok, checkpoint_id, continuation} =
+      Continuation.checkpoint_tool_group(
+        continuation,
+        request.request_id,
+        request.messages ++ [assistant],
+        [
+          %{
+            tool_call_id: "current-call",
+            name: "read_file",
+            arguments: %{"path" => "a"}
+          }
+        ]
+      )
+
+    {:ok, continuation} =
+      Continuation.admit_tool_effect(
+        continuation,
+        request.request_id,
+        checkpoint_id,
+        "current-call",
+        "read_file",
+        %{"path" => "a"}
+      )
+
+    result =
+      Context.tool_result_message("read_file", "current-call", checkpoint_output.view, %{
+        output: checkpoint_output
+      })
+
+    {:ok, continuation} =
+      Continuation.complete_tool_effect(
+        continuation,
+        request.request_id,
+        checkpoint_id,
+        "current-call",
+        result
+      )
+
+    continuation
+  end
+
+  @spec retained_text_output(String.t(), binary()) :: Output.t()
+  defp retained_text_output(id, payload) do
+    reference = retained_reference(id, "text/plain", payload)
+    {:ok, range} = Range.new(:full, :bytes, 0, byte_size(payload), byte_size(payload))
+
+    {:ok, revision} =
+      Revision.new(
+        source_kind: :disk,
+        source_id: "fixture.txt",
+        scope: range,
+        generation: 7,
+        sha256: Reference.digest(payload)
+      )
+
+    {:ok, output} =
+      Output.new("full retained", :complete, range,
+        presentation: {:truncated, 5},
+        reference: reference,
+        revision: revision
+      )
+
+    output
+  end
+
+  @spec retained_image_output(String.t(), binary()) :: Output.t()
+  defp retained_image_output(id, payload) do
+    reference = retained_reference(id, "image/png", payload)
+    {:ok, attachment} = Attachment.image(reference, "fixture.png")
+    {:ok, range} = Range.new(:full, :bytes, 0, byte_size(payload), byte_size(payload))
+
+    {:ok, output} =
+      Output.new("[image: fixture.png]", :complete, range,
+        reference: reference,
+        attachments: [attachment]
+      )
+
+    output
+  end
+
+  @spec retained_reference(String.t(), String.t(), binary()) :: Reference.t()
+  defp retained_reference(id, media_type, payload) do
+    artifact_id = String.pad_trailing(id, 32, "x")
+    {:ok, token} = Reference.token("codec-session", artifact_id)
+
+    {:ok, reference} =
+      Reference.new(
+        token: token,
+        media_type: media_type,
+        bytes: byte_size(payload),
+        sha256: Reference.digest(payload)
+      )
+
+    reference
   end
 
   @spec private_mode?(non_neg_integer(), non_neg_integer()) :: boolean()
