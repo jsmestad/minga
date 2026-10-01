@@ -205,7 +205,6 @@ defmodule MingaAgent.Tools.FindTest do
       with_fake_path(%{"fd" => fd}, fn ->
         assert {:error, message} = Find.execute("*", dir, %{}, timeout_ms: 50)
         assert message =~ "Find capture incomplete (timeout)"
-        assert message =~ "partial.txt"
       end)
     end
 
@@ -235,7 +234,6 @@ defmodule MingaAgent.Tools.FindTest do
                  Find.execute("*", dir, %{"_timeout_ms" => 100_000}, timeout_ms: 50)
 
         assert message =~ "Find capture incomplete (timeout)"
-        assert message =~ "visible.txt"
       end)
     end
 

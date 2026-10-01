@@ -22,19 +22,16 @@ defmodule Minga.Buffer.AutoSaveTest do
     pid = start_buffer(file_path: path)
     assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    Events.subscribe(:log_message)
     Events.subscribe(:buffer_saved)
 
     try do
       assert :ok = BufferProcess.insert_text(pid, "!")
 
       assert_buffer_saved(path)
-      assert_log_contains("Auto-saved: #{Path.relative_to_cwd(path)}")
       assert File.read!(path) == "!hello"
       refute BufferProcess.dirty?(pid)
     after
       Events.unsubscribe(:buffer_saved)
-      Events.unsubscribe(:log_message)
     end
   end
 

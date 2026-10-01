@@ -17,6 +17,7 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Extension.RootSupervisor
   alias Minga.Extension.RuntimeSupervisor
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
@@ -1083,25 +1084,27 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       ensure_extension_runtime()
+      suffix = System.unique_integer([:positive])
+      extension_name = :"loader_start_all_failure_#{suffix}"
+      ext_module = Module.concat(["LoaderStartAllFailure#{suffix}"])
 
       ext_dir =
         Path.join(
           System.tmp_dir!(),
-          "minga_loader_start_all_#{System.unique_integer([:positive])}"
+          "minga_loader_start_all_#{suffix}"
         )
 
       File.mkdir_p!(ext_dir)
       ext_path = Path.join(ext_dir, "start_all_failure.ex")
-      ext_module = Minga.TestExtensions.LoaderStartAllFailure
 
       File.write!(
         ext_path,
         """
-        defmodule #{ext_module} do
+        defmodule #{inspect(ext_module)} do
           use Minga.Extension
 
           @impl true
-          def name, do: :loader_start_all_failure
+          def name, do: #{inspect(extension_name)}
 
           @impl true
           def description, do: "Loader start_all failure test"
@@ -1116,15 +1119,19 @@ defmodule Minga.Config.LoaderTest do
       )
 
       on_exit(fn ->
+        if Process.whereis(RootSupervisor) do
+          RootSupervisor.terminate_root(RootSupervisor, extension_name)
+        end
+
+        if Process.whereis(ExtRegistry), do: ExtRegistry.unregister(extension_name)
         File.rm_rf!(ext_dir)
-        if Process.whereis(ExtRegistry), do: ExtRegistry.unregister(:loader_start_all_failure)
         :code.purge(ext_module)
         :code.delete(ext_module)
       end)
 
       cleanup_callbacks = %{
         loader_reload_start_all_cleanup: fn
-          {:extension, :loader_start_all_failure} ->
+          {:extension, ^extension_name} ->
             raise "cleanup failure"
 
           _source ->
@@ -1136,7 +1143,7 @@ defmodule Minga.Config.LoaderTest do
         Path.join(minga_dir, "config.exs"),
         """
         use Minga.Config
-        extension :loader_start_all_failure, path: #{inspect(ext_dir)}
+        extension #{inspect(extension_name)}, path: #{inspect(ext_dir)}
         """
       )
 
@@ -1155,7 +1162,7 @@ defmodule Minga.Config.LoaderTest do
 
       assert {:error, msg} = Loader.reload(pid)
       assert msg =~ "Extension start_all failed"
-      assert msg =~ "loader_start_all_failure"
+      assert msg =~ Atom.to_string(extension_name)
       assert msg =~ "cleanup_failed"
       assert msg =~ "intentional_failure"
       assert msg =~ "cleanup failure"
@@ -1964,8 +1971,8 @@ defmodule Minga.Config.LoaderTest do
       start_supervised!({ExtRegistry, name: ExtRegistry})
     end
 
-    if Process.whereis(Minga.Extension.Supervisor) == nil do
-      start_supervised!({Minga.Extension.Supervisor, name: Minga.Extension.Supervisor})
+    if Process.whereis(RootSupervisor) == nil do
+      start_supervised!({ExtSupervisor, name: RootSupervisor})
     end
 
     ExtSupervisor.stop_all()

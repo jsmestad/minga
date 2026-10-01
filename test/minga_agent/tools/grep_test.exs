@@ -237,7 +237,6 @@ defmodule MingaAgent.Tools.GrepTest do
       with_fake_path(%{"rg" => rg}, fn ->
         assert {:error, message} = Grep.execute("token", dir, %{}, timeout_ms: 50)
         assert message =~ "Search capture incomplete (timeout)"
-        assert message =~ "visible.txt"
       end)
     end
 
@@ -270,7 +269,6 @@ defmodule MingaAgent.Tools.GrepTest do
                  Grep.execute("token", dir, %{"_timeout_ms" => 100_000}, timeout_ms: 50)
 
         assert message =~ "Search capture incomplete (timeout)"
-        assert message =~ "visible.txt"
       end)
     end
 

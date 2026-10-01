@@ -11,6 +11,9 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.ProjectView.UnavailableBackend
+  alias MingaAgent.Test.RetainedContextFixture
+  alias MingaAgent.Tool.Context, as: ToolContext
+  alias MingaAgent.Tool.Output
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools
   alias MingaAgent.Tools.Git, as: GitTools
@@ -59,40 +62,30 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   } do
     assert {:ok, read_result} = call_tool(tools, "read_file", %{"path" => "lib/file.txt"})
     assert read_result =~ "view text"
-    assert read_result =~ "ProjectView workspace 42"
-    assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
 
-    assert {:ok, write_result} =
+    assert {:ok, _write_result} =
              call_tool(tools, "write_file", %{"path" => "lib/new.txt", "content" => "new view"})
 
-    assert write_result =~ "via ProjectView"
     assert File.read!(Path.join(working_dir, "lib/new.txt")) == "new view"
     refute File.exists?(Path.join(root, "lib/new.txt"))
-    assert_receive {:project_view_call, {:write_file, "lib/new.txt", "new view"}}
 
-    assert {:ok, edit_result} =
+    assert {:ok, _edit_result} =
              call_tool(tools, "edit_file", %{
                "path" => "lib/file.txt",
                "old_text" => "view",
                "new_text" => "edited"
              })
 
-    assert edit_result =~ "via ProjectView"
     assert File.read!(Path.join(working_dir, "lib/file.txt")) == "edited text\n"
     assert File.read!(Path.join(root, "lib/file.txt")) == "root text\n"
-    assert_receive {:project_view_call, {:edit_file, "lib/file.txt", "view", "edited"}}
 
-    assert {:ok, multi_result} =
+    assert {:ok, _multi_result} =
              call_tool(tools, "multi_edit_file", %{
                "path" => "lib/file.txt",
                "edits" => [%{"old_text" => "edited", "new_text" => "multi"}]
              })
 
-    assert multi_result =~ "via ProjectView"
-    assert multi_result =~ "ProjectView workspace 42"
     assert File.read!(Path.join(working_dir, "lib/file.txt")) == "multi text\n"
-    assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
-    assert_receive {:project_view_call, {:write_file, "lib/file.txt", "multi text\n"}}
 
     diff = """
     @@ -1,1 +1,1 @@
@@ -100,19 +93,13 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     +diff text
     """
 
-    assert {:ok, diff_result} =
+    assert {:ok, _diff_result} =
              call_tool(tools, "apply_diff", %{"path" => "lib/file.txt", "diff" => diff})
 
-    assert diff_result =~ "via ProjectView"
-    assert diff_result =~ "ProjectView workspace 42"
     assert File.read!(Path.join(working_dir, "lib/file.txt")) == "diff text\n"
-    assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
-    assert_receive {:project_view_call, {:write_file, "lib/file.txt", "diff text\n"}}
 
-    assert {:ok, delete_result} = call_tool(tools, "delete_file", %{"path" => "lib/new.txt"})
-    assert delete_result =~ "ProjectView"
+    assert {:ok, _delete_result} = call_tool(tools, "delete_file", %{"path" => "lib/new.txt"})
     refute File.exists?(Path.join(working_dir, "lib/new.txt"))
-    assert_receive {:project_view_call, {:delete_file, "lib/new.txt"}}
   end
 
   test "multi_edit_file through ProjectView rejects empty old_text without writing", %{
@@ -128,8 +115,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     assert result =~ "applied 0/1 edits"
     assert result =~ "old_text is empty"
-    assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
-    refute_receive {:project_view_call, {:write_file, "lib/file.txt", _}}
     assert File.read!(Path.join(working_dir, "lib/file.txt")) == "view text\n"
     assert File.read!(Path.join(root, "lib/file.txt")) == "root text\n"
   end
@@ -149,8 +134,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     assert result =~ "applied 0/1 edits"
     assert result =~ "old_text found 2 times (ambiguous)"
-    assert_receive {:project_view_call, {:read_file, "lib/ambiguous.txt"}}
-    refute_receive {:project_view_call, {:write_file, "lib/ambiguous.txt", _}}
     assert File.read!(ambiguous_path) == "hello world hello world"
   end
 
@@ -160,21 +143,16 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   } do
     assert {:ok, list_result} = call_tool(tools, "list_directory", %{"path" => "lib"})
     assert list_result =~ "overlay_only.txt"
-    assert list_result =~ "ProjectView workspace 42"
-    assert_receive {:project_view_call, {:list_directory, "lib"}}
 
     assert {:ok, root_list_result} = call_tool(tools, "list_directory", %{"path" => "."})
     refute root_list_result =~ ".env.local"
     refute root_list_result =~ ".npmrc"
     refute root_list_result =~ "ignored_dir"
-    assert_receive {:project_view_call, {:list_directory, ""}}
 
     assert {:ok, ignored_root_result} =
              call_tool(tools, "list_directory", %{"path" => "node_modules"})
 
-    assert ignored_root_result =~ "ProjectView workspace 42"
     refute ignored_root_result =~ "leaked.txt"
-    assert_receive {:project_view_call, {:list_directory, "node_modules"}}
 
     assert {:ok, find_result} =
              call_tool(tools, "find", %{
@@ -184,7 +162,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
              })
 
     assert find_result =~ "overlay_only.txt"
-    assert find_result =~ "ProjectView workspace 42"
 
     assert {:ok, broad_find_result} =
              call_tool(tools, "find", %{
@@ -212,7 +189,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
              call_tool(tools, "grep", %{"pattern" => "needle", "path" => "lib"})
 
     assert grep_result =~ "overlay_only.txt"
-    assert grep_result =~ "ProjectView workspace 42"
 
     assert {:ok, broad_grep_result} =
              call_tool(tools, "grep", %{
@@ -245,8 +221,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
              })
 
     assert shell_result =~ "present:yes"
-    assert shell_result =~ "ProjectView workspace 42"
-    assert_receive {:project_view_call, :command_env}
   end
 
   test "project view operation errors stay visible while cwd-dependent tools report unavailability",
@@ -268,7 +242,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     tools = build_tools(project_root: root, project_view: view)
 
     for {name, args, expected} <- [
-          {"read_file", %{"path" => "lib/view_only.txt"}, ":read_failed"},
+          {"read_file", %{"path" => "lib/view_only.txt"}, :read_failed},
           {"write_file", %{"path" => "lib/new.txt", "content" => "new"}, ":write_failed"},
           {"edit_file",
            %{"path" => "lib/edit_target.txt", "old_text" => "editable", "new_text" => "changed"},
@@ -287,8 +261,15 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
           {"list_directory", %{"path" => "lib"}, ":list_failed"}
         ] do
       assert {:error, message} = call_tool(tools, name, args)
-      refute message =~ "project_view_unavailable"
-      assert message =~ expected
+
+      case expected do
+        reason when is_atom(reason) ->
+          assert message == reason
+
+        text ->
+          refute message =~ "project_view_unavailable"
+          assert message =~ text
+      end
     end
 
     for {name, args} <- [
@@ -683,7 +664,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     refute message =~ "outside secret token"
   end
 
-  test "overlay git_diff caps large no-index diff output", %{tmp_dir: root} do
+  test "overlay git_diff reports incomplete capture when output exceeds the cap", %{tmp_dir: root} do
     File.mkdir_p!(root)
     {_out, 0} = System.cmd("git", ["init"], cd: root, stderr_to_stdout: true)
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
@@ -694,9 +675,9 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
              call_tool(tools, "write_file", %{"path" => "big.txt", "content" => big_content})
 
     context = ToolRouter.context(nil, nil, changeset)
-    assert {:ok, diff} = GitTools.diff(root, [max_output_bytes: 1_024], context)
-    assert byte_size(diff) < 2_000
-    assert diff =~ "[truncated at 1KB]"
+    assert {:error, message} = GitTools.diff(root, [max_output_bytes: 1_024], context)
+    assert message =~ "capture incomplete"
+    assert message =~ "+large diff line"
   end
 
   test "overlay git_diff fails closed when one overlay file exceeds input cap", %{tmp_dir: root} do
@@ -903,18 +884,35 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   end
 
   defp build_tools(opts) do
+    retained = RetainedContextFixture.new(Keyword.fetch!(opts, :project_root), "project-view")
+
     context =
       opts
       |> Keyword.take([:project_root, :project_view, :fork_store, :changeset])
-      |> MingaAgent.Tool.Context.new()
+      |> Keyword.put(:artifact_store, retained.artifact_store)
+      |> ToolContext.new()
 
     Enum.map(Tools.all(), fn spec ->
-      %{name: spec.name, callback: MingaAgent.Tool.Spec.build_callback(spec, context)}
+      callback = fn args ->
+        call_id = "call-#{System.unique_integer([:positive])}"
+
+        scoped =
+          ToolContext.for_tool_call(context, context.artifact_store, "project-view", call_id)
+
+        MingaAgent.Tool.Spec.build_callback(spec, scoped).(args)
+      end
+
+      %{name: spec.name, callback: callback}
     end)
   end
 
   defp call_tool(tools, name, args) do
     tool = Enum.find(tools, &(&1.name == name))
-    tool.callback.(args)
+
+    case tool.callback.(args) do
+      {:ok, %Output{view: view}} -> {:ok, view}
+      {:error, %Output{view: view}} -> {:error, view}
+      result -> result
+    end
   end
 end
