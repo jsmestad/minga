@@ -125,9 +125,7 @@ defmodule MingaEditor.Agent.Events do
 
     agent_ui =
       state.workspace.agent_ui
-      |> UIState.set_model_name(route.display_name)
-      |> UIState.set_provider_name(route.model_provider)
-      |> UIState.set_thinking_level(selection.policy.reasoning.effort)
+      |> UIState.project_model_selection(selection)
       |> UIState.push_toast(message, :info)
 
     state

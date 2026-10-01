@@ -760,18 +760,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec apply_reconnected_snapshot(EditorState.t(), MingaAgent.Session.editor_snapshot()) ::
           EditorState.t()
   defp apply_reconnected_snapshot(state, snapshot) do
-    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-
-    updated_agent =
-      AgentState.apply_session_snapshot(
-        agent,
-        Map.get(snapshot, :status, :idle),
-        Map.get(snapshot, :pending_approval),
-        Map.get(snapshot, :error),
-        Map.get(snapshot, :active_tool_name)
-      )
-
-    MingaEditor.Shell.Traditional.Workflow.install_agent_state(state, updated_agent)
+    AgentLifecycle.apply_session_snapshot(state, snapshot)
   end
 
   @spec maybe_rebuild_agent_from_workspace(EditorState.t(), non_neg_integer()) :: EditorState.t()

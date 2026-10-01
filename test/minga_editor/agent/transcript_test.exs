@@ -181,6 +181,13 @@ defmodule MingaEditor.Agent.TranscriptTest do
       refute text =~ "Session started"
     end
 
+    test "pending discovery presents checking instead of an unconfigured result" do
+      result = Transcript.display([{:system, "Session started", :info}], empty_state: :checking)
+
+      assert [{:system, "Checking agent credentials and model availability...", :info}] =
+               result.display_messages
+    end
+
     test "empty state does not replace transcripts with user turns" do
       startup = {:system, "Session started", :info}
       user = {:user, "hello"}

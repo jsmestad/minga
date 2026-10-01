@@ -18,7 +18,6 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
@@ -143,6 +142,7 @@ defmodule MingaEditor.Commands.AgentSession do
         state
         |> ensure_agent_workspace(pid, project_view)
         |> assign_session_to_tab(pid)
+        |> AgentLifecycle.rebuild_agent_from_session(pid)
 
       {:error, reason} ->
         maybe_discard_project_view(project_view, created_project_view?)
@@ -587,23 +587,12 @@ defmodule MingaEditor.Commands.AgentSession do
   defp apply_remote_snapshot(
          state,
          %{
-           status: status,
-           pending_approval: pending_approval,
-           error: error
+           status: _status,
+           pending_approval: _pending_approval,
+           error: _error
          } = snapshot
        ) do
-    MingaEditor.Shell.Traditional.Workflow.install_agent_state(
-      state,
-      (fn agent ->
-         AgentState.apply_session_snapshot(
-           agent,
-           status,
-           pending_approval,
-           error,
-           Map.get(snapshot, :active_tool_name)
-         )
-       end).(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
-    )
+    AgentLifecycle.apply_session_snapshot(state, snapshot)
   end
 
   @spec detach_remote_session(state(), pid()) :: state()

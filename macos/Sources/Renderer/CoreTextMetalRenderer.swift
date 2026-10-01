@@ -1760,6 +1760,14 @@ final class CoreTextMetalRenderer {
                     return
                 }
                 do {
+                    if ProcessInfo.processInfo.environment["MINGA_STARTUP_TIMER"] == "1" {
+                        drawable.addPresentedHandler { shown in
+                            recordStartupPhase(
+                                "drawable_presented", frameSequence: presentationFrame.frameSeq,
+                                presentedTime: shown.presentedTime
+                            )
+                        }
+                    }
                     try self.factories.present(drawable)
                 } catch {
                     self.recordNativeFailure(NativePresentationFailure(

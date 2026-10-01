@@ -1,0 +1,174 @@
+[
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "small",
+    "presented_ms": 6158.432501,
+    "catalog_calls_before_presentation": [
+      "Elixir.MingaEditor"
+    ],
+    "inspect": {
+      "elapsed_ms": 26.894792,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor"
+      ]
+    },
+    "edit": {
+      "elapsed_ms": 102.277917,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor"
+      ]
+    },
+    "catalog_calls_after_operations": [
+      "Elixir.MingaEditor"
+    ]
+  },
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "explicit",
+    "presented_ms": 2920.0097925,
+    "catalog_calls_before_presentation": [],
+    "inspect": {
+      "elapsed_ms": 31.126791,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "ollama:llama3.2",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "edit": {
+      "elapsed_ms": 93.799708,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "ollama:llama3.2",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "catalog_calls_after_operations": []
+  },
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "api",
+    "presented_ms": 6243.48316725,
+    "catalog_calls_before_presentation": [
+      "Elixir.MingaEditor"
+    ],
+    "inspect": {
+      "elapsed_ms": 35.393875,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "ms2_9n4CPiSAH-mav-dEfwVp7vZ1cYaCGxm3S34j3mxBQLQ",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor"
+      ]
+    },
+    "edit": {
+      "elapsed_ms": 87.04975,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "ms2_9n4CPiSAH-mav-dEfwVp7vZ1cYaCGxm3S34j3mxBQLQ",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor"
+      ]
+    },
+    "catalog_calls_after_operations": [
+      "Elixir.MingaEditor"
+    ]
+  },
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "oauth",
+    "presented_ms": 6245.94641725,
+    "catalog_calls_before_presentation": [
+      "Elixir.MingaEditor"
+    ],
+    "inspect": {
+      "elapsed_ms": 34.4765,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "ms2_CX53kQxaiQEDOCBlLgGSuKu3W66yLtnZpooA4TGa7nk",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor"
+      ]
+    },
+    "edit": {
+      "elapsed_ms": 98.64575,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "ms2_CX53kQxaiQEDOCBlLgGSuKu3W66yLtnZpooA4TGa7nk",
+        "theme": "doom_one",
+        "readiness": "unconfigured",
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor"
+      ]
+    },
+    "catalog_calls_after_operations": [
+      "Elixir.MingaEditor"
+    ]
+  }
+]

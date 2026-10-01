@@ -23,6 +23,20 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
+  test "visible pending discovery does not claim a missing model" do
+    session = fake_session_pid()
+    panel = synced_panel([]) |> Panel.set_model_name("unknown")
+
+    for readiness <- [:checking, :configured] do
+      model =
+        context(session, Panel.set_credential_readiness(panel, readiness))
+        |> AgentChatBuilder.build()
+
+      assert model.visible?
+      assert model.model_name == "Model not resolved"
+    end
+  end
+
   test "build/1 sends cached display message pairs to resident agent transcript" do
     session = fake_session_pid()
     old_message = {:assistant, "old pinned"}

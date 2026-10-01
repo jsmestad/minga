@@ -1,0 +1,343 @@
+[
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "small",
+    "presented_ms": 4292.84887525,
+    "catalog_calls_before_presentation": [],
+    "inspect": {
+      "elapsed_ms": 35.411625,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "edit": {
+      "elapsed_ms": 95.80325,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "catalog_calls_after_operations": []
+  },
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "explicit",
+    "presented_ms": 2983.46787525,
+    "catalog_calls_before_presentation": [],
+    "inspect": {
+      "elapsed_ms": 35.423291,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "ollama:llama3.2",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "edit": {
+      "elapsed_ms": 88.069084,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "ollama:llama3.2",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "catalog_calls_after_operations": []
+  },
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "api",
+    "presented_ms": 2974.962042,
+    "catalog_calls_before_presentation": [],
+    "inspect": {
+      "elapsed_ms": 30.445208,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "edit": {
+      "elapsed_ms": 88.559625,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "agent": {
+      "elapsed_ms": 3507.563541,
+      "state": {
+        "mode": "normal",
+        "buffer": null,
+        "model": "Daybreak Blue",
+        "theme": "doom_one",
+        "thinking_level": "default",
+        "readiness": "configured",
+        "session_thinking": "default",
+        "provider_started": true,
+        "session_model": "openai:gpt-daybreak-blue-latest",
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "picker": {
+      "elapsed_ms": 83.960958,
+      "state": {
+        "mode": "normal",
+        "buffer": null,
+        "model": "Daybreak Blue",
+        "theme": "doom_one",
+        "thinking_level": "default",
+        "readiness": "configured",
+        "session_thinking": "default",
+        "provider_started": true,
+        "session_model": "openai:gpt-daybreak-blue-latest",
+        "picker_open": true,
+        "picker_ready": true
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "catalog_calls_after_operations": [
+      "Elixir.MingaEditor",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  {
+    "endpoint": "MTLDrawable.presentedTime",
+    "fixture": "oauth",
+    "presented_ms": 2971.434876,
+    "catalog_calls_before_presentation": [],
+    "inspect": {
+      "elapsed_ms": 29.4905,
+      "state": {
+        "mode": "normal",
+        "buffer": "startup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "edit": {
+      "elapsed_ms": 114.341959,
+      "state": {
+        "mode": "normal",
+        "buffer": "Xstartup fixture\n",
+        "model": "unknown",
+        "theme": "doom_one",
+        "thinking_level": null,
+        "readiness": "checking",
+        "session_thinking": null,
+        "provider_started": false,
+        "session_model": null,
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": []
+    },
+    "agent": {
+      "elapsed_ms": 4091.638625,
+      "state": {
+        "mode": "normal",
+        "buffer": null,
+        "model": "Daybreak Blue",
+        "theme": "doom_one",
+        "thinking_level": "default",
+        "readiness": "configured",
+        "session_thinking": "default",
+        "provider_started": true,
+        "session_model": "openai:gpt-daybreak-blue-latest",
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "picker": {
+      "elapsed_ms": 81.484083,
+      "state": {
+        "mode": "normal",
+        "buffer": null,
+        "model": "Daybreak Blue",
+        "theme": "doom_one",
+        "thinking_level": "default",
+        "readiness": "configured",
+        "session_thinking": "default",
+        "provider_started": true,
+        "session_model": "openai:gpt-daybreak-blue-latest",
+        "picker_open": true,
+        "picker_ready": true
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "catalog_calls_after_operations": [
+      "Elixir.MingaEditor",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  {
+    "endpoint": "frame committed, SwiftUI surface verified separately",
+    "fixture": "agent_first",
+    "presented_ms": 2786.386916,
+    "catalog_calls_before_presentation": [
+      "Elixir.MingaEditor"
+    ],
+    "inspect": {
+      "elapsed_ms": 3401.066333,
+      "state": {
+        "mode": "normal",
+        "buffer": null,
+        "model": "Daybreak Blue",
+        "theme": "doom_one",
+        "thinking_level": "default",
+        "readiness": "configured",
+        "session_thinking": "default",
+        "provider_started": true,
+        "session_model": "openai:gpt-daybreak-blue-latest",
+        "picker_open": false,
+        "picker_ready": false
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "picker": {
+      "elapsed_ms": 87.110125,
+      "state": {
+        "mode": "normal",
+        "buffer": null,
+        "model": "Daybreak Blue",
+        "theme": "doom_one",
+        "thinking_level": "default",
+        "readiness": "configured",
+        "session_thinking": "default",
+        "provider_started": true,
+        "session_model": "openai:gpt-daybreak-blue-latest",
+        "picker_open": true,
+        "picker_ready": true
+      },
+      "catalog_calls": [
+        "Elixir.MingaEditor",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "catalog_calls_after_operations": [
+      "Elixir.MingaEditor",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  }
+]

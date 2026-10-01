@@ -258,8 +258,19 @@ defmodule MingaEditor.Agent.UIState do
 
   # ── Model/provider config ──────────────────────────────────────────────────
 
+  @doc "Projects a resolved model policy without an activation notice."
+  @spec project_model_selection(t(), MingaAgent.ModelSelection.t() | nil) :: t()
+  def project_model_selection(%__MODULE__{} = state, nil), do: state
+
+  def project_model_selection(
+        %__MODULE__{panel: panel} = state,
+        %MingaAgent.ModelSelection{} = selection
+      ) do
+    %{state | panel: Panel.project_model_selection(panel, selection)}
+  end
+
   @doc "Sets the thinking level."
-  @spec set_thinking_level(t(), String.t()) :: t()
+  @spec set_thinking_level(t(), String.t() | nil) :: t()
   def set_thinking_level(%__MODULE__{panel: panel} = state, level) do
     %{state | panel: %{panel | thinking_level: level}}
   end

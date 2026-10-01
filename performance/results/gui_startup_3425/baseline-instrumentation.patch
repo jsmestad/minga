@@ -1,0 +1,95 @@
+diff --git a/macos/Sources/Instrumentation.swift b/macos/Sources/Instrumentation.swift
+index 0a07edaa9..15e8e03fa 100644
+--- a/macos/Sources/Instrumentation.swift
++++ b/macos/Sources/Instrumentation.swift
+@@ -2,8 +2,19 @@
+ /// and Console.app without depending on the BEAM being alive.
+
+ import os
++import Foundation
++import Darwin
+
+ let startupLog = OSLog(subsystem: "com.minga.app", category: "Startup")
+ let renderLog = OSLog(subsystem: "com.minga.app", category: "Render")
+ let protocolLog = OSLog(subsystem: "com.minga.app", category: "Protocol")
+ let inputLog = OSLog(subsystem: "com.minga.app", category: "Input")
++
++/// Emits opt-in startup probe timestamps to stderr, which is separate from the protocol transport.
++func recordStartupPhase(_ phase: String, frameSequence: UInt32 = 0, presentedTime: Double = 0) {
++    guard ProcessInfo.processInfo.environment["MINGA_STARTUP_TIMER"] == "1" else { return }
++    let line = "[startup-native] \(phase) uptime_ns=\(DispatchTime.now().uptimeNanoseconds) frame=\(frameSequence) presented_time=\(presentedTime)\n"
++    line.withCString { bytes in
++        _ = Darwin.write(STDERR_FILENO, bytes, strlen(bytes))
++    }
++}
+diff --git a/macos/Sources/MingaApp.swift b/macos/Sources/MingaApp.swift
+index becfb9031..ffc6b9d11 100644
+--- a/macos/Sources/MingaApp.swift
++++ b/macos/Sources/MingaApp.swift
+@@ -390,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+         signal(SIGPIPE, SIG_IGN)
+
+         os_signpost(.begin, log: startupLog, name: "AppStartup")
++        recordStartupPhase("app_startup")
+
+         // Register the bundled Nerd Font for devicon rendering.
+         registerBundledFonts()
+@@ -404,6 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+         // Font manager owns the primary and all registered font faces.
+         let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
+         self.fontManager = fm
++        recordStartupPhase("fonts_ready")
+
+         // Initial grid dimensions (no gutter padding subtraction yet; the first
+         // setFrameSize call will send corrected cols once the gutter is established).
+@@ -419,6 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+             return
+         }
+         ctRenderer.setupRenderers(fontManager: fm)
++        recordStartupPhase("native_ready")
+
+         // Protocol encoder and reader: in bundle mode, we spawn the BEAM
+         // and use pipe file handles. In dev mode, we use stdin/stdout.
+@@ -449,6 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+             }
+
+             manager.start()
++            recordStartupPhase("beam_spawned")
+
+             guard let readH = manager.readHandle, let writeH = manager.writeHandle else {
+                 NSLog("Failed to start BEAM process")
+@@ -614,6 +618,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+
+         // Start the already-installed connection only after every application consumer is ready to receive its ordered events.
+         connection.start()
++        recordStartupPhase("protocol_started")
+         coreConnectionIsLive = true
+
+         // First frame callback: dismiss the startup overlay and flush Finder,
+@@ -623,6 +628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+             guard let self else { return }
+
+             os_signpost(.end, log: startupLog, name: "AppStartup")
++            recordStartupPhase("first_frame_committed")
+             self.editorNSView?.focusPolicy.firstFrameDidRender()
+
+             let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
+diff --git a/macos/Sources/Renderer/CoreTextMetalRenderer.swift b/macos/Sources/Renderer/CoreTextMetalRenderer.swift
+index d726c5d89..36e2e2754 100644
+--- a/macos/Sources/Renderer/CoreTextMetalRenderer.swift
++++ b/macos/Sources/Renderer/CoreTextMetalRenderer.swift
+@@ -1760,6 +1760,14 @@ final class CoreTextMetalRenderer {
+                     return
+                 }
+                 do {
++                    if ProcessInfo.processInfo.environment["MINGA_STARTUP_TIMER"] == "1" {
++                        drawable.addPresentedHandler { shown in
++                            recordStartupPhase(
++                                "drawable_presented", frameSequence: presentationFrame.frameSeq,
++                                presentedTime: shown.presentedTime
++                            )
++                        }
++                    }
+                     try self.factories.present(drawable)
+                 } catch {
+                     self.recordNativeFailure(NativePresentationFailure(

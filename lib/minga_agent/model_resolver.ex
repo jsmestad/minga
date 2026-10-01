@@ -77,6 +77,7 @@ defmodule MingaAgent.ModelResolver do
   def candidates(opts \\ []) do
     config = Keyword.get(opts, :config, %Config{})
     snapshot = Keyword.get_lazy(opts, :credential_snapshot, &Credentials.snapshot/0)
+    opts = candidate_catalog_options(config, snapshot, opts)
     favorites = Keyword.get(opts, :favorites, config.model_favorites)
     current_id = current_selection_id(Keyword.get(opts, :current))
 
@@ -100,6 +101,41 @@ defmodule MingaAgent.ModelResolver do
         []
     end
   end
+
+  @spec candidate_catalog_options(Config.t(), Snapshot.t(), keyword()) :: keyword()
+  defp candidate_catalog_options(config, snapshot, opts) do
+    if catalog_discovery_available?(snapshot) or explicit_local_model?(config) or
+         explicit_route_id?(Keyword.get(opts, :current)) do
+      opts
+    else
+      Keyword.put(opts, :models, [])
+    end
+  end
+
+  @spec catalog_discovery_available?(Snapshot.t()) :: boolean()
+  defp catalog_discovery_available?(%Snapshot{oauth_ref: %OAuth{}}), do: true
+
+  defp catalog_discovery_available?(%Snapshot{provider_sources: sources}) do
+    Enum.any?(@request_provider_names, fn provider ->
+      provider not in ["ollama", "openai_codex"] and Map.has_key?(sources, provider)
+    end)
+  end
+
+  @spec explicit_local_model?(Config.t()) :: boolean()
+  defp explicit_local_model?(%Config{model: model}) do
+    case Config.split_model_spec(model) do
+      {_model, "ollama"} -> true
+      {"ms2_" <> _id, nil} -> true
+      _other -> false
+    end
+  end
+
+  @spec explicit_route_id?(term()) :: boolean()
+  defp explicit_route_id?(%ModelSelection{} = selection),
+    do: explicit_route_id?(ModelSelection.id(selection))
+
+  defp explicit_route_id?("ms2_" <> _id), do: true
+  defp explicit_route_id?(_current), do: false
 
   @spec canonical_favorites(
           [String.t()],
@@ -212,6 +248,7 @@ defmodule MingaAgent.ModelResolver do
       |> Keyword.put(:backend_spec, context.spec)
       |> Keyword.put(:config, context.config)
       |> Keyword.put(:credential_snapshot, context.snapshot)
+      |> Keyword.put(:current, id)
 
     matches =
       candidate_opts

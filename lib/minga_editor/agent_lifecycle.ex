@@ -39,30 +39,50 @@ defmodule MingaEditor.AgentLifecycle do
   @max_styled_result_chars 500
 
   @doc "Rebuilds the active agent presentation from its authoritative session snapshot."
-  @spec rebuild_agent_from_session(state(), Tab.t()) :: state()
+  @spec rebuild_agent_from_session(state(), Tab.t() | pid()) :: state()
   def rebuild_agent_from_session(state, %Tab{kind: :agent, payload: %Agent{session: session_pid}})
-      when is_pid(session_pid) do
-    case safe_editor_snapshot(session_pid) do
-      nil ->
-        MingaEditor.Shell.Traditional.Workflow.install_agent_tool_clear(state)
+      when is_pid(session_pid), do: rebuild_agent_from_session(state, session_pid)
 
-      snapshot ->
-        MingaEditor.Shell.Traditional.Workflow.install_agent_state(
-          state,
-          (fn agent ->
-             AgentState.apply_session_snapshot(
-               agent,
-               snapshot.status,
-               snapshot.pending_approval,
-               snapshot.error,
-               Map.get(snapshot, :active_tool_name)
-             )
-           end).(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
-        )
+  def rebuild_agent_from_session(state, session_pid) when is_pid(session_pid) do
+    case safe_editor_snapshot(session_pid) do
+      nil -> MingaEditor.Shell.Traditional.Workflow.install_agent_tool_clear(state)
+      snapshot -> apply_session_snapshot(state, snapshot)
     end
   end
 
   def rebuild_agent_from_session(state, %Tab{}), do: state
+
+  @doc "Hydrates execution and resolved model facts without replaying activation effects."
+  @spec apply_session_snapshot(state(), AgentSession.editor_snapshot()) :: state()
+  def apply_session_snapshot(state, snapshot) do
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+    agent =
+      AgentState.apply_session_snapshot(
+        agent,
+        Map.get(snapshot, :status, :idle),
+        Map.get(snapshot, :pending_approval),
+        Map.get(snapshot, :error),
+        Map.get(snapshot, :active_tool_name)
+      )
+
+    ui = state.workspace.agent_ui
+
+    panel =
+      Panel.set_credential_readiness(
+        ui.panel,
+        Map.get(snapshot, :credential_readiness, ui.panel.credential_readiness)
+      )
+
+    ui =
+      ui
+      |> UIState.replace_panel(panel)
+      |> UIState.project_model_selection(Map.get(snapshot, :model_selection))
+
+    state
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(agent)
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(ui)
+  end
 
   @spec safe_editor_snapshot(pid()) :: map() | nil
   defp safe_editor_snapshot(session_pid) do
@@ -251,6 +271,8 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec empty_state_for_panel(MingaEditor.Agent.UIState.Panel.t(), pid() | nil) ::
           Transcript.empty_state()
+  defp empty_state_for_panel(%Panel{credential_readiness: :checking}, _session), do: :checking
+
   defp empty_state_for_panel(panel, session) do
     empty_state_for_status(
       configured_model?(panel.model_name),
