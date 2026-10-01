@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaAgent.FileMention
   alias MingaAgent.Markdown
   alias MingaAgent.Message
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaEditor.Agent.PromptBuffer
@@ -886,11 +887,12 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
           {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
-  defp resolve_prompt_for_session(state, text, model) do
+  defp resolve_prompt_for_session(state, text, _model) do
     if remote_session?(state) do
       {:ok, text}
     else
-      resolve_mentions(text, model: model)
+      selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
+      resolve_mentions(text, model_selection: selection)
     end
   end
 
@@ -1327,19 +1329,15 @@ defmodule MingaEditor.Commands.Agent do
       NoticeWorkflow.publish(state, "No agent session")
     else
       case Session.cycle_model(Runtime.active_session(state.shell_runtime)) do
-        {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
-          state = apply_model_and_provider(state, model)
+        {:ok, %{"model" => model} = result} ->
+          provider = Map.get(result, "provider", AgentConfig.extract_provider_prefix(model))
+          state = apply_model_and_provider(state, model, provider)
           state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
+          route = Map.get(result, "route")
+          message = Enum.reject(["Model: #{model}", route], &is_nil/1) |> Enum.join(" via ")
 
-          Session.add_system_message(
-            Runtime.active_session(state.shell_runtime),
-            "Model: #{model} [#{index}/#{total}]"
-          )
-
-          NoticeWorkflow.publish(
-            state,
-            "Model: #{model} [#{index}/#{total}]"
-          )
+          Session.add_system_message(Runtime.active_session(state.shell_runtime), message)
+          NoticeWorkflow.publish(state, message)
 
         {:error, reason} when is_binary(reason) ->
           NoticeWorkflow.publish(state, reason)
@@ -1351,9 +1349,9 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec maybe_update_thinking_level(state(), term()) :: state()
-  @spec apply_model_and_provider(state(), String.t()) :: state()
-  defp apply_model_and_provider(state, model) do
-    provider = AgentConfig.extract_provider_prefix(model)
+  @spec apply_model_and_provider(state(), String.t(), String.t() | nil) :: state()
+  defp apply_model_and_provider(state, model, provider \\ nil) do
+    provider = provider || AgentConfig.extract_provider_prefix(model)
 
     state
     |> update_agent_ui(&UIState.set_model_name(&1, model))
@@ -1366,23 +1364,26 @@ defmodule MingaEditor.Commands.Agent do
 
   defp maybe_update_thinking_level(state, _level), do: state
 
-  @doc "Sets the agent model without resetting conversation context."
-  @spec set_model(state(), String.t()) :: state()
-  def set_model(state, model) do
-    state = apply_model_and_provider(state, model)
+  @doc "Sets an exact agent model route without resetting conversation context."
+  @spec set_model(state(), String.t() | ModelSelection.t()) :: state()
+  def set_model(state, model_or_selection) do
+    display = model_display(model_or_selection)
 
     case Runtime.active_session(state.shell_runtime) do
       nil ->
-        NoticeWorkflow.publish(state, "Model: #{model}")
+        state
+        |> apply_model_selection_to_ui(model_or_selection)
+        |> NoticeWorkflow.publish("Model: #{display}")
 
       session ->
-        case Session.set_model(session, model) do
+        case Session.set_model(session, model_or_selection) do
           :ok ->
-            Session.add_system_message(session, "Model: #{model}")
-            NoticeWorkflow.publish(state, "Model: #{model}")
+            state = apply_model_selection_to_ui(state, model_or_selection)
+            Session.add_system_message(session, "Model: #{display}")
+            NoticeWorkflow.publish(state, "Model: #{display}")
 
           {:pending, :credential_discovery} ->
-            message = "Model change accepted: #{model}. Checking local Ollama availability."
+            message = "Model change accepted: #{display}. Checking exact route availability."
             Session.add_system_message(session, message)
             NoticeWorkflow.publish(state, message)
 
@@ -1390,13 +1391,25 @@ defmodule MingaEditor.Commands.Agent do
             NoticeWorkflow.publish(state, reason)
 
           {:error, reason} ->
-            NoticeWorkflow.publish(
-              state,
-              "Error: #{inspect(reason)}"
-            )
+            NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
         end
     end
   end
+
+  @spec apply_model_selection_to_ui(state(), String.t() | ModelSelection.t()) :: state()
+  defp apply_model_selection_to_ui(state, %ModelSelection{} = selection) do
+    state
+    |> apply_model_and_provider(selection.route.display_name, selection.route.model_provider)
+    |> update_agent_ui(&UIState.set_thinking_level(&1, selection.policy.reasoning.effort))
+  end
+
+  defp apply_model_selection_to_ui(state, model), do: apply_model_and_provider(state, model)
+
+  @spec model_display(String.t() | ModelSelection.t()) :: String.t()
+  defp model_display(%ModelSelection{} = selection),
+    do: "#{selection.route.display_name} via #{selection.route.execution.wire_protocol}"
+
+  defp model_display(model), do: model
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
   #

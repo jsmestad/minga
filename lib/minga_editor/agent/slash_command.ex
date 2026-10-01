@@ -13,7 +13,8 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Instructions
   alias MingaAgent.Memory
-  alias MingaAgent.ModelCatalog
+  alias MingaAgent.ModelCandidate
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
@@ -245,72 +246,45 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   @spec available_model_entries(state(), [String.t()] | nil) :: [map()]
-  defp available_model_entries(state, configured_models) do
-    current_model = current_model(state)
-
-    session_models =
-      case Runtime.active_session(state.shell_runtime) do
-        session when is_pid(session) -> safe_session_models(session)
-        _ -> []
-      end
-
-    configured_model_entries(configured_models)
-    |> Kernel.++(session_models)
-    |> Kernel.++(ModelCatalog.available_models(current_model))
-    |> uniq_model_entries()
+  defp available_model_entries(state, _configured_models) do
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) -> safe_session_models(session)
+      _no_session -> []
+    end
   end
 
   @spec safe_session_models(pid()) :: [map()]
   defp safe_session_models(session) do
     case Session.get_available_models(session) do
-      {:ok, models} when is_list(models) -> models
-      _ -> []
+      {:ok, candidates} when is_list(candidates) ->
+        Enum.flat_map(candidates, fn
+          %ModelCandidate{selection: selection, favorite: favorite} ->
+            route = selection.route
+
+            [
+              %{
+                "id" => ModelSelection.id(selection),
+                "name" => route.display_name,
+                "provider" => route.model_provider,
+                "protocol" => route.execution.wire_protocol,
+                "endpoint" => route.execution.base_url <> route.execution.path,
+                "credential" => ModelSelection.credential_id(selection.credential),
+                "support" => :unverified,
+                "favorite" => favorite,
+                "context_window" => selection.policy.limits.context,
+                "cost" => selection.policy.cost
+              }
+            ]
+
+          _invalid ->
+            []
+        end)
+
+      _ ->
+        []
     end
   catch
     :exit, _ -> []
-  end
-
-  @spec configured_model_entries([String.t()] | nil) :: [map()]
-  defp configured_model_entries(nil), do: configured_model_entries(Config.get(:agent_models))
-
-  defp configured_model_entries(models) do
-    models
-    |> List.wrap()
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&configured_model_entry/1)
-  end
-
-  @spec configured_model_entry(String.t()) :: map()
-  defp configured_model_entry(entry) do
-    model = entry |> String.split("|", parts: 2) |> hd() |> String.trim()
-
-    %{
-      "id" => model,
-      "name" => model,
-      "provider" => provider_label(model),
-      "context_window" => nil,
-      "cost" => nil
-    }
-  end
-
-  @spec current_model(state()) :: String.t()
-  defp current_model(state) do
-    state.workspace.agent_ui.panel.model_name
-  end
-
-  @spec provider_label(String.t()) :: String.t()
-  defp provider_label(model) do
-    case String.split(model, ":", parts: 2) do
-      [provider, _] -> provider
-      [_] -> "custom"
-    end
-  end
-
-  @spec uniq_model_entries([map()]) :: [map()]
-  defp uniq_model_entries(entries) do
-    entries
-    |> Enum.reject(&(model_id(&1) == ""))
-    |> Enum.uniq_by(&model_id/1)
   end
 
   @spec filter_model_entries([map()], String.t()) :: [map()]
@@ -349,7 +323,14 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec model_description(map()) :: String.t()
   defp model_description(model) do
-    [model_name(model), model_provider(model), model_context(model)]
+    route =
+      case {Map.get(model, "protocol"), Map.get(model, "support")} do
+        {protocol, :verified} when is_binary(protocol) -> "#{protocol} verified"
+        {protocol, _support} when is_binary(protocol) -> "#{protocol} unverified"
+        _other -> ""
+      end
+
+    [model_name(model), model_provider(model), route, model_context(model)]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("  ")
   end

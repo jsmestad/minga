@@ -182,6 +182,8 @@ set :agent_provider, :native
 set :agent_model, "anthropic:claude-sonnet-4-20250514"
 ```
 
+Opening `/model` without an argument lists exact executable routes. Each entry shows the API protocol, endpoint, credential profile, reasoning controls, and whether that route is explicitly verified or catalog-only/unverified. A saved session retains this secret-free route identity; if its selected credential is revoked, Minga asks you to correct the selection instead of silently choosing another credential.
+
 Type a prompt, press Enter. The agent reads, edits, and creates files in your project. You review every change as an inline diff before it hits disk.
 
 Useful slash commands:

@@ -14,6 +14,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
   alias MingaAgent.Test.RecordingProcessBackend
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tools
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse.MetadataHandle
@@ -129,6 +130,7 @@ defmodule MingaAgent.Providers.NativeTest do
     defaults = [
       subscriber: subscriber,
       model: "anthropic:claude-sonnet-4-20250514",
+      model_selection: ModelSelectionFixture.selection(),
       config: %AgentConfig{},
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [],
@@ -426,8 +428,8 @@ defmodule MingaAgent.Providers.NativeTest do
         start_provider(tmp_dir: dir, thinking_level: "high", active_skill_names: ["plan"])
 
       assert {:ok, session_state} = Native.get_state(pid)
-      assert session_state.model.provider == "native"
-      assert session_state.model.id == "anthropic:claude-sonnet-4-20250514"
+      assert session_state.model.provider == "openai"
+      assert String.starts_with?(session_state.model.id, "ms2_")
       assert session_state.is_streaming == false
       assert session_state.thinking_level == "high"
       assert session_state.active_skill_names == ["plan"]
@@ -775,16 +777,19 @@ defmodule MingaAgent.Providers.NativeTest do
           build_stream_response([ReqLLM.StreamChunk.text("ok")])
         end
 
+        model_id = model |> String.split(":", parts: 2) |> List.last()
+
         {:ok, pid} =
           start_provider(
             tmp_dir: dir,
             model: model,
+            model_selection: ModelSelectionFixture.selection(model_id: model_id),
             thinking_level: thinking_level,
             llm_client: client
           )
 
         assert :ok = send_prompt(pid, "test")
-        assert_receive {^ref, ^model, opts}, 2_000
+        assert_receive {^ref, %LLMDB.Model{provider_model_id: ^model_id}, opts}, 2_000
 
         if expected_effort do
           assert Keyword.get(opts, :reasoning_effort) == expected_effort
@@ -794,12 +799,6 @@ defmodule MingaAgent.Providers.NativeTest do
 
         provider_options = Keyword.get(opts, :provider_options, [])
         refute Keyword.has_key?(provider_options, :additional_model_request_fields)
-
-        if String.starts_with?(model, "openai_codex:") do
-          assert provider_options[:auth_mode] == :oauth
-          assert provider_options[:oauth_file] == MingaAgent.Credentials.oauth_path()
-          assert provider_options[:codex_originator] == "minga"
-        end
 
         collect_run_events()
       end)
@@ -830,15 +829,23 @@ defmodule MingaAgent.Providers.NativeTest do
       :ok = send_prompt(pid, "Hello")
       collect_run_events()
 
-      assert :ok = Native.set_model(pid, "openai:o4-mini")
+      switched_selection =
+        ModelSelectionFixture.selection(
+          model_id: "o4-mini",
+          display_name: "o4-mini",
+          reasoning: %{effort: "medium", options: ["off", "medium"]}
+        )
+
+      assert :ok = Native.set_model(pid, switched_selection)
       assert {:ok, state} = Native.get_state(pid)
-      assert state.model.id == "openai:o4-mini"
+      assert state.model.id == MingaAgent.ModelSelection.id(switched_selection)
+      assert state.model.name == "o4-mini"
       assert state.thinking_level == "medium"
 
       :ok = send_prompt(pid, "Follow up")
       collect_run_events()
 
-      assert_received {^messages_ref, 1, "openai:o4-mini", messages}
+      assert_received {^messages_ref, 1, %LLMDB.Model{provider_model_id: "o4-mini"}, messages}
 
       assert Enum.map(messages, &{&1.role, text_content(&1)}) == [
                {:user, "Hello"},

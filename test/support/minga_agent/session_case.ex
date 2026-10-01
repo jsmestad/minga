@@ -182,9 +182,15 @@ defmodule Minga.Test.SessionCase do
 
   @spec native_provider_opts(module(), keyword()) :: keyword()
   defp native_provider_opts(MingaAgent.Providers.Native, provider_opts) do
+    config =
+      provider_opts
+      |> Keyword.get(:config, %MingaAgent.Config{})
+      |> MingaAgent.Test.ModelSelectionFixture.config()
+
     provider_opts
-    |> Keyword.put_new(:provider, "anthropic")
-    |> Keyword.put_new(:model, "anthropic:test")
+    |> Keyword.put(:provider, "test")
+    |> Keyword.put(:model, MingaAgent.Test.ModelSelectionFixture.model_intent())
+    |> Keyword.put(:config, config)
   end
 
   defp native_provider_opts(_provider, provider_opts), do: provider_opts

@@ -7,6 +7,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   alias MingaAgent.MCP.ServerConfig
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session.Request
+  alias MingaAgent.Test.ModelSelectionFixture
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse.MetadataHandle
 
@@ -46,6 +47,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     defaults = [
       subscriber: start_provider_subscriber(self()),
       model: "anthropic:claude-sonnet-4-20250514",
+      model_selection: ModelSelectionFixture.selection(),
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [builtin_tool()],
       config: agent_config(),

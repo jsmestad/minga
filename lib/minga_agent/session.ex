@@ -38,6 +38,11 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Memory
   alias MingaAgent.Message
   alias MingaAgent.Notifier
+  alias MingaAgent.ModelCandidate
+  alias MingaAgent.ModelResolver
+  alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.None
+  alias MingaAgent.ModelSelection.Stored
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
@@ -110,7 +115,9 @@ defmodule MingaAgent.Session do
           tool_approval_policy: tool_approval_policy(),
           idle_gc_timeout_ms: non_neg_integer(),
           persistence: Persistence.t(),
-          pending_model_change: String.t() | nil,
+          model_selection: ModelSelection.t() | nil,
+          selection_error: String.t() | nil,
+          pending_model_change: ModelSelection.t() | String.t() | nil,
           pending_thinking_level: String.t() | nil,
           notifier: module() | {module(), term()},
           background_subagent: boolean(),
@@ -465,6 +472,12 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :list_skills)
   end
 
+  @doc "Returns the immutable executable model selection owned by this session."
+  @spec model_selection(GenServer.server()) :: ModelSelection.t() | nil
+  def model_selection(session) do
+    GenServer.call(session, :model_selection)
+  end
+
   @doc "Fetches available models from the provider."
   @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(session) do
@@ -502,9 +515,9 @@ defmodule MingaAgent.Session do
   so callers may pass a larger `timeout` when a slow provider startup should not
   surface as a call timeout.
   """
-  @spec set_model(GenServer.server(), String.t(), timeout()) ::
+  @spec set_model(GenServer.server(), ModelResolver.intent(), timeout()) ::
           :ok | {:pending, :credential_discovery} | {:error, term()}
-  def set_model(session, model, timeout \\ 5_000) when is_binary(model) do
+  def set_model(session, model, timeout \\ 5_000) do
     GenServer.call(session, {:set_model, model}, timeout)
   end
 
@@ -726,17 +739,34 @@ defmodule MingaAgent.Session do
     timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
 
     session_id = Keyword.get(opts, :session_id, generate_session_id())
-    model_name = session_model_name(opts, provider_opts)
+    raw_model_name = session_model_name(opts, provider_opts)
     resolved_provider_resolution = resolve_provider(opts)
     credential_snapshot = credentials_snapshot_fn.()
 
-    credentials_configured? =
-      session_credentials_configured?(
-        resolved_provider_resolution.module,
+    {model_selection, selection_error} =
+      initial_model_selection(
+        resolved_provider_resolution,
+        raw_model_name,
         provider_opts,
         credential_snapshot,
-        credentials_configured_fn
+        initial_thinking_level
       )
+
+    credentials_configured? =
+      if resolved_provider_resolution.module == MingaAgent.Providers.Native do
+        case model_selection do
+          %ModelSelection{credential: %None{provider: "ollama"}} -> false
+          %ModelSelection{} -> true
+          nil -> false
+        end
+      else
+        session_credentials_configured?(
+          resolved_provider_resolution.module,
+          provider_opts,
+          credential_snapshot,
+          credentials_configured_fn
+        )
+      end
 
     provider_resolution =
       if credentials_configured?,
@@ -744,9 +774,18 @@ defmodule MingaAgent.Session do
         else: unconfigured_provider_resolution()
 
     provider_module = provider_resolution.module
+    model_name = selection_model_name(model_selection, raw_model_name)
 
     {provider_name, provider_opts} =
       session_provider_configuration(provider_module, model_name, provider_opts)
+
+    provider_name =
+      case model_selection do
+        %ModelSelection{route: %{model_provider: selected_provider}} -> selected_provider
+        nil -> provider_name
+      end
+
+    provider_opts = maybe_put_model_selection(provider_opts, model_selection)
 
     provider_lease =
       if credentials_configured? do
@@ -797,7 +836,11 @@ defmodule MingaAgent.Session do
       turn_execution: TurnExecution.new(),
       transcript:
         Transcript.new(
-          [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
+          initial_session_messages(
+            timestamp,
+            Keyword.get(opts, :startup_notice),
+            selection_error
+          ),
           now
         ),
       continuation: Continuation.new(),
@@ -805,8 +848,10 @@ defmodule MingaAgent.Session do
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
+      model_selection: model_selection,
+      selection_error: selection_error,
       pending_model_change: nil,
-      pending_thinking_level: initial_thinking_level,
+      pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
       notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
       hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
@@ -1244,6 +1289,18 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
+  def handle_call(:model_selection, _from, state) do
+    {:reply, state.model_selection, state}
+  end
+
+  def handle_call(:get_available_models, _from, state)
+      when state.provider.module == MingaAgent.Providers.Native do
+    candidates =
+      ModelResolver.candidates(model_resolution_opts(state, current: state.model_selection))
+
+    {:reply, {:ok, candidates}, state}
+  end
+
   def handle_call(
         :get_available_models,
         _from,
@@ -1273,6 +1330,19 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(
+        {:set_thinking_level, level},
+        _from,
+        %{model_selection: %ModelSelection{}} = state
+      ) do
+    with {:ok, selection} <- ModelSelection.with_reasoning(state.model_selection, level),
+         :ok <- apply_selection_to_attached_provider(state, selection) do
+      {:reply, :ok, install_model_selection(state, selection)}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
         {:set_thinking_level, _level},
         _from,
         %{provider: provider} = state
@@ -1289,6 +1359,20 @@ defmodule MingaAgent.Session do
       ])
 
     {:reply, result, state}
+  end
+
+  def handle_call(:cycle_thinking_level, _from, %{model_selection: %ModelSelection{}} = state) do
+    options = state.model_selection.policy.reasoning.options
+    current_effort = state.model_selection.policy.reasoning.effort
+    current = Enum.find_index(options, &(&1 == current_effort)) || 0
+    level = Enum.at(options, rem(current + 1, length(options)))
+
+    with {:ok, selection} <- ModelSelection.with_reasoning(state.model_selection, level),
+         :ok <- apply_selection_to_attached_provider(state, selection) do
+      {:reply, {:ok, %{"level" => level}}, install_model_selection(state, selection)}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(
@@ -1312,6 +1396,38 @@ defmodule MingaAgent.Session do
   def handle_call(
         :cycle_model,
         _from,
+        %{provider: %{module: MingaAgent.Providers.Native}} = state
+      ) do
+    candidates =
+      ModelResolver.candidates(model_resolution_opts(state, current: state.model_selection))
+
+    case next_model_candidate(candidates, state.model_selection) do
+      %ModelCandidate{selection: selection} ->
+        case apply_resolved_model_selection(state, selection) do
+          {:ok, state} ->
+            reply = %{
+              "model" => selection.route.display_name,
+              "provider" => selection.route.model_provider,
+              "route" => selection.route.execution.wire_protocol
+            }
+
+            {:reply, {:ok, reply}, state}
+
+          {:pending, state} ->
+            {:reply, {:pending, :credential_discovery}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      nil ->
+        {:reply, {:error, :no_available_model}, state}
+    end
+  end
+
+  def handle_call(
+        :cycle_model,
+        _from,
         %{provider: provider} = state
       )
       when ProviderLifecycle.is_detached(provider) do
@@ -1327,7 +1443,25 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
-  def handle_call({:set_model, model}, _from, state) do
+  def handle_call(
+        {:set_model, intent},
+        _from,
+        %{provider: %{module: MingaAgent.Providers.Native}} = state
+      ) do
+    case ModelResolver.resolve(intent, model_resolution_opts(state)) do
+      {:ok, selection} ->
+        case apply_resolved_model_selection(state, selection) do
+          {:ok, state} -> {:reply, :ok, state}
+          {:pending, state} -> {:reply, {:pending, :credential_discovery}, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, ModelResolver.message(reason)}, state}
+    end
+  end
+
+  def handle_call({:set_model, model}, _from, state) when is_binary(model) do
     {state, refresh_result} =
       state
       |> update_model_configuration(model)
@@ -4009,6 +4143,38 @@ defmodule MingaAgent.Session do
 
   @spec refresh_credentials_state_result(state()) ::
           {state(), :ok | {:pending, :credential_discovery} | {:error, term()}}
+  defp refresh_credentials_state_result(
+         %{provider: %{module: MingaAgent.Providers.Native}} = state
+       ) do
+    snapshot = state.credentials_snapshot_fn.()
+    opts = Keyword.put(model_resolution_opts(state), :credential_snapshot, snapshot)
+
+    result =
+      case state.model_selection do
+        %ModelSelection{} = selection -> ModelResolver.restore(selection, opts)
+        nil -> ModelResolver.resolve(state.provider.model_name, opts)
+      end
+
+    case result do
+      {:ok, selection} ->
+        state = install_model_selection(state, selection)
+        configured? = not ModelSelection.local?(selection)
+        refresh_credentials_from_snapshot(state, snapshot, configured?)
+
+      {:error, :no_available_model} ->
+        refresh_credentials_from_snapshot(state, snapshot, false)
+
+      {:error, reason} ->
+        state =
+          %{state | selection_error: ModelResolver.message(reason)}
+          |> stop_credential_check()
+          |> install_credential_readiness(:unconfigured)
+          |> broadcast_credential_readiness()
+
+        {state, {:error, ModelResolver.message(reason)}}
+    end
+  end
+
   defp refresh_credentials_state_result(state) do
     snapshot = state.credentials_snapshot_fn.()
 
@@ -4147,19 +4313,7 @@ defmodule MingaAgent.Session do
         ) :: state()
   defp apply_credential_availability(state, request, :available) do
     if credential_request_current?(state, request) do
-      provider_was_running? = is_pid(ProviderLifecycle.pid(state.provider))
-      state = install_credential_readiness(state, :configured)
-      {state, _result} = maybe_start_provider_result(state)
-
-      state =
-        if provider_was_running? do
-          {state, _result} = apply_pending_model_change(state)
-          state
-        else
-          %{state | pending_model_change: nil}
-        end
-
-      broadcast_credential_readiness(state)
+      activate_available_selection(state)
     else
       state
     end
@@ -4173,15 +4327,63 @@ defmodule MingaAgent.Session do
     settle_credential_unavailable(state, request, {:unexpected_result, unexpected})
   end
 
+  @spec activate_available_selection(state()) :: state()
+  defp activate_available_selection(
+         %{pending_model_change: %ModelSelection{} = selection} = state
+       ) do
+    previous = state
+    staged = %{state | pending_model_change: nil}
+
+    case do_apply_resolved_model_selection(staged, selection) do
+      {:ok, activated} ->
+        activated
+
+      {:error, reason} ->
+        %{previous | pending_model_change: nil, selection_error: inspect(reason)}
+    end
+  end
+
+  defp activate_available_selection(state) do
+    state = install_credential_readiness(state, :configured)
+    {state, _result} = maybe_start_provider_result(state)
+    broadcast_credential_readiness(state)
+  end
+
   @spec settle_credential_unavailable(state(), AvailabilityCheck.request(), term()) :: state()
-  defp settle_credential_unavailable(state, request, _reason) do
+  defp settle_credential_unavailable(state, request, reason) do
     if credential_request_current?(state, request) do
-      state
-      |> install_credential_readiness(:unconfigured)
-      |> broadcast_credential_readiness()
+      settle_current_unavailable(state, reason)
     else
       state
     end
+  end
+
+  @spec settle_current_unavailable(state(), term()) :: state()
+  defp settle_current_unavailable(
+         %{pending_model_change: %ModelSelection{}, model_selection: %ModelSelection{}} = state,
+         reason
+       ) do
+    readiness =
+      case ModelResolver.restore(state.model_selection, model_resolution_opts(state)) do
+        {:ok, %ModelSelection{credential: %None{provider: "ollama"}}} -> :unconfigured
+        {:ok, %ModelSelection{}} -> :configured
+        {:error, _reason} -> :unconfigured
+      end
+
+    %{
+      state
+      | pending_model_change: nil,
+        selection_error: "Local route unavailable: #{inspect(reason)}"
+    }
+    |> install_credential_readiness(readiness)
+    |> broadcast_credential_readiness()
+  end
+
+  defp settle_current_unavailable(state, _reason) do
+    state
+    |> Map.put(:pending_model_change, nil)
+    |> install_credential_readiness(:unconfigured)
+    |> broadcast_credential_readiness()
   end
 
   @spec install_credential_readiness(state(), Credentials.readiness()) :: state()
@@ -4207,8 +4409,21 @@ defmodule MingaAgent.Session do
 
   @spec credential_request_current?(state(), AvailabilityCheck.request()) :: boolean()
   defp credential_request_current?(state, request) do
-    request.session_id == state.session_id and request.model_name == state.provider.model_name
+    request.session_id == state.session_id and
+      request.model_name == credential_request_identity(state)
   end
+
+  @spec credential_request_identity(state()) :: String.t()
+  defp credential_request_identity(%{pending_model_change: %ModelSelection{} = selection}),
+    do: ModelSelection.id(selection)
+
+  defp credential_request_identity(%{pending_model_change: model}) when is_binary(model),
+    do: model
+
+  defp credential_request_identity(%{model_selection: %ModelSelection{} = selection}),
+    do: ModelSelection.id(selection)
+
+  defp credential_request_identity(state), do: state.provider.model_name
 
   @spec maybe_restart_credential_check(state(), boolean()) :: state()
   defp maybe_restart_credential_check(state, true), do: refresh_credentials_state(state)
@@ -4256,6 +4471,211 @@ defmodule MingaAgent.Session do
   defp cancel_credential_timer(timer_ref) do
     _cancelled? = Process.cancel_timer(timer_ref)
     :ok
+  end
+
+  @spec initial_model_selection(
+          ProviderResolver.resolved(),
+          String.t(),
+          keyword(),
+          CredentialSnapshot.t(),
+          String.t() | nil
+        ) :: {ModelSelection.t() | nil, String.t() | nil}
+  defp initial_model_selection(
+         %{module: MingaAgent.Providers.Native} = resolution,
+         model,
+         provider_opts,
+         snapshot,
+         thinking_level
+       ) do
+    config = Keyword.get_lazy(provider_opts, :config, &AgentConfig.resolve/0)
+
+    resolver_opts =
+      [
+        config: config,
+        credential_snapshot: snapshot,
+        backend_spec: resolution.spec
+      ]
+      |> Keyword.merge(Keyword.get(provider_opts, :model_resolver_opts, []))
+
+    intent =
+      %{
+        "model" => model,
+        "reasoning_effort" => thinking_level
+      }
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
+
+    case ModelResolver.resolve(intent, resolver_opts) do
+      {:ok, selection} ->
+        case maybe_apply_initial_reasoning(selection, thinking_level) do
+          {:ok, selection} -> {selection, nil}
+          {:error, message} -> {nil, message}
+        end
+
+      {:error, reason} ->
+        {nil, ModelResolver.message(reason)}
+    end
+  end
+
+  defp initial_model_selection(_resolution, _model, _provider_opts, _snapshot, _thinking),
+    do: {nil, nil}
+
+  @spec maybe_apply_initial_reasoning(ModelSelection.t(), String.t() | nil) ::
+          {:ok, ModelSelection.t()} | {:error, String.t()}
+  defp maybe_apply_initial_reasoning(selection, nil), do: {:ok, selection}
+
+  defp maybe_apply_initial_reasoning(selection, level),
+    do: ModelSelection.with_reasoning(selection, level)
+
+  @spec initial_session_messages(String.t(), String.t() | nil, String.t() | nil) :: [Message.t()]
+  defp initial_session_messages(timestamp, startup_notice, nil) do
+    [Message.system(initial_system_message(timestamp, startup_notice))]
+  end
+
+  defp initial_session_messages(timestamp, startup_notice, selection_error) do
+    [
+      Message.system(initial_system_message(timestamp, startup_notice)),
+      Message.system("Model selection needs correction: #{selection_error}", :error)
+    ]
+  end
+
+  @spec selection_model_name(ModelSelection.t() | nil, String.t()) :: String.t()
+  defp selection_model_name(%ModelSelection{} = selection, _fallback),
+    do: ModelSelection.id(selection)
+
+  defp selection_model_name(nil, fallback), do: fallback
+
+  @spec maybe_put_model_selection(keyword(), ModelSelection.t() | nil) :: keyword()
+  defp maybe_put_model_selection(opts, nil), do: Keyword.delete(opts, :model_selection)
+
+  defp maybe_put_model_selection(opts, %ModelSelection{} = selection),
+    do: Keyword.put(opts, :model_selection, selection)
+
+  @spec model_resolution_opts(state(), keyword()) :: keyword()
+  defp model_resolution_opts(state, extra \\ []) do
+    config = Keyword.get_lazy(state.provider.opts, :config, &AgentConfig.resolve/0)
+
+    [
+      config: config,
+      credential_snapshot: state.credentials_snapshot_fn.()
+    ]
+    |> Keyword.merge(Keyword.get(state.provider.opts, :model_resolver_opts, []))
+    |> Keyword.merge(extra)
+  end
+
+  @spec apply_selection_to_attached_provider(state(), ModelSelection.t()) ::
+          :ok | {:error, term()}
+  defp apply_selection_to_attached_provider(state, selection) do
+    case ProviderLifecycle.pid(state.provider) do
+      nil -> :ok
+      provider -> dispatch_optional(state.provider.module, :set_model, [provider, selection])
+    end
+  end
+
+  @spec apply_resolved_model_selection(state(), ModelSelection.t()) ::
+          {:ok, state()} | {:pending, state()} | {:error, term()}
+  defp apply_resolved_model_selection(state, selection) do
+    if ModelSelection.local?(selection) do
+      stage_local_model_selection(state, selection)
+    else
+      do_apply_resolved_model_selection(state, selection)
+    end
+  end
+
+  @spec stage_local_model_selection(state(), ModelSelection.t()) ::
+          {:pending, state()} | {:error, term()}
+  defp stage_local_model_selection(state, selection) do
+    snapshot = state.credentials_snapshot_fn.()
+    identity = ModelSelection.id(selection)
+
+    {availability, request, cleanup} =
+      AvailabilityCheck.request(
+        state.credential_availability,
+        snapshot,
+        identity,
+        state.session_id
+      )
+
+    cleanup_credential_worker(cleanup)
+
+    staged =
+      %{
+        state
+        | credential_availability: availability,
+          pending_model_change: selection
+      }
+      |> install_credential_readiness(:checking)
+      |> broadcast_credential_readiness()
+
+    case start_credential_check(staged, request) do
+      {:ok, staged} -> {:pending, staged}
+      {:error, reason, _staged} -> {:error, reason}
+    end
+  end
+
+  @spec do_apply_resolved_model_selection(state(), ModelSelection.t()) ::
+          {:ok, state()} | {:error, term()}
+  defp do_apply_resolved_model_selection(state, selection) do
+    case apply_selection_to_attached_provider(state, selection) do
+      :ok ->
+        state =
+          state
+          |> install_model_selection(selection)
+          |> stop_credential_check()
+          |> install_credential_readiness(:configured)
+
+        {state, result} = maybe_start_provider_result(state)
+
+        case result do
+          :ok -> {:ok, broadcast_credential_readiness(state)}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec install_model_selection(state(), ModelSelection.t()) :: state()
+  defp install_model_selection(state, selection) do
+    stable_id = ModelSelection.id(selection)
+    provider_name = selection.route.model_provider
+
+    provider_opts =
+      state.provider.opts
+      |> Keyword.put(:model, stable_id)
+      |> Keyword.put(:provider, provider_name)
+      |> Keyword.put(:model_selection, selection)
+
+    lifecycle =
+      ProviderLifecycle.replace(
+        state.provider,
+        stable_id,
+        provider_name,
+        provider_opts
+      )
+
+    %{
+      state
+      | provider: lifecycle,
+        model_selection: selection,
+        selection_error: nil,
+        credentials_configured: true
+    }
+  end
+
+  @spec next_model_candidate([ModelCandidate.t()], ModelSelection.t() | nil) ::
+          ModelCandidate.t() | nil
+  defp next_model_candidate([], _current), do: nil
+  defp next_model_candidate([candidate | _rest], nil), do: candidate
+
+  defp next_model_candidate(candidates, selection) do
+    current_id = ModelSelection.id(selection)
+
+    current_index =
+      Enum.find_index(candidates, &(ModelSelection.id(&1.selection) == current_id)) || -1
+
+    Enum.at(candidates, rem(current_index + 1, length(candidates)))
   end
 
   @spec update_model_configuration(state(), String.t()) :: state()
@@ -4965,6 +5385,8 @@ defmodule MingaAgent.Session do
             readable_title(first_user_prompt(Transcript.messages(state.transcript))),
         model_name: state.provider.model_name,
         provider_name: state.provider.provider_name,
+        model_selection: state.model_selection,
+        selection_intent: %{"model" => state.provider.model_name},
         messages: Transcript.messages(state.transcript),
         message_ids:
           state.transcript
@@ -5058,61 +5480,100 @@ defmodule MingaAgent.Session do
     SessionManager.abort_session_identity(state.session_manager, reservation)
   end
 
+  @spec resolve_saved_model_selection(state(), SessionStore.session_data()) ::
+          {:ok, ModelSelection.t() | nil} | {:error, term()}
+  defp resolve_saved_model_selection(
+         %{provider: %{module: MingaAgent.Providers.Native}} = state,
+         data
+       ) do
+    result =
+      case Map.get(data, :model_selection) do
+        %ModelSelection{} = selection ->
+          ModelResolver.restore(selection, model_resolution_opts(state))
+
+        %Stored{} = stored ->
+          ModelResolver.restore(stored, model_resolution_opts(state))
+
+        nil ->
+          intent = Map.get(data, :selection_intent, %{"model" => data.model_name})
+          ModelResolver.resolve(intent, model_resolution_opts(state))
+      end
+
+    case result do
+      {:ok, selection} ->
+        {:ok, selection}
+
+      {:error, reason} ->
+        {:error, {:model_selection_correction_required, ModelResolver.message(reason)}}
+    end
+  end
+
+  defp resolve_saved_model_selection(_state, _data), do: {:ok, nil}
+
   @spec restore_loaded_candidate(
           state(),
           SessionStore.session_data(),
           SessionManager.identity_reservation() | :unchanged | :unmanaged
         ) :: {:ok, state()} | {:error, term()}
   defp restore_loaded_candidate(state, data, reservation) do
-    restart_credential_check? = AvailabilityCheck.checking?(state.credential_availability)
-    loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
-    provider_name = Map.get(data, :provider_name, state.provider.provider_name)
-    provider_opts = Keyword.put(state.provider.opts, :model, data.model_name)
+    with {:ok, selection} <- resolve_saved_model_selection(state, data) do
+      restart_credential_check? = AvailabilityCheck.checking?(state.credential_availability)
+      loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
+      model_name = selection_model_name(selection, data.model_name)
+      provider_name = if selection, do: selection.route.model_provider, else: data.provider_name
 
-    lifecycle =
-      ProviderLifecycle.replace(
-        state.provider,
-        data.model_name,
-        provider_name,
-        provider_opts
-      )
+      provider_opts =
+        state.provider.opts
+        |> Keyword.put(:model, model_name)
+        |> maybe_put_model_selection(selection)
 
-    transcript =
-      Transcript.restore(
-        data.messages,
-        data.message_ids,
-        Map.get(data, :branches, []),
-        data.usage,
-        Map.get(data, :pinned_ids, MapSet.new()),
-        loaded_at
-      )
+      lifecycle =
+        ProviderLifecycle.replace(
+          state.provider,
+          model_name,
+          provider_name,
+          provider_opts
+        )
 
-    execution = TurnExecution.restore(state.turn_execution)
+      transcript =
+        Transcript.restore(
+          data.messages,
+          data.message_ids,
+          Map.get(data, :branches, []),
+          data.usage,
+          Map.get(data, :pinned_ids, MapSet.new()),
+          loaded_at
+        )
 
-    candidate = %{
-      state
-      | session_id: data.id,
-        transcript: transcript,
-        continuation: data.continuation,
-        provider: lifecycle,
-        turn_execution: execution,
-        pending_model_change: nil,
-        created_at: loaded_at
-    }
+      execution = TurnExecution.restore(state.turn_execution)
 
-    with {:ok, staged, reconciled?} <- reconcile_loaded_checkpoint(candidate),
-         {:ok, staged} <- prepare_reconciliation_warning(staged, reconciled?),
-         :ok <- restore_loaded_provider_model(staged, state.provider.model_name) do
-      restore_loaded_memory_candidate(
-        state,
-        data,
-        staged,
-        lifecycle,
-        execution,
-        loaded_at,
-        restart_credential_check?,
-        reservation
-      )
+      candidate = %{
+        state
+        | session_id: data.id,
+          transcript: transcript,
+          continuation: data.continuation,
+          provider: lifecycle,
+          model_selection: selection,
+          selection_error: nil,
+          turn_execution: execution,
+          pending_model_change: nil,
+          created_at: loaded_at
+      }
+
+      with {:ok, staged, reconciled?} <- reconcile_loaded_checkpoint(candidate),
+           {:ok, staged} <- prepare_reconciliation_warning(staged, reconciled?),
+           :ok <- restore_loaded_provider_model(staged, state.model_selection) do
+        restore_loaded_memory_candidate(
+          state,
+          data,
+          staged,
+          lifecycle,
+          execution,
+          loaded_at,
+          restart_credential_check?,
+          reservation
+        )
+      end
     end
   end
 
@@ -5149,13 +5610,14 @@ defmodule MingaAgent.Session do
         )
 
       {:error, memory_error} ->
-        rollback_loaded_memory_restore(staged, state.provider.model_name, memory_error)
+        rollback_loaded_memory_restore(staged, state.model_selection, memory_error)
     end
   end
 
-  @spec rollback_loaded_memory_restore(state(), String.t(), term()) :: {:error, term()}
-  defp rollback_loaded_memory_restore(staged, previous_model, memory_error) do
-    case rollback_loaded_provider_model(staged, previous_model) do
+  @spec rollback_loaded_memory_restore(state(), ModelSelection.t() | nil, term()) ::
+          {:error, term()}
+  defp rollback_loaded_memory_restore(staged, previous_selection, memory_error) do
+    case rollback_loaded_provider_model(staged, previous_selection) do
       :ok ->
         {:error, memory_error}
 
@@ -5173,10 +5635,10 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec restore_loaded_provider_model(state(), String.t()) ::
+  @spec restore_loaded_provider_model(state(), ModelSelection.t() | nil) ::
           :ok | {:error, {:provider_model_restore_failed, term()}}
-  defp restore_loaded_provider_model(state, current_model) do
-    case apply_loaded_model_to_provider(state, current_model) do
+  defp restore_loaded_provider_model(state, current_selection) do
+    case apply_loaded_model_to_provider(state, current_selection) do
       :ok -> :ok
       {:error, reason} -> {:error, {:provider_model_restore_failed, reason}}
     end
@@ -5212,7 +5674,10 @@ defmodule MingaAgent.Session do
         )
 
       {:error, reason} ->
-        {:error, {:session_identity_commit_failed, reason}}
+        case rollback_loaded_provider_model(staged, state.model_selection) do
+          :ok -> {:error, {:session_identity_commit_failed, reason}}
+          {:error, rollback_error} -> {:error, {:restore_rollback_failed, reason, rollback_error}}
+        end
     end
   end
 
@@ -5248,6 +5713,8 @@ defmodule MingaAgent.Session do
         continuation: staged.continuation,
         persistence: persistence,
         provider: lifecycle,
+        model_selection: staged.model_selection,
+        selection_error: staged.selection_error,
         turn_execution: execution,
         pending_model_change: nil,
         created_at: loaded_at
@@ -5374,20 +5841,24 @@ defmodule MingaAgent.Session do
     _error -> {:error, :event_log_reconciliation_failed}
   end
 
-  @spec apply_loaded_model_to_provider(state(), String.t()) :: :ok | {:error, term()}
-  defp apply_loaded_model_to_provider(%{provider: provider}, _current_model)
+  @spec apply_loaded_model_to_provider(state(), ModelSelection.t() | nil) ::
+          :ok | {:error, term()}
+  defp apply_loaded_model_to_provider(%{provider: provider}, _current_selection)
        when ProviderLifecycle.is_detached(provider),
        do: :ok
 
-  defp apply_loaded_model_to_provider(state, current_model) do
+  defp apply_loaded_model_to_provider(state, current_selection) do
+    argument = provider_model_argument(state)
+
     case dispatch_optional(state.provider.module, :set_model, [
            ProviderLifecycle.pid(state.provider),
-           state.provider.model_name
+           argument
          ]) do
       :ok ->
         :ok
 
-      {:error, :not_supported} when current_model == state.provider.model_name ->
+      {:error, :not_supported}
+      when current_selection != nil and current_selection == state.model_selection ->
         :ok
 
       {:error, reason} ->
@@ -5400,19 +5871,25 @@ defmodule MingaAgent.Session do
     :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
 
-  @spec rollback_loaded_provider_model(state(), String.t()) :: :ok | {:error, term()}
-  defp rollback_loaded_provider_model(%{provider: provider}, _current_model)
+  @spec rollback_loaded_provider_model(state(), ModelSelection.t() | nil) ::
+          :ok | {:error, term()}
+  defp rollback_loaded_provider_model(%{provider: provider}, _current_selection)
        when ProviderLifecycle.is_detached(provider),
        do: :ok
 
-  defp rollback_loaded_provider_model(state, current_model)
-       when current_model == state.provider.model_name,
+  defp rollback_loaded_provider_model(state, current_selection)
+       when current_selection == state.model_selection,
        do: :ok
 
-  defp rollback_loaded_provider_model(state, current_model) do
+  defp rollback_loaded_provider_model(state, current_selection) do
+    argument =
+      if state.provider.module == MingaAgent.Providers.Native,
+        do: current_selection,
+        else: state.provider.model_name
+
     case dispatch_optional(state.provider.module, :set_model, [
            ProviderLifecycle.pid(state.provider),
-           current_model
+           argument
          ]) do
       :ok -> :ok
       {:error, reason} -> {:error, reason}
@@ -5421,6 +5898,15 @@ defmodule MingaAgent.Session do
   catch
     :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
+
+  @spec provider_model_argument(state()) :: ModelSelection.t() | String.t() | nil
+  defp provider_model_argument(%{
+         provider: %{module: MingaAgent.Providers.Native},
+         model_selection: selection
+       }),
+       do: selection
+
+  defp provider_model_argument(state), do: state.provider.model_name
 
   @spec persist_current_before_replacement(state(), String.t()) :: :ok | {:error, term()}
   defp persist_current_before_replacement(%{session_id: target_id}, target_id), do: :ok

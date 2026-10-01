@@ -48,13 +48,14 @@ defmodule MingaAgent.SessionProviderErrorTest do
           session_store_dir: Path.join(dir, "sessions"),
           provider: Native,
           provider_opts: [
-            model: "anthropic:claude-sonnet-4-20250514",
+            model: MingaAgent.Test.ModelSelectionFixture.model_intent(),
             project_root: dir,
             tools: [mcp_session_builtin_tool()],
-            config: %MingaAgent.Config{
-              mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
-              tool_approval: :none
-            },
+            config:
+              MingaAgent.Test.ModelSelectionFixture.config(%MingaAgent.Config{
+                mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
+                tool_approval: :none
+              }),
             mcp_enabled?: true,
             mcp_transport: FakeTransport,
             mcp_transport_opts: [

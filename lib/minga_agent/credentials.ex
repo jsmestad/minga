@@ -21,6 +21,8 @@ defmodule MingaAgent.Credentials do
   @type key_source :: :env | :file | :oauth | nil
 
   alias MingaAgent.Credentials.Snapshot
+  alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.{ApiKey, None, OAuth}
 
   @typedoc "Live Ollama availability, kept separate from local configuration."
   @type ollama_availability :: :pending | :available | {:unavailable, term()}
@@ -97,6 +99,41 @@ defmodule MingaAgent.Credentials do
   end
 
   @doc """
+  Resolves one tagged credential reference for a single ReqLLM request.
+
+  API-key sources are exact. OAuth is refreshed by ReqLLM from Minga's explicit
+  file and the returned provider, file, and account identities must match the
+  pin before the access token is exposed to the caller.
+  """
+  @spec request_options(ModelSelection.credential_ref(), keyword()) ::
+          {:ok, keyword()} | {:error, {:credential_unavailable, String.t()}}
+  def request_options(%None{}, _opts), do: {:ok, [auth_mode: :none]}
+
+  def request_options(%ApiKey{provider: provider, source: source} = credential, opts) do
+    case resolve_exact_api_key(provider, source, opts) do
+      {:ok, key} -> {:ok, [auth_mode: :api_key, api_key: key]}
+      :error -> credential_error(credential)
+    end
+  end
+
+  def request_options(%OAuth{} = credential, opts) do
+    path = credential.oauth_path || Keyword.get(opts, :oauth_path, oauth_path())
+
+    with {:ok, resolved} <- resolve_req_llm_oauth(path, opts),
+         true <- oauth_resolution_matches?(resolved, credential, path),
+         token when is_binary(token) and token != "" <- Map.get(resolved, :token) do
+      {:ok,
+       [
+         auth_mode: :oauth,
+         access_token: token,
+         chatgpt_account_id: credential.account_id
+       ]}
+    else
+      _unavailable -> credential_error(credential)
+    end
+  end
+
+  @doc """
   Stores an API key for a provider in the credentials file.
 
   Creates the config directory and file if they don't exist. Sets
@@ -144,11 +181,13 @@ defmodule MingaAgent.Credentials do
       end)
       |> Map.reject(fn {_provider, source} -> is_nil(source) end)
 
-    Snapshot.new(
-      sources,
-      auth_probe(opts, :oauth_probe, &oauth_configured?/0),
-      ollama_host(opts)
-    )
+    oauth_ref =
+      case Keyword.get(opts, :oauth_identity_probe) do
+        probe when is_function(probe, 0) -> probe.()
+        nil -> local_oauth_identity(Keyword.get(opts, :oauth_path, oauth_path()))
+      end
+
+    Snapshot.new(sources, oauth_ref, ollama_host(opts))
   end
 
   @doc """
@@ -187,7 +226,7 @@ defmodule MingaAgent.Credentials do
       end)
 
     oauth_status =
-      if snapshot.oauth_configured do
+      if is_struct(snapshot.oauth_ref, OAuth) do
         %ProviderStatus{
           provider: "openai_codex",
           configured: true,
@@ -301,13 +340,6 @@ defmodule MingaAgent.Credentials do
     :exit, reason -> {:unavailable, {:exit, reason}}
   end
 
-  @spec auth_probe(keyword(), atom(), (-> boolean())) :: boolean()
-  defp auth_probe(opts, key, default) do
-    opts
-    |> Keyword.get(key, default)
-    |> then(& &1.())
-  end
-
   @spec acquire_stored_credentials(keyword()) :: map()
   defp acquire_stored_credentials(opts) do
     path = credentials_path(opts)
@@ -367,26 +399,83 @@ defmodule MingaAgent.Credentials do
   def oauth_path, do: MingaAgent.OAuth.oauth_path()
 
   @doc """
-  Returns true if an `openai-codex` entry exists in `oauth.json`.
+  Pins the exact OpenAI Codex account in Minga's explicit OAuth file.
+
+  ReqLLM owns refresh locking and persistence. Tokens returned while pinning are
+  discarded; only the provider, provider key, account id, and exact path remain.
   """
-  @spec oauth_configured?() :: boolean()
-  def oauth_configured? do
-    path = oauth_path()
-    key = MingaAgent.OAuth.provider_key()
+  @spec pin_oauth(:openai_codex, String.t()) :: {:ok, OAuth.t()} | {:error, term()}
+  def pin_oauth(:openai_codex, path) when is_binary(path) do
+    expanded_path = Path.expand(path)
 
-    case File.read(path) do
-      {:ok, content} when content != "" ->
-        case JSON.decode(content) do
-          {:ok, %{^key => %{"access" => access}}}
-          when is_binary(access) and access != "" ->
-            true
+    with {:ok, resolved} <- ReqLLM.OAuth.resolve(:openai_codex, oauth_file: expanded_path),
+         "openai-codex" <- Map.get(resolved, :provider_key),
+         ^expanded_path <- Map.get(resolved, :oauth_file),
+         account_id when is_binary(account_id) and account_id != "" <-
+           Map.get(resolved, :account_id) do
+      {:ok, OAuth.new(account_id, expanded_path)}
+    else
+      {:error, _reason} = error -> error
+      _mismatch -> {:error, :oauth_identity_mismatch}
+    end
+  end
 
-          _ ->
-            false
-        end
+  @spec local_oauth_identity(String.t()) :: OAuth.t() | nil
+  defp local_oauth_identity(path) do
+    expanded_path = Path.expand(path)
+    provider_key = MingaAgent.OAuth.provider_key()
 
-      _ ->
-        false
+    with {:ok, content} when content != "" <- File.read(expanded_path),
+         {:ok, data} when is_map(data) <- JSON.decode(content),
+         entry when is_map(entry) <- Map.get(data, provider_key),
+         account_id when is_binary(account_id) and account_id != "" <-
+           Map.get(entry, "accountId") || Map.get(entry, "account_id") ||
+             oauth_account_from_entry(entry) do
+      OAuth.new(account_id, expanded_path)
+    else
+      _missing -> nil
+    end
+  end
+
+  @spec oauth_account_from_entry(map()) :: String.t() | nil
+  defp oauth_account_from_entry(entry) do
+    access = Map.get(entry, "access") || Map.get(entry, "access_token")
+    MingaAgent.OAuth.account_id_from_token(access)
+  end
+
+  @spec resolve_req_llm_oauth(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  defp resolve_req_llm_oauth(path, opts) do
+    case Keyword.get(opts, :oauth_resolver) do
+      resolver when is_function(resolver, 2) ->
+        resolver.(:openai_codex, oauth_file: Path.expand(path))
+
+      nil ->
+        ReqLLM.OAuth.resolve(:openai_codex, oauth_file: Path.expand(path))
+    end
+  end
+
+  @spec oauth_resolution_matches?(map(), OAuth.t(), String.t()) :: boolean()
+  defp oauth_resolution_matches?(resolved, credential, path) do
+    credential.provider == :openai_codex and
+      Map.get(resolved, :provider_key) == credential.provider_key and
+      Map.get(resolved, :account_id) == credential.account_id and
+      Map.get(resolved, :oauth_file) == Path.expand(path)
+  end
+
+  @spec credential_error(ModelSelection.credential_ref()) ::
+          {:error, {:credential_unavailable, String.t()}}
+  defp credential_error(credential) do
+    {:error, {:credential_unavailable, ModelSelection.credential_id(credential)}}
+  end
+
+  @spec resolve_exact_api_key(provider(), :env | :file, keyword()) ::
+          {:ok, String.t()} | :error
+  defp resolve_exact_api_key(provider, :env, opts), do: resolve_from_env(provider, opts)
+
+  defp resolve_exact_api_key(provider, :file, opts) do
+    case resolve_from_file(provider, opts) do
+      {:ok, key, :file} -> {:ok, key}
+      :error -> :error
     end
   end
 

@@ -54,8 +54,18 @@ defmodule MingaAgent.ProviderPacks.Native do
       id: "native",
       module: Native,
       display_name: "native",
-      model_prefixes: ["anthropic:", "openai:", "ollama:", "groq:", "bedrock:"],
-      capabilities: [:streaming, :tools, :mcp, :thinking, :model_switching],
+      model_prefixes: [
+        "anthropic:",
+        "openai:",
+        "openai_codex:",
+        "google:",
+        "openrouter:",
+        "groq:",
+        "mistral:",
+        "deepseek:",
+        "ollama:"
+      ],
+      capabilities: [:streaming, :tools, :images, :mcp, :thinking, :model_switching],
       credential_requirements: [:llm]
     )
   end

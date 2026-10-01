@@ -2,6 +2,7 @@ defmodule MingaAgent.CredentialsTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Credentials
+  alias MingaAgent.ModelSelection.Credential.OAuth
 
   @test_dir "test/tmp/credentials_test"
 
@@ -28,7 +29,6 @@ defmodule MingaAgent.CredentialsTest do
     opts = [
       config_dir: parent_dir,
       env: @nil_env,
-      oauth_probe: fn -> false end,
       ollama_probe: fn -> false end
     ]
 
@@ -160,12 +160,20 @@ defmodule MingaAgent.CredentialsTest do
     end
 
     test "malformed storage remains unconfigured and OAuth remains independently configured", %{
-      opts: opts
+      opts: opts,
+      dir: dir
     } do
+      oauth_path = Path.join(dir, "oauth.json")
+
+      File.write!(
+        oauth_path,
+        JSON.encode!(%{"openai-codex" => %{"accountId" => "account-exact"}})
+      )
+
       malformed_opts =
         opts
         |> Keyword.put(:credentials_reader, fn _path -> {:error, :malformed_json} end)
-        |> Keyword.put(:oauth_probe, fn -> true end)
+        |> Keyword.put(:oauth_path, oauth_path)
 
       snapshot = Credentials.snapshot(malformed_opts)
       statuses = Credentials.status(snapshot, {:unavailable, :connection_refused})
@@ -236,6 +244,58 @@ defmodule MingaAgent.CredentialsTest do
 
     test "returns nil for unknown provider" do
       assert nil == Credentials.env_var_for("unknown")
+    end
+  end
+
+  describe "request_options/2 OAuth pinning" do
+    test "uses the request-local token only for the pinned account and path", %{dir: dir} do
+      path = Path.join(dir, "oauth.json")
+
+      credential = %OAuth{
+        provider: :openai_codex,
+        provider_key: "openai-codex",
+        account_id: "account-a",
+        oauth_path: path
+      }
+
+      resolver = fn :openai_codex, oauth_file: requested_path ->
+        {:ok,
+         %{
+           provider_key: "openai-codex",
+           account_id: "account-a",
+           oauth_file: requested_path,
+           token: "request-token"
+         }}
+      end
+
+      assert {:ok, options} =
+               Credentials.request_options(credential, oauth_resolver: resolver)
+
+      assert options[:auth_mode] == :oauth
+      assert options[:access_token] == "request-token"
+      assert options[:chatgpt_account_id] == "account-a"
+    end
+
+    test "rejects a token resolved for a different account", %{dir: dir} do
+      credential = %OAuth{
+        provider: :openai_codex,
+        provider_key: "openai-codex",
+        account_id: "account-a",
+        oauth_path: Path.join(dir, "oauth.json")
+      }
+
+      resolver = fn :openai_codex, oauth_file: requested_path ->
+        {:ok,
+         %{
+           provider_key: "openai-codex",
+           account_id: "account-b",
+           oauth_file: requested_path,
+           token: "other-token"
+         }}
+      end
+
+      assert {:error, {:credential_unavailable, "openai-codex:account-a"}} =
+               Credentials.request_options(credential, oauth_resolver: resolver)
     end
   end
 end

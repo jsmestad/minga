@@ -2,6 +2,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.ModelSelection.Credential.ApiKey
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias ReqLLM.StreamResponse.MetadataHandle
 
@@ -18,48 +20,29 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     }
   end
 
-  test "validates malformed models before ReqLLM handles them" do
-    assert :ok = ReqLLMAdapter.validate_model("anthropic:claude-sonnet-4")
-    assert :ok = ReqLLMAdapter.validate_model("local/llama3@ollama")
+  test "builds request-local credential, cache, token, and reasoning options" do
+    config = %AgentConfig{prompt_cache: true}
+    selection = selection()
 
-    for invalid <- [
-          "claude-sonnet-4",
-          "anthropic:",
-          ":claude",
-          "claude@",
-          "@ollama",
-          "anthropic:claude@openai"
-        ] do
-      assert {:error, message, :invalid_format} = ReqLLMAdapter.validate_model(invalid)
-      assert message =~ "Expected"
-      assert message =~ "Check :agent_model"
-    end
-  end
+    assert {:ok, opts} =
+             ReqLLMAdapter.stream_opts(
+               selection,
+               [],
+               config,
+               env: %{"ANTHROPIC_API_KEY" => "request-secret"}
+             )
 
-  test "builds request options for endpoints, prompt cache, codex oauth, and thinking" do
-    config = %AgentConfig{
-      api_base_url_override: nil,
-      api_base_url: "https://global.example/v1",
-      api_endpoints: %{"anthropic" => "https://anthropic.example/v1"},
-      prompt_cache: true
-    }
-
-    opts = ReqLLMAdapter.stream_opts("anthropic:claude", [], "high", 4096, config)
     assert opts[:tools] == []
-    assert opts[:max_tokens] == 4096
-    assert opts[:base_url] == "https://anthropic.example/v1"
+    assert opts[:max_tokens] == 4_096
+    refute Keyword.has_key?(opts, :base_url)
+    assert opts[:auth_mode] == :api_key
+    assert opts[:api_key] == "request-secret"
     assert opts[:provider_options][:anthropic_prompt_cache] == true
     assert opts[:provider_options][:anthropic_cache_messages] == true
     assert opts[:reasoning_effort] == :high
 
-    openai_opts = ReqLLMAdapter.stream_opts("gpt-4o@openai", [], "high", 1000, config)
-    assert openai_opts[:base_url] == "https://global.example/v1"
-    refute Keyword.has_key?(openai_opts[:provider_options] || [], :anthropic_prompt_cache)
-
-    codex_opts = ReqLLMAdapter.stream_opts("gpt-5@openai_codex", [], "off", 1000, config)
-    assert codex_opts[:provider_options][:auth_mode] == :oauth
-    assert codex_opts[:provider_options][:oauth_file] == MingaAgent.Credentials.oauth_path()
-    assert codex_opts[:provider_options][:codex_originator] == "minga"
+    assert {:error, {:credential_unavailable, "anthropic:env"}} =
+             ReqLLMAdapter.stream_opts(selection, [], config, env: %{"OPENAI_API_KEY" => "other"})
   end
 
   test "processes streaming text, thinking, tool calls, and usage into neutral turn data" do
@@ -230,25 +213,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert_receive {:DOWN, ^ref, :process, ^accumulator, _reason}
   end
 
-  test "call_sync wraps the streaming client and returns text" do
-    parent = self()
-
-    client = fn _model, _messages, opts ->
-      send(parent, {:sync_opts, opts})
-      {:ok, build_stream_response([ReqLLM.StreamChunk.text("summary")])}
-    end
-
-    config = %AgentConfig{api_base_url: "https://global.example/v1"}
-
-    assert {:ok, "summary"} =
-             ReqLLMAdapter.call_sync(client, "anthropic:claude", [], [max_tokens: 1234], config)
-
-    assert_received {:sync_opts, opts}
-    assert opts[:max_tokens] == 1234
-    assert opts[:base_url] == "https://global.example/v1"
-  end
-
-  test "summary_client preserves request options and returns text" do
+  test "summary client uses the resolved request model and exact route" do
     parent = self()
 
     client = fn model, messages, opts ->
@@ -256,13 +221,19 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
       {:ok, build_stream_response([ReqLLM.StreamChunk.text("compacted")])}
     end
 
-    config = %AgentConfig{api_endpoints: %{"anthropic" => "https://anthropic.example/v1"}}
-    summary_client = ReqLLMAdapter.summary_client(client, config)
+    selection = ModelSelectionFixture.selection()
 
-    assert {:ok, "compacted"} = summary_client.("anthropic:claude", [:message], max_tokens: 500)
-    assert_received {:summary_request, "anthropic:claude", [:message], opts}
+    summary_client = ReqLLMAdapter.summary_client(client, selection, %AgentConfig{})
+
+    assert {:ok, "compacted"} =
+             summary_client.(selection.request_model, [:message], max_tokens: 500)
+
+    assert_received {:summary_request, %LLMDB.Model{} = model, [:message], opts}
+    assert model == selection.request_model
     assert opts[:max_tokens] == 500
-    assert opts[:base_url] == "https://anthropic.example/v1"
+    refute Keyword.has_key?(opts, :base_url)
+    assert opts[:auth_mode] == :none
+    refute Keyword.has_key?(opts, :api_key)
   end
 
   test "assistant_tool_call keeps ReqLLM message compatibility" do
@@ -273,5 +244,23 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
              name: "grep",
              arguments: %{"pattern" => "needle"}
            }
+  end
+
+  defp selection do
+    ModelSelectionFixture.selection(
+      request_provider: :anthropic,
+      model_provider: "anthropic",
+      model_id: "claude",
+      display_name: "Claude",
+      origin: {:catalog, "anthropic", "claude"},
+      credential: %ApiKey{provider: "anthropic", source: :env},
+      reasoning: %{effort: "high", options: ["off", "high"]},
+      limits: %{
+        context: 100_000,
+        input: 90_000,
+        output: 4_096,
+        request_output: 4_096
+      }
+    )
   end
 end

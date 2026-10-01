@@ -2,6 +2,7 @@ defmodule MingaAgent.SessionStoreTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Branch
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.SessionStore
@@ -64,6 +65,55 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:ok, loaded} = SessionStore.load(data.id)
       assert loaded.id == data.id
       assert loaded.model_name == "claude-sonnet-4"
+    end
+
+    test "persists a versioned secret-free executable selection", %{tmp_dir: dir} do
+      selection = model_selection()
+      data = Map.put(sample_data("selected-route"), :model_selection, selection)
+
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      raw = File.read!(path)
+      record = JSON.decode!(raw)
+
+      assert record["version"] == 4
+
+      assert record["model_selection"]["credential"] == %{
+               "kind" => "none",
+               "provider" => "test"
+             }
+
+      refute Map.has_key?(record["model_selection"], "api_key")
+      refute Map.has_key?(record["model_selection"], "access_token")
+
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+      assert %ModelSelection.Stored{} = loaded.model_selection
+      assert ModelSelection.id(loaded.model_selection) == ModelSelection.id(selection)
+    end
+
+    test "loads version two model strings as deterministic correction intent", %{tmp_dir: dir} do
+      data = sample_data("version-two-selection")
+      assert :ok = SessionStore.save(data, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+      record =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.put("version", 2)
+        |> Map.delete("model_selection")
+        |> Map.delete("selection_intent")
+
+      File.write!(path, JSON.encode!(record))
+
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+      assert loaded.model_selection == nil
+
+      assert loaded.selection_intent == %{
+               "model" => data.model_name,
+               "provider" => data.provider_name
+             }
     end
 
     test "persists the exact active request for restart recovery" do
@@ -765,4 +815,6 @@ defmodule MingaAgent.SessionStoreTest do
   defp private_mode?(mode, mask) do
     Bitwise.band(mode, mask) == 0
   end
+
+  defp model_selection, do: MingaAgent.Test.ModelSelectionFixture.selection()
 end

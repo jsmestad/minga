@@ -12,6 +12,7 @@ defmodule MingaAgent.SessionStore do
   picker calls `list/0` to scan the directory for past sessions.
   """
 
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Transcript
@@ -41,6 +42,8 @@ defmodule MingaAgent.SessionStore do
           required(:messages) => [MingaAgent.Message.t()],
           required(:usage) => MingaAgent.TurnUsage.t(),
           required(:continuation) => Continuation.t(),
+          optional(:model_selection) => ModelSelection.t() | ModelSelection.Stored.t() | nil,
+          optional(:selection_intent) => map(),
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
           optional(:provider_name) => String.t(),
@@ -57,6 +60,8 @@ defmodule MingaAgent.SessionStore do
            required(:title) => String.t(),
            required(:model_name) => String.t(),
            required(:provider_name) => String.t(),
+           optional(:model_selection) => ModelSelection.Stored.t() | nil,
+           optional(:selection_intent) => map(),
            required(:messages) => [MingaAgent.Message.t()],
            required(:message_ids) => [pos_integer()],
            required(:pinned_ids) => MapSet.t(pos_integer()),
@@ -187,8 +192,12 @@ defmodule MingaAgent.SessionStore do
   end
 
   @spec load_versioned_record(map(), String.t()) :: {:ok, session_data()} | {:error, term()}
-  defp load_versioned_record(%{"version" => 2} = data, session_id) do
-    with :ok <- validate_versioned_record(data, session_id), do: deserialize(data)
+  defp load_versioned_record(%{"version" => version} = data, session_id)
+       when version in [2, 3, 4] do
+    with :ok <- validate_versioned_record(data, session_id),
+         {:ok, session} <- deserialize(data) do
+      restore_selection_data(version, data, session)
+    end
   end
 
   defp load_versioned_record(%{"version" => version}, _session_id)
@@ -236,6 +245,7 @@ defmodule MingaAgent.SessionStore do
          true <- non_empty_string?(data["title"]),
          true <- non_empty_string?(data["model_name"]),
          true <- non_empty_string?(data["provider_name"]),
+         true <- valid_model_selection_field?(data),
          true <- is_list(data["messages"]) and Enum.all?(data["messages"], &valid_v2_message?/1),
          true <- valid_v2_message_ids?(data["message_ids"], data["messages"]),
          true <- valid_v2_branches?(data["branches"]),
@@ -251,6 +261,19 @@ defmodule MingaAgent.SessionStore do
 
   @spec non_empty_string?(term()) :: boolean()
   defp non_empty_string?(value), do: is_binary(value) and value != ""
+
+  @spec valid_model_selection_field?(map()) :: boolean()
+  defp valid_model_selection_field?(%{"version" => 2}), do: true
+
+  defp valid_model_selection_field?(%{"version" => 3} = data) do
+    is_map(data["model_selection"]) or is_map(data["selection_intent"])
+  end
+
+  defp valid_model_selection_field?(%{"version" => 4} = data) do
+    is_map(data["model_selection"]) or is_map(data["selection_intent"])
+  end
+
+  defp valid_model_selection_field?(_data), do: false
 
   @spec valid_timestamp?(term()) :: boolean()
   defp valid_timestamp?(value) when is_binary(value) do
@@ -451,13 +474,19 @@ defmodule MingaAgent.SessionStore do
     timestamp = Map.get(data, :timestamp) || DateTime.to_iso8601(DateTime.utc_now())
 
     %{
-      "version" => 2,
+      "version" => 4,
       "id" => data.id,
       "timestamp" => timestamp,
       "last_message_at" => Map.get(data, :last_message_at, timestamp),
       "title" => Map.get(data, :title) || title_from_messages(messages),
       "model_name" => data.model_name,
       "provider_name" => Map.get(data, :provider_name, "unknown"),
+      "model_selection" => serialize_model_selection(Map.get(data, :model_selection)),
+      "selection_intent" =>
+        Map.get(data, :selection_intent, %{
+          "model" => data.model_name,
+          "provider" => Map.get(data, :provider_name, "unknown")
+        }),
       "messages" => Enum.map(messages, &serialize_message/1),
       "message_ids" => message_ids,
       "pinned_ids" => serialize_pinned_ids(Map.get(data, :pinned_ids)),
@@ -467,6 +496,12 @@ defmodule MingaAgent.SessionStore do
       "continuation" => ContinuationCodec.encode(data.continuation)
     }
   end
+
+  @spec serialize_model_selection(ModelSelection.t() | nil) :: map() | nil
+  defp serialize_model_selection(%ModelSelection{} = selection),
+    do: ModelSelection.encode(selection)
+
+  defp serialize_model_selection(nil), do: nil
 
   @spec default_message_ids([term()]) :: [pos_integer()]
   defp default_message_ids(messages) when messages == [], do: []
@@ -532,6 +567,40 @@ defmodule MingaAgent.SessionStore do
         |> Map.put(:continuation, continuation)
 
       {:ok, session}
+    end
+  end
+
+  @spec restore_selection_data(2 | 3 | 4, map(), session_data()) ::
+          {:ok, session_data()} | {:error, term()}
+  defp restore_selection_data(2, data, session) do
+    {:ok,
+     session
+     |> Map.put(:model_selection, nil)
+     |> Map.put(:selection_intent, %{
+       "model" => data["model_name"],
+       "provider" => data["provider_name"]
+     })}
+  end
+
+  defp restore_selection_data(version, data, session) when version in [3, 4] do
+    case data["model_selection"] do
+      selection when is_map(selection) ->
+        case ModelSelection.decode(selection) do
+          {:ok, selection} ->
+            {:ok,
+             session
+             |> Map.put(:model_selection, selection)
+             |> Map.put(:selection_intent, data["selection_intent"])}
+
+          {:error, reason} ->
+            {:error, {:invalid_saved_model_selection, reason}}
+        end
+
+      nil ->
+        {:ok,
+         session
+         |> Map.put(:model_selection, nil)
+         |> Map.put(:selection_intent, data["selection_intent"])}
     end
   end
 
@@ -748,7 +817,7 @@ defmodule MingaAgent.SessionStore do
   defp load_meta(path) do
     with {:ok, json} <- File.read(path),
          {:ok, data} when is_map(data) <- decode_json(json),
-         true <- data["version"] in [nil, 1, 2] do
+         true <- data["version"] in [nil, 1, 2, 3, 4] do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
       timestamp = data["timestamp"] || ""
@@ -776,12 +845,13 @@ defmodule MingaAgent.SessionStore do
   @spec continuation_kind(map()) ::
           :lossless | :legacy_reconstructed | :legacy_import_required
   defp continuation_kind(%{
-         "version" => 2,
+         "version" => version,
          "continuation" => %{"provenance" => "legacy_reconstructed"}
-       }),
+       })
+       when version in [2, 3, 4],
        do: :legacy_reconstructed
 
-  defp continuation_kind(%{"version" => 2}), do: :lossless
+  defp continuation_kind(%{"version" => version}) when version in [2, 3, 4], do: :lossless
   defp continuation_kind(_data), do: :legacy_import_required
 
   @spec title_from_messages([MingaAgent.Message.t()]) :: String.t()

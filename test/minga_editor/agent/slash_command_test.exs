@@ -362,7 +362,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth publishes local pending status while its held probe leaves Editor work responsive" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{"openai" => :env}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{"openai" => :env}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
 
       state =
@@ -412,7 +412,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         )
 
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       original_state = %{mock_state(session: original_session) | effect_scheduler: scheduler}
 
       _state =
@@ -445,7 +445,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth ignores a late result after new_session reuses the active PID" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
       original_session_id = Session.session_id(session)
 
@@ -490,7 +490,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       session = start_session(session_store_dir: dir, persist?: false)
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
 
       _state =
@@ -520,7 +520,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/auth timeout kills its worker and publishes terminal unavailable status" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
 
       _state =
@@ -549,7 +549,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "repeated /auth status requests keep only the newest probe" do
       session = start_session()
       scheduler = start_effect_scheduler()
-      snapshot = CredentialSnapshot.new(%{}, false, "http://ollama.test")
+      snapshot = CredentialSnapshot.new(%{}, nil, "http://ollama.test")
       state = %{mock_state(session: session) | effect_scheduler: scheduler}
       effect_opts = [probe: {HeldAuthProbe, :availability, [self()]}]
 

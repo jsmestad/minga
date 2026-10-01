@@ -205,13 +205,43 @@ defmodule MingaAgent.FileMentionTest do
   end
 
   describe "resolve_prompt/2 with images" do
-    test "returns ContentPart list when image is mentioned", %{tmp_dir: dir, root: root} do
+    setup do
+      config = %MingaAgent.Config{
+        api_endpoints: %{
+          "local" => %{
+            "url" => "http://localhost:9000/v1",
+            "protocol" => "openai_chat",
+            "auth_mode" => "none",
+            "models" => %{"vision" => %{"capabilities" => %{"images" => true}}}
+          }
+        }
+      }
+
+      {:ok, selection} =
+        MingaAgent.ModelResolver.resolve("local:vision",
+          config: config,
+          backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+          credential_snapshot: MingaAgent.Credentials.Snapshot.new(%{}, nil, "http://localhost"),
+          models: []
+        )
+
+      %{selection: selection}
+    end
+
+    test "returns captured image bytes on an image-capable route", %{
+      tmp_dir: dir,
+      root: root,
+      selection: selection
+    } do
       # Create a minimal 1x1 red PNG (67 bytes)
       png_data = create_minimal_png()
       path = Path.join(dir, "screenshot.png")
       File.write!(path, png_data)
 
-      {:ok, parts} = FileMention.resolve_prompt("@screenshot.png what is this?", root)
+      {:ok, parts} =
+        FileMention.resolve_prompt("@screenshot.png what is this?", root,
+          model_selection: selection
+        )
 
       assert is_list(parts)
       assert Enum.count(parts) == 2
@@ -222,14 +252,21 @@ defmodule MingaAgent.FileMentionTest do
 
       assert image_part.type == :image
       assert image_part.media_type == "image/png"
-      assert is_binary(image_part.data)
+      assert image_part.data == png_data
     end
 
-    test "mixes text files and images as content parts", %{tmp_dir: dir, root: root} do
+    test "mixes text files and images as content parts", %{
+      tmp_dir: dir,
+      root: root,
+      selection: selection
+    } do
       File.write!(Path.join(dir, "code.ex"), "defmodule Foo do\nend")
       File.write!(Path.join(dir, "design.png"), create_minimal_png())
 
-      {:ok, parts} = FileMention.resolve_prompt("@code.ex @design.png compare", root)
+      {:ok, parts} =
+        FileMention.resolve_prompt("@code.ex @design.png compare", root,
+          model_selection: selection
+        )
 
       assert is_list(parts)
       text_parts = Enum.filter(parts, &(&1.type == :text))
@@ -242,18 +279,27 @@ defmodule MingaAgent.FileMentionTest do
       assert hd(text_parts).text =~ "compare"
     end
 
-    test "rejects oversized images", %{tmp_dir: dir, root: root} do
+    test "rejects oversized images", %{tmp_dir: dir, root: root, selection: selection} do
       # Create a file that exceeds the 5MB limit
       path = Path.join(dir, "huge.png")
       File.write!(path, :binary.copy(<<0>>, 6 * 1024 * 1024))
 
-      assert {:error, msg} = FileMention.resolve_prompt("@huge.png look", root)
+      assert {:error, msg} =
+               FileMention.resolve_prompt("@huge.png look", root, model_selection: selection)
+
       assert msg =~ "image too large"
     end
 
-    test "returns error for missing image file", %{root: root} do
-      assert {:error, msg} = FileMention.resolve_prompt("@missing.png look", root)
+    test "returns error for missing image file", %{root: root, selection: selection} do
+      assert {:error, msg} =
+               FileMention.resolve_prompt("@missing.png look", root, model_selection: selection)
+
       assert msg =~ "file not found"
+    end
+
+    test "rejects image input when route capability is unknown", %{root: root} do
+      assert {:error, message} = FileMention.resolve_prompt("@screenshot.png inspect", root)
+      assert message =~ "does not explicitly support image input"
     end
 
     test "text-only mentions still return a string", %{tmp_dir: dir, root: root} do

@@ -20,11 +20,13 @@ defmodule MingaAgent.CostCalculator do
   is authoritative). Otherwise, the cost is calculated from LLMDB pricing
   for the given model.
 
-  `model` should be the bare model ID (without provider prefix).
-  `provider` should be the provider atom (e.g., :anthropic).
+  `model` is the exact bare catalog model ID and `provider` is the exact
+  catalog provider string from the resolved selection.
   """
-  @spec ensure_cost(MingaAgent.TurnUsage.t(), String.t(), atom()) :: MingaAgent.TurnUsage.t()
-  def ensure_cost(%MingaAgent.TurnUsage{} = usage, model_id, provider) do
+  @spec ensure_cost(MingaAgent.TurnUsage.t(), String.t(), String.t()) ::
+          MingaAgent.TurnUsage.t()
+  def ensure_cost(%MingaAgent.TurnUsage{} = usage, model_id, provider)
+      when is_binary(provider) do
     if usage.cost > 0.0 do
       usage
     else
@@ -38,8 +40,9 @@ defmodule MingaAgent.CostCalculator do
 
   Returns 0.0 if the model is not found in LLMDB.
   """
-  @spec calculate_cost(MingaAgent.TurnUsage.t(), String.t(), atom()) :: float()
-  def calculate_cost(%MingaAgent.TurnUsage{} = usage, model_id, provider) do
+  @spec calculate_cost(MingaAgent.TurnUsage.t(), String.t(), String.t()) :: float()
+  def calculate_cost(%MingaAgent.TurnUsage{} = usage, model_id, provider)
+      when is_binary(provider) do
     case find_model_pricing(model_id, provider) do
       nil ->
         0.0
@@ -56,9 +59,11 @@ defmodule MingaAgent.CostCalculator do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec find_model_pricing(String.t(), atom()) :: map() | nil
+  @spec find_model_pricing(String.t(), String.t()) :: map() | nil
   defp find_model_pricing(model_id, provider) do
-    case Enum.find(LLMDB.models(), &(&1.id == model_id and &1.provider == provider)) do
+    case Enum.find(LLMDB.models(), fn model ->
+           model.id == model_id and Atom.to_string(model.provider) == provider
+         end) do
       nil -> nil
       model -> model.cost
     end
