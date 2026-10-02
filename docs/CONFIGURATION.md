@@ -206,7 +206,7 @@ Each segment has a priority. When the window is too narrow, Minga drops the lowe
 
 Set `:agent_model` to a provider/model intent such as `"anthropic:claude-sonnet-4-20250514"`. Minga resolves it to one exact executable route before use. Open `/model` to inspect the protocol, endpoint, credential profile, limits, reasoning controls, and tool/image/streaming capability evidence for every available route.
 
-Minga supports named hosted providers from its pinned catalog. Local servers, anonymous routes, custom endpoints, and provider endpoint overrides are not configurable. Minga rejects unsupported models and unavailable credentials instead of inferring another provider or silently falling back. See [Agent model selection](AGENT-MODEL-SELECTION.md) for the provider list, selection identity, capability policy, and picker benchmark.
+Minga supports named hosted providers from its pinned catalog. Local servers, anonymous routes, custom endpoints, and provider endpoint overrides are not configurable. Minga rejects unsupported models and unavailable credentials instead of inferring another provider or silently falling back. See [Agent model selection](AGENT-MODEL-SELECTION.md) for the provider list, selection identity, and capability policy.
 
 ## Agent reactive diagnostics
 

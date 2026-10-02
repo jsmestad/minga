@@ -9,6 +9,15 @@ defmodule Minga.Extension.AITest do
 
   @msgs [%{role: "user", content: "hi"}]
 
+  setup_all do
+    snapshot = Credentials.Snapshot.new(%{"openai" => :env}, nil)
+
+    assert {:ok, _selection} =
+             ModelResolver.resolve("openai:gpt-4", credential_snapshot: snapshot)
+
+    :ok
+  end
+
   setup do
     [
       hosted_opts: [

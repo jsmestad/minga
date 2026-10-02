@@ -887,26 +887,6 @@ Tool recovery is a separate effect protocol, not a second conversation log. Pers
 Managed restart is a generation boundary for admitted native effects. `SessionManager` monitors each attached provider and its admitted tool workers, and does not start a replacement Session until both the provider and all registered workers exit. Native providers also drain and await their workers before an orderly exit, so a recovered Session cannot classify an effect as interrupted while the old effect is still running.
 See [Session Recovery](SESSION-RECOVERY.md) for the save, restart, interruption, and explicit legacy-import behavior.
 
-### Continuation performance evidence
-
-`MIX_ENV=prod mix run bench/agent_continuation_bench.exs` compares the durable path with display-history reconstruction over the same 10, 1,000, and 10,000-message fixture. The fixture includes a 69,632-byte tool result. The display baseline is intentionally lossy and is a cost reference, not an equivalent recovery implementation. Elapsed values are microseconds shown as p50/p95/p99 from an optimized build on Darwin 25.6, arm64. Fresh-file save means a new snapshot path, not a cleared OS page cache.
-
-| Messages | Append baseline / continuation p50/p95/p99 | Boundary baseline / continuation p50/p95/p99 | Restore baseline / continuation p50/p95/p99 | Snapshot bytes baseline / continuation | Retained bytes baseline / continuation |
-|---:|---:|---:|---:|---:|---:|
-| 10 | 0/1/6 / 0/7/13 | 219/394/463 / 465/577/604 | 190/323/333 / 19/29/41 | 74,220 / 154,573 | 70,183 / 73,209 |
-| 1,000 | 41/49/361 / 27/59/257 | 511/574/749 / 7,061/10,232/11,247 | 441/515/553 / 1,659/1,959/2,058 | 120,650 / 784,921 | 103,743 / 400,805 |
-| 10,000 | 425/708/2,217 / 270/300/4,293 | 3,589/4,514/5,021 / 105,384/138,399/155,442 | 5,441/6,793/8,259 / 18,877/20,087/20,659 | 552,650 / 6,544,925 | 418,743 / 3,388,805 |
-
-| Messages | Fresh-file save p50/p95/p99 | Reused-file save p50/p95/p99 | Reused-file load p50/p95/p99 | Two-session save p50/p95/p99 |
-|---:|---:|---:|---:|---:|
-| 10 | 1,303/1,771/2,453 | 1,314/1,594/1,600 | 544/640/657 | 2,021/2,820/3,477 |
-| 1,000 | 9,422/11,438/11,728 | 9,043/12,040/12,219 | 9,290/11,846/11,868 | 15,337/16,831/17,209 |
-| 10,000 | 115,580/134,960/139,291 | 109,981/130,892/137,101 | 112,685/172,465/177,832 | 180,986/187,051/188,282 |
-
-At 10,000 messages, the boundary path measured 105,384/138,399/155,442 µs p50/p95/p99. Its measured stages were message validation 231/247/255 µs, prefix validation 102/106/108 µs, completion 361/445/483 µs, ReqLLM codec encoding 4,001/4,504/4,616 µs, and JSON encoding 105,812/130,987/131,881 µs. From 1,000 to 10,000 messages, JSON encoding grew 14.5× while the exact continuation payload grew 9.0×. The continuation retained 3,388,805 bytes versus 418,743 bytes for the display projection. These measurements include saving and loading the same large referenced tool result, plus two concurrent session saves.
-
-
-
 ### Extension lifecycle, artifact, and callback ownership
 
 Every declared extension has one stable `Minga.Extension.Instance` mailbox that serializes eager start, lazy or deferred activation, stop, failure rollback, runtime exit, restart, and unload. The runtime child PID is an observed implementation detail. `Minga.Extension.Registry` is only the compatible declaration and status projection: `Instance` publishes the current PID, status, module, manifest, and error from its tagged phase, while callers never consult registry lifecycle fields to decide the next transition. `Minga.Extension.Supervisor` remains the compatible public facade for bulk prerequisites and the existing start, stop, list, and deferred APIs, but routes individual lifecycle requests to the Instance without caller-side restart polling or retries.

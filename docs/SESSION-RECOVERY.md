@@ -61,12 +61,6 @@ The loopback image smoke sends a valid PNG larger than one fetch page through th
 mix run scripts/smoke_native_retained_image.exs
 ```
 
-The optimized benchmark emits JSON with p50/p95 capture-to-visible timings for sub-cap, ten-times-visible-cap, and quota-crossing fixtures; warm and reopened-actor late-page retrieval; scoped `:file.pread/3` requested-byte counts; sampled producer, store, and quota process-memory deltas; logical retained disk bytes and file count; fixture identities; and same-fixture legacy truncation/search baselines. Reopened actors do not flush the operating system's page cache. Memory is sampled every millisecond, so shorter allocation spikes may be missed.
-
-```sh
-MIX_ENV=prod mix run bench/agent_retained_output_bench.exs /path/to/repository
-```
-
 ## Older display-only records
 
 Older records do not contain enough information to recreate every provider request. They remain unchanged until the user explicitly imports them. Import preserves the source record and marks the new continuation as `legacy_reconstructed`.
@@ -79,4 +73,4 @@ A completed session snapshot is durable across a full application restart. The m
 
 An application restart does not make an admitted effect safe to replay. If the snapshot contains an unfinished admitted effect, recovery records its unknown outcome and requires reconciliation. Use the visible tool result and the external system's state to decide what to do next.
 
-For architecture ownership and the measured continuation costs, see [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery). For the provider request contract, see [For AI Coders](FOR-AI-CODERS.md#provider-turns-keep-their-durable-continuation).
+For architecture ownership, see [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery). For the provider request contract, see [For AI Coders](FOR-AI-CODERS.md#provider-turns-keep-their-durable-continuation).

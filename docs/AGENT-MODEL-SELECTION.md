@@ -62,13 +62,3 @@ Unsupported image tool results are recoverable, model-visible tool errors, not e
 Selection codec version 3 adds the transport capability and reads version 2 conservatively. Stable route identities keep the `ms2_` identity schema; adding a delivery capability does not rename the route.
 
 Catalog presence and an installed adapter do not prove that every model has passed a maintained vendor integration test.
-
-## Picker benchmark
-
-Measure cold and warm picker construction in an optimized environment:
-
-```sh
-MIX_ENV=prod mix run bench/agent_model_picker.exs
-```
-
-The benchmark reports the pinned LLMDB catalog size and SHA-256 fingerprint. Cold is the first complete picker candidate build in a fresh optimized BEAM. Warm is 100 sequential complete builds in the same process after 10 unmeasured warmups. Set `MINGA_BENCH_SAMPLES` to change the sample count. Both measurements include the session call, exact route resolution, sorting, and picker formatting; they exclude rendering, network I/O, and credential value reads.
