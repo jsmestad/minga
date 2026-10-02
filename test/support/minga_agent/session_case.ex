@@ -3,6 +3,13 @@ defmodule Minga.Test.SessionCase do
 
   @provider_startup_timeout 30_000
 
+  setup_all do
+    # Native stream fixtures and cost calculation use the real catalog before tool events arrive.
+    # Load it before tests start their event deadlines.
+    assert [_ | _] = LLMDB.models()
+    :ok
+  end
+
   using do
     quote do
       import Minga.Test.SessionCase
