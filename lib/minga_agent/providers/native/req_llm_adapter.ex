@@ -307,11 +307,16 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   defp content_event_to_part({:content_part, part}), do: part
 
   @doc "Builds the summary callback expected by the compaction subsystem."
-  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t()) ::
+  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t(), keyword()) ::
           MingaAgent.Compaction.summary_fn()
-  def summary_client(llm_client, %ModelSelection{} = selection, %AgentConfig{} = config) do
+  def summary_client(
+        llm_client,
+        %ModelSelection{} = selection,
+        %AgentConfig{} = config,
+        credential_opts \\ []
+      ) do
     fn _model, messages, opts ->
-      with {:ok, auth_opts} <- Credentials.request_options(selection.credential, []),
+      with {:ok, auth_opts} <- Credentials.request_options(selection.credential, credential_opts),
            request_opts <-
              opts
              |> Keyword.take([:max_tokens])

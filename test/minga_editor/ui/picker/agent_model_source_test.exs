@@ -3,7 +3,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
-  alias MingaAgent.ModelSelection.Credential.ApiKey
   alias MingaAgent.Test.ModelPickerSession
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.RuntimeState
@@ -37,15 +36,14 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   test "shows exact route, unverified status, favorite, and thinking controls" do
     selection =
       ModelSelectionFixture.selection(
-        model_provider: "custom",
-        model_id: "private-model",
-        display_name: "Private Model",
-        base_url: "https://gateway.example/v1",
+        model_provider: "openai",
+        model_id: "gpt-4",
+        display_name: "GPT-4",
+        base_url: "https://api.openai.com/v1",
         transport: "http",
-        credential: %ApiKey{provider: "custom", source: :file},
         reasoning: %{effort: "low", options: ["off", "low", "high"]},
-        limits: %{context: nil, input: nil, output: nil, request_output: 2_048},
-        capabilities: %{tools: :unknown, images: :unknown, streaming: :unknown}
+        limits: %{context: 128_000, input: nil, output: 8_192, request_output: 2_048},
+        capabilities: %{tools: true, images: true, streaming: true}
       )
 
     candidate = %ModelCandidate{selection: selection, favorite: true, current: true}
@@ -55,11 +53,12 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert item.id == ModelSelection.id(selection)
     assert item.active
     assert item.annotation == "★ favorite"
-    assert item.description =~ "custom via openai_chat"
-    assert item.description =~ "https://gateway.example/v1/chat/completions"
-    assert item.description =~ "unverified custom route"
+    assert item.description =~ "openai via openai_chat"
+    assert item.description =~ "https://api.openai.com/v1/chat/completions"
+    assert item.description =~ "unverified catalog route"
+    assert item.description =~ "openai:env"
     assert item.description =~ "thinking low (off/low/high)"
-    assert item.description =~ "tools unknown, images unknown, streaming unknown"
+    assert item.description =~ "tools yes, images yes, streaming yes"
   end
 
   test "keeps duplicate display names distinct by exact route identity" do
@@ -67,16 +66,14 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       ModelSelectionFixture.selection(
         model_id: "shared-name",
         display_name: "Shared Model",
-        route_id: "gateway-a/shared-name",
-        base_url: "https://gateway-a.example/v1"
+        route_id: "openai/shared-name"
       )
 
     second =
       ModelSelectionFixture.selection(
-        model_id: "shared-name",
+        model_id: "shared-name-v2",
         display_name: "Shared Model",
-        route_id: "gateway-b/shared-name",
-        base_url: "https://gateway-b.example/v1"
+        route_id: "openai/shared-name-v2"
       )
 
     candidates = [
@@ -89,8 +86,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     assert Enum.map(items, & &1.label) == ["Shared Model", "Shared Model"]
     assert items |> Enum.map(& &1.id) |> Enum.uniq() |> length() == 2
-    assert Enum.any?(items, &String.contains?(&1.description, "gateway-a.example"))
-    assert Enum.any?(items, &String.contains?(&1.description, "gateway-b.example"))
+    assert Enum.all?(items, &String.contains?(&1.description, "api.openai.example"))
   end
 
   test "rejected picker selection preserves the prior visible model" do

@@ -211,12 +211,12 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           ui = UIState.set_model_name(state.workspace.agent_ui, "Active Model")
           MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
         end)
-        |> Events.dispatch({:model_selection_rejected, selection, "Ollama is unavailable"})
+        |> Events.dispatch({:model_selection_rejected, selection, "The model is unavailable"})
 
       assert state.workspace.agent_ui.panel.model_name == "Active Model"
 
       assert state.workspace.agent_ui.view.toast == %{
-               message: "Ollama is unavailable",
+               message: "The model is unavailable",
                icon: "✗",
                level: :error
              }

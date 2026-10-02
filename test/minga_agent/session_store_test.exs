@@ -90,8 +90,9 @@ defmodule MingaAgent.SessionStoreTest do
       assert record["version"] == 5
 
       assert record["model_selection"]["credential"] == %{
-               "kind" => "none",
-               "provider" => "test"
+               "kind" => "api_key",
+               "provider" => "test",
+               "source" => "env"
              }
 
       refute Map.has_key?(record["model_selection"], "api_key")
@@ -131,13 +132,13 @@ defmodule MingaAgent.SessionStoreTest do
 
     test "version three and four executable snapshots retain their exact selection when upgraded",
          %{tmp_dir: dir} do
-      resolve_opts = [
-        config: MingaAgent.Test.ModelSelectionFixture.config(),
-        backend_spec: MingaAgent.ProviderPacks.Native.spec(),
-        credential_snapshot: MingaAgent.Credentials.Snapshot.new(%{}, nil, "http://127.0.0.1:1")
-      ]
+      resolve_opts = MingaAgent.Test.ModelSelectionFixture.resolver_opts()
 
-      {:ok, selection} = MingaAgent.ModelResolver.resolve("test:test-model", resolve_opts)
+      {:ok, selection} =
+        MingaAgent.ModelResolver.resolve(
+          MingaAgent.Test.ModelSelectionFixture.model_intent(),
+          resolve_opts
+        )
 
       for version <- [3, 4] do
         data = Map.put(sample_data("model-version-#{version}"), :model_selection, selection)

@@ -9,27 +9,20 @@ defmodule MingaAgent.Credentials.Snapshot do
 
   alias MingaAgent.ModelSelection.Credential.OAuth
 
-  @enforce_keys [:provider_sources, :oauth_ref, :ollama_host]
+  @enforce_keys [:provider_sources, :oauth_ref]
   defstruct @enforce_keys
 
   @type source :: :env | :file
   @type t :: %__MODULE__{
           provider_sources: %{optional(String.t()) => source()},
-          oauth_ref: OAuth.t() | nil,
-          ollama_host: String.t()
+          oauth_ref: OAuth.t() | nil
         }
 
   @doc "Builds a secret-free credential snapshot from an exact OAuth identity."
-  @spec new(%{optional(String.t()) => source()}, OAuth.t() | nil, String.t()) :: t()
-  def new(provider_sources, oauth_ref, ollama_host)
-      when is_map(provider_sources) and
-             (is_struct(oauth_ref, OAuth) or is_nil(oauth_ref)) and
-             is_binary(ollama_host) do
-    %__MODULE__{
-      provider_sources: provider_sources,
-      oauth_ref: oauth_ref,
-      ollama_host: ollama_host
-    }
+  @spec new(%{optional(String.t()) => source()}, OAuth.t() | nil) :: t()
+  def new(provider_sources, oauth_ref)
+      when is_map(provider_sources) and (is_struct(oauth_ref, OAuth) or is_nil(oauth_ref)) do
+    %__MODULE__{provider_sources: provider_sources, oauth_ref: oauth_ref}
   end
 
   @doc "Returns the configured source for one API-key provider."

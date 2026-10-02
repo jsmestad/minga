@@ -92,8 +92,6 @@ defmodule Minga.Config.Options do
           | :agent_status_interval_ms
           | :agent_max_turns
           | :agent_max_cost
-          | :agent_api_base_url
-          | :agent_api_endpoints
           | :agent_mcp_servers
           | :agent_compaction_threshold
           | :agent_compaction_keep_recent
@@ -337,9 +335,6 @@ defmodule Minga.Config.Options do
      "Milliseconds between agent status command runs. Values below 1000 are treated as 1000."},
     {:agent_max_turns, :pos_integer, 100, "Maximum number of turns allowed in an agent session."},
     {:agent_max_cost, :float_or_nil, nil, "Optional cost ceiling for an agent session."},
-    {:agent_api_base_url, :string, "", "Base URL override for agent API requests."},
-    {:agent_api_endpoints, :map_or_nil, nil,
-     "Provider endpoint overrides for agent API requests."},
     {:agent_mcp_servers, :map_list, [], "MCP server definitions made available to the agent."},
     {:agent_compaction_threshold, :float_or_nil, 0.8,
      "Conversation-size threshold that triggers agent context compaction."},

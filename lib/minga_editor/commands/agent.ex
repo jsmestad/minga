@@ -739,8 +739,8 @@ defmodule MingaEditor.Commands.Agent do
       {:error, :provider_not_ready} ->
         NoticeWorkflow.publish(state, provider_starting_status())
 
-      {:error, :credential_discovery_pending} ->
-        NoticeWorkflow.publish(state, credential_discovery_pending_status())
+      {:error, :credentials_pending} ->
+        NoticeWorkflow.publish(state, credentials_pending_status())
 
       {:error, :credentials_not_configured} ->
         NoticeWorkflow.publish(state, credentials_missing_status())
@@ -855,7 +855,7 @@ defmodule MingaEditor.Commands.Agent do
     do: {:blocked, credentials_missing_status()}
 
   defp prompt_readiness_submit_status(:credentials_checking),
-    do: {:blocked, credential_discovery_pending_status()}
+    do: {:blocked, credentials_pending_status()}
 
   defp prompt_readiness_submit_status(:starting), do: {:blocked, provider_starting_status()}
 
@@ -873,10 +873,9 @@ defmodule MingaEditor.Commands.Agent do
     "No provider credentials are configured for this model. Your prompt was preserved. Run /auth or /login to set one up."
   end
 
-  @spec credential_discovery_pending_status() :: String.t()
-  defp credential_discovery_pending_status do
-    "Checking local Ollama availability. Your prompt was preserved."
-  end
+  @spec credentials_pending_status() :: String.t()
+  defp credentials_pending_status,
+    do: "Checking hosted provider credentials. Your prompt was preserved."
 
   @spec provider_starting_status() :: String.t()
   defp provider_starting_status do
@@ -950,8 +949,8 @@ defmodule MingaEditor.Commands.Agent do
       {:error, :provider_not_ready} ->
         NoticeWorkflow.publish(state, provider_starting_status())
 
-      {:error, :credential_discovery_pending} ->
-        NoticeWorkflow.publish(state, credential_discovery_pending_status())
+      {:error, :credentials_pending} ->
+        NoticeWorkflow.publish(state, credentials_pending_status())
 
       {:error, :credentials_not_configured} ->
         NoticeWorkflow.publish(state, credentials_missing_status())
@@ -1350,12 +1349,6 @@ defmodule MingaEditor.Commands.Agent do
           Session.add_system_message(Runtime.active_session(state.shell_runtime), message)
           NoticeWorkflow.publish(state, message)
 
-        {:pending, :credential_discovery} ->
-          NoticeWorkflow.publish(
-            state,
-            "Checking exact local model route availability. The current model remains active."
-          )
-
         {:error, reason} when is_binary(reason) ->
           NoticeWorkflow.publish(state, reason)
 
@@ -1396,13 +1389,6 @@ defmodule MingaEditor.Commands.Agent do
             state = apply_model_selection_to_ui(state, model_or_selection)
             Session.add_system_message(session, "Model: #{display}")
             NoticeWorkflow.publish(state, "Model: #{display}")
-
-          {:pending, :credential_discovery} ->
-            message =
-              "Checking exact route availability for #{display}. The current model remains active."
-
-            Session.add_system_message(session, message)
-            NoticeWorkflow.publish(state, message)
 
           {:error, reason} when is_binary(reason) ->
             NoticeWorkflow.publish(state, reason)

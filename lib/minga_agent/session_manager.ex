@@ -1671,7 +1671,7 @@ defmodule MingaAgent.SessionManager do
          _session_ref,
          {:error, reason}
        )
-       when reason in [:provider_not_ready, :credential_discovery_pending, :session_id_changed] do
+       when reason in [:provider_not_ready, :credentials_pending, :session_id_changed] do
     retry_startup_delivery(state, session_id, entry, delivery)
   end
 

@@ -10,7 +10,7 @@ defmodule MingaAgent.ModelSelection do
   @version 3
   @identity_version 2
 
-  alias __MODULE__.Credential.{ApiKey, None, OAuth}
+  alias __MODULE__.Credential.{ApiKey, OAuth}
   alias __MODULE__.{Evidence, Policy, Route, Stored}
 
   @enforce_keys [
@@ -27,7 +27,7 @@ defmodule MingaAgent.ModelSelection do
   @type capability :: Policy.capability()
   @type image_tool_result_delivery ::
           :supported | {:unsupported, :model_image_input | :tool_result_transport}
-  @type credential_ref :: ApiKey.t() | OAuth.t() | None.t()
+  @type credential_ref :: ApiKey.t() | OAuth.t()
   @type t :: %__MODULE__{
           backend_id: String.t(),
           backend_module: module(),
@@ -111,11 +111,7 @@ defmodule MingaAgent.ModelSelection do
       "route" => Route.encode(selection.route),
       "credential" => encode_credential(selection.credential),
       "policy" => encode_policy(selection.policy),
-      "evidence" => %{
-        "status" => "unverified",
-        "catalog" => selection.evidence.catalog,
-        "custom" => selection.evidence.custom
-      }
+      "evidence" => %{"status" => "unverified"}
     }
   end
 
@@ -144,13 +140,6 @@ defmodule MingaAgent.ModelSelection do
 
   def credential_id(%OAuth{provider_key: provider_key, account_id: account_id}),
     do: "#{provider_key}:#{account_id}"
-
-  def credential_id(%None{provider: provider}), do: "#{provider}:none"
-
-  @doc "Returns true for a credential-free local Ollama selection."
-  @spec local?(t()) :: boolean()
-  def local?(%__MODULE__{credential: %None{provider: "ollama"}}), do: true
-  def local?(%__MODULE__{}), do: false
 
   @doc "Returns true only when tool use is explicitly supported."
   @spec tools?(t()) :: boolean()
@@ -199,7 +188,7 @@ defmodule MingaAgent.ModelSelection do
   @spec validate_credential(credential_ref(), Route.t()) :: :ok | {:error, :invalid_credential}
   defp validate_credential(
          %ApiKey{provider: owner, source: source},
-         %Route{origin: {_kind, owner, _model}, request_provider: request_provider}
+         %Route{origin: {:catalog, owner, _model}, request_provider: request_provider}
        )
        when is_binary(owner) and owner != "" and source in [:env, :file] and
               request_provider != :openai_codex,
@@ -216,18 +205,6 @@ defmodule MingaAgent.ModelSelection do
        )
        when is_binary(account_id) and account_id != "" and is_binary(source_id) and
               byte_size(source_id) == 64,
-       do: :ok
-
-  defp validate_credential(
-         %None{provider: "ollama"},
-         %Route{request_provider: :ollama, origin: {:catalog, "ollama", _model}}
-       ),
-       do: :ok
-
-  defp validate_credential(
-         %None{provider: owner},
-         %Route{origin: {:custom, owner, _model}}
-       ),
        do: :ok
 
   defp validate_credential(_credential, _route), do: {:error, :invalid_credential}
@@ -251,10 +228,6 @@ defmodule MingaAgent.ModelSelection do
     }
   end
 
-  defp encode_credential(%None{} = credential) do
-    %{"kind" => "none", "provider" => credential.provider}
-  end
-
   @spec decode_credential(map()) :: {:ok, credential_ref()} | {:error, :invalid_credential}
   defp decode_credential(%{"kind" => "api_key", "provider" => provider, "source" => "env"})
        when is_binary(provider) and provider != "" do
@@ -276,11 +249,6 @@ defmodule MingaAgent.ModelSelection do
        when is_binary(account_id) and account_id != "" and
               is_binary(source_id) and byte_size(source_id) == 64 do
     {:ok, OAuth.restore(account_id, source_id)}
-  end
-
-  defp decode_credential(%{"kind" => "none", "provider" => provider})
-       when is_binary(provider) and provider != "" do
-    {:ok, None.new(provider)}
   end
 
   defp decode_credential(_data), do: {:error, :invalid_credential}
@@ -346,13 +314,7 @@ defmodule MingaAgent.ModelSelection do
   end
 
   @spec decode_evidence(map()) :: {:ok, Evidence.t()} | {:error, :invalid_evidence}
-  defp decode_evidence(%{
-         "status" => "unverified",
-         "catalog" => catalog,
-         "custom" => custom
-       })
-       when is_boolean(catalog) and is_boolean(custom),
-       do: {:ok, Evidence.new(catalog, custom)}
+  defp decode_evidence(%{"status" => "unverified"}), do: {:ok, Evidence.new()}
 
   defp decode_evidence(_data), do: {:error, :invalid_evidence}
 
@@ -384,7 +346,4 @@ defmodule MingaAgent.ModelSelection do
       source_id: credential.source_id
     }
   end
-
-  defp credential_identity(%None{} = credential),
-    do: %{kind: :none, provider: credential.provider}
 end

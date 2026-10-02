@@ -31,8 +31,7 @@ defmodule MingaAgent.ProviderPacks.NativeTest do
              "openrouter:",
              "groq:",
              "mistral:",
-             "deepseek:",
-             "ollama:"
+             "deepseek:"
            ]
 
     assert :streaming in spec.capabilities

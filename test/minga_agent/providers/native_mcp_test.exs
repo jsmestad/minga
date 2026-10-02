@@ -58,10 +58,15 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       mcp_enabled?: true,
       mcp_transport: FakeTransport,
       mcp_transport_opts: [tools: [mcp_tool_def()], test_pid: self()],
+      credential_opts: test_credential_opts(),
       skip_api_key_env: true
     ]
 
     start_supervised({Native, Keyword.merge(defaults, opts)})
+  end
+
+  defp test_credential_opts do
+    [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}]
   end
 
   defp start_provider_subscriber(owner, store) do

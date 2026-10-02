@@ -62,8 +62,7 @@ defmodule MingaAgent.ProviderPacks.Native do
         "openrouter:",
         "groq:",
         "mistral:",
-        "deepseek:",
-        "ollama:"
+        "deepseek:"
       ],
       capabilities: [:streaming, :tools, :images, :mcp, :thinking, :model_switching],
       credential_requirements: [:llm]

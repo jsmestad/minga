@@ -39,21 +39,18 @@ defmodule MingaAgent.Providers.NativeStartupSelectionTest do
   end
 
   @tag :tmp_dir
-  test "legacy model startup keeps the resolver default or validates an explicit override", %{
+  test "model startup keeps the resolver default or validates an explicit override", %{
     tmp_dir: root
   } do
-    config = ModelSelectionFixture.config()
-
     for effort <- [nil, "low"] do
       pid =
         start_supervised!(
           Supervisor.child_spec(
             {Native,
              subscriber: self(),
-             config: config,
              model: ModelSelectionFixture.model_intent(),
              thinking_level: effort,
-             model_resolver_opts: [models: []],
+             model_resolver_opts: ModelSelectionFixture.resolver_opts(),
              project_root: root,
              tools: [],
              skip_api_key_env: true},
@@ -71,10 +68,9 @@ defmodule MingaAgent.Providers.NativeStartupSelectionTest do
                Supervisor.child_spec(
                  {Native,
                   subscriber: self(),
-                  config: config,
                   model: ModelSelectionFixture.model_intent(),
                   thinking_level: "unsupported",
-                  model_resolver_opts: [models: []]},
+                  model_resolver_opts: ModelSelectionFixture.resolver_opts()},
                  id: :invalid
                )
              )

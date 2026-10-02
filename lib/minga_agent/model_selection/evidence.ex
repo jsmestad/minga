@@ -1,13 +1,11 @@
 defmodule MingaAgent.ModelSelection.Evidence do
   @moduledoc "Minga-owned support evidence for one complete route."
-  @enforce_keys [:status, :catalog, :custom]
+  @enforce_keys [:status]
   defstruct @enforce_keys
 
-  @type t :: %__MODULE__{status: :unverified, catalog: boolean(), custom: boolean()}
+  @type t :: %__MODULE__{status: :unverified}
 
-  @doc "Builds conservative support evidence."
-  @spec new(boolean(), boolean()) :: t()
-  def new(catalog, custom) when is_boolean(catalog) and is_boolean(custom) do
-    %__MODULE__{status: :unverified, catalog: catalog, custom: custom}
-  end
+  @doc "Builds conservative catalog support evidence."
+  @spec new() :: t()
+  def new, do: %__MODULE__{status: :unverified}
 end

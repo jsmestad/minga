@@ -6,7 +6,7 @@ defmodule MingaEditor.Agent.SessionProjectionTest do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.RenderPipeline.TestHelpers
 
-  test "initial hydration projects resolved policy without an activation notice, including pending local routes" do
+  test "initial hydration projects resolved policy without an activation notice while credentials are pending" do
     selections = [
       {:configured,
        ModelSelectionFixture.selection(
@@ -15,9 +15,8 @@ defmodule MingaEditor.Agent.SessionProjectionTest do
        )},
       {:checking,
        ModelSelectionFixture.selection(
-         base_url: "http://127.0.0.1:11434/v1",
-         model_provider: "ollama",
-         display_name: "Local model",
+         model_provider: "openai",
+         display_name: "Pending hosted model",
          reasoning: %{effort: "low", options: ["low", "high"]}
        )}
     ]

@@ -138,6 +138,7 @@ defmodule MingaAgent.Providers.NativeTest do
       config: %AgentConfig{},
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [],
+      credential_opts: test_credential_opts(),
       skip_api_key_env: true
     ]
 
@@ -159,6 +160,29 @@ defmodule MingaAgent.Providers.NativeTest do
       end
 
     Native.start_link(merged)
+  end
+
+  defp test_credential_opts do
+    [
+      env: %{
+        "ANTHROPIC_API_KEY" => "fixture-anthropic-key",
+        "OPENAI_API_KEY" => "fixture-openai-key",
+        "GOOGLE_API_KEY" => "fixture-google-key",
+        "OPENROUTER_API_KEY" => "fixture-openrouter-key",
+        "GROQ_API_KEY" => "fixture-groq-key",
+        "MISTRAL_API_KEY" => "fixture-mistral-key",
+        "DEEPSEEK_API_KEY" => "fixture-deepseek-key"
+      },
+      oauth_resolver: fn :openai_codex, oauth_file: path ->
+        {:ok,
+         %{
+           provider_key: "openai-codex",
+           account_id: "fixture-account",
+           oauth_file: path,
+           token: "fixture-oauth-token"
+         }}
+      end
+    ]
   end
 
   defp start_provider_subscriber(owner, store) do
@@ -2648,7 +2672,7 @@ defmodule MingaAgent.Providers.NativeTest do
           tmp_dir: dir,
           llm_client: client,
           max_retries: 0,
-          model_selection: ModelSelectionFixture.selection(model_provider: "anthropic")
+          model_selection: ModelSelectionFixture.selection(request_provider: :anthropic)
         )
 
       assert :ok = send_prompt(pid, "Hello")
@@ -3495,40 +3519,6 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
-  describe "exact request endpoint" do
-    test "the active resolved endpoint cannot be replaced by mutable config defaults", %{
-      tmp_dir: dir
-    } do
-      parent = self()
-      selection = ModelSelectionFixture.selection(base_url: "http://127.0.0.1:9000/v1")
-
-      config =
-        agent_config(
-          api_base_url_override: "https://wrong-override.example/v1",
-          api_base_url: "https://wrong-default.example/v1",
-          api_endpoints: %{"openai" => "https://wrong-provider.example/v1"}
-        )
-
-      client = fn model, _messages, opts ->
-        send(parent, {:executed_route, model.base_url, opts})
-        build_stream_response([{:text, "ok"}])
-      end
-
-      {:ok, provider} =
-        start_provider(
-          tmp_dir: dir,
-          model_selection: selection,
-          llm_client: client,
-          config: config
-        )
-
-      assert :ok = send_prompt(provider, "Use the active route")
-      assert_receive {:executed_route, "http://127.0.0.1:9000/v1", opts}, 2_000
-      refute Keyword.has_key?(opts, :base_url)
-      assert Enum.any?(collect_run_events(), &match?(%Event.AgentEnd{}, &1))
-    end
-  end
-
   # ── Model format validation ──────────────────────────────────────────────────
 
   describe "provider error formatting" do
@@ -3542,7 +3532,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} =
         start_provider(
-          model_selection: ModelSelectionFixture.selection(model_provider: "anthropic"),
+          model_selection: ModelSelectionFixture.selection(request_provider: :anthropic),
           llm_client: fake_error_client(reason),
           tmp_dir: tmp_dir,
           max_retries: 0
@@ -3573,7 +3563,7 @@ defmodule MingaAgent.Providers.NativeTest do
     } do
       {:ok, pid} =
         start_provider(
-          model_selection: ModelSelectionFixture.selection(model_provider: "openai_codex"),
+          model_selection: ModelSelectionFixture.selection(request_provider: :openai_codex),
           llm_client: fake_error_client("Unauthorized"),
           tmp_dir: tmp_dir,
           max_retries: 0
@@ -3605,7 +3595,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} =
         start_provider(
-          model_selection: ModelSelectionFixture.selection(model_provider: "openai_codex"),
+          model_selection: ModelSelectionFixture.selection(request_provider: :openai_codex),
           llm_client: fake_error_client(reason),
           tmp_dir: tmp_dir,
           max_retries: 0
@@ -3638,7 +3628,7 @@ defmodule MingaAgent.Providers.NativeTest do
       Enum.each(cases, fn {reason, kind} ->
         {:ok, pid} =
           start_provider(
-            model_selection: ModelSelectionFixture.selection(model_provider: "anthropic"),
+            model_selection: ModelSelectionFixture.selection(request_provider: :anthropic),
             llm_client: fake_error_client(reason),
             tmp_dir: tmp_dir,
             max_retries: 0

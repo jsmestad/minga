@@ -2,7 +2,7 @@ defmodule MingaAgent.ModelResolver do
   @moduledoc """
   Resolves boundary input into one exact executable `ModelSelection`.
 
-  Catalog lookup and custom endpoint interpretation happen only at selection and restore boundaries.
+  Catalog lookup happens only at selection and restore boundaries.
   Restore validates the persisted exact route against its current source-owned declaration and never substitutes another route.
   """
 
@@ -11,12 +11,12 @@ defmodule MingaAgent.ModelResolver do
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
-  alias MingaAgent.ModelSelection.Credential.{ApiKey, None, OAuth}
+  alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth}
   alias MingaAgent.ModelSelection.{Evidence, Policy, Route, Stored, TextExecution}
   alias MingaAgent.Provider.Spec
   alias MingaAgent.ProviderRegistry
 
-  @request_providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek ollama)a
+  @request_providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
   @request_provider_names Enum.map(@request_providers, &Atom.to_string/1)
   @reasoning_efforts ~w(off none minimal low medium high xhigh max)
 
@@ -103,9 +103,8 @@ defmodule MingaAgent.ModelResolver do
   end
 
   @spec candidate_catalog_options(Config.t(), Snapshot.t(), keyword()) :: keyword()
-  defp candidate_catalog_options(config, snapshot, opts) do
-    if catalog_discovery_available?(snapshot) or explicit_local_model?(config) or
-         explicit_route_id?(Keyword.get(opts, :current)) do
+  defp candidate_catalog_options(_config, snapshot, opts) do
+    if catalog_discovery_available?(snapshot) or explicit_route_id?(Keyword.get(opts, :current)) do
       opts
     else
       Keyword.put(opts, :models, [])
@@ -117,17 +116,8 @@ defmodule MingaAgent.ModelResolver do
 
   defp catalog_discovery_available?(%Snapshot{provider_sources: sources}) do
     Enum.any?(@request_provider_names, fn provider ->
-      provider not in ["ollama", "openai_codex"] and Map.has_key?(sources, provider)
+      provider != "openai_codex" and Map.has_key?(sources, provider)
     end)
-  end
-
-  @spec explicit_local_model?(Config.t()) :: boolean()
-  defp explicit_local_model?(%Config{model: model}) do
-    case Config.split_model_spec(model) do
-      {_model, "ollama"} -> true
-      {"ms2_" <> _id, nil} -> true
-      _other -> false
-    end
   end
 
   @spec explicit_route_id?(term()) :: boolean()
@@ -181,7 +171,7 @@ defmodule MingaAgent.ModelResolver do
 
   def message({:model_not_found, model}),
     do:
-      "Model #{inspect(model)} is not in the executable catalog or an explicitly configured custom endpoint. Pick another model."
+      "Model #{inspect(model)} is not in the executable hosted-provider catalog. Pick another model."
 
   def message({:backend_unavailable, backend}),
     do: "Agent backend #{inspect(backend)} is unavailable. Enable it or pick another backend."
@@ -275,12 +265,11 @@ defmodule MingaAgent.ModelResolver do
           {:ok, ModelSelection.t()} | {:error, resolution_error()}
   defp restore_stored(%Stored{} = stored, opts) do
     snapshot = Keyword.get_lazy(opts, :credential_snapshot, &Credentials.snapshot/0)
-    config = Keyword.get(opts, :config, %Config{})
 
     with {:ok, spec} <- backend_spec(Keyword.put(opts, :backend_id, stored.backend_id)),
          true <- spec.id == stored.backend_id,
          :ok <- credential_available(stored.credential, snapshot, opts),
-         :ok <- validate_stored_source(stored, config, snapshot, spec, opts),
+         :ok <- validate_stored_source(stored, snapshot, spec, opts),
          {:ok, selection} <- materialize_stored(stored, spec, snapshot),
          :ok <- validate_backend_capabilities(selection, spec) do
       {:ok, selection}
@@ -318,20 +307,19 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @spec validate_stored_source(Stored.t(), Config.t(), Snapshot.t(), Spec.t(), keyword()) ::
+  @spec validate_stored_source(Stored.t(), Snapshot.t(), Spec.t(), keyword()) ::
           :ok | {:error, resolution_error()}
-  defp validate_stored_source(stored, config, snapshot, spec, opts) do
-    {kind, provider, model_id} = stored.route.origin
-    context = %{config: config, snapshot: snapshot, spec: spec, opts: opts}
+  defp validate_stored_source(stored, snapshot, spec, opts) do
+    {:catalog, provider, model_id} = stored.route.origin
+    context = %{config: %Config{}, snapshot: snapshot, spec: spec, opts: opts}
 
     input = %{
       provider: provider,
       model_id: model_id,
-      credential: stored.credential,
-      kind: kind
+      credential: stored.credential
     }
 
-    with {:ok, source} <- stored_source(stored, config, opts),
+    with {:ok, source} <- stored_source(stored, opts),
          {:ok, expected} <- build_route(Map.put(input, :source, source), context),
          true <- expected.execution == stored.route.execution,
          true <- expected.request_provider == stored.route.request_provider,
@@ -347,11 +335,10 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @spec stored_source(Stored.t(), Config.t(), keyword()) ::
+  @spec stored_source(Stored.t(), keyword()) ::
           {:ok, source()} | {:error, term()}
   defp stored_source(
-         %Stored{route: %Route{origin: {_kind, provider, model_id}}, evidence: %{catalog: true}},
-         _config,
+         %Stored{route: %Route{origin: {:catalog, provider, model_id}}},
          opts
        ) do
     case exact_catalog_model(provider, model_id, opts) do
@@ -360,17 +347,7 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  defp stored_source(
-         %Stored{
-           route: %Route{origin: {:custom, provider, model_id}},
-           evidence: %{catalog: false}
-         },
-         config,
-         _opts
-       ),
-       do: custom_model(provider, model_id, config)
-
-  defp stored_source(_stored, _config, _opts), do: {:error, :invalid_source}
+  defp stored_source(_stored, _opts), do: {:error, :invalid_source}
 
   @spec stored_policy_matches?(Policy.t(), source()) :: boolean()
   defp stored_policy_matches?(policy, source) do
@@ -422,28 +399,19 @@ defmodule MingaAgent.ModelResolver do
     with {:ok, requested_provider, model_id} <-
            exact_model_identity(exact_model, models(context.opts)),
          source_provider = catalog_provider(requested_provider),
-         {:ok, source} <-
-           model_source(source_provider, model_id, context.config, context.opts),
-         {:ok, route_kind} <- route_kind(source, source_provider, context.config),
+         {:ok, source} <- model_source(source_provider, model_id, context.opts),
          {:ok, credential} <-
-           choose_credential(
-             requested_provider,
-             source_provider,
-             route_kind,
-             intent,
-             context
-           ),
+           choose_credential(requested_provider, source_provider, intent, context),
          :ok <- credential_available(credential, context.snapshot, context.opts),
          route_input = %{
            source: source,
            provider: source_provider,
            model_id: model_id,
-           credential: credential,
-           kind: route_kind
+           credential: credential
          },
          {:ok, route} <- build_route(route_input, context),
          {:ok, policy} <- build_policy(source, intent, context.config),
-         evidence = Evidence.new(match?({:catalog, _}, source), route_kind == :custom),
+         evidence = Evidence.new(),
          {:ok, selection} <-
            ModelSelection.build(context.spec, route, credential, policy, evidence),
          :ok <- validate_backend_capabilities(selection, context.spec) do
@@ -459,50 +427,22 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @type source :: {:catalog, map()} | {:custom, map()}
-  @type route_kind :: :catalog | :custom
+  @type source :: {:catalog, map()}
 
-  @spec model_source(String.t(), String.t(), Config.t(), keyword()) ::
+  @spec model_source(String.t(), String.t(), keyword()) ::
           {:ok, source()} | {:error, resolution_error()}
-  defp model_source(provider, model_id, config, opts) do
-    case custom_model(provider, model_id, config) do
-      {:ok, source} ->
-        {:ok, source}
-
-      {:error, _missing} ->
-        case exact_catalog_model(provider, model_id, opts) do
-          {:ok, model} -> {:ok, {:catalog, model}}
-          {:error, :not_found} -> {:error, {:model_not_found, "#{provider}:#{model_id}"}}
-        end
+  defp model_source(provider, model_id, opts) do
+    case exact_catalog_model(provider, model_id, opts) do
+      {:ok, model} -> {:ok, {:catalog, model}}
+      {:error, :not_found} -> {:error, {:model_not_found, "#{provider}:#{model_id}"}}
     end
   end
 
-  @spec custom_model(String.t(), String.t(), Config.t()) ::
-          {:ok, source()} | {:error, resolution_error()}
-  defp custom_model(provider, model_id, config) do
-    with endpoint when is_map(endpoint) <- endpoint_config(config, provider),
-         models when is_map(models) <- value(endpoint, "models"),
-         model when is_map(model) <- map_value_by_string_key(models, model_id) do
-      {:ok, {:custom, string_key_map(model)}}
-    else
-      _missing -> {:error, {:model_not_found, "#{provider}:#{model_id}"}}
-    end
-  end
-
-  @spec route_kind(source(), String.t(), Config.t()) ::
-          {:ok, route_kind()} | {:error, resolution_error()}
-  defp route_kind({:custom, _model}, _provider, _config), do: {:ok, :custom}
-
-  defp route_kind({:catalog, _model}, provider, config) do
-    if custom_endpoint_override?(config, provider), do: {:ok, :custom}, else: {:ok, :catalog}
-  end
-
-  @spec choose_credential(String.t(), String.t(), route_kind(), map(), context()) ::
+  @spec choose_credential(String.t(), String.t(), map(), context()) ::
           {:ok, ModelSelection.credential_ref()} | {:error, resolution_error()}
   defp choose_credential(
          "openai_codex",
          _source_provider,
-         _route_kind,
          intent,
          context
        ) do
@@ -512,53 +452,11 @@ defmodule MingaAgent.ModelResolver do
   defp choose_credential(
          _requested_provider,
          source_provider,
-         :custom,
-         intent,
-         context
-       ) do
-    with endpoint when is_map(endpoint) <-
-           endpoint_auth_config(context.config, source_provider),
-         {:ok, configured_mode} <- configured_auth_mode(endpoint),
-         :ok <- requested_auth_matches(intent, configured_mode) do
-      profiles =
-        custom_credential_profiles(source_provider, configured_mode, context.snapshot)
-
-      choose_from_profiles(profiles, intent, source_provider)
-    else
-      {:error, _reason} = error -> error
-      _missing -> route_error("The custom endpoint authentication declaration is missing.")
-    end
-  end
-
-  defp choose_credential(
-         _requested_provider,
-         source_provider,
-         :catalog,
          intent,
          context
        ) do
     profiles = catalog_credential_profiles(source_provider, context.snapshot)
     choose_from_profiles(profiles, intent, source_provider)
-  end
-
-  @spec requested_auth_matches(map(), :api_key | :oauth | :none) ::
-          :ok | {:error, resolution_error()}
-  defp requested_auth_matches(intent, configured_mode) do
-    case normalize_auth_mode(Map.get(intent, "auth_mode")) do
-      nil ->
-        :ok
-
-      ^configured_mode ->
-        :ok
-
-      :invalid ->
-        {:error, {:invalid_model_selection, "Unknown auth mode. Use api_key, oauth, or none."}}
-
-      _different ->
-        {:error,
-         {:invalid_model_selection,
-          "The requested auth mode does not match the configured endpoint."}}
-    end
   end
 
   @spec choose_from_profiles([ModelSelection.credential_ref()], map(), String.t()) ::
@@ -598,25 +496,10 @@ defmodule MingaAgent.ModelResolver do
   end
 
   @spec catalog_credential_profiles(String.t(), Snapshot.t()) :: [ModelSelection.credential_ref()]
-  defp catalog_credential_profiles("ollama", _snapshot), do: [None.new("ollama")]
-
   defp catalog_credential_profiles(provider, snapshot) do
     api_key_profiles(provider, snapshot) ++
       if(provider == "openai", do: oauth_profiles(snapshot), else: [])
   end
-
-  @spec custom_credential_profiles(String.t(), term(), Snapshot.t()) ::
-          [ModelSelection.credential_ref()]
-  defp custom_credential_profiles(provider, mode, _snapshot) when mode in [:none, "none"] do
-    [None.new(provider)]
-  end
-
-  defp custom_credential_profiles(provider, mode, snapshot)
-       when mode in [:api_key, "api_key", nil] do
-    api_key_profiles(provider, snapshot)
-  end
-
-  defp custom_credential_profiles(_provider, _invalid_mode, _snapshot), do: []
 
   @spec api_key_profiles(String.t(), Snapshot.t()) :: [ApiKey.t()]
   defp api_key_profiles(provider, snapshot) do
@@ -632,8 +515,6 @@ defmodule MingaAgent.ModelResolver do
 
   @spec credential_available(ModelSelection.credential_ref(), Snapshot.t(), keyword()) ::
           :ok | {:error, resolution_error()}
-  defp credential_available(%None{}, _snapshot, _opts), do: :ok
-
   defp credential_available(
          %ApiKey{provider: provider, source: source} = credential,
          snapshot,
@@ -689,10 +570,6 @@ defmodule MingaAgent.ModelResolver do
   end
 
   @spec build_route(map(), context()) :: {:ok, Route.t()} | {:error, resolution_error()}
-  defp build_route(%{credential: %OAuth{}, kind: :custom}, _context) do
-    route_error("OAuth routes cannot be redirected to a custom endpoint.")
-  end
-
   defp build_route(
          %{source: source, provider: provider, model_id: model_id, credential: %OAuth{}},
          _context
@@ -711,56 +588,11 @@ defmodule MingaAgent.ModelResolver do
           provider: provider,
           model_id: model_id,
           request_provider: :openai_codex,
-          execution: execution,
-          kind: :catalog
+          execution: execution
         })
 
       {:error, _reason} ->
         route_error("The OpenAI Codex execution route is invalid.")
-    end
-  end
-
-  defp build_route(
-         %{
-           source: source,
-           provider: provider,
-           model_id: model_id,
-           credential: credential,
-           kind: :custom
-         },
-         context
-       ) do
-    endpoint = effective_endpoint_config(context.config, provider, source)
-
-    with endpoint when is_map(endpoint) <- endpoint,
-         {:ok, configured_auth} <- configured_auth_mode(endpoint),
-         true <- credential_matches_auth?(credential, configured_auth, provider),
-         protocol when is_binary(protocol) <-
-           configured_protocol(endpoint) || source_protocol(source),
-         {:ok, execution, request_provider} <-
-           custom_execution(
-             provider,
-             model_id,
-             protocol,
-             endpoint,
-             provider_model_id(source, model_id)
-           ),
-         :ok <- validate_route_auth(configured_auth, protocol) do
-      route(source, %{
-        provider: provider,
-        model_id: model_id,
-        request_provider: request_provider,
-        execution: execution,
-        kind: :custom
-      })
-    else
-      {:error, {:route_unavailable, _message}} = error ->
-        error
-
-      _invalid ->
-        route_error(
-          "Custom endpoint configuration must declare a supported protocol, exact HTTP(S) URL, and compatible authentication mode."
-        )
     end
   end
 
@@ -774,37 +606,18 @@ defmodule MingaAgent.ModelResolver do
         provider: provider,
         model_id: model_id,
         request_provider: request_provider,
-        execution: execution,
-        kind: :catalog
+        execution: execution
       })
     end
   end
-
-  @spec validate_route_auth(:api_key | :none, String.t()) :: :ok | {:error, resolution_error()}
-  defp validate_route_auth(:api_key, _protocol), do: :ok
-
-  defp validate_route_auth(:none, protocol) when protocol in ["openai_chat", "openai_responses"],
-    do: :ok
-
-  defp validate_route_auth(:none, _protocol),
-    do:
-      route_error(
-        "The selected protocol requires API-key authentication; anonymous authentication is not supported by its request adapter."
-      )
 
   @spec route(source(), map()) :: {:ok, Route.t()} | {:error, resolution_error()}
   defp route(source, route_data) do
     provider = route_data.provider
     model_id = route_data.model_id
 
-    origin =
-      case route_data.kind do
-        :catalog -> {:catalog, provider, model_id}
-        :custom -> {:custom, provider, model_id}
-      end
-
     attrs = %{
-      origin: origin,
+      origin: {:catalog, provider, model_id},
       request_provider: route_data.request_provider,
       id: route_id(route_data.request_provider, model_id),
       model_provider: provider,
@@ -849,66 +662,16 @@ defmodule MingaAgent.ModelResolver do
 
       {:error, _reason} ->
         route_error(
-          "The catalog entry has no complete supported text execution contract. Configure an exact custom route or choose another model."
+          "The catalog entry has no complete supported text execution contract. Choose another model."
         )
     end
   end
 
   @spec catalog_base_url(String.t(), term(), map(), context()) :: String.t() | nil
-  defp catalog_base_url("ollama", _text, _model, context),
-    do: context.snapshot.ollama_host
-
   defp catalog_base_url(provider, text, model, context) do
     value(text, "base_url") || value(model, "base_url") ||
       provider_endpoint(provider, context.opts)
   end
-
-  @spec custom_execution(String.t(), String.t(), String.t(), map(), String.t()) ::
-          {:ok, TextExecution.t(), Route.request_provider()} | {:error, resolution_error()}
-  defp custom_execution(endpoint_id, _model_id, protocol, endpoint, provider_model_id) do
-    with {:ok, request_provider, family, canonical_path} <- custom_mapping(endpoint_id, protocol),
-         configured_path = value(endpoint, "path"),
-         true <- is_nil(configured_path) or configured_path == canonical_path,
-         base_url when is_binary(base_url) <- endpoint_url(endpoint),
-         {:ok, execution} <-
-           TextExecution.new(%{
-             supported: true,
-             family: family,
-             wire_protocol: protocol,
-             transport: "http",
-             provider_model_id: provider_model_id,
-             base_url: base_url,
-             path: canonical_path
-           }) do
-      {:ok, execution, request_provider}
-    else
-      {:error, {:route_unavailable, _message}} = error ->
-        error
-
-      _invalid ->
-        route_error("The custom endpoint path or URL is incompatible with its selected protocol.")
-    end
-  end
-
-  @spec custom_mapping(String.t(), String.t()) ::
-          {:ok, Route.request_provider(), String.t(), String.t()} | {:error, resolution_error()}
-  defp custom_mapping("ollama", "openai_chat"),
-    do: {:ok, :ollama, "openai_chat_compatible", "/chat/completions"}
-
-  defp custom_mapping(_endpoint_id, "openai_chat"),
-    do: {:ok, :openai, "openai_chat_compatible", "/chat/completions"}
-
-  defp custom_mapping(_endpoint_id, "openai_responses"),
-    do: {:ok, :openai, "openai_responses_compatible", "/responses"}
-
-  defp custom_mapping(_endpoint_id, "anthropic_messages"),
-    do: {:ok, :anthropic, "anthropic_messages", "/v1/messages"}
-
-  defp custom_mapping(_endpoint_id, "google_generate_content"),
-    do: {:ok, :google, "google_generate_content", "/models/{provider_model_id}:generateContent"}
-
-  defp custom_mapping(_endpoint_id, protocol),
-    do: route_error("Protocol #{inspect(protocol)} has no installed exact adapter mapping.")
 
   @spec catalog_request_provider(String.t()) ::
           {:ok, Route.request_provider()} | {:error, resolution_error()}
@@ -918,33 +681,6 @@ defmodule MingaAgent.ModelResolver do
       request_provider -> {:ok, request_provider}
     end
   end
-
-  @spec configured_auth_mode(map()) ::
-          {:ok, :api_key | :none} | {:error, resolution_error()}
-  defp configured_auth_mode(endpoint) do
-    case normalize_auth_mode(value(endpoint, "auth_mode")) do
-      mode when mode in [:api_key, :none] ->
-        {:ok, mode}
-
-      nil ->
-        {:ok, :api_key}
-
-      :oauth ->
-        route_error(
-          "Custom endpoints support api_key or none authentication. OAuth is bound to the catalog OpenAI Codex endpoint and cannot be redirected."
-        )
-
-      :invalid ->
-        {:error, {:invalid_model_selection, "Custom endpoint auth_mode must be api_key or none."}}
-    end
-  end
-
-  @spec credential_matches_auth?(ModelSelection.credential_ref(), atom(), String.t()) :: boolean()
-  defp credential_matches_auth?(%ApiKey{provider: provider}, :api_key, endpoint_id),
-    do: provider == endpoint_id
-
-  defp credential_matches_auth?(%None{provider: provider}, :none, provider), do: true
-  defp credential_matches_auth?(_credential, _mode, _endpoint_id), do: false
 
   @spec build_policy(source(), map(), Config.t()) ::
           {:ok, Policy.t()} | {:error, resolution_error()}
@@ -1020,9 +756,7 @@ defmodule MingaAgent.ModelResolver do
       opts: opts
     }
 
-    intents =
-      Enum.flat_map(catalog, &catalog_candidate_intents(&1, context.snapshot, context.config)) ++
-        custom_candidate_intents(context.config, context.snapshot)
+    intents = Enum.flat_map(catalog, &catalog_candidate_intents(&1, context.snapshot))
 
     intents
     |> Enum.reduce([], fn intent, selections ->
@@ -1030,8 +764,7 @@ defmodule MingaAgent.ModelResolver do
         {:ok, selection} ->
           [selection | selections]
 
-        {:error, reason} ->
-          warn_configured_candidate_failure(intent, reason)
+        {:error, _reason} ->
           selections
       end
     end)
@@ -1040,23 +773,12 @@ defmodule MingaAgent.ModelResolver do
     |> Enum.sort_by(&candidate_sort_key/1)
   end
 
-  @spec warn_configured_candidate_failure(map(), term()) :: :ok
-  defp warn_configured_candidate_failure(%{"configured_custom" => true, "model" => model}, reason) do
-    Minga.Log.warning(
-      :agent,
-      "Configured model #{inspect(model)} is unavailable: #{MingaAgent.Redaction.format_error(reason)}"
-    )
-  end
-
-  defp warn_configured_candidate_failure(_intent, _reason), do: :ok
-
-  @spec catalog_candidate_intents(map(), Snapshot.t(), Config.t()) :: [map()]
-  defp catalog_candidate_intents(model, snapshot, config) do
+  @spec catalog_candidate_intents(map(), Snapshot.t()) :: [map()]
+  defp catalog_candidate_intents(model, snapshot) do
     if selectable_catalog_model?(model) do
       provider = provider_string(model)
       model_id = canonical_model_id(model)
-      route_kind = if(custom_endpoint_override?(config, provider), do: :custom, else: :catalog)
-      profiles = candidate_profiles(provider, route_kind, config, snapshot)
+      profiles = catalog_credential_profiles(provider, snapshot)
 
       Enum.map(profiles, fn credential ->
         %{
@@ -1069,76 +791,6 @@ defmodule MingaAgent.ModelResolver do
       []
     end
   end
-
-  @spec candidate_profiles(String.t(), route_kind(), Config.t(), Snapshot.t()) ::
-          [ModelSelection.credential_ref()]
-  defp candidate_profiles(provider, :catalog, _config, snapshot),
-    do: catalog_credential_profiles(provider, snapshot)
-
-  defp candidate_profiles(provider, :custom, config, snapshot) do
-    case endpoint_auth_config(config, provider) do
-      endpoint when is_map(endpoint) ->
-        case configured_auth_mode(endpoint) do
-          {:ok, mode} -> custom_credential_profiles(provider, mode, snapshot)
-          {:error, _reason} -> []
-        end
-
-      _missing ->
-        []
-    end
-  end
-
-  @spec custom_candidate_intents(Config.t(), Snapshot.t()) :: [map()]
-  defp custom_candidate_intents(config, snapshot) do
-    case config.api_endpoints do
-      endpoints when is_map(endpoints) ->
-        Enum.flat_map(endpoints, &custom_endpoint_intents(&1, snapshot))
-
-      _none ->
-        []
-    end
-  end
-
-  @spec custom_endpoint_intents({term(), term()}, Snapshot.t()) :: [map()]
-  defp custom_endpoint_intents({provider_key, endpoint}, snapshot) when is_map(endpoint) do
-    provider = to_string(provider_key)
-    models = value(endpoint, "models")
-
-    case {models, configured_auth_mode(endpoint)} do
-      {models, {:ok, mode}} when is_map(models) ->
-        profiles = custom_credential_profiles(provider, mode, snapshot)
-
-        Enum.flat_map(models, &custom_model_intents(&1, provider, profiles))
-
-      {_models, {:error, reason}} ->
-        Minga.Log.warning(
-          :agent,
-          "Configured model endpoint #{inspect(provider)} is unavailable: #{MingaAgent.Redaction.format_error(reason)}"
-        )
-
-        []
-
-      _invalid ->
-        []
-    end
-  end
-
-  defp custom_endpoint_intents(_entry, _snapshot), do: []
-
-  @spec custom_model_intents({term(), term()}, String.t(), [ModelSelection.credential_ref()]) ::
-          [map()]
-  defp custom_model_intents({model_id, model}, provider, profiles) when is_map(model) do
-    Enum.map(profiles, fn credential ->
-      %{
-        "model" => "#{provider}:#{model_id}",
-        "configured_custom" => true,
-        "selection_credential" => ModelSelection.credential_id(credential),
-        "auth_mode" => Atom.to_string(credential_auth_mode(credential))
-      }
-    end)
-  end
-
-  defp custom_model_intents(_model, _provider, _profiles), do: []
 
   @spec selectable_catalog_model?(map()) :: boolean()
   defp selectable_catalog_model?(model) do
@@ -1167,10 +819,6 @@ defmodule MingaAgent.ModelResolver do
   defp text_output?(_modalities), do: false
 
   @spec reasoning_options(source()) :: [String.t()]
-  defp reasoning_options({:custom, model}) do
-    normalize_reasoning_options(value(model, "reasoning_options"), false)
-  end
-
   defp reasoning_options({:catalog, model}) do
     reasoning = model |> value("capabilities") |> value("reasoning")
     effort = value(reasoning, "effort")
@@ -1228,17 +876,6 @@ defmodule MingaAgent.ModelResolver do
           tool_result_images: ModelSelection.capability(),
           streaming: ModelSelection.capability()
         }
-  defp capabilities({:custom, model}) do
-    configured = value(model, "capabilities")
-
-    %{
-      tools: configured_capability(configured, "tools"),
-      images: configured_capability(configured, "images"),
-      tool_result_images: configured_capability(configured, "tool_result_images"),
-      streaming: configured_capability(configured, "streaming")
-    }
-  end
-
   defp capabilities({:catalog, model}) do
     caps = value(model, "capabilities")
     modalities = value(model, "modalities")
@@ -1300,27 +937,6 @@ defmodule MingaAgent.ModelResolver do
   defp boolean_or_unknown(_value), do: :unknown
 
   @spec source_metadata(source()) :: map()
-  defp source_metadata({:custom, model} = source) do
-    caps = capabilities(source)
-
-    metadata =
-      source_metadata({:catalog, model})
-      |> Map.put(
-        :capabilities,
-        %{
-          tools: transport_capability(caps.tools, :enabled),
-          streaming: transport_capability(caps.streaming, :text)
-        }
-        |> Map.reject(fn {_key, value} -> is_nil(value) end)
-      )
-
-    case caps.images do
-      true -> Map.put(metadata, :modalities, %{input: [:text, :image], output: [:text]})
-      false -> Map.put(metadata, :modalities, %{input: [:text], output: [:text]})
-      :unknown -> metadata
-    end
-  end
-
   defp source_metadata(source) do
     {_kind, model} = source
 
@@ -1332,10 +948,6 @@ defmodule MingaAgent.ModelResolver do
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
-
-  @spec transport_capability(ModelSelection.capability(), atom()) :: map() | nil
-  defp transport_capability(value, key) when is_boolean(value), do: %{key => value}
-  defp transport_capability(:unknown, _key), do: nil
 
   @spec request_output_limit(pos_integer(), pos_integer() | nil) :: pos_integer()
   defp request_output_limit(configured, model_limit) when is_integer(model_limit),
@@ -1480,12 +1092,6 @@ defmodule MingaAgent.ModelResolver do
   defp catalog_provider("openai_codex"), do: "openai"
   defp catalog_provider(provider), do: provider
 
-  @spec source_protocol(source()) :: String.t() | nil
-  defp source_protocol({:catalog, model}),
-    do: model |> value("execution") |> value("text") |> value("wire_protocol")
-
-  defp source_protocol({:custom, model}), do: value(model, "protocol")
-
   @spec display_name(source(), String.t()) :: String.t()
   defp display_name({_kind, model}, fallback), do: value(model, "name") || fallback
 
@@ -1500,16 +1106,14 @@ defmodule MingaAgent.ModelResolver do
   @spec route_id(Route.request_provider(), String.t()) :: String.t()
   defp route_id(request_provider, model_id), do: "#{request_provider}/#{model_id}"
 
-  @spec credential_auth_mode(ModelSelection.credential_ref()) :: :api_key | :oauth | :none
+  @spec credential_auth_mode(ModelSelection.credential_ref()) :: :api_key | :oauth
   defp credential_auth_mode(%ApiKey{}), do: :api_key
   defp credential_auth_mode(%OAuth{}), do: :oauth
-  defp credential_auth_mode(%None{}), do: :none
 
-  @spec normalize_auth_mode(term()) :: :api_key | :oauth | :none | :invalid | nil
+  @spec normalize_auth_mode(term()) :: :api_key | :oauth | :invalid | nil
   defp normalize_auth_mode(nil), do: nil
   defp normalize_auth_mode(value) when value in [:api_key, "api_key"], do: :api_key
   defp normalize_auth_mode(value) when value in [:oauth, "oauth"], do: :oauth
-  defp normalize_auth_mode(value) when value in [:none, "none"], do: :none
   defp normalize_auth_mode(_value), do: :invalid
 
   @spec backend_spec(keyword()) :: {:ok, Spec.t()} | {:error, resolution_error()}
@@ -1572,84 +1176,6 @@ defmodule MingaAgent.ModelResolver do
   defp existing_provider_atom(provider),
     do: Enum.find(@request_providers, &(Atom.to_string(&1) == provider))
 
-  @spec endpoint_config(Config.t(), String.t()) :: map() | nil
-  defp endpoint_config(config, provider) do
-    case config.api_endpoints do
-      endpoints when is_map(endpoints) ->
-        endpoints |> map_value_by_string_key(provider) |> normalize_endpoint()
-
-      _none ->
-        nil
-    end
-  end
-
-  @spec normalize_endpoint(term()) :: map() | nil
-  defp normalize_endpoint(url) when is_binary(url) and url != "",
-    do: %{"url" => url, "auth_mode" => "api_key"}
-
-  defp normalize_endpoint(endpoint) when is_map(endpoint), do: endpoint
-  defp normalize_endpoint(_invalid), do: nil
-
-  @spec endpoint_auth_config(Config.t(), String.t()) :: map() | nil
-  defp endpoint_auth_config(config, provider) do
-    case endpoint_config(config, provider) do
-      endpoint when is_map(endpoint) -> endpoint
-      nil -> synthetic_endpoint_auth(base_url_override(config))
-    end
-  end
-
-  @spec synthetic_endpoint_auth(String.t() | nil) :: map() | nil
-  defp synthetic_endpoint_auth(nil), do: nil
-  defp synthetic_endpoint_auth(_url), do: %{"auth_mode" => "api_key"}
-
-  @spec effective_endpoint_config(Config.t(), String.t(), source()) :: map() | nil
-  defp effective_endpoint_config(config, provider, source) do
-    endpoint = endpoint_config(config, provider)
-    override = base_url_override(config)
-
-    case {endpoint, override} do
-      {endpoint, override} when is_map(endpoint) and is_binary(override) ->
-        Map.put(endpoint, "url", override)
-
-      {endpoint, _override} when is_map(endpoint) ->
-        endpoint
-
-      {nil, override} when is_binary(override) ->
-        %{
-          "url" => override,
-          "protocol" => source_protocol(source),
-          "auth_mode" => "api_key"
-        }
-
-      _missing ->
-        nil
-    end
-  end
-
-  @spec base_url_override(Config.t()) :: String.t() | nil
-  defp base_url_override(config) do
-    case config.api_base_url_override do
-      value when is_binary(value) and value != "" -> value
-      _missing_override -> present_string(config.api_base_url)
-    end
-  end
-
-  @spec present_string(term()) :: String.t() | nil
-  defp present_string(value) when is_binary(value) and value != "", do: value
-  defp present_string(_value), do: nil
-
-  @spec custom_endpoint_override?(Config.t(), String.t()) :: boolean()
-  defp custom_endpoint_override?(config, provider) do
-    is_map(endpoint_config(config, provider)) or present_string?(config.api_base_url_override) or
-      present_string?(config.api_base_url)
-  end
-
-  @spec endpoint_url(map()) :: String.t() | nil
-  defp endpoint_url(endpoint), do: value(endpoint, "url") || value(endpoint, "endpoint")
-
-  @spec configured_protocol(map()) :: String.t() | nil
-  defp configured_protocol(endpoint), do: value(endpoint, "protocol")
-
   @spec candidate_sort_key(ModelCandidate.t()) :: tuple()
   defp candidate_sort_key(%ModelCandidate{selection: selection} = candidate) do
     {
@@ -1684,14 +1210,6 @@ defmodule MingaAgent.ModelResolver do
     Map.get(map, String.to_existing_atom(key))
   rescue
     ArgumentError -> nil
-  end
-
-  @spec map_value_by_string_key(map(), String.t()) :: term()
-  defp map_value_by_string_key(map, key) do
-    case Map.fetch(map, key) do
-      {:ok, result} -> result
-      :error -> value_from_atom_key(map, key)
-    end
   end
 
   @spec string_key_map(map()) :: map()
