@@ -77,38 +77,7 @@ The harness prints raw JSON percentiles and environment metadata. `performance/b
 
 CI never generates a baseline. A change requires an explicit JSON diff and PR rationale naming the fixture/toolchain change and measured p95 values. Never change the 4 ms, 8 ms, 1.20x, or 0.05 ms policies merely to make a run pass. Measurements above the hybrid limit must be investigated instead of increasing the allowance.
 
-`resident-ordinary-edit-v2` replaces #2791's synthetic dictionary/tuple work with the production resident decode/apply and shared CoreText command preparation paths. Process-CPU runs `29360855703` and `29362531315` measured 0.185 ms and 0.547 ms combined p95 on unchanged renderer code while combined p50 stayed at 0.145 ms and 0.152 ms. Schema v3 therefore measures calling-thread CPU, which matches the synchronous work under test and excludes unrelated Foundation or runtime threads. Two thread-CPU calibrations in CI run `29363711962` (jobs `87189922733` and `87192352431`) measured 0.071/0.386/0.460 ms and 0.015/0.138/0.157 ms p95 for decode/apply, command preparation, and combined work. The checked references use the conservative first run, rounded upward to three decimals. The hard 4 ms stage, 8 ms combined, 1.20x regression ratio, and 0.05 ms sub-millisecond measurement allowance remain code-owned policy.
-
-## Explicit font registry benchmark
-
-Issue #3291 replaces the render process dictionary with an explicit immutable `FontRegistry`. `bench/font_registry_flow_bench.exs` measures this change through the production `RenderPipeline.run/1` and separately measures `Composition.segments_to_text_and_spans/2`. The matrix covers one and four windows; zero, one, and eight fallback families; ordinary and inline virtual-text spans; first allocation, warm repeated frames, and recovery re-registration. Each window renders 40 rows by 120 columns from 32 source lines with eight styled segments per line. Ordinary fixtures contain 256 syntax spans. Virtual-text fixtures contain 32 inline decorations and 256 virtual segments.
-
-Run the candidate in an optimized Mix environment:
-
-```sh
-MIX_ENV=prod MINGA_FONT_BENCH_LABEL=candidate-round-1 MINGA_FONT_BENCH_OUTPUT=performance/results/font_registry_explicit_3291/candidate-round-1.json mix run bench/font_registry_flow_bench.exs
-```
-
-For a baseline worktree at `34fd79322806ed3734bab2c00c569335678f21df`, run the same candidate harness by absolute path so the fixture and measurement code are identical. The harness detects the baseline's arity-one ambient-registry composition API and the candidate's arity-two explicit-registry API. It waits 5 seconds for startup work, performs 20 warmups, records 120 raw nanosecond samples per phase, and asserts allocation and registration counts. Repeat five paired rounds. Run rounds one through three baseline first and rounds four through five candidate first to balance order effects.
-
-The September 14, 2026 comparison used Elixir 1.20.3, OTP 29, ERTS 17.0.6, `aarch64-apple-darwin25.6.0`, eight online schedulers, and `MIX_ENV=prod`. Both worktrees had Git revision `34fd79322806ed3734bab2c00c569335678f21df`; the baseline production-source diff SHA-256 was `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`, the candidate production-source diff SHA-256 was `166be608ac83cb67639b13dcb778e3167fdd8c1902e44b3b1b89d03b67c9c930`, and the shared harness SHA-256 was `9b93b07bebb137d6cc4a51397104939791de99a830c6db2930f62d411ca903fe`. `performance/results/font_registry_explicit_3291/` retains five raw JSON files per revision with every sample, fixture size, percentile, operation count, emitted-byte count, timestamp, revision, diff hash, harness hash, runtime, architecture, scheduler count, clock, and build mode.
-
-The table reports the median of the five round-level percentiles for the highest-allocation ordinary path and the directly changed span-construction path:
-
-| Measurement | Baseline p50 | Candidate p50 | Delta | Baseline p95 | Candidate p95 | Delta |
-|---|---:|---:|---:|---:|---:|---:|
-| Pipeline, 1 window, 8 families, first allocation | 5.595 ms | 6.141 ms | +9.75% | 6.406 ms | 7.030 ms | +9.73% |
-| Pipeline, 1 window, 8 families, warm frame | 3.412 ms | 3.488 ms | +2.24% | 4.076 ms | 4.200 ms | +3.05% |
-| Pipeline, 4 windows, 8 families, first allocation | 14.376 ms | 14.583 ms | +1.44% | 15.584 ms | 15.517 ms | -0.43% |
-| Pipeline, 4 windows, 8 families, warm frame | 5.544 ms | 5.521 ms | -0.41% | 6.243 ms | 6.307 ms | +1.01% |
-| Span construction, 8 families, ordinary, first allocation | 5.084 us | 4.875 us | -4.11% | 5.417 us | 5.250 us | -3.08% |
-| Span construction, 8 families, ordinary, warm | 4.042 us | 3.834 us | -5.15% | 4.292 us | 4.083 us | -4.87% |
-| Span construction, 8 families, virtual text, first allocation | 4.708 us | 4.458 us | -5.31% | 5.250 us | 4.708 us | -10.32% |
-| Span construction, 8 families, virtual text, warm | 3.625 us | 3.417 us | -5.74% | 3.833 us | 3.625 us | -5.43% |
-
-The explicit path preserved every allocation, registration, command, and byte observation in all ten runs. First allocation and recovery registered exactly zero, one, or eight families; warm frames registered zero and retained the allocated IDs. Warm emitted bytes were 10,273 ordinary and 8,053 virtual-text bytes for one window, and 38,401 ordinary and 29,521 virtual-text bytes for four windows. First allocation and recovery added 14 bytes for one family or 112 bytes for eight families at every window/span size, exactly matching the baseline.
-
-The one-window, eight-family ordinary first-allocation result is a localized increase of about 0.55 ms p50 and 0.62 ms p95. It is larger than that baseline scenario's five-round range at p50, so it is not dismissed as ordinary variation. The direct allocation and span-construction measurement is faster, the equivalent four-window first-allocation delta is 1.44% p50 and -0.43% p95, and the warm path is unchanged within run-to-run variation. This evidence rules out an added per-span traversal, synchronous process call, or registry serialization. The remaining bounded first-frame cost is consistent with propagating the updated immutable registry value at each new-family allocation boundary. It does not scale with the number of windows and does not recur after allocation. Existing performance thresholds remain unchanged.
+The baseline uses calling-thread CPU time for the synchronous resident decode/apply and CoreText command preparation paths. This clock excludes work on unrelated Foundation and runtime threads. Keep the fixture, clock, toolchain, and percentile schema aligned when updating the checked references.
 
 ## Native latency milestones
 
@@ -124,19 +93,6 @@ GPU completion is the closest reliable native callback currently used; it is lat
 ## macOS pane accessibility projection
 
 Run `scripts/check_accessibility_performance` to build the shipping projection path with Release optimization and measure calling-thread CPU time. The `accessibility-visible-pane-v1` fixture warms for 200 iterations and measures 1,000 projection builds for one and four panes at 5,000 and 65,536 resident rows. It also measures one row whose source text is 4 KiB below the 64 MiB wire payload ceiling. Each measured iteration builds the pane projection from the visible resident slice and reads its text length, insertion range, and insertion bounds. Production attaches that immutable projection when it atomically promotes the matching visible presentation, so accessibility child queries reuse it. The harness records `ResidentRowStore` row visits and UTF-16 units inspected while mapping the horizontal slice, so a document-size or long-line regression is visible even when timing is noisy.
-
-The issue #3321 implementation measurement ran on macOS 26.6.1, build 25G76, with 8 logical CPUs:
-
-| Panes | Resident rows per pane | Rows visited per query | p50 | p95 |
-|---:|---:|---:|---:|---:|
-| 1 | 5,000 | 81 | 0.094 ms | 0.103 ms |
-| 4 | 5,000 | 324 | 0.376 ms | 0.432 ms |
-| 1 | 65,536 | 81 | 0.094 ms | 0.098 ms |
-| 4 | 65,536 | 324 | 0.377 ms | 0.419 ms |
-
-The resident document size does not change row visits or median query time. The 65,536-row four-pane p95 showed scheduler noise, but the exact row counters remain bounded by the exposed 80-row viewport and pane count. The four-pane fixture visits exactly four times the rows and takes about four times the median CPU time of one pane.
-
-The legal-payload long-line case used 67,104,768 UTF-8 source bytes. Each query visited one row and 154 UTF-16 units, with 0.006 ms p50 and 0.006 ms p95. The projection therefore inspects only the horizontally exposed prefix instead of scanning the full source row.
 
 ## Local validation
 

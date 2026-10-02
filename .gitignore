@@ -67,3 +67,9 @@ macos/Tests/Snapshots/
 CLAUDE.md
 autoresearch.*
 go/tui/minga-renderer-go
+
+# Local performance measurements
+/bench/results/
+/performance/results/
+/performance/evidence/
+/docs/performance/
