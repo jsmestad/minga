@@ -606,9 +606,11 @@ defmodule MingaEditor.Commands.Search do
       %{
         state
         | workspace:
-            MingaEditor.Session.State.transition_mode(state.workspace, :command, %CommandState{
-              input: "%s/"
-            })
+            MingaEditor.Session.State.transition_mode(
+              state.workspace,
+              :command,
+              CommandState.new("%s/")
+            )
       }
     end
   )

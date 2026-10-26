@@ -394,7 +394,7 @@ defmodule MingaEditor.Input.InterruptTest do
       vim = %{
         state.workspace.editing
         | mode: :normal,
-          mode_state: %Minga.Mode.CommandState{input: "w"}
+          mode_state: Minga.Mode.CommandState.new("w")
       }
 
       state = %{state | workspace: %{state.workspace | editing: vim}}

@@ -9,7 +9,7 @@ defmodule Minga.Mode.CommandTest do
   @escape 27
 
   # Build a fresh command-mode state (as injected by the editor).
-  defp fresh_state(input \\ ""), do: %CommandState{input: input}
+  defp fresh_state(input \\ ""), do: CommandState.new(input)
 
   # ── Typing characters ────────────────────────────────────────────────────────
 
@@ -158,24 +158,17 @@ defmodule Minga.Mode.CommandTest do
     end
 
     test "arrow up decrements candidate_index" do
-      state = %CommandState{input: "w", candidate_index: 2}
+      state = CommandState.new("w") |> CommandState.move_candidate(2)
       assert {:continue, new_state} = Command.handle_key({57_352, 0}, state)
       assert new_state.candidate_index == 1
       assert new_state.input == "w"
     end
 
     test "arrow down increments candidate_index" do
-      state = %CommandState{input: "w", candidate_index: 0}
+      state = CommandState.new("w")
       assert {:continue, new_state} = Command.handle_key({57_353, 0}, state)
       assert new_state.candidate_index == 1
       assert new_state.input == "w"
-    end
-
-    test "arrow left/right are ignored" do
-      assert {:continue, state} = Command.handle_key({57_350, 0}, fresh_state("w"))
-      assert state.input == "w"
-      assert {:continue, state} = Command.handle_key({57_351, 0}, fresh_state("w"))
-      assert state.input == "w"
     end
 
     test "tab returns accept_command_candidate action" do
@@ -184,10 +177,82 @@ defmodule Minga.Mode.CommandTest do
     end
 
     test "typing a character resets candidate_index to 0" do
-      state = %CommandState{input: "w", candidate_index: 3}
+      state = CommandState.new("w") |> CommandState.move_candidate(3)
       assert {:continue, new_state} = Command.handle_key({?r, 0}, state)
       assert new_state.input == "wr"
       assert new_state.candidate_index == 0
+    end
+  end
+
+  describe "command cursor editing" do
+    test "arrows stop at the input boundaries, including empty input" do
+      for input <- ["", "a", "a😀e\u0301"] do
+        state = fresh_state(input)
+        length = String.length(input)
+        assert state.cursor == length
+        assert {:continue, ^state} = Command.handle_key({57_351, 0}, state)
+
+        start =
+          Enum.reduce(0..length, state, fn _, acc ->
+            {:continue, next} = Command.handle_key({57_350, 0}, acc)
+            next
+          end)
+
+        assert start.input == input
+        assert start.cursor == 0
+        assert {:continue, ^start} = Command.handle_key({57_350, 0}, start)
+        assert {:continue, moved} = Command.handle_key({57_351, 0}, start)
+        assert moved.cursor == min(1, length)
+      end
+    end
+
+    test "typing inserts before the cursor and backspace deletes before it" do
+      state = fresh_state("%s/foo/baz/g")
+      {:continue, state} = Command.handle_key({57_350, 0}, state)
+      {:continue, state} = Command.handle_key({57_350, 0}, state)
+      {:continue, state} = Command.handle_key({127, 0}, state)
+      assert state.input == "%s/foo/ba/g"
+      assert state.cursor == 9
+
+      {:continue, state} = Command.handle_key({?r, 0}, state)
+      assert state.input == "%s/foo/bar/g"
+      assert state.cursor == 10
+
+      assert {:execute_then_transition,
+              [{:execute_ex_command, {:substitute, "foo", "bar", [:global]}}], :normal,
+              %{input: "", cursor: 0}} = Command.handle_key({@enter, 0}, state)
+    end
+
+    test "backspace at the start preserves nonempty input and command mode" do
+      state = fresh_state("w") |> CommandState.move_cursor(:left)
+      assert {:continue, ^state} = Command.handle_key({127, 0}, state)
+    end
+
+    test "movement and deletion use graphemes instead of bytes or codepoints" do
+      state = fresh_state("a👩‍💻e\u0301z")
+      assert state.cursor == 4
+      {:continue, state} = Command.handle_key({57_350, 0}, state)
+      {:continue, state} = Command.handle_key({8, 0}, state)
+      assert state.input == "a👩‍💻z"
+      assert state.cursor == 2
+      {:continue, state} = Command.handle_key({8, 0}, state)
+      assert state.input == "az"
+      assert state.cursor == 1
+    end
+
+    test "a typed combining character joins the preceding grapheme" do
+      state = fresh_state("ez") |> CommandState.move_cursor(:left)
+      {:continue, state} = Command.handle_key({0x0301, 0}, state)
+      assert state.input == "e\u0301z"
+      assert state.cursor == 1
+    end
+
+    test "backspace resets a selected completion after editing" do
+      state = fresh_state("wri") |> CommandState.move_candidate(2)
+      {:continue, state} = Command.handle_key({127, 0}, state)
+      assert state.input == "wr"
+      assert state.cursor == 2
+      assert state.candidate_index == 0
     end
   end
 

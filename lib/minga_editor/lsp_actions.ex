@@ -1224,7 +1224,7 @@ defmodule MingaEditor.LspActions do
 
     # Enter command mode with "rename <placeholder>" pre-filled
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
-    command_state = %CommandState{input: "rename #{placeholder}"}
+    command_state = CommandState.new("rename #{placeholder}")
     vim = VimState.transition(state.workspace.editing, :command, command_state)
     %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, vim)}
   end

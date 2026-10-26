@@ -43,6 +43,7 @@ defmodule MingaEditor.LspActions.RenameTest do
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, result})
       assert state.workspace.editing.mode == :command
       assert state.workspace.editing.mode_state.input == "rename my_func"
+      assert state.workspace.editing.mode_state.cursor == 14
     end
 
     test "prepare with range-only response enters command mode" do
@@ -54,6 +55,7 @@ defmodule MingaEditor.LspActions.RenameTest do
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, result})
       assert state.workspace.editing.mode == :command
       assert state.workspace.editing.mode_state.input == "rename "
+      assert state.workspace.editing.mode_state.cursor == 7
     end
   end
 

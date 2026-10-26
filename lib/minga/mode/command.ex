@@ -15,15 +15,14 @@ defmodule Minga.Mode.Command do
   | `Enter`     | Parse + execute command, transition to Normal       |
   | `Tab`       | Accept selected completion candidate                |
   | `Escape`    | Cancel, transition to Normal                        |
-  | `Backspace` | Delete last character; if empty → Normal            |
-  | `↑` / `↓`  | Navigate completion candidates                     |
-  | Printable   | Append character to the command buffer              |
+  | `Backspace` | Delete before cursor; if empty → Normal              |
+  | `↑` / `↓`  | Navigate completion candidates                      |
+  | `←` / `→`  | Move the cursor within the command input             |
+  | Printable   | Insert character at the command cursor               |
 
   ## State contract
 
-  Command mode reads and writes `:input` (a `String.t()`) in the shared FSM
-  state. The editor injects `input: ""` when transitioning *into* command mode
-  (just as it injects `:visual_anchor` for Visual mode).
+  `Minga.Mode.CommandState` owns the input string and its grapheme cursor position. The editor creates an empty command state when entering command mode.
   """
 
   @behaviour Minga.Mode
@@ -58,33 +57,26 @@ defmodule Minga.Mode.Command do
   def handle_key({@enter, _mods}, %CommandState{input: input, candidate_index: idx} = state)
       when idx != 0 do
     {:execute_then_transition, [{:execute_command_candidate, input, idx}], :normal,
-     %{state | input: ""}}
+     CommandState.replace_input(state, "")}
   end
 
   def handle_key({@enter, _mods}, %CommandState{input: input} = state) do
     parsed = CommandParser.parse(input)
-    {:execute_then_transition, [{:execute_ex_command, parsed}], :normal, %{state | input: ""}}
+
+    {:execute_then_transition, [{:execute_ex_command, parsed}], :normal,
+     CommandState.replace_input(state, "")}
   end
 
   # Escape → cancel, return to Normal without executing
   def handle_key({@escape, _mods}, %CommandState{} = state) do
-    {:transition, :normal, %{state | input: ""}}
+    {:transition, :normal, CommandState.replace_input(state, "")}
   end
 
-  # Backspace (DEL 127 or BS 8) — remove last char; if empty → Normal
-  def handle_key({cp, _mods}, %CommandState{input: input} = state) when cp in [8, 127] do
-    case input do
-      "" ->
-        {:transition, :normal, state}
-
-      _ ->
-        new_input = String.slice(input, 0, String.length(input) - 1)
-
-        if new_input == "" do
-          {:transition, :normal, %{state | input: ""}}
-        else
-          {:continue, %{state | input: new_input}}
-        end
+  # Backspace removes the grapheme before the cursor; empty input returns to Normal.
+  def handle_key({cp, _mods}, %CommandState{} = state) when cp in [8, 127] do
+    case CommandState.backspace(state) do
+      %CommandState{input: ""} = next -> {:transition, :normal, next}
+      next -> {:continue, next}
     end
   end
 
@@ -94,35 +86,37 @@ defmodule Minga.Mode.Command do
   end
 
   # Arrow up → move candidate selection up
-  def handle_key({@arrow_up, _mods}, %CommandState{candidate_index: idx} = state) do
-    {:continue, %{state | candidate_index: idx - 1}}
+  def handle_key({@arrow_up, _mods}, %CommandState{} = state) do
+    {:continue, CommandState.move_candidate(state, -1)}
   end
 
   # Arrow down → move candidate selection down
-  def handle_key({@arrow_down, _mods}, %CommandState{candidate_index: idx} = state) do
-    {:continue, %{state | candidate_index: idx + 1}}
+  def handle_key({@arrow_down, _mods}, %CommandState{} = state) do
+    {:continue, CommandState.move_candidate(state, 1)}
   end
 
   # C-p → move candidate selection up (vim convention)
-  def handle_key({?p, mods}, %CommandState{candidate_index: idx} = state)
+  def handle_key({?p, mods}, %CommandState{} = state)
       when band(mods, @ctrl) != 0 do
-    {:continue, %{state | candidate_index: idx - 1}}
+    {:continue, CommandState.move_candidate(state, -1)}
   end
 
   # C-n → move candidate selection down (vim convention)
-  def handle_key({?n, mods}, %CommandState{candidate_index: idx} = state)
+  def handle_key({?n, mods}, %CommandState{} = state)
       when band(mods, @ctrl) != 0 do
-    {:continue, %{state | candidate_index: idx + 1}}
+    {:continue, CommandState.move_candidate(state, 1)}
   end
 
-  # Arrow left/right — ignored in command mode
-  def handle_key({cp, _mods}, %CommandState{} = state)
-      when cp in [@arrow_left, @arrow_right] do
-    {:continue, state}
+  def handle_key({@arrow_left, _mods}, %CommandState{} = state) do
+    {:continue, CommandState.move_cursor(state, :left)}
   end
 
-  # Printable Unicode characters (no modifiers) → append to input, reset candidate selection
-  def handle_key({codepoint, 0}, %CommandState{input: input} = state)
+  def handle_key({@arrow_right, _mods}, %CommandState{} = state) do
+    {:continue, CommandState.move_cursor(state, :right)}
+  end
+
+  # Printable Unicode characters insert at the cursor and reset completion selection.
+  def handle_key({codepoint, 0}, %CommandState{} = state)
       when codepoint >= 32 and codepoint <= 0x10FFFF do
     char =
       try do
@@ -133,7 +127,7 @@ defmodule Minga.Mode.Command do
 
     case char do
       nil -> {:continue, state}
-      c -> {:continue, %{state | input: input <> c, candidate_index: 0}}
+      c -> {:continue, CommandState.insert_text(state, c)}
     end
   end
 

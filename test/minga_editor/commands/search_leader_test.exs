@@ -28,6 +28,7 @@ defmodule MingaEditor.Commands.SearchLeaderTest do
 
       assert state.workspace.editing.mode == :command
       assert state.workspace.editing.mode_state.input == "%s/"
+      assert state.workspace.editing.mode_state.cursor == 3
     end
   end
 end
