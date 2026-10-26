@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Cursor-left and Backspace no longer scan all preceding buffer text on each action. Line-boundary lookup searches backward in bounded chunks, and grapheme lookup reads only the final line while preserving Unicode and CRLF boundaries.
 - Bounded agent command collection now terminates live producers before closing their Ports on timeout or capture exhaustion. Search and shell commands no longer continue consuming CPU after returning an incomplete result.
 
 <!-- RELEASE_MARKER: new releases are prepended above this line -->
