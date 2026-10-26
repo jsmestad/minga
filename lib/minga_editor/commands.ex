@@ -25,6 +25,7 @@ defmodule MingaEditor.Commands do
   """
 
   alias Minga.Buffer
+  alias Minga.Mode.CommandState
   alias Minga.Extension.CallbackInvoker
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
@@ -841,7 +842,7 @@ defmodule MingaEditor.Commands do
         state
 
       %{label: label} ->
-        new_ms = %{ms | input: label, candidate_index: 0}
+        new_ms = CommandState.replace_input(ms, label)
         Editing.update_mode_state(state, fn _ -> new_ms end)
     end
   end

@@ -397,7 +397,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     test "hydration reapplies substitute preview to the complete source" do
       state = warm(resident_state(300))
       state = perform_presentation_operation(state, :scroll)
-      mode = %Minga.Mode.CommandState{input: "%s/line 221:/replacement/g"}
+      mode = Minga.Mode.CommandState.new("%s/line 221:/replacement/g")
 
       workspace =
         MingaEditor.Session.State.transition_mode(state.editor.workspace, :command, mode)

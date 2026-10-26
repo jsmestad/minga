@@ -11,6 +11,7 @@ defmodule MingaEditor.MinibufferDataTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Mode.CommandState
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.ModalOverlay.CommandCompletion
   alias MingaEditor.State.Prompt, as: PromptState
@@ -88,7 +89,7 @@ defmodule MingaEditor.MinibufferDataTest do
   describe "from_state/1 command mode" do
     test "returns visible struct with correct fields" do
       state = %{
-        workspace: %{editing: %{mode: :command, mode_state: %{input: "wri", candidate_index: 0}}}
+        workspace: %{editing: %{mode: :command, mode_state: CommandState.new("wri")}}
       }
 
       result = MinibufferData.from_state(state)
@@ -100,9 +101,22 @@ defmodule MingaEditor.MinibufferDataTest do
       assert result.cursor_pos == 3
     end
 
+    test "projects the interior grapheme cursor to the frontend" do
+      mode_state = CommandState.new("%s/😀e\u0301/bar") |> CommandState.move_cursor(:left)
+      state = %{workspace: %{editing: %{mode: :command, mode_state: mode_state}}}
+      result = MinibufferData.from_state(state)
+      assert result.input == "%s/😀e\u0301/bar"
+      assert result.cursor_pos == 8
+    end
+
     test "reads candidate_index from mode_state" do
       state = %{
-        workspace: %{editing: %{mode: :command, mode_state: %{input: "qui", candidate_index: 1}}}
+        workspace: %{
+          editing: %{
+            mode: :command,
+            mode_state: CommandState.new("qui") |> CommandState.move_candidate(1)
+          }
+        }
       }
 
       result = MinibufferData.from_state(state)
@@ -126,7 +140,7 @@ defmodule MingaEditor.MinibufferDataTest do
             {:command_completion,
              CommandCompletion.new(filter_text: "wri", candidates: [candidate], total: 1)}
         },
-        workspace: %{editing: %{mode: :command, mode_state: %{input: "wri", candidate_index: 0}}}
+        workspace: %{editing: %{mode: :command, mode_state: CommandState.new("wri")}}
       }
 
       result = MinibufferData.from_state(state)
@@ -136,7 +150,7 @@ defmodule MingaEditor.MinibufferDataTest do
 
     test "generates completion candidates for non-empty input" do
       state = %{
-        workspace: %{editing: %{mode: :command, mode_state: %{input: "sav", candidate_index: 0}}}
+        workspace: %{editing: %{mode: :command, mode_state: CommandState.new("sav")}}
       }
 
       result = MinibufferData.from_state(state)
@@ -148,7 +162,7 @@ defmodule MingaEditor.MinibufferDataTest do
 
     test "empty input returns candidates (popular commands)" do
       state = %{
-        workspace: %{editing: %{mode: :command, mode_state: %{input: "", candidate_index: 0}}}
+        workspace: %{editing: %{mode: :command, mode_state: CommandState.new("")}}
       }
 
       result = MinibufferData.from_state(state)

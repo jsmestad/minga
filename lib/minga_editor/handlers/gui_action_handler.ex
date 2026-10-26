@@ -12,6 +12,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   """
 
   alias Minga.Buffer
+  alias Minga.Mode.CommandState
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -571,7 +572,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
             state
 
           %{label: label} ->
-            new_ms = %{ms | input: label, candidate_index: 0}
+            new_ms = CommandState.replace_input(ms, label)
             set_vim_mode_state(state, new_ms)
         end
 

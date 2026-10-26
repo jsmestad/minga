@@ -390,8 +390,8 @@ struct ProtocolReaderDecodeIsolationTests {
 struct ProtocolEventHandoffTests {
     @Test("handoff keeps immutable connection identity")
     func keepsConnectionIdentity() {
-        let old = ProtocolEventHandoff(connectionID: 41)
-        let replacement = ProtocolEventHandoff(connectionID: 42)
+        let old = ProtocolEventHandoff(connectionID: 41, consume: { _ in })
+        let replacement = ProtocolEventHandoff(connectionID: 42, consume: { _ in })
 
         #expect(old.connectionID == 41)
         #expect(replacement.connectionID == 42)
@@ -407,13 +407,13 @@ struct ProtocolEventHandoffTests {
             Data([OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 9])
         ]
         let frames = try packets.map { try decodeFrame(from: $0) }
-        let handoff = ProtocolEventHandoff()
+        let received = AsyncStream.makeStream(of: DecodedFrameEvent.self)
+        let handoff = ProtocolEventHandoff { received.continuation.yield($0) }
 
         let consumer = Task { @MainActor in
             var opcodes: [UInt8] = []
             var hops: [Int] = []
-            for await event in handoff.events {
-                handoff.releaseAdmission()
+            for await event in received.stream {
                 guard case .frame(let frame) = event else { continue }
                 opcodes.append(contentsOf: frame.commands.map(\.opcode))
                 hops.append(frame.metrics.actorHopCount)
@@ -435,20 +435,25 @@ struct ProtocolEventHandoffTests {
 
     @Test("cancelled handoff cannot deliver stale events")
     func cancelledHandoffDropsStaleDelivery() async throws {
-        let handoff = ProtocolEventHandoff()
+        let receivedEvents = AsyncStream.makeStream(of: DecodedFrameEvent.self)
+        let handoff = ProtocolEventHandoff { receivedEvents.continuation.yield($0) }
         let frame = try decodeFrame(from: Data([OP_SET_WINDOW_BG, 1, 2, 3]))
         #expect(handoff.acquireAdmission())
         handoff.cancel()
         handoff.deliver(frame)
 
+        await withCheckedContinuation { continuation in
+            MainRunLoopAction { continuation.resume() }.enqueue()
+        }
+        receivedEvents.continuation.finish()
         var received = 0
-        for await _ in handoff.events { received += 1 }
+        for await _ in receivedEvents.stream { received += 1 }
         #expect(received == 0)
     }
 
     @Test("cancellation wakes a producer blocked behind the capacity-one slot")
     func cancellationWakesAdmission() async {
-        let handoff = ProtocolEventHandoff()
+        let handoff = ProtocolEventHandoff(consume: { _ in })
         #expect(handoff.acquireAdmission())
 
         let blocked = Task.detached { handoff.acquireAdmission() }

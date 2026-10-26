@@ -134,7 +134,7 @@ defmodule MingaEditor.MinibufferData do
     %__MODULE__{
       visible: true,
       mode: @mode_command,
-      cursor_pos: String.length(input),
+      cursor_pos: ms.cursor,
       prompt: ":",
       input: input,
       context: "",

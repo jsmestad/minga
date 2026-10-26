@@ -348,6 +348,59 @@ defmodule MingaEditor.Input.PasteEventTest do
       assert Buffer.content(search.buffer) == "abc abc"
     end
 
+    test "arrow editing executes the corrected substitute expression" do
+      ctx = start_editor("foo foo\n")
+      send_keys_sync(ctx, ":%s/foo/baz/g")
+      send_key_sync(ctx, 57_350)
+      send_key_sync(ctx, 57_350)
+      send_keys_sync(ctx, "<BS>r")
+      send_key_sync(ctx, 57_351)
+      send_key_sync(ctx, 57_351)
+      send_key_sync(ctx, 13)
+      assert Buffer.content(ctx.buffer) == "bar bar\n"
+      assert editor_state(ctx).workspace.editing.mode == :normal
+    end
+
+    test "command paste inserts at the interior cursor before execution" do
+      ctx = start_editor("foo foo\n")
+      send_keys_sync(ctx, ":%s/foo/baz/g")
+      send_key_sync(ctx, 57_350)
+      send_key_sync(ctx, 57_350)
+      send_key_sync(ctx, 127)
+      state = paste(ctx, "r")
+      assert state.workspace.editing.mode_state.input == "%s/foo/bar/g"
+      assert state.workspace.editing.mode_state.cursor == 10
+      assert Buffer.content(ctx.buffer) == "foo foo\n"
+
+      send_key_sync(ctx, 13)
+      assert Buffer.content(ctx.buffer) == "bar bar\n"
+    end
+
+    test "tab and GUI completion acceptance reposition the cursor at the candidate end" do
+      {[candidate | _], _total} = MingaEditor.MinibufferData.complete_ex_command("wri")
+
+      for selection <- [:tab, :gui] do
+        ctx = start_editor("document")
+        send_keys_sync(ctx, ":wri")
+        send_key_sync(ctx, 57_350)
+
+        state =
+          case selection do
+            :tab ->
+              send_key_sync(ctx, 9)
+
+            :gui ->
+              send(ctx.editor, {:minga_input, {:gui_action, {:minibuffer_select, 0}}})
+              editor_state(ctx)
+          end
+
+        mode_state = state.workspace.editing.mode_state
+        assert mode_state.input == candidate.label
+        assert mode_state.cursor == String.length(candidate.label)
+        assert mode_state.candidate_index == 0
+      end
+    end
+
     test "prompt and picker overlays receive paste without mutating the document" do
       prompt = start_editor("document")
 

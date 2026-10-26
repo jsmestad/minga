@@ -128,12 +128,12 @@ final class BEAMProcessManager {
         proc.standardError = FileHandle.standardError
 
         proc.terminationHandler = { [weak self] process in
-            Task { @MainActor in
+            MainRunLoopAction {
                 self?.handleTermination(
                     status: process.terminationStatus,
                     reason: process.terminationReason
                 )
-            }
+            }.enqueue()
         }
 
         do {
@@ -364,9 +364,11 @@ final class BEAMProcessManager {
             restartTimestamps.append(now)
             exitIntent = .restartScheduled
             NSLog("BEAMProcessManager: restarting in \(delay)s")
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.exitIntent == .restartScheduled else { return }
-                self.start()
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) { [weak self] in
+                MainRunLoopAction {
+                    guard let self, self.exitIntent == .restartScheduled else { return }
+                    self.start()
+                }.enqueue()
             }
         }
     }

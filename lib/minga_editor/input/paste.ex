@@ -28,7 +28,7 @@ defmodule MingaEditor.Input.Paste do
       ) do
     state
     |> Editing.update_mode_state(fn mode_state ->
-      %{mode_state | input: mode_state.input <> text, candidate_index: 0}
+      CommandState.insert_text(mode_state, text)
     end)
     |> KeyDispatch.refresh_command_completion()
   end
