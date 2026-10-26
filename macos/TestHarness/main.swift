@@ -500,7 +500,7 @@ func runDecodeBenchmark() throws {
 
     for size in sizes {
         let decodedFrame = try decodeFrame(from: makeDecodeBenchmarkPacket(size: size), collectOwnedMetrics: true)
-        let handoff = ProtocolEventHandoff()
+        let handoff = ProtocolEventHandoff(consume: { _ in })
         let frame = handoff.deliver(decodedFrame)
         let nanoseconds = decodeBenchmarkNanoseconds(frame.metrics.decodeDuration)
         if baselineNanoseconds == 0 { baselineNanoseconds = max(nanoseconds, 1_000) }

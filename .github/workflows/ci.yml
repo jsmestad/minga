@@ -430,7 +430,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _build/test/lib/minga/priv/minga-test-harness
-          key: swift-harness-${{ runner.os }}-${{ hashFiles('macos/Sources/Protocol/**/*.swift', 'macos/Sources/Renderer/WindowContent.swift', 'macos/TestHarness/main.swift', 'mix/protocol_generator.ex') }}
+          key: swift-harness-${{ runner.os }}-${{ hashFiles('macos/Sources/Protocol/**/*.swift', 'macos/Sources/MainRunLoopAction.swift', 'macos/Sources/Renderer/WindowContent.swift', 'macos/TestHarness/main.swift', 'lib/mix/tasks/swift_harness.ex', 'mix/protocol_generator.ex') }}
 
       - name: Build Swift test harness
         if: steps.harness-cache.outputs.cache-hit != 'true'
