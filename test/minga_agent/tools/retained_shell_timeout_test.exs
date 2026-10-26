@@ -1,5 +1,6 @@
 defmodule MingaAgent.Tools.RetainedShellTimeoutTest do
-  use ExUnit.Case, async: true
+  # The canonical shell callback saves dirty buffers through the global Buffer.Registry.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore

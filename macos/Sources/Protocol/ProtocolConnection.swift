@@ -19,7 +19,6 @@ final class ProtocolConnection {
     private let writeHandle: FileHandle
     private let reader: ProtocolReader
     private let handoff: ProtocolEventHandoff
-    private var consumerTask: Task<Void, Never>?
     private var started = false
     private var stopped = false
 
@@ -52,7 +51,10 @@ final class ProtocolConnection {
         }
         self.encoder = encoder
 
-        let handoff = ProtocolEventHandoff(connectionID: connectionID)
+        let handoff = ProtocolEventHandoff(connectionID: connectionID) { event in
+            guard isCurrent(connectionID) else { return }
+            consume(event, connectionID)
+        }
         self.handoff = handoff
         let decode: Decoder = decoder ?? { [resourcePolicy] data in
             try decodeFrame(from: data, policy: resourcePolicy)
@@ -68,20 +70,13 @@ final class ProtocolConnection {
                 handoff.deliver(failure)
             },
             onDisconnect: {
-                Task { @MainActor in
+                MainRunLoopAction {
                     onReaderDisconnect(encoder, connectionID)
-                }
+                }.enqueue()
             },
             acquireAdmission: { handoff.acquireAdmission() },
             cancelAdmission: { handoff.cancel() }
         )
-        consumerTask = Task { @MainActor in
-            for await event in handoff.events {
-                handoff.releaseAdmission()
-                guard !Task.isCancelled, isCurrent(connectionID) else { continue }
-                consume(event, connectionID)
-            }
-        }
     }
 
     /// Retires the current owner before attempting construction, then reports initialization failure without reviving retired delivery.
@@ -139,8 +134,6 @@ final class ProtocolConnection {
         guard !stopped else { return }
         stopped = true
         handoff.cancel()
-        consumerTask?.cancel()
-        consumerTask = nil
         reader.stop()
         let readHandle = readHandle
         let writeHandle = writeHandle

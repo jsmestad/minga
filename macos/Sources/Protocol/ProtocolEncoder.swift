@@ -160,9 +160,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             if case .paste = action,
                case .payloadTooLarge(let limitBytes, let attemptedBytes) = rejection {
                 let callback = onInputRejection
-                Task { @MainActor in
+                MainRunLoopAction {
                     callback(.pasteTooLarge(limitBytes: limitBytes, attemptedBytes: attemptedBytes))
-                }
+                }.enqueue()
             }
             if case .invalidPayload(let message) = rejection {
                 encodeLog(level: LOG_LEVEL_WARN, message: message)
@@ -1767,9 +1767,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         clearQueue()
 
         let callback = onTransportFailure
-        Task { @MainActor in
+        MainRunLoopAction {
             callback(report)
-        }
+        }.enqueue()
     }
 
     private func bufferedData() -> Data {
