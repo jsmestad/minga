@@ -291,6 +291,9 @@ jobs:
   swift:
     name: Swift (macOS GUI)
     runs-on: macos-15
+    env:
+      # ViewInspector's glass-effect inspectors require the macOS 26 SDK.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
         with:
