@@ -16,6 +16,9 @@ defmodule MingaEditor.Test.ExtensionBlockingEventHandler do
     end
   end
 
+  def handle_editor_event(state, {:editor_action, :theme, theme}),
+    do: {:handled, EditorState.apply_theme(state, theme)}
+
   def handle_editor_event(_state, {:source_unload, _source}), do: exit(:unload_failed)
   def handle_editor_event(_state, _event), do: :not_matched
 end

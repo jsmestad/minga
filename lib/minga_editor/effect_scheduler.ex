@@ -15,6 +15,7 @@ defmodule MingaEditor.EffectScheduler do
   alias MingaEditor.EffectScheduler.State
 
   @default_max_admitted 64
+  @hibernate_after_ms 1_000
 
   @typedoc "Scheduler server reference."
   @type server :: GenServer.server()
@@ -31,8 +32,14 @@ defmodule MingaEditor.EffectScheduler do
     {name, opts} = Keyword.pop(opts, :name)
 
     case name do
-      nil -> GenServer.start_link(__MODULE__, opts)
-      server_name -> GenServer.start_link(__MODULE__, opts, name: server_name)
+      nil ->
+        GenServer.start_link(__MODULE__, opts, hibernate_after: @hibernate_after_ms)
+
+      server_name ->
+        GenServer.start_link(__MODULE__, opts,
+          name: server_name,
+          hibernate_after: @hibernate_after_ms
+        )
     end
   end
 

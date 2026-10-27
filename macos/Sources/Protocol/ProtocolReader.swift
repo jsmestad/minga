@@ -78,64 +78,70 @@ final class ProtocolReader: @unchecked Sendable {
 
     private func readLoop() {
         while running.withLock({ $0 }) {
-            // Reserve the sole reader-to-main slot before reading any payload bytes.
-            guard acquireAdmission() else { return }
-            // Read 4-byte length header.
-            let lenData = input.readData(ofLength: 4)
-            guard lenData.count == 4 else {
-                // stdin closed or short read: BEAM has exited.
-                cancelAdmission()
-                onDisconnect()
-                return
-            }
-
-            let length = Int(lenData[0]) << 24 | Int(lenData[1]) << 16 |
-                         Int(lenData[2]) << 8 | Int(lenData[3])
-
-            guard length > 0, length <= maxPayloadLength else {
-                os_log(.error, log: protocolLog, "Protocol payload length %{public}d outside valid range 1...%{public}d; disconnecting to avoid stream desync", length, maxPayloadLength)
-                cancelAdmission()
-                onDisconnect()
-                return
-            }
-
-            // Read the payload.
-            var payload = Data()
-            var remaining = length
-            while remaining > 0 {
-                let chunk = input.readData(ofLength: remaining)
-                guard !chunk.isEmpty else {
-                    cancelAdmission()
-                    onDisconnect()
-                    return
-                }
-                payload.append(chunk)
-                remaining -= chunk.count
-            }
-
-            os_signpost(.event, log: protocolLog, name: "ProtocolPayloadReceived", "bytes=%{public}d", payload.count)
-            do {
-                let frame = try decoder(payload)
-                os_signpost(
-                    .event,
-                    log: protocolLog,
-                    name: "ProtocolPayloadDecoded",
-                    "bytes=%{public}d copied=%{public}d allocations=%{public}d",
-                    frame.metrics.packetBytes,
-                    frame.metrics.bytesCopied,
-                    frame.metrics.allocations
-                )
-                handler(frame)
-            } catch let failure as DecodedFrameFailure {
-                onDecodeFailure(failure)
-            } catch let error as ProtocolDecodeError {
-                onDecodeFailure(DecodedFrameFailure(
-                    error: error.unwrappedFrameFailure,
-                    envelope: error.frameEnvelope
-                ))
-            } catch {
-                onDecodeFailure(DecodedFrameFailure(error: .malformed, envelope: nil))
-            }
+            // FileHandle returns autoreleased NSData; drain each packet so read buffers do not live until this thread exits.
+            guard autoreleasepool(invoking: readPacket) else { return }
         }
+    }
+
+    private func readPacket() -> Bool {
+        // Reserve the sole reader-to-main slot before reading any payload bytes.
+        guard acquireAdmission() else { return false }
+        // Read 4-byte length header.
+        let lenData = input.readData(ofLength: 4)
+        guard lenData.count == 4 else {
+            // stdin closed or short read: BEAM has exited.
+            cancelAdmission()
+            onDisconnect()
+            return false
+        }
+
+        let length = Int(lenData[0]) << 24 | Int(lenData[1]) << 16 |
+                     Int(lenData[2]) << 8 | Int(lenData[3])
+
+        guard length > 0, length <= maxPayloadLength else {
+            os_log(.error, log: protocolLog, "Protocol payload length %{public}d outside valid range 1...%{public}d; disconnecting to avoid stream desync", length, maxPayloadLength)
+            cancelAdmission()
+            onDisconnect()
+            return false
+        }
+
+        // Read the payload.
+        var payload = Data()
+        var remaining = length
+        while remaining > 0 {
+            let chunk = input.readData(ofLength: remaining)
+            guard !chunk.isEmpty else {
+                cancelAdmission()
+                onDisconnect()
+                return false
+            }
+            payload.append(chunk)
+            remaining -= chunk.count
+        }
+
+        os_signpost(.event, log: protocolLog, name: "ProtocolPayloadReceived", "bytes=%{public}d", payload.count)
+        do {
+            let frame = try decoder(payload)
+            os_signpost(
+                .event,
+                log: protocolLog,
+                name: "ProtocolPayloadDecoded",
+                "bytes=%{public}d copied=%{public}d allocations=%{public}d",
+                frame.metrics.packetBytes,
+                frame.metrics.bytesCopied,
+                frame.metrics.allocations
+            )
+            handler(frame)
+        } catch let failure as DecodedFrameFailure {
+            onDecodeFailure(failure)
+        } catch let error as ProtocolDecodeError {
+            onDecodeFailure(DecodedFrameFailure(
+                error: error.unwrappedFrameFailure,
+                envelope: error.frameEnvelope
+            ))
+        } catch {
+            onDecodeFailure(DecodedFrameFailure(error: .malformed, envelope: nil))
+        }
+        return true
     }
 }

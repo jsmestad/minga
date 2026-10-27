@@ -1,5 +1,5 @@
 defmodule Minga.GitTest do
-  @moduledoc "Tests for the Git delegator and pure calculations."
+  @moduledoc "Tests for Git backend delegation and repository-relative path resolution."
   use ExUnit.Case, async: true
 
   alias Minga.Git
@@ -175,10 +175,40 @@ defmodule Minga.GitTest do
     end
   end
 
-  describe "relative_path (pure calculation)" do
+  describe "relative_path" do
     test "returns path relative to git root" do
       assert Git.relative_path("/home/user/project", "/home/user/project/lib/foo.ex") ==
                "lib/foo.ex"
+    end
+
+    @tag :tmp_dir
+    test "directory aliases still identify the tracked repository path", %{tmp_dir: dir} do
+      root = Path.join(dir, "repository")
+      alias_root = Path.join(dir, "alias")
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.write!(Path.join(root, "lib/app.ex"), "defmodule App, do: nil\n")
+      File.ln_s!("repository", alias_root)
+      {:ok, canonical_root} = Minga.Project.Root.canonical_path(root)
+
+      for {git_root, file} <- [
+            {canonical_root, Path.join(alias_root, "lib/app.ex")},
+            {alias_root, Path.join(canonical_root, "lib/app.ex")},
+            {alias_root, Path.join(alias_root, "lib/app.ex")}
+          ] do
+        assert Git.relative_path(git_root, file) == "lib/app.ex"
+      end
+    end
+
+    @tag :tmp_dir
+    test "new files resolve their existing symlinked parent before a first save", %{tmp_dir: dir} do
+      root = Path.join(dir, "repository")
+      alias_root = Path.join(dir, "alias")
+      File.mkdir_p!(root)
+      File.ln_s!("repository", alias_root)
+      {:ok, canonical_root} = Minga.Project.Root.canonical_path(root)
+
+      assert Git.relative_path(canonical_root, Path.join(alias_root, "new/deep/app.ex")) ==
+               "new/deep/app.ex"
     end
   end
 end

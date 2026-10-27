@@ -15,7 +15,7 @@ defmodule MingaEditor.Extension.EventEffect do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
-  alias MingaEditor.Extension.EventDispatchResult
+  alias MingaEditor.Extension.EventEffect.Result
   alias MingaEditor.Extension.EventDispatcher
   alias MingaEditor.Extension.EventHandler
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
@@ -83,26 +83,30 @@ defmodule MingaEditor.Extension.EventEffect do
   end
 
   @impl true
-  @spec run(t()) :: {:ok, EventDispatchResult.t()}
+  @spec run(t()) :: {:ok, Result.t()}
   def run(%__MODULE__{mode: :ordinary} = effect) do
-    {:ok,
-     EventDispatcher.dispatch(
-       effect.base_state,
-       effect.event,
-       effect.registry,
-       effect.admission
-     )}
+    result =
+      EventDispatcher.dispatch(
+        effect.base_state,
+        effect.event,
+        effect.registry,
+        effect.admission
+      )
+
+    {:ok, Result.from_dispatch(result, effect.base_state)}
   end
 
   def run(%__MODULE__{mode: {:unload, source, token}} = effect) do
-    {:ok,
-     EventDispatcher.dispatch_source_unload(
-       effect.base_state,
-       source,
-       token,
-       effect.registry,
-       effect.admission
-     )}
+    result =
+      EventDispatcher.dispatch_source_unload(
+        effect.base_state,
+        source,
+        token,
+        effect.registry,
+        effect.admission
+      )
+
+    {:ok, Result.from_dispatch(result, effect.base_state)}
   end
 
   @impl true
@@ -110,10 +114,11 @@ defmodule MingaEditor.Extension.EventEffect do
   def apply(
         %EditorState{} = current,
         %Outcome{
-          value: {:completed, %EventDispatchResult{} = result},
+          value: {:completed, %Result{} = result},
           request: %Request{effect: %__MODULE__{base_state: base_state} = effect}
         } = outcome
       ) do
+    result = Result.resolve(result, base_state)
     {state, final_outcome} = commit_result(current, base_state, result, outcome, effect.event)
     reply(effect, unload_reply(result, final_outcome))
     {state, final_outcome}
@@ -141,12 +146,12 @@ defmodule MingaEditor.Extension.EventEffect do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{value: {:completed, %EventDispatchResult{status: status}}})
+  def render?(%Outcome{value: {:completed, %Result{status: status}}})
       when status in [:handled, :callback_failed],
       do: true
 
   def render?(%Outcome{
-        value: {:completed, %EventDispatchResult{status: :not_matched}},
+        value: {:completed, %Result{status: :not_matched}},
         request: %Request{effect: %__MODULE__{mode: {:unload, _source, _token}}}
       }),
       do: true
@@ -158,7 +163,7 @@ defmodule MingaEditor.Extension.EventEffect do
       do: true
 
   def render?(%Outcome{
-        value: {:completed, %EventDispatchResult{status: result_status}},
+        value: {:completed, %Result{status: result_status}},
         request: %Request{effect: %__MODULE__{event: {:editor_action, _action, _arguments}}}
       })
       when result_status in [:not_matched, :callback_failed],
@@ -176,7 +181,7 @@ defmodule MingaEditor.Extension.EventEffect do
   @spec commit_result(
           EditorState.t(),
           EditorState.t(),
-          EventDispatchResult.t(),
+          Result.resolved(),
           Outcome.t(),
           EventHandler.event()
         ) :: {EditorState.t(), Outcome.t()}
@@ -200,15 +205,15 @@ defmodule MingaEditor.Extension.EventEffect do
     end
   end
 
-  @spec result_feedback(EditorState.t(), EventDispatchResult.t(), EventHandler.event()) ::
+  @spec result_feedback(EditorState.t(), Result.resolved(), EventHandler.event()) ::
           EditorState.t()
-  defp result_feedback(state, %EventDispatchResult{status: :callback_failed}, event),
+  defp result_feedback(state, %Result{status: :callback_failed}, event),
     do: interactive_failure(state, event)
 
-  defp result_feedback(state, %EventDispatchResult{status: :not_matched}, event),
+  defp result_feedback(state, %Result{status: :not_matched}, event),
     do: interactive_unavailable(state, event)
 
-  defp result_feedback(state, %EventDispatchResult{}, _event), do: state
+  defp result_feedback(state, %Result{}, _event), do: state
 
   @spec terminal_feedback(EditorState.t(), EventHandler.event(), atom(), term()) ::
           EditorState.t()
@@ -305,16 +310,16 @@ defmodule MingaEditor.Extension.EventEffect do
   @spec bounded_inspect(term()) :: String.t()
   defp bounded_inspect(value), do: inspect(value, limit: 10, printable_limit: 200)
 
-  @spec unload_reply(EventDispatchResult.t(), Outcome.t()) :: :ok | {:error, term()}
+  @spec unload_reply(Result.resolved(), Outcome.t()) :: :ok | {:error, term()}
   defp unload_reply(_result, %Outcome{value: {:stale, reason}}),
     do: {:error, {:extension_unload_stale, reason}}
 
-  defp unload_reply(%EventDispatchResult{status: :callback_failed, failures: failures}, %Outcome{
+  defp unload_reply(%Result{status: :callback_failed, failures: failures}, %Outcome{
          value: {:completed, _result}
        }),
        do: {:error, failures}
 
-  defp unload_reply(%EventDispatchResult{}, %Outcome{value: {:completed, _result}}), do: :ok
+  defp unload_reply(%Result{}, %Outcome{value: {:completed, _result}}), do: :ok
 
   @spec timeout(keyword()) :: pos_integer()
   defp timeout(opts) do

@@ -20,7 +20,7 @@ settings:
 packages:
   ViewInspector:
     url: https://github.com/nalexn/ViewInspector
-    from: "0.10.3"
+    from: "0.10.5"
 
 targets:
   MingaProtocol:

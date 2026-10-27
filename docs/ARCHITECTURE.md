@@ -659,7 +659,7 @@ sequenceDiagram
     FE->>FE: decode model, render colored text
 ```
 
-All 50 grammars are compiled into the Zig binary (`zig/build.zig`). Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.
+Bundled grammars are compiled into the Zig binary (`zig/build.zig`). Queries are embedded via `@embedFile`, compiled when a language is first used, and cached for the parser process lifetime. Production support binaries use Zig's `ReleaseSafe` mode, which keeps runtime safety checks without the Debug allocator overhead.
 
 Users can override queries by placing `.scm` files in `~/.config/minga/queries/{lang}/highlights.scm`.
 
@@ -709,12 +709,14 @@ Git awareness runs as a lightweight per-buffer process (`Minga.Git.Buffer`) unde
 1. Detects the git root via `git rev-parse --show-toplevel`
 2. Fetches the HEAD version of the file via `git show HEAD:<path>`
 3. Splits both the HEAD version and current buffer content into lines
-4. Diffs them in pure Elixir using `List.myers_difference/2` (no external process needed)
+4. Diffs them in pure Elixir using `Minga.Core.Diff.diff_lines/2`, with direct hunks for empty sides and Myers comparisons otherwise
 5. Produces a hunk list and a sign map (line number → `:added` | `:modified` | `:deleted`)
 
 The sign map feeds the gutter renderer. Each line gets a 2-character sign column showing `▎` for added/modified lines and `▁` for deleted lines. Diagnostic signs (errors, warnings) take priority on the same line.
 
-This design avoids shelling out to `git diff` on every keystroke. The diff runs entirely in-memory against cached base content. The only git commands happen at buffer open (to fetch HEAD content) and on explicit stage operations. This matters for AI agent scenarios where edits arrive in rapid bursts.
+Git paths resolve filesystem aliases before deriving the repository-relative path, so a symlinked project does not turn a tracked file into an apparent new file. New and removed files bypass Myers entirely: their single addition or deletion hunk takes linear work instead of building a quadratic diff workspace.
+
+This design avoids shelling out to `git diff` on every keystroke. The diff runs entirely in-memory against cached base content. Git commands refresh the base at buffer open, save, and explicit git operations. This matters for AI agent scenarios where edits arrive in rapid bursts.
 
 When a hunk is staged, the `Git.Buffer` re-fetches HEAD content to rebase its diff. Reverting a hunk splices the original lines back into the buffer content.
 

@@ -140,6 +140,7 @@ defmodule Minga.Extension.DisposableBeam do
       |> Enum.flat_map(&["-pa", &1])
 
     ["+S", "2:2", "+A", "1", "-noshell", "-noinput"] ++
+      release_boot_arguments() ++
       code_paths ++
       [
         "-eval",
@@ -148,6 +149,23 @@ defmodule Minga.Extension.DisposableBeam do
         Atom.to_string(mode),
         request_path
       ]
+  end
+
+  @spec release_boot_arguments() :: [String.t()]
+  defp release_boot_arguments do
+    case {System.get_env("RELEASE_ROOT"), System.get_env("RELEASE_VSN")} do
+      {root, version} when is_binary(root) and is_binary(version) ->
+        [
+          "-boot",
+          Path.join([root, "releases", version, "start_clean"]),
+          "-boot_var",
+          "RELEASE_LIB",
+          Path.join(root, "lib")
+        ]
+
+      _development ->
+        []
+    end
   end
 
   @spec await_exit(port(), timeout(), non_neg_integer()) :: :ok | {:error, run_error()}

@@ -32,17 +32,10 @@
 +swtdcpu very_low
 +swtdio very_low
 
-## ── Memory allocators ───────────────────────────────────────────────
+## ── Memory allocation ──────────────────────────────────────────────
 ##
-## Address-order best fit reduces fragmentation for bursty allocation
-## patterns (render loop builds then discards IO lists every frame).
-+MBas aobf
-
-## Return unused memory carriers to the OS aggressively. An editor
-## should have a small footprint when idle, not cache memory "just
-## in case" like a web server expecting the next request burst.
-+Mea min
-+MBacul 0
+## Keep ERTS's specialized allocators and carrier migration enabled.
+## +Mea min disables those allocators and routes allocations through libc; it does not mean "return unused carriers".
 
 ## Lower the minimum binary virtual heap size. This triggers binary
 ## GC sooner on processes that churn binaries (Editor, Buffer.Process

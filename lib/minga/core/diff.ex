@@ -2,9 +2,7 @@ defmodule Minga.Core.Diff do
   @moduledoc """
   In-memory line diffing and hunk operations.
 
-  Uses `List.myers_difference/2` to compute line-level diffs between
-  two versions of text. Produces hunk structs consumed by git gutter
-  rendering, hunk navigation, AI diff review, and patch generation.
+  Uses `List.myers_difference/2` for nonempty line-level comparisons and direct hunks for whole-file additions and deletions. Produces hunks consumed by git gutter rendering, hunk navigation, AI diff review, and patch generation.
 
   Pure computation with no side effects.
   """
@@ -49,6 +47,34 @@ defmodule Minga.Core.Diff do
   Both inputs should be lists of strings (one per line, without trailing newlines).
   """
   @spec diff_lines([String.t()], [String.t()]) :: [hunk()]
+  def diff_lines([], []), do: []
+
+  def diff_lines([], current_lines) when is_list(current_lines) do
+    [
+      %{
+        type: :added,
+        start_line: 0,
+        count: length(current_lines),
+        old_start: 0,
+        old_count: 0,
+        old_lines: []
+      }
+    ]
+  end
+
+  def diff_lines(base_lines, []) when is_list(base_lines) do
+    [
+      %{
+        type: :deleted,
+        start_line: 0,
+        count: 0,
+        old_start: 0,
+        old_count: length(base_lines),
+        old_lines: base_lines
+      }
+    ]
+  end
+
   def diff_lines(base_lines, current_lines) do
     List.myers_difference(base_lines, current_lines)
     |> build_hunks(0, 0, [])

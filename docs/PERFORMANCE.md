@@ -94,6 +94,35 @@ GPU completion is the closest reliable native callback currently used; it is lat
 
 Run `scripts/check_accessibility_performance` to build the shipping projection path with Release optimization and measure calling-thread CPU time. The `accessibility-visible-pane-v1` fixture warms for 200 iterations and measures 1,000 projection builds for one and four panes at 5,000 and 65,536 resident rows. It also measures one row whose source text is 4 KiB below the 64 MiB wire payload ceiling. Each measured iteration builds the pane projection from the visible resident slice and reads its text length, insertion range, and insertion bounds. Production attaches that immutable projection when it atomically promotes the matching visible presentation, so accessibility child queries reuse it. The harness records `ResidentRowStore` row visits and UTF-16 units inspected while mapping the horizontal slice, so a document-size or long-line regression is visible even when timing is noisy.
 
+## Memory measurement
+
+Measure the complete editing workload, not just buffer text or the renderer's allocation ledger. Record Minga's BEAM, parser, and frontend separately from language servers, then report both Minga-owned memory and the complete process tree. Use the same unmodified language server, project, files, window geometry, display scale, and interactions in each comparison. A language server's initialize response is not proof that project indexing finished; verify a real language request before taking steady-state samples.
+
+Build both pinned revisions through the same `make release-mac` pipeline in isolated worktrees. Force native outputs to rebuild when testing older revisions whose timestamp cache could reuse copied artifacts. Use a non-symlinked disposable project and verify that each tracked workload file loads its expected HEAD content before measurement; report symlink and untracked-file cases separately. Interleave the comparison as A, B, A, B. Require an onscreen window and a native presentation receipt before driving each arm. Exercise buffer switching, typing, saving, scrolling, and an input burst, then verify the original source hashes after removing the typed text.
+
+Verify that bundled extensions loaded, including a registered Git porcelain save callback. A failed isolated compiler produces an artificially lighter editor and is not a healthy-project baseline. If a startup correctness fix is needed to run both revisions, apply it identically to both builds and identify that shared prerequisite separately from the measured memory changes.
+
+On macOS, use `footprint --noCategories --swapped -f bytes` with the frontend, BEAM, and parser PIDs. Sample active post-burst memory and settled memory separately, with three samples per phase, and compare medians across both runs of each revision. An idle-only arm cannot establish a normal-project reduction. Record startup peaks separately. Do not add per-process peaks reached at different times and call that the process-tree peak. `ps` RSS includes clean shared mappings, so it is not interchangeable with physical footprint. Do not force garbage collection, change the project's toolchain, constrain the language server, or run builds during a scored sample.
+
+Use `:erlang.memory/0` to split BEAM-managed memory into processes, code, binaries, and ETS. `Process.info(pid, :memory)` identifies large process heaps; it is not the process's share of OS footprint, and summing binary references across processes double-counts shared binaries. Editor launchers keep ERTS's specialized allocators enabled. The old `+Mea min` preset disabled them rather than returning unused carriers more aggressively.
+
+The effect scheduler hibernates after one second without messages, releasing heap space left by completed work while preserving active requests and timers. The Editor does not inherit that policy. Unchanged extension callback results refer to the request's existing snapshot; changed candidates still cross the boundary and pass the same stale-state check. This avoids a second full-state copy without serializing callbacks or changing their API.
+
+The parser compiles embedded queries only for languages in use. Production builds select Zig `ReleaseSafe`; development builds remain Debug. Compare eager and lazy query loading under the same optimization mode and wait for eager prewarming to finish before attributing its retained memory. A sample taken while that background work is still running understates the old steady-state cost.
+
+The macOS protocol reader drains an autorelease pool after each packet. Its background thread does not run an AppKit event loop, so autoreleased `NSData` from `FileHandle.readData(ofLength:)` otherwise accumulates for the lifetime of the connection. Use `heap -s --noContent PID` to distinguish retained Foundation read storage from resident rows and GPU resources; a bounded render-resource ledger does not account for those temporary buffers.
+
+For native resource ownership, run the optimized production renderer investigation:
+
+```sh
+make release-mac
+export PATH="$PWD/.tools/xcodegen/xcodegen/bin:$PATH"
+MINGA_NATIVE_RENDER_SWIFT_CONDITIONS="MINGA_SNAPSHOT_RENDERER MINGA_TRANSCRIPT_ACCOUNTING" scripts/check_native_render_performance --build /tmp/minga-native-memory
+scripts/check_native_render_performance --investigate /tmp/minga-native-memory /tmp/minga-native-memory.json
+```
+
+`peakRetainedNativeBytes` counts live textures and buffers through weak references; it is not the frontend's physical footprint or Metal driver overhead. Record `maximumInFlightGenerations`, allocation counts, raster uploads, frame CPU percentiles, and dropped frames alongside it. Serial harness results cannot establish a memory reduction after real input bursts: overlapping frames can fill every native resource slot. Require a repeatable process-footprint improvement in the active workload before changing resource-slot policy.
+
 ## Local validation
 
 ```sh
