@@ -54,6 +54,136 @@ struct PresentedTextLayoutTests {
     }
 }
 
+@Suite("Accessibility selection overlay")
+@MainActor
+struct AccessibilitySelectionOverlayTests {
+    private let scale: Float = 2
+    private let rowHeight: Float = 40
+    private let color = SIMD3<Float>(0.9, 0.1, 0.2)
+
+    private func row(_ text: String, at presentationRow: Int, start: Int = 0, originX: CGFloat = 40) -> PresentedTextLayout.Row {
+        let attributed = NSAttributedString(string: text, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)])
+        return PresentedTextLayout.Row(
+            rowIndex: UInt32(clamping: presentationRow), rowID: UInt64(clamping: presentationRow), presentationRow: presentationRow,
+            composedUTF16Start: start, composedUTF16End: start + text.utf16.count,
+            line: CTLineCreateWithAttributedString(attributed), origin: CGPoint(x: originX, y: 0), rect: .zero
+        )
+    }
+
+    /// Device-pixel x of a composed UTF-16 offset, measured directly from the row's CoreText line.
+    private func edge(_ row: PresentedTextLayout.Row, _ utf16: Int) -> Float {
+        Float(row.origin.x + CTLineGetOffsetForStringIndex(row.line, utf16 - row.composedUTF16Start, nil)) * scale
+    }
+
+    private func rect(_ row: PresentedTextLayout.Row, _ start: Int, _ end: Int) -> SIMD4<Float> {
+        let x = edge(row, start)
+        return SIMD4(x, Float(row.presentationRow) * rowHeight, edge(row, end) - x, rowHeight)
+    }
+
+    /// Appends quads in prepared-row order and returns their (x, y, width, height) rectangles.
+    private func rects(
+        _ ranges: [GUIAccessibilityRange], selection: GUISelectionOverlay?, rows: [PresentedTextLayout.Row],
+        yOffset: Float = 0, clipLeft: Float = 80, clipRight: Float = 600, clipTop: Float = 0, clipBottom: Float = 400
+    ) -> [SIMD4<Float>] {
+        let overlay = AccessibilitySelectionOverlay(ranges: ranges, selection: selection, color: color)
+        var quads: [QuadGPU] = []
+        for row in rows {
+            overlay.appendQuads(
+                for: row, y: yOffset + Float(row.presentationRow) * rowHeight, height: rowHeight, scale: scale,
+                clipLeft: clipLeft, clipRight: clipRight, clipTop: clipTop, clipBottom: clipBottom,
+                to: &quads
+            )
+        }
+        #expect(quads.allSatisfy { $0.color == color && $0.alpha == 1 })
+        return quads.map { SIMD4($0.position.x, $0.position.y, $0.size.x, $0.size.y) }
+    }
+
+    @Test("a nil selection paints ranges in input order within a row and command order across rows")
+    func nilSelectionKeepsRangeAndCommandOrder() {
+        let first = row("alpha beta", at: 0)
+        let second = row("gamma", at: 1)
+        let third = row("delta epsilon", at: 2)
+        let ranges = [
+            GUIAccessibilityRange(row: 2, startUTF16: 6, endUTF16: 13),
+            GUIAccessibilityRange(row: 0, startUTF16: 0, endUTF16: 5),
+            GUIAccessibilityRange(row: 2, startUTF16: 0, endUTF16: 5),
+            GUIAccessibilityRange(row: 0, startUTF16: 0, endUTF16: 5),
+            GUIAccessibilityRange(row: 1, startUTF16: 1, endUTF16: 3),
+        ]
+
+        #expect(rects(ranges, selection: nil, rows: [third, first, second]) == [
+            rect(third, 6, 13), rect(third, 0, 5), rect(first, 0, 5), rect(first, 0, 5), rect(second, 1, 3),
+        ])
+    }
+
+    @Test("characterwise rows before the end row extend through the newline and blockwise rows stop at the range")
+    func newlineExtension() {
+        let first = row("one two", at: 0)
+        let last = row("three", at: 1)
+        let ranges = [
+            GUIAccessibilityRange(row: 0, startUTF16: 0, endUTF16: 3),
+            GUIAccessibilityRange(row: 0, startUTF16: 4, endUTF16: 7),
+            GUIAccessibilityRange(row: 1, startUTF16: 0, endUTF16: 2),
+        ]
+        let char = GUISelectionOverlay(type: .char, startRow: 0, startCol: 0, endRow: 1, endCol: 2)
+        let block = GUISelectionOverlay(type: .block, startRow: 0, startCol: 0, endRow: 1, endCol: 2)
+
+        #expect(rects(ranges, selection: char, rows: [first, last]) == [
+            SIMD4(edge(first, 0), 0, 600 - edge(first, 0), rowHeight),
+            SIMD4(edge(first, 4), 0, 600 - edge(first, 4), rowHeight),
+            rect(last, 0, 2),
+        ])
+        #expect(rects(ranges, selection: block, rows: [first, last]) == [rect(first, 0, 3), rect(first, 4, 7), rect(last, 0, 2)])
+    }
+
+    @Test("scrolled and horizontally sliced rows clip to the content rect")
+    func scrollAndClip() {
+        let sliced = row("界abcdefgh", at: 0, start: 12, originX: 0)
+        let below = row("hidden", at: 1)
+        let ranges = [
+            GUIAccessibilityRange(row: 0, startUTF16: 12, endUTF16: 13),
+            GUIAccessibilityRange(row: 0, startUTF16: 12, endUTF16: 17),
+            GUIAccessibilityRange(row: 0, startUTF16: 15, endUTF16: 21),
+            GUIAccessibilityRange(row: 1, startUTF16: 0, endUTF16: 6),
+        ]
+        let clipLeft: Float = 40
+        let clipRight = edge(sliced, 19)
+        #expect(edge(sliced, 13) < clipLeft && edge(sliced, 15) > clipLeft, "fixture must straddle the left clip edge")
+
+        #expect(rects(ranges, selection: nil, rows: [sliced, below], yOffset: -10, clipLeft: clipLeft, clipRight: clipRight, clipBottom: 30) == [
+            SIMD4(clipLeft, 0, edge(sliced, 17) - clipLeft, 30),
+            SIMD4(edge(sliced, 15), 0, clipRight - edge(sliced, 15), 30),
+        ])
+    }
+
+    @Test("combining and non-BMP ranges use CoreText UTF-16 boundaries")
+    func unicodeBoundaries() {
+        let text = row("e\u{301}x😀界z", at: 0)
+        let ranges = [
+            GUIAccessibilityRange(row: 0, startUTF16: 0, endUTF16: 2),
+            GUIAccessibilityRange(row: 0, startUTF16: 3, endUTF16: 5),
+            GUIAccessibilityRange(row: 0, startUTF16: 5, endUTF16: 7),
+        ]
+
+        let quads = rects(ranges, selection: nil, rows: [text])
+        #expect(quads == [rect(text, 0, 2), rect(text, 3, 5), rect(text, 5, 7)])
+        #expect(quads.allSatisfy { $0.z > 0 })
+        #expect(quads[0].x < quads[1].x && quads[1].x < quads[2].x)
+    }
+
+    @Test("empty ranges, linewise selections, and rows without ranges add no quads")
+    func emptyAndLinewise() {
+        let text = row("line", at: 0)
+        let ranges = [GUIAccessibilityRange(row: 0, startUTF16: 0, endUTF16: 4)]
+        let char = GUISelectionOverlay(type: .char, startRow: 0, startCol: 0, endRow: 0, endCol: 4)
+        let line = GUISelectionOverlay(type: .line, startRow: 0, startCol: 0, endRow: 0, endCol: 0)
+
+        #expect(rects([], selection: char, rows: [text]).isEmpty)
+        #expect(rects(ranges, selection: line, rows: [text]).isEmpty)
+        #expect(rects(ranges, selection: nil, rows: [row("overscan", at: -1), row("next", at: 1)]).isEmpty)
+    }
+}
+
 @Suite("Text presentation lifetime")
 @MainActor
 struct TextPresentationLeasesTests {

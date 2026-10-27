@@ -783,6 +783,97 @@ struct TemporalOffscreenMetalTests {
         #expect(outsideDiffCount == 0, "blink changed \(outsideDiffCount) pixels outside the cursor ROI")
     }
 
+    @Test("accessibility ranges paint selection quads through the production frame path")
+    @MainActor
+    func accessibilityRangesPaintSelection() async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
+        let cellW = Float(fontManager.cellWidth)
+        let cellH = Float(fontManager.cellHeight)
+        let cols: UInt16 = 12, rowCount: UInt16 = 3
+        let width = Int((Float(cols) * cellW).rounded(.up)) + 8
+        let height = Int((Float(rowCount) * cellH).rounded(.up)) + 4
+
+        var frameState = FrameState(cols: cols, rows: rowCount)
+        frameState.defaultBg = Self.neutral
+        frameState.totalLineCount = UInt32(rowCount)
+        let themeColors = ThemeColors()
+        themeColors.selectionBgSIMD = SIMD3<Float>(Float(0xE0) / 255, Float(0x10) / 255, Float(0x10) / 255)
+        let gutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: rowCount,
+            isActive: true, contentWidth: cols, cursorLine: 0,
+            lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        let pane = GUICellRect(row: 0, col: 0, width: cols, height: rowCount)
+        let geometry = GUIPaneGeometry(
+            windowId: 1, totalRect: pane, contentRect: pane, textRect: pane,
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: rowCount), clipRect: pane,
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: rowCount, cols: cols, totalLines: UInt32(rowCount), visualRowOffset: 0, totalVisualRows: UInt32(rowCount)),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+            hitRegions: []
+        )
+        let text = String(repeating: " ", count: Int(cols))
+        let rows = (0..<Int(rowCount)).map { bandRow(rowId: UInt64($0), text: text, bg: Self.neutral) }
+
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        guard let renderer = makeRenderer(factories: factories, fontManager: fontManager) else {
+            Issue.record("renderer unavailable"); return
+        }
+
+        func renderFrame(selection: GUISelectionOverlay?, seq: UInt32) async throws -> ReadbackImage? {
+            // Unsorted on purpose: the renderer must still find each row's range.
+            let content = try GUIWindowContent(
+                windowId: 1, fullRefresh: true, cursorVisible: false, cursorRow: 0, cursorCol: 0,
+                cursorShape: .block, rows: rows, selection: selection, searchMatches: [],
+                diagnosticUnderlines: [], documentHighlights: [], paneGeometry: geometry,
+                accessibilitySelectionRanges: [
+                    GUIAccessibilityRange(row: 2, startUTF16: 7, endUTF16: 11),
+                    GUIAccessibilityRange(row: 0, startUTF16: 2, endUTF16: 6),
+                ]
+            )
+            waiter.reset()
+            guard let texture = OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height) else { return nil }
+            let drawable = ReadbackDrawable(texture: texture, drawableID: Int(seq))
+            let outcome = await waiter.awaitOutcome {
+                renderer.render(
+                    frameState: frameState, fontManager: fontManager, windowContents: [1: content],
+                    windowGutters: [1: gutter], themeColors: themeColors,
+                    drawableProvider: { drawable },
+                    viewportSize: CGSize(width: width, height: height), contentScale: 1,
+                    presentationWindowId: 1, presentationInputSeq: seq,
+                    onPresented: { waiter.succeed($0) }
+                )
+            }
+            guard case .presented = outcome else {
+                Issue.record("selection frame \(seq) did not present: \(outcome)")
+                return nil
+            }
+            return await OffscreenReadback.read(texture: texture, queue: queue)
+        }
+
+        func cell(_ image: ReadbackImage, col: Float, row: Float) -> PixelColor {
+            image.pixel(x: Int((col + 0.5) * cellW), y: Int((row + 0.5) * cellH))
+        }
+        let selected = Self.expectedColor(Self.colorA)
+        let neutral = Self.expectedColor(Self.neutral)
+
+        // A nil selection with non-empty ranges paints exactly the ranged cells.
+        guard let ranged = try await renderFrame(selection: nil, seq: 1) else { return }
+        #expect(cell(ranged, col: 4, row: 0).rgbDistanceSquared(to: selected) < 0.02, "row 0 range did not paint")
+        #expect(cell(ranged, col: 9, row: 2).rgbDistanceSquared(to: selected) < 0.02, "row 2 range did not paint")
+        #expect(cell(ranged, col: 0, row: 0).rgbDistanceSquared(to: neutral) < 0.02, "row 0 painted before its range")
+        #expect(cell(ranged, col: 9, row: 0).rgbDistanceSquared(to: neutral) < 0.02, "row 0 painted after its range")
+        #expect(cell(ranged, col: 4, row: 1).rgbDistanceSquared(to: neutral) < 0.02, "a row without ranges painted")
+
+        // Linewise selections paint whole rows through the cell pass and ignore the ranges.
+        let line = GUISelectionOverlay(type: .line, startRow: 1, startCol: 0, endRow: 1, endCol: 0)
+        guard let linewise = try await renderFrame(selection: line, seq: 2) else { return }
+        #expect(cell(linewise, col: 4, row: 1).rgbDistanceSquared(to: selected) < 0.02, "linewise row did not paint")
+        #expect(cell(linewise, col: 4, row: 0).rgbDistanceSquared(to: neutral) < 0.02, "linewise frame painted an accessibility range")
+    }
+
     // MARK: 5. Failure preservation + recovery — a nil drawable preserves the
     // last good presented pixels and snapshot; a later valid frame recovers.
 

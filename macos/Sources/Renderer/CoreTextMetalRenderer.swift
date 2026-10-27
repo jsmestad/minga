@@ -113,6 +113,72 @@ struct PreparedResidentSemanticRow: Sendable {
     let diagnostics: [GUIResidentDiagnostic]
 }
 
+/// Selection ranges indexed by presentation row once per prepared surface and frame.
+struct AccessibilitySelectionOverlay {
+    /// Shares the decoded array when its ranges already follow presentation-row order.
+    private let ranges: [GUIAccessibilityRange]
+    /// Characterwise rows above this row extend to the right clip edge to show the selected newline.
+    private let newlineEndRow: Int?
+    private let color: SIMD3<Float>
+
+    /// Linewise selection ranges are painted by the cell-geometry pass, not this overlay.
+    /// A nil selection still paints its ranges.
+    init(ranges: [GUIAccessibilityRange], selection: GUISelectionOverlay?, color: SIMD3<Float>) {
+        if selection?.type == .line {
+            self.ranges = []
+        } else if zip(ranges, ranges.dropFirst()).allSatisfy({ $0.row <= $1.row }) {
+            self.ranges = ranges
+        } else {
+            self.ranges = ranges.enumerated()
+                .sorted { ($0.element.row, $0.offset) < ($1.element.row, $1.offset) }
+                .map(\.element)
+        }
+        newlineEndRow = selection.flatMap { $0.type == .char ? Int($0.endRow) : nil }
+        self.color = color
+    }
+
+    /// Appends one quad per range on `textRow`, in input order, clipped to the content rect.
+    func appendQuads(
+        for textRow: PresentedTextLayout.Row,
+        y: Float, height: Float, scale: Float,
+        clipLeft: Float, clipRight: Float, clipTop: Float, clipBottom: Float,
+        to quads: inout [QuadGPU]
+    ) {
+        let row = textRow.presentationRow
+        var index = firstIndex(atOrAfter: row)
+        guard index < ranges.count, Int(ranges[index].row) == row,
+              let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: height, top: clipTop, bottom: clipBottom) else { return }
+        let includesNewline = newlineEndRow.map { row < $0 } ?? false
+        while index < ranges.count, Int(ranges[index].row) == row {
+            let range = ranges[index]
+            index += 1
+            let x = max(Float(textRow.x(at: range.startUTF16)) * scale, clipLeft)
+            let right = includesNewline ? clipRight : min(Float(textRow.x(at: range.endUTF16)) * scale, clipRight)
+            guard right > x else { continue }
+            var quad = QuadGPU()
+            quad.position = SIMD2<Float>(x, clipped.y)
+            quad.size = SIMD2<Float>(right - x, clipped.height)
+            quad.color = color
+            quad.alpha = 1
+            quads.append(quad)
+        }
+    }
+
+    private func firstIndex(atOrAfter row: Int) -> Int {
+        var low = 0
+        var high = ranges.count
+        while low < high {
+            let mid = (low + high) / 2
+            if Int(ranges[mid].row) < row {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        return low
+    }
+}
+
 private struct PreparedResidentGuideRow {
     let presentationRow: Int
     let level: UInt16
@@ -865,6 +931,11 @@ final class CoreTextMetalRenderer {
                 // Reuse the shared Metal-free CoreText commands prepared once
                 // at the start of this frame.
                 let preparedRows = preparedSurface.prepared
+                let accessibilitySelection = AccessibilitySelectionOverlay(
+                    ranges: content.accessibilitySelectionRanges,
+                    selection: content.selection,
+                    color: currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
+                )
                 var visibleRowWidths: [Int: Int] = [:]
                 var textRows: [PresentedTextLayout.Row] = []
                 for command in preparedRows.commands {
@@ -886,19 +957,12 @@ final class CoreTextMetalRenderer {
                         rect: CGRect(x: CGFloat(contentColOffset / scale), y: CGFloat(yPos / scale), width: CGFloat((contentRightPx - contentColOffset) / scale), height: CGFloat(displayCellH))
                     )
                     textRows.append(textRow)
-                    for selection in content.accessibilitySelectionRanges where Int(selection.row) == presentationRow && content.selection?.type != .line {
-                        let x = max(Float(textRow.x(at: selection.startUTF16)) * scale, contentColOffset)
-                        let includesNewline = content.selection.map { $0.type == .char && presentationRow < Int($0.endRow) } ?? false
-                        let right = includesNewline ? contentRightPx : min(Float(textRow.x(at: selection.endUTF16)) * scale, contentRightPx)
-                        if right > x, let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) {
-                            var quad = QuadGPU()
-                            quad.position = SIMD2<Float>(x, clipped.y)
-                            quad.size = SIMD2<Float>(right - x, clipped.height)
-                            quad.color = currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
-                            quad.alpha = 1
-                            semanticOverlayQuads.append(quad)
-                        }
-                    }
+                    accessibilitySelection.appendQuads(
+                        for: textRow, y: yPos, height: displayCellH * scale, scale: scale,
+                        clipLeft: contentColOffset, clipRight: contentRightPx,
+                        clipTop: contentTopPx, clipBottom: contentBottomPx,
+                        to: &semanticOverlayQuads
+                    )
 
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
                         visibleRowWidths[presentationRow] = entry.pixelWidth
