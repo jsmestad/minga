@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
+- LSP, diagnostic, and caret position conversion now walks UTF-8 text directly instead of building charlists or re-encoding each character, and UTF-32 position lookup runs in constant stack. Converted positions, clamping, and exact-column errors are unchanged.
 - GUI search indexes now build in one linear pass when indexing into an empty tree, so initial builds and edits that remove every match no longer insert each match-bearing line persistently. Match order, counts, navigation, and incremental edits are unchanged.
 - Full-content undo commits now find the changed byte range with native binary prefix and suffix comparison over bounded 4 KiB chunks instead of a per-byte Elixir scan, without copying either whole document. Patch contents, apply/invert behavior, and cursor restoration are unchanged.
 - Opening or reloading a buffer in which no line starts with a merge conflict marker no longer splits every line or copies the document to build the conflict index. On a 60,000-line, 3.9 MB ASCII document, building the index drops from about 8 ms to 0.3 ms (median) wherever the edit gap sits. Documents with any marker line, including orphan markers, are indexed as before.
