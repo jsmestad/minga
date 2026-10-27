@@ -1203,8 +1203,14 @@ defmodule MingaAgent.SessionPersistenceTest do
   @tag :tmp_dir
   test "restart reconciles an admitted checkpoint without replay and preserves opaque provider content",
        %{tmp_dir: dir} do
+    record_id =
+      "interrupted-checkpoint-" <>
+        Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+
+    on_exit(fn -> ArtifactStores.delete_record(record_id) end)
+
     {:ok, request, continuation} =
-      Continuation.begin_request(Continuation.new(), "request-interrupted", 11, [
+      Continuation.begin_request(Continuation.new(), "request-#{record_id}", 11, [
         ReqLLM.Message.ContentPart.text("inspect"),
         ReqLLM.Message.ContentPart.image(<<0, 255, 10>>, "image/png")
       ])
@@ -1264,7 +1270,7 @@ defmodule MingaAgent.SessionPersistenceTest do
         arguments
       )
 
-    {:ok, artifact_store} = ArtifactStores.ensure_record("interrupted-checkpoint")
+    {:ok, artifact_store} = ArtifactStores.ensure_record(record_id)
 
     {:ok, capture_spec} =
       CaptureSpec.new(
@@ -1284,7 +1290,7 @@ defmodule MingaAgent.SessionPersistenceTest do
     assert :ok =
              SessionStore.save(
                %{
-                 id: "interrupted-checkpoint",
+                 id: record_id,
                  timestamp: "2026-01-01T00:00:00Z",
                  model_name: "test-model",
                  provider_name: "test",
@@ -1303,7 +1309,7 @@ defmodule MingaAgent.SessionPersistenceTest do
         persist?: true
       )
 
-    assert :ok = Session.load_session(session, "interrupted-checkpoint")
+    assert :ok = Session.load_session(session, record_id)
 
     assert Enum.any?(Session.messages(session), fn
              {:system, message, :error} ->
@@ -1313,7 +1319,7 @@ defmodule MingaAgent.SessionPersistenceTest do
                false
            end)
 
-    assert {:ok, recovered} = SessionStore.load("interrupted-checkpoint", dir)
+    assert {:ok, recovered} = SessionStore.load(record_id, dir)
     assert recovered.continuation.tool_checkpoint == nil
     assert Enum.at(recovered.continuation.messages, -2) === assistant
 
