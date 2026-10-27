@@ -13,18 +13,30 @@ defmodule Minga.Buffer.Position do
   @typedoc "An absolute point in the document text."
   @type point :: non_neg_integer()
 
-  @doc "Returns the document point for an editor position."
+  @doc """
+  Returns the document point for an editor position.
+
+  Lines past the final line resolve to the final line. Columns are byte offsets from the line
+  start and are not clamped to the line's end, so a large column can reach into later lines;
+  the result never exceeds the document byte size.
+  """
   @spec point_for(Document.t(), t()) :: point()
   def point_for(%Document{} = doc, {line, column})
       when line >= 0 and column >= 0 do
-    {line_starts, text} = Lines.snapshot(doc)
-    point_in(line_starts, line, column, byte_size(text))
+    min(Lines.start_of(doc, line) + column, Document.content_byte_size(doc))
   end
 
-  @doc "Returns the editor position at a document point."
+  @doc """
+  Returns the editor position at a document point.
+
+  The column is the byte offset from the containing line's start. A newline belongs to the line
+  it ends, and points past the document end resolve to the end of the final line.
+  """
   @spec from_point(Document.t(), point()) :: t()
   def from_point(%Document{} = doc, point) when point >= 0 do
-    doc |> Document.content() |> walk_to_position(point, 0, 0)
+    clamped_point = min(point, Document.content_byte_size(doc))
+    {line, line_start} = Lines.containing(doc, clamped_point)
+    {line, clamped_point - line_start}
   end
 
   @doc "Returns the document point for an editor position against an existing line index."
@@ -66,20 +78,6 @@ defmodule Minga.Buffer.Position do
     case String.next_grapheme_size(remaining) do
       {size, _rest} -> min(clamped_point + size, text_size)
       nil -> clamped_point
-    end
-  end
-
-  @spec walk_to_position(String.t(), point(), non_neg_integer(), non_neg_integer()) :: t()
-  defp walk_to_position(_text, 0, line, column), do: {line, column}
-  defp walk_to_position("", _point, line, column), do: {line, column}
-
-  defp walk_to_position(text, point, line, column) when point > 0 do
-    case text do
-      <<"\n", rest::binary>> ->
-        walk_to_position(rest, point - 1, line + 1, 0)
-
-      <<_byte, rest::binary>> ->
-        walk_to_position(rest, point - 1, line, column + 1)
     end
   end
 

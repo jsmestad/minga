@@ -211,6 +211,33 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.content(buf) == ""
       assert Document.empty?(buf)
     end
+
+    test "deleting a CRLF joins lines" do
+      buf = "a\r\nb\nc" |> Document.new() |> Document.move_to({1, 0}) |> Document.delete_before()
+
+      assert Document.content(buf) == "ab\nc"
+      assert Document.cursor(buf) == {0, 1}
+      assert_consumer_view(buf)
+    end
+
+    test "deleting from inside a CRLF removes only the CR" do
+      buf = "a\r\nb" |> Document.new() |> Document.move_to({0, 2})
+
+      assert Document.cursor_offset(buf) == 2
+
+      buf = Document.delete_before(buf)
+      assert Document.content(buf) == "a\nb"
+      assert Document.cursor(buf) == {0, 1}
+      assert_consumer_view(buf)
+    end
+
+    test "deleting a bare CR keeps the line" do
+      buf = "a\rb\nc" |> Document.new() |> Document.move_to({0, 2}) |> Document.delete_before()
+
+      assert Document.content(buf) == "ab\nc"
+      assert Document.cursor(buf) == {0, 1}
+      assert_consumer_view(buf)
+    end
   end
 
   describe "delete_at/1" do
@@ -234,6 +261,62 @@ defmodule Minga.Buffer.DocumentTest do
     test "deletes unicode character at cursor" do
       buf = Document.new("🥨hi") |> Document.delete_at()
       assert Document.content(buf) == "hi"
+    end
+
+    test "deleting a CRLF at the cursor joins lines" do
+      buf = "a\r\nb\nc" |> Document.new() |> Document.move_to({0, 1}) |> Document.delete_at()
+
+      assert Document.content(buf) == "ab\nc"
+      assert Document.cursor(buf) == {0, 1}
+      assert Document.position_to_offset(buf, {1, 0}) == 3
+      assert Document.offset_to_position(buf, 1) == {0, 1}
+      assert_consumer_view(buf)
+    end
+
+    test "deleting from inside a CRLF removes only the LF" do
+      buf = "a\r\nb" |> Document.new() |> Document.move_to({0, 2})
+
+      assert Document.cursor_offset(buf) == 2
+
+      buf = Document.delete_at(buf)
+      assert Document.content(buf) == "a\rb"
+      assert Document.cursor(buf) == {0, 2}
+      assert_consumer_view(buf)
+    end
+
+    test "deleting a bare CR at the cursor keeps the line" do
+      buf = "a\rb\nc" |> Document.new() |> Document.move_to({0, 1}) |> Document.delete_at()
+
+      assert Document.content(buf) == "ab\nc"
+      assert_consumer_view(buf)
+    end
+  end
+
+  describe "moving across CRLF" do
+    test "moving right over a CRLF enters the next line before editing" do
+      buf = "a\r\nb\nc" |> Document.new() |> Document.move_to({0, 1}) |> Document.move(:right)
+
+      assert Document.cursor(buf) == {1, 0}
+
+      buf = Document.insert_text(buf, "X")
+      assert Document.content(buf) == "a\r\nXb\nc"
+      assert Document.cursor(buf) == {1, 1}
+      assert Document.offset_to_position(buf, 4) == {1, 1}
+      assert Document.position_to_offset(buf, {2, 0}) == 6
+      assert_consumer_view(buf)
+    end
+
+    test "moving left over a CRLF returns to the previous line before deleting" do
+      buf = "ab\r\nc\nd" |> Document.new() |> Document.move_to({1, 0}) |> Document.move(:left)
+
+      assert Document.cursor(buf) == {0, 2}
+
+      buf = Document.delete_before(buf)
+      assert Document.content(buf) == "a\r\nc\nd"
+      assert Document.cursor(buf) == {0, 1}
+      assert Document.offset_to_position(buf, 3) == {1, 0}
+      assert Document.position_to_offset(buf, {2, 0}) == 5
+      assert_consumer_view(buf)
     end
   end
 
@@ -492,6 +575,31 @@ defmodule Minga.Buffer.DocumentTest do
         assert_cache_valid(result)
       end
     end
+
+    property "positions, lines, and line count match the content after edits across CR and LF" do
+      check all(
+              text <- string([?a, ?\r, ?\n, 0xE9], max_length: 30),
+              ops <-
+                list_of(
+                  one_of([
+                    member_of([:left, :right, :up, :down, :delete_before, :delete_at]),
+                    {:insert, member_of(["x", "\r", "\n", "\r\n", "é"])},
+                    {:move_to, integer(0..6), integer(0..8)}
+                  ]),
+                  max_length: 25
+                )
+            ) do
+        ops
+        |> Enum.reduce(Document.new(text), fn
+          {:insert, inserted}, acc -> Document.insert_text(acc, inserted)
+          {:move_to, l, c}, acc -> Document.move_to(acc, {l, c})
+          :delete_before, acc -> Document.delete_before(acc)
+          :delete_at, acc -> Document.delete_at(acc)
+          dir, acc -> Document.move(acc, dir)
+        end)
+        |> assert_consumer_view()
+      end
+    end
   end
 
   # ── Test helpers ──
@@ -535,6 +643,26 @@ defmodule Minga.Buffer.DocumentTest do
 
     assert resolved_ls == expected_ls,
            "line_offsets mismatch: resolved=#{inspect(resolved_ls)}, expected #{inspect(expected_ls)} (raw=#{inspect(ls)}, content=#{inspect(text)})"
+
+    :ok
+  end
+
+  # Checks what callers observe (cursor, line count, lines, and point/position conversion)
+  # against values derived from the document content alone.
+  @spec assert_consumer_view(Document.t()) :: :ok
+  defp assert_consumer_view(%Document{} = doc) do
+    text = Document.content(doc)
+    lines = :binary.split(text, "\n", [:global])
+
+    assert Document.cursor(doc) == byte_offset_to_position(text, Document.cursor_offset(doc))
+    assert Document.line_count(doc) == length(lines)
+    assert Document.lines(doc, 0, length(lines) + 1) == lines
+
+    for point <- 0..byte_size(text) do
+      position = byte_offset_to_position(text, point)
+      assert Document.offset_to_position(doc, point) == position
+      assert Document.position_to_offset(doc, position) == point
+    end
 
     :ok
   end
