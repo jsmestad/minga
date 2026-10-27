@@ -4,8 +4,9 @@ defmodule Minga.Editing.Search.Index do
 
   Match-bearing lines live in a persistent treap augmented with subtree match
   counts. A lazy line offset on each subtree lets edits shift an unchanged
-  suffix without walking it. The index preserves the byte-column semantics of
-  `Minga.Editing.Search`.
+  suffix without walking it. Indexing into an empty tree builds the treap in
+  one linear pass; later edits insert lines persistently. The index preserves
+  the byte-column semantics of `Minga.Editing.Search`.
   """
 
   alias Minga.Buffer.EditDelta
@@ -18,6 +19,9 @@ defmodule Minga.Editing.Search.Index do
           nil
           | {non_neg_integer(), line_matches(), non_neg_integer(), tree_node(), tree_node(),
              integer(), non_neg_integer()}
+
+  # A right-spine node awaiting its right subtree during bulk construction.
+  @typep open_node :: {non_neg_integer(), line_matches(), non_neg_integer(), tree_node()}
 
   @type metrics :: %{
           scanned_lines: non_neg_integer(),
@@ -161,27 +165,69 @@ defmodule Minga.Editing.Search.Index do
           Search.search_opts()
         ) :: {tree_node(), pos_integer(), non_neg_integer(), non_neg_integer()}
   defp index_lines(root, priority, lines, first_line, query, options) do
-    matches =
-      Search.find_all_in_range(lines, query, first_line, options)
-
-    {root, next_priority} =
-      matches
-      |> Enum.chunk_by(& &1.line)
-      |> Enum.reduce({root, priority}, fn line_matches, {tree, next_priority} ->
-        [%Match{line: line_number} | _rest] = line_matches
-
-        compact_matches =
-          line_matches
-          |> Enum.map(fn %Match{col: col, length: length} -> {col, length} end)
-          |> List.to_tuple()
-
-        tree = insert(tree, leaf(line_number, compact_matches, mixed_priority(next_priority)))
-        {tree, next_priority + 1}
-      end)
-
+    matches = Search.find_all_in_range(lines, query, first_line, options)
+    line_groups = Enum.chunk_by(matches, & &1.line)
+    {root, next_priority} = add_line_groups(root, priority, line_groups)
     scanned_bytes = Enum.reduce(lines, 0, &(byte_size(&1) + &2))
     {root, next_priority, length(matches), scanned_bytes}
   end
+
+  # Line groups arrive sorted by line, and each consumes the next priority
+  # counter. An empty tree is built in one linear pass over a right-spine stack;
+  # a populated tree takes one persistent insertion per group. Both paths yield
+  # the same treap because sorted insertion only ever descends the right spine.
+  @spec add_line_groups(tree_node(), pos_integer(), [[Match.t()]]) ::
+          {tree_node(), pos_integer()}
+  defp add_line_groups(nil, priority, line_groups), do: build_spine(line_groups, priority, [])
+
+  defp add_line_groups(root, priority, line_groups) do
+    Enum.reduce(line_groups, {root, priority}, fn line_matches, {tree, next_priority} ->
+      {line, compact_matches} = compact_line(line_matches)
+      tree = insert(tree, leaf(line, compact_matches, mixed_priority(next_priority)))
+      {tree, next_priority + 1}
+    end)
+  end
+
+  @spec compact_line([Match.t(), ...]) :: {non_neg_integer(), line_matches()}
+  defp compact_line([%Match{line: line} | _rest] = line_matches) do
+    compact_matches =
+      line_matches
+      |> Enum.map(fn %Match{col: col, length: length} -> {col, length} end)
+      |> List.to_tuple()
+
+    {line, compact_matches}
+  end
+
+  # The spine holds open right-spine nodes as `{line, matches, priority, left}`,
+  # deepest first. Their right subtrees are only known once a lower-priority
+  # line arrives or the input ends, so each node is finalized exactly once.
+  @spec build_spine([[Match.t()]], pos_integer(), [open_node()]) ::
+          {tree_node(), pos_integer()}
+  defp build_spine([], priority, spine), do: {close_spine(spine, nil), priority}
+
+  defp build_spine([line_matches | rest], priority, spine) do
+    {line, compact_matches} = compact_line(line_matches)
+    node_priority = mixed_priority(priority)
+    {spine, left} = pop_greater(spine, node_priority, nil)
+    build_spine(rest, priority + 1, [{line, compact_matches, node_priority, left} | spine])
+  end
+
+  # Strictly greater: an equal-priority older line stays above the newer one,
+  # matching `insert/2`, which only rotates a node up past a greater priority.
+  @spec pop_greater([open_node()], non_neg_integer(), tree_node()) ::
+          {[open_node()], tree_node()}
+  defp pop_greater([{line, matches, open_priority, left} | rest], priority, right)
+       when open_priority > priority do
+    pop_greater(rest, priority, make_node(line, matches, open_priority, left, right, 0))
+  end
+
+  defp pop_greater(spine, _priority, right), do: {spine, right}
+
+  @spec close_spine([open_node()], tree_node()) :: tree_node()
+  defp close_spine([], right), do: right
+
+  defp close_spine([{line, matches, priority, left} | rest], right),
+    do: close_spine(rest, make_node(line, matches, priority, left, right, 0))
 
   @spec apply_delta(EditDelta.t(), tree_node()) :: tree_node()
   defp apply_delta(
