@@ -6,6 +6,16 @@ defmodule Minga.Buffer.ConflictIndexTest do
   alias Minga.Buffer.Operation
   alias Minga.Git.MergeConflict
 
+  @conflict_lines [
+    "<<<<<<< HEAD",
+    "ours",
+    "||||||| base",
+    "common",
+    "=======",
+    "theirs",
+    ">>>>>>> branch"
+  ]
+
   test "indexes two-way and diff3 conflicts without retaining side text" do
     content =
       Enum.join(
@@ -86,6 +96,60 @@ defmodule Minga.Buffer.ConflictIndexTest do
     assert ConflictIndex.count(index) == 1
   end
 
+  test "an orphan marker split by the gap stays indexed until later edits complete it" do
+    for {marker_line, kind} <- [{0, :start}, {2, :base}, {4, :separator}, {6, :end}],
+        marker <- [Enum.at(@conflict_lines, marker_line)],
+        gap <- orphan_gap_positions(marker_line, marker) do
+      lines = List.replace_at(List.duplicate("plain", 7), marker_line, marker)
+      document = lines |> Enum.join("\n") |> Document.new() |> Document.move_to(gap)
+      assert byte_size(document.before) == gap_offset(lines, gap)
+      index = ConflictIndex.new(document)
+      assert index == %ConflictIndex{markers: [{marker_line, kind}], entries: []}
+
+      {document, index} =
+        0..6
+        |> Enum.reject(&(&1 == marker_line))
+        |> Enum.reduce({document, index}, fn line, {document, index} ->
+          {:edited, next, delta} =
+            Operation.replace_lines(document, line, line, Enum.at(@conflict_lines, line))
+
+          {next, ConflictIndex.apply_edit(index, next, delta)}
+        end)
+
+      content = Document.content(document)
+      assert content == Enum.join(@conflict_lines, "\n")
+      assert [entry] = ConflictIndex.entries(index)
+
+      assert {entry.start_line, entry.base_marker_line, entry.separator_line, entry.end_line} ==
+               {0, 2, 4, 6}
+
+      assert [MergeConflict.region_from_entry(content, entry)] == MergeConflict.parse(content)
+    end
+  end
+
+  test "marker prefixes inside lines or split by the gap without a line start are not markers" do
+    lines = ["text with <<<<<<< inside", " ||||||| indented", "ends with =======", ">>>>>> short"]
+    content = Enum.join(lines, "\n")
+    assert MergeConflict.parse(content) == []
+
+    for {text, line} <- Enum.with_index(lines), column <- 0..byte_size(text) do
+      document = content |> Document.new() |> Document.move_to({line, column})
+      assert byte_size(document.before) == gap_offset(lines, {line, column})
+      assert ConflictIndex.new(document) == %ConflictIndex{markers: [], entries: []}
+    end
+  end
+
+  test "new index on a marker-free document skips per-line marker classification" do
+    plain = Enum.map_join(1..20_000, "\n", &"plain line #{&1}")
+    {head, tail} = plain |> String.split("\n") |> Enum.split(10_000)
+    with_orphan = Enum.join(head ++ [">>>>>>> orphan"] ++ tail, "\n")
+
+    plain_cost = new_index_reductions(plain)
+    orphan_cost = new_index_reductions(with_orphan)
+
+    assert plain_cost * 10 < orphan_cost
+  end
+
   test "editing inside a very large conflict retains a lightweight entry" do
     side = Enum.map_join(1..100_000, "\n", &"line #{&1}")
     document = Document.new("<<<<<<< HEAD\n#{side}\n=======\ntheirs\n>>>>>>> branch")
@@ -159,6 +223,16 @@ defmodule Minga.Buffer.ConflictIndexTest do
   defp conflict_with_padding(line_count) do
     padding = Enum.map_join(1..line_count, "\n", &"plain #{&1}")
     padding <> "\n" <> conflict_with_body(1)
+  end
+
+  # Every byte boundary of the marker line, plus the boundary before its newline.
+  defp orphan_gap_positions(line, marker) do
+    before_newline = if line > 0, do: [{line - 1, byte_size("plain")}], else: []
+    before_newline ++ for(column <- 0..byte_size(marker), do: {line, column})
+  end
+
+  defp gap_offset(lines, {line, column}) do
+    lines |> Enum.take(line) |> Enum.map(&(byte_size(&1) + 1)) |> Enum.sum() |> Kernel.+(column)
   end
 
   defp insert(document, index, position, text) do

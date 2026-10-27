@@ -18,11 +18,23 @@ defmodule Minga.Buffer.ConflictIndex do
 
   @type t :: %__MODULE__{markers: [marker()], entries: [Entry.t()]}
 
-  @doc "Builds the initial index from a document."
+  @marker_prefixes [start: "<<<<<<<", base: "|||||||", separator: "=======", end: ">>>>>>>"]
+  @line_start_marker_patterns for {_kind, prefix} <- @marker_prefixes, do: "\n" <> prefix
+  @marker_prefix_bytes 7
+
+  @doc """
+  Builds the initial index from a document.
+
+  Documents where no line starts with a marker prefix return an empty index without splitting lines.
+  """
   @spec new(Document.t()) :: t()
   def new(%Document{} = document) do
-    markers = document |> all_lines() |> marker_lines(0)
-    %__MODULE__{markers: markers, entries: parse_entries(document, markers)}
+    if marker_line?(document) do
+      markers = document |> all_lines() |> marker_lines(0)
+      %__MODULE__{markers: markers, entries: parse_entries(document, markers)}
+    else
+      %__MODULE__{markers: [], entries: []}
+    end
   end
 
   @doc "Updates the index after one edit."
@@ -132,6 +144,26 @@ defmodule Minga.Buffer.ConflictIndex do
     end
   end
 
+  # Search the gap halves in place; only the small boundary window may need a copy.
+  # Separate single-pattern searches avoid the per-byte cost of the multi-pattern matcher.
+  @spec marker_line?(Document.t()) :: boolean()
+  defp marker_line?(document) do
+    size = Document.content_byte_size(document)
+    gap = Document.cursor_offset(document)
+    window_before = min(gap, @marker_prefix_bytes)
+    window_size = window_before + min(size - gap, @marker_prefix_bytes)
+    first_bytes = Document.slice_byte_range(document, 0, min(size, @marker_prefix_bytes))
+
+    marker_kind(first_bytes) != nil or
+      line_start_marker?(Document.slice_byte_range(document, 0, gap)) or
+      line_start_marker?(Document.slice_byte_range(document, gap, size - gap)) or
+      line_start_marker?(Document.slice_byte_range(document, gap - window_before, window_size))
+  end
+
+  @spec line_start_marker?(binary()) :: boolean()
+  defp line_start_marker?(segment),
+    do: Enum.any?(@line_start_marker_patterns, &(:binary.match(segment, &1) != :nomatch))
+
   @spec all_lines(Document.t()) :: [String.t()]
   defp all_lines(document), do: Lines.slice(document, 0, Document.line_count(document))
 
@@ -161,9 +193,9 @@ defmodule Minga.Buffer.ConflictIndex do
   end
 
   @spec marker_kind(String.t()) :: marker_kind() | nil
-  defp marker_kind("<<<<<<<" <> _rest), do: :start
-  defp marker_kind("|||||||" <> _rest), do: :base
-  defp marker_kind("=======" <> _rest), do: :separator
-  defp marker_kind(">>>>>>>" <> _rest), do: :end
+  for {kind, prefix} <- @marker_prefixes do
+    defp marker_kind(unquote(prefix) <> _rest), do: unquote(kind)
+  end
+
   defp marker_kind(_line), do: nil
 end

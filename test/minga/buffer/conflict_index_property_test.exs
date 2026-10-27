@@ -6,8 +6,8 @@ defmodule Minga.Buffer.ConflictIndexPropertyTest do
   alias Minga.Git.MergeConflict
 
   property "marker indexing preserves the full parser's interpretation of malformed and nested blocks" do
-    check all(lines <- marker_lines()) do
-      document = Document.new(Enum.join(lines, "\n"))
+    check all(lines <- marker_lines(), gap <- gap()) do
+      document = lines |> Enum.join("\n") |> Document.new() |> place_gap(gap)
       assert_matches_parser(document, ConflictIndex.new(document))
     end
   end
@@ -15,9 +15,10 @@ defmodule Minga.Buffer.ConflictIndexPropertyTest do
   property "inserting and replacing lines preserves conflict interpretation after every edit" do
     check all(
             lines <- marker_lines(),
+            gap <- gap(),
             operations <- StreamData.list_of(edit(), min_length: 1, max_length: 25)
           ) do
-      document = Document.new(Enum.join(lines, "\n"))
+      document = lines |> Enum.join("\n") |> Document.new() |> place_gap(gap)
       index = ConflictIndex.new(document)
 
       Enum.reduce(operations, {document, index}, fn operation, {document, index} ->
@@ -29,8 +30,49 @@ defmodule Minga.Buffer.ConflictIndexPropertyTest do
     end
   end
 
+  property "documents without line-start markers index exactly like a marker-free parse" do
+    check all(lines <- StreamData.list_of(non_marker_line(), max_length: 45), gap <- gap()) do
+      document = lines |> Enum.join("\n") |> Document.new() |> place_gap(gap)
+      index = ConflictIndex.new(document)
+      assert index == %ConflictIndex{markers: [], entries: []}
+      assert_matches_parser(document, index)
+    end
+  end
+
   defp marker_lines do
     StreamData.list_of(line(), max_length: 45)
+  end
+
+  defp non_marker_line do
+    StreamData.member_of([
+      "<<<<<< partial",
+      "====== partial",
+      " ||||||| indented",
+      "\t>>>>>>> tabbed",
+      "text with <<<<<<< inside",
+      "ends with =======",
+      "café 世界",
+      "",
+      "normal line"
+    ])
+  end
+
+  defp gap do
+    StreamData.tuple({StreamData.integer(0..100), StreamData.integer(0..100)})
+  end
+
+  # Moves the gap to a codepoint boundary so `before`/`after` can split any marker.
+  defp place_gap(document, {line_seed, column_seed}) do
+    line = rem(line_seed, Document.line_count(document))
+    boundaries = document |> Lines.fetch(line) |> codepoint_boundaries()
+    Document.move_to(document, {line, Enum.at(boundaries, rem(column_seed, length(boundaries)))})
+  end
+
+  defp codepoint_boundaries(text) do
+    text
+    |> String.codepoints()
+    |> Enum.scan(0, &(byte_size(&1) + &2))
+    |> then(&[0 | &1])
   end
 
   defp line do
