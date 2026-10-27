@@ -310,6 +310,14 @@ defmodule Minga.MixProject do
 
   @spec clean_release(Mix.Release.t()) :: Mix.Release.t()
   defp clean_release(release) do
+    build_path = Path.expand(Mix.Project.build_path())
+    relative_path = Path.relative_to(Path.expand(release.path), build_path)
+
+    if relative_path in [".", ".."] or Path.type(relative_path) == :absolute or
+         String.starts_with?(relative_path, "../") do
+      Mix.raise("Release output must be inside #{build_path}; refusing to clean #{release.path}")
+    end
+
     # --overwrite replaces current versions but leaves obsolete versions alongside them.
     File.mkdir_p!(release.path)
 

@@ -5,8 +5,25 @@ defmodule Minga.ReleaseTest do
   @native_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner)
   @resources ~w(queries/elixir/highlights.scm extensions/example/extension.ex tree_sitter/parser.h tutor.txt)
 
+  setup %{tmp_dir: external_dir} do
+    dir = Path.join([Mix.Project.build_path(), "release-tests", Path.basename(external_dir)])
+    on_exit(fn -> File.rm_rf!(dir) end)
+    %{tmp_dir: dir, external_dir: external_dir}
+  end
+
   for name <- [:minga, :minga_macos] do
     @release_name name
+
+    test "#{name} refuses shared output paths without deleting their contents", %{
+      external_dir: dir
+    } do
+      release = %{release(@release_name, dir) | path: dir}
+      files = Enum.map(~w(bin/tool lib/other-1.0/data), &write_file(dir, &1))
+      [clean | _] = steps(@release_name)
+
+      assert_raise Mix.Error, ~r/Release output must be inside/, fn -> clean.(release) end
+      for file <- files, do: assert(File.read!(file) == "runtime asset")
+    end
 
     test "#{name} starts assembly without previous runtime or application versions", %{
       tmp_dir: dir
