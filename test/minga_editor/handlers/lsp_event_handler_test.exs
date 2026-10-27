@@ -1299,6 +1299,59 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       refute Map.has_key?(new_state.lsp.semantic_tokens, buffer)
     end
 
+    test "empty semantic token response at the requested revision clears the accepted layer" do
+      state = file_buffer_state("hello\n")
+      buffer = state.workspace.buffers.active
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      state = seed_semantic_layer(state, buffer)
+      seeded_revision = Map.fetch!(state.lsp.semantic_token_revisions, buffer)
+      ref = make_ref()
+      state = track_pending_request(state, ref, semantic_request(client, buffer))
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => []}}})
+
+      assert effects == [:render_now]
+      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+      version = Minga.Buffer.version(buffer)
+      assert Map.fetch!(new_state.lsp.semantic_tokens, buffer) == {version, {}, {}}
+      refute Map.fetch!(new_state.lsp.semantic_token_revisions, buffer) == seeded_revision
+    end
+
+    test "empty semantic token responses for stale, dead, or superseded requests are ignored" do
+      invalidations = [
+        fn buffer, _client -> :ok = BufferProcess.insert_text(buffer, "!") end,
+        fn buffer, _client ->
+          monitor = Process.monitor(buffer)
+          Process.exit(buffer, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^buffer, :killed}
+        end,
+        fn buffer, client ->
+          Minga.LSP.SyncServer.put_clients(buffer, [start_fake_lsp_client(), client])
+        end
+      ]
+
+      for invalidate <- invalidations do
+        state = file_buffer_state("hello\n")
+        buffer = state.workspace.buffers.active
+        client = start_fake_lsp_client()
+        register_lsp_client(buffer, client)
+        state = seed_semantic_layer(state, buffer)
+        ref = make_ref()
+        state = track_pending_request(state, ref, semantic_request(client, buffer))
+        invalidate.(buffer, client)
+
+        {new_state, effects} =
+          LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"data" => []}}})
+
+        assert effects == [:render_now]
+        assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
+        assert new_state.lsp.semantic_tokens == state.lsp.semantic_tokens
+        assert new_state.lsp.semantic_token_revisions == state.lsp.semantic_token_revisions
+      end
+    end
+
     test "malformed semantic token response is ignored without crashing" do
       state = file_buffer_state("hello\n")
       buffer = state.workspace.buffers.active
@@ -1805,6 +1858,20 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   defp semantic_request(client, buffer),
     do:
       {:semantic_tokens, client, buffer, Minga.Buffer.version(buffer), :utf16, {["variable"], []}}
+
+  defp seed_semantic_layer(state, buffer) do
+    %{
+      state
+      | lsp:
+          LSPState.accept_semantic_tokens(
+            state.lsp,
+            buffer,
+            Minga.Buffer.version(buffer),
+            ["@lsp.type.variable"],
+            [Minga.Language.Highlight.Span.new(0, 5, 0)]
+          )
+    }
+  end
 
   defp put_parser_highlight(state, buffer, names, spans) do
     %{

@@ -79,6 +79,16 @@ defmodule MingaEditor.SemanticTokenSync do
 
   def handle_response(state, _client, _buffer, _version, _encoding, _legend, _other), do: state
 
+  defp accept_tokens(state, buffer, version, _encoding, []) do
+    case safe_version(buffer) do
+      ^version ->
+        %{state | lsp: LSPState.accept_semantic_tokens(state.lsp, buffer, version, [], [])}
+
+      _ ->
+        state
+    end
+  end
+
   defp accept_tokens(state, buffer, version, encoding, tokens) do
     case safe_content_with_version(buffer) do
       {:ok, content, ^version} ->
@@ -137,6 +147,12 @@ defmodule MingaEditor.SemanticTokenSync do
 
   defp safe_encoding(client) do
     Client.encoding(client)
+  catch
+    :exit, _ -> nil
+  end
+
+  defp safe_version(buffer) do
+    Buffer.version(buffer)
   catch
     :exit, _ -> nil
   end
