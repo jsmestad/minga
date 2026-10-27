@@ -2,10 +2,28 @@ defmodule Minga.Core.Unicode do
   @moduledoc """
   Byte ↔ grapheme conversion utilities for UTF-8 text.
 
-  Pure string functions for converting between byte offsets and grapheme
-  indices, computing display widths, and navigating grapheme boundaries.
+  Pure string functions for checking UTF-8 well-formedness, converting between byte offsets and grapheme indices, computing display widths, and navigating grapheme boundaries.
   Used by the buffer, editing, and rendering domains.
   """
+
+  # ── Well-formedness ───────────────────────────────────────────────────────
+
+  @doc """
+  Returns whether `text` is well-formed UTF-8.
+
+  Gives the same answer as `String.valid?/1` for every binary: overlong encodings, surrogates, code points above U+10FFFF, stray continuation bytes, and truncated sequences are invalid; noncharacters, unassigned code points, BOMs, and NUL are valid.
+  Only binaries are accepted; chardata lists raise `FunctionClauseError`.
+
+  ## Examples
+
+      iex> Minga.Core.Unicode.valid_utf8?("café 🥨")
+      true
+      iex> Minga.Core.Unicode.valid_utf8?(<<0xC0, 0x80>>)
+      false
+  """
+  @spec valid_utf8?(binary()) :: boolean()
+  def valid_utf8?(text) when is_binary(text),
+    do: is_binary(:unicode.characters_to_binary(text, :utf8))
 
   # ── Grapheme table ────────────────────────────────────────────────────────
 

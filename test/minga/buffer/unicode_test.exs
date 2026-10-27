@@ -1,7 +1,144 @@
 defmodule Minga.Core.UnicodeTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Core.Unicode
+
+  # ── valid_utf8?/1 ─────────────────────────────────────────────────────────
+
+  describe "valid_utf8?/1" do
+    property "agrees with String.valid?/1 on arbitrary binaries" do
+      check all(bytes <- StreamData.binary(max_length: 64)) do
+        assert Unicode.valid_utf8?(bytes) == String.valid?(bytes)
+      end
+    end
+
+    property "accepts every valid Unicode string" do
+      check all(text <- StreamData.string(:utf8, max_length: 64)) do
+        assert Unicode.valid_utf8?(text)
+      end
+    end
+
+    property "agrees with String.valid?/1 on every byte prefix of valid text" do
+      check all(
+              text <- StreamData.string(:utf8, min_length: 1, max_length: 32),
+              cut <- StreamData.integer(0..byte_size(text))
+            ) do
+        prefix = binary_part(text, 0, cut)
+        assert Unicode.valid_utf8?(prefix) == String.valid?(prefix)
+      end
+    end
+
+    property "agrees with String.valid?/1 on multibyte-shaped sequences" do
+      check all(
+              valid_prefix <- StreamData.string(:utf8, max_length: 8),
+              lead <- StreamData.integer(0xC0..0xFF),
+              continuations <- StreamData.list_of(StreamData.integer(0x80..0xBF), max_length: 4),
+              valid_suffix <- StreamData.string(:utf8, max_length: 8)
+            ) do
+        bytes = valid_prefix <> :erlang.list_to_binary([lead | continuations]) <> valid_suffix
+        assert Unicode.valid_utf8?(bytes) == String.valid?(bytes)
+      end
+    end
+
+    property "agrees with String.valid?/1 on valid text spliced with raw bytes" do
+      check all(
+              parts <-
+                StreamData.list_of(
+                  StreamData.one_of([
+                    StreamData.string(:utf8, max_length: 8),
+                    StreamData.binary(max_length: 4)
+                  ]),
+                  max_length: 8
+                )
+            ) do
+        bytes = IO.iodata_to_binary(parts)
+        assert Unicode.valid_utf8?(bytes) == String.valid?(bytes)
+      end
+    end
+
+    test "accepts well-formed text including noncharacters, unassigned code points, BOM, and NUL" do
+      for text <- [
+            "",
+            "plain ascii",
+            "café",
+            "日本語",
+            "🥨👩‍👩‍👧",
+            <<0xEF, 0xB7, 0x90>>,
+            <<0xEF, 0xBF, 0xBE>>,
+            <<0xEF, 0xBF, 0xBF>>,
+            <<0xF0, 0x9F, 0xBF, 0xBE>>,
+            <<0xCD, 0xB8>>,
+            <<0xEF, 0xBB, 0xBF, "text">>,
+            <<0>>,
+            <<"a", 0, "b">>,
+            <<0xED, 0x9F, 0xBF>>,
+            <<0xEE, 0x80, 0x80>>,
+            <<0xF4, 0x8F, 0xBF, 0xBF>>
+          ] do
+        assert String.valid?(text), "fixture should be valid: #{inspect(text, base: :hex)}"
+        assert Unicode.valid_utf8?(text), "rejected valid #{inspect(text, base: :hex)}"
+      end
+    end
+
+    test "rejects overlongs, surrogates, out-of-range code points, stray continuations, and truncations" do
+      for bytes <- [
+            <<0xC0, 0x80>>,
+            <<0xC1, 0xBF>>,
+            <<0xE0, 0x80, 0x80>>,
+            <<0xE0, 0x9F, 0xBF>>,
+            <<0xF0, 0x80, 0x80, 0x80>>,
+            <<0xF0, 0x8F, 0xBF, 0xBF>>,
+            <<0xED, 0xA0, 0x80>>,
+            <<0xED, 0xBF, 0xBF>>,
+            <<0xF4, 0x90, 0x80, 0x80>>,
+            <<0xF5, 0x80, 0x80, 0x80>>,
+            <<0xFF>>,
+            <<0x80>>,
+            <<0xBF>>,
+            <<"a", 0x80, "b">>,
+            <<"a", 0xE4, 0xB8, "b">>,
+            <<"abc", 0xE4, 0xB8>>,
+            <<"abc", 0xF0, 0x9F, 0x98>>,
+            <<0xC3>>
+          ] do
+        refute String.valid?(bytes), "fixture should be invalid: #{inspect(bytes, base: :hex)}"
+        refute Unicode.valid_utf8?(bytes), "accepted invalid #{inspect(bytes, base: :hex)}"
+      end
+    end
+
+    test "rejects an invalid byte after a large valid prefix" do
+      prefix = String.duplicate("abc 日本 🥨\n", 50_000)
+
+      assert Unicode.valid_utf8?(prefix)
+      refute Unicode.valid_utf8?(prefix <> <<0xFF>>)
+      refute Unicode.valid_utf8?(prefix <> <<0xF0, 0x9F, 0x98>>)
+      refute Unicode.valid_utf8?(prefix <> <<0xED, 0xA0, 0x80>> <> prefix)
+    end
+
+    test "classifies byte-range prefixes of a large document like String.valid?/1" do
+      text = String.duplicate("abc 日本 🥨\n", 50_000)
+      size = byte_size(text)
+      cuts = Enum.concat([0..40, div(size, 2)..(div(size, 2) + 40), (size - 40)..size])
+
+      results =
+        for cut <- cuts do
+          prefix = binary_part(text, 0, cut)
+          valid? = Unicode.valid_utf8?(prefix)
+          assert valid? == String.valid?(prefix), "prefix of #{cut} bytes disagreed"
+          valid?
+        end
+
+      assert true in results
+      assert false in results
+    end
+
+    test "rejects non-binary input instead of accepting chardata" do
+      for term <- [~c"abc", ["a", "b"], nil, 97] do
+        assert_raise FunctionClauseError, fn -> Unicode.valid_utf8?(dynamic_term(term)) end
+      end
+    end
+  end
 
   # ── graphemes_with_byte_offsets/1 ─────────────────────────────────────────
 
@@ -481,4 +618,7 @@ defmodule Minga.Core.UnicodeTest do
       end
     end
   end
+
+  @spec dynamic_term(term()) :: term()
+  defp dynamic_term(value), do: value
 end

@@ -1157,7 +1157,7 @@ defmodule Minga.Buffer.Process do
   def handle_call({:open, file_path}, _from, state) do
     case Persistence.read_content(state, file_path) do
       {:ok, text} when is_binary(text) ->
-        if String.valid?(text) do
+        if Unicode.valid_utf8?(text) do
           state = clear_swap(state)
           first_line = text |> String.split("\n", parts: 2) |> List.first("")
           filetype = Language.detect_filetype_from_content(file_path, first_line)

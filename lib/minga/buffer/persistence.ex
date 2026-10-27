@@ -9,6 +9,7 @@ defmodule Minga.Buffer.Persistence do
   alias Minga.Buffer.SaveState
   alias Minga.Buffer.State, as: BufState
   alias Minga.Buffer.State.LocalPersistence
+  alias Minga.Core.Unicode
 
   @type storage :: BufState.storage()
   @type metadata :: {mtime :: integer() | nil, size :: non_neg_integer() | nil}
@@ -24,7 +25,7 @@ defmodule Minga.Buffer.Persistence do
   def load_content(storage, file_path, _initial_content) do
     case read_content(storage, file_path) do
       {:ok, text} ->
-        if String.valid?(text) do
+        if Unicode.valid_utf8?(text) do
           {:ok, text, file_path, file_metadata(storage, file_path)}
         else
           {:error, :binary_file}
