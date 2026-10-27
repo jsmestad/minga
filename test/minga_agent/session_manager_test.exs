@@ -599,6 +599,10 @@ defmodule MingaAgent.SessionManagerTest do
       assert {:ok, ^session_id, session_pid} =
                SessionManager.start_session(manager, session_id: session_id)
 
+      # Finish initial provider attachment before installing the controlled draining provider.
+      Session.get_provider(session_pid)
+      :sys.get_state(manager)
+
       provider_pid =
         spawn(fn ->
           receive do

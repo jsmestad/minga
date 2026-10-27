@@ -106,7 +106,23 @@ defmodule Minga.Buffer.Cursor do
   @spec previous_character(String.t()) :: {String.t(), String.t()}
   def previous_character(text) when is_binary(text) do
     text_size = byte_size(text)
-    {character_start, _size} = final_character(text, 0)
+    line_start = text_size - Lines.last_line_width(text)
+
+    search_start =
+      if line_start == text_size and text_size > 0, do: text_size - 1, else: line_start
+
+    # LF separates graphemes, except that CRLF is one grapheme.
+    search_start =
+      if search_start > 0 and :binary.at(text, search_start) == ?\n and
+           :binary.at(text, search_start - 1) == ?\r,
+         do: search_start - 1,
+         else: search_start
+
+    {character_start, _size} =
+      text
+      |> binary_part(search_start, text_size - search_start)
+      |> final_character(search_start)
+
     rest = binary_part(text, 0, character_start)
     character = binary_part(text, character_start, text_size - character_start)
     {rest, character}

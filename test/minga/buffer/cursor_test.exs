@@ -2,7 +2,7 @@ defmodule Minga.Buffer.CursorTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Buffer.{Document, Cursor}
+  alias Minga.Buffer.{Document, Cursor, Lines}
 
   # ── Movement ──
 
@@ -131,6 +131,50 @@ defmodule Minga.Buffer.CursorTest do
 
       assert_cache_valid(doc)
       assert Document.cursor(doc) == {1, 0}
+    end
+  end
+
+  test "previous_character preserves empty text and line-break graphemes" do
+    for {text, expected} <- [
+          {"", {"", ""}},
+          {"\n", {"", "\n"}},
+          {"\r\n", {"", "\r\n"}},
+          {"界\n", {"界", "\n"}},
+          {"界\r\n", {"界", "\r\n"}}
+        ] do
+      assert Cursor.previous_character(text) == expected
+    end
+  end
+
+  property "suffix scans preserve Unicode graphemes across line and chunk boundaries" do
+    fragments = [
+      "a",
+      "\n",
+      "\r",
+      "\r\n",
+      "界",
+      "é",
+      "e\u0301",
+      "👩‍💻",
+      "🇨🇦",
+      "\u0600A",
+      "\u0301",
+      "\u200D"
+    ]
+
+    check all(
+            prefix <- list_of(member_of(fragments), max_length: 20),
+            padding <- member_of([0, 1, 4095, 4096, 4097, 8191, 8192, 8193]),
+            separator <- member_of(["", "\n", "\r\n"]),
+            ending <- list_of(member_of(fragments), max_length: 10)
+          ) do
+      text = Enum.join(prefix) <> separator <> String.duplicate("x", padding) <> Enum.join(ending)
+      last = List.last(String.graphemes(text)) || ""
+      preceding = binary_part(text, 0, byte_size(text) - byte_size(last))
+      expected_width = text |> String.split("\n") |> List.last() |> byte_size()
+
+      assert Cursor.previous_character(text) == {preceding, last}
+      assert Lines.last_line_width(text) == expected_width
     end
   end
 
