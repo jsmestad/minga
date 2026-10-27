@@ -46,19 +46,39 @@ defmodule Minga.Editing.Search do
     case_sensitive = Keyword.get(opts, :case_sensitive, true)
     whole_word = Keyword.get(opts, :whole_word, false)
 
-    if use_regex or not case_sensitive or whole_word do
-      regex_source = if use_regex, do: pattern, else: Regex.escape(pattern)
-      regex_source = if whole_word, do: "\\b#{regex_source}\\b", else: regex_source
-      regex_opts = if case_sensitive, do: "", else: "i"
-
-      case Regex.compile(regex_source, regex_opts) do
-        {:ok, regex} -> regex
-        {:error, _} -> Regex.compile!(Regex.escape(pattern), regex_opts)
-      end
-    else
+    if case_sensitive and not whole_word and (not use_regex or literal_regex?(pattern)) do
       pattern
+    else
+      compile_regex(pattern, use_regex, case_sensitive, whole_word)
     end
   end
+
+  @spec compile_regex(String.t(), boolean(), boolean(), boolean()) :: Regex.t()
+  defp compile_regex(pattern, use_regex, case_sensitive, whole_word) do
+    regex_source = if use_regex, do: pattern, else: Regex.escape(pattern)
+    regex_source = if whole_word, do: "\\b#{regex_source}\\b", else: regex_source
+    regex_opts = if case_sensitive, do: "", else: "i"
+
+    case Regex.compile(regex_source, regex_opts) do
+      {:ok, regex} -> regex
+      {:error, _} -> Regex.compile!(Regex.escape(pattern), regex_opts)
+    end
+  end
+
+  # Nonempty regexes without metacharacters match their own bytes; neither `x` nor `u` is enabled.
+  # The binary matcher avoids regex compilation. Empty sources stay regexes for zero-width matches.
+  @spec literal_regex?(String.t()) :: boolean()
+  defp literal_regex?(""), do: false
+  defp literal_regex?(pattern), do: free_of_regex_metacharacters?(pattern)
+
+  @spec free_of_regex_metacharacters?(binary()) :: boolean()
+  defp free_of_regex_metacharacters?(<<>>), do: true
+
+  defp free_of_regex_metacharacters?(<<byte, _rest::binary>>) when byte in ~c".^$*+?()[]{}\\|",
+    do: false
+
+  defp free_of_regex_metacharacters?(<<_byte, rest::binary>>),
+    do: free_of_regex_metacharacters?(rest)
 
   @spec match_in(String.t(), matcher()) :: {non_neg_integer(), non_neg_integer()} | nil
   defp match_in(haystack, matcher) when is_binary(matcher) do
