@@ -33,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Repeated release builds no longer accumulate obsolete Erlang runtimes and dependency versions. macOS and standalone TUI packages include only Minga's runtime resources, excluding test harnesses, retired renderers, and other development leftovers. Production Go renderers omit debug metadata and local build paths without removing language support or runtime extension compilation.
+- Release cleanup refuses output paths outside the active Mix build directory, protecting shared installation prefixes from deletion. Custom `mix release --path` destinations must be below that build directory.
 - Cursor-left and Backspace no longer scan all preceding buffer text on each action. Line-boundary lookup searches backward in bounded chunks, and grapheme lookup reads only the final line while preserving Unicode and CRLF boundaries.
 - Converting between document points and editor positions no longer walks or copies buffer content. Range edits, replacements, and edit deltas resolve positions through the cached line index, including pending line shifts, while keeping exact byte columns.
 - Deleting or moving the cursor across a CRLF line ending now updates the line count, cursor line, and line index. Previously the CRLF pair was treated as an ordinary character, so later positions resolved to the wrong line.

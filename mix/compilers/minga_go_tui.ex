@@ -13,6 +13,8 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
   @build_dir "bin"
   @binary_name "minga-renderer-go"
   @source_extensions ~w(.go .mod .sum)
+  @build_env Mix.env()
+  @build_flags if @build_env == :prod, do: ["-trimpath", "-ldflags=-s -w"], else: []
 
   @impl true
   @spec run(keyword()) :: {:ok, []} | {:error, []}
@@ -29,7 +31,7 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
       true ->
         output = Path.join(@priv_dir, @binary_name)
 
-        if needs_rebuild?(output) do
+        if @build_env == :prod or needs_rebuild?(output) do
           compile()
         else
           {:ok, []}
@@ -102,7 +104,9 @@ defmodule Mix.Tasks.Compile.MingaGoTui do
 
     case System.cmd(
            "go",
-           ["build", "-o", Path.join(@build_dir, @binary_name), "./cmd/minga-renderer-go"],
+           ["build"] ++
+             @build_flags ++
+             ["-o", Path.join(@build_dir, @binary_name), "./cmd/minga-renderer-go"],
            cd: @module_dir,
            stderr_to_stdout: true
          ) do

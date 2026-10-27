@@ -32,6 +32,8 @@ defmodule Minga.MixProject do
   @version "0.1.0"
   @generated_language_aliases_path ".generated/language_aliases/elixir/lib"
   @generated_elixir_path ".generated/protocol/elixir/lib"
+  @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner)
+  @release_priv_entries @native_release_artifacts ++ ~w(extensions queries tree_sitter tutor.txt)
 
   def project do
     [
@@ -286,7 +288,7 @@ defmodule Minga.MixProject do
     [
       # TUI release: Burrito-wrapped standalone binary (macOS + Linux)
       minga: [
-        steps: [:assemble, &ensure_tui_release_artifacts/1, &Burrito.wrap/1],
+        steps: [&clean_release/1, :assemble, &prepare_release_artifacts/1, &Burrito.wrap/1],
         burrito: [
           targets: burrito_targets(),
           debug: Mix.env() != :prod,
@@ -299,50 +301,53 @@ defmodule Minga.MixProject do
       minga_macos: [
         include_erts: true,
         cookie: "minga_app_cookie",
-        steps: [:assemble, &ensure_macos_release_artifacts/1],
+        steps: [&clean_release/1, :assemble, &prepare_release_artifacts/1],
         rel_templates_path: "rel",
         strip_beams: Mix.env() == :prod
       ]
     ]
   end
 
-  @spec ensure_tui_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
-  defp ensure_tui_release_artifacts(release) do
-    ensure_release_artifacts!(
-      release,
-      ["minga-renderer-go", "minga-parser", "minga-hook-runner"],
-      "Run `MIX_ENV=prod mix native.build.tui` before `mix release minga`."
-    )
-  end
+  @spec clean_release(Mix.Release.t()) :: Mix.Release.t()
+  defp clean_release(release) do
+    build_path = Path.expand(Mix.Project.build_path())
+    relative_path = Path.relative_to(Path.expand(release.path), build_path)
 
-  @spec ensure_macos_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
-  defp ensure_macos_release_artifacts(release) do
-    ensure_release_artifacts!(
-      release,
-      ["minga-renderer-go", "minga-parser", "minga-hook-runner"],
-      "Run `MIX_ENV=prod mix native.build.tui` before `mix release minga_macos`."
-    )
-  end
-
-  @spec ensure_release_artifacts!(Mix.Release.t(), [String.t()], String.t()) :: Mix.Release.t()
-  defp ensure_release_artifacts!(release, artifact_names, instruction) do
-    priv_dirs = Path.wildcard(Path.join([release.path, "lib", "minga-*", "priv"]))
-    missing = missing_release_artifacts(priv_dirs, artifact_names)
-
-    if missing == [] do
-      release
-    else
-      Mix.raise("Missing native release artifacts: #{Enum.join(missing, ", ")}\n#{instruction}")
+    if relative_path in [".", ".."] or Path.type(relative_path) == :absolute or
+         String.starts_with?(relative_path, "../") do
+      Mix.raise("Release output must be inside #{build_path}; refusing to clean #{release.path}")
     end
+
+    # --overwrite replaces current versions but leaves obsolete versions alongside them.
+    File.mkdir_p!(release.path)
+
+    for entry <- File.ls!(release.path),
+        entry in ~w(bin lib releases) or String.starts_with?(entry, "erts-") do
+      File.rm_rf!(Path.join(release.path, entry))
+    end
+
+    release
   end
 
-  @spec missing_release_artifacts([String.t()], [String.t()]) :: [String.t()]
-  defp missing_release_artifacts([], artifact_names), do: artifact_names
+  @spec prepare_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
+  defp prepare_release_artifacts(release) do
+    version = release.applications |> Map.fetch!(:minga) |> Keyword.fetch!(:vsn)
+    priv_dir = Path.join([release.path, "lib", "minga-#{version}", "priv"])
+    missing = Enum.reject(@native_release_artifacts, &File.regular?(Path.join(priv_dir, &1)))
 
-  defp missing_release_artifacts(priv_dirs, artifact_names) do
-    Enum.reject(artifact_names, fn artifact_name ->
-      Enum.any?(priv_dirs, fn priv_dir -> File.exists?(Path.join(priv_dir, artifact_name)) end)
-    end)
+    if missing != [] do
+      Mix.raise("""
+      Missing native release artifacts: #{Enum.join(missing, ", ")}
+      Run `MIX_ENV=prod mix native.build.tui` before `mix release #{release.name}`.
+      """)
+    end
+
+    # Mix copies all of the development priv directory. Filter the release copy only.
+    for entry <- File.ls!(priv_dir), entry not in @release_priv_entries do
+      File.rm_rf!(Path.join(priv_dir, entry))
+    end
+
+    release
   end
 
   defp burrito_targets do
