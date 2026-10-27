@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
 
+- Buffer file opens, byte-range replacements, and undo reconstruction now validate UTF-8 through the VM's native Unicode converter instead of `String.valid?/1`. Accepted and rejected input is unchanged; validating multi-megabyte files is roughly four to five times faster.
+
 - Ordinary editor startup defers agent model discovery until agent use and starts the bundled BEAM before native font and Metal setup. Unresolved models retain truthful readiness, and exact hosted route startup preserves the selected reasoning policy.
 - Agent model selection now supports named hosted providers only. Ollama, anonymous routes, custom endpoints, endpoint overrides, local availability probes, and their configuration options have been removed. Unsupported routes fail without provider fallback or network probing.
 - Agent tool advice now carries tool results through an explicit tagged invocation outcome. Tool-specific around callbacks must return `{:returned, state, result}` or `{:skipped, state}`; editor command advice keeps its existing state-to-state contract.
