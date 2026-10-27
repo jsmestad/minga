@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
+- Full-content undo commits now find the changed byte range with native binary prefix and suffix comparison over bounded 4 KiB chunks instead of a per-byte Elixir scan, without copying either whole document. Patch contents, apply/invert behavior, and cursor restoration are unchanged.
 
 - Ordinary editor startup defers agent model discovery until agent use and starts the bundled BEAM before native font and Metal setup. Unresolved models retain truthful readiness, and exact hosted route startup preserves the selected reasoning policy.
 - Agent model selection now supports named hosted providers only. Ollama, anonymous routes, custom endpoints, endpoint overrides, local availability probes, and their configuration options have been removed. Unsupported routes fail without provider fallback or network probing.
