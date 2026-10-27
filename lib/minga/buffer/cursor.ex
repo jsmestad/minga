@@ -7,6 +7,11 @@ defmodule Minga.Buffer.Cursor do
 
   @type direction :: :left | :right | :up | :down
 
+  # Where placement reads and splits content: the gap halves, or one joined copy of them.
+  @typep split_source :: :halves | {:joined, String.t()}
+
+  @max_code_point_bytes 4
+
   @doc "Moves the cursor one move in the requested direction."
   @spec move(Document.t(), direction()) :: Document.t()
   def move(%Document{before: ""} = doc, :left), do: doc
@@ -65,24 +70,14 @@ defmodule Minga.Buffer.Cursor do
   @spec place(Document.t(), Document.position()) :: Document.t()
   def place(%Document{} = doc, {target_line, target_column})
       when target_line >= 0 and target_column >= 0 do
-    {line_starts, text} = Lines.snapshot(doc)
-    text_size = byte_size(text)
-    line = min(target_line, tuple_size(line_starts) - 1)
-    {line_start, line_length} = Lines.span(line_starts, line, text_size)
-    line_text = binary_part(text, line_start, line_length)
-    column = caret_column(line_text, min(target_column, line_length))
-    point = line_start + column
-    before = binary_part(text, 0, point)
-    after_ = binary_part(text, point, text_size - point)
+    {%Document{line_count: line_count} = doc, source} = indexed(doc)
+    line = min(target_line, line_count - 1)
+    line_start = Lines.start_of(doc, line)
+    line_length = line_stop(doc, line, line_count) - line_start
+    caret_read = {line_start, caret_read_size(line_length, target_column)}
+    {before, after_, column} = relocate(source, doc, caret_read, line_length, target_column)
 
-    %{
-      doc
-      | before: before,
-        after: after_,
-        cursor_line: line,
-        cursor_col: column,
-        line_offsets: line_starts
-    }
+    %{doc | before: before, after: after_, cursor_line: line, cursor_col: column}
   end
 
   @doc "Returns whether a byte column is an exact editor caret boundary in a line."
@@ -153,5 +148,119 @@ defmodule Minga.Buffer.Cursor do
       {size, rest} -> final_character(rest, current_point + size)
       nil -> {current_point, 0}
     end
+  end
+
+  @spec line_stop(Document.t(), Lines.line_index(), Lines.line_count()) :: non_neg_integer()
+  defp line_stop(doc, line, line_count) when line == line_count - 1,
+    do: Document.content_byte_size(doc)
+
+  defp line_stop(doc, line, _line_count), do: Lines.start_of(doc, line + 1) - 1
+
+  # UAX #29 resolves a break from the preceding text and the code point at the boundary.
+  # Read through the code point holding the requested byte, never through a truncated code point.
+  @spec caret_read_size(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp caret_read_size(line_length, target_column) when target_column >= line_length, do: 0
+
+  defp caret_read_size(line_length, target_column),
+    do: min(line_length, target_column + @max_code_point_bytes)
+
+  # A missing index is rebuilt from joined content, which placement then splits as views.
+  # An empty half lets the other serve as joined content without copying.
+  @spec indexed(Document.t()) :: {Document.t(), split_source()}
+  defp indexed(%Document{line_offsets: nil, before: before, after: after_} = doc) do
+    text = joined(before, after_)
+    {%{doc | line_offsets: Lines.build_index(text)}, {:joined, text}}
+  end
+
+  defp indexed(%Document{before: before, after: ""} = doc), do: {doc, {:joined, before}}
+  defp indexed(%Document{before: "", after: after_} = doc), do: {doc, {:joined, after_}}
+  defp indexed(%Document{} = doc), do: {doc, :halves}
+
+  @spec joined(String.t(), String.t()) :: String.t()
+  defp joined(before, ""), do: before
+  defp joined("", after_), do: after_
+  defp joined(before, after_), do: IO.iodata_to_binary([before, after_])
+
+  # A gap-crossing caret read materializes the content once and reuses it for both halves.
+  # Otherwise the read is a view and the halves use one exact copy of the content.
+  @spec relocate(
+          split_source(),
+          Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), String.t(), non_neg_integer()}
+  defp relocate({:joined, text}, _doc, caret_read, line_length, target_column),
+    do: split_joined(text, caret_read, line_length, target_column)
+
+  defp relocate(
+         :halves,
+         %Document{before: before, after: after_},
+         {read_start, read_size} = caret_read,
+         line_length,
+         target_column
+       )
+       when read_start < byte_size(before) and read_start + read_size > byte_size(before) do
+    text = joined(before, after_)
+    split_joined(text, caret_read, line_length, target_column)
+  end
+
+  defp relocate(:halves, doc, {read_start, read_size}, line_length, target_column) do
+    read = Document.slice_byte_range(doc, read_start, read_size)
+    column = caret_in(read, line_length, target_column)
+    {before, after_} = split_exact(doc, read_start + column)
+    {before, after_, column}
+  end
+
+  @spec split_joined(
+          String.t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {String.t(), String.t(), non_neg_integer()}
+  defp split_joined(text, {read_start, read_size}, line_length, target_column) do
+    column = caret_in(binary_part(text, read_start, read_size), line_length, target_column)
+    point = read_start + column
+    {binary_part(text, 0, point), binary_part(text, point, byte_size(text) - point), column}
+  end
+
+  @spec caret_in(binary(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp caret_in(_read, line_length, target_column) when target_column >= line_length,
+    do: line_length
+
+  defp caret_in(read, _line_length, target_column) do
+    tail = binary_part(read, target_column + 1, byte_size(read) - target_column - 1)
+
+    read
+    |> binary_part(0, target_column + 1 + continuation_bytes(tail))
+    |> caret_column(target_column)
+  end
+
+  @spec continuation_bytes(binary()) :: non_neg_integer()
+  defp continuation_bytes(<<0b10::2, _::6, rest::binary>>), do: 1 + continuation_bytes(rest)
+  defp continuation_bytes(_bytes), do: 0
+
+  @spec split_exact(Document.t(), non_neg_integer()) :: {String.t(), String.t()}
+  defp split_exact(%Document{before: before, after: after_}, point)
+       when point == byte_size(before),
+       do: {before, after_}
+
+  defp split_exact(%Document{} = doc, point) do
+    size = Document.content_byte_size(doc)
+    {exact_copy(doc, 0, point), exact_copy(doc, point, size - point)}
+  end
+
+  @spec exact_copy(Document.t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  defp exact_copy(%Document{before: before} = doc, start, count)
+       when start + count <= byte_size(before) or start >= byte_size(before),
+       do: doc |> Document.slice_byte_range(start, count) |> :binary.copy()
+
+  defp exact_copy(%Document{before: before, after: after_}, start, count) do
+    in_before = byte_size(before) - start
+
+    IO.iodata_to_binary([
+      binary_part(before, start, in_before),
+      binary_part(after_, 0, count - in_before)
+    ])
   end
 end

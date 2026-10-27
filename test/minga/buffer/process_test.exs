@@ -273,6 +273,39 @@ defmodule Minga.Buffer.ProcessTest do
       refute BufferProcess.dirty?(pid)
     end
 
+    test "placement keeps vertical moves, edits, and deltas aligned across Unicode and CRLF" do
+      {:ok, pid} = BufferProcess.start_link(content: "e\u0301x\r\n🇨🇦🇺🇸\n👩\u200D💻 ok\nend")
+
+      BufferProcess.move_to(pid, {0, 2})
+      assert BufferProcess.cursor(pid) == {0, 0}
+      BufferProcess.move_to(pid, {0, 4})
+      assert :ok = BufferProcess.insert_char(pid, "!")
+
+      BufferProcess.move(pid, :down)
+      assert BufferProcess.cursor(pid) == {1, 0}
+      BufferProcess.move_to(pid, {1, 12})
+      assert BufferProcess.cursor(pid) == {1, 8}
+      assert :ok = BufferProcess.insert_char(pid, "-")
+
+      BufferProcess.move(pid, :up)
+      assert BufferProcess.cursor(pid) == {0, 6}
+      BufferProcess.move_to(pid, {99, 99})
+      assert BufferProcess.cursor(pid) == {3, 3}
+      BufferProcess.move(pid, :up)
+      assert BufferProcess.cursor(pid) == {2, 0}
+      BufferProcess.move_to(pid, {2, 12})
+      assert :ok = BufferProcess.delete_before(pid)
+
+      assert BufferProcess.content(pid) == "e\u0301x!\r\n🇨🇦-🇺🇸\n👩\u200D💻ok\nend"
+      assert BufferProcess.cursor(pid) == {2, 11}
+
+      assert [
+               %{start_byte: 4, old_end_byte: 4, new_end_byte: 5, inserted_text: "!"},
+               %{start_byte: 15, old_end_byte: 15, new_end_byte: 16, inserted_text: "-"},
+               %{start_byte: 36, old_end_byte: 37, new_end_byte: 36, inserted_text: ""}
+             ] = consume_edit_deltas(pid, :test)
+    end
+
     test "move_to_utf16_if_version uses one-based lines and exact UTF-16 boundaries" do
       {:ok, pid} = BufferProcess.start_link(content: "one\na😀b")
       version = Buffer.version(pid)
@@ -1121,6 +1154,25 @@ defmodule Minga.Buffer.ProcessTest do
 
       BufferProcess.redo(pid)
       assert BufferProcess.content(pid) == "one\n\nthree"
+    end
+
+    test "clearing an empty line after an edit round-trip does not record another edit" do
+      pid = start_supervised!({BufferProcess, content: "a\n\nb"})
+      BufferProcess.move_to(pid, {1, 0})
+      BufferProcess.insert_char(pid, "x")
+      BufferProcess.break_undo_coalescing(pid)
+      BufferProcess.delete_before(pid)
+      version = BufferProcess.version(pid)
+      dirty? = BufferProcess.dirty?(pid)
+      assert [_, _] = consume_edit_deltas(pid, :test)
+
+      assert {:ok, ""} = BufferProcess.clear_line(pid, 1)
+      assert BufferProcess.version(pid) == version
+      assert BufferProcess.dirty?(pid) == dirty?
+      assert [] = consume_edit_deltas(pid, :test)
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "a\nx\nb"
     end
   end
 
