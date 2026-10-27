@@ -45,7 +45,7 @@ defmodule Minga.Buffer.Operation do
 
     new_doc =
       doc
-      |> Document.delete_range(from_pos, to_pos)
+      |> Selection.delete(selection)
       |> Document.insert_text(replacement)
 
     delta =
@@ -275,7 +275,7 @@ defmodule Minga.Buffer.Operation do
   def delete_range(%Document{} = doc, from_pos, to_pos) do
     selection = Selection.characterwise(doc, from_pos, to_pos)
     %Span{start: start_byte, stop: old_end_byte} = selection.span
-    new_doc = Document.delete_range(doc, from_pos, to_pos)
+    new_doc = Selection.delete(doc, selection)
 
     if new_doc == doc do
       :unchanged
