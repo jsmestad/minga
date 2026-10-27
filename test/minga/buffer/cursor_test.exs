@@ -109,6 +109,24 @@ defmodule Minga.Buffer.CursorTest do
       # Should clamp to byte 3 (start of é)
       assert Document.cursor(buf) == {0, 3}
     end
+
+    test "clamps clusters that the gap splits and keeps line-end placement before LF" do
+      for {prefix, suffix, target, expected} <- [
+            {"ae", "\u0301x", {0, 2}, {0, 1}},
+            {"👩", "\u200D💻!", {0, 6}, {0, 0}},
+            {"🇨", "🇦🇺🇸", {0, 9}, {0, 8}},
+            {"ab\r", "\nnext", {0, 99}, {0, 3}},
+            {"ab\r", "\nnext", {1, 2}, {1, 2}}
+          ],
+          doc = suffix |> Document.new() |> Document.insert_text(prefix),
+          doc <- [doc, %{doc | line_offsets: nil}] do
+        placed = Cursor.place(doc, target)
+
+        assert Document.cursor(placed) == expected
+        assert Document.content(placed) == prefix <> suffix
+        assert_cache_valid(placed)
+      end
+    end
   end
 
   describe "cache updates" do
@@ -216,6 +234,82 @@ defmodule Minga.Buffer.CursorTest do
       max_col = byte_size(current_line)
       assert byte_col >= 0 and byte_col <= max_col
     end
+  end
+
+  # Fragments that join into longer graphemes (combining marks, ZWJ and skin-tone emoji,
+  # regional indicators, prepend, Hangul jamo, Indic conjuncts), so a split between two of
+  # them can leave the gap inside a cluster or inside a CRLF pair.
+  @place_fragments [
+    "a",
+    "\n",
+    "\r",
+    "\r\n",
+    "é",
+    "e",
+    "\u0301",
+    "\u200D",
+    "👩",
+    "💻",
+    "👩\u200D💻",
+    "\u{1F3FB}",
+    "🇨",
+    "🇦",
+    "🇨🇦",
+    "界",
+    "\u0600",
+    "\u1100",
+    "\u1161",
+    "\u11A8",
+    "\u0915",
+    "\u094D"
+  ]
+
+  property "place/2 matches a whole-line caret clamp from every gap and index state" do
+    check all(
+            prefix <- list_of(member_of(@place_fragments), max_length: 12),
+            suffix <- list_of(member_of(@place_fragments), max_length: 12),
+            state <- member_of([:split, :pending_insert, :pending_delete, :missing])
+          ) do
+      doc =
+        suffix
+        |> Enum.join()
+        |> Document.new()
+        |> Document.insert_text(Enum.join(prefix))
+        |> in_index_state(state)
+
+      text = Document.content(doc)
+      line_starts = Lines.build_index(text)
+      widest = text |> String.split("\n") |> Enum.map(&byte_size/1) |> Enum.max()
+
+      for line <- 0..tuple_size(line_starts), column <- 0..(widest + 1) do
+        placed = Cursor.place(doc, {line, column})
+
+        assert Document.content(placed) == text
+
+        assert {Document.cursor_offset(placed), Document.cursor(placed)} ==
+                 whole_line_place(text, line_starts, {line, column})
+
+        assert_cache_valid(placed)
+      end
+    end
+  end
+
+  @spec in_index_state(Document.t(), :split | :pending_insert | :pending_delete | :missing) ::
+          Document.t()
+  defp in_index_state(doc, :split), do: doc
+  defp in_index_state(doc, :pending_insert), do: Document.insert_text(doc, "x")
+  defp in_index_state(doc, :pending_delete), do: Document.delete_before(doc)
+  defp in_index_state(doc, :missing), do: %{doc | line_offsets: nil}
+
+  # The previous placement contract: clamp against the whole target line of the flat text.
+  @spec whole_line_place(String.t(), Lines.line_starts(), Document.position()) ::
+          {non_neg_integer(), Document.position()}
+  defp whole_line_place(text, line_starts, {target_line, target_column}) do
+    line = min(target_line, tuple_size(line_starts) - 1)
+    {start, length} = Lines.span(line_starts, line, byte_size(text))
+    line_text = binary_part(text, start, length)
+    column = Cursor.caret_column(line_text, min(target_column, length))
+    {start + column, {line, column}}
   end
 
   @spec assert_cache_valid(Document.t()) :: :ok
