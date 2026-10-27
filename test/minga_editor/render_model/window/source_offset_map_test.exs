@@ -1,5 +1,6 @@
 defmodule MingaEditor.RenderModel.Window.SourceOffsetMapTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Core.Decorations
   alias Minga.Core.Face
@@ -34,6 +35,28 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMapTest do
 
       assert SourceOffsetMap.composed_utf16_to_source_bytes(map, boundaries) ==
                Enum.map(0..10_000//1_000, &(&1 * 2))
+    end
+
+    test "identity lines map every grapheme boundary in both directions" do
+      for text <- [
+            "",
+            "plain ascii",
+            "界界A",
+            "a😀b",
+            "e\u0301x\u0301",
+            "👨\u200D👩\u200D👧 family",
+            "line\r\n",
+            "raw\ttab"
+          ] do
+        assert_identity_mapping(text, Decorations.new(), [])
+      end
+    end
+
+    property "tab-free identity lines map grapheme boundaries with any tab width" do
+      check all(text <- identity_text_gen(), opts <- member_of([[], [tab_width: 4]])) do
+        assert_identity_mapping(text, Decorations.new(), opts)
+        assert_identity_mapping(text, other_line_decorations(), opts)
+      end
     end
   end
 
@@ -98,6 +121,22 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMapTest do
 
       assert SourceOffsetMap.composed_utf16_to_source_byte(map, 8, :start) == 3
       assert SourceOffsetMap.composed_utf16_to_source_byte(map, 100, :end) == 3
+    end
+
+    test "a conceal whose replacement equals its source keeps replacement affinity" do
+      {_id, decorations} =
+        Decorations.add_conceal(Decorations.new(), {0, 1}, {0, 3}, replacement: "bc")
+
+      map = SourceOffsetMap.new("abcd", "abcd", decorations, 0)
+
+      assert SourceOffsetMap.composed_utf16_to_source_byte(map, 2, :start) == 1
+      assert SourceOffsetMap.composed_utf16_to_source_byte(map, 2, :end) == 3
+
+      assert SourceOffsetMap.composed_utf16_to_source_bytes(map, [{2, :start}, {2, :end}]) ==
+               [1, 3]
+
+      assert SourceOffsetMap.source_to_composed_utf16(map, 1, :start) == 1
+      assert SourceOffsetMap.source_to_composed_utf16(map, 2, :start) == 3
     end
   end
 
@@ -190,6 +229,90 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMapTest do
       assert SourceOffsetMap.composed_utf16_to_source_byte(map, composed_utf16, :end) ==
                source_byte
     end
+  end
+
+  # Derive boundaries with String.graphemes/1 and :unicode, independently of the map under test.
+  # Interior UTF-16 offsets resolve to the edge selected by affinity.
+  defp assert_identity_mapping(text, decorations, opts) do
+    map = SourceOffsetMap.new(text, text, decorations, 0, opts)
+    graphemes = grapheme_extents(text)
+    source_end = byte_size(text)
+    utf16_end = utf16_units(text)
+
+    for {start_byte, end_byte, start_utf16, end_utf16} <- graphemes,
+        affinity <- [:start, :end] do
+      assert SourceOffsetMap.source_to_composed_utf16(map, start_byte, affinity) == start_utf16
+
+      assert SourceOffsetMap.composed_utf16_to_source_byte(map, start_utf16, affinity) ==
+               start_byte
+
+      expected = if affinity == :start, do: start_byte, else: end_byte
+
+      for interior <- (start_utf16 + 1)..(end_utf16 - 1)//1 do
+        assert SourceOffsetMap.composed_utf16_to_source_byte(map, interior, affinity) == expected
+      end
+    end
+
+    for affinity <- [:start, :end] do
+      assert SourceOffsetMap.source_to_composed_utf16(map, source_end, affinity) == utf16_end
+      assert SourceOffsetMap.source_to_composed_utf16(map, source_end + 3, affinity) == utf16_end
+
+      assert SourceOffsetMap.composed_utf16_to_source_byte(map, utf16_end, affinity) ==
+               source_end
+
+      assert SourceOffsetMap.composed_utf16_to_source_byte(map, utf16_end + 3, affinity) ==
+               source_end
+
+      boundaries = for utf16 <- 0..(utf16_end + 1), do: {utf16, affinity}
+
+      assert SourceOffsetMap.composed_utf16_to_source_bytes(map, boundaries) ==
+               Enum.map(boundaries, fn {utf16, affinity} ->
+                 SourceOffsetMap.composed_utf16_to_source_byte(map, utf16, affinity)
+               end)
+    end
+  end
+
+  defp grapheme_extents(text) do
+    {extents, _byte, _utf16} =
+      text
+      |> String.graphemes()
+      |> Enum.reduce({[], 0, 0}, fn grapheme, {extents, byte, utf16} ->
+        next_byte = byte + byte_size(grapheme)
+        next_utf16 = utf16 + utf16_units(grapheme)
+        {[{byte, next_byte, utf16, next_utf16} | extents], next_byte, next_utf16}
+      end)
+
+    Enum.reverse(extents)
+  end
+
+  defp utf16_units(text),
+    do: text |> :unicode.characters_to_binary(:utf8, :utf16) |> byte_size() |> div(2)
+
+  # Joined graphemes may fuse (combining marks, ZWJ, CR+LF), so the oracle
+  # re-segments the final text rather than trusting the generated pieces.
+  defp identity_text_gen do
+    ascii = ["a", " ", "Z"]
+    wide = ["界", "😀", "👨\u200D👩\u200D👧"]
+    joiners = ["e", "\u0301", "é", "\u200D", "\r", "\n", "\r\n"]
+
+    (ascii ++ wide ++ joiners)
+    |> member_of()
+    |> list_of(max_length: 24)
+    |> map(&Enum.join/1)
+  end
+
+  # Decorations on other lines must not change an undecorated line's mapping.
+  defp other_line_decorations do
+    {_id, decorations} =
+      Decorations.add_conceal(Decorations.new(), {1, 0}, {1, 2}, replacement: "x")
+
+    {_id, decorations} =
+      Decorations.add_virtual_text(decorations, {2, 0},
+        segments: [{"hint", Face.new()}],
+        placement: :inline
+      )
+
+    decorations
   end
 
   defp plain_map(text), do: SourceOffsetMap.new(text, text, Decorations.new(), 0)

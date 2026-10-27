@@ -58,22 +58,15 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   """
   @spec new(String.t(), String.t(), Decorations.t(), non_neg_integer(), keyword()) :: t()
   def new(source_text, composed_text, %Decorations{} = decorations, line, opts) do
-    tab_width = Keyword.get(opts, :tab_width)
-
-    pieces =
-      source_text
-      |> conceal_pieces(decorations, line)
-      |> insert_virtual_text(decorations, source_text, line)
-      |> maybe_expand_tabs(tab_width)
-      |> coalesce_pieces()
-
-    {reversed_spans, built_utf16} = reversed_spans_from_pieces(pieces)
-    composed_utf16 = utf16_length(composed_text)
-
-    spans =
-      reversed_spans
-      |> prepend_unmapped_suffix(byte_size(source_text), built_utf16, composed_utf16)
-      |> Enum.reverse()
+    {spans, composed_utf16} =
+      line_spans(
+        source_text,
+        composed_text,
+        Decorations.conceals_for_line(decorations, line),
+        Decorations.inline_virtual_texts_for_line(decorations, line),
+        line,
+        Keyword.get(opts, :tab_width)
+      )
 
     %__MODULE__{
       source_text: source_text,
@@ -85,6 +78,73 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
       insertions: insertion_summaries(spans),
       replacements: replacement_summaries(spans)
     }
+  end
+
+  # Equal text can still have conceal or tab replacement affinity.
+  # Only a line with no conceal, no inline virtual text, and no expanded tab is unchanged source.
+  @spec line_spans(
+          String.t(),
+          String.t(),
+          [ConcealRange.t()],
+          [VirtualText.t()],
+          non_neg_integer(),
+          pos_integer() | nil
+        ) :: {[span()], non_neg_integer()}
+  defp line_spans(text, text, [], [], _line, nil), do: unchanged_spans(text)
+
+  defp line_spans(text, text, [], [], line, tab_width) do
+    case :binary.match(text, "\t") do
+      :nomatch -> unchanged_spans(text)
+      _tab -> composed_spans(text, text, [], [], line, tab_width)
+    end
+  end
+
+  defp line_spans(source_text, composed_text, conceals, virtual_texts, line, tab_width),
+    do: composed_spans(source_text, composed_text, conceals, virtual_texts, line, tab_width)
+
+  @spec unchanged_spans(String.t()) :: {[span()], non_neg_integer()}
+  defp unchanged_spans(text) do
+    utf16 = utf16_length(text)
+    {[{:source, 0, byte_size(text), 0, utf16}], utf16}
+  end
+
+  @spec composed_spans(
+          String.t(),
+          String.t(),
+          [ConcealRange.t()],
+          [VirtualText.t()],
+          non_neg_integer(),
+          pos_integer() | nil
+        ) :: {[span()], non_neg_integer()}
+  defp composed_spans(source_text, composed_text, conceals, virtual_texts, line, tab_width) do
+    pieces =
+      source_text
+      |> decoration_pieces(conceals, virtual_texts, line)
+      |> maybe_expand_tabs(tab_width)
+      |> coalesce_pieces()
+
+    {reversed_spans, built_utf16} = reversed_spans_from_pieces(pieces)
+    composed_utf16 = utf16_length(composed_text)
+
+    spans =
+      reversed_spans
+      |> prepend_unmapped_suffix(byte_size(source_text), built_utf16, composed_utf16)
+      |> Enum.reverse()
+
+    {spans, composed_utf16}
+  end
+
+  @spec decoration_pieces(String.t(), [ConcealRange.t()], [VirtualText.t()], non_neg_integer()) ::
+          [piece()]
+  defp decoration_pieces(source_text, [], [], _line),
+    do: [{source_text, :source, 0, byte_size(source_text)}]
+
+  defp decoration_pieces(source_text, conceals, virtual_texts, line) do
+    line_width = Unicode.display_width(source_text)
+
+    source_text
+    |> conceal_pieces(conceals, line, line_width)
+    |> insert_virtual_text(virtual_texts, source_text, line_width)
   end
 
   @spec slice(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
@@ -323,14 +383,11 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
 
   defp choose_source_candidate(candidates, _map, _composed_utf16, :end), do: Enum.max(candidates)
 
-  @spec conceal_pieces(String.t(), Decorations.t(), non_neg_integer()) :: [piece()]
-  defp conceal_pieces(source_text, decorations, line) do
-    line_width = Unicode.display_width(source_text)
-
+  @spec conceal_pieces(String.t(), [ConcealRange.t()], non_neg_integer(), non_neg_integer()) ::
+          [piece()]
+  defp conceal_pieces(source_text, conceals, line, line_width) do
     {pieces, source_byte} =
-      decorations
-      |> Decorations.conceals_for_line(line)
-      |> Enum.reduce({[], 0}, fn conceal, {pieces, source_byte} ->
+      Enum.reduce(conceals, {[], 0}, fn conceal, {pieces, source_byte} ->
         {start_byte, end_byte} = conceal_bytes(conceal, source_text, line, line_width)
         start_byte = max(start_byte, source_byte)
         pieces = append_source_piece(pieces, source_text, source_byte, start_byte)
@@ -388,14 +445,11 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   defp append_replacement_piece(pieces, replacement, start_byte, end_byte),
     do: [{replacement, :replacement, start_byte, end_byte} | pieces]
 
-  @spec insert_virtual_text([piece()], Decorations.t(), String.t(), non_neg_integer()) :: [
+  @spec insert_virtual_text([piece()], [VirtualText.t()], String.t(), non_neg_integer()) :: [
           piece()
         ]
-  defp insert_virtual_text(pieces, decorations, source_text, line) do
-    line_width = Unicode.display_width(source_text)
-
-    decorations
-    |> Decorations.inline_virtual_texts_for_line(line)
+  defp insert_virtual_text(pieces, virtual_texts, source_text, line_width) do
+    virtual_texts
     |> Enum.reduce(pieces, fn %VirtualText{anchor: {_line, col}, segments: segments}, pieces ->
       anchor_col = min(col, line_width)
       anchor_byte = Unicode.display_col_to_byte(source_text, anchor_col)

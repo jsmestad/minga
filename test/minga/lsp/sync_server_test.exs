@@ -131,6 +131,108 @@ defmodule Minga.LSP.SyncServerTest do
         assert context.buffer_revision == revision
       end
     end
+
+    test "mixed clients receive one exact Unicode revision per flush", %{tmp_dir: dir} do
+      path = Path.join(dir, "mixed.txt")
+      File.write!(path, "😀é!\nz")
+      buf = start_buffer(file_path: path)
+      full = start_client(:full)
+      utf16 = start_client(:incremental, :utf16)
+      utf8 = start_client(:incremental, :utf8)
+      utf32 = start_client(:incremental, :utf32)
+      full_sync_clients = [full, utf16, utf32]
+      SyncServer.put_clients(buf, [full, utf16, utf8, utf32])
+
+      :ok = BufferProcess.move_to(buf, {0, 6})
+      :ok = BufferProcess.insert_text(buf, "ß")
+      first_revision = BufferProcess.version(buf)
+      assert BufferProcess.content(buf) == "😀éß!\nz"
+
+      assert_receive {:client_cast, ^utf8,
+                      {:did_change_incremental, uri, [{0, 6, 0, 6, "ß"}], ^buf, ^first_revision}},
+                     1_000
+
+      assert uri == SyncServer.path_to_uri(path)
+
+      for client <- full_sync_clients do
+        assert_receive {:client_cast, ^client,
+                        {:did_change, ^uri, "😀éß!\nz", ^buf, ^first_revision}},
+                       1_000
+      end
+
+      refute_receive {:client_cast, _client, _message}, 50
+
+      :ok = BufferProcess.move_to(buf, {1, 0})
+      :ok = BufferProcess.insert_text(buf, "日本")
+      second_revision = BufferProcess.version(buf)
+      assert second_revision > first_revision
+
+      assert_receive {:client_cast, ^utf8,
+                      {:did_change_incremental, ^uri, [{1, 0, 1, 0, "日本"}], ^buf,
+                       ^second_revision}},
+                     1_000
+
+      for client <- full_sync_clients do
+        assert_receive {:client_cast, ^client,
+                        {:did_change, ^uri, "😀éß!\n日本z", ^buf, ^second_revision}},
+                       1_000
+      end
+
+      refute_receive {:client_cast, _client, _message}, 50
+    end
+
+    test "dead clients do not prevent live mixed clients from receiving changes", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "dead-clients.txt")
+      File.write!(path, "naïve 😀")
+      buf = start_buffer(file_path: path)
+      dead_full = start_client(:full)
+      dead_incremental = start_client(:incremental)
+      incremental = start_client(:incremental)
+      utf16 = start_client(:incremental, :utf16)
+      Enum.each([dead_full, dead_incremental], &kill_client/1)
+      SyncServer.put_clients(buf, [dead_full, dead_incremental, incremental, utf16])
+
+      :ok = BufferProcess.insert_text(buf, "¡")
+      edit_revision = BufferProcess.version(buf)
+
+      assert_receive {:client_cast, ^incremental,
+                      {:did_change_incremental, _uri, [{0, 0, 0, 0, "¡"}], ^buf, ^edit_revision}},
+                     1_000
+
+      assert_receive {:client_cast, ^utf16,
+                      {:did_change, _uri, "¡naïve 😀", ^buf, ^edit_revision}},
+                     1_000
+
+      :ok = BufferProcess.replace_content(buf, "fin ✓")
+      replace_revision = BufferProcess.version(buf)
+
+      for client <- [incremental, utf16] do
+        assert_receive {:client_cast, ^client,
+                        {:did_change, _uri, "fin ✓", ^buf, ^replace_revision}},
+                       1_000
+      end
+
+      refute_receive {:client_cast, _client, {:did_change_incremental, _, _, _, _}}, 50
+    end
+
+    test "a buffer closed before its flush notifies no client", %{tmp_dir: dir} do
+      path = Path.join(dir, "closed.txt")
+      File.write!(path, "hello")
+      buf = start_supervised!({BufferProcess, file_path: path}, id: :closing_buffer)
+      full = start_client(:full)
+      incremental = start_client(:incremental)
+      SyncServer.put_clients(buf, [full, incremental])
+      delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
+
+      Events.broadcast(:buffer_changed, changed_event(buf, delta, EditSource.user(), 1))
+      sync_server()
+      :ok = stop_supervised!(:closing_buffer)
+
+      refute_receive {:client_cast, _client, _message}, 400
+      refute Map.has_key?(:sys.get_state(SyncServer).pending_revisions, buf)
+    end
   end
 
   describe "client monitoring" do
@@ -169,6 +271,12 @@ defmodule Minga.LSP.SyncServerTest do
     pid = spawn(fn -> client_loop(parent, sync_kind, encoding) end)
     on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
     pid
+  end
+
+  defp kill_client(pid) do
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
   end
 
   defp client_loop(parent, sync_kind, encoding) do

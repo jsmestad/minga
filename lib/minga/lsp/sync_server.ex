@@ -672,15 +672,31 @@ defmodule Minga.LSP.SyncServer do
     :ok
   end
 
+  # Full-sync clients share the first successful content/revision snapshot per buffer flush.
+  # Failed reads remain uncached so later clients can retry.
+  @typep change_notification :: %{
+           uri: String.t(),
+           buffer: pid(),
+           deltas: [Minga.Buffer.EditDelta.t()],
+           revision: non_neg_integer(),
+           snapshot: {String.t(), non_neg_integer()} | nil
+         }
+
   @spec notify_clients_change([pid()], pid(), [Minga.Buffer.EditDelta.t()], non_neg_integer()) ::
           :ok
   defp notify_clients_change([], _buffer_pid, _deltas, _revision), do: :ok
 
   defp notify_clients_change(clients, buffer_pid, deltas, revision) do
     with uri when is_binary(uri) <- buffer_uri(buffer_pid) do
-      send_to_alive_clients(clients, fn client ->
-        send_change(client, uri, buffer_pid, deltas, revision)
-      end)
+      notification = %{
+        uri: uri,
+        buffer: buffer_pid,
+        deltas: deltas,
+        revision: revision,
+        snapshot: nil
+      }
+
+      Enum.reduce(clients, notification, &send_change/2)
     end
 
     :ok
@@ -688,16 +704,10 @@ defmodule Minga.LSP.SyncServer do
     :exit, _ -> :ok
   end
 
-  # Sends a change notification using incremental sync if the server supports
-  # it and deltas are available, otherwise falls back to full sync.
-  @spec send_change(
-          pid(),
-          String.t(),
-          pid(),
-          [Minga.Buffer.EditDelta.t()],
-          non_neg_integer()
-        ) :: :ok
-  defp send_change(client, uri, buffer_pid, deltas, revision) do
+  # Send incremental changes when supported and deltas are available; otherwise fall back to full sync.
+  # An exit skips only this client and keeps the notification unchanged, like `send_to_alive_clients/2`.
+  @spec send_change(pid(), change_notification()) :: change_notification()
+  defp send_change(client, notification) do
     sync_kind =
       try do
         Client.sync_kind(client)
@@ -712,16 +722,45 @@ defmodule Minga.LSP.SyncServer do
         :exit, _ -> :unknown
       end
 
-    case {sync_kind, encoding, deltas} do
-      {:incremental, :utf8, [_ | _]} ->
+    case {sync_kind, encoding, notification.deltas} do
+      {:incremental, :utf8, [_ | _] = deltas} ->
         changes = Enum.map(deltas, &delta_to_lsp_change/1)
-        Client.did_change_incremental(client, uri, changes, buffer_pid, revision)
+
+        Client.did_change_incremental(
+          client,
+          notification.uri,
+          changes,
+          notification.buffer,
+          notification.revision
+        )
+
+        notification
 
       _ ->
-        {content, current_revision} = Buffer.content_with_version(buffer_pid)
-        Client.did_change(client, uri, content, buffer_pid, current_revision)
+        notification = acquire_change_snapshot(notification)
+        {content, current_revision} = notification.snapshot
+
+        Client.did_change(
+          client,
+          notification.uri,
+          content,
+          notification.buffer,
+          current_revision
+        )
+
+        notification
     end
+  catch
+    :exit, _ -> notification
   end
+
+  # A read that exits leaves the snapshot unset, so the next full-sync client retries the read.
+  @spec acquire_change_snapshot(change_notification()) :: change_notification()
+  defp acquire_change_snapshot(%{snapshot: nil} = notification) do
+    %{notification | snapshot: Buffer.content_with_version(notification.buffer)}
+  end
+
+  defp acquire_change_snapshot(notification), do: notification
 
   @spec delta_to_lsp_change(Minga.Buffer.EditDelta.t()) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()}
