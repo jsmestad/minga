@@ -9,6 +9,7 @@ defmodule Minga.Git do
   """
 
   alias Minga.Git.StashEntry
+  alias Minga.Project.Root
 
   defmodule StatusEntry do
     @moduledoc false
@@ -326,17 +327,32 @@ defmodule Minga.Git do
   @spec revert_hunk([String.t()], Minga.Core.Diff.hunk()) :: [String.t()]
   defdelegate revert_hunk(current_lines, hunk), to: Minga.Core.Diff
 
-  # ── Pure calculations (no backend needed) ──────────────────────────────
+  # ── Path resolution ─────────────────────────────────────────────────────
 
   @doc """
-  Returns the path of a file relative to the git root.
+  Returns the path of a file relative to the git root, resolving filesystem aliases on both sides.
   """
   @spec relative_path(String.t(), String.t()) :: String.t()
   def relative_path(git_root, file_path) do
-    Path.relative_to(Path.expand(file_path), Path.expand(git_root))
+    Path.relative_to(canonical_git_path(file_path), canonical_git_path(git_root))
   end
 
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec canonical_git_path(String.t()) :: String.t()
+  defp canonical_git_path(path) do
+    case Root.canonical_path(path) do
+      {:ok, canonical} ->
+        canonical
+
+      {:error, :enoent} ->
+        expanded = Path.expand(path)
+        Path.join(canonical_git_path(Path.dirname(expanded)), Path.basename(expanded))
+
+      {:error, _reason} ->
+        Path.expand(path)
+    end
+  end
 
   @spec impl() :: module()
   defp impl do

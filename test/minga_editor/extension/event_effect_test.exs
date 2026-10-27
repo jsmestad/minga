@@ -7,7 +7,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
   alias Minga.Extension.CodeLease
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
-  alias MingaEditor.Extension.EventDispatchResult
+  alias MingaEditor.Extension.EventEffect.Result
   alias MingaEditor.Extension.EventEffect
   alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.Session.State, as: SessionState
@@ -91,17 +91,36 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
     outcome = receive_outcome(ctx.scheduler, request_id, :completed)
 
-    assert {:completed,
-            %EventDispatchResult{status: :handled, state: outcome_state, failures: []}} =
-             outcome.value
+    assert {:completed, %Result{status: :handled, state: :base, failures: []}} = outcome.value
 
-    assert outcome_state == ctx.state
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
 
     assert {state, %Outcome{value: {:completed, _result}} = applied} =
              EventEffect.apply(ctx.state, outcome)
 
     assert state == ctx.state
+    EffectScheduler.finalize(ctx.scheduler, applied)
+  end
+
+  test "a changed callback candidate commits through the compact result", ctx do
+    theme = MingaEditor.UI.Theme.get!(:doom_one)
+    expected = EditorState.apply_theme(ctx.state, theme)
+    refute expected == ctx.state
+
+    EventWorkflow.dispatch(ctx.state, {:editor_action, :theme, theme},
+      callback_registry: ctx.registry,
+      callback_admission: ctx.code_lease
+    )
+
+    assert_receive {:effect_lifecycle, %Outcome{value: :running, request: %{id: request_id}}},
+                   @timeout
+
+    outcome = receive_outcome(ctx.scheduler, request_id, :completed)
+    assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
+
+    assert {^expected, %Outcome{value: {:completed, _}} = applied} =
+             EventEffect.apply(ctx.state, outcome)
+
     EffectScheduler.finalize(ctx.scheduler, applied)
   end
 
@@ -164,11 +183,9 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
     outcome = receive_outcome(ctx.scheduler, request_id, :completed)
 
-    assert {:completed,
-            %EventDispatchResult{status: :not_matched, state: outcome_state, failures: []}} =
+    assert {:completed, %Result{status: :not_matched, state: :base, failures: []}} =
              outcome.value
 
-    assert outcome_state == ctx.state
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
     current = EditorState.apply_theme(state, MingaEditor.UI.Theme.get!(:doom_one))
 
@@ -202,11 +219,9 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
       outcome = receive_outcome(ctx.scheduler, request_id, :completed)
 
-      assert {:completed,
-              %EventDispatchResult{status: :not_matched, state: outcome_state, failures: []}} =
+      assert {:completed, %Result{status: :not_matched, state: :base, failures: []}} =
                outcome.value
 
-      assert outcome_state == ctx.state
       assert EventEffect.render?(outcome)
       assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
 
@@ -246,16 +261,15 @@ defmodule MingaEditor.Extension.EventEffectTest do
     assert :ok = EffectScheduler.claim(ctx.scheduler, outcome)
 
     assert {:completed,
-            %EventDispatchResult{
+            %Result{
               status: :callback_failed,
               failures: [failure],
-              state: callback_state
+              state: :base
             }} = outcome.value
 
     assert {^state, %Outcome{value: {:completed, _result}} = applied} =
              EventEffect.apply(state, outcome)
 
-    assert {:completed, %EventDispatchResult{state: ^callback_state}} = applied.value
     assert EventEffect.render?(applied)
     EffectScheduler.finalize(ctx.scheduler, applied)
 

@@ -85,6 +85,66 @@ defmodule Minga.Core.DiffTest do
     test "both empty produces no hunks" do
       assert Diff.diff_lines([], []) == []
     end
+
+    test "whole-file additions and deletions preserve blank and Unicode lines when reverted" do
+      lines = ["α", "", "🙂", ""]
+
+      assert [added] = Diff.diff_lines([], lines)
+
+      assert added == %{
+               type: :added,
+               start_line: 0,
+               count: 4,
+               old_start: 0,
+               old_count: 0,
+               old_lines: []
+             }
+
+      assert Diff.revert_hunk(lines, added) == []
+
+      assert Diff.signs_for_hunks([added]) == %{
+               0 => :added,
+               1 => :added,
+               2 => :added,
+               3 => :added
+             }
+
+      assert [deleted] = Diff.diff_lines(lines, [])
+
+      assert deleted == %{
+               type: :deleted,
+               start_line: 0,
+               count: 0,
+               old_start: 0,
+               old_count: 4,
+               old_lines: lines
+             }
+
+      assert Diff.revert_hunk([], deleted) == lines
+      assert Diff.signs_for_hunks([deleted]) == %{0 => :deleted}
+    end
+
+    test "a large added or removed file does not allocate a quadratic diff workspace" do
+      lines = Enum.map(1..4_000, fn line -> "line #{line}" end)
+      parent = self()
+
+      for {base, current, type} <- [{[], lines, :added}, {lines, [], :deleted}] do
+        reference = make_ref()
+
+        {pid, monitor} =
+          spawn_monitor(fn ->
+            hunks = Diff.diff_lines(base, current)
+            {:memory, bytes} = Process.info(self(), :memory)
+            send(parent, {reference, bytes, hunks})
+          end)
+
+        assert_receive {^reference, bytes, [hunk]}, 5_000
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
+        assert hunk.type == type
+        assert max(hunk.count, hunk.old_count) == 4_000
+        assert bytes < 16 * 1_024 * 1_024
+      end
+    end
   end
 
   # ── signs_for_hunks/1 ─────────────────────────────────────────────────────

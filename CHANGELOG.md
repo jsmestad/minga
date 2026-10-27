@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Production parser and hook-runner binaries now use Zig `ReleaseSafe`, with Zig's build cache selecting the correct optimization mode. Parser queries compile only for languages in use instead of prewarming every bundled language. Editor launchers retain ERTS's specialized memory allocators instead of disabling them.
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
 - LSP, diagnostic, and caret position conversion now walks UTF-8 text directly instead of building charlists or re-encoding each character, and UTF-32 position lookup runs in constant stack. Converted positions, clamping, and exact-column errors are unchanged.
 - GUI search indexes now build in one linear pass when indexing into an empty tree, so initial builds and edits that remove every match no longer insert each match-bearing line persistently. Match order, counts, navigation, and incremental edits are unchanged.
@@ -27,6 +28,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Cursor-left and Backspace no longer scan all preceding buffer text on each action. Line-boundary lookup searches backward in bounded chunks, and grapheme lookup reads only the final line while preserving Unicode and CRLF boundaries.
 - Converting between document points and editor positions no longer walks or copies buffer content. Range edits, replacements, and edit deltas resolve positions through the cached line index, including pending line shifts, while keeping exact byte columns.
 - Deleting or moving the cursor across a CRLF line ending now updates the line count, cursor line, and line index. Previously the CRLF pair was treated as an ordinary character, so later positions resolved to the wrong line.
+- Git tracking resolves project-directory aliases before reading HEAD, including new paths under a symlinked parent.
+- Whole-file additions and deletions use direct line-diff hunks instead of a quadratic Myers workspace, preventing large transient heaps for untracked files.
+- The macOS protocol reader releases temporary Foundation read buffers after each packet instead of retaining them until its background thread exits.
+- Extension callback completions reuse the request snapshot when no state changed, and the effect scheduler releases its idle heap after a burst.
+- Bundled extensions boot their isolated compiler and validator with the release's clean boot script and library path.
 - Bounded agent command collection now terminates live producers before closing their Ports on timeout or capture exhaustion. Search and shell commands no longer continue consuming CPU after returning an incomplete result.
 
 <!-- RELEASE_MARKER: new releases are prepended above this line -->

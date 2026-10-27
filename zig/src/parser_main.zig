@@ -77,7 +77,6 @@ pub fn main(init: std.process.Init) !void {
 
     var hl = try highlighter_mod.Highlighter.init(alloc);
     defer hl.deinit();
-    hl.startPrewarm();
 
     // Stdout (Port protocol channel).
     var stdout_buf: [4096]u8 = undefined;
