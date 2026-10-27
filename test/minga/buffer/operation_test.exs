@@ -35,6 +35,26 @@ defmodule Minga.Buffer.OperationTest do
       assert delta.new_end_position == {0, 2}
       assert delta.inserted_text == "X"
     end
+
+    test "reports byte positions for a multi-line range on a document with pending line shifts" do
+      doc =
+        "one\ntwo\nthree"
+        |> Document.new()
+        |> Document.move_to({0, 3})
+        |> Document.insert_text("!")
+
+      assert {:pending, _starts, 0, 1} = doc.line_offsets
+      assert {:edited, new_doc, delta} = Operation.replace_range(doc, {1, 1}, {2, 1}, "X")
+      assert Document.content(new_doc) == "one!\ntXree"
+      assert Document.cursor(new_doc) == {1, 2}
+      assert delta.start_byte == 6
+      assert delta.old_end_byte == 11
+      assert delta.new_end_byte == 7
+      assert delta.start_position == {1, 1}
+      assert delta.old_end_position == {2, 2}
+      assert delta.new_end_position == {1, 2}
+      assert delta.inserted_text == "X"
+    end
   end
 
   describe "replace_lines/4" do
@@ -110,6 +130,36 @@ defmodule Minga.Buffer.OperationTest do
       assert delta.old_end_position == {0, 3}
       assert delta.new_end_position == {0, 1}
       assert delta.inserted_text == ""
+    end
+
+    test "joins lines when deleting a CRLF and keeps later positions on the joined index" do
+      doc = "a\r\nb\nc" |> Document.new() |> Document.move_to({0, 1})
+
+      assert {:edited, new_doc, delta} = Operation.delete_forward(doc)
+      assert Document.content(new_doc) == "ab\nc"
+      assert Document.line_count(new_doc) == 2
+      assert Document.cursor(new_doc) == {0, 1}
+      assert {delta.start_byte, delta.old_end_byte, delta.new_end_byte} == {1, 3, 1}
+      assert {delta.start_position, delta.old_end_position} == {{0, 1}, {1, 0}}
+      assert Document.offset_to_position(new_doc, 2) == {0, 2}
+      assert Document.offset_to_position(new_doc, 3) == {1, 0}
+      assert Document.line_at(new_doc, 1) == "c"
+    end
+  end
+
+  describe "backspace/1" do
+    test "joins lines when deleting a CRLF and keeps later positions on the joined index" do
+      doc = "a\r\nb\nc" |> Document.new() |> Document.move_to({1, 0})
+
+      assert {:edited, new_doc, delta} = Operation.backspace(doc)
+      assert Document.content(new_doc) == "ab\nc"
+      assert Document.line_count(new_doc) == 2
+      assert Document.cursor(new_doc) == {0, 1}
+      assert {delta.start_byte, delta.old_end_byte, delta.new_end_byte} == {1, 3, 1}
+      assert {delta.start_position, delta.old_end_position} == {{0, 1}, {1, 0}}
+      assert Document.offset_to_position(new_doc, 3) == {1, 0}
+      assert Document.position_to_offset(new_doc, {1, 1}) == 4
+      assert Document.line_at(new_doc, 1) == "c"
     end
   end
 

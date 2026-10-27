@@ -10,6 +10,9 @@ defmodule Minga.Test.Generators do
 
   alias Minga.Buffer.Document
 
+  @typedoc "The line-index representation an `indexed_document/0` document was built in."
+  @type index_state :: :clean | :pending_insert | :pending_delete | :missing
+
   # ── Buffer content generators ─────────────────────────────────────────────
 
   @doc "Generates a multi-line string suitable for buffer content."
@@ -61,6 +64,37 @@ defmodule Minga.Test.Generators do
       {content, pos}
     end
   end
+
+  @doc """
+  Generates a multi-line Unicode document and the state its line index is in.
+
+  The index is clean, pending a positive shift, pending a negative shift, or missing. Pending
+  edits happen between two `z` bytes, so they never touch a newline and never flush the index.
+  """
+  @spec indexed_document() :: StreamData.t({Document.t(), index_state()})
+  def indexed_document do
+    gen all(
+          prefix <- string([?a, ?\n, ?\r, 0xE9, 0x1F968], max_length: 30),
+          suffix <- string([?b, ?\n, 0xE9, 0x1F968], max_length: 30),
+          inserted <- string([?x, 0xE9], min_length: 1, max_length: 3),
+          state <- member_of([:clean, :pending_insert, :pending_delete, :missing])
+        ) do
+      anchored = prefix <> "z"
+      [last_line | earlier_lines] = anchored |> String.split("\n") |> Enum.reverse()
+      cursor = {length(earlier_lines), byte_size(last_line)}
+      document = Document.new(anchored <> "z" <> suffix) |> Document.move_to(cursor)
+      {in_index_state(document, state, inserted), state}
+    end
+  end
+
+  @spec in_index_state(Document.t(), index_state(), String.t()) :: Document.t()
+  defp in_index_state(document, :clean, _inserted), do: document
+
+  defp in_index_state(document, :pending_insert, inserted),
+    do: Document.insert_text(document, inserted)
+
+  defp in_index_state(document, :pending_delete, _inserted), do: Document.delete_before(document)
+  defp in_index_state(document, :missing, _inserted), do: %{document | line_offsets: nil}
 
   # ── Protocol event generators ──────────────────────────────────────────────
 
