@@ -5,6 +5,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Search.IndexGeneration
   alias Minga.Search.IndexOwner
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
@@ -13,6 +14,9 @@ defmodule MingaEditor.Frontend.GUISearchTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search, as: SearchData
   alias Minga.Protocol.Opcodes
+
+  # GuiSearchBuild requests are bounded by the scheduler's 10s timeout; wait slightly longer.
+  @search_build_wait [max_attempts: 1_100, interval_ms: 10]
 
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
@@ -719,16 +723,19 @@ defmodule MingaEditor.Frontend.GUISearchTest do
 
     if is_pid(state.workspace.buffers.active) and
          state.workspace.search.gui_search.acknowledged_edit_seq == edit_seq do
-      wait_until(ctx, &search_edit_ready?(&1, edit_seq))
+      wait_until(ctx, &search_build_finished?/1, @search_build_wait)
+      search = editor_state(ctx).workspace.search.gui_search
+
+      assert search_edit_ready?(search, edit_seq),
+             "search edit #{edit_seq} finished without a ready index: #{inspect(search.result)}"
     end
   end
 
-  defp search_edit_ready?(state, edit_seq) do
-    match?(
-      %{acknowledged_edit_seq: ^edit_seq, result: {:ready, _index}},
-      state.workspace.search.gui_search
-    )
-  end
+  defp search_build_finished?(state),
+    do: not EffectScheduler.active_activity?(state.effect_scheduler, :gui_search_matching)
+
+  defp search_edit_ready?(search, edit_seq),
+    do: match?(%{acknowledged_edit_seq: ^edit_seq, result: {:ready, _index}}, search)
 
   defp send_search_focus(ctx, replace_mode) do
     replace_mode_byte = if replace_mode, do: 1, else: 0

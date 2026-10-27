@@ -1599,23 +1599,36 @@ defmodule Minga.Extension.LifecycleContractTest do
       receive do: (:never -> :ok)
     end
 
+    # The cleanup worker runs shared global cleanup families before reaching this probe.
+    # The deadline is delivered explicitly once the probe proves the blocked callback is running.
+    cleanup_timeout_ms = 5_000
+
     cleanup_opts =
       ctx.opts
-      |> Keyword.put(:callback_timeout_ms, 25)
+      |> Keyword.put(:callback_timeout_ms, cleanup_timeout_ms)
       |> Keyword.put(:callbacks, %{blocked_cleanup: blocked_cleanup})
 
     cleanup_stop = Task.async(fn -> stop_extension(ctx, cleanup_name, cleanup_opts) end)
-    assert_receive {:timeout_worker, :cleanup, cleanup_worker}
+    assert_receive {:timeout_worker, :cleanup, cleanup_worker}, cleanup_timeout_ms
     cleanup_ref = Process.monitor(cleanup_worker)
+    authority = instance_pid(ctx, cleanup_name)
+
+    assert %{
+             phase:
+               {:stopping,
+                %{worker: %Worker{id: cleanup_worker_id, kind: :cleanup, pid: ^cleanup_worker}}}
+           } = :sys.get_state(authority)
+
+    send(authority, {Worker, :timeout, cleanup_worker_id, :cleanup})
 
     assert {:error,
             {:cleanup_failed,
              [
                %{
                  family: :cleanup_worker,
-                 reason: {:transition_timeout, :cleanup, 25}
+                 reason: {:transition_timeout, :cleanup, ^cleanup_timeout_ms}
                }
-             ]}} = Task.await(cleanup_stop)
+             ]}} = Task.await(cleanup_stop, cleanup_timeout_ms + 1_000)
 
     assert_receive {:DOWN, ^cleanup_ref, :process, ^cleanup_worker, :killed}
     assert :ok = stop_extension(ctx, cleanup_name, Keyword.put(ctx.opts, :callbacks, %{}))

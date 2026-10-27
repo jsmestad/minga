@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
+- Full-content undo commits now find the changed byte range with native binary prefix and suffix comparison over bounded 4 KiB chunks instead of a per-byte Elixir scan, without copying either whole document. Patch contents, apply/invert behavior, and cursor restoration are unchanged.
 - Opening or reloading a buffer in which no line starts with a merge conflict marker no longer splits every line or copies the document to build the conflict index. On a 60,000-line, 3.9 MB ASCII document, building the index drops from about 8 ms to 0.3 ms (median) wherever the edit gap sits. Documents with any marker line, including orphan markers, are indexed as before.
 - Buffer file opens, byte-range replacements, and undo reconstruction now validate UTF-8 through the VM's native Unicode converter instead of `String.valid?/1`. Accepted and rejected input is unchanged; validating multi-megabyte files is roughly four to five times faster.
 - Ordinary editor startup defers agent model discovery until agent use and starts the bundled BEAM before native font and Metal setup. Unresolved models retain truthful readiness, and exact hosted route startup preserves the selected reasoning policy.
