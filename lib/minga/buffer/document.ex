@@ -36,6 +36,7 @@ defmodule Minga.Buffer.Document do
   """
 
   alias Minga.Buffer.{Cursor, Lines, Position, Selection}
+  alias Minga.Core.Unicode
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
   defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
@@ -424,7 +425,7 @@ defmodule Minga.Buffer.Document do
 
   @spec validate_reconstructed_content(binary()) :: binary()
   defp validate_reconstructed_content(content) do
-    if String.valid?(content) do
+    if Unicode.valid_utf8?(content) do
       content
     else
       raise ArgumentError, "byte range replacement produced invalid UTF-8 content"

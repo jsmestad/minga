@@ -475,9 +475,22 @@ defmodule Minga.Buffer.Lines do
 
   @spec last_line_start(String.t()) :: non_neg_integer()
   defp last_line_start(text) do
-    case :binary.matches(text, "\n") do
-      [] -> 0
-      matches -> elem(Enum.at(matches, -1), 0) + 1
+    text_size = byte_size(text)
+
+    if text_size > 0 and :binary.last(text) == ?\n,
+      do: text_size,
+      else: last_line_start(text, text_size)
+  end
+
+  @spec last_line_start(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp last_line_start(_text, 0), do: 0
+
+  defp last_line_start(text, stop) do
+    start = max(stop - 4096, 0)
+
+    case :binary.matches(text, "\n", scope: {start, stop - start}) do
+      [] -> last_line_start(text, start)
+      matches -> elem(List.last(matches), 0) + 1
     end
   end
 end

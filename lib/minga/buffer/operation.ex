@@ -13,6 +13,7 @@ defmodule Minga.Buffer.Operation do
   alias Minga.Buffer.Selection
   alias Minga.Buffer.Span
   alias Minga.Buffer.UndoPatch
+  alias Minga.Core.Unicode
 
   @typedoc "Result of a pure edit operation."
   @type result :: :unchanged | {:edited, Document.t(), EditDelta.t()}
@@ -128,7 +129,7 @@ defmodule Minga.Buffer.Operation do
          true <- old_end_byte <= byte_size(content),
          true <- valid_utf8_boundary?(content, start_byte),
          true <- valid_utf8_boundary?(content, old_end_byte),
-         true <- String.valid?(replacement) do
+         true <- Unicode.valid_utf8?(replacement) do
       replace_valid_byte_range(
         doc,
         position,
@@ -187,7 +188,7 @@ defmodule Minga.Buffer.Operation do
   defp valid_utf8_boundary?(content, point) do
     content
     |> binary_part(0, point)
-    |> String.valid?()
+    |> Unicode.valid_utf8?()
   end
 
   @doc "Applies multiple range replacements from the end of the document toward the start."
