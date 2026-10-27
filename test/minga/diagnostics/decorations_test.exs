@@ -3,6 +3,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Diagnostics.Diagnostic
@@ -205,7 +206,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       BufferProcess.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
-            style: Minga.Core.Face.new(fg: 0x00FF00),
+            style: Face.new(fg: 0x00FF00),
             group: :search
           )
 
@@ -226,5 +227,62 @@ defmodule Minga.Diagnostics.DecorationsTest do
       groups = Enum.map(ranges, & &1.group) |> Enum.sort()
       assert groups == [:diagnostics, :search]
     end
+
+    test "endpoint line runs past the buffer end keep exact line text in published order",
+         ctx do
+      {:ok, pid} = BufferProcess.start_link(content: "αβγ one\nδε two\nplain\nζη three\na four")
+      uri = "file:///test/line_runs.ex"
+      search = {{2, 0}, {2, 5}, [style: Face.new(fg: 0x00FF00), group: :search]}
+      BufferProcess.batch_decorations(pid, &add_highlights(&1, [search]))
+
+      # Endpoint lines form runs 0-1, 3-5, and 7-9; the buffer ends at line 4.
+      Diagnostics.publish(ctx.diag_name, :test, uri, [
+        make_diagnostic(:info, 7, 0, 7, 3, encoding: :utf16),
+        make_diagnostic(:warning, 3, 2, 5, 1, encoding: :utf16),
+        make_diagnostic(:info, 8, 1, 8, 3),
+        make_diagnostic(:hint, 4, 0, 4, 1, encoding: :utf16),
+        make_diagnostic(:error, 9, 1, 9, 4, encoding: :utf16),
+        make_diagnostic(:error, 3, 0, 3, 2, encoding: :utf16),
+        make_diagnostic(:error, 0, 1, 1, 2, encoding: :utf16)
+      ])
+
+      DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
+
+      diagnostic_ranges =
+        for {start_pos, end_pos, color, priority} <- [
+              {{0, 2}, {1, 4}, @gutter_colors.error_fg, 40},
+              {{3, 0}, {3, 4}, @gutter_colors.error_fg, 40},
+              {{3, 4}, {5, 0}, @gutter_colors.warning_fg, 30},
+              {{4, 0}, {4, 1}, @gutter_colors.hint_fg, 10},
+              {{8, 1}, {8, 3}, @gutter_colors.info_fg, 20}
+            ] do
+          style = Face.new(underline: true, underline_color: color)
+          {start_pos, end_pos, [style: style, priority: priority, group: :diagnostics]}
+        end
+
+      expected =
+        Decorations.new()
+        |> Decorations.batch(&add_highlights(&1, [search]))
+        |> Decorations.batch(fn decs ->
+          decs
+          |> Decorations.remove_group(:diagnostics)
+          |> add_highlights(diagnostic_ranges)
+        end)
+
+      assert visible_highlights(BufferProcess.decorations(pid)) == visible_highlights(expected)
+    end
+  end
+
+  defp add_highlights(decs, ranges) do
+    Enum.reduce(ranges, decs, fn {start_pos, end_pos, opts}, acc ->
+      {_id, acc} = Decorations.add_highlight(acc, start_pos, end_pos, opts)
+      acc
+    end)
+  end
+
+  defp visible_highlights(decs) do
+    decs
+    |> Decorations.highlights_for_lines(0, 10)
+    |> Enum.map(&{&1.start, &1.end_, &1.style, &1.priority, &1.group})
   end
 end
