@@ -93,37 +93,28 @@ defmodule Minga.Core.PositionEncoding do
 
   @spec exact_codepoint_column(String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, non_neg_integer()} | {:error, :column_out_of_range}
+  defp exact_codepoint_column(<<codepoint::utf8, rest::binary>>, remaining, byte_offset)
+       when remaining > 0 do
+    exact_codepoint_column(rest, remaining - 1, byte_offset + utf8_byte_width(codepoint))
+  end
+
   defp exact_codepoint_column(_line_text, 0, byte_offset), do: {:ok, byte_offset}
   defp exact_codepoint_column("", _remaining, _byte_offset), do: {:error, :column_out_of_range}
 
-  defp exact_codepoint_column(<<codepoint::utf8, rest::binary>>, remaining, byte_offset) do
-    exact_codepoint_column(rest, remaining - 1, byte_offset + byte_size(<<codepoint::utf8>>))
-  end
-
   @spec exact_utf16_column(String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, non_neg_integer()} | {:error, :column_out_of_range | :column_not_boundary}
-  defp exact_utf16_column(_line_text, 0, byte_offset), do: {:ok, byte_offset}
-  defp exact_utf16_column("", _remaining, _byte_offset), do: {:error, :column_out_of_range}
-
-  defp exact_utf16_column(<<codepoint::utf8, rest::binary>>, remaining, byte_offset) do
-    units = utf16_units_for_codepoint(codepoint)
-    exact_utf16_step(rest, remaining, byte_offset, codepoint, units)
-  end
-
-  @spec exact_utf16_step(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          1 | 2
-        ) :: {:ok, non_neg_integer()} | {:error, :column_out_of_range | :column_not_boundary}
-  defp exact_utf16_step(_rest, remaining, _byte_offset, _codepoint, units)
-       when remaining < units,
+  defp exact_utf16_column(<<codepoint::utf8, _rest::binary>>, 1, _byte_offset)
+       when codepoint > 0xFFFF,
        do: {:error, :column_not_boundary}
 
-  defp exact_utf16_step(rest, remaining, byte_offset, codepoint, units) do
-    exact_utf16_column(rest, remaining - units, byte_offset + byte_size(<<codepoint::utf8>>))
+  defp exact_utf16_column(<<codepoint::utf8, rest::binary>>, remaining, byte_offset)
+       when remaining > 0 do
+    units = utf16_units_for_codepoint(codepoint)
+    exact_utf16_column(rest, remaining - units, byte_offset + utf8_byte_width(codepoint))
   end
+
+  defp exact_utf16_column(_line_text, 0, byte_offset), do: {:ok, byte_offset}
+  defp exact_utf16_column("", _remaining, _byte_offset), do: {:error, :column_out_of_range}
 
   @spec normalize_encoding(String.t()) :: encoding() | nil
   defp normalize_encoding("utf-8"), do: :utf8
@@ -143,45 +134,58 @@ defmodule Minga.Core.PositionEncoding do
   defp byte_col_to_lsp(byte_col, line_text, :utf16) do
     safe_byte_col = min(byte_col, byte_size(line_text))
     prefix = binary_part(line_text, 0, safe_byte_col)
-    count_utf16_code_units(prefix)
+    count_utf16_code_units(prefix, prefix, 0)
   end
 
   @spec lsp_to_byte_col(non_neg_integer(), String.t(), encoding()) :: non_neg_integer()
   defp lsp_to_byte_col(character, _line_text, :utf8), do: character
-  defp lsp_to_byte_col(character, line_text, :utf32), do: walk_codepoints(line_text, character)
+
+  defp lsp_to_byte_col(character, line_text, :utf32),
+    do: walk_codepoints(line_text, character, 0)
 
   defp lsp_to_byte_col(character, line_text, :utf16),
     do: walk_utf16_units(line_text, character, 0)
 
-  @spec count_utf16_code_units(binary()) :: non_neg_integer()
-  defp count_utf16_code_units(binary) do
-    binary
+  @spec count_utf16_code_units(binary(), binary(), non_neg_integer()) :: non_neg_integer()
+  defp count_utf16_code_units(<<codepoint::utf8, rest::binary>>, prefix, units) do
+    count_utf16_code_units(rest, prefix, units + utf16_units_for_codepoint(codepoint))
+  end
+
+  defp count_utf16_code_units(<<>>, _prefix, units), do: units
+
+  # Bit-syntax UTF-8 matching rejects exactly the bytes `:unicode` rejects, so invalid input
+  # reaches the original conversion and raises its UnicodeConversionError unchanged.
+  defp count_utf16_code_units(_invalid, prefix, _units) do
+    prefix
     |> String.to_charlist()
-    |> Enum.reduce(0, fn codepoint, acc ->
-      acc + utf16_units_for_codepoint(codepoint)
-    end)
+    |> Enum.reduce(0, &(&2 + utf16_units_for_codepoint(&1)))
   end
 
   @spec utf16_units_for_codepoint(non_neg_integer()) :: 1 | 2
   defp utf16_units_for_codepoint(cp) when cp <= 0xFFFF, do: 1
   defp utf16_units_for_codepoint(_cp), do: 2
 
-  @spec walk_codepoints(binary(), non_neg_integer()) :: non_neg_integer()
-  defp walk_codepoints(_binary, 0), do: 0
-  defp walk_codepoints(<<>>, _remaining), do: 0
+  @spec utf8_byte_width(non_neg_integer()) :: 1..4
+  defp utf8_byte_width(cp) when cp < 0x80, do: 1
+  defp utf8_byte_width(cp) when cp < 0x800, do: 2
+  defp utf8_byte_width(cp) when cp < 0x10000, do: 3
+  defp utf8_byte_width(_cp), do: 4
 
-  defp walk_codepoints(<<c::utf8, rest::binary>>, remaining) do
-    byte_size_of_char = byte_size(<<c::utf8>>)
-    byte_size_of_char + walk_codepoints(rest, remaining - 1)
+  # Negative or overshot counts never reach zero, so they walk to the end of the line.
+  @spec walk_codepoints(binary(), integer(), non_neg_integer()) :: non_neg_integer()
+  defp walk_codepoints(<<c::utf8, rest::binary>>, remaining, byte_offset) when remaining != 0 do
+    walk_codepoints(rest, remaining - 1, byte_offset + utf8_byte_width(c))
   end
 
-  @spec walk_utf16_units(binary(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp walk_codepoints(_binary, 0, byte_offset), do: byte_offset
+  defp walk_codepoints(<<>>, _remaining, byte_offset), do: byte_offset
+
+  @spec walk_utf16_units(binary(), integer(), non_neg_integer()) :: non_neg_integer()
+  defp walk_utf16_units(<<c::utf8, rest::binary>>, remaining, byte_offset) when remaining != 0 do
+    units = utf16_units_for_codepoint(c)
+    walk_utf16_units(rest, remaining - units, byte_offset + utf8_byte_width(c))
+  end
+
   defp walk_utf16_units(_binary, 0, byte_offset), do: byte_offset
   defp walk_utf16_units(<<>>, _remaining, byte_offset), do: byte_offset
-
-  defp walk_utf16_units(<<c::utf8, rest::binary>>, remaining, byte_offset) do
-    char_bytes = byte_size(<<c::utf8>>)
-    units = utf16_units_for_codepoint(c)
-    walk_utf16_units(rest, remaining - units, byte_offset + char_bytes)
-  end
 end
