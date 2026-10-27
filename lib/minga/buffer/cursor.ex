@@ -13,7 +13,7 @@ defmodule Minga.Buffer.Cursor do
 
   def move(%Document{cursor_line: line} = doc, :left) do
     {new_before, character} = previous_character(doc.before)
-    new_line = if character == "\n", do: line - 1, else: line
+    new_line = if character in ["\n", "\r\n"], do: line - 1, else: line
     new_column = Lines.last_line_width(new_before)
 
     %{
@@ -29,10 +29,10 @@ defmodule Minga.Buffer.Cursor do
 
   def move(%Document{} = doc, :right) do
     case next_character(doc.after) do
-      {"\n", rest} ->
+      {newline, rest} when newline in ["\n", "\r\n"] ->
         %{
           doc
-          | before: doc.before <> "\n",
+          | before: doc.before <> newline,
             after: rest,
             cursor_line: doc.cursor_line + 1,
             cursor_col: 0

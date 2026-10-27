@@ -3,8 +3,9 @@ defmodule Minga.Buffer.Lines do
   Presents document content as editor lines.
 
   This module owns line-oriented questions: fetching visible line text,
-  taking line ranges, maintaining the cached line index, and measuring
-  how inserted text changes the current line.
+  taking line ranges, maintaining the cached line index, resolving document
+  points to lines and line starts, and measuring how inserted text changes
+  the current line.
 
   ## Line index representation
 
@@ -29,6 +30,9 @@ defmodule Minga.Buffer.Lines do
   @type line_starts :: tuple()
   @type line_span :: {start :: non_neg_integer(), length :: non_neg_integer()}
   @type snapshot :: {line_starts(), String.t()}
+
+  # Line starts with the pending shift applied to lines after `adjust_after`.
+  @typep index_view :: {line_starts(), adjust_after :: non_neg_integer(), delta :: integer()}
 
   # ── Line extraction (zero-copy from gap buffer halves) ──
 
@@ -265,6 +269,32 @@ defmodule Minga.Buffer.Lines do
     elem(line_starts, line)
   end
 
+  @doc """
+  Returns the line containing document point `point` and the point where that line starts.
+
+  A terminating newline belongs to the line it ends. Points past the end of the document
+  resolve to the final line. Clean and pending indexes are searched in O(log lines) without
+  flushing the index or copying content.
+  """
+  @spec containing(Document.t(), non_neg_integer()) :: {line_index(), non_neg_integer()}
+  def containing(%Document{} = doc, point) when is_integer(point) and point >= 0 do
+    {starts, adjust_after, delta} = index_view(doc)
+    line = search_containing(starts, adjust_after, delta, point, 0, tuple_size(starts) - 1)
+    {line, adjusted_offset(starts, line, adjust_after, delta)}
+  end
+
+  @doc """
+  Returns the document point where `line` starts.
+
+  Lines past the final line resolve to the final line's start. Clean and pending indexes are
+  answered in O(1) without flushing the index or copying content.
+  """
+  @spec start_of(Document.t(), line_index()) :: non_neg_integer()
+  def start_of(%Document{} = doc, line) when is_integer(line) and line >= 0 do
+    {starts, adjust_after, delta} = index_view(doc)
+    adjusted_offset(starts, min(line, tuple_size(starts) - 1), adjust_after, delta)
+  end
+
   # ── Index construction and incremental update ──
 
   @doc "Builds a line-start index from a complete text."
@@ -397,6 +427,39 @@ defmodule Minga.Buffer.Lines do
   defp adjusted_offset(starts, line, adjust_after, delta) do
     raw = elem(starts, line)
     if line > adjust_after, do: raw + delta, else: raw
+  end
+
+  @spec index_view(Document.t()) :: index_view()
+  defp index_view(%Document{line_offsets: {:pending, starts, adjust_after, delta}}),
+    do: {starts, adjust_after, delta}
+
+  defp index_view(%Document{line_offsets: starts})
+       when is_tuple(starts) and is_integer(elem(starts, 0)),
+       do: {starts, tuple_size(starts) - 1, 0}
+
+  defp index_view(%Document{} = doc) do
+    starts = doc |> Document.content() |> build_index()
+    {starts, tuple_size(starts) - 1, 0}
+  end
+
+  # Finds the greatest line whose adjusted start is at or before `point`. The upper
+  # midpoint guarantees progress when `low` moves up to `mid`.
+  @spec search_containing(
+          line_starts(),
+          non_neg_integer(),
+          integer(),
+          non_neg_integer(),
+          line_index(),
+          line_index()
+        ) :: line_index()
+  defp search_containing(_starts, _adjust_after, _delta, _point, low, low), do: low
+
+  defp search_containing(starts, adjust_after, delta, point, low, high) do
+    mid = div(low + high + 1, 2)
+
+    if adjusted_offset(starts, mid, adjust_after, delta) <= point,
+      do: search_containing(starts, adjust_after, delta, point, mid, high),
+      else: search_containing(starts, adjust_after, delta, point, low, mid - 1)
   end
 
   @spec accumulate_delta(Document.line_offsets(), non_neg_integer(), integer()) ::

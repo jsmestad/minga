@@ -3,6 +3,7 @@ defmodule Minga.Buffer.LinesTest do
   use ExUnitProperties
 
   alias Minga.Buffer.{Document, Lines}
+  alias Minga.Test.Generators
 
   describe "count/1" do
     test "empty text has one line" do
@@ -78,6 +79,115 @@ defmodule Minga.Buffer.LinesTest do
     end
   end
 
+  describe "containing/2" do
+    test "an empty document has one line starting at zero" do
+      document = Document.new("")
+
+      assert Lines.containing(document, 0) == {0, 0}
+      assert Lines.containing(document, 3) == {0, 0}
+    end
+
+    test "a terminating newline belongs to the line it ends" do
+      document = Document.new("ab\ncd\n")
+
+      assert Lines.containing(document, 2) == {0, 0}
+      assert Lines.containing(document, 3) == {1, 3}
+      assert Lines.containing(document, 5) == {1, 3}
+      assert Lines.containing(document, 6) == {2, 6}
+    end
+
+    test "points past the end resolve to the final line" do
+      assert Lines.containing(Document.new("ab\ncd\n"), 99) == {2, 6}
+      assert Lines.containing(Document.new("ab\ncd"), 99) == {1, 3}
+    end
+
+    test "consecutive newlines each start their own line" do
+      document = Document.new("\n\n")
+
+      assert Lines.containing(document, 0) == {0, 0}
+      assert Lines.containing(document, 1) == {1, 1}
+      assert Lines.containing(document, 2) == {2, 2}
+    end
+
+    test "points inside a multi-byte codepoint resolve to the line holding its bytes" do
+      document = Document.new("é\n🥨b")
+
+      assert Lines.containing(document, 1) == {0, 0}
+      assert Lines.containing(document, 2) == {0, 0}
+      assert Lines.containing(document, 4) == {1, 3}
+    end
+
+    test "applies a pending positive shift to lines after the edited line" do
+      document =
+        "ab\ncd\nef" |> Document.new() |> Document.move_to({0, 1}) |> Document.insert_text("XY")
+
+      assert {:pending, _starts, 0, 2} = document.line_offsets
+      assert Document.content(document) == "aXYb\ncd\nef"
+      assert Lines.containing(document, 4) == {0, 0}
+      assert Lines.containing(document, 5) == {1, 5}
+      assert Lines.containing(document, 8) == {2, 8}
+    end
+
+    test "applies a pending negative shift to lines after the edited line" do
+      document =
+        "abc\nde\nf" |> Document.new() |> Document.move_to({1, 1}) |> Document.delete_before()
+
+      assert {:pending, _starts, 1, -1} = document.line_offsets
+      assert Document.content(document) == "abc\ne\nf"
+      assert Lines.containing(document, 4) == {1, 4}
+      assert Lines.containing(document, 5) == {1, 4}
+      assert Lines.containing(document, 6) == {2, 6}
+    end
+
+    test "rebuilds a missing index from content" do
+      document = %{Document.new("ab\ncd") | line_offsets: nil}
+
+      assert Lines.containing(document, 2) == {0, 0}
+      assert Lines.containing(document, 3) == {1, 3}
+    end
+  end
+
+  describe "start_of/2" do
+    test "returns each line start and clamps past the final line" do
+      document = Document.new("ab\ncd\n")
+
+      assert Enum.map(0..4, &Lines.start_of(document, &1)) == [0, 3, 6, 6, 6]
+    end
+
+    test "an empty document starts every line at zero" do
+      assert Lines.start_of(Document.new(""), 7) == 0
+    end
+
+    test "applies pending shifts and rebuilds a missing index" do
+      pending =
+        "ab\ncd\nef" |> Document.new() |> Document.move_to({1, 1}) |> Document.insert_text("é")
+
+      assert {:pending, _starts, 1, 2} = pending.line_offsets
+      assert Enum.map(0..3, &Lines.start_of(pending, &1)) == [0, 3, 8, 8]
+      assert Lines.start_of(%{Document.new("ab\ncd") | line_offsets: nil}, 1) == 3
+    end
+  end
+
+  property "containing/2 and start_of/2 match a naive newline scan in every index state" do
+    check all({document, state} <- Generators.indexed_document()) do
+      assert index_state(document) == state
+
+      text = Document.content(document)
+      size = byte_size(text)
+      starts = naive_line_starts(text)
+
+      for point <- 0..(size + 2) do
+        clamped = min(point, size)
+        line = Enum.count(starts, &(&1 <= clamped)) - 1
+        assert Lines.containing(document, point) == {line, Enum.at(starts, line)}
+      end
+
+      for line <- 0..(length(starts) + 1) do
+        assert Lines.start_of(document, line) == Enum.at(starts, min(line, length(starts) - 1))
+      end
+    end
+  end
+
   property "fetch/2 matches naive String.split for random content" do
     check all(
             text <- string(:printable, min_length: 0, max_length: 500),
@@ -118,5 +228,23 @@ defmodule Minga.Buffer.LinesTest do
     # Delete invalidates cache
     buf = Document.delete_at(buf)
     assert Lines.fetch(buf, 1) == "bb"
+  end
+
+  @spec index_state(Document.t()) :: Generators.index_state()
+  defp index_state(%Document{line_offsets: {:pending, _starts, _line, delta}}) when delta > 0,
+    do: :pending_insert
+
+  defp index_state(%Document{line_offsets: {:pending, _starts, _line, delta}}) when delta < 0,
+    do: :pending_delete
+
+  defp index_state(%Document{line_offsets: nil}), do: :missing
+  defp index_state(%Document{line_offsets: starts}) when is_tuple(starts), do: :clean
+
+  @spec naive_line_starts(String.t()) :: [non_neg_integer()]
+  defp naive_line_starts(text) do
+    newline_ends =
+      for {?\n, index} <- text |> :binary.bin_to_list() |> Enum.with_index(), do: index + 1
+
+    [0 | newline_ends]
   end
 end

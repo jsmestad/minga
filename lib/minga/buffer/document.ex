@@ -236,7 +236,7 @@ defmodule Minga.Buffer.Document do
         } = buf
       ) do
     {new_before, removed} = Cursor.previous_character(before)
-    newline? = removed == "\n"
+    newline? = removed in ["\n", "\r\n"]
 
     {new_line, new_col, new_lc} =
       if newline? do
@@ -273,11 +273,11 @@ defmodule Minga.Buffer.Document do
           buf
       ) do
     case Cursor.next_character(after_) do
-      {"\n", rest} ->
+      {newline, rest} when newline in ["\n", "\r\n"] ->
         new_ls =
           case ls do
             nil -> nil
-            _ -> Lines.update_after_delete_at(ls, line, 1, true)
+            _ -> Lines.update_after_delete_at(ls, line, byte_size(newline), true)
           end
 
         %{buf | after: rest, line_count: lc - 1, line_offsets: new_ls}
