@@ -97,7 +97,11 @@ public enum ResidentRenderPreparation {
         let text = row.text
         guard !text.isEmpty else { return (row, 0) }
         let clipStart = max(scrollLeft, 0)
-        let clipLimit = clipStart + max(viewportCols, 0)
+        let clipWidth = max(viewportCols, 0)
+        // UTF-8 byte count bounds display width for an unstyled row.
+        // Retain a fitting unscrolled row without walking its graphemes.
+        if clipStart == 0, row.spans.isEmpty, text.utf8.count <= clipWidth { return (row, 0) }
+        let clipLimit = clipStart + clipWidth
         var column = 0
         var index = text.startIndex
         var start = text.endIndex
@@ -121,6 +125,11 @@ public enum ResidentRenderPreparation {
         let clipEnd = min(clipLimit, column)
         guard clipStart < clipEnd else {
             return (rebuilt(row, text: "", spans: [], scrollLeft: scrollLeft), text.utf16.count)
+        }
+        // Reuse a whole unscrolled row only when every span survives normalization.
+        if clipStart == 0, start == text.startIndex, end == text.endIndex,
+           row.spans.allSatisfy({ $0.startCol < $0.endCol && Int($0.endCol) <= clipEnd }) {
+            return (row, 0)
         }
         let clippedText = String(text[start..<end])
         let clippedSpans = row.spans.compactMap { span -> GUIHighlightSpan? in
