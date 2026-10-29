@@ -39,6 +39,9 @@ final class BEAMProcessManager {
     /// Called when the BEAM exits unexpectedly and restart limits are exceeded.
     var onCrash: (@MainActor () -> Void)?
 
+    /// Lets application termination claim a process exit before automatic restart policy runs.
+    var onTermination: (@MainActor (_ status: Int32) -> Bool)?
+
     /// Called when the BEAM exits normally (exit code 0).
     var onNormalExit: (@MainActor () -> Void)?
 
@@ -335,6 +338,8 @@ final class BEAMProcessManager {
         self.process = nil
         closeLaunchPipes()
         endBackgroundActivity()
+
+        if onTermination?(status) == true { return }
 
         // Prune old timestamps outside the restart window.
         let now = Date()

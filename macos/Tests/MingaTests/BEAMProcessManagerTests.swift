@@ -339,6 +339,58 @@ struct BEAMProcessManagerTerminationTests {
         )
     }
 
+    @Test("approved quit claims nonzero process death before automatic restart")
+    @MainActor func approvedNonzeroExitDoesNotRestart() {
+        let manager = BEAMProcessManager()
+        var replies: [Bool] = []
+        var recoveryPresented = false
+        let coordinator = ApplicationQuitCoordinator(
+            sendRequest: { _ in true },
+            sendDecision: { _, _ in true },
+            presentDecision: { _, _ in },
+            replyToAppKit: { replies.append($0) },
+            presentFailure: { _ in },
+            restoreFocus: {}
+        )
+        manager.onTermination = { _ in
+            let disposition = coordinator.coreDidExit()
+            #expect(disposition == .approvedTermination)
+            manager.beginAppShutdown()
+            return true
+        }
+        manager.onCrash = { recoveryPresented = true }
+        #expect(coordinator.begin() == .pending)
+        coordinator.receive(ApplicationQuitResponse(requestID: 1, outcome: .proceeding, dirtyCount: 0, bufferName: "", detail: ""))
+        coordinator.transportDidDisconnect()
+
+        manager.handleTermination(status: 1, reason: .exit)
+
+        #expect(replies == [true])
+        #expect(manager.exitIntent == .appShutdown)
+        #expect(!recoveryPresented)
+    }
+
+    @Test("pending quit claims early nonzero exit until final approval is drained")
+    @MainActor func earlyNonzeroExitWaitsForApproval() {
+        let manager = BEAMProcessManager()
+        var replies: [Bool] = []
+        let coordinator = ApplicationQuitCoordinator(
+            sendRequest: { _ in true },
+            sendDecision: { _, _ in true },
+            presentDecision: { _, _ in },
+            replyToAppKit: { replies.append($0) },
+            presentFailure: { _ in },
+            restoreFocus: {}
+        )
+        manager.onTermination = { _ in coordinator.coreDidExit() != .noPendingQuit }
+        #expect(coordinator.begin() == .pending)
+        manager.handleTermination(status: 1, reason: .exit)
+        #expect(manager.exitIntent != .restartScheduled)
+        #expect(replies.isEmpty)
+        #expect(coordinator.receive(ApplicationQuitResponse(requestID: 1, outcome: .proceeding, dirtyCount: 0, bufferName: "", detail: "")) == .approvedTermination)
+        #expect(replies == [true])
+    }
+
     // MARK: - Main-actor is never blocked by the termination path (#2698 defect B)
 
     @Test("give-up path invokes recovery without blocking the main actor")

@@ -217,37 +217,101 @@ struct ApplicationQuitCoordinatorTests {
         #expect(replies == [false])
     }
 
-    @Test("live bundle transport EOF cancels but matching process exit approves")
-    @MainActor func bundleTransportAndProcessExitRemainDistinct() {
-        var eofReplies: [Bool] = []
-        let eofCoordinator = ApplicationQuitCoordinator(
+    @Test("approval followed by EOF and actual process exit approves once")
+    @MainActor func approvedEOFThenExit() {
+        var replies: [Bool] = []
+        var failures: [String] = []
+        let coordinator = makeCoordinator(replies: { replies.append($0) }, failures: { failures.append($0) })
+        #expect(coordinator.begin() == .pending)
+        coordinator.receive(response(requestID: 1, outcome: .proceeding))
+
+        #expect(coordinator.transportDidDisconnect() == nil)
+        #expect(replies.isEmpty)
+        #expect(coordinator.coreDidExit() == .approvedTermination)
+        #expect(coordinator.coreDidExit() == .noPendingQuit)
+        #expect(replies == [true])
+        #expect(failures.isEmpty)
+    }
+
+    @Test("actual process exit before the queued approval waits for the response")
+    @MainActor func exitThenApproval() {
+        var replies: [Bool] = []
+        let coordinator = makeCoordinator(replies: { replies.append($0) })
+        #expect(coordinator.begin() == .pending)
+        #expect(coordinator.coreDidExit() == .awaitingConfirmation)
+        #expect(replies.isEmpty)
+
+        #expect(coordinator.receive(response(requestID: 1, outcome: .proceeding)) == .approvedTermination)
+        #expect(replies == [true])
+        #expect(coordinator.transportDidDisconnect() == .noPendingQuit)
+        #expect(replies == [true])
+    }
+
+    @Test("process exit without approval cancels once ordered EOF proves no response remains")
+    @MainActor func exitWithoutApproval() {
+        var replies: [Bool] = []
+        let coordinator = makeCoordinator(replies: { replies.append($0) })
+        #expect(coordinator.begin() == .pending)
+        #expect(coordinator.coreDidExit() == .awaitingConfirmation)
+        #expect(coordinator.transportDidDisconnect() == .cancelledTermination)
+        #expect(replies == [false])
+    }
+
+    @Test("live process transport failure cancels only at the recovery deadline")
+    @MainActor func liveTransportDeadline() {
+        var replies: [Bool] = []
+        let coordinator = makeCoordinator(replies: { replies.append($0) })
+        #expect(coordinator.begin() == .pending)
+        coordinator.receive(response(requestID: 1, outcome: .proceeding))
+        coordinator.transportDidDisconnect()
+        #expect(replies.isEmpty)
+        coordinator.transportRecoveryDidExpire()
+        coordinator.transportRecoveryDidExpire()
+        #expect(replies == [false])
+    }
+
+    @Test("dev EOF acts as process death for an approved quit or a core-initiated quit")
+    @MainActor func devEOF() {
+        var replies: [Bool] = []
+        let coordinator = makeCoordinator(replies: { replies.append($0) })
+        #expect(coordinator.begin() == .pending)
+        coordinator.receive(response(requestID: 1, outcome: .proceeding))
+        coordinator.transportDidDisconnect()
+        #expect(coordinator.coreDidExit() == .approvedTermination)
+        #expect(replies == [true])
+
+        coordinator.replaceConnection()
+        coordinator.transportDidDisconnect()
+        #expect(coordinator.coreDidExit() == .noPendingQuit)
+        #expect(replies == [true])
+    }
+
+    @Test("connection replacement clears prior process and EOF facts")
+    @MainActor func replacementResetsLifecycle() {
+        var replies: [Bool] = []
+        let coordinator = makeCoordinator(replies: { replies.append($0) })
+        coordinator.transportDidDisconnect()
+        #expect(coordinator.coreDidExit() == .noPendingQuit)
+        coordinator.replaceConnection()
+        #expect(coordinator.begin() == .pending)
+        coordinator.receive(response(requestID: 1, outcome: .proceeding))
+        #expect(replies.isEmpty)
+        #expect(coordinator.coreDidExit() == .approvedTermination)
+        #expect(replies == [true])
+    }
+
+    @MainActor private func makeCoordinator(
+        replies: @escaping (Bool) -> Void,
+        failures: @escaping (String) -> Void = { _ in }
+    ) -> ApplicationQuitCoordinator {
+        ApplicationQuitCoordinator(
             sendRequest: { _ in true },
             sendDecision: { _, _ in true },
             presentDecision: { _, _ in },
-            replyToAppKit: { eofReplies.append($0) },
-            presentFailure: { _ in },
+            replyToAppKit: replies,
+            presentFailure: failures,
             restoreFocus: {}
         )
-
-        #expect(eofCoordinator.begin() == .pending)
-        eofCoordinator.receive(response(requestID: 1, outcome: .proceeding))
-        eofCoordinator.transportDidDisconnect()
-        #expect(eofReplies == [false])
-
-        var exitReplies: [Bool] = []
-        let exitCoordinator = ApplicationQuitCoordinator(
-            sendRequest: { _ in true },
-            sendDecision: { _, _ in true },
-            presentDecision: { _, _ in },
-            replyToAppKit: { exitReplies.append($0) },
-            presentFailure: { _ in },
-            restoreFocus: {}
-        )
-
-        #expect(exitCoordinator.begin() == .pending)
-        exitCoordinator.receive(response(requestID: 1, outcome: .proceeding))
-        #expect(exitCoordinator.coreDidExit() == .approvedTermination)
-        #expect(exitReplies == [true])
     }
 
     @Test("delegate maps immediate send rejection directly to terminateCancel")

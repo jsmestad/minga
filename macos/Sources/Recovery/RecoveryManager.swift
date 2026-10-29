@@ -24,6 +24,12 @@ struct OutboundConnectionState {
         failedCurrentConnection = false
     }
 
+    /// Retires callbacks from a terminal connection without accepting them as new failures.
+    mutating func retire() {
+        currentID = nil
+        failedCurrentConnection = true
+    }
+
     mutating func acceptFailure(for id: UInt64) -> Bool {
         guard currentID == id, !failedCurrentConnection else { return false }
         failedCurrentConnection = true
