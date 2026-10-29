@@ -22,7 +22,7 @@ enum ApplicationTerminationPolicy {
 
 /// Owns the AppKit side of one correlated application termination handshake.
 ///
-/// The coordinator tracks only transport and request identity.
+/// The coordinator tracks protocol closure, process exit, and request identity.
 /// Dirty-buffer inventory and every save or discard decision remain authoritative on the BEAM.
 @MainActor
 final class ApplicationQuitCoordinator {
@@ -39,6 +39,7 @@ final class ApplicationQuitCoordinator {
         case noPendingQuit
         case approvedTermination
         case cancelledTermination
+        case awaitingConfirmation
     }
 
     enum BeginDisposition: Equatable {
@@ -49,6 +50,8 @@ final class ApplicationQuitCoordinator {
     private(set) var state: State = .idle
     private var nextRequestID: UInt32 = 1
     private var connectionID: UInt64 = 1
+    private var coreExited = false
+    private var transportClosed = false
     private let sendRequest: (UInt32) -> Bool
     private let sendDecision: (UInt32, ApplicationQuitDecision) -> Bool
     private let presentDecision: DecisionPresenter
@@ -94,15 +97,23 @@ final class ApplicationQuitCoordinator {
     }
 
     /// Applies one response only when both the connection and request still match.
-    func receive(_ response: ApplicationQuitResponse) {
+    @discardableResult
+    func receive(_ response: ApplicationQuitResponse) -> CoreExitDisposition? {
         let expectedConnectionID = connectionID
-        guard requestMatches(response.requestID, connectionID: expectedConnectionID) else { return }
+        guard requestMatches(response.requestID, connectionID: expectedConnectionID) else { return nil }
 
         switch response.outcome {
+        case .needsDecision where coreExited:
+            cancel(
+                requestID: response.requestID,
+                connectionID: expectedConnectionID,
+                message: "The editor core exited before a quit decision could be sent. Quit was cancelled."
+            )
+
         case .needsDecision:
             guard case let .awaitingResponse(activeRequestID, activeConnectionID) = state,
                   activeRequestID == response.requestID,
-                  activeConnectionID == expectedConnectionID else { return }
+                  activeConnectionID == expectedConnectionID else { return nil }
             state = .awaitingDecision(requestID: response.requestID, connectionID: expectedConnectionID)
             presentDecision(response.dirtyCount) { [weak self] decision in
                 self?.resolveDecision(
@@ -115,8 +126,9 @@ final class ApplicationQuitCoordinator {
         case .proceeding:
             guard case let .awaitingResponse(activeRequestID, activeConnectionID) = state,
                   activeRequestID == response.requestID,
-                  activeConnectionID == expectedConnectionID else { return }
+                  activeConnectionID == expectedConnectionID else { return nil }
             state = .proceeding(requestID: response.requestID, connectionID: expectedConnectionID)
+            if coreExited { return coreDidExit() }
 
         case .cancelled:
             cancel(requestID: response.requestID, connectionID: expectedConnectionID, message: nil)
@@ -130,15 +142,21 @@ final class ApplicationQuitCoordinator {
                 message: "Quit was cancelled. \(subject): \(reason)"
             )
         }
+        return coreExited && state == .idle ? .cancelledTermination : nil
     }
 
     /// Completes AppKit termination only after the matching core actually exits.
     func coreDidExit() -> CoreExitDisposition {
+        coreExited = true
         switch state {
         case .proceeding(_, let expectedConnectionID) where expectedConnectionID == connectionID:
             state = .idle
             replyToAppKit(true)
             return .approvedTermination
+
+        case .awaitingResponse where !transportClosed:
+            // Process termination and reader delivery use independent queues. Drain the final response before deciding whether quit was approved.
+            return .awaitingConfirmation
 
         case .awaitingResponse(let requestID, let expectedConnectionID),
              .awaitingDecision(let requestID, let expectedConnectionID):
@@ -178,25 +196,28 @@ final class ApplicationQuitCoordinator {
         }
 
         connectionID &+= 1
+        coreExited = false
+        transportClosed = false
     }
 
-    /// Cancels a pending AppKit attempt when a live transport disappears without a confirmed core exit.
-    func transportDidDisconnect() {
+    /// Records ordered reader closure without confusing it with process death in bundle mode.
+    @discardableResult
+    func transportDidDisconnect() -> CoreExitDisposition? {
+        transportClosed = true
+        return coreExited ? coreDidExit() : nil
+    }
+
+    /// Ends a bounded wait when a broken transport does not produce a confirmed quit.
+    func transportRecoveryDidExpire() {
         switch state {
         case .awaitingResponse(let requestID, let expectedConnectionID),
-             .awaitingDecision(let requestID, let expectedConnectionID):
+             .awaitingDecision(let requestID, let expectedConnectionID),
+             .proceeding(let requestID, let expectedConnectionID):
             cancel(
                 requestID: requestID,
                 connectionID: expectedConnectionID,
-                message: "The editor core connection closed before the process exited. Quit was cancelled."
+                message: "The editor core connection closed before quit completed. Quit was cancelled."
             )
-
-        case .proceeding:
-            state = .idle
-            replyToAppKit(false)
-            presentFailure("The editor core connection closed before the process exited. Quit was cancelled.")
-            restoreFocus()
-
         case .idle:
             break
         }

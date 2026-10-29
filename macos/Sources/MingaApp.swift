@@ -356,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
     private var outboundConnectionState = OutboundConnectionState()
+    private var coreLifecycle: EditorCoreLifecycle?
     private var pendingFileURLs: [URL] = []
     private var acceptsOpenRequests = false
     private let frameResourcePolicy = FrameResourcePolicy.default
@@ -401,21 +402,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let manager = BEAMProcessManager()
             self.beamManager = manager
 
+            manager.onTermination = { [weak self] _ in
+                self?.coreConnectionIsLive = false
+                return self?.coreLifecycle?.coreDidExit() ?? false
+            }
             manager.onCrash = { [weak self] in
-                let disposition = self?.applicationQuitCoordinator?.coreDidExit()
-                // The editor core died and automatic restart gave up. Present the
-                // recovery surface instead of terminating, and keep the app
-                // responsive (clickable/quittable) while the user decides (#2698).
-                if disposition != .approvedTermination {
-                    self?.presentEditorCoreStoppedRecovery()
-                }
+                self?.presentEditorCoreStoppedRecovery()
             }
             manager.onNormalExit = { [weak self] in
                 guard let self, self.beamManager?.isShuttingDown != true else { return }
-                let disposition = self.applicationQuitCoordinator?.coreDidExit() ?? .noPendingQuit
-                if disposition == .noPendingQuit {
-                    NSApp.terminate(nil)
-                }
+                NSApp.terminate(nil)
             }
             manager.onBEAMReady = { [weak self] newReadHandle, newWriteHandle in
                 self?.reconnectProtocol(readHandle: newReadHandle, writeHandle: newWriteHandle)
@@ -541,8 +537,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         self.applicationQuitCoordinator = quitCoordinator
-        disp.onApplicationQuitResponse = { [weak quitCoordinator] response in
-            quitCoordinator?.receive(response)
+        let lifecycle = EditorCoreLifecycle(
+            quitCoordinator: quitCoordinator,
+            processManager: beamManager,
+            retireConnection: { [weak self] in self?.retireProtocolConnection() },
+            presentTransportFailure: { [weak self] message in self?.presentTerminalTransportFailure(message: message) },
+            presentCoreStopped: { [weak self] in self?.presentEditorCoreStoppedRecovery() },
+            terminateApplication: { NSApp.terminate(nil) }
+        )
+        self.coreLifecycle = lifecycle
+        disp.onApplicationQuitResponse = { [weak lifecycle] response in
+            lifecycle?.receive(response)
         }
         disp.onFileDialogRequest = { [weak self] request in
             self?.presentFileDialog(request)
@@ -889,8 +894,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         cancelWorkspaceLifecycleNotifications()
         beamManager?.beginAppShutdown()
-        protocolConnection?.stop()
-        protocolConnection = nil
+        coreLifecycle?.stop()
+        retireProtocolConnection()
         beamManager?.abortStartup()
     }
 
@@ -1162,7 +1167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.editorNSView?.invalidateConnection()
                 self.appState.encoder = nil
                 self.appState.gui.settingsState.sendAction = nil
-                self.applicationQuitCoordinator?.replaceConnection()
+                self.coreLifecycle?.replaceConnection()
                 self.coreConnectionIsLive = false
                 PortLogger.clearEncoder()
             },
@@ -1249,28 +1254,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ report: OutboundTransportFailureReport,
         connectionID: UInt64
     ) {
-        guard outboundConnectionState.acceptFailure(for: connectionID) else { return }
-        dismissInputRejection()
+        guard outboundConnectionState.isCurrent(connectionID) else { return }
         coreConnectionIsLive = false
-        applicationQuitCoordinator?.transportDidDisconnect()
-        if protocolConnection?.connectionID == connectionID {
-            protocolConnection?.stop()
-            protocolConnection = nil
-        }
-        appState.encoder = nil
-        appState.gui.settingsState.sendAction = nil
-        editorNSView?.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
-        if let manager = beamManager {
-            recoveryManager?.presentTransportFailure(
-                message: report.userFacingMessage,
-                restartAction: { manager.restartTransportAfterFailure() }
-            )
-        } else {
-            recoveryManager?.presentTransportFailure(
-                message: report.userFacingMessage,
-                restartAction: nil
-            )
-        }
+        coreLifecycle?.transportDidFail(message: report.userFacingMessage)
     }
 
     private func handleOutboundReaderDisconnect(
@@ -1278,7 +1264,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connectionID: UInt64
     ) {
         guard outboundConnectionState.isCurrent(connectionID) else { return }
-        encoder.disconnect(reason: .unexpectedPeerClosure)
+        encoder.disconnect(reason: .expectedTeardown)
+        coreConnectionIsLive = false
+        coreLifecycle?.readerDidClose()
+    }
+
+    private func retireProtocolConnection() {
+        outboundConnectionState.retire()
+        recoveryManager?.transportDidReconnect()
+        dismissInputRejection()
+        protocolConnection?.stop()
+        protocolConnection = nil
+        appState.encoder = nil
+        appState.gui.settingsState.sendAction = nil
+        editorNSView?.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
+    }
+
+    private func presentTerminalTransportFailure(message: String) {
+        if let manager = beamManager {
+            recoveryManager?.presentTransportFailure(
+                message: message,
+                restartAction: { manager.restartTransportAfterFailure() }
+            )
+        } else {
+            recoveryManager?.presentTransportFailure(message: message, restartAction: nil)
+        }
     }
 
     private func dismissInputRejection() {
@@ -1297,7 +1307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         canRestart: Bool
     ) {
         coreConnectionIsLive = false
-        applicationQuitCoordinator?.transportDidDisconnect()
+        applicationQuitCoordinator?.transportRecoveryDidExpire()
         if canRestart, let manager = beamManager {
             recoveryManager?.presentTransportFailure(
                 message: error.userFacingMessage,

@@ -76,6 +76,72 @@ struct ModalTerminationDeliveryTests {
         #expect(!manager.hasLiveProcess)
     }
 
+    @Test("final quit packet and EOF resolve one actual connection in either process-exit order", arguments: [false, true])
+    func finalQuitPacketThenEOF(processExitsFirst: Bool) throws {
+        let input = Pipe()
+        let output = Pipe()
+        let manager = BEAMProcessManager()
+        var replies: [Bool] = []
+        var events: [String] = []
+        let coordinator = ApplicationQuitCoordinator(
+            sendRequest: { _ in true },
+            sendDecision: { _, _ in true },
+            presentDecision: { _, _ in Issue.record("Unexpected quit chooser") },
+            replyToAppKit: { replies.append($0) },
+            presentFailure: { Issue.record("Unexpected quit failure: \($0)") },
+            restoreFocus: {}
+        )
+        let lifecycle = EditorCoreLifecycle(
+            quitCoordinator: coordinator,
+            processManager: manager,
+            retireConnection: {},
+            presentTransportFailure: { Issue.record("Unexpected recovery: \($0)") },
+            presentCoreStopped: { Issue.record("Unexpected stopped core") },
+            terminateApplication: { Issue.record("AppKit handshake should resolve termination") }
+        )
+        manager.onTermination = { _ in lifecycle.coreDidExit() }
+        let connection = try ProtocolConnection(
+            connectionID: 1,
+            readHandle: input.fileHandleForReading,
+            writeHandle: output.fileHandleForWriting,
+            resourcePolicy: .default,
+            isCurrent: { $0 == 1 },
+            consume: { event, _ in
+                guard case .frame(let frame) = event,
+                      case .applicationQuitResponse(let response) = frame.commands.first?.command else {
+                    Issue.record("Expected final quit response")
+                    return
+                }
+                events.append("approval")
+                lifecycle.receive(response)
+            },
+            onTransportFailure: { _ in Issue.record("Normal EOF must not report transport failure") },
+            onInputRejection: { _ in },
+            onReaderDisconnect: { encoder, _ in
+                events.append("EOF")
+                encoder.disconnect(reason: .expectedTeardown)
+                lifecycle.readerDidClose()
+                if !processExitsFirst { manager.handleTermination(status: 1, reason: .exit) }
+            }
+        )
+        defer { connection.stop(); output.fileHandleForReading.closeFile() }
+        #expect(coordinator.begin() == .pending)
+        if processExitsFirst { manager.handleTermination(status: 1, reason: .exit) }
+        connection.start()
+        // Length-prefixed application_quit_response: request 1, proceeding, no dirty buffers or failure strings.
+        try input.fileHandleForWriting.write(contentsOf: Data([
+            0, 0, 0, 14, OP_APPLICATION_QUIT_RESPONSE, 0, 11,
+            0, 0, 0, 1, ApplicationQuitResponse.Outcome.proceeding.rawValue, 0, 0, 0, 0, 0, 0
+        ]))
+        try input.fileHandleForWriting.close()
+        runModalLoop(until: { events.last == "EOF" })
+
+        #expect(events == ["approval", "EOF"])
+        #expect(replies == [true])
+        #expect(manager.exitIntent == .appShutdown)
+        #expect(!connection.encoder.send(.executeCommand(name: "late input")).wasAccepted)
+    }
+
     @Test("outbound transport failure cancels a pending quit during native termination")
     func transportFailureDuringTermination() throws {
         let output = Pipe()
@@ -97,7 +163,7 @@ struct ModalTerminationDeliveryTests {
             },
             onTransportFailure: { _ in
                 MainActor.assertIsolated()
-                coordinator.transportDidDisconnect()
+                coordinator.transportRecoveryDidExpire()
             }
         )
         defer { encoder.disconnect(reason: .expectedTeardown) }
