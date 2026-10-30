@@ -80,6 +80,8 @@ targets:
       - path: Sources/Views/Overlays
       - path: Sources/Views/Settings
       - path: Sources/Views/Sidebar
+      - path: Sources/Views/Shared/ChromeTokens.swift
+        type: file
       - path: Sources/Views/Shared/EditTimelineState.swift
         type: file
       - path: Sources/Views/Shared/EditTimelineView.swift
@@ -150,6 +152,7 @@ targets:
         excludes:
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "PreviewRegistry+*.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/AgentStatusTypes.swift"
@@ -185,6 +188,7 @@ targets:
           - "Views/Overlays/**"
           - "Views/Settings/**"
           - "Views/Sidebar/**"
+          - "Views/Shared/ChromeTokens.swift"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/FrontendViewAction.swift"
@@ -298,6 +302,7 @@ targets:
           - "MingaApp.swift"
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "PreviewRegistry+*.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/AgentStatusTypes.swift"
@@ -332,6 +337,7 @@ targets:
           - "Views/Overlays/**"
           - "Views/Settings/**"
           - "Views/Sidebar/**"
+          - "Views/Shared/ChromeTokens.swift"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/FrontendViewAction.swift"
@@ -409,6 +415,7 @@ targets:
           - "MingaApp.swift"
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "PreviewRegistry+*.swift"
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/AgentStatusTypes.swift"
@@ -441,6 +448,7 @@ targets:
           - "Views/Overlays/**"
           - "Views/Settings/**"
           - "Views/Sidebar/**"
+          - "Views/Shared/ChromeTokens.swift"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/FrontendViewAction.swift"
@@ -525,6 +533,7 @@ targets:
           - "Views/Overlays/**"
           - "Views/Settings/**"
           - "Views/Sidebar/**"
+          - "Views/Shared/ChromeTokens.swift"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/FrontendViewAction.swift"

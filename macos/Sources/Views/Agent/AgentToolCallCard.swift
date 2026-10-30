@@ -44,11 +44,11 @@ public struct AgentToolCallCard: View {
 
         VStack(alignment: .leading, spacing: 0) {
             // Header (clickable to toggle collapse)
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.sm) {
                 // Collapse/expand chevron (only shown when there's result content)
                 if hasResult {
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(Typography.font(.micro, weight: .medium))
                         .foregroundStyle(theme.agentTextFg.opacity(0.4))
                 }
 
@@ -59,12 +59,12 @@ public struct AgentToolCallCard: View {
                         .scaleEffect(0.6)
                 } else {
                     Image(systemName: toolIcon(status))
-                        .font(.system(size: 10))
+                        .font(Typography.font(.caption))
                         .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.agentToolHeader)
                 }
 
                 Text(name)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(Typography.font(.body, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.agentTextFg)
                     .layoutPriority(1)
 
@@ -77,7 +77,7 @@ public struct AgentToolCallCard: View {
 
                 if durationMs > 0 {
                     Text(formatDuration(durationMs))
-                        .font(.system(size: 10))
+                        .font(Typography.font(.caption))
                         .foregroundStyle(theme.agentTextFg.opacity(0.3))
                 }
 
@@ -87,8 +87,8 @@ public struct AgentToolCallCard: View {
                     autoApprovedPill(label: autoApprovedLabel)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
             .contentShape(Rectangle())
             .onTapGesture {
                 if hasResult, let messageID = UInt32(exactly: messageID), messageID != 0 {
@@ -102,8 +102,8 @@ public struct AgentToolCallCard: View {
                     .frame(height: 1)
 
                 previewLinesView(visiblePreviewLines)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.md)
             }
 
             // Result (collapsed by default, supports styled or plain text)
@@ -115,31 +115,31 @@ public struct AgentToolCallCard: View {
                 ScrollView([.horizontal, .vertical]) {
                     if let lines = resultLines, !lines.isEmpty {
                         // Styled result with tree-sitter/markdown formatting
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: Spacing.hairline) {
                             ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
-                                styledLineView(runs, 11, true)
+                                styledLineView(runs, Typography.Step.small.rawValue, true)
                             }
                         }
-                        .padding(10)
+                        .padding(Spacing.md)
                     } else if let text = result, !text.isEmpty {
                         // Plain text fallback
                         Text(text)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(Typography.font(.small, design: .monospaced))
                             .foregroundStyle(theme.agentTextFg.opacity(0.7))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: true, vertical: false)
-                            .padding(10)
+                            .padding(Spacing.md)
                     }
                 }
                 .frame(maxHeight: 200)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Radius.lg)
                 .fill(theme.agentCodeBg)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Radius.lg)
                 .strokeBorder(isError ? Color.red.opacity(0.3) : theme.agentToolBorder.opacity(0.3), lineWidth: 1)
         )
     }
@@ -151,7 +151,7 @@ public struct AgentToolCallCard: View {
         if name == "shell" {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(summary)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Typography.font(.small, design: .monospaced))
                     .foregroundStyle(theme.agentTextFg.opacity(0.5))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -159,7 +159,7 @@ public struct AgentToolCallCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(summary)
-                .font(.system(size: 11, design: .monospaced))
+                .font(Typography.font(.small, design: .monospaced))
                 .foregroundStyle(theme.agentTextFg.opacity(0.5))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -169,12 +169,12 @@ public struct AgentToolCallCard: View {
     // MARK: - Preview lines
 
     private func previewLinesView(_ lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                 previewLine(line)
             }
         }
-        .padding(8)
+        .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(previewBackground)
         .overlay(previewBorder)
@@ -182,7 +182,7 @@ public struct AgentToolCallCard: View {
 
     private func previewLine(_ line: String) -> some View {
         Text(line)
-            .font(.system(size: 10, design: .monospaced))
+            .font(Typography.font(.caption, design: .monospaced))
             .foregroundStyle(previewLineColor(line))
             .truncationMode(.tail)
     }
@@ -198,11 +198,11 @@ public struct AgentToolCallCard: View {
     }
 
     private var previewBackground: some View {
-        RoundedRectangle(cornerRadius: 6).fill(theme.agentCodeBg.opacity(0.8))
+        RoundedRectangle(cornerRadius: Radius.md).fill(theme.agentCodeBg.opacity(0.8))
     }
 
     private var previewBorder: some View {
-        RoundedRectangle(cornerRadius: 6).stroke(theme.agentCodeBorder.opacity(0.35), lineWidth: 1)
+        RoundedRectangle(cornerRadius: Radius.md).stroke(theme.agentCodeBorder.opacity(0.35), lineWidth: 1)
     }
 
     // MARK: - Badges & helpers
@@ -221,12 +221,12 @@ public struct AgentToolCallCard: View {
 
         if !text.isEmpty {
             Text(text)
-                .font(.system(size: 9, weight: .medium))
+                .font(Typography.font(.micro, weight: .medium))
                 .foregroundStyle(color.opacity(0.8))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.hairline)
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(color.opacity(0.1))
                 )
         }
@@ -234,7 +234,7 @@ public struct AgentToolCallCard: View {
 
     private func autoApprovedPill(label: String) -> some View {
         Text("auto-approved · \(label)")
-            .font(.system(size: 10, design: .rounded))
+            .font(Typography.font(.caption, design: .rounded))
             .foregroundStyle(theme.agentTextFg.opacity(0.55))
             .accessibilityLabel("Auto-approved for this \(label)")
     }

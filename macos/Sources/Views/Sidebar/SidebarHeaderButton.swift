@@ -25,12 +25,12 @@ public struct SidebarHeaderButton: View {
     public var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(barFg.opacity(isHovered ? 0.7 : 0.45))
                 .frame(width: 28, height: 34)
                 .contentShape(Rectangle())
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(barFg.opacity(isHovered ? 0.08 : 0))
                 )
                 .animation(

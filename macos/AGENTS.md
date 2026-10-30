@@ -105,6 +105,70 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 
 `GUIState` holds all sub-states as `let` properties (not a flat bag of fields). Each sub-state is independently observable. Adding a new chrome element means adding one State class, one View, and one `let` property on `GUIState`. No existing code changes.
 
+## Chrome tokens
+
+Use the frontend scales in `Sources/Views/Shared/ChromeTokens.swift` instead of inventing a padding, gap, font size, or corner radius. They describe chrome, not editor cells. They do not read the theme, protocol state, or editor font.
+
+### Spacing
+
+| Token | Points | Intent |
+|-------|--------|--------|
+| `pixel` | 1 | Optical separation for compact badges and rules. |
+| `hairline` | 2 | Badge internals and tight vertical rhythm. |
+| `xs` | 4 | Tight inline groups and small control insets. |
+| `sm` | 6 | Compact row gaps and vertical control padding. |
+| `md` | 8 | Default control gaps and insets. |
+| `lg` | 12 | Comfortable rows and panel insets. |
+| `xl` | 16 | Separation between groups. |
+| `xxl` | 20 | Section padding. |
+| `panel` | 24 | Spacious empty-state and dialog insets. |
+| `section` | 32 | Major section breaks. |
+
+The 1pt optical and 24pt dialog steps preserve existing chrome, rather than forcing those surfaces onto a different layout. The earlier scale's names changed: old `sm/md/lg/xl/xxl` values map to new `md/lg/xl/xxl/section`. Re-map existing callers by value, not by name.
+
+### Typography
+
+Call `Typography.font(.body, weight: .semibold, design: .monospaced)` when a surface needs an explicit style. `Typography.monospacedSmall` is the shared 11pt, medium-weight, monospaced style for which-key keys, picker candidate labels, and completion labels. Match highlights keep that size and use semibold.
+
+| Step | Points | Intent |
+|------|--------|--------|
+| `tiny` | 7 | Tiny toolbar disclosure and close glyphs. |
+| `symbol` | 8 | Compact chevrons and sync arrows. |
+| `micro` | 9 | Status glyphs and small badges. |
+| `caption` | 10 | Counts, timestamps, and metadata. |
+| `small` | 11 | Dense row labels and key columns. |
+| `body` | 12 | Standard chrome text. |
+| `emphasis` | 13 | Prompts and primary labels. |
+| `title` | 14 | Panel titles and secondary markdown headings. |
+| `toolbar` | 15 | Activity-bar symbols and prominent headings. |
+| `heading` | 16 | Top-level hover documentation headings. |
+| `illustration` | 20 | Empty-state symbols. |
+| `action` | 24 | Primary prompt action symbols. |
+
+The symbol and heading extensions preserve existing intentional sizes. Do not shrink an illustration to body text just to pass the guard. Named system text styles such as `.caption` remain available for native adaptive UI. AppKit and custom-font consumers use `Typography.Step.body.rawValue` for the same point scale. Text genuinely derived from runtime metrics goes through `Typography.relative(to:scale:weight:design:)`; it must remain derived, not become a local literal disguised as a runtime value.
+
+### Radius
+
+| Token | Points | Intent |
+|-------|--------|--------|
+| `accent` | 1 | Narrow active-row accent, not a card. |
+| `sm` | 4 | Compact rows, badges, and fields. |
+| `md` | 6 | Small panels and controls. |
+| `lg` | 8 | Overlays and cards. |
+| `xl` | 12 | Large cards and prompt capsules. |
+
+### Source guard and preview evidence
+
+`ChromeTokenGuardrailTests` scans `Sources/Views` for numeric literals anywhere inside balanced `.padding(...)`, `spacing:`, `.font(.system(size:...))`, and `cornerRadius` arguments. Ternaries, arithmetic, and nested wrappers do not bypass it. Metric constants are scanned through complete balanced initializers, including conditional result branches and multiline wrappers. Named `CGFloat` padding/spacing/inset/radius parameters retain their external call labels even when their internal names differ. The only allowed numeric token in guarded arguments is `0`, meaning no spacing. The migration allowlist is empty, and a stale or unexplained entry fails.
+
+`Views/Editor` and `EditorScrollTrack.Metrics` are excluded. `ChromeTokens.swift` is the constant owner, not a consuming view. Frames, row heights, line spacing, editor-cell sizing, and scroll-track geometry keep their own metrics. For runtime layout, retain the arithmetic and replace point-valued offsets with tokens; counts and dimensionless ratios are not spacing steps.
+
+On macOS with the pinned Xcode/XcodeGen and generated protocol sources, run `scripts/preview.sh --all` to capture every name in `PreviewRegistry.swift`. The command creates its ignored snapshot output directory and prints each generated image path; set `PREVIEW_OUTPUT_DIR` to choose another destination. One named preview still works. Extend a scale only with an intent and a before/after preview, rather than adding a literal or a per-view wrapper constant.
+
+The **Chrome preview evidence** workflow builds separate base and proposed checkouts on the same runner. Its artifact contains original before/after PNGs, paged contact sheets, `pixel-change-manifest.json`, and a review summary. The original 45 registry entries are retained; 13 additional fixtures render independent chrome surfaces, a visible canonical workspace header, both timeline representations, and the non-default settings tabs. CI installs the same additional preview definitions, dispatch cases, screenshot sizes, and non-preview target membership exclusions in the base checkout without copying proposed production views. Registry extensions belong only to PreviewHost, alongside their owning registry. `baseline-fixture-supplement.json` records the limited setup. Trigger the workflow through a PR or `gh workflow run chrome-previews.yml --ref <branch> -f base_ref=main`. Pixel differences are review evidence, not a CI pixel gate. A failed real capture fails the workflow; it never substitutes a mock image.
+
+`scripts/chrome_token_migration.json` records each intentional snap by original source line, its reason, derived runtime values, and the representative fixture covering each formerly unpreviewed surface. Registered parent fixtures cover the remaining child views. The pixel manifest reports observed changes separately from source-level candidate tokens. Review every changed preview and investigate any unexplained change before approval. Do not claim a preview is pixel-identical or approved before reading that evidence.
+
 ## Adding New Features
 
 ### New GUI chrome element (e.g., a new panel or overlay)

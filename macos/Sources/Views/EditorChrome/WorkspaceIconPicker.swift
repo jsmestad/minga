@@ -62,32 +62,32 @@ public struct WorkspaceIconPicker: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.sm) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                 TextField("Search icons", text: $searchText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(Typography.font(.body))
                     .focused($searchFocused)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.md)
 
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
                     ForEach(filteredCategories, id: \.0) { category, icons in
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
                             Text(category)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(Typography.font(.caption, weight: .medium))
                                 .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
+                                .padding(.horizontal, Spacing.xs)
 
                             LazyVGrid(
-                                columns: Array(repeating: GridItem(.fixed(32), spacing: 2), count: 6),
-                                spacing: 2
+                                columns: Array(repeating: GridItem(.fixed(32), spacing: Spacing.hairline), count: 6),
+                                spacing: Spacing.hairline
                             ) {
                                 ForEach(icons, id: \.self) { icon in
                                     iconButton(icon)
@@ -96,7 +96,7 @@ public struct WorkspaceIconPicker: View {
                         }
                     }
                 }
-                .padding(10)
+                .padding(Spacing.md)
             }
             .frame(width: 220, height: 280)
         }
@@ -115,11 +115,11 @@ public struct WorkspaceIconPicker: View {
         let isSelected = icon == currentIcon
         Button(action: { onSelect(icon) }) {
             Image(systemName: icon)
-                .font(.system(size: 14))
+                .font(Typography.font(.title))
                 .foregroundStyle(isSelected ? accentColor : .primary)
                 .frame(width: 32, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: Radius.md)
                         .fill(isSelected ? accentColor.opacity(0.15) : Color.clear)
                 )
                 .contentShape(Rectangle())

@@ -129,6 +129,34 @@ enum PreviewRegistry {
             latencyHUDPreview()
         case "LatencyHUDEmpty":
             latencyHUDEmptyPreview()
+        // BEGIN chrome migration preview cases
+        case "AgentContextBar":
+            migrationContextBarPreview()
+        case "WorkspaceIconPicker":
+            migrationWorkspaceIconPickerPreview()
+        case "WorkspaceHeaderView":
+            migrationWorkspaceHeaderPreview()
+        case "WorkspaceIndicatorView":
+            migrationWorkspaceIndicatorPreview()
+        case "ExtensionOverlayView":
+            migrationExtensionOverlayPreview()
+        case "ExtensionPanelView":
+            migrationExtensionPanelPreview()
+        case "FloatPopupOverlay":
+            migrationFloatPopupPreview()
+        case "ProtocolErrorOverlay":
+            migrationProtocolErrorPreview()
+        case "ResyncOverlay":
+            migrationResyncPreview()
+        case "EditTimelineFiles":
+            migrationTimelineFilesPreview()
+        case "EditTimelineTrack":
+            migrationTimelineTrackPreview()
+        case "EditorSettingsView":
+            migrationEditorSettingsPreview()
+        case "KeybindingsSettingsView":
+            migrationKeybindingsSettingsPreview()
+        // END chrome migration preview cases
         default:
             Text("Unknown view: \(name)")
                 .font(.title)

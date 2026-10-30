@@ -30,10 +30,10 @@ public struct AgentContextBar: View {
 
     public var body: some View {
         if state.visible {
-            HStack(spacing: 12) {
+            HStack(spacing: Spacing.lg) {
                 // Task description (left-aligned)
                 Text(state.task)
-                    .font(.system(size: 12))
+                    .font(Typography.font(.body))
                     .foregroundStyle(theme.breadcrumbFg)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -42,7 +42,7 @@ public struct AgentContextBar: View {
 
                 if !state.progress.activeAction.isEmpty {
                     Text(state.progress.activeAction)
-                        .font(.system(size: 11))
+                        .font(Typography.font(.small))
                         .foregroundStyle(theme.breadcrumbFg.opacity(0.75))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -50,14 +50,14 @@ public struct AgentContextBar: View {
 
                 if state.progress.toolCount > 0 || state.progress.fileCount > 0 {
                     Text("\(state.progress.toolCount) tools / \(state.progress.fileCount) files")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Typography.font(.small, design: .monospaced))
                         .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
                         .lineLimit(1)
                 }
 
                 if let activeTodo = state.todos.first(where: { $0.status == 1 }) ?? state.todos.first {
                     Text(todoLabel(activeTodo))
-                        .font(.system(size: 11))
+                        .font(Typography.font(.small))
                         .foregroundStyle(theme.breadcrumbFg.opacity(0.7))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -67,7 +67,7 @@ public struct AgentContextBar: View {
 
                 // Elapsed time (right-aligned, monospaced)
                 Text(elapsedDisplay)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Typography.font(.small, design: .monospaced))
                     .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
                     .onReceive(timer) { _ in
                         updateElapsedDisplay()
@@ -81,7 +81,7 @@ public struct AgentContextBar: View {
                     actionButtons
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Spacing.lg)
             .frame(height: barHeight)
             .background(theme.breadcrumbBg)
             .focusable(false)
@@ -97,19 +97,19 @@ public struct AgentContextBar: View {
     // MARK: - Status Badge
 
     private var statusBadge: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 7, height: 7)
 
             Text(state.status.label)
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xs)
         .background(statusColor.opacity(0.15))
-        .clipShape(.rect(cornerRadius: 4))
+        .clipShape(.rect(cornerRadius: Radius.sm))
     }
 
     private var statusColor: Color {
@@ -120,7 +120,7 @@ public struct AgentContextBar: View {
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             reviewButton(
                 label: "Approve",
                 systemIcon: "checkmark.circle.fill",
@@ -158,17 +158,17 @@ public struct AgentContextBar: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: systemIcon)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(Typography.font(.caption, weight: .medium))
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Typography.font(.small, weight: .medium))
             }
             .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs)
             .background(color.opacity(0.15))
-            .clipShape(.rect(cornerRadius: 4))
+            .clipShape(.rect(cornerRadius: Radius.sm))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

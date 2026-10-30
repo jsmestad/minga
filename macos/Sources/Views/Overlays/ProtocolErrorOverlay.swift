@@ -21,23 +21,23 @@ public struct ProtocolErrorOverlay: View {
                 theme.editorBg
                     .ignoresSafeArea()
 
-                VStack(spacing: 12) {
+                VStack(spacing: Spacing.lg) {
                     Text("Protocol error")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Typography.font(.toolbar, weight: .semibold))
                         .foregroundStyle(theme.gutterErrorFg)
 
                     Text(message)
-                        .font(.system(size: 13))
+                        .font(Typography.font(.emphasis))
                         .foregroundStyle(theme.tabActiveFg)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 420)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(24)
+                .padding(Spacing.panel)
                 .background(theme.popupBg)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.lg))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: Radius.lg)
                         .stroke(theme.popupBorder, lineWidth: 1)
                 )
             }

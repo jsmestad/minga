@@ -42,7 +42,7 @@ public struct FileTreeRowView: View {
     public var body: some View {
         let row = rowContent
             .padding(.leading, leadingPadding)
-            .padding(.trailing, 8)
+            .padding(.trailing, Spacing.md)
             .frame(height: rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(rowBackground)
@@ -78,7 +78,7 @@ public struct FileTreeRowView: View {
                 .accessibilityHidden(entry.isEditing)
 
             Text(entry.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
+                .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
                 .foregroundStyle(iconColor)
                 .frame(width: 16, alignment: .center)
                 .accessibilityHidden(entry.isEditing)
@@ -96,7 +96,7 @@ public struct FileTreeRowView: View {
                 .frame(height: rowHeight)
             } else {
                 Text(entry.name)
-                    .font(.system(size: 12, weight: entry.showsActiveAccent ? .semibold : .regular))
+                    .font(Typography.font(.body, weight: entry.showsActiveAccent ? .semibold : .regular))
                     .foregroundStyle(nameColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -114,7 +114,7 @@ public struct FileTreeRowView: View {
     private var disclosureChevron: some View {
         if entry.isDir {
             Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .medium))
+                .font(Typography.font(.micro, weight: .medium))
                 .foregroundStyle(theme.treeFg.opacity(0.5))
                 .rotationEffect(.degrees(entry.isExpanded ? 90 : 0))
                 .animation(.easeInOut(duration: animDuration), value: entry.isExpanded)
@@ -126,7 +126,7 @@ public struct FileTreeRowView: View {
 
     @ViewBuilder
     private var statusCluster: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             diagnosticMarker
             dirtyMarker
             gitStatusDot
@@ -137,7 +137,7 @@ public struct FileTreeRowView: View {
     private var diagnosticMarker: some View {
         if let text = diagnosticMarkerText, let color = diagnosticMarkerColor {
             Text(text)
-                .font(.system(size: 9, weight: entry.highestDiagnosticSeverity == .hint ? .medium : .bold))
+                .font(Typography.font(.micro, weight: entry.highestDiagnosticSeverity == .hint ? .medium : .bold))
                 .foregroundStyle(color)
         }
     }
@@ -178,7 +178,7 @@ public struct FileTreeRowView: View {
     private var dirtyMarker: some View {
         if entry.showsDirtyMarker {
             Text("●")
-                .font(.system(size: 9, weight: .bold))
+                .font(Typography.font(.micro, weight: .bold))
                 .foregroundStyle(theme.treeGitModified)
         }
     }
@@ -244,21 +244,21 @@ public struct FileTreeRowView: View {
     @ViewBuilder
     private var activeFileAccent: some View {
         if entry.showsActiveAccent {
-            RoundedRectangle(cornerRadius: 1)
+            RoundedRectangle(cornerRadius: Radius.accent)
                 .fill(theme.treeActiveFg)
                 .frame(width: 2, height: rowHeight - 8)
-                .padding(.leading, 4)
+                .padding(.leading, Spacing.xs)
         }
     }
 
     private func rowFill(_ color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: Radius.sm)
             .fill(color)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, Spacing.xs)
     }
 
     public var leadingPadding: CGFloat {
-        8 + depthOffset(for: entry.depth)
+        Spacing.md + depthOffset(for: entry.depth)
     }
 
     public var indentGuideOpacity: Double {

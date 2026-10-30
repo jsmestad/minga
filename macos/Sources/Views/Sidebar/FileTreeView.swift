@@ -45,7 +45,7 @@ public struct FileTreeView: View {
     }
 
     private let rowHeight: CGFloat = 22
-    private let indentWidth: CGFloat = 14
+    private let indentWidth: CGFloat = Spacing.lg + Spacing.hairline
     private let chevronWidth: CGFloat = 12
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -102,7 +102,7 @@ public struct FileTreeView: View {
                     entryRow(entry)
                 }
             }
-            .padding(.top, 2)
+            .padding(.top, Spacing.hairline)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(theme.treeBg)
             .clipped()
@@ -114,7 +114,7 @@ public struct FileTreeView: View {
                             entryRow(entry)
                         }
                     }
-                    .padding(.top, 2)
+                    .padding(.top, Spacing.hairline)
                     .background(
                         GeometryReader { geo in
                             Color.clear.preference(
@@ -148,7 +148,7 @@ public struct FileTreeView: View {
     @ViewBuilder
     private var stateContent: some View {
         let generation = fileTreeState.generation
-        VStack(spacing: 10) {
+        VStack(spacing: Spacing.md) {
             switch fileTreeState.treeState {
             case .loading:
                 ProgressView()
@@ -175,7 +175,7 @@ public struct FileTreeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .padding(20)
+        .padding(Spacing.xxl)
         .background(theme.treeBg)
     }
 
@@ -201,12 +201,12 @@ public struct FileTreeView: View {
     }
 
     private func stateText(title: String, subtitle: String) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: Spacing.xs) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .foregroundStyle(theme.treeDirFg)
             Text(subtitle)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.treeFg.opacity(0.65))
                 .multilineTextAlignment(.center)
         }
@@ -228,14 +228,14 @@ public struct FileTreeView: View {
                         disclosureChevron(parent)
 
                         Text(parent.icon)
-                            .font(.custom("Symbols Nerd Font Mono", size: 12))
+                            .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
                             .foregroundStyle(theme.treeDirFg)
                             .frame(width: 16, alignment: .center)
 
                         Spacer().frame(width: 4)
 
                         Text(parent.name)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Typography.font(.body, weight: .medium))
                             .foregroundStyle(theme.treeDirFg)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -243,7 +243,7 @@ public struct FileTreeView: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, leadingPadding(parent))
-                    .padding(.trailing, 8)
+                    .padding(.trailing, Spacing.md)
                     .frame(height: rowHeight)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(theme.treeBg)
@@ -268,7 +268,7 @@ public struct FileTreeView: View {
 
         // The 2px top padding shifts the content down. scrollOffset is negative
         // when scrolled down (content moves up).
-        let adjustedOffset = -(scrollOffset - 2)
+        let adjustedOffset = -(scrollOffset - Spacing.hairline)
         guard adjustedOffset > 0 else { return [] }
 
         let topIndex = min(Int(adjustedOffset / rowHeight), entries.count - 1)
@@ -321,15 +321,15 @@ public struct FileTreeView: View {
                 )
                 .contextMenu { entryContextMenu(entry) }
                 .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Spacing.xs) {
                         Text(entry.icon)
-                            .font(.system(size: 12))
+                            .font(Typography.font(.body))
                         Text(entry.name)
-                            .font(.system(size: 12))
+                            .font(Typography.font(.body))
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 4))
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.hairline)
+                    .background(theme.popupBg, in: RoundedRectangle(cornerRadius: Radius.sm))
                 }
                 .dropDestination(for: URL.self) { urls, _ in
                     handleDrop(urls: urls, onto: entry, generation: generation)
@@ -506,7 +506,7 @@ public struct FileTreeView: View {
     private func disclosureChevron(_ entry: FileTreeEntry) -> some View {
         if entry.isDir {
             Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .medium))
+                .font(Typography.font(.micro, weight: .medium))
                 .foregroundStyle(theme.treeFg.opacity(0.5))
                 .rotationEffect(.degrees(entry.isExpanded ? 90 : 0))
                 .animation(.easeInOut(duration: animDuration), value: entry.isExpanded)
@@ -519,7 +519,7 @@ public struct FileTreeView: View {
     // MARK: - Layout helpers
 
     private func leadingPadding(_ entry: FileTreeEntry) -> CGFloat {
-        8 + depthOffset(for: entry.depth)
+        Spacing.md + depthOffset(for: entry.depth)
     }
 
     private func depthOffset(for depth: Int) -> CGFloat {
@@ -566,20 +566,20 @@ private struct FileTreeStateButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
+            .font(Typography.font(.body, weight: .semibold))
             .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.82 : 1.0))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
             .frame(minWidth: 92)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.md)
                     .fill(backgroundColor.opacity(configuration.isPressed ? 0.82 : 1.0))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.md)
                     .stroke(borderColor, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.md))
     }
 }
 

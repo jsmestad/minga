@@ -140,7 +140,7 @@ public struct TabBarView: View {
                 }
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(Typography.font(.small, weight: .medium))
                     .foregroundStyle(theme.chromeMutedFg)
                     .frame(width: 28, height: barHeight)
             }
@@ -288,23 +288,23 @@ public struct TabBarView: View {
             // Switch to this workspace by id (activates its first tab on the BEAM side)
             sendAction?(.executeCommand(name: workspaceGotoCommand(for: workspace)))
         }) {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: workspace.icon.isEmpty ? "cpu" : workspace.icon)
-                    .font(.system(size: 10))
+                    .font(Typography.font(.caption))
                     .foregroundStyle(color)
 
                 Text(workspace.label)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .lineLimit(1)
                     .foregroundStyle(theme.tabInactiveFg)
 
                 AgentStatusDot(status: workspace.agentStatus, color: color)
 
                 Text("(\(workspace.tabCount))")
-                    .font(.system(size: 10))
+                    .font(Typography.font(.caption))
                     .foregroundStyle(theme.tabInactiveFg.opacity(0.7))
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Spacing.md)
             .frame(height: barHeight)
             .contentShape(Rectangle())
         }
@@ -339,7 +339,7 @@ public struct TabBarView: View {
         Rectangle()
             .fill(color.opacity(0.6))
             .frame(width: 2, height: 20)
-            .padding(.horizontal, 2)
+            .padding(.horizontal, Spacing.hairline)
     }
 
     // MARK: - Tab item
@@ -348,15 +348,15 @@ public struct TabBarView: View {
     private func tabItem(_ tab: TabEntry, visibleIndex: Int) -> some View {
         let isHovering = hoverTabId == tab.id || dropTargetTabId == tab.id
 
-        HStack(spacing: tab.isPinned ? 0 : 5) {
+        HStack(spacing: tab.isPinned ? 0 : Spacing.xs) {
             // File type icon (Nerd Font for files, SF Symbol for agents)
             if tab.isAgent {
                 Image(systemName: "cpu")
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)
             } else {
                 Text(tab.icon)
-                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
                     .foregroundStyle(tabIconColor(tab))
             }
 
@@ -364,7 +364,7 @@ public struct TabBarView: View {
             // Ephemeral (not-on-disk) buffers like Untitled-1 render italic.
             if !tab.isPinned && !tab.isAgent {
                 Text(tab.label)
-                    .font(.system(size: 11.5))
+                    .font(Typography.font(.body))
                     .italic(tab.isEphemeral)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -393,12 +393,12 @@ public struct TabBarView: View {
                 .frame(width: 12, height: 12)
             }
         }
-        .padding(.horizontal, tab.isPinned ? 8 : 12)
+        .padding(.horizontal, tab.isPinned ? Spacing.md : Spacing.lg)
         .frame(width: tab.isPinned ? 28 : nil, height: barHeight)
         .background {
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .fill(tabBackgroundColor(tab, isHovering: isHovering))
-                .padding(.vertical, 4)
+                .padding(.vertical, Spacing.xs)
         }
         .overlay(alignment: .top) {
             if tab.isActive {
@@ -419,8 +419,8 @@ public struct TabBarView: View {
                 Circle()
                     .fill(badgeColor)
                     .frame(width: 5, height: 5)
-                    .padding(.top, 6)
-                    .padding(.trailing, 5)
+                    .padding(.top, Spacing.sm)
+                    .padding(.trailing, Spacing.xs)
             }
         }
         .contentShape(Rectangle())
@@ -535,26 +535,26 @@ public struct TabBarView: View {
 
     @ViewBuilder
     private func tabDragPreview(_ tab: TabEntry) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Spacing.xs) {
             if tab.isAgent {
                 Image(systemName: "cpu")
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
             } else {
                 Text(tab.icon)
-                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
                     .foregroundStyle(tabIconColor(tab))
             }
 
             if !tab.isPinned && !tab.isAgent {
                 Text(tab.label)
-                    .font(.system(size: 11.5))
+                    .font(Typography.font(.body))
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, tab.isPinned ? 8 : 12)
+        .padding(.horizontal, tab.isPinned ? Spacing.md : Spacing.lg)
         .frame(width: tab.isPinned ? 28 : nil, height: barHeight)
         .background(theme.tabActiveBg)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.md))
         .shadow(radius: 6, y: 3)
     }
 
@@ -575,11 +575,11 @@ public struct TabBarView: View {
             closeTab(tab)
         }) {
             Image(systemName: "xmark")
-                .font(.system(size: 7, weight: .bold))
+                .font(Typography.font(.tiny, weight: .bold))
                 .foregroundStyle(theme.tabInactiveFg)
                 .frame(width: 12, height: 12)
                 .background(
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(theme.tabInactiveFg.opacity(0.15))
                 )
         }
@@ -615,7 +615,7 @@ public struct TabBarView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemIcon)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(theme.chromeMutedFg)
                 .frame(width: 28, height: barHeight)
         }
@@ -634,7 +634,7 @@ public struct TabBarView: View {
         Rectangle()
             .fill(theme.tabSeparatorFg.opacity(0.75))
             .frame(width: 1, height: 22)
-            .padding(.horizontal, 3)
+            .padding(.horizontal, Spacing.xs)
     }
 
     private func tabIconColor(_ tab: TabEntry) -> Color {

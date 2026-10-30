@@ -28,7 +28,7 @@ public struct WorkspaceHeaderView: View {
     private let rowHeight: CGFloat = 26
 
     public var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             if let activeWorkspace = workspaceState.activeWorkspace {
                 activeWorkspacePill(activeWorkspace)
 
@@ -50,12 +50,12 @@ public struct WorkspaceHeaderView: View {
                 }
             } else {
                 Text("Workspace")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.font(.body, weight: .semibold))
                     .foregroundStyle(theme.tabInactiveFg)
                 Spacer(minLength: 8)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Spacing.md)
         .frame(height: rowHeight)
         .background(theme.tabBg)
         .overlay(alignment: .bottom) {
@@ -67,11 +67,11 @@ public struct WorkspaceHeaderView: View {
     }
 
     private func activeWorkspacePill(_ workspace: WorkspacePresentationEntry) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             workspaceIcon(workspace)
             workspaceTitle(workspace)
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Spacing.xs)
         .frame(height: rowHeight)
         .accessibilityIdentifier("workspace-label-\(workspace.id)")
         .accessibilityLabel("Workspace \(workspace.label)")
@@ -95,7 +95,7 @@ public struct WorkspaceHeaderView: View {
         if isRenaming {
             TextField("Workspace name", text: $renameText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .frame(minWidth: 90, maxWidth: 180)
                 .focused($renameFieldFocused)
                 .onSubmit { commitRename(workspace) }
@@ -114,7 +114,7 @@ public struct WorkspaceHeaderView: View {
                 }
         } else {
             Text(workspace.label)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .lineLimit(1)
                 .foregroundStyle(theme.tabActiveFg)
         }
@@ -125,7 +125,7 @@ public struct WorkspaceHeaderView: View {
             sendAction?(.executeCommand(name: "workspace_next"))
         } label: {
             Image(systemName: "rectangle.grid.1x2")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.font(.body, weight: .medium))
                 .foregroundStyle(theme.tabInactiveFg)
                 .frame(width: 24, height: rowHeight)
                 .contentShape(Rectangle())
@@ -150,12 +150,12 @@ public struct WorkspaceHeaderView: View {
         Button {
             sendAction?(.executeCommand(name: "toggle_agentic_view"))
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Spacing.xs) {
                 Circle()
                     .fill(agentStatusColor(workspace.agentStatus, accent: workspace.color))
                     .frame(width: 7, height: 7)
                 Text(agentStatusLabel(workspace.agentStatus))
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
             }
             .foregroundStyle(theme.tabInactiveFg)
         }
@@ -168,7 +168,7 @@ public struct WorkspaceHeaderView: View {
 
     @ViewBuilder
     private func badges(for workspace: WorkspacePresentationEntry) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Spacing.xs) {
             if workspace.runningBackgroundCount > 0 {
                 badge("⚡\(workspace.runningBackgroundCount)", help: "Agent running in this workspace")
             }
@@ -187,7 +187,7 @@ public struct WorkspaceHeaderView: View {
 
     @ViewBuilder
     private var backgroundBadges: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Spacing.xs) {
             if workspaceState.backgroundRunningCount > 0 {
                 badge("bg ⚡\(workspaceState.backgroundRunningCount)", help: "Background workspace agents are running")
             }
@@ -212,7 +212,7 @@ public struct WorkspaceHeaderView: View {
             sendAction?(.close(id: workspace.id))
         } label: {
             Image(systemName: "xmark.circle")
-                .font(.system(size: 13))
+                .font(Typography.font(.emphasis))
                 .foregroundStyle(theme.tabInactiveFg)
         }
         .buttonStyle(.plain)
@@ -222,9 +222,9 @@ public struct WorkspaceHeaderView: View {
 
     private func badge(_ text: String, help: String, color: Color? = nil) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .font(Typography.font(.caption, weight: .semibold))
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.hairline)
             .background(Capsule().fill((color ?? theme.tabInactiveFg).opacity(0.18)))
             .foregroundStyle(color ?? theme.tabInactiveFg)
             .help(help)
@@ -235,11 +235,11 @@ public struct WorkspaceHeaderView: View {
     private func workspaceIcon(_ workspace: WorkspacePresentationEntry) -> some View {
         if workspace.isManual {
             Image(systemName: "folder")
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(workspace.color)
         } else {
             Image(systemName: workspace.icon.isEmpty ? "cpu" : workspace.icon)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(workspace.color)
         }
     }

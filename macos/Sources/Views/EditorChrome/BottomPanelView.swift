@@ -106,12 +106,12 @@ public struct BottomPanelView: View {
                 sendAction?(.dismiss)
             }) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(Typography.font(.caption, weight: .medium))
                     .foregroundStyle(theme.tabInactiveFg)
             }
             .buttonStyle(.plain)
             .help("Close panel")
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Spacing.md)
             .pointingHandCursor()
         }
         .frame(height: 28)
@@ -122,10 +122,10 @@ public struct BottomPanelView: View {
         let isActive = tab.id == state.activeTabIndex
 
         return Text(tab.name)
-            .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+            .font(Typography.font(.small, weight: isActive ? .semibold : .regular))
             .foregroundStyle(isActive ? theme.tabActiveFg : theme.tabInactiveFg)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.xs)
         .background(
             isActive
                 ? theme.tabActiveBg.opacity(0.5)
@@ -159,7 +159,7 @@ public struct BottomPanelView: View {
             VStack {
                 Spacer()
                 Text(activeTabName)
-                    .font(.system(size: 12))
+                    .font(Typography.font(.body))
                     .foregroundStyle(theme.tabInactiveFg.opacity(0.5))
                 Spacer()
             }

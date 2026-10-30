@@ -1,33 +1,25 @@
 #!/bin/bash
-# Renders a single SwiftUI chrome view to a PNG screenshot.
+# Renders a named SwiftUI chrome view, or every PreviewRegistry entry, to real PNG captures.
 #
-# Usage: scripts/preview.sh <ViewName>
+# Usage: scripts/preview.sh <ViewName>|--all
+# Output: macos/Tests/Snapshots/<ViewName>.png (override PREVIEW_OUTPUT_DIR).
 #
-# Available views: EditorChromeView, AgentChromeView, GitStatusView,
-#                  GitStatusClean, GitStatusConflict, GitStatusDense,
-#                  FileTreeView, FileTreeEmpty, FileTreeError, FileTreeDeep,
-#                  CompletionOverlay, StatusBarView, TabBarView,
-#                  NotificationCenterView, NotificationStack, BottomPanelView,
-#                  BottomPanelEmpty, SettingsView, ObservatoryView,
-#                  AgentChatView,
-#                  AgentChatStreaming, AgentChatApproval, AgentChatError,
-#                  AgentChatCompletion, AgentChatSummary,
-#                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar,
-#                  HoverPopupOverlay, SignatureHelpOverlay, DiagnosticsEditorView,
-#                  TabBarOverflow
-#
-# The script builds the PreviewHost target, launches it with the view name,
-# and the app self-captures its window to a PNG before exiting. Full-shell
-# previews exercise the real editor renderer path without starting the BEAM.
-#
-# Output: macos/Tests/Snapshots/<ViewName>.png
+# CI can set PREVIEW_PROJECT_ROOT to a base checkout while using this driver's
+# --all support. Both revisions still build and capture their own PreviewHost.
 
 set -euo pipefail
 
-VIEW_NAME="${1:?Usage: scripts/preview.sh <ViewName>}"
-OUTPUT_DIR="macos/Tests/Snapshots"
+VIEW_NAME="${1:?Usage: scripts/preview.sh <ViewName>|--all}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="${PREVIEW_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+OUTPUT_DIR="${PREVIEW_OUTPUT_DIR:-$PROJECT_ROOT/macos/Tests/Snapshots}"
+BUILD_DIR="${PREVIEW_DERIVED_DATA:-$PROJECT_ROOT/macos/DerivedData/PreviewHost}"
+
+if [ "$VIEW_NAME" = "--all" ]; then
+    VIEW_NAMES="$(python3 "$SCRIPT_DIR/chrome_preview_evidence.py" names "$PROJECT_ROOT/macos/Sources/PreviewRegistry.swift")"
+else
+    VIEW_NAMES="$VIEW_NAME"
+fi
 
 cd "$PROJECT_ROOT"
 
@@ -43,17 +35,16 @@ cd macos
 xcodegen generate --quiet 2>/dev/null || xcodegen generate
 cd "$PROJECT_ROOT"
 
-# Build PreviewHost.
+# Build once, then launch a fresh process for each registered fixture.
 xcodebuild build \
     -project macos/Minga.xcodeproj \
     -scheme PreviewHost \
     -configuration Debug \
-    -quiet \
-    2>&1 | grep -v "^$"
+    -derivedDataPath "$BUILD_DIR" \
+    CODE_SIGNING_ALLOWED=NO \
+    -quiet
 
-# Find the built app
-BUILD_DIR=$(xcodebuild -project macos/Minga.xcodeproj -scheme PreviewHost -configuration Debug -showBuildSettings 2>/dev/null | grep "^\s*BUILT_PRODUCTS_DIR = " | sed 's/.*= //')
-APP_PATH="$BUILD_DIR/PreviewHost.app"
+APP_PATH="$BUILD_DIR/Build/Products/Debug/PreviewHost.app"
 
 if [ ! -d "$APP_PATH" ]; then
     echo "error: PreviewHost.app not found at $APP_PATH" >&2
@@ -62,15 +53,14 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
-# Launch directly (not via `open`) so environment variables reach the process.
-# PreviewSnapshotPolicy is the source of truth for which view names may use eager layout.
-PREVIEW_EAGER_LAYOUT=1 PREVIEW_VIEW="$VIEW_NAME" PREVIEW_OUTPUT_DIR="$OUTPUT_DIR" "$APP_PATH/Contents/MacOS/PreviewHost"
-
-OUTPUT_PATH="$OUTPUT_DIR/${VIEW_NAME}.png"
-
-if [ -f "$OUTPUT_PATH" ]; then
+# Launch directly so PreviewSnapshotPolicy receives the same environment on both revisions.
+while IFS= read -r name; do
+    OUTPUT_PATH="$OUTPUT_DIR/$name.png"
+    rm -f "$OUTPUT_PATH"
+    PREVIEW_EAGER_LAYOUT=1 PREVIEW_VIEW="$name" PREVIEW_OUTPUT_DIR="$OUTPUT_DIR" "$APP_PATH/Contents/MacOS/PreviewHost"
+    if [ ! -f "$OUTPUT_PATH" ]; then
+        echo "error: screenshot not produced at $OUTPUT_PATH" >&2
+        exit 1
+    fi
     echo "$OUTPUT_PATH"
-else
-    echo "error: screenshot not produced at $OUTPUT_PATH" >&2
-    exit 1
-fi
+done <<< "$VIEW_NAMES"

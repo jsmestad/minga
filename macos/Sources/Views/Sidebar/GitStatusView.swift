@@ -112,13 +112,13 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private var notARepoView: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Spacing.sm) {
             Spacer()
             Image(systemName: "folder.badge.questionmark")
-                .font(.system(size: 20))
+                .font(Typography.font(.illustration))
                 .foregroundStyle(theme.treeFg.opacity(0.2))
             Text("Not a git repository")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.font(.body, weight: .medium))
                 .foregroundStyle(theme.treeFg.opacity(0.4))
             Spacer()
         }
@@ -127,13 +127,13 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private var loadingView: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Spacing.sm) {
             Spacer()
             ProgressView()
                 .scaleEffect(0.6)
                 .tint(theme.treeFg.opacity(0.4))
             Text("Loading\u{2026}")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.treeFg.opacity(0.4))
             Spacer()
         }
@@ -142,16 +142,16 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private var cleanView: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Spacing.sm) {
             Spacer()
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 20))
+                .font(Typography.font(.illustration))
                 .foregroundStyle(theme.gitAddedFg.opacity(0.4))
             Text("Nothing to commit")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.font(.body, weight: .medium))
                 .foregroundStyle(theme.treeFg.opacity(0.5))
             Text("Working tree clean")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.treeFg.opacity(0.3))
             Spacer()
         }
@@ -169,7 +169,7 @@ public struct GitStatusView: View {
                 sectionBlock(.changed)
                 sectionBlock(.untracked)
             }
-            .padding(.top, 2)
+            .padding(.top, Spacing.hairline)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .clipped()
             .animation(.easeInOut(duration: animDuration), value: state.snapshot.entriesRevision)
@@ -181,7 +181,7 @@ public struct GitStatusView: View {
                     sectionBlock(.changed)
                     sectionBlock(.untracked)
                 }
-                .padding(.top, 2)
+                .padding(.top, Spacing.hairline)
                 .animation(.easeInOut(duration: animDuration), value: state.snapshot.entriesRevision)
             }
         }
@@ -207,24 +207,24 @@ public struct GitStatusView: View {
         let isCollapsed = state.session.collapsedSections.contains(section)
         let isHovered = hoveredSection == section
 
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .medium))
+                .font(Typography.font(.micro, weight: .medium))
                 .foregroundStyle(theme.treeFg.opacity(0.5))
                 .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                 .animation(.easeInOut(duration: animDuration), value: isCollapsed)
                 .frame(width: 12)
 
             Text(section.label)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Typography.font(.small, weight: .semibold))
                 .foregroundStyle(theme.treeFg.opacity(0.7))
                 .textCase(.uppercase)
 
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(Typography.font(.caption, weight: .medium).monospacedDigit())
                 .foregroundStyle(theme.treeFg.opacity(0.4))
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.pixel)
                 .background(
                     Capsule().fill(theme.treeFg.opacity(0.08))
                 )
@@ -237,7 +237,7 @@ public struct GitStatusView: View {
                     .transition(.opacity.animation(.easeInOut(duration: animDuration)))
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Spacing.md)
         .frame(height: sectionHeaderHeight)
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
@@ -259,7 +259,7 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private func sectionActions(_ section: GitStatusSection) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Spacing.hairline) {
             switch section {
             case .staged:
                 actionButton(systemName: "minus", tooltip: "Unstage All") {
@@ -298,7 +298,7 @@ public struct GitStatusView: View {
         HStack(spacing: 0) {
             // Status letter (M, A, D, R, C, ?, !)
             Text(statusLetter(entry.status))
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(Typography.font(.small, weight: .bold, design: .monospaced))
                 .foregroundStyle(statusColor(entry.status))
                 .frame(width: 18, alignment: .center)
 
@@ -306,7 +306,7 @@ public struct GitStatusView: View {
 
             // Filename
             Text(entry.filename)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(theme.treeFg)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -315,7 +315,7 @@ public struct GitStatusView: View {
             // Parent directory (dimmed)
             if !entry.directory.isEmpty {
                 Text(" " + entry.directory)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.treeDisabledFg)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -331,7 +331,7 @@ public struct GitStatusView: View {
                     .transition(.opacity.animation(.easeInOut(duration: animDuration)))
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Spacing.md)
         .frame(height: rowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground(isHovered: isHovered))
@@ -356,7 +356,7 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private func rowActions(_ entry: GitStatusEntry) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Spacing.hairline) {
             switch entry.section {
             case .staged:
                 actionButton(systemName: "minus", tooltip: "Unstage") {
@@ -479,9 +479,9 @@ public struct GitStatusView: View {
     @ViewBuilder
     private func rowBackground(isHovered: Bool) -> some View {
         if isHovered {
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .fill(theme.treeFg.opacity(0.06))
-                .padding(.horizontal, 4)
+                .padding(.horizontal, Spacing.xs)
         } else {
             Color.clear
         }
@@ -496,7 +496,7 @@ public struct GitStatusView: View {
                 .fill(theme.treeSeparatorFg.opacity(0.3))
                 .frame(height: 1)
 
-            VStack(spacing: 6) {
+            VStack(spacing: Spacing.sm) {
                 // Amend toggle
                 HStack {
                     Toggle(isOn: Binding(
@@ -504,7 +504,7 @@ public struct GitStatusView: View {
                         set: { state.setAmendMode($0) }
                     )) {
                         Text("Amend")
-                            .font(.system(size: 11))
+                            .font(Typography.font(.small))
                             .foregroundStyle(theme.treeMutedFg)
                     }
                     .toggleStyle(.checkbox)
@@ -516,18 +516,18 @@ public struct GitStatusView: View {
                 ZStack(alignment: .topLeading) {
                     if state.session.draft.isEmpty {
                         Text("Commit message\u{2026}")
-                            .font(.system(size: 12))
+                            .font(Typography.font(.body))
                             .foregroundStyle(theme.treeDisabledFg)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.sm)
                     }
 
                     TextEditor(text: Binding(
                         get: { state.session.draft },
                         set: { state.updateDraft($0) }
                     ))
-                        .padding(.vertical, 6)
-                        .font(.system(size: 12))
+                        .padding(.vertical, Spacing.sm)
+                        .font(Typography.font(.body))
                         .foregroundStyle(theme.treeFg)
                         .scrollContentBackground(.hidden)
                         .frame(height: commitMessageEditorHeight)
@@ -536,16 +536,16 @@ public struct GitStatusView: View {
                     charCounter
                 }
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(theme.editorBg.opacity(0.5))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 4)
+                            RoundedRectangle(cornerRadius: Radius.sm)
                                 .stroke(commitBorderColor, lineWidth: 1)
                         )
                 )
 
                 // Push / Pull / Fetch row
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     if state.snapshot.behind > 0 {
                         miniButton(systemName: "arrow.down.circle", label: "Pull \(state.snapshot.behind)") {
                             sendAction?(.pull)
@@ -572,17 +572,17 @@ public struct GitStatusView: View {
                         sendAction?(.amend(message: submission.message))
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Spacing.xs) {
                         Image(systemName: state.session.amendMode ? "pencil" : "checkmark")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Typography.font(.caption, weight: .semibold))
                         Text(state.session.amendMode ? "Amend" : "Commit")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Typography.font(.body, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 26)
                     .foregroundStyle(commitButtonEnabled ? readableAccentForeground : theme.treeDisabledFg)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: Radius.sm)
                             .fill(commitButtonEnabled ? theme.accent : theme.treeFg.opacity(0.10))
                     )
                 }
@@ -590,8 +590,8 @@ public struct GitStatusView: View {
                 .disabled(!commitButtonEnabled)
                 .help(commitButtonHelp)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.md)
         }
         .frame(maxWidth: .infinity)
     }
@@ -604,10 +604,10 @@ public struct GitStatusView: View {
 
         if !state.session.draft.isEmpty {
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(Typography.font(.caption, weight: .medium).monospacedDigit())
                 .foregroundStyle(color)
-                .padding(.trailing, 8)
-                .padding(.top, 6)
+                .padding(.trailing, Spacing.md)
+                .padding(.top, Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .topTrailing)
         }
     }
@@ -658,17 +658,17 @@ public struct GitStatusView: View {
 
     private func miniButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 3) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: systemName)
-                    .font(.system(size: 10))
+                    .font(Typography.font(.caption))
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
             }
             .foregroundStyle(theme.treeMutedFg)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
             .background(
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .fill(theme.treeFg.opacity(0.06))
             )
         }
@@ -679,13 +679,13 @@ public struct GitStatusView: View {
 
     @ViewBuilder
     private func toastBanner(message: String, level: ToastLevel, action: ToastAction) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             Image(systemName: level == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(level == .success ? theme.gitAddedFg : theme.gutterErrorFg)
 
             Text(message)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.treeFg)
                 .lineLimit(2)
 
@@ -695,21 +695,21 @@ public struct GitStatusView: View {
                 Button("Pull & Retry") {
                     sendAction?(.pullAndRetry)
                 }
-                .font(.system(size: 10, weight: .medium))
+                .font(Typography.font(.caption, weight: .medium))
                 .buttonStyle(.plain)
                 .foregroundStyle(theme.accent)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .fill(level == .success
                     ? theme.gitAddedFg.opacity(0.1)
                     : theme.gutterErrorFg.opacity(0.1))
         )
-        .padding(.horizontal, 6)
-        .padding(.top, 4)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.top, Spacing.xs)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(.easeInOut(duration: 0.2), value: state.snapshot.toastMessage)
     }

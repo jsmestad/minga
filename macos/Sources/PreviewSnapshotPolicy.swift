@@ -36,6 +36,19 @@ enum PreviewSnapshotPolicy {
         case "BottomPanelDiagnostics": CGSize(width: 800, height: 250)
         case "NotificationOverflow": CGSize(width: 800, height: 600)
         case "FileTreeRename": CGSize(width: 280, height: 600)
+        // BEGIN chrome migration preview sizes
+        case "AgentContextBar": CGSize(width: 1200, height: 64)
+        case "WorkspaceIconPicker": CGSize(width: 240, height: 360)
+        case "WorkspaceHeaderView": CGSize(width: 1100, height: 64)
+        case "WorkspaceIndicatorView": CGSize(width: 500, height: 64)
+        case "ExtensionOverlayView": CGSize(width: 520, height: 240)
+        case "ExtensionPanelView": CGSize(width: 600, height: 560)
+        case "FloatPopupOverlay": CGSize(width: 600, height: 360)
+        case "ProtocolErrorOverlay": CGSize(width: 640, height: 400)
+        case "ResyncOverlay": CGSize(width: 640, height: 160)
+        case "EditTimelineFiles", "EditTimelineTrack": CGSize(width: 900, height: 80)
+        case "EditorSettingsView", "KeybindingsSettingsView": CGSize(width: 600, height: 480)
+        // END chrome migration preview sizes
         default: CGSize(width: 400, height: 200)
         }
     }

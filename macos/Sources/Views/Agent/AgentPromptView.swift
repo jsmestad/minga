@@ -77,12 +77,12 @@ public struct AgentPromptView: View {
 
     @ViewBuilder
     private var promptArea: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             promptCapsule
             actionButton
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Agent prompt")
     }
@@ -92,27 +92,27 @@ public struct AgentPromptView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Mode indicator bar (only in non-insert modes)
             if !modeLabel.isEmpty {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Text(modeLabel)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(Typography.font(.micro, weight: .bold, design: .monospaced))
                         .foregroundStyle(theme.agentInputBorder)
                     Spacer()
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 4)
-                .padding(.bottom, 2)
+                .padding(.horizontal, Spacing.lg)
+                .padding(.top, Spacing.xs)
+                .padding(.bottom, Spacing.hairline)
             }
 
             // Prompt text with monospaced font and cursor
             HStack(spacing: 0) {
                 if isStreaming && state.prompt.isEmpty {
                     Text("Generating...")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(Typography.font(.emphasis, design: .monospaced))
                         .foregroundStyle(theme.agentInputPlaceholder)
                         .italic()
                 } else if state.prompt.isEmpty && !isInsertMode {
                     Text("Ask anything...")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(Typography.font(.emphasis, design: .monospaced))
                         .foregroundStyle(theme.agentInputPlaceholder)
                 } else {
                     // Render prompt text with cursor overlay
@@ -121,18 +121,18 @@ public struct AgentPromptView: View {
 
                 Spacer(minLength: 4)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, modeLabel.isEmpty ? 10 : 6)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, modeLabel.isEmpty ? Spacing.md : Spacing.sm)
         }
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: Radius.xl)
                 .fill(theme.agentInputBg.opacity(capsuleBgOpacity))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: Radius.xl)
                 .strokeBorder(capsuleBorderColor, lineWidth: 1)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: Radius.xl))
         .onTapGesture {
             if !isInsertMode && !isStreaming {
                 sendAction?(.keyPress(codepoint: 0x69, modifiers: 0, sequence: 0))
@@ -160,7 +160,7 @@ public struct AgentPromptView: View {
         let isBlock = state.promptMode.usesBlockCursor
         let lineH = promptLineHeight
 
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
             ForEach(Array(lines.prefix(8).enumerated()), id: \.offset) { lineIdx, line in
                 AgentPromptLineView(
                     text: line,
@@ -188,7 +188,7 @@ public struct AgentPromptView: View {
             }
         } label: {
             Image(systemName: actionButtonIcon)
-                .font(.system(size: 24))
+                .font(Typography.font(.action))
                 .foregroundStyle(actionButtonColor)
                 .contentTransition(.symbolEffect(.replace))
         }
@@ -207,43 +207,43 @@ public struct AgentPromptView: View {
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(completion.candidates.enumerated()), id: \.offset) { index, candidate in
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.sm) {
                     Image(systemName: isSlash ? "command" : "doc")
-                        .font(.system(size: 10))
+                        .font(Typography.font(.caption))
                         .foregroundStyle(theme.agentTextFg.opacity(0.4))
                         .frame(width: 14)
 
                     Text(candidate.name)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(Typography.font(.body, design: .monospaced))
                         .foregroundStyle(theme.agentTextFg)
                         .lineLimit(1)
 
                     if !candidate.description.isEmpty {
                         Text(candidate.description)
-                            .font(.system(size: 11))
+                            .font(Typography.font(.small))
                             .foregroundStyle(theme.agentTextFg.opacity(0.4))
                             .lineLimit(1)
                     }
 
                     Spacer()
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.xs)
                 .background(index == Int(completion.selected) ? theme.agentInputBorder.opacity(0.15) : Color.clear)
             }
         }
         .frame(maxWidth: 400)
         .frame(maxHeight: CGFloat(completion.candidates.count) * 24)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Radius.md)
                 .fill(theme.agentCodeBg)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Radius.md)
                 .strokeBorder(theme.agentCodeBorder.opacity(0.4), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.2), radius: 8, y: -4)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Spacing.xl)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isSlash ? "Slash command completion" : "File mention completion")
     }
@@ -260,7 +260,7 @@ struct AgentPromptCaretMetrics {
 }
 
 @MainActor struct AgentPromptLineLayout {
-    static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    static let font = NSFont.monospacedSystemFont(ofSize: Typography.Step.emphasis.rawValue, weight: .regular)
 
     let line: CTLine
     let size: CGSize
