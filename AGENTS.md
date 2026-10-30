@@ -20,11 +20,11 @@ Each frontend has its own AGENTS.md with architecture, coding standards, and con
 
 ## Tech Stack
 
-- **Elixir 1.19** / OTP 28 — editor core (buffers, modes, commands, orchestration)
+- **Elixir 1.20 / OTP 29**: editor core (buffers, modes, commands, orchestration)
 - **Swift 6 / Metal 3.1** — macOS native GUI frontend (primary)
 - **GTK4** — Linux native GUI frontend (planned)
-- **Go 1.23 / Bubble Tea** — terminal frontend (the only TUI)
-- **Zig 0.15** — tree-sitter parser infrastructure (`minga-parser`)
+- **Go 1.26 / Bubble Tea**: terminal frontend (the only TUI)
+- **Zig 0.16**: tree-sitter parser infrastructure (`minga-parser`)
 - **ExUnit** + **StreamData** — testing
 - Pinned versions in `.tool-versions`
 
@@ -32,95 +32,9 @@ Each frontend has its own AGENTS.md with architecture, coding standards, and con
 
 Runtime logs are written to `~/.local/share/minga/minga.log`. macOS crash reports land in `~/Library/Logs/DiagnosticReports/` as `.ips` files (look for `minga-mac-*.ips`). Check both when investigating crashes.
 
-## Project Structure
+## Repository Map
 
-```
-lib/
-  minga.ex                    # Root module
-  minga/
-    application.ex            # OTP application / supervisor tree
-    foundation/
-      supervisor.ex           # Foundation supervisor (Events, Config, Keymap, etc.)
-    services/
-      supervisor.ex           # Services supervisor (Git, Extensions, LSP, Diagnostics, etc.)
-    runtime/
-      supervisor.ex           # Runtime supervisor (Watchdog, FileWatcher, Editor.Supervisor)
-    buffer/
-      document.ex           # Pure data structure (no GenServer)
-      server.ex               # GenServer wrapper for gap buffer
-      edit_delta.ex           # Edit delta struct for incremental sync
-      state.ex                # Buffer GenServer internal state
-    port/
-      protocol.ex             # Port protocol encoder/decoder
-      protocol/gui.ex         # GUI chrome protocol encoder (native frontends only)
-      manager.ex              # GenServer managing the frontend Port
-      frontend.ex             # Behaviour for pluggable rendering backends
-      capabilities.ex         # Frontend capabilities struct
-    parser/
-      manager.ex              # GenServer managing the tree-sitter parser Port
-    editor.ex                 # Editor orchestration GenServer
-    editor/
-      supervisor.ex           # Editor supervisor (Parser, Port, Editor)
-      layout.ex               # Pure layout computation (single source of truth for all rects)
-      viewport.ex             # Viewport scrolling logic
-    mode/
-      normal.ex               # Vim normal mode
-      insert.ex               # Vim insert mode
-      visual.ex               # Vim visual mode
-      operator_pending.ex     # Operator-pending mode (d, c, y + motion)
-      command.ex              # : command mode
-    motion.ex                 # Cursor motion functions
-    operator.ex               # Operator functions (delete, change, yank)
-    text_object.ex            # Text objects (iw, aw, i", etc.)
-    command.ex                # Command struct
-    command/
-      registry.ex             # Named command lookup
-      parser.ex               # :command parsing
-    comment.ex                 # Line comment toggling per filetype (tree-sitter injection-aware)
-    git.ex                     # Git delegator (resolves backend via app config)
-    git/
-      backend.ex             # Behaviour for git operations (9 callbacks)
-      system.ex              # Production backend (shells out to git CLI)
-      buffer.ex              # Per-buffer GenServer: caches HEAD, computes diffs
-      diff.ex                # Pure in-memory line diffing via List.myers_difference/2
-    config.ex                 # Config DSL (use Minga.Config)
-    config/
-      options.ex              # Typed option registry with per-filetype overrides
-      loader.ex               # Config file discovery and evaluation
-      hooks.ex                # Lifecycle hook registry (after_save, after_open, etc.)
-      advice.ex               # Before/after command advice (ETS-backed, read_concurrency)
-    keymap.ex                 # Mode-specific keymap management
-    keymap/
-      bindings.ex             # Key sequence to command mappings
-      defaults.ex             # Default Doom-style keybindings
-      active.ex               # Live merged keymap (defaults + user overrides)
-      key_parser.ex           # Human-readable key string parser
-    which_key.ex              # Which-key popup logic
-    cli.ex                    # CLI entry point
-  mix/
-    compilers/
-      zig.ex                  # Custom Mix compiler for Zig builds
-
-macos/                        # macOS native GUI frontend (primary)
-  project.yml                 # XcodeGen project definition
-  Sources/
-    MingaApp.swift            # App entry point, SwiftUI wiring
-    Protocol/                 # Binary protocol decoder/encoder
-    Renderer/                 # Metal cell grid renderer
-    Font/                     # CoreText font loading, glyph atlas
-    Views/                    # SwiftUI + NSView wrappers
-  Tests/                      # Protocol round-trip tests
-
-zig/                          # tree-sitter parser (the legacy TUI renderer was removed in #2223)
-  build.zig                   # Zig build configuration
-  build.zig.zon               # Zig package manifest (no external deps)
-  src/
-    parser_main.zig           # Parser entry point, buffer management, command loop
-    protocol.zig              # Port protocol encoder/decoder
-    highlighter.zig           # Tree-sitter highlighter (shared by all frontends via parser Port)
-
-test/                         # Mirrors lib/ structure
-```
+Use the directory and entry-point tables under [Code Organization](#code-organization) to find the Elixir owners. Frontend-specific guides cover their own directory layouts.
 
 ## Git Branching
 
@@ -177,24 +91,24 @@ Minga's code is organized by **dependency direction** and **state ownership**, n
 
 Code is organized in three layers. Dependencies flow downward only. A module in Layer 0 never imports from Layer 1 or 2. A module in Layer 1 never imports from Layer 2. If you find yourself adding an upward dependency, you're putting logic in the wrong layer.
 
-**Layer 0 — Pure foundations (no dependencies on other Minga modules):**
-`Buffer.Document`, `Editing.Motion`, `Editing.TextObject`, `Editing.Operator`, `Editing.Search`, `Editing.AutoPair`, `Core.IntervalTree`, `Core.Face`, `Core.Decorations`, `Core.Diff`, `Core.Unicode`, `Core.IndentGuide`, `Editing.Text.Readable` (protocol), `Mode.*` (FSM modules)
+**Layer 0: Pure foundations**
+The exact pure-module list is returned by `Minga.Credo.DependencyDirectionCheck.layer_0_prefixes/0`.
 
 These are pure functions and data structures. They take values in and return values out. They don't call GenServers, don't subscribe to events, don't log. They're the stable core that everything else builds on.
 
 **Layer 1 — Stateful services (depend on Layer 0 only):**
-`Buffer.Process`, `Config.*`, `Events`, `Language.*`, `LSP.*`, `Git.*`, `Project.*`, `Agent.*` (session management, tool execution), `Keymap.*`, `Parser.Manager`, `Frontend.Manager`, `Frontend.Protocol`
+`Minga.Buffer.Process`, `Minga.Config.*`, `Minga.Events`, `Minga.Language.*`, `Minga.LSP.*`, `Minga.Git.*`, `Minga.Project.*`, `MingaAgent.*` (session management, tool execution), `Minga.Keymap.*`, `Minga.Parser.Manager`
 
 These are GenServers, registries, and OTP processes. They manage state and coordinate work. They use Layer 0 data structures and algorithms but don't know anything about how the editor presents itself.
 
 **Layer 2 — Orchestration and presentation (depends on everything):**
-`Editor.*`, `Shell.*`, `Input.*`, `Editor.Commands.*`, `Editor.RenderPipeline.*`, `Session.State`
+`MingaEditor.*`, including shells, input, commands, rendering, session state, and frontend transport
 
 This is where editing state, input dispatch, layout, rendering, and chrome live. It consumes everything from Layers 0 and 1. This layer changes the most because it's where UX experiments happen.
 
 **Cross-cutting modules** (used by all layers): `Minga.Events`, `Minga.Log`, `Minga.Telemetry`, `Minga.Clipboard`. These are infrastructure, not domain logic.
 
-**How to check:** look at the `alias`/`import` lines in a module. If a Layer 0 module aliases something from `Minga.Editor.*`, that's a violation. Fix it by moving the logic to the right layer or passing the needed data as a function argument.
+Dependency direction is enforced by `DependencyDirectionCheck` (EX9001).
 
 ### Rule 2: State ownership (one writer per struct)
 
@@ -202,7 +116,7 @@ Each struct has **one module** that's allowed to construct and update it. Other 
 
 ```elixir
 # Good: VimState owns its own transitions
-new_editing = Minga.Editor.VimState.transition(state.workspace.editing, :insert, mode_state)
+new_editing = MingaEditor.VimState.transition(state.workspace.editing, :insert, mode_state)
 
 # Bad: random module reaches in and mutates VimState
 new_editing = %{state.workspace.editing | mode: :insert, mode_state: mode_state}
@@ -210,9 +124,9 @@ new_editing = %{state.workspace.editing | mode: :insert, mode_state: mode_state}
 
 If you need to change a struct's field from outside its owning module, add a function to the owning module and call that instead. If no suitable function exists, add one. The function name should describe the domain operation, not the field being changed: `VimState.transition(vim, :insert, ms)` not `VimState.set_mode(vim, :insert)`.
 
-**The test:** grep for `%{thing |` and `%Module{thing |` across the codebase. Every instance should be in the struct's owning module. Violations mean someone is scattering mutation logic that should be centralized.
+Editor state ownership is enforced by `EditorStateOwnershipCheck` (EX9012); state-machine gates are enforced by `NoDirectStateMachineWriteCheck` (EX9004).
 
-**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions. `Editor.State` is the biggest offender here and is being decomposed into `Session.State`, `Shell.Traditional.State`, and focused sub-structs (`State.Buffers`, `State.Windows`, `State.Search`, etc.).
+**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions.
 
 ### Rule 3: Extract, don't branch
 
@@ -227,7 +141,7 @@ else
 end
 
 # Good: one dispatch point, callers don't know about editing models
-Minga.Editing.active_model(state).handle_key(key, model_state)
+active_model.handle_key(key, model_state)
 ```
 
 The smell: if the same condition appears in 3+ files, it should be a function or behaviour dispatch in one place. Every new `if gui?` or `if vim?` or `if agent_active?` scattered across the codebase is a future maintenance burden.
@@ -238,10 +152,9 @@ Directories under `lib/minga/` group related modules. Some have a top-level entr
 
 The practical rule: **prefer the entry-point module when one exists**, because it gives you a stable API if the internals are reorganized. But reaching into `Buffer.Document` directly from `Editing.Motion` is fine when you need the data structure, not the GenServer. The Layer rules (Rule 1) are what actually prevent bad coupling, not module access.
 
+Minga uses three namespaces: `Minga.*` for pure foundations and services, `MingaAgent.*` for agent services, and `MingaEditor.*` for orchestration and presentation. Namespace alone does not identify a pure module; use the check's explicit pure-module list. `.reach.exs` adds the runtime purity contract, and `test/minga/credo/reach_policy_test.exs` keeps its module list synchronized with Credo.
 
-Minga uses three namespaces: `Minga.*` (Layer 0 pure foundations plus Layer 1 services), `MingaAgent.*` (Layer 1), `MingaEditor.*` (Layer 2). The layer of a module is decided by `Minga.Credo.DependencyDirectionCheck` (EX9001), not by its namespace: Layer 0 is the explicit `@layer_0_prefixes` list, Layer 2 is `MingaEditor.*`, and every other `Minga.*` or `MingaAgent.*` module is Layer 1. The check sees aliases, imports, fully qualified calls, struct literals, and typespecs. `.reach.exs` adds the runtime side of the Layer 0 promise: `mix reach.check --arch` fails when a Layer 0 module sends or receives messages, writes files or ETS, or reads the clock; the module list there mirrors `@layer_0_prefixes` and `test/minga/credo/reach_policy_test.exs` fails when they drift. See `docs/ARCHITECTURE.md` for the full rationale.
-
-MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, provider specs, tool specs, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries such as `MingaAgent.ProviderRegistry`, `MingaAgent.Tool.Context`, credentials, approval, `ToolRouter`, changesets, buffer forks, edit boundaries, and extension callback code leases; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
+MingaAgent also has internal Agent Level 0/1/2 boundaries: pure contracts and values, runtime services and safety owners, then bundled integrations and presentation. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the classification enforced by `DependencyDirectionCheck` (EX9001).
 
 #### Layer 0: `lib/minga/` (Minga.*)
 
@@ -253,7 +166,7 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 | `mode/` | `Minga.Mode` | Vim modal FSM behaviour + mode implementations |
 | `config/` | `Minga.Config` | Options, hooks, advice, per-filetype overrides |
 | `keymap/` | `Minga.Keymap` | Key bindings, mode tries, scope management |
-| `lsp/` | `Minga.LSP` | Language server client, document sync, workspace edits |
+| `lsp/` | `Minga.LSP.Client`, `Minga.LSP.ServerRegistry` | Language server client, document sync, workspace edits |
 | `command/` | `Minga.Command` | Command struct, registry, provider behaviour |
 | `git/` | `Minga.Git` | Git operations, diff, blame, status |
 | `language/` | `Minga.Language` | Language definitions, filetype detection, tree-sitter, grammar registry, devicons |
@@ -290,9 +203,9 @@ MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Leve
 
 ### Shell architecture
 
-The `Minga.Shell` behaviour is the plug-in point for different UX models. Each shell owns its own layout, chrome, input routing, and rendering. The workspace (core editing state) is shared; the shell decides how to present it.
+The `MingaEditor.Shell` behaviour is the plug-in point for different UX models. Each shell owns its own layout, chrome, input routing, and rendering. The workspace (core editing state) is shared; the shell decides how to present it.
 
-- `Minga.Shell.Traditional` — tab-based editor with file tree, modeline, picker, agent panel
+- `MingaEditor.Shell.Traditional`: tab-based editor with file tree, modeline, picker, agent panel
 
 Shells should be as independent as possible. The ideal: a new shell can be built by implementing the Shell behaviour and using only Layer 0 + Layer 1 modules, without importing anything from another shell's implementation.
 
@@ -300,7 +213,7 @@ Shells should be as independent as possible. The ideal: a new shell can be built
 
 ### Elixir Types (mandatory)
 
-Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help it by being explicit:
+Elixir's set-theoretic type system catches real bugs at compile time. Help it by being explicit:
 
 - **`@spec`** on every public function — no exceptions
 - **`@type` / `@typep`** for all custom types in every module
@@ -309,17 +222,17 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
 - **Pattern matching** over `if/cond` — helps type narrowing across clauses
 - **No `cond` blocks** — use multi-clause functions with pattern matching and guards instead. `cond` defeats BEAM JIT optimizations and hides control flow that the type system and compiler can reason about. Extract a private helper with multiple `defp` clauses rather than inlining a `cond`.
 - **List append strategy depends on context.** When credo (or your instincts) flags a `list ++ [item]`, don't reflexively reach for `Enum.reverse([item | Enum.reverse(list)])`. That double-reverse is *worse* than `++` for a single append (two O(n) traversals vs one). Evaluate each case:
-  - **Small list, infrequent appends** (e.g., chat messages, UI indicator lines, anything bounded by human interaction speed or terminal height): `list ++ [item]` is fine. Readability wins. The `AppendSingleItem` credo check is disabled project-wide for this reason.
+  - **Small list, infrequent appends** (e.g., chat messages, UI indicator lines, anything bounded by human interaction speed or terminal height): `list ++ [item]` is fine. Readability wins. The `AppendSingleItem` Credo check is advisory (`exit_status: 0`), not disabled.
   - **Accumulating in a loop/reduce** (building a list item by item): prepend with `[item | acc]` inside the loop, then `Enum.reverse(acc)` once at the end. This is O(n) total vs O(n²) for repeated `++`. This is the one case where the pattern is correct.
   - **Frequent appends AND frequent ordered reads on a large list**: use `:queue` (Erlang's double-ended queue) for O(1) amortized operations on both ends.
   - **Never use `Enum.reverse([item | Enum.reverse(list)])`** as a substitute for `list ++ [item]`. It's strictly worse: same O(n) complexity, 2x the constant factor, and much harder to read.
 - **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Minga.Buffer.apply_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
-- **Structs over bare maps and tuples for data that crosses module boundaries.** Tuples and bare `%{}` maps are fine for small, fixed-shape data inside one module. When a data shape is used across 3+ modules (returned from a behaviour callback and consumed by a renderer, constructed in one GenServer and mutated in another), use a struct. Name the struct after the domain concept it represents (`Agent.ToolCall`, not `Agent.ToolCallMap`). Signals you need a struct: the same `%{key: ..., key: ...}` shape is constructed in multiple files, consumers do `%{tc | status: :error, result: "aborted"}` mutations in scattered places, or adding a field silently breaks pattern matches elsewhere. Put the struct in its own file under the domain it belongs to (`lib/minga/agent/tool_call.ex`).
-  - **Co-locate mutations on the struct module.** When a struct has domain transitions (e.g., a tool call completing, erroring, or being aborted), put those methods on the struct itself: `ToolCall.complete(tc, result)`, `ToolCall.abort(tc)`. This replaces scattered `%{tc | status: :error, result: "aborted", is_error: true}` updates with a single call that encodes the business rules. The test: if 3+ files do `%{thing | field: value}` on the same struct, extract a method.
+- **Structs over bare maps and tuples for data that crosses module boundaries.** Tuples and bare `%{}` maps are fine for small, fixed-shape data inside one module. When a data shape is used across 3+ modules (returned from a behaviour callback and consumed by a renderer, constructed in one GenServer and mutated in another), use a struct. Name the struct after the domain concept it represents (`MingaAgent.ToolCall`, not a generic tool-call map). Signals you need a struct: the same `%{key: ..., key: ...}` shape is constructed in multiple files, consumers do `%{tc | status: :error, result: "aborted"}` mutations in scattered places, or adding a field silently breaks pattern matches elsewhere. Put the struct in its own file under the domain it belongs to (`lib/minga_agent/tool_call.ex`).
+  - **Co-locate mutations on the struct module.** When a struct has domain transitions (e.g., a tool call completing, erroring, or being aborted), put those methods on the struct itself: `ToolCall.complete(tc, result)`, `ToolCall.abort(tc)`. This replaces scattered `%{tc | status: :error, result: "aborted", is_error: true}` updates with a single call that encodes the business rules. If 3+ files update the same struct directly, extract a method. `EditorStateOwnershipCheck` (EX9012) covers editor state owners, not every struct.
   - **`@enforce_keys` should list genuinely required fields, or be omitted entirely.** Don't add `@enforce_keys []` as documentation; it's noise. If a struct has fields that must always be provided at construction time (e.g., `id`, `name`), enforce those. If every field has a meaningful default, skip `@enforce_keys`.
   - **`| nil` belongs on the field or spec, not the type alias.** Write `@type approval :: ToolApproval.t()` and then `pending_approval: approval() | nil` on the field that can be nil. Baking nullability into the type alias hides it from every consumer.
   - **`@derive JSON.Encoder`** on any struct that gets serialized to disk or over the wire. Without it, `JSON.encode!/1` raises at runtime.
-- **No `Process.sleep/1`** — never use `Process.sleep` anywhere in production code. It blocks the calling process, defeats the BEAM's concurrency model, and hides real timing bugs. Use `Process.send_after/3`, GenServer state machines, or `receive` with `after` clauses instead. If you need to defer work until a resource is ready, store the intent in state and act on it when the ready signal arrives (e.g., set a pending field and apply it in the `handle_info` that confirms the resource is up). `Process.sleep` in tests is acceptable only in integration tests that interact with external processes.
+- **No production sleeps:** `NoProcessSleepCheck` (EX9002).
 - **Handling dead GenServer dependencies** — when one GenServer (e.g., the Editor) holds a PID to another GenServer (e.g., an Agent Session) that might crash or stop independently, use the idiomatic OTP pattern: `Process.monitor` + `:DOWN` handler. Do not build wrapper modules, adapter layers, or blanket try/catch around every call site. The correct approach:
   1. **Monitor the dependency.** Call `Process.monitor(pid)` when you store the PID. Store the monitor ref alongside it so you can `Process.demonitor(ref, [:flush])` cleanly when switching or clearing.
   2. **Handle `:DOWN` in the dependent process.** Add a `handle_info({:DOWN, ref, :process, pid, reason}, state)` clause that clears the stale PID from state. Match on both the stored ref and PID to avoid swallowing unrelated `:DOWN` messages.
@@ -414,7 +327,7 @@ Minga already follows this pattern in places (`Editor.KeyDispatch`, `Editor.Comp
 Use the right abstraction for the dispatch pattern. Getting this wrong creates boilerplate (protocol for one implementation) or loses compile-time guarantees (behaviour where a protocol fits).
 
 - **Protocol** when you have a value and don't know its type at the call site. The caller writes `MyProtocol.do_thing(some_value)` and dispatch happens on the value's struct type. Examples: serialization, text access across different document types, rendering different content kinds.
-- **Behaviour** when you know the contract and want to swap the implementation module. The caller writes `impl_module.do_thing(args)` where `impl_module` is chosen at configuration time or stored in state. Examples: git backend (`System` vs `Stub`), rendering backend (`Port.Frontend`), storage adapters.
+- **Behaviour** when you know the contract and want to swap the implementation module. The caller writes `impl_module.do_thing(args)` where `impl_module` is chosen at configuration time or stored in state. Examples: git backend (`System` vs `Stub`), rendering backend (`MingaEditor.Frontend.Adapter`), storage adapters.
 - **Neither** when there's only one implementation (just call the function directly) or when you're doing simple value validation (pattern match, don't wrap it in a protocol).
 
 The diagnostic: if the call site stores a module atom and calls it dynamically, that's a behaviour. If the call site receives a value and dispatches on its type, that's a protocol. If you find yourself using `function_exported?/3` to check for optional callbacks, you probably want a protocol with a fallback `Any` implementation instead.
@@ -438,12 +351,20 @@ Minga has project-specific Credo checks in `credo/checks/`. These enforce archit
 
 | Check | ID | What it guards |
 |-------|----|----------------|
-| `DependencyDirectionCheck` | EX9001 | Layer 0/1/2 dependency direction (Rule 1). Flags `alias`/`import` from a lower layer to a higher one. |
-| `NoProcessSleepCheck` | EX9002 | No `Process.sleep/1` in production code. Use `Process.send_after/3` or state machines. |
-| `NoDirectLoggerCheck` | EX9003 | No direct `Logger` calls. Use `Minga.Log.{level}(:subsystem, msg)` for filtered logging. |
-| `NoDirectStateMachineWriteCheck` | EX9004 | State machine fields (`mode:`, nested struct fields on `editing:`, `workspace:`) must go through gate functions, not raw map updates. |
-| `NoDirectModalOverlayWriteCheck` | EX9005 | Modal overlay writes must flow through `MingaEditor.State.ModalOverlay`, not raw `%{state \| modal: ...}`. |
-| `NoRawWorkspaceSnapshotCheck` | EX9006 | No `Map.from_struct` on workspace structs. Use `TabContext.from_workspace/1` instead of converting to an intermediate map. See #1403. |
+| `DependencyDirectionCheck` | EX9001 | Dependencies flow down the editor and agent layers. |
+| `NoProcessSleepCheck` | EX9002 | Production code must not call `Process.sleep/1`. |
+| `NoDirectLoggerCheck` | EX9003 | Use subsystem-aware `Minga.Log`, not direct `Logger` calls (advisory). |
+| `NoDirectStateMachineWriteCheck` | EX9004 | State-machine writes use the owning transition API. |
+| `NoDirectModalOverlayWriteCheck` | EX9005 | Modal overlay writes use `MingaEditor.State.ModalOverlay`. |
+| `NoRawWorkspaceSnapshotCheck` | EX9006 | Do not convert workspace structs to intermediate maps. |
+| `CommandRegistrationCheck` | EX9007 | Parser, parsed types, dispatcher, and provider registration must agree. |
+| `NoBlockingEditorCallCheck` | EX9008 | Move blocking calls off the Editor process. |
+| `NoBlockingHandleInfoCheck` | EX9009 | Keep expensive synchronous work out of Editor `handle_info/2`. |
+| `NoDelegateInEditorCheck` | EX9010 | Update editor callers instead of adding forwarding stubs (advisory). |
+| `NoGlobalStateInTestCheck` | EX9011 | Isolate test state instead of mutating global resources (advisory). |
+| `EditorStateOwnershipCheck` | EX9012 | Editor state values have one writer and pure owner APIs. |
+| `NoEventBusBroadcastInTestCheck` | EX9013 | Do not broadcast on the global EventBus in tests. |
+| `NoLossyGuiEncoderCheck` | EX9014 | GUI encoders must not silently truncate out-of-range values. |
 
 ### Feedback Loop and Pre-commit Checks (enforced by commit-gate extension)
 
@@ -527,7 +448,7 @@ end
 - **Descriptive names**: `"deleting at start of line joins with previous line"` not `"test delete_before/1"`
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode
-- **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga/integration/` to regenerate baselines, then review the diffs before committing.
+- **Screen snapshot tests**: follow `docs/recipes/update-snapshots.md` after intentional UI changes and review every baseline diff before committing.
 
 #### Sandi Metz-style test boundaries
 
@@ -629,6 +550,15 @@ EditorCase tests must not assert on internal state fields via `:sys.get_state` u
 
 `:sys.get_state/1` remains valid as a **synchronization barrier** (ensuring messages are processed before asserting). Just don't pattern-match on the returned state fields.
 
+```elixir
+# Good: synchronize, then query the public promise.
+:sys.get_state(editor)
+assert buffer_content(ctx) == "hello"
+
+# Bad: couple the assertion to the Editor's internal layout.
+assert :sys.get_state(editor).workspace.buffers.active == expected_buffer
+```
+
 **Running tests (prefer these aliases over raw `mix test`):**
 
 During edits, run the cheapest test that proves the change: a focused test file first, then `mix test.quick` when the change affects a broader area. Use `mix test --failed` only to iterate on an observed failure. Run `mix test.llm` before review; it remains the full local non-heavy gate.
@@ -655,6 +585,7 @@ mix test                                  # Full suite, default ExUnit output. U
 **Test concurrency (`async: true` by default):**
 
 All new test files must use `async: true` unless they have a documented reason for serialization. Every `async: false` must have a comment on the line above explaining the specific global resource that forces serialization.
+Global-state isolation is checked by `NoGlobalStateInTestCheck` (EX9011); the serialization and synchronization rules below still apply.
 
 Legitimate reasons for `async: false`:
 - Mutates global state that cannot be parameterized (Application env, Logger config, global telemetry handlers, `persistent_term`)
@@ -693,11 +624,11 @@ mix test --seed 12345                     # Reproduce a specific run order
 
 **DI stubs for OS processes:**
 
-Tests must not spawn OS processes during concurrent (async) execution. The BEAM's `erl_child_setup` has a race condition that causes EPIPE errors under concurrency. Modules that shell out (`Minga.Git`, `Minga.FileFind`, `Minga.ProjectSearch`) use a backend behaviour pattern so tests can inject stubs:
+Tests must not spawn OS processes during concurrent (async) execution. The BEAM's `erl_child_setup` has a race condition that causes EPIPE errors under concurrency. Modules that shell out (`Minga.Git`, `Minga.Project.FileFind`, `Minga.Project.ProjectSearch`) use a backend behaviour pattern so tests can inject stubs:
 
 - `Minga.Git` → `Minga.Git.Backend` behaviour, `Minga.Git.Stub` in tests (configured in `config/test.exs`)
 - `Git.Stub` is ETS-backed and configurable per-test via `Git.Stub.set_root/2`, `set_status/2`, etc.
-- Tests that genuinely need OS processes (e.g., `Extension.GitIntegrationTest`) must be `async: false` with `@moduletag timeout:` to prevent hangs
+- Tests that genuinely need OS processes must be `async: false` with `@moduletag timeout:` to prevent hangs.
 
 ### Zig
 
@@ -720,33 +651,18 @@ Minga has a `*Messages*` buffer (viewable via `SPC b m`) that acts as the editor
 
 **How to log (Elixir side):**
 
-**Always use `Minga.Log` instead of calling `Logger` directly.** `Minga.Log` routes through per-subsystem log levels so users can turn debug output on/off per subsystem without drowning in noise from everywhere else. Direct `Logger.debug/info/warning/error` calls bypass this filtering and should not be used in application code.
+Use subsystem-aware `Minga.Log` instead of direct `Logger` calls: `NoDirectLoggerCheck` (EX9003).
 
-```elixir
-# Good: subsystem-aware, respects per-subsystem log level config
-Minga.Log.debug(:render, "[render:content] 24µs")
-Minga.Log.warning(:lsp, "LSP server crashed: #{inspect(reason)}")
-
-# Bad: bypasses subsystem filtering, don't do this
-Logger.debug("[render:content] 24µs")
-```
-
-Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`. If your code doesn't fit any of these, add a new subsystem:
-
-1. Add `:log_level_<name>` to the `option_name` type union in `Minga.Config.Options`
-2. Add a `{:log_level_<name>, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default}` entry to `@option_specs`
-3. Add the subsystem atom to the `@subsystem_options` map in `Minga.Log`
-4. Add the subsystem to the `@type subsystem` union in `Minga.Log`
-5. Document the new subsystem in `docs/CONFIGURATION.md` under the Logging section
+Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`, `:config`, `:port`, `:distribution`, `:ext`. To add one, follow `docs/recipes/new-log-subsystem.md`.
 
 **Two-tier logging model:** These are two distinct tiers of the same pipeline, not competing mechanisms.
 
-- **`log_message(state, text)` / `Minga.Editor.log_to_messages(text)`** is the unconditional tier. Use it for user-visible lifecycle events that should always appear in `*Messages*` regardless of log level settings: file open/save/close, config reload, format-on-save, editor startup. Inside the Editor GenServer, call `log_message(state, text)`. Outside, call `Minga.Editor.log_to_messages(text)` (async cast to avoid deadlocks).
+- **`Minga.API.message(text)`** is the unconditional tier. Use it for user-visible lifecycle events that should always appear in `*Messages*` regardless of log level settings: file open/save/close, config reload, format-on-save, editor startup. It publishes a log-message event without calling the Editor synchronously.
 - **`Minga.Log.{level}(:subsystem, text)`** is the filterable tier. Use it for diagnostic output gated by per-subsystem log levels: LSP traces, render timing, debug context.
 
-Decision rule: if the user would be confused by its absence, use `log_to_messages`. If it's noise unless you're debugging, use `Minga.Log`.
+Decision rule: if the user would be confused by its absence, use `Minga.API.message/1`. If it's noise unless you're debugging, use `Minga.Log`.
 
-**Zig side:** Use `std.log` for debug output. The Port.Manager captures log messages from the Zig process's stderr and forwards them to `*Messages*` prefixed with `[ZIG/{level}]`.
+**Zig side:** Use `std.log` for debug output. Parser protocol log events pass through `Minga.Parser.EventRouter` to the editor's highlight handler and appear in `*Messages*` with a `[PARSER/{level}]` prefix. Frontend log events are handled separately by `MingaEditor.Frontend.Manager`.
 
 **Guidelines:**
 - Keep messages concise and actionable. `"LSP: elixir-ls connected (pid 42031)"` is better than `"The language server process has successfully been started."`
@@ -797,29 +713,22 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `edi
 Examples:
 - `feat(buffer): implement gap buffer with cursor movement`
 - `feat(macos): add native hover tooltips for LSP content`
-- `feat(zig): scaffold libvaxis renderer with port protocol`
+- `feat(zig): add parser highlight query validation`
 - `test(buffer): add property-based tests for insert/delete`
 
 ## Port Protocol
 
-BEAM ↔ frontend communication uses length-prefixed binary messages over stdin/stdout of the frontend process. All frontends (Swift, GTK4, Zig TUI) speak the same protocol. The TUI's Zig process uses `/dev/tty` for terminal I/O (not stdout).
+BEAM ↔ frontend communication uses length-prefixed binary messages over stdin/stdout of the frontend process. Both live frontends (Swift and Go) speak the same protocol; GTK4 is planned. The Go TUI uses `/dev/tty` for terminal I/O, not stdout.
 
-See `docs/PROTOCOL.md` for the full message specification and `docs/GUI_PROTOCOL.md` for the additional GUI chrome opcodes sent only to native GUI frontends.
+See `docs/PROTOCOL.md` for the full message specification and `docs/GUI_PROTOCOL.md` for Semantic UI opcodes shared by the native GUI and Go TUI.
 
 ## Rendering Architecture
 
-The rendering pipeline supports multiple frontends through a shared display list IR and a binary port protocol. The BEAM is the single authority for editor state and semantics; frontends are semantic renderers with a precisely bounded local-presentation layer (see "Ownership" below).
-
-Key design decisions:
-- **Display list IR:** The BEAM side owns a display list of styled text runs (not a cell grid) that sits between editor state and protocol encoding. All frontends consume this shared IR. See `docs/ARCHITECTURE.md` § "Display List (Rendering IR)" for the type definitions.
-- **Styled text runs over cell grids:** GUIs don't think in terminal cells. The IR uses `{col, text, style}` tuples organized by line within positioned rectangles. The TUI quantizes runs to cells; a GUI renders runs with its font engine.
-- **GUI chrome protocol:** Native GUI frontends receive structured data opcodes (0x70-0x78) for chrome elements like tab bars, file trees, status bars, and popups. These are rendered with platform-native widgets (SwiftUI, GTK4), not painted as cells. See `docs/GUI_PROTOCOL.md`.
-- **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
-- **Pipeline stages:** Seven named stages (Layout, Scroll, Content, Agent content, Chrome, Compose, Emit) with per-stage timing via telemetry.
+The rendering pipeline builds a shared `Minga.RenderModel` and encodes it through `Minga.Frontend.Adapter.GUI` for both live frontends. The BEAM is the single authority for editor state and semantics; frontends render committed semantic models with a precisely bounded local-presentation layer (see "Ownership" below). See `docs/ARCHITECTURE.md#the-render-model-and-the-rendering-pipeline` for the pipeline and renderer-owned caches.
 
 ### Ownership: what the BEAM decides vs what frontends decide
 
-This is the load-bearing boundary of the whole architecture. When in doubt about where logic goes, resolve it against this section, and read `docs/workstreams/resident-scroll.md` for the direction that sharpened it (epic #2652).
+This is the load-bearing boundary of the whole architecture. When in doubt about where logic goes, resolve it against this section, and read `docs/workstreams/resident-scroll.md` for the resident-store design.
 
 **The BEAM owns (authoritative, durable, shared across frontends):**
 
@@ -843,9 +752,9 @@ This is the load-bearing boundary of the whole architecture. When in doubt about
 - Frontends send semantic intents (`gui_action` with row identity and offsets), never mutate state locally, and never duplicate semantics (no local cursor motion, selection logic, fuzzy matching, or regex search per frontend). The pattern is resident data plus local presentation, never local semantics
 - Uniformity across Swift, Go, and the future GTK4 frontend comes from making the BEAM say more and the frontends decide less, enforced by conformance transcripts (store transcripts and input transcripts), not by hand-kept parity docs
 
-New scrollable surfaces adopt the #2652 store lifecycle (resident data plus a discardable local presentation offset) instead of inventing per-surface reconciliation. The velocity-aware overscan prefetch machinery that the scroll compositor once used was deleted in #2680 (epic #2652 complete); do not reintroduce it. The windowed emit path survives only for wrapped/folded buffers and the brief pre-promotion arming frame, and uses a fixed overscan, not velocity tiers.
+New scrollable surfaces adopt the resident-store lifecycle (resident data plus a discardable local presentation offset) instead of inventing per-surface reconciliation. Do not reintroduce velocity-aware overscan prefetch. The windowed emit path survives only for wrapped/folded buffers and the brief pre-promotion arming frame, and uses a fixed overscan, not velocity tiers.
 
-**Row fit is a presentation fact (ADR-0001).** The frontend computes how many rows fit (one floor: `content_pixels / (cell_height × line_spacing)`) and reports it; the BEAM lays out in the rows it is given and never derives row counts from pixel math or line spacing. Line spacing is a draw-time hint with zero BEAM-side layout influence. If a bug smells like "line height broke the layout," the real defect is a unit conversion on the wrong side of the process boundary or chrome double-booking — read `docs/adr/0001-frontend-owns-row-fit.md` before touching viewport/row/geometry accounting, and do not reintroduce `effective_rows`-style derivation on the BEAM.
+**Row fit is a presentation fact (ADR-0001).** The frontend computes how many rows fit (one floor: `content_pixels / (cell_height × line_spacing)`) and reports it; the BEAM lays out in the rows it is given and never derives row counts from pixel math or line spacing. Line spacing is a draw-time hint with zero BEAM-side layout influence. If a bug smells like "line height broke the layout," the real defect is a unit conversion on the wrong side of the process boundary or chrome double-booking. Read `docs/adr/0001-frontend-owns-row-fit.md` before touching viewport/row/geometry accounting, and do not reintroduce `effective_rows`-style derivation on the BEAM.
 
 ## Keymap Architecture
 
@@ -855,7 +764,7 @@ Minga follows the Neovim/which-key model: flat, explicit, debuggable. This is a 
 
 **1. The keymap is the single authority for "should this command run here."** If a key resolves to a command through the scope trie, the command runs. Period. Commands never contain internal guards that re-check whether the context is appropriate (no `no_agent_ui?` patterns). If a command shouldn't run in a context, don't bind it in that context's scope. The dispatch layer is the gate; commands trust their caller.
 
-**2. Scopes are flat, explicit declarations.** Each scope module (`Keymap.Scope.Agent`, `Keymap.Scope.Editor`, etc.) declares its own trie. No automatic composition, no implicit inheritance, no minor-mode-style stacking. Shared bindings (SPC leader sequences, Ctrl+S) use bulk registration helpers that merge named binding groups into a scope's trie at compile time. A scope declares which groups it includes; the helper merges them. Scope-specific bindings override group bindings on conflict. See #1278 for the bulk registration design.
+**2. Scopes are flat, explicit declarations.** Each scope module (`Keymap.Scope.Agent`, `Keymap.Scope.Editor`, etc.) declares its own trie. No automatic composition, no implicit inheritance, no minor-mode-style stacking. Shared bindings (SPC leader sequences, Ctrl+S) use bulk registration helpers that merge named binding groups into a scope's trie at compile time. A scope declares which groups it includes; the helper merges them. Scope-specific bindings override group bindings on conflict.
 
 **3. Derived scope, not managed scope.** The active scope should follow from what's on screen (window content type, focused panel), not from a field that activation code manually sets and command code manually checks. When the scope is derived, you can't forget to set it and you can't forget to check it. (This is the target architecture. Today `workspace.keymap_scope` is still a manually managed field. Move toward derived scope when touching this code.)
 
@@ -863,34 +772,32 @@ Minga follows the Neovim/which-key model: flat, explicit, debuggable. This is a 
 
 Emacs's keymap hierarchy is powerful but opaque. With 15 minor mode keymaps stacked, "why doesn't my keybinding work?" requires mentally simulating the entire stack. Neovim's ecosystem moved away from this toward explicit which-key registration because debuggability matters more than automatic composition. Minga makes the same bet: a slightly less flexible system that's transparent beats a powerful system that's invisible.
 
-The tradeoff: scopes can't automatically inherit bindings from a parent scope. If the agent scope needs the same SPC leader keys as the editor scope, those bindings come in through a shared group, not through implicit fallback. The bulk registration helper (#1278) makes this low-cost. The payoff: you can read one scope module and know exactly what keys do in that context. No surprises from implicit composition.
+The tradeoff: scopes can't automatically inherit bindings from a parent scope. If the agent scope needs the same SPC leader keys as the editor scope, those bindings come in through a shared group, not through implicit fallback. The bulk registration helper makes this low-cost. The payoff: you can read one scope module and know exactly what keys do in that context. No surprises from implicit composition.
 
 ### What this means in practice
 
 - **Adding a new keybinding:** Add it to the scope trie where it should be active. If it should work in multiple scopes, add it to a shared binding group.
 - **Adding a new command:** Register it in the command provider. Bind it in the appropriate scope trie. Don't add context guards inside the command function.
-- **Adding a new scope:** Create a new `Keymap.Scope.*` module implementing the `Keymap.Scope` behaviour. Declare its tries. Include shared groups for common bindings. Register it in `Scope.@scope_modules`.
+- **Adding a new scope:** Create a new `Minga.Keymap.Scope.*` module implementing the `Minga.Keymap.Scope` behaviour. Declare its tries. Include shared groups for common bindings. Register it in `@builtin_scopes` in `lib/minga/keymap/scope.ex`.
 - **Debugging "key does nothing":** Look at the active scope module's trie for that vim state. If the key isn't there, it's not bound. No need to trace through handler stacks or check command guards.
 
 ## Mouse Support (first-class citizen)
 
 Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Go/Bubble Tea, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
 
-See [#217](https://github.com/jsmestad/minga/issues/217) for the full tracker.
-
 ### Architecture
 
-Mouse events flow through the same protocol as keyboard events. All frontends encode mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM side decodes them in `Minga.Port.Protocol` and dispatches them through `MingaEditor.Input.Router.dispatch_mouse/7`, which either preserves active drag/resize direct ownership in `MingaEditor.Mouse.handle/7` or routes ordinary events through FocusTree node bubbling.
+Mouse events flow through the same protocol as keyboard events. Frontends encode wheel, divider, and other non-text mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM decodes them in `MingaEditor.Frontend.Protocol` and dispatches them through `MingaEditor.Input.Router.dispatch_mouse/7`, which preserves active drag/resize ownership in `MingaEditor.Mouse.handle/7` or routes ordinary events through `MingaEditor.FocusTree` node bubbling. Editor body clicks and drags use presentation-aware `editor_text_event` messages and `MingaEditor.Mouse.handle_text_event/3`.
 
 Key rules for mouse work:
 
-1. **Mouse events must flow through `Input.Router.dispatch_mouse/7` and the `FocusTree` hit path for initial clicks, wheels, and ordinary routed events.** Active editor drag/release and resize drag/release keep their direct `MingaEditor.Mouse.handle/7` ownership so an in-progress drag is not retargeted. The file tree, picker, completion menu, and agent panel all need to intercept clicks in their regions. Add `handle_mouse_at_node/8` or legacy `handle_mouse/7` callbacks to `Input.Handler` implementations when building mouse-interactive UI components.
+1. **Mouse events must flow through `MingaEditor.Input.Router.dispatch_mouse/7` and the `MingaEditor.FocusTree` hit path for initial clicks, wheels, and ordinary routed events.** Active editor drag/release and resize drag/release keep their direct `MingaEditor.Mouse.handle/7` ownership so an in-progress drag is not retargeted. The file tree, picker, completion menu, and agent panel all need to intercept clicks in their regions. Add `handle_mouse_at_node/8` or legacy `handle_mouse/7` callbacks to `Input.Handler` implementations when building mouse-interactive UI components.
 
 2. **Always pass modifiers through.** The `Editor.handle_info` clause for mouse events must pass modifiers to the mouse handler. Modifier+click combinations (Shift+click, Cmd+click, Ctrl+click) are meaningful interactions, not noise to discard.
 
-3. **Use FocusTree node context for routed surface hits and `Layout.get(state)` rects for surface-local geometry.** Every UI region has a computed rect from `Minga.Editor.Layout`. Node-aware mouse handlers receive the hit node from `Input.Router`; once inside a surface, handlers may interpret local regions such as gutters, prompt bands, or modeline segments from the current layout. Never hardcode pixel/cell offsets.
+3. **Use `MingaEditor.FocusTree` node context for routed surface hits and `Layout.get(state)` rects for surface-local geometry.** Every UI region has a computed rect from `MingaEditor.Layout`. Node-aware mouse handlers receive the hit node from `Input.Router`; once inside a surface, handlers may interpret local regions such as gutters, prompt bands, or modeline segments from the current layout. Never hardcode pixel/cell offsets.
 
-4. **GUI and TUI may diverge on capture, but the BEAM handler is shared.** The Swift GUI captures `NSEvent.clickCount` natively; the Zig TUI infers multi-click from timing. Both send the same protocol message. The BEAM handler doesn't care which frontend produced the event.
+4. **GUI and TUI may diverge on capture, but the BEAM handler is shared.** The Swift GUI captures `NSEvent.clickCount` natively. The Go TUI sends a click count of one, and the BEAM detects repeated clicks using timing and semantic target identity. The BEAM handler applies the same editing operations for both frontends.
 
 5. **When adding new clickable UI elements** (panels, popups, modeline segments), always add mouse interaction alongside keyboard interaction. Don't ship a keyboard-only UI and plan to "add mouse later." Mouse is not a follow-up.
 
@@ -932,55 +839,20 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 
 ## Adding New Features
 
-### New feature in an existing module group
-1. Implement the logic in a module under the appropriate `lib/minga/{group}/` directory
-2. If the group has an entry-point module, add a `defdelegate` or short wrapper there
-3. Verify the new module sits in the correct layer (Rule 1): pure logic in Layer 0, stateful services in Layer 1, presentation in Layer 2
-4. Verify struct mutations follow Rule 2: updates go through the owning module
-
 ### Semantic UI first for shared visible chrome
 Shared visible chrome (status bar, tab bar, file tree, picker, popups, agent surfaces, panels, and similar) is delivered as a **Semantic UI** model, not as pre-encoded protocol binaries or cell draws. The canonical path is: build a `Minga.RenderModel.UI.*` semantic struct in a builder under `lib/minga_editor/render_model/ui/`, then encode it with a `Minga.Frontend.Adapter.GUI` encoder under `lib/minga/frontend/adapter/gui/`. The guardrail in `test/minga/render_model/guardrails_test.exs` enforces this: a `Minga.RenderModel.UI.*` struct must not carry a protocol-binary payload field (`:encoded`, `:cmd`, `*_encoded`, `*_cmd`, etc.), and a builder under `lib/minga_editor/render_model/` must not reference `MingaEditor.Frontend.Protocol.GUI`. Both allowlists are empty; keep them empty.
 
-Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests. The legacy Zig cell-grid TUI that consumed cell draws was removed in #2223; the BEAM-side cell chrome/layout builders that produced `DisplayList` cell frames (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `sidebar_renderer.ex`) were deleted in #2235, and `picker_ui.ex`'s cell renderer was deleted in #2236 (the module's live picker orchestration API — `open/3`, `handle_key/3`, `close/1`, `refresh_items/1`, `update_picker/2` — is retained; the semantic `PickerBuilder` reads the modal state it produces). `DisplayList` itself is retained because the semantic window builder reads its styled runs.
+Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests. Picker orchestration remains in `picker_ui.ex`; semantic builders consume its state.
 
-Render and command code selects the semantic path with `Capabilities.semantic_ui?`, never `gui?`. Both live frontends (macOS GUI and Go TUI) advertise `semantic_ui` and take `Chrome.GUI` / `Layout.GUI` / the semantic builders, which are now the only render path. The legacy Zig cell-grid TUI and its `Chrome.TUI` / `Layout.TUI` cell builders were removed in #2223/#2235. `gui?` is reserved for native-window-only concerns that are not render/command dispatch (native-renderer config, GUI defaults, the native-window title, GUI-only key bindings, settings-panel config push). There are no `Commands.*.GUI` / `Commands.*.TUI` dispatch submodules; shared chrome commands live directly in their command module.
+Render and command code selects the semantic path with `Capabilities.semantic_ui?`, never `gui?`. Both live frontends (macOS GUI and Go TUI) advertise `semantic_ui` and take `Chrome.GUI` / `Layout.GUI` / the semantic builders, which are the only render path. `gui?` is reserved for native-window-only concerns that are not render/command dispatch (native-renderer config, GUI defaults, the native-window title, GUI-only key bindings, settings-panel config push). Shared chrome commands live directly in their command module, without frontend-specific dispatch submodules.
 
-When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. Cross-frontend coverage (macOS SwiftUI, Charm/Go TUI) is tracked in the Semantic UI inventory (#2113); forgetting to update a frontend is a common mistake.
+When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. Cross-frontend coverage must include both macOS SwiftUI and the Charm/Go TUI.
 
-### New command
-1. Add the command to the appropriate `Commands.*` sub-module's `__commands__/0` (implements `Minga.Command.Provider` behaviour). Include name, description, `requires_buffer` flag, and execute function. If no existing sub-module fits, create a new one and add it to the `@command_modules` list in `Minga.Command.Registry`.
-2. Add keybinding in `Minga.Keymap.Defaults`
-3. Test the command function and the keybinding lookup
+### Development recipes
 
-### New motion
-1. Add the implementation in the appropriate `Minga.Editing.Motion.*` sub-module (e.g., `Motion.Word`, `Motion.Line`)
-2. Add a `defdelegate` in `Minga.Editing.Motion` (entry point for motions)
-3. Add a `defdelegate` in `Minga.Editing` (entry point for the editing group) so callers can use `Minga.Editing.my_motion/2`
-4. Register in `Minga.Mode.Normal` and `Minga.Mode.OperatorPending`
-5. Test against known buffer content
-
-### New text object
-1. Add the implementation in `Minga.Editing.TextObject` with `@spec`
-2. Add a `defdelegate` in `Minga.Editing` (entry point) so callers can use `Minga.Editing.my_text_object/2`
-3. Register in `Minga.Mode.OperatorPending`
-4. Test with edge cases (cursor outside delimiters, nested, empty)
-
-### New or modified agent tool
-Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool that reads or writes file content:
-
-1. **File tools route through `MingaAgent.ToolRouter`.** The router checks whether a buffer is open for the target path. If so, it creates a `Buffer.Fork` (lazy, on first write) for in-memory isolation. If a changeset overlay is active, it routes through that instead. Only when neither is available does it fall through to direct filesystem I/O. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the design rationale.
-2. **Do not reintroduce context artifact writing without a reader.** The old writer was deleted because it saved `.minga/context/session-summary-*` files that no code loaded. Add an explicit picker or loader before adding any new writer.
-3. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
-4. **Test the tool function** in `test/minga_agent/tools/`.
-
-### New render command (requires BEAM + frontend changes)
-1. Add the opcode to `docs/protocol_schema.toml`, then run `mix protocol.gen`. Do not hand-edit generated opcode constants.
-2. Add the BEAM encoder/decoder behavior in the relevant protocol module under `lib/minga_editor/frontend/` or `lib/minga/parser/`.
-3. **macOS GUI:** Use the generated constants from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`, add decoder behavior in `macos/Sources/Protocol/ProtocolDecoder.swift`, and add the handler in `CommandDispatcher.swift`.
-4. **TUI:** Use the generated constants from `go/tui/internal/generated/opcodes.go`, then add decoder and handler behavior in the Go renderer under `go/tui/internal/protocol/` and `go/tui/internal/ui/`.
-5. **Linux GUI:** (when it exists) Add decoder and handler behavior in the GTK4 frontend.
-6. Test encode/decode round-trip on all sides. GUI chrome and semantic opcodes are schema-defined and consumed by the GUI and Go TUI frontends. The `minga-parser` Port (`zig/src/protocol.zig`) also decodes the protocol; if a frontend-only opcode can appear on the parser stream, add an explicit decoder skip or no-op handler for it there.
-
-### New tree-sitter grammar
-
-See `zig/AGENTS.md` § "Adding a New Tree-Sitter Grammar" for the full 5-step process (vendor grammar, add query, register in build.zig, register in highlighter.zig, register filetype in Elixir).
+- **New command:** `docs/recipes/new-command.md`
+- **New motion:** `docs/recipes/new-motion.md`
+- **New text object:** `docs/recipes/new-text-object.md`
+- **New or modified agent tool:** `docs/recipes/new-agent-tool.md`
+- **New render command:** `docs/recipes/new-render-command.md`
+- **New tree-sitter grammar:** `docs/recipes/new-grammar.md`
