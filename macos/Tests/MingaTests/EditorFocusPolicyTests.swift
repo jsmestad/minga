@@ -197,7 +197,7 @@ struct EditorFocusPolicyTests {
 
     @Test("nested native modal and agent visibility lifecycle never infer an editor owner")
     func lifecycleAppliesOnlyDecodedOwner() async throws {
-        let application = try FocusTestApplicationScope("nested native modal")
+        let application = try await FocusTestApplicationScope("nested native modal")
         defer { application.close() }
         let fixture = Fixture()
         defer { fixture.close() }

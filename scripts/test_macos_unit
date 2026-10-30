@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run MingaTests in its three required, sequential AppKit process boundaries."""
+"""Run existing MingaTests through MingaUnitTests in three separate host processes."""
 
 import argparse
 import json
@@ -52,7 +52,6 @@ def validate_action(name, summary, tests, log, exit_code):
     for key in ("totalTestCount", "passedTests", "failedTests"):
         if type(summary.get(key)) is not int or summary[key] < 0:
             errors.append(f"Missing or invalid summary count: {key}")
-    passed_count = summary.get("passedTests") if type(summary.get("passedTests")) is int else 0
     if summary.get("totalTestCount", 0) == 0 or summary.get("passedTests", 0) == 0:
         errors.append("No passed tests were executed")
     if summary.get("failedTests") != 0 or summary.get("result") != "Passed":
@@ -92,12 +91,15 @@ def validate_action(name, summary, tests, log, exit_code):
     else:
         enumerated = any("corpusIsEnumerated" in node_text(node) or "focus scenarios are enumerated for both consumers" in node_text(node) for node in passed)
         replayed = any("replay(" in node_text(node) or "same shared frames establish responder and AX identity" in node_text(node) for node in passed)
-        observed = {case for case in REPLAY_CASES if any(case in node_text(node) for node in passed)}
-        # Xcode versions may flatten parameter arguments. When names are absent,
-        # require the enumerator, replay test, and at least eight actual passes:
-        # the enumerator plus seven parameterized replay executions.
-        cases_passed = observed == REPLAY_CASES or (not observed and passed_count >= 8 and replayed)
-        if not enumerated or not cases_passed:
+        # Global summary counts describe logical functions, not argument runs.
+        # Require the actual pinned-Xcode named argument receipts instead.
+        observed = {
+            node.get("name") for node, ancestors in nodes
+            if node.get("nodeType") == "Arguments" and node.get("result") == "Passed"
+            and belongs_to(ancestors, REPLAY)
+            and any("replay(" in node_text(parent) for parent in ancestors)
+        }
+        if not enumerated or not replayed or observed != REPLAY_CASES:
             errors.append(f"Replay must pass enumeration and all seven cases; observed cases={sorted(observed)}, passedTests={summary.get('passedTests')}")
     return errors, pids
 
@@ -142,7 +144,7 @@ def main():
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix="run-", dir=output))
-    common = ["-scheme", "Minga", "-configuration", "Debug", "-derivedDataPath", str(root / "macos/DerivedData"), "CODE_SIGNING_ALLOWED=NO"]
+    common = ["-scheme", "MingaUnitTests", "-configuration", "Debug", "-derivedDataPath", str(root / "macos/DerivedData"), "CODE_SIGNING_ALLOWED=NO"]
     # Three actions, never three selectors in one runner: Swift Testing's
     # per-suite .serialized trait does not serialize unrelated suites.
     selections = [

@@ -21,7 +21,7 @@ Regenerate and verify:
 mix conformance.gen
 git diff --exit-code -- test/conformance/corpus
 mix test test/conformance/production_render_corpus_test.exs
-mix swift.build -- -project macos/Minga.xcodeproj -scheme Minga test
+scripts/test_macos_unit
 (cd go/tui && go test ./...)
 ```
 
@@ -133,7 +133,7 @@ mix test test/conformance/production_render_corpus_test.exs \
   test/minga_editor/render_pipeline/resident_incremental_test.exs \
   test/perf/production_gate_test.exs
 mix test
-mix swift.build -- -project macos/Minga.xcodeproj -scheme Minga test
+scripts/test_macos_unit
 (cd go/tui && go test ./...)
 mix zig.lint
 scripts/check_render_performance

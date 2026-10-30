@@ -16,7 +16,7 @@ native = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(native)
 
 
-def summary(passed=8, failed=0):
+def summary(passed=2, failed=0):
     return {
         "totalTestCount": passed + failed,
         "passedTests": passed,
@@ -40,7 +40,10 @@ def tree(suite, children):
 
 
 def replay_tree(named=True):
-    arguments = [case(name) for name in sorted(native.REPLAY_CASES)] if named else None
+    arguments = [
+        {"nodeType": "Arguments", "name": name, "result": "Passed"}
+        for name in sorted(native.REPLAY_CASES)
+    ] if named else None
     return tree(native.REPLAY, [
         case("corpusIsEnumerated()"), case("replay(_:)", arguments),
     ])
@@ -51,11 +54,10 @@ def log(pid=4102):
 
 
 class MacOSUnitResultsTest(unittest.TestCase):
-    def test_named_replay_cases_and_flattened_xcode_counts_are_accepted(self):
-        for named in (True, False):
-            errors, pids = native.validate_action("focus-replay", summary(), replay_tree(named), log(), 0)
-            self.assertEqual(errors, [])
-            self.assertEqual(pids, [4102])
+    def test_named_replay_cases_are_independent_of_logical_function_counts(self):
+        errors, pids = native.validate_action("focus-replay", summary(2), replay_tree(), log(), 0)
+        self.assertEqual(errors, [])
+        self.assertEqual(pids, [4102])
 
     def test_missing_named_case_cannot_hide_behind_a_passing_summary(self):
         tests = replay_tree()
@@ -63,10 +65,19 @@ class MacOSUnitResultsTest(unittest.TestCase):
         errors, _ = native.validate_action("focus-replay", summary(), tests, log(), 0)
         self.assertTrue(any("all seven cases" in error for error in errors))
 
-    def test_flattened_replay_requires_seven_passes_plus_enumeration(self):
-        errors, _ = native.validate_action("focus-replay", summary(7), replay_tree(False), log(), 0)
-        self.assertTrue(any("all seven cases" in error for error in errors))
-        tests = replay_tree(False)
+    def test_named_receipts_must_be_passed_argument_nodes(self):
+        for replacement in ({"nodeType": "Test Case"}, {"result": "Skipped"}):
+            tests = replay_tree()
+            argument = tests["testNodes"][0]["children"][1]["children"][0]
+            argument.update(replacement)
+            errors, _ = native.validate_action("focus-replay", summary(), tests, log(), 0)
+            self.assertTrue(any("all seven cases" in error for error in errors))
+
+    def test_flattened_counts_cannot_replace_named_argument_evidence(self):
+        for passed in (2, 7, 8, 100):
+            errors, _ = native.validate_action("focus-replay", summary(passed), replay_tree(False), log(), 0)
+            self.assertTrue(any("all seven cases" in error for error in errors))
+        tests = replay_tree()
         tests["testNodes"][0]["children"].pop(0)
         errors, _ = native.validate_action("focus-replay", summary(), tests, log(), 0)
         self.assertTrue(any("enumeration" in error for error in errors))
@@ -127,7 +138,7 @@ class MacOSUnitResultsTest(unittest.TestCase):
             output = Path(directory)
             result = native.save_results(output, actions, time.monotonic())
             self.assertTrue(result["success"])
-            self.assertEqual(result["total_passed_tests"], 120)
+            self.assertEqual(result["total_passed_tests"], 114)
             self.assertEqual(result["total_failed_tests"], 0)
             self.assertEqual(json.loads((output / "results.json").read_text())["actions"], original)
             actions[2]["summary"] = None
