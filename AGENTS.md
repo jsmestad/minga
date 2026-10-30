@@ -91,7 +91,7 @@ Minga's code is organized by **dependency direction** and **state ownership**, n
 
 Code is organized in three layers. Dependencies flow downward only. A module in Layer 0 never imports from Layer 1 or 2. A module in Layer 1 never imports from Layer 2. If you find yourself adding an upward dependency, you're putting logic in the wrong layer.
 
-**Layer 0 — Pure foundations (no dependencies on other Minga modules):**
+**Layer 0: Pure foundations**
 The exact pure-module list is returned by `Minga.Credo.DependencyDirectionCheck.layer_0_prefixes/0`.
 
 These are pure functions and data structures. They take values in and return values out. They don't call GenServers, don't subscribe to events, don't log. They're the stable core that everything else builds on.
@@ -124,9 +124,9 @@ new_editing = %{state.workspace.editing | mode: :insert, mode_state: mode_state}
 
 If you need to change a struct's field from outside its owning module, add a function to the owning module and call that instead. If no suitable function exists, add one. The function name should describe the domain operation, not the field being changed: `VimState.transition(vim, :insert, ms)` not `VimState.set_mode(vim, :insert)`.
 
-**The test:** grep for `%{thing |` and `%Module{thing |` across the codebase. Every instance should be in the struct's owning module. Violations mean someone is scattering mutation logic that should be centralized.
+Editor state ownership is enforced by `EditorStateOwnershipCheck` (EX9012); state-machine gates are enforced by `NoDirectStateMachineWriteCheck` (EX9004).
 
-**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions. `Editor.State` is the biggest offender here and is being decomposed into `Session.State`, `Shell.Traditional.State`, and focused sub-structs (`State.Buffers`, `State.Windows`, `State.Search`, etc.).
+**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions.
 
 ### Rule 3: Extract, don't branch
 
@@ -141,7 +141,7 @@ else
 end
 
 # Good: one dispatch point, callers don't know about editing models
-Minga.Editing.active_model(state).handle_key(key, model_state)
+active_model.handle_key(key, model_state)
 ```
 
 The smell: if the same condition appears in 3+ files, it should be a function or behaviour dispatch in one place. Every new `if gui?` or `if vim?` or `if agent_active?` scattered across the codebase is a future maintenance burden.
@@ -152,10 +152,9 @@ Directories under `lib/minga/` group related modules. Some have a top-level entr
 
 The practical rule: **prefer the entry-point module when one exists**, because it gives you a stable API if the internals are reorganized. But reaching into `Buffer.Document` directly from `Editing.Motion` is fine when you need the data structure, not the GenServer. The Layer rules (Rule 1) are what actually prevent bad coupling, not module access.
 
+Minga uses three namespaces: `Minga.*` for pure foundations and services, `MingaAgent.*` for agent services, and `MingaEditor.*` for orchestration and presentation. Namespace alone does not identify a pure module; use the check's explicit pure-module list. `.reach.exs` adds the runtime purity contract, and `test/minga/credo/reach_policy_test.exs` keeps its module list synchronized with Credo.
 
-Minga uses three namespaces: `Minga.*` (Layer 0 pure foundations plus Layer 1 services), `MingaAgent.*` (Layer 1), `MingaEditor.*` (Layer 2). The layer of a module is decided by `Minga.Credo.DependencyDirectionCheck` (EX9001), not by its namespace: Layer 0 is the explicit `@layer_0_prefixes` list, Layer 2 is `MingaEditor.*`, and every other `Minga.*` or `MingaAgent.*` module is Layer 1. The check sees aliases, imports, fully qualified calls, struct literals, and typespecs. `.reach.exs` adds the runtime side of the Layer 0 promise: `mix reach.check --arch` fails when a Layer 0 module sends or receives messages, writes files or ETS, or reads the clock; the module list there mirrors `@layer_0_prefixes` and `test/minga/credo/reach_policy_test.exs` fails when they drift. See `docs/ARCHITECTURE.md` for the full rationale.
-
-MingaAgent also has internal Agent Level 0/1/2 rules from epic #2075. Agent Level 0 contains pure contracts, value types, provider specs, tool specs, and safety interfaces; Agent Level 1 contains runtime services, source-owned registries such as `MingaAgent.ProviderRegistry`, `MingaAgent.Tool.Context`, credentials, approval, `ToolRouter`, changesets, buffer forks, edit boundaries, and extension callback code leases; Agent Level 2 contains bundled integrations, adapters, and agent presentation surfaces. `Minga.Credo.DependencyDirectionCheck` enforces that Agent Level 0 cannot depend on Levels 1 or 2 and Agent Level 1 cannot depend on Level 2. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the current module classification.
+MingaAgent also has internal Agent Level 0/1/2 boundaries: pure contracts and values, runtime services and safety owners, then bundled integrations and presentation. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the classification enforced by `DependencyDirectionCheck` (EX9001).
 
 #### Layer 0: `lib/minga/` (Minga.*)
 
@@ -229,11 +228,11 @@ Elixir's set-theoretic type system catches real bugs at compile time. Help it by
   - **Never use `Enum.reverse([item | Enum.reverse(list)])`** as a substitute for `list ++ [item]`. It's strictly worse: same O(n) complexity, 2x the constant factor, and much harder to read.
 - **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Minga.Buffer.apply_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
 - **Structs over bare maps and tuples for data that crosses module boundaries.** Tuples and bare `%{}` maps are fine for small, fixed-shape data inside one module. When a data shape is used across 3+ modules (returned from a behaviour callback and consumed by a renderer, constructed in one GenServer and mutated in another), use a struct. Name the struct after the domain concept it represents (`MingaAgent.ToolCall`, not a generic tool-call map). Signals you need a struct: the same `%{key: ..., key: ...}` shape is constructed in multiple files, consumers do `%{tc | status: :error, result: "aborted"}` mutations in scattered places, or adding a field silently breaks pattern matches elsewhere. Put the struct in its own file under the domain it belongs to (`lib/minga_agent/tool_call.ex`).
-  - **Co-locate mutations on the struct module.** When a struct has domain transitions (e.g., a tool call completing, erroring, or being aborted), put those methods on the struct itself: `ToolCall.complete(tc, result)`, `ToolCall.abort(tc)`. This replaces scattered `%{tc | status: :error, result: "aborted", is_error: true}` updates with a single call that encodes the business rules. The test: if 3+ files do `%{thing | field: value}` on the same struct, extract a method.
+  - **Co-locate mutations on the struct module.** When a struct has domain transitions (e.g., a tool call completing, erroring, or being aborted), put those methods on the struct itself: `ToolCall.complete(tc, result)`, `ToolCall.abort(tc)`. This replaces scattered `%{tc | status: :error, result: "aborted", is_error: true}` updates with a single call that encodes the business rules. If 3+ files update the same struct directly, extract a method. `EditorStateOwnershipCheck` (EX9012) covers editor state owners, not every struct.
   - **`@enforce_keys` should list genuinely required fields, or be omitted entirely.** Don't add `@enforce_keys []` as documentation; it's noise. If a struct has fields that must always be provided at construction time (e.g., `id`, `name`), enforce those. If every field has a meaningful default, skip `@enforce_keys`.
   - **`| nil` belongs on the field or spec, not the type alias.** Write `@type approval :: ToolApproval.t()` and then `pending_approval: approval() | nil` on the field that can be nil. Baking nullability into the type alias hides it from every consumer.
   - **`@derive JSON.Encoder`** on any struct that gets serialized to disk or over the wire. Without it, `JSON.encode!/1` raises at runtime.
-- **No `Process.sleep/1`** — never use `Process.sleep` anywhere in production code. It blocks the calling process, defeats the BEAM's concurrency model, and hides real timing bugs. Use `Process.send_after/3`, GenServer state machines, or `receive` with `after` clauses instead. If you need to defer work until a resource is ready, store the intent in state and act on it when the ready signal arrives (e.g., set a pending field and apply it in the `handle_info` that confirms the resource is up). `Process.sleep` in tests is acceptable only in integration tests that interact with external processes.
+- **No production sleeps:** `NoProcessSleepCheck` (EX9002).
 - **Handling dead GenServer dependencies** — when one GenServer (e.g., the Editor) holds a PID to another GenServer (e.g., an Agent Session) that might crash or stop independently, use the idiomatic OTP pattern: `Process.monitor` + `:DOWN` handler. Do not build wrapper modules, adapter layers, or blanket try/catch around every call site. The correct approach:
   1. **Monitor the dependency.** Call `Process.monitor(pid)` when you store the PID. Store the monitor ref alongside it so you can `Process.demonitor(ref, [:flush])` cleanly when switching or clearing.
   2. **Handle `:DOWN` in the dependent process.** Add a `handle_info({:DOWN, ref, :process, pid, reason}, state)` clause that clears the stale PID from state. Match on both the stored ref and PID to avoid swallowing unrelated `:DOWN` messages.
@@ -551,6 +550,15 @@ EditorCase tests must not assert on internal state fields via `:sys.get_state` u
 
 `:sys.get_state/1` remains valid as a **synchronization barrier** (ensuring messages are processed before asserting). Just don't pattern-match on the returned state fields.
 
+```elixir
+# Good: synchronize, then query the public promise.
+:sys.get_state(editor)
+assert buffer_content(ctx) == "hello"
+
+# Bad: couple the assertion to the Editor's internal layout.
+assert :sys.get_state(editor).workspace.buffers.active == expected_buffer
+```
+
 **Running tests (prefer these aliases over raw `mix test`):**
 
 During edits, run the cheapest test that proves the change: a focused test file first, then `mix test.quick` when the change affects a broader area. Use `mix test --failed` only to iterate on an observed failure. Run `mix test.llm` before review; it remains the full local non-heavy gate.
@@ -577,6 +585,7 @@ mix test                                  # Full suite, default ExUnit output. U
 **Test concurrency (`async: true` by default):**
 
 All new test files must use `async: true` unless they have a documented reason for serialization. Every `async: false` must have a comment on the line above explaining the specific global resource that forces serialization.
+Global-state isolation is checked by `NoGlobalStateInTestCheck` (EX9011); the serialization and synchronization rules below still apply.
 
 Legitimate reasons for `async: false`:
 - Mutates global state that cannot be parameterized (Application env, Logger config, global telemetry handlers, `persistent_term`)
@@ -642,16 +651,7 @@ Minga has a `*Messages*` buffer (viewable via `SPC b m`) that acts as the editor
 
 **How to log (Elixir side):**
 
-**Always use `Minga.Log` instead of calling `Logger` directly.** `Minga.Log` routes through per-subsystem log levels so users can turn debug output on/off per subsystem without drowning in noise from everywhere else. Direct `Logger.debug/info/warning/error` calls bypass this filtering and should not be used in application code.
-
-```elixir
-# Good: subsystem-aware, respects per-subsystem log level config
-Minga.Log.debug(:render, "[render:content] 24µs")
-Minga.Log.warning(:lsp, "LSP server crashed: #{inspect(reason)}")
-
-# Bad: bypasses subsystem filtering, don't do this
-Logger.debug("[render:content] 24µs")
-```
+Use subsystem-aware `Minga.Log` instead of direct `Logger` calls: `NoDirectLoggerCheck` (EX9003).
 
 Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`, `:config`, `:port`, `:distribution`, `:ext`. To add one, follow `docs/recipes/new-log-subsystem.md`.
 
@@ -713,29 +713,22 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `edi
 Examples:
 - `feat(buffer): implement gap buffer with cursor movement`
 - `feat(macos): add native hover tooltips for LSP content`
-- `feat(zig): scaffold libvaxis renderer with port protocol`
+- `feat(zig): add parser highlight query validation`
 - `test(buffer): add property-based tests for insert/delete`
 
 ## Port Protocol
 
 BEAM ↔ frontend communication uses length-prefixed binary messages over stdin/stdout of the frontend process. Both live frontends (Swift and Go) speak the same protocol; GTK4 is planned. The Go TUI uses `/dev/tty` for terminal I/O, not stdout.
 
-See `docs/PROTOCOL.md` for the full message specification and `docs/GUI_PROTOCOL.md` for the additional GUI chrome opcodes sent only to native GUI frontends.
+See `docs/PROTOCOL.md` for the full message specification and `docs/GUI_PROTOCOL.md` for Semantic UI opcodes shared by the native GUI and Go TUI.
 
 ## Rendering Architecture
 
-The rendering pipeline supports multiple frontends through a shared display list IR and a binary port protocol. The BEAM is the single authority for editor state and semantics; frontends are semantic renderers with a precisely bounded local-presentation layer (see "Ownership" below).
-
-Key design decisions:
-- **Display list IR:** The BEAM side owns a display list of styled text runs (not a cell grid) that sits between editor state and protocol encoding. All frontends consume this shared IR. See `docs/ARCHITECTURE.md` § "Display List (Rendering IR)" for the type definitions.
-- **Styled text runs over cell grids:** GUIs don't think in terminal cells. The IR uses `{col, text, style}` tuples organized by line within positioned rectangles. The TUI quantizes runs to cells; a GUI renders runs with its font engine.
-- **GUI chrome protocol:** Native GUI frontends receive structured data opcodes (0x70-0x78) for chrome elements like tab bars, file trees, status bars, and popups. These are rendered with platform-native widgets (SwiftUI, GTK4), not painted as cells. See `docs/GUI_PROTOCOL.md`.
-- **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
-- **Pipeline stages:** Seven named stages (Layout, Scroll, Content, Agent content, Chrome, Compose, Emit) with per-stage timing via telemetry.
+The rendering pipeline builds a shared `Minga.RenderModel` and encodes it through `Minga.Frontend.Adapter.GUI` for both live frontends. The BEAM is the single authority for editor state and semantics; frontends render committed semantic models with a precisely bounded local-presentation layer (see "Ownership" below). See `docs/ARCHITECTURE.md#the-render-model-and-the-rendering-pipeline` for the pipeline and renderer-owned caches.
 
 ### Ownership: what the BEAM decides vs what frontends decide
 
-This is the load-bearing boundary of the whole architecture. When in doubt about where logic goes, resolve it against this section, and read `docs/workstreams/resident-scroll.md` for the direction that sharpened it (epic #2652).
+This is the load-bearing boundary of the whole architecture. When in doubt about where logic goes, resolve it against this section, and read `docs/workstreams/resident-scroll.md` for the resident-store design.
 
 **The BEAM owns (authoritative, durable, shared across frontends):**
 
@@ -759,9 +752,9 @@ This is the load-bearing boundary of the whole architecture. When in doubt about
 - Frontends send semantic intents (`gui_action` with row identity and offsets), never mutate state locally, and never duplicate semantics (no local cursor motion, selection logic, fuzzy matching, or regex search per frontend). The pattern is resident data plus local presentation, never local semantics
 - Uniformity across Swift, Go, and the future GTK4 frontend comes from making the BEAM say more and the frontends decide less, enforced by conformance transcripts (store transcripts and input transcripts), not by hand-kept parity docs
 
-New scrollable surfaces adopt the #2652 store lifecycle (resident data plus a discardable local presentation offset) instead of inventing per-surface reconciliation. The velocity-aware overscan prefetch machinery that the scroll compositor once used was deleted in #2680 (epic #2652 complete); do not reintroduce it. The windowed emit path survives only for wrapped/folded buffers and the brief pre-promotion arming frame, and uses a fixed overscan, not velocity tiers.
+New scrollable surfaces adopt the resident-store lifecycle (resident data plus a discardable local presentation offset) instead of inventing per-surface reconciliation. Do not reintroduce velocity-aware overscan prefetch. The windowed emit path survives only for wrapped/folded buffers and the brief pre-promotion arming frame, and uses a fixed overscan, not velocity tiers.
 
-**Row fit is a presentation fact (ADR-0001).** The frontend computes how many rows fit (one floor: `content_pixels / (cell_height × line_spacing)`) and reports it; the BEAM lays out in the rows it is given and never derives row counts from pixel math or line spacing. Line spacing is a draw-time hint with zero BEAM-side layout influence. If a bug smells like "line height broke the layout," the real defect is a unit conversion on the wrong side of the process boundary or chrome double-booking — read `docs/adr/0001-frontend-owns-row-fit.md` before touching viewport/row/geometry accounting, and do not reintroduce `effective_rows`-style derivation on the BEAM.
+**Row fit is a presentation fact (ADR-0001).** The frontend computes how many rows fit (one floor: `content_pixels / (cell_height × line_spacing)`) and reports it; the BEAM lays out in the rows it is given and never derives row counts from pixel math or line spacing. Line spacing is a draw-time hint with zero BEAM-side layout influence. If a bug smells like "line height broke the layout," the real defect is a unit conversion on the wrong side of the process boundary or chrome double-booking. Read `docs/adr/0001-frontend-owns-row-fit.md` before touching viewport/row/geometry accounting, and do not reintroduce `effective_rows`-style derivation on the BEAM.
 
 ## Keymap Architecture
 
@@ -771,7 +764,7 @@ Minga follows the Neovim/which-key model: flat, explicit, debuggable. This is a 
 
 **1. The keymap is the single authority for "should this command run here."** If a key resolves to a command through the scope trie, the command runs. Period. Commands never contain internal guards that re-check whether the context is appropriate (no `no_agent_ui?` patterns). If a command shouldn't run in a context, don't bind it in that context's scope. The dispatch layer is the gate; commands trust their caller.
 
-**2. Scopes are flat, explicit declarations.** Each scope module (`Keymap.Scope.Agent`, `Keymap.Scope.Editor`, etc.) declares its own trie. No automatic composition, no implicit inheritance, no minor-mode-style stacking. Shared bindings (SPC leader sequences, Ctrl+S) use bulk registration helpers that merge named binding groups into a scope's trie at compile time. A scope declares which groups it includes; the helper merges them. Scope-specific bindings override group bindings on conflict. See #1278 for the bulk registration design.
+**2. Scopes are flat, explicit declarations.** Each scope module (`Keymap.Scope.Agent`, `Keymap.Scope.Editor`, etc.) declares its own trie. No automatic composition, no implicit inheritance, no minor-mode-style stacking. Shared bindings (SPC leader sequences, Ctrl+S) use bulk registration helpers that merge named binding groups into a scope's trie at compile time. A scope declares which groups it includes; the helper merges them. Scope-specific bindings override group bindings on conflict.
 
 **3. Derived scope, not managed scope.** The active scope should follow from what's on screen (window content type, focused panel), not from a field that activation code manually sets and command code manually checks. When the scope is derived, you can't forget to set it and you can't forget to check it. (This is the target architecture. Today `workspace.keymap_scope` is still a manually managed field. Move toward derived scope when touching this code.)
 
@@ -779,7 +772,7 @@ Minga follows the Neovim/which-key model: flat, explicit, debuggable. This is a 
 
 Emacs's keymap hierarchy is powerful but opaque. With 15 minor mode keymaps stacked, "why doesn't my keybinding work?" requires mentally simulating the entire stack. Neovim's ecosystem moved away from this toward explicit which-key registration because debuggability matters more than automatic composition. Minga makes the same bet: a slightly less flexible system that's transparent beats a powerful system that's invisible.
 
-The tradeoff: scopes can't automatically inherit bindings from a parent scope. If the agent scope needs the same SPC leader keys as the editor scope, those bindings come in through a shared group, not through implicit fallback. The bulk registration helper (#1278) makes this low-cost. The payoff: you can read one scope module and know exactly what keys do in that context. No surprises from implicit composition.
+The tradeoff: scopes can't automatically inherit bindings from a parent scope. If the agent scope needs the same SPC leader keys as the editor scope, those bindings come in through a shared group, not through implicit fallback. The bulk registration helper makes this low-cost. The payoff: you can read one scope module and know exactly what keys do in that context. No surprises from implicit composition.
 
 ### What this means in practice
 
@@ -791,8 +784,6 @@ The tradeoff: scopes can't automatically inherit bindings from a parent scope. I
 ## Mouse Support (first-class citizen)
 
 Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Go/Bubble Tea, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
-
-See [#217](https://github.com/jsmestad/minga/issues/217) for the full tracker.
 
 ### Architecture
 
@@ -851,11 +842,11 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 ### Semantic UI first for shared visible chrome
 Shared visible chrome (status bar, tab bar, file tree, picker, popups, agent surfaces, panels, and similar) is delivered as a **Semantic UI** model, not as pre-encoded protocol binaries or cell draws. The canonical path is: build a `Minga.RenderModel.UI.*` semantic struct in a builder under `lib/minga_editor/render_model/ui/`, then encode it with a `Minga.Frontend.Adapter.GUI` encoder under `lib/minga/frontend/adapter/gui/`. The guardrail in `test/minga/render_model/guardrails_test.exs` enforces this: a `Minga.RenderModel.UI.*` struct must not carry a protocol-binary payload field (`:encoded`, `:cmd`, `*_encoded`, `*_cmd`, etc.), and a builder under `lib/minga_editor/render_model/` must not reference `MingaEditor.Frontend.Protocol.GUI`. Both allowlists are empty; keep them empty.
 
-Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests. The legacy Zig cell-grid TUI that consumed cell draws was removed in #2223; the BEAM-side cell chrome/layout builders that produced `DisplayList` cell frames (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `sidebar_renderer.ex`) were deleted in #2235, and `picker_ui.ex`'s cell renderer was deleted in #2236 (the module's live picker orchestration API — `open/3`, `handle_key/3`, `close/1`, `refresh_items/1`, `update_picker/2` — is retained; the semantic `PickerBuilder` reads the modal state it produces). `DisplayList` itself is retained because the semantic window builder reads its styled runs.
+Do **not** add new shared chrome through `ProtocolGUI.encode_gui_*`, `DisplayList`, or another compatibility layer. The remaining `ProtocolGUI.encode_gui_*` functions exist only as byte-for-byte parity oracles for protocol tests. Picker orchestration remains in `picker_ui.ex`; semantic builders consume its state.
 
-Render and command code selects the semantic path with `Capabilities.semantic_ui?`, never `gui?`. Both live frontends (macOS GUI and Go TUI) advertise `semantic_ui` and take `Chrome.GUI` / `Layout.GUI` / the semantic builders, which are now the only render path. The legacy Zig cell-grid TUI and its `Chrome.TUI` / `Layout.TUI` cell builders were removed in #2223/#2235. `gui?` is reserved for native-window-only concerns that are not render/command dispatch (native-renderer config, GUI defaults, the native-window title, GUI-only key bindings, settings-panel config push). There are no `Commands.*.GUI` / `Commands.*.TUI` dispatch submodules; shared chrome commands live directly in their command module.
+Render and command code selects the semantic path with `Capabilities.semantic_ui?`, never `gui?`. Both live frontends (macOS GUI and Go TUI) advertise `semantic_ui` and take `Chrome.GUI` / `Layout.GUI` / the semantic builders, which are the only render path. `gui?` is reserved for native-window-only concerns that are not render/command dispatch (native-renderer config, GUI defaults, the native-window title, GUI-only key bindings, settings-panel config push). Shared chrome commands live directly in their command module, without frontend-specific dispatch submodules.
 
-When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. Cross-frontend coverage (macOS SwiftUI, Charm/Go TUI) is tracked in the Semantic UI inventory (#2113); forgetting to update a frontend is a common mistake.
+When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. Cross-frontend coverage must include both macOS SwiftUI and the Charm/Go TUI.
 
 ### Development recipes
 
