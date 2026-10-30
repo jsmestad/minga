@@ -12,10 +12,8 @@ package ui
 // This runner never hand-builds wire bytes; it base64-decodes the fixtures and
 // feeds them through protocol.DecodeCommand + Model.applyMutation.
 //
-// Transcripts marked go:false in index.json are the resident-only seams the Go
-// TUI does not implement under its windowed contract (the scroll_seq discard).
-// They are explicitly skipped-with-reason here, never silently omitted, so the
-// resident-port child flips them on by decoding the corpus that already exists.
+// Transcripts marked go:false in index.json declare a frontend capability this TUI does not implement, such as resident scroll reconciliation or AppKit focus.
+// They are explicitly skipped with their declared reason, never silently omitted.
 
 import (
 	"encoding/base64"
@@ -153,13 +151,23 @@ func TestConformanceTranscripts(t *testing.T) {
 		entry := entry
 		t.Run(entry.Name, func(t *testing.T) {
 			if !entry.Go {
-				// Enumerated-but-skipped is the deliverable; the resident-port
-				// child flips these on by satisfying the existing expectation.
-				t.Skipf("resident-only transcript, Go windowed contract: %s", entry.GoSkipReason)
+				t.Skipf("skipped for Go: %s", entry.GoSkipReason)
 			}
 			transcript := loadConformanceTranscript(t, entry.File)
 			runConformanceTranscript(t, transcript)
 		})
+	}
+}
+
+func TestConformanceGoSkipReasons(t *testing.T) {
+	for _, entry := range loadConformanceIndex(t).Transcripts {
+		if !entry.Go {
+			t.Run(entry.Name, func(t *testing.T) {
+				if entry.GoSkipReason == "" {
+					t.Fatal("Go-disabled transcript must declare go_skip_reason")
+				}
+			})
+		}
 	}
 }
 

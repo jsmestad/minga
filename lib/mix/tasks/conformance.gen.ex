@@ -4,24 +4,20 @@ defmodule Mix.Tasks.Conformance.Gen do
   @moduledoc """
   Generates the shared frontend conformance transcript corpus (#2667).
 
-  This task drives the real `Minga.Frontend.Adapter.GUI.WindowEncoder` and the
-  real `Minga.RenderModel.Window` frame model to produce framed binary payload
-  sequences plus expected-outcome JSON. The Swift (`macos/Tests/MingaTests`) and
-  Go (`go/tui/internal/ui`) test suites both execute this corpus so a divergence
-  between frontends fails a build instead of surfacing as a rendering bug.
+  This task drives the real GUI adapter encoders and render models to produce binary payload sequences plus expected-outcome JSON.
+  The Swift (`macos/Tests/MingaTests`) and Go (`go/tui/internal/ui`) test suites execute this corpus so a divergence between frontends fails a build instead of surfacing as a rendering or input bug.
+  Native-only transcripts are enumerated with an explicit Go skip reason.
 
-  Because every payload is produced by the real `WindowEncoder`, fixtures cannot
-  drift from the wire format (AC4). Expected outcomes are derived from the same
-  render-model structs the encoder encoded, and from the documented reconciliation
-  rule in `docs/GUI_PROTOCOL.md` (the offset-transform reconciliation key plus the
-  `scroll_seq` strictly-newer rule). No wire bytes are hand-typed.
+  Window payloads come from `WindowEncoder`, chat payloads from `AgentTranscriptEncoder`, and keyboard ownership from `FocusOwnerEncoder`.
+  Window expectations follow the render-model structs and the reconciliation rule in `docs/GUI_PROTOCOL.md`; focus expectations follow the committed owner and native lifecycle contract.
+  No wire bytes are hand-typed.
 
   ## Usage
 
       mix conformance.gen
 
-  Writes the corpus under `test/conformance/corpus/`. The format is documented in
-  `test/conformance/corpus/README.md`.
+  Writes the corpus under `test/conformance/corpus/`.
+  The format is documented in `test/conformance/corpus/README.md`.
   """
 
   use Mix.Task
@@ -31,9 +27,14 @@ defmodule Mix.Tasks.Conformance.Gen do
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.FocusOwnerEncoder
+  alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
+  alias Minga.RenderModel.UI.FocusOwner
+  alias Minga.RenderModel.UI.Theme
   alias Minga.RenderModel.Window, as: RW
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.PaneGeometry
@@ -49,6 +50,7 @@ defmodule Mix.Tasks.Conformance.Gen do
   @op_viewport_delta 0xA1
   @op_rows_delta 0xA2
   @op_gui_agent_transcript Opcodes.gui_agent_transcript()
+  @op_gui_focus_owner Opcodes.gui_focus_owner()
 
   @typep sp :: ScrollPresentation.t()
   @typep transcript :: %{optional(String.t()) => term()}
@@ -59,6 +61,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     File.mkdir_p!(Path.join(@corpus_dir, "store"))
     File.mkdir_p!(Path.join(@corpus_dir, "input"))
     File.mkdir_p!(Path.join(@corpus_dir, "chat"))
+    File.mkdir_p!(Path.join(@corpus_dir, "focus"))
 
     # The chat family uses the semantic transcript selector. It reads the
     # resident byte-cap option from Config, so start its ETS-backed server for
@@ -112,7 +115,17 @@ defmodule Mix.Tasks.Conformance.Gen do
       session_switch_full_replace(),
       trim_front_eviction_midstream(),
       epoch_flip_midstream(),
-      streaming_tail_patch()
+      streaming_tail_patch(),
+      picker_focus_survives_window_becoming_key(),
+      prompt_returns_to_editor_after_native_modal(),
+      inline_edit_survives_swiftui_rebuild(),
+      file_drop_returns_to_named_owner(),
+      pointer_return_respects_named_owner(),
+      agent_overlay_toggle_keeps_owner(),
+      owner_change_deferred_during_local_text_editing(),
+      owner_applied_when_responder_registers_late(),
+      keyframe_reasserts_owner(),
+      native_text_editing_returns_to_latest_owner()
     ]
   end
 
@@ -1084,6 +1097,336 @@ defmodule Mix.Tasks.Conformance.Gen do
   defp chat_transcript(name, description, steps) do
     transcript(name, "chat", %{swift: true, go: true}, description, steps)
   end
+
+  # ── Native keyboard ownership transcripts (#3512) ──────────────────────────
+
+  @spec picker_focus_survives_window_becoming_key() :: transcript()
+  defp picker_focus_survives_window_becoming_key do
+    focus_transcript(
+      "picker_focus_survives_window_becoming_key",
+      "Window activation reapplies the committed picker owner, not the editor view.",
+      [
+        focus_frame("picker owns keyboard input", :picker_query, :picker, "picker_query"),
+        native_event("window_did_become_key", "activate the editor window", %{}, "picker_query")
+      ]
+    )
+  end
+
+  @spec prompt_returns_to_editor_after_native_modal() :: transcript()
+  defp prompt_returns_to_editor_after_native_modal do
+    focus_transcript(
+      "prompt_returns_to_editor_after_native_modal",
+      "A native modal temporarily suspends focus application; closing it restores the committed prompt owner.",
+      [
+        focus_frame("prompt uses the editor responder", :editor_view, :prompt, "editor_view"),
+        native_event("native_modal_began", "open a native modal scope", %{}, "editor_view"),
+        focus_frame(
+          "defer picker ownership during the modal",
+          :picker_query,
+          :picker,
+          "editor_view"
+        ),
+        focus_frame(
+          "prompt becomes the latest pending owner",
+          :editor_view,
+          :prompt,
+          "editor_view"
+        ),
+        native_event("native_modal_ended", "close the native modal scope", %{}, "editor_view"),
+        native_event(
+          "native_modal_restored",
+          "retry native modal restoration",
+          %{},
+          "editor_view"
+        )
+      ]
+    )
+  end
+
+  @spec inline_edit_survives_swiftui_rebuild() :: transcript()
+  defp inline_edit_survives_swiftui_rebuild do
+    focus_transcript(
+      "inline_edit_survives_swiftui_rebuild",
+      "A SwiftUI hierarchy update cannot replace the committed inline-edit responder with the editor view.",
+      [
+        focus_frame("inline edit owns keyboard input", :inline_edit, :inline_edit, "inline_edit"),
+        native_event(
+          "swiftui_hierarchy_rebuilt",
+          "retry after SwiftUI updates",
+          %{},
+          "inline_edit"
+        )
+      ]
+    )
+  end
+
+  @spec file_drop_returns_to_named_owner() :: transcript()
+  defp file_drop_returns_to_named_owner do
+    focus_transcript(
+      "file_drop_returns_to_named_owner",
+      "File-drop completion restores the named picker responder instead of inferring editor focus.",
+      [
+        focus_frame("picker owns keyboard input", :picker_query, :picker, "picker_query"),
+        native_event("file_drop_completed", "finish the native file drop", %{}, "picker_query")
+      ]
+    )
+  end
+
+  @spec pointer_return_respects_named_owner() :: transcript()
+  defp pointer_return_respects_named_owner do
+    focus_transcript(
+      "pointer_return_respects_named_owner",
+      "Returning the pointer to the editor leaves the committed search field in control of keyboard input.",
+      [
+        focus_frame("search owns keyboard input", :search_query, :search, "search_query"),
+        native_event("pointer_returned", "return the pointer to the editor", %{}, "search_query")
+      ]
+    )
+  end
+
+  @spec agent_overlay_toggle_keeps_owner() :: transcript()
+  defp agent_overlay_toggle_keeps_owner do
+    focus_transcript(
+      "agent_overlay_toggle_keeps_owner",
+      "Agent overlay key routing can change without inventing a different keyboard owner.",
+      [
+        focus_frame("agent uses the editor responder", :editor_view, :agent, "editor_view"),
+        native_event(
+          "agent_overlay_visibility_changed",
+          "show the agent overlay",
+          %{"visible" => true},
+          "editor_view"
+        ),
+        native_event(
+          "agent_overlay_visibility_changed",
+          "hide the agent overlay",
+          %{"visible" => false},
+          "editor_view"
+        )
+      ]
+    )
+  end
+
+  @spec owner_change_deferred_during_local_text_editing() :: transcript()
+  defp owner_change_deferred_during_local_text_editing do
+    rename = %{"kind" => "workspace_rename"}
+    icon_search = %{"kind" => "workspace_icon_search"}
+
+    focus_transcript(
+      "owner_change_deferred_during_local_text_editing",
+      "Both frontend-local text leases retain native focus while frames arrive, then apply the latest committed owner when editing ends.",
+      [
+        focus_frame("editor initially owns keyboard input", :editor_view, :editor, "editor_view"),
+        native_event(
+          "local_text_editing_began",
+          "begin workspace rename",
+          rename,
+          "local_text_field"
+        ),
+        focus_frame(
+          "defer picker ownership during rename",
+          :picker_query,
+          :picker,
+          "local_text_field"
+        ),
+        native_event(
+          "local_text_editing_ended",
+          "finish workspace rename",
+          rename,
+          "picker_query"
+        ),
+        native_event(
+          "local_text_editing_began",
+          "begin workspace icon search",
+          icon_search,
+          "local_text_field"
+        ),
+        focus_frame(
+          "defer search ownership during icon search",
+          :search_query,
+          :search,
+          "local_text_field"
+        ),
+        native_event(
+          "local_text_editing_ended",
+          "finish workspace icon search",
+          icon_search,
+          "search_query"
+        )
+      ]
+    )
+  end
+
+  @spec owner_applied_when_responder_registers_late() :: transcript()
+  defp owner_applied_when_responder_registers_late do
+    focus_transcript(
+      "owner_applied_when_responder_registers_late",
+      "An unavailable responder retains pending ownership until registration; later removal of an inactive field cannot steal focus.",
+      [
+        focus_frame(
+          "editor owns input before inline registration",
+          :editor_view,
+          :editor,
+          "editor_view"
+        ),
+        focus_frame(
+          "inline edit has not registered yet",
+          :inline_edit,
+          :inline_edit,
+          "editor_view"
+        ),
+        native_event(
+          "responder_registered",
+          "register the pending inline editor",
+          %{"kind" => "inline_edit"},
+          "inline_edit"
+        ),
+        focus_frame(
+          "native field editing defers return to editor",
+          :editor_view,
+          :editor,
+          "inline_edit"
+        ),
+        native_event(
+          "native_text_editing_ended",
+          "finish editing the inline field",
+          %{},
+          "editor_view"
+        ),
+        native_event(
+          "responder_unregistered",
+          "remove the inactive inline editor",
+          %{"kind" => "inline_edit"},
+          "editor_view"
+        ),
+        native_event(
+          "responder_registered",
+          "register the replacement inline editor",
+          %{"kind" => "inline_edit"},
+          "editor_view"
+        )
+      ]
+    )
+    |> Map.put("setup", %{"unregistered_responders" => ["inline_edit"]})
+  end
+
+  @spec keyframe_reasserts_owner() :: transcript()
+  defp keyframe_reasserts_owner do
+    focus_transcript(
+      "keyframe_reasserts_owner",
+      "A fresh encoder cache re-emits an unchanged owner on a keyframe; first-frame and pointer lifecycle events preserve it.",
+      [
+        focus_frame("picker owner in initial keyframe", :picker_query, :picker, "picker_query"),
+        native_event(
+          "first_frame_rendered",
+          "record the first rendered frame",
+          %{},
+          "picker_query"
+        ),
+        native_event("pointer_returned", "return the pointer to the editor", %{}, "picker_query"),
+        focus_frame(
+          "same picker owner reasserted by keyframe",
+          :picker_query,
+          :picker,
+          "picker_query"
+        )
+      ]
+    )
+  end
+
+  @spec native_text_editing_returns_to_latest_owner() :: transcript()
+  defp native_text_editing_returns_to_latest_owner do
+    focus_transcript(
+      "native_text_editing_returns_to_latest_owner",
+      "Native field editing defers an incoming editor owner until AppKit ends editing and the policy retries.",
+      [
+        focus_frame("picker field starts native editing", :picker_query, :picker, "picker_query"),
+        focus_frame(
+          "editor owner is pending during native editing",
+          :editor_view,
+          :editor,
+          "picker_query"
+        ),
+        native_event(
+          "native_text_editing_ended",
+          "finish native picker editing",
+          %{},
+          "editor_view"
+        )
+      ]
+    )
+  end
+
+  @spec focus_frame(String.t(), FocusOwner.responder(), FocusOwner.surface(), String.t()) :: map()
+  defp focus_frame(note, responder, surface, first_responder) do
+    owner = %FocusOwner{responder: responder, surface: surface, window_id: 1, generation: 1}
+    # Each focus frame is a keyframe snapshot, including unchanged ownership.
+    {payload, _caches} = FocusOwnerEncoder.encode(owner, Caches.new())
+    frame(@op_gui_focus_owner, note, payload, %{"first_responder" => first_responder})
+  end
+
+  @spec native_event(String.t(), String.t(), map(), String.t()) :: map()
+  defp native_event(event, note, args, first_responder) do
+    %{
+      "kind" => "native_event",
+      "event" => event,
+      "note" => note,
+      "args" => args,
+      "expect" => %{"first_responder" => first_responder}
+    }
+  end
+
+  @spec focus_transcript(String.t(), String.t(), [map()]) :: transcript()
+  defp focus_transcript(name, description, steps) do
+    transcript(
+      name,
+      "focus",
+      %{
+        swift: true,
+        go: false,
+        go_skip_reason: "no native responder chain; keyboard owner is BEAM-routed"
+      },
+      description,
+      steps |> Enum.with_index(1) |> Enum.map(&focus_transaction/1)
+    )
+  end
+
+  @spec focus_transaction({map(), pos_integer()}) :: map()
+  defp focus_transaction({%{"kind" => "frame", "payload_base64" => encoded} = step, sequence}) do
+    # Focus does not depend on theme colors; supply every required slot through the real encoder.
+    slots = Enum.concat([1..0x17, 0x20..0x2A, 0x30..0x3A, [0x40], 0x50..0x62, 0xA0..0xAE])
+    model = %Theme{name: :focus_conformance, color_slots: Enum.map(slots, &{&1, 0})}
+    {theme, _caches} = ThemeEncoder.encode(model, Caches.new())
+
+    begin_frame =
+      :begin_frame
+      |> Writer.new()
+      |> Writer.uint8(:opcode, Opcodes.begin_frame())
+      |> Writer.uint32(:frame_seq, sequence)
+      |> Writer.uint32(:base_frame_seq, 0)
+      |> Writer.uint32(:generation, 1)
+      |> Writer.finish()
+
+    commit_frame =
+      :commit_frame
+      |> Writer.new()
+      |> Writer.uint8(:opcode, Opcodes.commit_frame())
+      |> Writer.uint32(:frame_seq, sequence)
+      |> Writer.uint32(:input_seq, 0)
+      |> Writer.finish()
+
+    payload =
+      IO.iodata_to_binary([
+        begin_frame,
+        theme,
+        Base.decode64!(encoded),
+        commit_frame
+      ])
+
+    %{step | "payload_base64" => Base.encode64(payload)}
+  end
+
+  defp focus_transaction({step, _sequence}), do: step
 
   # ── Reconciliation rule (mirrors docs/GUI_PROTOCOL.md) ────────────────────
 
