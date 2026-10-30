@@ -18,15 +18,32 @@ LOADER.exec_module(evidence)
 
 
 def native_result():
+    identifier = "ConformanceTranscriptTests/runsTranscript(_:)"
+    url = "test://com.apple.xcode/Minga/MingaTests/" + identifier
+    messages = [
+        "ConformanceTranscriptTests.swift:352: Expectation failed: matches: " + evidence.TARGET + " step 2: transaction_result",
+        "ConformanceTranscriptTests.swift:361: Expectation failed: (dispatcher.lastCommittedGeneration → 3) == "
+        '(UInt32(last["generation"] as? Int ?? 0) → 2): ' + evidence.GENERATION_ASSERTION,
+        "ConformanceTranscriptTests.swift:171: Expectation failed: (outboundActions.last → .frameApplied(generation: 3, frameSequence: 21)) == "
+        "(Self.expectedAction(step) → .frameApplied(generation: 2, frameSequence: 21)): " + evidence.TARGET + " step 3: frame_status",
+    ]
     return {
         "exit_code": 65, "bundle_exists": True,
-        "summary": {"passedTests": 1, "failedTests": 1, "testFailures": [
-            {"failureText": "Expectation failed: (dispatcher.lastCommittedGeneration → 3) == (expected → 2)\n"
-                            + evidence.GENERATION_ASSERTION},
-            {"failureText": evidence.TARGET + " step 2: transaction_result"},
-            {"failureText": evidence.TARGET + " step 3: frame_status"},
+        # xcresult's summary retains only the first issue for this failed argument.
+        "summary": {"passedTests": 1, "failedTests": 1, "testFailures": [{
+            "failureText": "Expectation failed: matches: " + evidence.TARGET + " step 2: transaction_result",
+            "testIdentifierString": identifier, "testIdentifierURL": url,
+        }]},
+        "tests": {"testNodes": [
+            {"nodeType": "Test Case", "name": "corpus enumerates transcripts", "result": "Passed",
+             "nodeIdentifier": "ConformanceTranscriptTests/corpusIsPopulated()"},
+            {"nodeType": "Test Case", "name": "runsTranscript(_:)", "result": "Failed",
+             "nodeIdentifier": identifier, "nodeIdentifierURL": url, "children": [
+                 {"nodeType": "Arguments", "name": evidence.TARGET, "result": "Failed", "children": [
+                     {"nodeType": "Failure Message", "name": message} for message in messages
+                 ]},
+             ]},
         ]},
-        "tests": {"testNodes": [{"nodeType": "Test Case", "name": evidence.TARGET, "result": "Failed"}]},
     }
 
 
@@ -41,31 +58,44 @@ class RecoveryEvidenceTest(unittest.TestCase):
                 self.assertFalse(evidence.native_generation_failure(result))
 
     def test_native_kill_rejects_unrelated_failures_zero_tests_and_wrong_assertions(self):
-        for change in ("unrelated", "zero", "wrong-test", "wrong-assertion", "marker-without-expression"):
+        for change in ("unrelated-summary", "unrelated-tree", "zero", "wrong-test", "wrong-summary-owner",
+                       "wrong-assertion", "marker-without-expression", "wrong-tree-owner", "missing-tree-issues"):
             with self.subTest(change=change):
                 result = native_result()
-                if change == "unrelated":
+                argument = result["tests"]["testNodes"][1]["children"][0]
+                if change == "unrelated-summary":
                     result["summary"]["testFailures"].append({"failureText": "native lifecycle focus failed"})
+                elif change == "unrelated-tree":
+                    argument["children"].append({"nodeType": "Failure Message", "name": "Expectation failed: pane_rects"})
                 elif change == "zero":
                     result["summary"].update(passedTests=0, failedTests=0)
                 elif change == "wrong-test":
-                    result["tests"]["testNodes"][0]["name"] = "a different case"
+                    argument["name"] = "a different case"
+                elif change == "wrong-summary-owner":
+                    result["summary"]["testFailures"][0]["testIdentifierString"] = "OtherTests/runsTranscript(_:)"
                 elif change == "wrong-assertion":
-                    result["summary"]["testFailures"][0]["failureText"] = evidence.TARGET + " step 2: pane_rects"
+                    argument["children"][1]["name"] = "Expectation failed: " + evidence.TARGET + " step 2: pane_rects"
+                elif change == "marker-without-expression":
+                    argument["children"][1]["name"] = "Expectation failed: " + evidence.GENERATION_ASSERTION
+                elif change == "wrong-tree-owner":
+                    result["tests"]["testNodes"][0]["children"] = [argument["children"].pop(1)]
                 else:
-                    result["summary"]["testFailures"][0]["failureText"] = evidence.GENERATION_ASSERTION
+                    argument["children"] = []
                 self.assertFalse(evidence.native_generation_failure(result))
 
     def test_control_requires_the_named_passing_case_and_no_failures(self):
         result = native_result()
         result["exit_code"] = 0
         result["summary"] = {"passedTests": 2, "failedTests": 0}
-        result["tests"]["testNodes"][0]["result"] = "Passed"
+        argument = result["tests"]["testNodes"][1]["children"][0]
+        argument["result"] = "Passed"
+        result["tests"]["testNodes"][1]["result"] = "Passed"
+        argument["children"] = []
         self.assertTrue(evidence.native_control_passes(result))
         result["summary"]["passedTests"] = 0
         self.assertFalse(evidence.native_control_passes(result))
         result["summary"]["passedTests"] = 2
-        result["tests"]["testNodes"][0]["name"] = "unrelated passing test"
+        argument["name"] = "unrelated passing test"
         self.assertFalse(evidence.native_control_passes(result))
         self.assertTrue(evidence.native_control_passes(result, named_case=None))
         result["tests"] = None
