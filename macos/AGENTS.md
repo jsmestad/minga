@@ -44,14 +44,14 @@ ProtocolEncoder ──stdout ({:packet,4})──►  Port.Manager
 1. **ProtocolReader** reads length-prefixed binary messages from stdin on a background thread
 2. **ProtocolDecoder** parses bytes into `RenderCommand` enum cases (one enum per opcode)
 3. **CommandDispatcher** routes each command: metadata goes to `FrameState`, chrome data goes to `GUIState` sub-states, content goes to `GUIWindowContent`
-4. On `batch_end`, the Metal renderer draws using `FrameState` + window content textures, and SwiftUI views reactively update from their `@Observable` state objects
+4. **CommandDispatcher** stages commands between `begin_frame` and `commit_frame`, then publishes the committed model atomically. The Metal renderer draws committed window content, and SwiftUI views reactively update from committed `@Observable` state.
 
 ### Data flow: user → BEAM
 
 1. **EditorNSView** captures keyboard, mouse, and IME events
 2. **SwiftUI views** capture GUI actions (tab clicks, file tree clicks, picker selection, etc.)
 3. **ProtocolEncoder** encodes events as binary and writes to stdout
-4. The BEAM's **Port.Manager** decodes and dispatches
+4. The BEAM's **MingaEditor.Frontend.Manager** decodes and dispatches
 
 ## Rendering Pipeline
 
@@ -106,7 +106,6 @@ macos/
 
     Views/
       GUIState.swift                       # Container for all @Observable chrome sub-states
-      MingaWindow.swift                    # NSWindow subclass
       EditorView.swift                     # NSViewRepresentable wrapper for SwiftUI
       EditorNSView.swift                   # NSView: Metal layer, keyboard, mouse, IME input
       ThemeColors.swift                    # Theme color slots from guiTheme opcode
@@ -179,7 +178,7 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 
 ### New GUI chrome element (e.g., a new panel or overlay)
 
-1. **Elixir side**: add the opcode encoder in `lib/minga_editor/frontend/protocol/gui.ex`, add the emit call in `lib/minga_editor/frontend/emit/gui.ex`, then add the opcode to `docs/protocol_schema.toml` and regenerate with `mix protocol.gen`
+1. **Elixir side**: build the semantic model under `lib/minga_editor/render_model/ui/`, encode it under `lib/minga/frontend/adapter/gui/`, then add the opcode to `docs/protocol_schema.toml` and regenerate with `mix protocol.gen`. Follow the root guide's Semantic UI rule, not the legacy protocol parity encoders.
 2. **Generated Swift opcodes**: use the generated opcode constant from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`
 3. **ProtocolDecoder.swift**: add the `RenderCommand` enum case and decoder
 4. **FooState.swift**: create the `@Observable` state class with an `update(...)` and `hide()` method
@@ -224,7 +223,7 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 - **Swift 6.0+** with strict concurrency
 - **Metal 3.1+** (MSL 3.1), macOS 15.0+ deployment target
 - **Xcode 16+** for building
-- Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen <dir>`, then build via `xcodegen generate && xcodebuild -project Minga.xcodeproj -scheme Minga build`.
+- Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen` (pass the installation directory as its argument), then build via `xcodegen generate && xcodebuild -project Minga.xcodeproj -scheme Minga build`.
 
 ## Coding Standards
 

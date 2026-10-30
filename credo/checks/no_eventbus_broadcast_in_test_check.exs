@@ -6,7 +6,7 @@ defmodule Minga.Credo.NoEventBusBroadcastInTestCheck do
   """
 
   use Credo.Check,
-    id: "EX9009",
+    id: "EX9013",
     base_priority: :normal,
     category: :warning,
     explanations: [

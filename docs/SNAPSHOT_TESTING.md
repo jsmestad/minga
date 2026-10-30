@@ -6,16 +6,16 @@ Minga uses plain-text screen snapshots to catch UI regressions. Each snapshot ca
 
 ```bash
 # Run snapshot tests
-mix test test/minga/integration/
+mix test.llm test/minga_editor/integration/
 
 # Update ALL baselines after an intentional UI change
-UPDATE_SNAPSHOTS=1 mix test test/minga/integration/
+UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/
 
 # Update baselines for a single test file
-UPDATE_SNAPSHOTS=1 mix test test/minga/integration/command_mode_test.exs
+UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/snapshot_test.exs
 
 # Update a single test's baseline
-UPDATE_SNAPSHOTS=1 mix test test/minga/integration/command_mode_test.exs:42
+UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/snapshot_test.exs:21
 ```
 
 ## When to update snapshots
@@ -33,7 +33,7 @@ UPDATE_SNAPSHOTS=1 mix test test/minga/integration/command_mode_test.exs:42
 ## Workflow for UI changes
 
 1. Make your UI change in the editor code.
-2. Run `mix test test/minga/integration/`. Some snapshot tests will fail.
+2. Run `mix test.llm test/minga_editor/integration/`. Some snapshot tests will fail.
 3. Read each diff carefully. The failure message shows exactly what changed:
    ```
    Diff (- expected, + actual):
@@ -45,9 +45,9 @@ UPDATE_SNAPSHOTS=1 mix test test/minga/integration/command_mode_test.exs:42
    ```
 4. If every diff looks correct (matches your intentional change), update the baselines:
    ```bash
-   UPDATE_SNAPSHOTS=1 mix test test/minga/integration/
+   UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/
    ```
-5. Verify the updated baselines pass: `mix test test/minga/integration/`
+5. Verify the updated baselines pass: `mix test.llm test/minga_editor/integration/`
 6. `git diff test/snapshots/` to review what changed. The diffs should be reviewable in a PR.
 7. Commit the updated `.snap` files alongside the code change.
 
@@ -56,7 +56,7 @@ UPDATE_SNAPSHOTS=1 mix test test/minga/integration/command_mode_test.exs:42
 Snapshots live in `test/snapshots/` with paths derived from the test module and snapshot name:
 
 ```
-test/snapshots/minga/integration/command_mode_test/command_entry.snap
+test/snapshots/minga_editor/integration/snapshot_test/command_mode_typed_set.snap
 ```
 
 Each file is plain text:
