@@ -244,6 +244,7 @@ category = "render"
 name = "begin_frame"
 value = 0x10
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:13"
 
 # commit_frame (#2219 child A) closes a frame transaction; a frontend promotes its
@@ -260,6 +261,7 @@ category = "render"
 name = "commit_frame"
 value = 0x11
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:9"
 
 # batch_end (value 0x13) was retired in protocol_version 3 (#2219 child B). Its
@@ -273,6 +275,7 @@ category = "render"
 name = "set_cursor_shape"
 value = 0x15
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:2"
 
 [[opcodes]]
@@ -280,6 +283,7 @@ category = "render"
 name = "set_title"
 value = 0x16
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -287,6 +291,7 @@ category = "render"
 name = "set_window_bg"
 value = 0x17
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:4"
 
 # set_link_cursor (#2630) reuses the freed cell-paradigm value 0x19 (destroy_region,
@@ -300,6 +305,8 @@ category = "render"
 name = "set_link_cursor"
 value = 0x19
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal does not expose native pointer cursor shapes" }
 framing = "fixed:2"
 
 # Correlated native application-quit response. The len16 payload is request_id(u32) + outcome(u8) + dirty_count(u16) + buffer_name(string16) + detail(string16). Each string is at most 32,000 UTF-8 bytes so the complete payload fits u16. It is an out-of-band lifecycle command and is never part of a render transaction.
@@ -308,6 +315,8 @@ category = "render"
 name = "application_quit_response"
 value = 0x1A
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Native application quit negotiation is not used by the TUI" }
 framing = "len16"
 
 # Frame-scoped identity of the BEAM semantic target represented by the editor
@@ -318,6 +327,8 @@ category = "render"
 name = "presentation_target"
 value = 0x1B
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Native presentation targeting is not used by the TUI" }
 framing = "fixed:16"
 
 # Out-of-band registration of one admitted local operation. It may complete as
@@ -329,6 +340,8 @@ category = "render"
 name = "presentation_operation"
 value = 0x1C
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Native presentation operations are not used by the TUI" }
 framing = "fixed:24"
 
 # protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
@@ -340,6 +353,7 @@ category = "render"
 name = "protocol_error"
 value = 0x18
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 # Frontend configuration commands.
@@ -348,6 +362,8 @@ category = "config"
 name = "set_font"
 value = 0x50
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal controls font selection" }
 framing = "custom"
 
 [[opcodes]]
@@ -355,6 +371,8 @@ category = "config"
 name = "set_font_fallback"
 value = 0x51
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal controls font fallback" }
 framing = "custom"
 
 [[opcodes]]
@@ -362,6 +380,8 @@ category = "config"
 name = "register_font"
 value = 0x52
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal controls font registration" }
 framing = "custom"
 
 # Parser commands.
@@ -564,6 +584,7 @@ category = "gui_chrome"
 name = "gui_tab_bar"
 value = 0x71
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -571,6 +592,7 @@ category = "gui_chrome"
 name = "gui_which_key"
 value = 0x72
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -578,6 +600,7 @@ category = "gui_chrome"
 name = "gui_completion"
 value = 0x73
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -585,6 +608,7 @@ category = "gui_chrome"
 name = "gui_theme"
 value = 0x74
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -592,6 +616,7 @@ category = "gui_chrome"
 name = "gui_breadcrumb"
 value = 0x75
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -599,6 +624,7 @@ category = "gui_chrome"
 name = "gui_status_bar"
 value = 0x76
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "sectioned"
 
 [[opcodes]]
@@ -606,6 +632,7 @@ category = "gui_chrome"
 name = "gui_picker"
 value = 0x77
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -613,6 +640,7 @@ category = "gui_chrome"
 name = "gui_agent_chat"
 value = 0x78
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -620,6 +648,7 @@ category = "gui_chrome"
 name = "gui_gutter_sep"
 value = 0x79
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:6"
 
 [[opcodes]]
@@ -627,6 +656,7 @@ category = "gui_chrome"
 name = "gui_cursorline"
 value = 0x7A
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:6"
 
 [[opcodes]]
@@ -634,6 +664,7 @@ category = "gui_chrome"
 name = "gui_gutter"
 value = 0x7B
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "sectioned"
 
 # Custom payload includes the Messages stream header stream_instance:u32 before entry_count when visible.
@@ -642,6 +673,7 @@ category = "gui_chrome"
 name = "gui_bottom_panel"
 value = 0x7C
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -649,6 +681,7 @@ category = "gui_chrome"
 name = "gui_picker_preview"
 value = 0x7D
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -656,6 +689,7 @@ category = "gui_chrome"
 name = "gui_minibuffer"
 value = 0x7F
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -663,6 +697,7 @@ category = "gui_chrome"
 name = "clipboard_write"
 value = 0x90
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 [[opcodes]]
@@ -670,6 +705,7 @@ category = "gui_chrome"
 name = "gui_indent_guides"
 value = 0x91
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -677,6 +713,8 @@ category = "gui_chrome"
 name = "gui_line_spacing"
 value = 0x92
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal controls line spacing" }
 framing = "len16"
 
 [[opcodes]]
@@ -684,6 +722,7 @@ category = "gui_chrome"
 name = "gui_file_tree"
 value = 0x93
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 [[opcodes]]
@@ -691,6 +730,7 @@ category = "gui_chrome"
 name = "gui_file_tree_selection"
 value = 0x94
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -698,6 +738,8 @@ category = "gui_chrome"
 name = "gui_cursor_animation"
 value = 0x95
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal controls cursor animation" }
 framing = "len16"
 
 # Native GUI semantic rendering and overlays.
@@ -706,6 +748,7 @@ category = "gui_semantic"
 name = "gui_window_content"
 value = 0x80
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 [[opcodes]]
@@ -713,6 +756,7 @@ category = "gui_semantic"
 name = "gui_hover_popup"
 value = 0x81
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -720,6 +764,7 @@ category = "gui_semantic"
 name = "gui_signature_help"
 value = 0x82
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -727,6 +772,7 @@ category = "gui_semantic"
 name = "gui_float_popup"
 value = 0x83
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -734,6 +780,7 @@ category = "gui_semantic"
 name = "gui_split_separators"
 value = 0x84
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -741,6 +788,7 @@ category = "gui_semantic"
 name = "gui_git_status"
 value = 0x85
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 # gui_agent_transcript (#2654) carries the resident agent-chat transcript (the
@@ -767,6 +815,7 @@ category = "gui_semantic"
 name = "gui_agent_transcript"
 value = 0x86
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 # Out-of-band native file-dialog request. Payload:
@@ -778,6 +827,8 @@ category = "gui_semantic"
 name = "gui_request"
 value = 0x87
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Native file dialogs are not used by the TUI" }
 framing = "len16"
 
 [[opcodes]]
@@ -785,6 +836,7 @@ category = "gui_semantic"
 name = "gui_agent_context"
 value = 0x88
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -792,6 +844,7 @@ category = "gui_semantic"
 name = "gui_hover_action"
 value = 0x96
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -799,6 +852,8 @@ category = "gui_semantic"
 name = "gui_config_state"
 value = 0x97
 direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Native settings state is not used by the TUI" }
 framing = "len16"
 
 [[opcodes]]
@@ -806,6 +861,7 @@ category = "gui_semantic"
 name = "gui_workspaces"
 value = 0x98
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -813,6 +869,7 @@ category = "gui_semantic"
 name = "gui_notifications"
 value = 0x99
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -820,6 +877,7 @@ category = "gui_semantic"
 name = "gui_observatory"
 value = 0x9A
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 [[opcodes]]
@@ -827,6 +885,7 @@ category = "gui_semantic"
 name = "gui_edit_timeline"
 value = 0x9B
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -834,6 +893,7 @@ category = "gui_semantic"
 name = "gui_extension_overlay"
 value = 0x9C
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -841,6 +901,7 @@ category = "gui_semantic"
 name = "gui_extension_panel"
 value = 0x9D
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -848,6 +909,7 @@ category = "gui_semantic"
 name = "gui_search_state"
 value = 0x9E
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -855,6 +917,7 @@ category = "gui_semantic"
 name = "gui_sidebars"
 value = 0x9F
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 [[opcodes]]
@@ -862,6 +925,7 @@ category = "gui_semantic"
 name = "gui_window_overlay_delta"
 value = 0xA0
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "custom"
 
 [[opcodes]]
@@ -869,6 +933,7 @@ category = "gui_semantic"
 name = "gui_window_viewport_delta"
 value = 0xA1
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "sectioned32"
 
 [[opcodes]]
@@ -876,6 +941,7 @@ category = "gui_semantic"
 name = "gui_window_rows_delta"
 value = 0xA2
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "sectioned32"
 
 [[opcodes]]
@@ -883,6 +949,7 @@ category = "gui_semantic"
 name = "gui_extension_runtime"
 value = 0xA3
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 # gui_surface_layout (#2219 child A) carries authoritative per-frame surface
@@ -904,6 +971,8 @@ category = "gui_semantic"
 name = "gui_surface_layout"
 value = 0xA4
 direction = "beam_to_frontend"
+consumers = ["go"]
+skip = { swift = "Native AppKit/SwiftUI surfaces own placement; terminal-cell surface layout is not consumed." }
 framing = "sectioned"
 
 # gui_empty_state (#2689) carries the zero-buffers launchpad: data-driven
@@ -916,6 +985,7 @@ category = "gui_semantic"
 name = "gui_empty_state"
 value = 0xA5
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -923,6 +993,7 @@ category = "gui_semantic"
 name = "gui_completion_selection"
 value = 0xA6
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 [[opcodes]]
@@ -930,6 +1001,7 @@ category = "gui_semantic"
 name = "gui_picker_selection"
 value = 0xA7
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len16"
 
 # Per-window immutable input snapshot, published inside its frame transaction.
@@ -938,6 +1010,7 @@ category = "gui_semantic"
 name = "gui_text_presentation"
 value = 0xA8
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "fixed:11"
 
 # Atomic resident semantics paired with the retained text candidate in the same
@@ -951,6 +1024,7 @@ category = "gui_semantic"
 name = "gui_resident_semantics"
 value = 0xA9
 direction = "beam_to_frontend"
+consumers = ["swift", "go"]
 framing = "len32"
 
 # Sub-opcodes inside gui_action (0x07).

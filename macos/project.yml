@@ -196,6 +196,9 @@ targets:
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
+      - path: .generated/protocol/ProtocolConsumers.generated.swift
+        name: ProtocolConsumers.generated.swift
+        type: file
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
         type: file
@@ -244,6 +247,7 @@ targets:
         basedOnDependencyAnalysis: false
         outputFiles:
           - $(SRCROOT)/.generated/protocol/ProtocolOpcodes.generated.swift
+          - $(SRCROOT)/.generated/protocol/ProtocolConsumers.generated.swift
           - $(SRCROOT)/.generated/protocol/ProtocolCommandSize.generated.swift
           - $(SRCROOT)/.generated/protocol/ProtocolSemanticDecode.generated.swift
     postCompileScripts:
@@ -337,6 +341,9 @@ targets:
           - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
+        type: file
+      - path: .generated/protocol/ProtocolConsumers.generated.swift
+        name: ProtocolConsumers.generated.swift
         type: file
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
@@ -443,6 +450,9 @@ targets:
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
+      - path: .generated/protocol/ProtocolConsumers.generated.swift
+        name: ProtocolConsumers.generated.swift
+        type: file
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
         type: file
@@ -526,6 +536,9 @@ targets:
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
+      - path: .generated/protocol/ProtocolConsumers.generated.swift
+        name: ProtocolConsumers.generated.swift
+        type: file
       - path: .generated/protocol/ProtocolCommandSize.generated.swift
         name: ProtocolCommandSize.generated.swift
         type: file
@@ -559,6 +572,7 @@ targets:
         basedOnDependencyAnalysis: false
         outputFiles:
           - $(SRCROOT)/.generated/protocol/ProtocolOpcodes.generated.swift
+          - $(SRCROOT)/.generated/protocol/ProtocolConsumers.generated.swift
           - $(SRCROOT)/.generated/protocol/ProtocolCommandSize.generated.swift
           - $(SRCROOT)/.generated/protocol/ProtocolSemanticDecode.generated.swift
 

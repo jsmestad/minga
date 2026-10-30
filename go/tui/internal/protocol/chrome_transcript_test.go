@@ -359,7 +359,10 @@ func TestDecodeAgentTranscriptRoutesThroughChrome(t *testing.T) {
 	frame := replaceFrameBytes(4, false, []transcriptEntry{
 		{id: 9, body: userBody("hello")},
 	})
-	chrome := decodeChrome(frame)
+	chrome, handled := decodeChrome(frame)
+	if !handled {
+		t.Fatal("agent transcript was not handled by chrome dispatch")
+	}
 	if chrome.Opcode != generated.OPGuiAgentTranscript {
 		t.Fatalf("opcode = %#x", chrome.Opcode)
 	}

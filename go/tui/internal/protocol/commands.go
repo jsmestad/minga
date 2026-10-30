@@ -118,12 +118,9 @@ type ChromePayload struct {
 	CursorlineChrome    CursorlineChrome
 	WindowGutter        Gutter
 	IndentGuides        IndentGuides
-	LineSpacing         LineSpacing
 	FileTreeSelection   FileTreeSelection
 	CompletionSelection CompletionSelection
 	PickerSelection     PickerSelection
-	CursorAnimation     CursorAnimation
-	ConfigState         ConfigState
 	Splits              SplitSeparators
 	EmptyState          EmptyState
 	// Placements carries the authoritative per-frame surface layout from
@@ -250,8 +247,6 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return skipString16(payload, 2, "register_font")
 	case generated.OPSetFontFallback:
 		return skipFontFallback(payload)
-	case generated.OPMeasureText:
-		return skipString16(payload, 5, "measure_text")
 	case generated.OPProtocolError:
 		return decodeProtocolError(payload)
 	case generated.OPClipboardWrite:
@@ -672,14 +667,18 @@ func decodeExtensionRuntime(payload []byte) (Command, error) {
 func decodeSkipOrChrome(payload []byte) (Command, error) {
 	opcode := payload[0]
 	if opcode >= 0x70 {
-		chrome := decodeChrome(payload)
-		return Command{Kind: CommandChrome, Size: chrome.Bytes, Chrome: chrome}, nil
+		if chrome, handled := decodeChrome(payload); handled {
+			return Command{Kind: CommandChrome, Size: chrome.Bytes, Chrome: chrome}, nil
+		}
 	}
 
-	// Unhandled low opcode: size it through the schema authority rather than
-	// swallowing the rest of the batch.
+	// Sizing is not consumption. Only the schema's declared skips may become
+	// no-ops; a sized required opcode still needs a concrete decoder.
 	if size, status := generated.CommandSize(payload); status == generated.CommandSizeOK {
-		return Command{Kind: CommandNoop, Size: size}, nil
+		return skippedCommand(opcode, size)
 	}
-	return Command{}, fmt.Errorf("cannot size opcode 0x%02X", opcode)
+	if _, skipped := generated.GoSkippedOpcodes[opcode]; skipped {
+		return Command{}, fmt.Errorf("cannot size skipped opcode 0x%02X", opcode)
+	}
+	return Command{}, unhandledOpcodeError(opcode)
 }

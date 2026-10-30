@@ -15,6 +15,46 @@ defmodule Minga.Mix.ProtocolGeneratorTest do
     %{schema: schema}
   end
 
+  test "consumer declarations classify each frontend exactly once" do
+    for declaration <- [
+          %{"consumers" => ["swift", "go"]},
+          %{"consumers" => ["swift"], "skip" => %{"go" => "Terminal owns font selection"}},
+          %{"skip" => %{"swift" => "Native layout", "go" => "Terminal layout"}}
+        ] do
+      assert :ok = ProtocolGenerator.validate_consumers!(consumer_schema(declaration))
+    end
+  end
+
+  test "incomplete, ambiguous, or invalid consumer declarations name the opcode" do
+    for declaration <- [
+          %{},
+          %{"consumers" => ["swift"]},
+          %{"consumers" => ["swift", "go", "go"]},
+          %{"consumers" => ["swift", "gtk"]},
+          %{"consumers" => ["swift", "go"], "skip" => %{"go" => "Duplicate"}},
+          %{"consumers" => ["swift"], "skip" => %{"go" => ""}},
+          %{"consumers" => ["swift"], "skip" => %{"go" => "  "}},
+          %{"consumers" => ["swift"], "skip" => %{"go" => "Two\nlines"}},
+          %{"consumers" => ["swift"], "skip" => %{"go" => 42}},
+          %{"consumers" => "swift"},
+          %{"skip" => ["go"]}
+        ] do
+      assert_raise Mix.Error, ~r/fixture_command/, fn ->
+        ProtocolGenerator.validate_consumers!(consumer_schema(declaration))
+      end
+    end
+  end
+
+  defp consumer_schema(declaration) do
+    opcode =
+      Map.merge(
+        %{"name" => "fixture_command", "value" => 1, "direction" => "beam_to_frontend"},
+        declaration
+      )
+
+    %{"opcodes" => [opcode]}
+  end
+
   test "validates every bounded numeric primitive from the schema" do
     for {field, actual, max} <- [
           {:tiny, 256, 255},

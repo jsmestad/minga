@@ -387,9 +387,11 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let (command, decodedSize) = try decodeCommandForRenderingChecked(data: data, offset: offset)
             guard decodedSize == size else { throw ProtocolDecodeError.malformed }
             return (command, size)
-        } catch ProtocolDecodeError.unknownOpcode {
-            // The generated schema knows this opcode and its exact framing, but
-            // this renderer intentionally has no semantic command for it.
+        } catch ProtocolDecodeError.unknownOpcode(let unknownOpcode) {
+            guard swiftSkippedOpcodes[unknownOpcode] != nil else {
+                throw ProtocolDecodeError.unknownOpcode(unknownOpcode)
+            }
+            // Only schema-declared skips may use generated framing without decoding.
             return (nil, size)
         }
     case .custom:
@@ -418,11 +420,13 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         throw ProtocolDecodeError.insufficientData
     }
 
-    let opcode = data[offset]
+    guard let opcode = SwiftRequiredOpcode(rawValue: data[offset]) else {
+        throw ProtocolDecodeError.unknownOpcode(data[offset])
+    }
     let rest = offset + 1
 
     switch opcode {
-    case OP_APPLICATION_QUIT_RESPONSE:
+    case .applicationQuitResponse:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLength = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -462,7 +466,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             3 + payloadLength
         )
 
-    case OP_GUI_REQUEST:
+    case .guiRequest:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLength = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -492,77 +496,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             3 + payloadLength
         )
 
-    case 0x20: // set_language: buffer_id:4, name_len:2, name
-        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
-        let nameLen = Int(try readU16(data, rest + 4))
-        guard data.count >= rest + 6 + nameLen else { throw ProtocolDecodeError.malformed }
-        return (nil, 1 + 6 + nameLen)
-
-    case 0x21: // parse_buffer: buffer_id:4, version:4, source_len:4, source
-        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
-        let sourceLen = Int(try readU32(data, rest + 8))
-        guard data.count >= rest + 12 + sourceLen else { throw ProtocolDecodeError.malformed }
-        return (nil, 1 + 12 + sourceLen)
-
-    case 0x22, 0x24, 0x28, 0x29, 0x2B, 0x40: // query commands: buffer_id:4, query_len:4, query
-        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
-        let queryLen = Int(try readU32(data, rest + 4))
-        guard data.count >= rest + 8 + queryLen else { throw ProtocolDecodeError.malformed }
-        return (nil, 1 + 8 + queryLen)
-
-    case 0x23: // load_grammar: name_len:2, name, path_len:2, path
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        let nameLen = Int(try readU16(data, rest))
-        guard data.count >= rest + 2 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-        let pathLen = Int(try readU16(data, rest + 2 + nameLen))
-        guard data.count >= rest + 2 + nameLen + 2 + pathLen else { throw ProtocolDecodeError.malformed }
-        return (nil, 1 + 2 + nameLen + 2 + pathLen)
-
-    case 0x25: // query_language_at: buffer_id:4, request_id:4, byte_offset:4
-        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
-        return (nil, 13)
-
-    case 0x26: // edit_buffer: buffer_id:4, version:4, edit_count:2, edits
-        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
-        let editCount = Int(try readU16(data, rest + 8))
-        var pos = rest + 10
-        for _ in 0..<editCount {
-            guard data.count >= pos + 40 else { throw ProtocolDecodeError.malformed }
-            let textLen = Int(try readU32(data, pos + 36))
-            guard data.count >= pos + 40 + textLen else { throw ProtocolDecodeError.malformed }
-            pos += 40 + textLen
-        }
-        return (nil, pos - offset)
-
-    case 0x27: // measure_text: request_id:4, text_len:2, text
-        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
-        let textLen = Int(try readU16(data, rest + 4))
-        guard data.count >= rest + 6 + textLen else { throw ProtocolDecodeError.malformed }
-        return (nil, 1 + 6 + textLen)
-
-    case 0x2A: // request_indent: buffer_id:4, request_id:4, line:4
-        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
-        return (nil, 13)
-
-    case 0x2C: // request_textobject: buffer_id:4, request_id:4, row:4, col:4, name_len:2, name
-        guard data.count >= rest + 18 else { throw ProtocolDecodeError.malformed }
-        let nameLen = Int(try readU16(data, rest + 16))
-        guard data.count >= rest + 18 + nameLen else { throw ProtocolDecodeError.malformed }
-        return (nil, 1 + 18 + nameLen)
-
-    case 0x2D: // close_buffer: buffer_id:4
-        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
-        return (nil, 5)
-
-    case 0x2E: // request_match_item: buffer_id:4, request_id:4, row:4, col:4
-        guard data.count >= rest + 16 else { throw ProtocolDecodeError.malformed }
-        return (nil, 17)
-
-    case 0x2F: // request_structural_nav: buffer_id:4, request_id:4, row:4, col:4, action:1
-        guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
-        return (nil, 18)
-
-    case OP_BEGIN_FRAME:
+    case .beginFrame:
         // begin_frame (#2739): <opcode, frame_seq:u32, base_frame_seq:u32, generation:u32>.
         guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
         let frameSeq = try readU32(data, rest)
@@ -570,7 +504,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let generation = try readU32(data, rest + 8)
         return (.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: generation), 13)
 
-    case OP_COMMIT_FRAME:
+    case .commitFrame:
         // commit_frame (#2219): <opcode, frame_seq:u32, input_seq:u32>. input_seq is
         // the echoed input correlation sequence (ticket #2215, formerly batch_end).
         guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
@@ -578,7 +512,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let seq = try readU32(data, rest + 4)
         return (.commitFrame(frameSeq: frameSeq, seq: seq), 9)
 
-    case OP_PRESENTATION_TARGET:
+    case .presentationTarget:
         guard data.count >= rest + 15 else { throw ProtocolDecodeError.malformed }
         let focus = data[rest + 14]
         guard focus <= 1 else { throw ProtocolDecodeError.malformed }
@@ -592,7 +526,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             16
         )
 
-    case OP_PRESENTATION_OPERATION:
+    case .presentationOperation:
         guard data.count >= rest + 23 else { throw ProtocolDecodeError.malformed }
         let postcondition = data[rest + 22]
         guard postcondition == 1 else { throw ProtocolDecodeError.malformed }
@@ -607,12 +541,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             24
         )
 
-    case OP_SET_CURSOR_SHAPE:
+    case .setCursorShape:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let shape = CursorShape(rawValue: data[rest]) ?? .block
         return (.setCursorShape(shape), 2)
 
-    case OP_SET_TITLE:
+    case .setTitle:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let titleLen = Int(try readU16(data, rest))
         guard data.count >= rest + 2 + titleLen else { throw ProtocolDecodeError.malformed }
@@ -620,16 +554,16 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let title = try decodeUTF8(titleData) ?? ""
         return (.setTitle(title), 1 + 2 + titleLen)
 
-    case OP_SET_WINDOW_BG:
+    case .setWindowBG:
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         return (.setWindowBg(r: data[rest], g: data[rest + 1], b: data[rest + 2]), 4)
 
-    case OP_SET_LINK_CURSOR:
+    case .setLinkCursor:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         return (.setLinkCursor(active: data[rest] != 0), 2)
 
     // Config commands.
-    case OP_SET_FONT:
+    case .setFont:
         // size:2, weight:1, ligatures:1, name_len:2 = 6 bytes after opcode
         guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
         let fontSize = try readU16(data, rest)
@@ -641,7 +575,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let family = try decodeUTF8(nameData) ?? "Menlo"
         return (.setFont(family: family, size: fontSize, ligatures: ligatures, weight: weight), 1 + 6 + nameLen)
 
-    case OP_SET_FONT_FALLBACK:
+    case .setFontFallback:
         // count:1, then count * (name_len:2, name:bytes)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let count = Int(data[rest])
@@ -660,7 +594,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.setFontFallback(families: families), offset - rest + 1)
 
-    case OP_REGISTER_FONT:
+    case .registerFont:
         // font_id:1, name_len:2, name:bytes
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let fontId = data[rest]
@@ -670,7 +604,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let family = try decodeUTF8(nameData) ?? "Menlo"
         return (.registerFont(id: fontId, family: family), 1 + 3 + nameLen)
 
-    case OP_GUI_CONFIG_STATE:
+    case .guiConfigState:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -678,7 +612,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let state = try decodeConfigState(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiConfigState(state), 1 + 2 + payloadLen)
 
-    case OP_GUI_NOTIFICATIONS:
+    case .guiNotifications:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -686,7 +620,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let notifications = try decodeNotifications(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiNotifications(notifications), 1 + 2 + payloadLen)
 
-    case OP_GUI_EMPTY_STATE:
+    case .guiEmptyState:
         // len16 framed. Payload: visible(1). When visible: flags(1, bit0=crashed),
         // version:string8, focused_id:string8, section_count(1), then per section:
         // section_id(1), title:string8, item_count(1), then per item:
@@ -748,7 +682,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiEmptyState(visible: true, crashed: esCrashed, version: esVersion, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
 
     // GUI chrome commands.
-    case OP_GUI_FILE_TREE:
+    case .guiFileTree:
         // Semantic file tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
         // v1: opcode(1) + payload_len(4) + version(1) + tree_flags(1) + selected_id + root + tree_width(2) + row_count(2) + rows...
         // v2: adds tree_state(1) after tree_flags and error_reason after row_count.
@@ -915,7 +849,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, generation: generation, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
 
-    case OP_GUI_OBSERVATORY:
+    case .guiObservatory:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU32(data, rest))
         let payloadStart = rest + 4
@@ -1002,7 +936,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
         return (.guiObservatory(visible: visible, nodeCount: nodeCount, nodes: nodes), 5 + payloadLen)
 
-    case OP_GUI_FILE_TREE_SELECTION:
+    case .guiFileTreeSelection:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -1016,7 +950,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let selectedId = try decodeUTF8(data[pos..<(pos + selectedIdLen)]) ?? ""
         return (.guiFileTreeSelection(generation: generation, selectedId: selectedId, focused: flags & 0x01 != 0), 3 + payloadLen)
 
-    case OP_GUI_TAB_BAR:
+    case .guiTabBar:
         // active_index:1 (255 means the active tab is hidden from the visible tab list), tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label, tint_color_rgb:4
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let activeIndex = data[rest]
@@ -1052,7 +986,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiTabBar(activeIndex: activeIndex, tabs: tabs), pos - offset)
 
-    case OP_GUI_THEME:
+    case .guiTheme:
         // count:1, then count × (slot_id:1, r:1, g:1, b:1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let count = Int(data[rest])
@@ -1067,7 +1001,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiTheme(slots: slots), 1 + 1 + count * 4)
 
-    case OP_GUI_COMPLETION:
+    case .guiCompletion:
         // Schema-generated decoder (gui_completion command_fields). The generated
         // GuiCompletionFields mirrors the Go decoder's field order and conditional
         // tail; we map it into the existing RenderCommand shape. CompletionKind's
@@ -1104,7 +1038,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
 
-    case OP_GUI_COMPLETION_SELECTION:
+    case .guiCompletionSelection:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -1117,7 +1051,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }
         return (.guiCompletionSelection(generation: generation, selectedItemID: selectedItemID, documentation: documentation), 3 + payloadLen)
 
-    case OP_GUI_WHICH_KEY:
+    case .guiWhichKey:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
         if !visible {
@@ -1152,7 +1086,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiWhichKey(visible: true, prefix: prefix, page: page, pageCount: pageCount, bindings: bindings), pos - offset)
 
-    case OP_GUI_BREADCRUMB:
+    case .guiBreadcrumb:
         // Schema-generated decoder (gui_breadcrumb command_fields): a u8-counted
         // list of string16 segments, mirroring the Go decoder.
         do {
@@ -1164,7 +1098,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
 
-    case OP_GUI_STATUS_BAR:
+    case .guiStatusBar:
         // Sectioned wire format: opcode(1) + section_count(1) + sections...
         // Each section: section_id(1) + section_len(2) + payload(section_len)
         // Unknown sections are skipped (forward compatibility).
@@ -1435,7 +1369,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         )
         return (.guiStatusBar(update), pos - offset)
 
-    case OP_GUI_PICKER:
+    case .guiPicker:
         // Sectioned format: opcode(1) + section_count(1) + sections...
         // Hidden picker: opcode(1) + 0(1) (zero sections, visible defaults to false)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -1541,7 +1475,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
         return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration), pickerPos - offset)
 
-    case OP_GUI_PICKER_SELECTION:
+    case .guiPickerSelection:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         let payloadStart = rest + 2
@@ -1551,7 +1485,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let selectedActionID = try readU32(data, payloadStart + 8)
         return (.guiPickerSelection(generation: generation, selectedItemID: selectedItemID, selectedActionID: selectedActionID), 3 + payloadLen)
 
-    case OP_GUI_PICKER_PREVIEW:
+    case .guiPickerPreview:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
         if !visible {
@@ -1586,7 +1520,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiPickerPreview(visible: true, lines: lines), pos2 - offset)
 
-    case OP_GUI_AGENT_CHAT:
+    case .guiAgentChat:
         // Sectioned format: opcode(1) + section_count(1) + sections...
         // Hidden: opcode(1) + 0(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -1727,7 +1661,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
         return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups), chatPos - offset)
 
-    case OP_GUI_AGENT_TRANSCRIPT:
+    case .guiAgentTranscript:
         // len32 framing: opcode(1) + payload_len(4) + payload (GUI_PROTOCOL.md 0x86).
         //   header: version(1)=1 + mode(1) + epoch(4) + truncated(1)
         //   full_replace (mode 0): count(4)
@@ -1799,19 +1733,19 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard transcriptPos == transcriptEnd else { throw ProtocolDecodeError.malformed }
         return (.guiAgentTranscript(mode: transcriptMode, epoch: transcriptEpoch, truncated: transcriptTruncated, trimFront: transcriptTrimFront, baseCount: transcriptBaseCount, messages: transcriptMessages), 1 + 4 + transcriptPayloadLen)
 
-    case OP_GUI_GUTTER_SEP:
+    case .guiGutterSep:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
         let col = try readU16(data, rest)
         return (.guiGutterSeparator(col: col, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
-    case OP_GUI_CURSORLINE:
+    case .guiCursorline:
         // row:2, r:1, g:1, b:1 = 5 bytes after opcode
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
         let row = try readU16(data, rest)
         return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
-    case OP_GUI_GUTTER:
+    case .guiGutter:
         // Sectioned format: opcode(1) + section_count(1) + sections...
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let gutterSectionCount = Int(data[rest])
@@ -1927,7 +1861,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         )
         return (.guiGutter(data: windowGutter), gutterPos - offset)
 
-    case OP_GUI_BOTTOM_PANEL:
+    case .guiBottomPanel:
         // visible(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
@@ -1991,11 +1925,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                  heightPercent: heightPercent, filterPreset: filterPreset,
                                  tabs: tabs, entries: entries), pos - offset)
 
-    case OP_GUI_TEXT_PRESENTATION:
+    case .guiTextPresentation:
         guard data.count >= offset + 11 else { throw ProtocolDecodeError.malformed }
         return (.guiTextPresentation(windowID: try readU16(data, rest), presentationID: try readU64(data, rest + 2)), 11)
 
-    case OP_GUI_WINDOW_CONTENT:
+    case .guiWindowContent:
         // len32 command framing plus u32 section lengths:
         // opcode(1) + payload_len(4) + section_count(1) + sections...
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
@@ -2083,7 +2017,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         )
         return (.guiWindowContent(data: content), 1 + 4 + wcPayloadLen)
 
-    case OP_GUI_WINDOW_OVERLAY_DELTA:
+    case .guiWindowOverlayDelta:
         guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
         let windowId = try readU16(data, rest)
         let contentEpoch = try readU32(data, rest + 2)
@@ -2114,20 +2048,20 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             return (.guiWindowOverlayDelta(data: delta), 17)
         }
 
-    case OP_GUI_WINDOW_VIEWPORT_DELTA:
+    case .guiWindowViewportDelta:
         let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: false)
         return (.guiWindowViewportDelta(data: delta), consumed)
 
-    case OP_GUI_WINDOW_ROWS_DELTA:
+    case .guiWindowRowsDelta:
         let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: true)
         return (.guiWindowRowsDelta(data: delta), consumed)
 
-    case OP_GUI_RESIDENT_SEMANTICS:
+    case .guiResidentSemantics:
         let (semantics, consumed) = try decodeResidentSemantics(data: data, offset: offset)
         return (.guiResidentSemantics(data: semantics), consumed)
 
 
-    case OP_GUI_MINIBUFFER:
+    case .guiMinibuffer:
         // visible(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let mbVisible = data[rest] != 0
@@ -2218,7 +2152,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                 selectedIndex: mbSelIndex, totalCandidates: mbTotalCandidates,
                                 candidates: mbCandidates, generation: mbGeneration), mbPos - offset)
 
-    case OP_GUI_HOVER_POPUP:
+    case .guiHoverPopup:
         // visible(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let hVisible = data[rest] != 0
@@ -2281,7 +2215,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                 focused: hFocused, scrollOffset: hScrollOffset, lines: hLines),
                 hPos - offset)
 
-    case OP_GUI_HOVER_ACTION:
+    case .guiHoverAction:
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         guard data.count >= rest + 2 + payloadLen else { throw ProtocolDecodeError.malformed }
@@ -2296,7 +2230,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let actionName = try decodeUTF8(actionData) ?? ""
         return (.guiHoverAction(visible: true, actionName: actionName), 3 + payloadLen)
 
-    case OP_GUI_SIGNATURE_HELP:
+    case .guiSignatureHelp:
         // visible(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let shVisible = data[rest] != 0
@@ -2356,7 +2290,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                    activeSignature: shActiveSig, activeParameter: shActiveParam,
                                    signatures: signatures), shPos - offset)
 
-    case OP_GUI_FLOAT_POPUP:
+    case .guiFloatPopup:
         // visible(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let fpVisible = data[rest] != 0
@@ -2390,7 +2324,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiFloatPopup(visible: true, width: fpWidth, height: fpHeight,
                                 title: fpTitle, lines: fpLines), fpPos - offset)
 
-    case OP_GUI_SPLIT_SEPARATORS:
+    case .guiSplitSeparators:
         // border_color_rgb(3) + vertical_count(1)
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let sepR = data[rest]
@@ -2435,7 +2369,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiSplitSeparators(borderColor: sepColor, verticals: verts, horizontals: horizs),
                 sepPos - offset)
 
-    case OP_GUI_GIT_STATUS:
+    case .guiGitStatus:
         // Header: repo_state:1, syncing:1, ahead:2, behind:2, branch_len:2, branch, entry_count:2
         //
         // gui_git_status stays hand-written (ticket #2225 ruling): this decoder is
@@ -2518,7 +2452,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage, stashCount: gsStashCount),
                 gsPos - offset)
 
-    case OP_GUI_WORKSPACES:
+    case .guiWorkspaces:
         // Canonical length-prefixed workspace payload.
         // opcode(1) + payload_len(2) + version(1) + active_workspace_id(2) + mode(1) + flags(1)
         // + workspace_count(1) + workspaces... + visible_tab_count(2) + visible_tabs...
@@ -2626,7 +2560,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiWorkspaces(version: version, activeWorkspaceId: activeGId, mode: WorkspaceViewMode(rawValue: mode), flags: WorkspaceFlags(rawValue: workspaceFlags), workspaces: workspaces, visibleTabs: visibleTabs),
                 payloadEnd - offset)
 
-    case OP_GUI_AGENT_CONTEXT:
+    case .guiAgentContext:
         var payloadStart = rest
         var payloadEnd: Int? = nil
         var framedSize: Int? = nil
@@ -2705,7 +2639,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                  status: CardStatus(rawValue: statusRaw), canApprove: canApprove,
                                  progress: progress, todos: todos),
                 consumed)
-    case OP_GUI_INDENT_GUIDES:
+    case .guiIndentGuides:
         // Forward-compatible format: opcode(1) + payload_length(2) + payload
         // Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each)
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
@@ -2747,7 +2681,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                      lineIndentLevels: igLineLevels)
         return (.guiIndentGuides(data: igData), 1 + 2 + igPayloadLen)
 
-    case OP_GUI_LINE_SPACING:
+    case .guiLineSpacing:
         // Forward-compatible format: opcode(1) + payload_length(2) + spacing_x100(2)
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let lsPayloadLen = Int(try readU16(data, rest))
@@ -2758,7 +2692,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let spacing = Float(spacingX100) / 100.0
         return (.guiLineSpacing(spacing: spacing), 1 + 2 + lsPayloadLen)
 
-    case OP_GUI_CURSOR_ANIMATION:
+    case .guiCursorAnimation:
         // Forward-compatible format: opcode(1) + payload_length(2) + enabled(1)
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let caPayloadLen = Int(try readU16(data, rest))
@@ -2767,7 +2701,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiCursorAnimation(enabled: data[rest + 2] != 0), 1 + 2 + caPayloadLen)
 
-    case OP_GUI_EDIT_TIMELINE:
+    case .guiEditTimeline:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
         guard data.count >= rest + 2 + payloadLen, payloadLen >= 4 else {
@@ -2833,7 +2767,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries, files: files, generation: generation), 1 + 2 + payloadLen)
 
-    case OP_GUI_EXTENSION_OVERLAY:
+    case .guiExtensionOverlay:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let eoPayloadLen = Int(try readU16(data, rest))
         guard data.count >= rest + 2 + eoPayloadLen, eoPayloadLen >= 1 else {
@@ -2878,7 +2812,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiExtensionOverlay(eoEntries), 1 + 2 + eoPayloadLen)
 
-    case OP_GUI_EXTENSION_PANEL:
+    case .guiExtensionPanel:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let epPayloadLen = Int(try readU16(data, rest))
         guard data.count >= rest + 2 + epPayloadLen, epPayloadLen >= 1 else {
@@ -3027,7 +2961,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
         return (.guiExtensionPanel(epPanels), 1 + 2 + epPayloadLen)
 
-    case OP_GUI_EXTENSION_RUNTIME:
+    case .guiExtensionRuntime:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU32(data, rest))
         let payloadStart = rest + 4
@@ -3039,7 +2973,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let payload = data[pos..<payloadEnd]
         return (.guiExtensionRuntime(FrontendExtensionRuntimeMessage(extensionID: extensionID, channel: channel, payload: Data(payload))), 1 + 4 + payloadLen)
 
-    case OP_GUI_SEARCH_STATE:
+    case .guiSearchState:
         // Protocol v21: opcode(1) + payload_len(2) + active(1) + match_count(4) + current_index(4) + flags(1) + query(string16) + session_id(4) + acknowledged_edit_seq(4) + status(1)
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let ssPayloadLen = Int(try readU16(data, rest))
@@ -3061,7 +2995,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard ssStatus <= maximumSearchStatus else { throw ProtocolDecodeError.malformed }
         return (.guiSearchState(active: ssActive, matchCount: ssMatchCount, currentIndex: ssCurrentIndex, flags: ssFlags, query: ssQuery, sessionID: ssSessionID, acknowledgedEditSeq: ssAcknowledgedEditSeq, status: ssStatus), 1 + 2 + ssPayloadLen)
 
-    case OP_GUI_SIDEBARS:
+    case .guiSidebars:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU32(data, rest))
         let payloadStart = rest + 4
@@ -3105,7 +3039,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }
         return (.guiSidebars(version: version, activeId: activeId, sidebars: sidebars), 5 + payloadLen)
 
-    case OP_CLIPBOARD_WRITE:
+    case .clipboardWrite:
         // Forward-compatible format: opcode(1) + payload_length(4) + target(1) + text_len(4) + text
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU32(data, rest))
@@ -3118,7 +3052,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let text = try decodeUTF8(textData) ?? ""
         return (.clipboardWrite(target: target, text: text), 1 + 4 + payloadLen)
 
-    case OP_PROTOCOL_ERROR:
+    case .protocolError:
         // protocol_error: opcode(1) + message_len(2) + UTF-8 message. The BEAM
         // emits it when this frontend's handshake protocol_version does not match
         // the BEAM's, so the frontend shows a blocking error instead of decoding
@@ -3129,9 +3063,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let messageData = data[(rest + 2)..<(rest + 2 + messageLen)]
         let message = try decodeUTF8(messageData) ?? ""
         return (.protocolError(message: message), 1 + 2 + messageLen)
-
-    default:
-        throw ProtocolDecodeError.unknownOpcode(opcode)
     }
 }
 
