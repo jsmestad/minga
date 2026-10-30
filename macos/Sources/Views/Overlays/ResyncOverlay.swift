@@ -60,23 +60,23 @@ public struct ResyncOverlay: View {
     }
 
     private func badgeContent(showRetryIcon: Bool) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             ProgressView()
                 .controlSize(.small)
             Text(state.rejection.map { "Resyncing generation \(state.generation): \($0)" } ?? "Resyncing generation \(state.generation)…")
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(theme.tabActiveFg)
             if showRetryIcon {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Typography.font(.small, weight: .semibold))
                     .foregroundStyle(theme.tabActiveFg)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .background(theme.popupBg.opacity(0.92))
         .clipShape(Capsule())
         .overlay(Capsule().stroke(theme.popupBorder, lineWidth: 1))
-        .padding(12)
+        .padding(Spacing.lg)
     }
 }

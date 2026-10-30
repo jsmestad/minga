@@ -63,7 +63,7 @@ public struct AgentChatView: View {
             ZStack {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: Spacing.lg) {
                             if state.transcriptTruncated {
                                 olderMessagesOmittedIndicator
                             }
@@ -73,9 +73,9 @@ public struct AgentChatView: View {
                             }
 
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 16)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.top, Spacing.lg)
+                        .padding(.bottom, Spacing.xl)
                         .frame(minHeight: scrollViewHeight, alignment: .bottom)
                     }
                     .defaultScrollAnchor(.bottom)
@@ -121,7 +121,7 @@ public struct AgentChatView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("Follow output")
                             .accessibilityHint("Scrolls to latest content and resumes auto-scroll")
-                            .padding(.bottom, 8)
+                            .padding(.bottom, Spacing.md)
                         }
                         .transition(.opacity)
                         .animation(
@@ -150,10 +150,10 @@ public struct AgentChatView: View {
     // MARK: - Messages
     private var olderMessagesOmittedIndicator: some View {
         Text("Older messages omitted")
-            .font(.system(size: 11, weight: .medium))
+            .font(Typography.font(.small, weight: .medium))
             .foregroundStyle(theme.agentMutedFg)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs)
             .background(Capsule().fill(theme.agentCodeBg.opacity(0.75)))
             .overlay(Capsule().strokeBorder(theme.agentCodeBorder.opacity(0.25), lineWidth: 1))
             .frame(maxWidth: .infinity, alignment: .center)
@@ -168,12 +168,12 @@ public struct AgentChatView: View {
     /// miscalculating tap targets due to variable-height implicit Groups.
     @ViewBuilder
     private func messageViewWithDivider(_ msg: ChatMessageEntry, index: Int) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.md) {
             if index > 0 && shouldShowDivider(before: msg, after: state.messages[index - 1]) {
                 Rectangle()
                     .fill(theme.agentCodeBorder.opacity(0.15))
                     .frame(height: 1)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, Spacing.xs)
             }
             messageView(msg, index: index)
         }
@@ -215,24 +215,24 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private func userMessage(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             // Sender label
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: "person.fill")
-                    .font(.system(size: 9))
+                    .font(Typography.font(.micro))
                 Text("You")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Typography.font(.small, weight: .medium))
             }
             .foregroundStyle(theme.agentUserLabel)
 
             Text(text)
-                .font(.system(size: 13))
+                .font(Typography.font(.emphasis))
                 .foregroundStyle(theme.agentTextFg)
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
         .background(theme.agentUserBorder.opacity(0.06))
     }
 
@@ -240,16 +240,16 @@ public struct AgentChatView: View {
     private func assistantBlock(_ text: String) -> some View {
         HStack {
             Text(text)
-                .font(.system(size: 13))
+                .font(Typography.font(.emphasis))
                 .foregroundStyle(theme.agentTextFg.opacity(0.9))
                 .textSelection(.enabled)
                 .lineSpacing(4)
             Spacer(minLength: 40)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Radius.md)
                 .fill(theme.agentAssistantBorder.opacity(0.03))
         )
     }
@@ -257,9 +257,9 @@ public struct AgentChatView: View {
     @ViewBuilder
     private func styledAssistantBlock(_ lines: [[Wire.StyledTextRun]]) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
-                    styledLineView(runs, baseFontSize: 13, monospaced: false)
+                    styledLineView(runs, baseFontSize: Typography.Step.emphasis.rawValue, monospaced: false)
                 }
             }
             Spacer(minLength: 40)
@@ -269,7 +269,7 @@ public struct AgentChatView: View {
     @ViewBuilder
     private func assistantMarkdownBlock(_ blocks: [Wire.AgentMarkdownBlock]) -> some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
                 ForEach(blocks) { block in
                     markdownBlockView(block)
                 }
@@ -282,15 +282,15 @@ public struct AgentChatView: View {
     private func markdownBlockView(_ block: Wire.AgentMarkdownBlock) -> some View {
         switch block.kind {
         case .paragraph:
-            markdownLines(block.lines, baseFontSize: 13, monospaced: false)
+            markdownLines(block.lines, baseFontSize: Typography.Step.emphasis.rawValue, monospaced: false)
         case .heading:
-            markdownLines(block.lines, baseFontSize: block.level == 1 ? 15 : 14, monospaced: false)
+            markdownLines(block.lines, baseFontSize: block.level == 1 ? Typography.Step.toolbar.rawValue : Typography.Step.title.rawValue, monospaced: false)
         case .listItem:
-            markdownLines(block.lines, baseFontSize: 13, monospaced: false)
-                .padding(.leading, CGFloat(block.indent) * 12)
+            markdownLines(block.lines, baseFontSize: Typography.Step.emphasis.rawValue, monospaced: false)
+                .padding(.leading, CGFloat(block.indent) * Spacing.lg)
         case .blockquote:
-            markdownLines(block.lines, baseFontSize: 13, monospaced: false)
-                .padding(.leading, 8)
+            markdownLines(block.lines, baseFontSize: Typography.Step.emphasis.rawValue, monospaced: false)
+                .padding(.leading, Spacing.md)
                 .overlay(alignment: .leading) {
                     Rectangle().fill(theme.agentToolBorder.opacity(0.35)).frame(width: 2)
                 }
@@ -305,7 +305,7 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private func markdownLines(_ lines: [[Wire.StyledTextRun]], baseFontSize: CGFloat, monospaced: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
                 styledLineView(runs, baseFontSize: baseFontSize, monospaced: monospaced)
             }
@@ -314,37 +314,37 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private func agentCodeCard(_ block: Wire.AgentMarkdownBlock) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
                 Text(block.label.isEmpty ? "Code" : block.label)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(Typography.font(.caption, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.agentTextFg.opacity(0.55))
                 if !block.targetPath.isEmpty {
                     Text(block.targetPath)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(Typography.font(.caption, design: .monospaced))
                         .foregroundStyle(theme.agentTextFg.opacity(0.38))
                 }
                 if !block.isComplete {
                     Text("streaming")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(Typography.font(.caption, design: .monospaced))
                         .foregroundStyle(theme.agentTextFg.opacity(0.38))
                 }
                 Spacer(minLength: 0)
             }
 
             ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     ForEach(Array(block.lines.enumerated()), id: \.offset) { _, runs in
-                        styledLineView(runs, baseFontSize: 12, monospaced: true, allowHorizontalScroll: false)
+                        styledLineView(runs, baseFontSize: Typography.Step.body.rawValue, monospaced: true, allowHorizontalScroll: false)
                             .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, Spacing.hairline)
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(theme.agentCodeBg))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.agentCodeBorder.opacity(0.35), lineWidth: 1))
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.lg).fill(theme.agentCodeBg))
+        .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(theme.agentCodeBorder.opacity(0.35), lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(codeBlockAccessibilityLabel(block))
         .accessibilityHint("Horizontally scrolls code content.")
@@ -382,13 +382,13 @@ public struct AgentChatView: View {
             let runMonospaced = monospaced || run.code
             let design: Font.Design = runMonospaced ? .monospaced : .default
             if run.bold && run.italic {
-                attr.font = .system(size: baseFontSize, weight: .bold, design: design).italic()
+                attr.font = Typography.relative(to: baseFontSize, weight: .bold, design: design).italic()
             } else if run.bold {
-                attr.font = .system(size: baseFontSize, weight: .bold, design: design)
+                attr.font = Typography.relative(to: baseFontSize, weight: .bold, design: design)
             } else if run.italic {
-                attr.font = .system(size: baseFontSize, design: design).italic()
+                attr.font = Typography.relative(to: baseFontSize, design: design).italic()
             } else if runMonospaced {
-                attr.font = .system(size: baseFontSize, design: .monospaced)
+                attr.font = Typography.relative(to: baseFontSize, design: .monospaced)
             }
             if run.underline {
                 attr.underlineStyle = .single
@@ -405,18 +405,18 @@ public struct AgentChatView: View {
     private func styledLineView(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat, monospaced: Bool, allowHorizontalScroll: Bool = true) -> some View {
         if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
             Text(" ")
-                .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
+                .font(Typography.relative(to: baseFontSize, design: monospaced ? .monospaced : .default))
                 .foregroundStyle(.clear)
         } else if allowHorizontalScroll && shouldScrollHorizontally(runs) {
             ScrollView(.horizontal) {
                 Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
-                    .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
+                    .font(Typography.relative(to: baseFontSize, design: monospaced ? .monospaced : .default))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: false)
             }
         } else {
             Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
-                .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
+                .font(Typography.relative(to: baseFontSize, design: monospaced ? .monospaced : .default))
                 .textSelection(.enabled)
         }
     }
@@ -442,34 +442,34 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private func thinkingBlock(_ text: String, collapsed: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9))
+                    .font(Typography.font(.micro))
                 Text("Thinking...")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Typography.font(.small, weight: .medium))
                 Spacer()
             }
             .foregroundStyle(theme.agentTextFg.opacity(0.4))
 
             if !collapsed && !text.isEmpty {
                 Text(text)
-                    .font(.system(size: 12))
+                    .font(Typography.font(.body))
                     .foregroundStyle(theme.agentTextFg.opacity(0.35))
                     .textSelection(.enabled)
                     .lineSpacing(3)
-                    .padding(.leading, 14)
+                    .padding(.leading, Spacing.lg)
             }
         }
     }
 
     @ViewBuilder
     private func systemMessage(_ text: String, isError: Bool) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             Image(systemName: isError ? "exclamationmark.triangle" : "info.circle")
-                .font(.system(size: 10))
+                .font(Typography.font(.caption))
             Text(text)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .textSelection(.enabled)
         }
         .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
@@ -479,13 +479,13 @@ public struct AgentChatView: View {
     @ViewBuilder
     private func usageRow(input: UInt32, output: UInt32, costMicros: UInt32) -> some View {
         let cost = Double(costMicros) / 1_000_000.0
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.lg) {
             Spacer()
             Label("\(input)", systemImage: "arrow.up")
             Label("\(output)", systemImage: "arrow.down")
             Text(String(format: "$%.4f", cost))
         }
-        .font(.system(size: 10))
+        .font(Typography.font(.caption))
         .foregroundStyle(theme.agentTextFg.opacity(0.3))
     }
 
@@ -494,14 +494,14 @@ public struct AgentChatView: View {
     @ViewBuilder
     private var helpOverlay: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 HStack {
                     Text("Keyboard Shortcuts")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(Typography.font(.title, weight: .semibold))
                         .foregroundStyle(theme.agentTextFg)
                     Spacer()
                     Text("Press ? or Esc to close")
-                        .font(.system(size: 11))
+                        .font(Typography.font(.small))
                         .foregroundStyle(theme.agentTextFg.opacity(0.4))
                 }
 
@@ -509,17 +509,17 @@ public struct AgentChatView: View {
                     helpGroupView(group)
                 }
             }
-            .padding(20)
+            .padding(Spacing.xxl)
         }
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: Radius.xl)
                 .fill(theme.agentPanelBg.opacity(0.95))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: Radius.xl)
                 .strokeBorder(theme.agentCodeBorder.opacity(0.3), lineWidth: 1)
         )
-        .padding(16)
+        .padding(Spacing.xl)
         .transition(.opacity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Keyboard shortcuts help")
@@ -527,20 +527,20 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private func helpGroupView(_ group: HelpGroup) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(group.title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .foregroundStyle(theme.agentHeaderFg)
 
             ForEach(Array(group.bindings.enumerated()), id: \.offset) { _, binding in
                 HStack(spacing: 0) {
                     Text(binding.key)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(Typography.font(.body, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.agentTextFg.opacity(0.9))
                         .frame(width: 140, alignment: .leading)
 
                     Text(binding.description)
-                        .font(.system(size: 12))
+                        .font(Typography.font(.body))
                         .foregroundStyle(theme.agentTextFg.opacity(0.6))
 
                     Spacer()
@@ -553,15 +553,15 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private var followOutputPillLabel: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Image(systemName: "arrow.down")
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typography.font(.caption, weight: .semibold))
             Text("Follow output")
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
         }
         .foregroundStyle(theme.agentTextFg.opacity(0.8))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
         .background(
             Capsule()
                 .fill(theme.agentCodeBg.opacity(0.9))

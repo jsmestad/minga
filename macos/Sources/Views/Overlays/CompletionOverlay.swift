@@ -61,15 +61,15 @@ public struct CompletionOverlay: View {
                 }
                 .frame(width: popupWidth)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Radius.lg)
                         .fill(theme.popupBg)
                         .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Radius.lg)
                         .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
                 )
-                .padding(4)
+                .padding(Spacing.xs)
             }
         }
         .onAppear {
@@ -88,12 +88,12 @@ public struct CompletionOverlay: View {
                 .overlay(theme.popupBorder.opacity(0.4))
             ScrollView(.vertical, showsIndicators: true) {
                 Text(doc)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.popupFg.opacity(0.85))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
             }
             .frame(maxHeight: docPaneMaxHeight)
         }
@@ -107,7 +107,7 @@ public struct CompletionOverlay: View {
         Button {
             activate(item, offeredContent: content)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.sm) {
                 // Kind indicator
                 kindBadge(item.kind)
 
@@ -115,8 +115,8 @@ public struct CompletionOverlay: View {
                 Text(TextHighlighting.attributedString(
                     item.label,
                     matchPositions: matchPositions(item.matchRanges, in: item.label),
-                    baseFont: .system(size: 12, design: .monospaced),
-                    matchFont: .system(size: 12, weight: .semibold, design: .monospaced),
+                    baseFont: Typography.monospacedSmall,
+                    matchFont: Typography.font(.small, weight: .semibold, design: .monospaced),
                     baseColor: isSelected ? theme.popupSelFg : theme.popupFg,
                     matchColor: theme.popupKeyFg
                 ))
@@ -127,21 +127,21 @@ public struct CompletionOverlay: View {
                 // Detail (type info)
                 if !item.detail.isEmpty {
                     Text(item.detail)
-                        .font(.system(size: 11))
+                        .font(Typography.font(.small))
                         .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.72) : theme.popupMutedFg)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Spacing.md)
             .frame(height: itemHeight)
             .background(
                 isSelected
                     ? theme.popupSelBg.opacity(0.7)
                     : (hoveredItemId == item.id ? theme.popupFg.opacity(0.06) : Color.clear)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .padding(.horizontal, 4)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+            .padding(.horizontal, Spacing.xs)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -207,11 +207,11 @@ public struct CompletionOverlay: View {
     private func kindBadge(_ kind: CompletionKind) -> some View {
         let (letter, color) = kindDisplay(kind)
         Text(letter)
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .font(Typography.font(.micro, weight: .bold, design: .monospaced))
             .foregroundStyle(color)
             .frame(width: 18, height: 18)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .fill(color.opacity(0.15))
             )
     }

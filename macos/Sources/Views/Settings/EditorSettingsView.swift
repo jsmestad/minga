@@ -57,7 +57,7 @@ public struct EditorSettingsView: View {
                 ))
             }
         }
-        .padding(20)
+        .padding(Spacing.xxl)
     }
 }
 

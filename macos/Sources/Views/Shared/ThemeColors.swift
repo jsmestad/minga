@@ -324,30 +324,6 @@ extension EnvironmentValues {
     }
 }
 
-/// Shared spacing scale for SwiftUI chrome.
-///
-/// A 4pt modular grid. Reach for the nearest step instead of ad-hoc magic
-/// numbers so spacing rhythm stays consistent across views. A 4pt grid reads
-/// more evenly for dense UI layout than a literal golden-ratio scale (φ suits
-/// type and section rhythm better than control gaps), so the steps below are
-/// the de-facto 4pt system used by Apple, Material, and Tailwind.
-public enum Spacing {
-    /// 2pt: hairline. Badge internals, dot-to-glyph.
-    public static let hairline: CGFloat = 2
-    /// 4pt: tight inline groups (chips, toggles, icon-to-label).
-    public static let xs: CGFloat = 4
-    /// 8pt: default control/element gap.
-    public static let sm: CGFloat = 8
-    /// 12pt: row padding, label-to-content, comfortable rows.
-    public static let md: CGFloat = 12
-    /// 16pt: separation between distinct groups.
-    public static let lg: CGFloat = 16
-    /// 20pt: section/panel padding.
-    public static let xl: CGFloat = 20
-    /// 32pt: major section breaks.
-    public static let xxl: CGFloat = 32
-}
-
 /// File-private helper to create a Color from a 24-bit RGB integer.
 /// Used by ThemeColors property defaults and applySlot.
 private func color(_ rgb: UInt32) -> Color {

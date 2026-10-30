@@ -47,13 +47,13 @@ public struct BreadcrumbBar: View {
                 ForEach(Array(state.segments.enumerated()), id: \.offset) { index, segment in
                     if index > 0 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .medium))
+                            .font(Typography.font(.symbol, weight: .medium))
                             .foregroundStyle(theme.breadcrumbSeparatorFg)
-                            .padding(.horizontal, 4)
+                            .padding(.horizontal, Spacing.xs)
                     }
 
                     Text(segment)
-                        .font(.system(size: 11.5))
+                        .font(Typography.font(.body))
                         .foregroundStyle(
                             index == state.segments.count - 1
                                 ? theme.breadcrumbFg
@@ -79,7 +79,7 @@ public struct BreadcrumbBar: View {
                     sendAction?(.executeCommand(name: "open_config"))
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Spacing.md)
             .frame(height: barHeight)
             .background(theme.breadcrumbBg)
             .focusable(false)
@@ -101,12 +101,12 @@ public struct BreadcrumbBar: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemIcon)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(theme.breadcrumbFg.opacity(0.5))
         }
         .buttonStyle(.plain)
         .help(tooltip)
-        .padding(.trailing, 4)
+        .padding(.trailing, Spacing.xs)
         .pointingHandCursor()
     }
 }

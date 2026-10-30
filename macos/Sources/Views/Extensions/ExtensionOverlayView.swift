@@ -65,12 +65,12 @@ public struct ExtensionOverlayView: View {
         case 1: // cursor_with_label
             VStack(spacing: 0) {
                 Text(entry.content)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(Typography.font(.micro, weight: .medium))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.pixel)
                     .background(color.opacity(0.85))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
                     .offset(y: -2)
 
                 Rectangle()
@@ -80,12 +80,12 @@ public struct ExtensionOverlayView: View {
 
         case 2: // label
             Text(entry.content)
-                .font(.system(size: 10, weight: .medium))
+                .font(Typography.font(.caption, weight: .medium))
                 .foregroundStyle(color)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.hairline)
                 .background(color.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
 
         default: // indicator
             Circle()

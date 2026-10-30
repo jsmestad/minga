@@ -1,0 +1,115 @@
+name: Chrome preview evidence
+
+on:
+  pull_request:
+    paths:
+      - "macos/**"
+      - "scripts/preview.sh"
+      - "scripts/chrome_preview_evidence.py"
+      - "scripts/chrome_token_migration.json"
+      - "test/scripts/chrome_preview_evidence_test.py"
+      - ".github/workflows/chrome-previews.yml"
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Main/base revision to capture before the migration"
+        required: true
+        default: "main"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-previews-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: Same-runner before and after captures
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: after
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # A separate base checkout preserves actual before production views.
+      # Fixtures and the preview-only target-membership repair are installed below.
+      - uses: actions/checkout@v4
+        with:
+          path: before
+          ref: ${{ github.event.pull_request.base.sha || inputs.base_ref }}
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: after/.tool-versions
+          version-type: strict
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned XcodeGen and image tooling
+        run: |
+          after/scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
+          python3 -m pip install Pillow==11.3.0
+
+      - name: Test preview evidence accounting
+        run: python3 -m unittest discover -s after/test/scripts -p chrome_preview_evidence_test.py
+
+      - name: Generate both revisions' protocol sources
+        run: |
+          (cd before && mix deps.get && mix protocol.gen)
+          (cd after && mix deps.get && mix protocol.gen)
+          mkdir -p "$RUNNER_TEMP/chrome-previews/before" "$RUNNER_TEMP/chrome-previews/after"
+          sw_vers > "$RUNNER_TEMP/chrome-previews/runner.txt"
+          xcodebuild -version >> "$RUNNER_TEMP/chrome-previews/runner.txt"
+          cp after/scripts/chrome_token_migration.json "$RUNNER_TEMP/chrome-previews/"
+
+      - name: Install identical fixtures and preview-only target membership in base
+        run: |
+          python3 after/scripts/chrome_preview_evidence.py prepare-base \
+            --before-root "$GITHUB_WORKSPACE/before" \
+            --after-root "$GITHUB_WORKSPACE/after" \
+            --output "$RUNNER_TEMP/chrome-previews/baseline-fixture-supplement.json"
+
+      - name: Capture before from the base checkout
+        env:
+          PREVIEW_PROJECT_ROOT: ${{ github.workspace }}/before
+          PREVIEW_OUTPUT_DIR: ${{ runner.temp }}/chrome-previews/before
+        run: |
+          set -o pipefail
+          bash after/scripts/preview.sh --all 2>&1 | tee "$RUNNER_TEMP/chrome-previews/before.log"
+
+      - name: Capture after from the proposed checkout
+        env:
+          PREVIEW_OUTPUT_DIR: ${{ runner.temp }}/chrome-previews/after
+        run: |
+          set -o pipefail
+          bash after/scripts/preview.sh --all 2>&1 | tee "$RUNNER_TEMP/chrome-previews/after.log"
+
+      - name: Build contact sheets and exact pixel manifest
+        run: |
+          python3 after/scripts/chrome_preview_evidence.py compare \
+            --before "$RUNNER_TEMP/chrome-previews/before" \
+            --after "$RUNNER_TEMP/chrome-previews/after" \
+            --before-root "$GITHUB_WORKSPACE/before" \
+            --after-root "$GITHUB_WORKSPACE/after" \
+            --inventory after/scripts/chrome_token_migration.json \
+            --output "$RUNNER_TEMP/chrome-previews"
+          cat "$RUNNER_TEMP/chrome-previews/review.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # No pixel-difference gate: macOS/Xcode rendering and live animations are
+      # review evidence. A failed real capture remains a failure, never a mock.
+      - name: Attach before and after review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-previews-${{ github.event.pull_request.number || github.run_id }}
+          path: ${{ runner.temp }}/chrome-previews
+          if-no-files-found: error
+          retention-days: 30

@@ -9,18 +9,18 @@ public struct ExtensionPanelView: View {
     public let panel: Wire.ExtensionPanelEntry
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             if !panel.title.isEmpty {
                 Text(panel.title)
                     .font(.headline)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, Spacing.xs)
             }
 
             ForEach(Array(panel.blocks.enumerated()), id: \.offset) { _, block in
                 contentBlockView(block)
             }
         }
-        .padding(12)
+        .padding(Spacing.lg)
     }
 
     @ViewBuilder
@@ -52,8 +52,8 @@ public struct ExtensionPanelView: View {
                         Text(col)
                             .font(.system(.caption, weight: .semibold))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 6)
+                            .padding(.vertical, Spacing.xs)
+                            .padding(.horizontal, Spacing.sm)
                     }
                 }
                 .background(Color.primary.opacity(0.05))
@@ -64,18 +64,18 @@ public struct ExtensionPanelView: View {
                             Text(cell)
                                 .font(.system(.body, design: .monospaced))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 3)
-                                .padding(.horizontal, 6)
+                                .padding(.vertical, Spacing.xs)
+                                .padding(.horizontal, Spacing.sm)
                         }
                     }
                     .background(rowIdx == Int(selected) ? Color.accentColor.opacity(0.15) : Color.clear)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1)))
+            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Radius.md).stroke(Color.primary.opacity(0.1)))
 
         case .keyValue(let pairs):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
                     HStack {
                         Text(pair.key)
@@ -92,14 +92,14 @@ public struct ExtensionPanelView: View {
             Divider()
 
         case .progress(let label, let percent):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(label)
                     .font(.caption)
                 ProgressView(value: Double(percent))
             }
 
         case .tree(let nodes):
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 ForEach(Array(nodes.enumerated()), id: \.offset) { _, node in
                     treeNodeView(node, depth: 0)
                 }
@@ -112,17 +112,17 @@ public struct ExtensionPanelView: View {
 
     private func treeNodeView(_ node: Wire.PanelTreeNode, depth: Int) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 if !node.children.isEmpty {
                     Image(systemName: node.expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9))
+                        .font(Typography.font(.micro))
                         .foregroundStyle(.secondary)
                 }
 
                 Text(node.label)
                     .font(.system(.body, design: .monospaced))
             }
-            .padding(.leading, CGFloat(depth) * 16)
+            .padding(.leading, CGFloat(depth) * Spacing.xl)
 
             if node.expanded {
                 ForEach(Array(node.children.enumerated()), id: \.offset) { _, child in

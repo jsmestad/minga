@@ -25,14 +25,14 @@ public struct ActivityBar: View {
     private let buttonSize: CGFloat = 28
 
     public var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: Spacing.xs) {
             ForEach(sidebarHostState.visibleSidebars) { item in
                 activityButton(for: item)
             }
 
             Spacer(minLength: 0)
         }
-        .padding(.top, 6)
+        .padding(.top, Spacing.sm)
         .frame(width: width)
         .frame(maxHeight: .infinity)
         .background(theme.treeHeaderBg)
@@ -72,17 +72,17 @@ public struct ActivityBar: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: item.icon.isEmpty ? item.semanticKind.fallbackIcon : item.icon)
-                    .font(.system(size: 15, weight: isActive ? .semibold : .regular))
+                    .font(Typography.font(.toolbar, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? theme.accent : theme.treeFg.opacity(0.45))
                     .frame(width: buttonSize, height: buttonSize)
 
                 if let badgeText = badgeText(for: item) {
                     Text(badgeText)
-                        .font(.system(size: 9, weight: .bold))
+                        .font(Typography.font(.micro, weight: .bold))
                         .foregroundStyle(theme.modeNormalFg)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 4)
+                        .padding(.horizontal, Spacing.xs)
                         .frame(minWidth: 14, minHeight: 14)
                         .background(Capsule().fill(theme.accent))
                         .offset(x: 3, y: -2)
@@ -90,7 +90,7 @@ public struct ActivityBar: View {
             }
             .frame(width: buttonSize, height: buttonSize)
             .background {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.md)
                     .fill(isActive ? theme.accent.opacity(0.14) : Color.clear)
             }
             .overlay(alignment: .leading) {

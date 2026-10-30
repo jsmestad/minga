@@ -27,9 +27,9 @@ public struct KeybindingsSettingsView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Keybindings")
                         .font(.headline)
                     Text("Bindings are read-only here. Edit config.exs for custom mappings.")
@@ -55,7 +55,7 @@ public struct KeybindingsSettingsView: View {
             }
             .searchable(text: $searchText, placement: .automatic, prompt: "Search keybindings")
         }
-        .padding(20)
+        .padding(Spacing.xxl)
     }
 }
 

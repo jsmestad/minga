@@ -57,14 +57,14 @@ public struct SearchToolbar: View {
                 .fill(theme.popupBorder.opacity(0.3))
                 .frame(height: 1)
 
-            VStack(spacing: 4) {
+            VStack(spacing: Spacing.xs) {
                 searchRow
                 if searchState.replaceMode {
                     replaceRow
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
             .background(theme.editorBg)
 
             // Bottom border
@@ -80,13 +80,13 @@ public struct SearchToolbar: View {
 
     @ViewBuilder
     private var searchRow: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             // Replace mode toggle (chevron)
             Button {
                 sendAction?(.focus(replaceMode: !searchState.replaceMode))
             } label: {
                 Image(systemName: searchState.replaceMode ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Typography.font(.caption, weight: .semibold))
                     .foregroundStyle(theme.editorFg.opacity(0.6))
                     .frame(width: 20, height: 22)
                     .contentShape(Rectangle())
@@ -110,25 +110,25 @@ public struct SearchToolbar: View {
 
                 if !matchCountText.isEmpty {
                     Text(matchCountText)
-                        .font(.system(size: 10))
+                        .font(Typography.font(.caption))
                         .foregroundStyle(
                             searchState.status != .failed
                                 ? theme.editorFg.opacity(0.5)
                                 : theme.gutterErrorFg.opacity(0.8)
                         )
-                        .padding(.trailing, 4)
+                        .padding(.trailing, Spacing.xs)
                         .lineLimit(1)
                         .fixedSize()
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .fill(theme.popupBg)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .stroke(theme.popupBorder.opacity(0.4), lineWidth: 1)
             )
 
@@ -171,7 +171,7 @@ public struct SearchToolbar: View {
 
     @ViewBuilder
     private var replaceRow: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             // Spacer to align with search field (matches the chevron toggle width)
             Color.clear
                 .frame(width: 20, height: 22)
@@ -179,16 +179,16 @@ public struct SearchToolbar: View {
             // Replace text field
             TextField("Replace", text: $replaceText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(theme.editorFg)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(theme.popupBg)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .stroke(theme.popupBorder.opacity(0.4), lineWidth: 1)
                 )
                 .onSubmit {
@@ -216,7 +216,7 @@ public struct SearchToolbar: View {
     private func toolbarButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.editorFg.opacity(0.7))
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
@@ -229,16 +229,16 @@ public struct SearchToolbar: View {
     private func toggleButton(label: String, accessibilityLabel: String, isActive: Bool, bordered: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 11, weight: isActive ? .bold : .regular, design: .monospaced))
+                .font(Typography.font(.small, weight: isActive ? .bold : .regular, design: .monospaced))
                 .foregroundStyle(isActive ? theme.accent : theme.editorFg.opacity(0.6))
                 .frame(width: 24, height: 22)
                 .background(
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(isActive ? theme.accent.opacity(0.15) : Color.clear)
                 )
                 .overlay {
                     if bordered && !isActive {
-                        RoundedRectangle(cornerRadius: 3)
+                        RoundedRectangle(cornerRadius: Radius.sm)
                             .stroke(theme.editorFg.opacity(0.15), lineWidth: 1)
                     }
                 }

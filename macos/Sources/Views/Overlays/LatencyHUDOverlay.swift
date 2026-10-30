@@ -22,8 +22,8 @@ public struct LatencyHUDOverlay: View {
                 HStack {
                     Spacer()
                     badge(model)
-                        .padding(.top, 6)
-                        .padding(.trailing, 10)
+                        .padding(.top, Spacing.sm)
+                        .padding(.trailing, Spacing.md)
                 }
                 Spacer()
             }
@@ -35,17 +35,17 @@ public struct LatencyHUDOverlay: View {
     private func badge(_ model: LatencyHUDModel) -> some View {
         Text(model.line)
             // Monospaced digits keep the badge from jittering as values change.
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .font(Typography.monospacedSmall)
             .monospacedDigit()
             .foregroundStyle(theme.treeActiveFg)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs)
             .background(theme.treeBg.opacity(0.92))
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.md)
                     .stroke(theme.treeSeparatorFg.opacity(0.5), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: Radius.md))
             .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
     }
 }

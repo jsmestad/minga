@@ -60,7 +60,7 @@ public struct StatusBarView: View {
     public var gitSyncing: Bool = false
 
     private let barHeight: CGFloat = 24
-    private let sideSpacing: CGFloat = 10
+    private let sideSpacing: CGFloat = Spacing.md
     private let leftFixedControlsWidth: CGFloat = 106
     private let rightFixedControlsWidth: CGFloat = 34
     private let maxCenterStatusWidth: CGFloat = 320
@@ -195,16 +195,16 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var centerSegment: some View {
         if state.isRecordingMacro, let reg = state.macroRegister {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Circle()
                     .fill(Color.red)
                     .frame(width: 6, height: 6)
                 Text("recording @\(String(reg))")
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.8))
             }
         } else if !state.message.isEmpty {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 if feedbackState?.showingSpinner == true, FeedbackState.isInflight(state.message) {
                     ProgressView()
                         .controlSize(.mini)
@@ -213,14 +213,14 @@ public struct StatusBarView: View {
                         .transition(.opacity)
                 }
                 Text(state.message)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
         } else if !state.diagnosticHint.isEmpty {
             Text(state.diagnosticHint)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.45))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -290,10 +290,10 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var agentStatusIcon: some View {
         if let label = agentStatusText {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 agentStatusGlyph
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.7))
                     .lineLimit(1)
             }
@@ -310,7 +310,7 @@ public struct StatusBarView: View {
         switch state.agentStatus {
         case .idle:
             Text("◯")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.55))
         case .thinking:
             ProgressView()
@@ -319,17 +319,17 @@ public struct StatusBarView: View {
                 .tint(theme.statusbarAccentFg)
         case .executingTool:
             Image(systemName: "bolt.fill")
-                .font(.system(size: 9))
+                .font(Typography.font(.micro))
                 .foregroundStyle(theme.statusbarAccentFg)
                 .frame(width: 14, height: barHeight)
         case .error:
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 9))
+                .font(Typography.font(.micro))
                 .foregroundStyle(theme.gutterErrorFg)
                 .frame(width: 14, height: barHeight)
         case .planning:
             Image(systemName: "pencil.and.outline")
-                .font(.system(size: 9))
+                .font(Typography.font(.micro))
                 .foregroundStyle(theme.agentStatusNeedsYou)
                 .frame(width: 14, height: barHeight)
         case .unknown:
@@ -342,11 +342,11 @@ public struct StatusBarView: View {
         Button(action: {
             sendAction?(.executeCommand(name: "agent_session_switcher"))
         }) {
-            HStack(spacing: 3) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: "person.2.wave.2.fill")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(Typography.font(.micro, weight: .medium))
                 Text(backgroundSubagentText)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .lineLimit(1)
             }
             .foregroundStyle(theme.modelineBarFg.opacity(0.65))
@@ -355,7 +355,7 @@ public struct StatusBarView: View {
         .help("Background sub-agents")
         .accessibilityLabel(backgroundSubagentText)
         .accessibilityHint("Switches to a background sub-agent session")
-        .padding(.horizontal, 6)
+        .padding(.horizontal, Spacing.sm)
         .pointingHandCursor()
     }
 
@@ -372,11 +372,11 @@ public struct StatusBarView: View {
         Button(action: {
             sendAction?(.executeCommand(name: command ?? "git_branch_picker"))
         }) {
-            HStack(spacing: 3) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(Typography.font(.micro, weight: .medium))
                 Text(state.gitBranch)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .lineLimit(1)
 
                 if gitSyncing {
@@ -387,20 +387,20 @@ public struct StatusBarView: View {
                 }
 
                 if state.hasGitDiffStats {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Spacing.xs) {
                         if state.gitAdded > 0 {
                             Text("+\(state.gitAdded)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(Typography.font(.small, design: .monospaced))
                                 .foregroundStyle(theme.gitAddedFg)
                         }
                         if state.gitModified > 0 {
                             Text("~\(state.gitModified)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(Typography.font(.small, design: .monospaced))
                                 .foregroundStyle(theme.gitModifiedFg)
                         }
                         if state.gitDeleted > 0 {
                             Text("-\(state.gitDeleted)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(Typography.font(.small, design: .monospaced))
                                 .foregroundStyle(theme.gitDeletedFg)
                         }
                     }
@@ -412,7 +412,7 @@ public struct StatusBarView: View {
         .help("Open branch picker")
         .accessibilityLabel("Git branch \(state.gitBranch)")
         .accessibilityHint("Opens the branch picker")
-        .padding(.horizontal, 6)
+        .padding(.horizontal, Spacing.sm)
         .pointingHandCursor()
     }
 
@@ -427,40 +427,40 @@ public struct StatusBarView: View {
                     sendAction?(.togglePanel(panel: 1))
                 }
             }) {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.sm) {
                     if state.errorCount > 0 {
-                        HStack(spacing: 2) {
+                        HStack(spacing: Spacing.hairline) {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
+                                .font(Typography.font(.micro))
                             Text("\(state.errorCount)")
-                                .font(.system(size: 11))
+                                .font(Typography.font(.small))
                         }
                         .foregroundStyle(theme.gutterErrorFg)
                     }
                     if state.warningCount > 0 {
-                        HStack(spacing: 2) {
+                        HStack(spacing: Spacing.hairline) {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 9))
+                                .font(Typography.font(.micro))
                             Text("\(state.warningCount)")
-                                .font(.system(size: 11))
+                                .font(Typography.font(.small))
                         }
                         .foregroundStyle(theme.gutterWarningFg)
                     }
                     if state.infoCount > 0 {
-                        HStack(spacing: 2) {
+                        HStack(spacing: Spacing.hairline) {
                             Image(systemName: "info.circle.fill")
-                                .font(.system(size: 9))
+                                .font(Typography.font(.micro))
                             Text("\(state.infoCount)")
-                                .font(.system(size: 11))
+                                .font(Typography.font(.small))
                         }
                         .foregroundStyle(theme.gutterInfoFg)
                     }
                     if state.hintCount > 0 {
-                        HStack(spacing: 2) {
+                        HStack(spacing: Spacing.hairline) {
                             Image(systemName: "lightbulb.fill")
-                                .font(.system(size: 9))
+                                .font(Typography.font(.micro))
                             Text("\(state.hintCount)")
-                                .font(.system(size: 11))
+                                .font(Typography.font(.small))
                         }
                         .foregroundStyle(theme.gutterHintFg)
                     }
@@ -470,7 +470,7 @@ public struct StatusBarView: View {
             .help("Show diagnostics (SPC c d)")
             .accessibilityLabel(diagnosticsAccessibilityLabel)
             .accessibilityHint("Shows diagnostics")
-            .padding(.horizontal, 4)
+            .padding(.horizontal, Spacing.xs)
             .pointingHandCursor()
         }
     }
@@ -490,13 +490,13 @@ public struct StatusBarView: View {
         case 1:
             commandButton(command: command, tooltip: "Tree-sitter parser unavailable") {
                 Image(systemName: "leaf.fill")
-                    .font(.system(size: 9))
+                    .font(Typography.font(.micro))
                     .foregroundStyle(theme.gutterErrorFg)
             }
         case 2:
             commandButton(command: command, tooltip: "Tree-sitter parser restarting") {
                 Image(systemName: "leaf.fill")
-                    .font(.system(size: 9))
+                    .font(Typography.font(.micro))
                     .foregroundStyle(theme.gutterWarningFg)
             }
         default:
@@ -509,9 +509,9 @@ public struct StatusBarView: View {
         let info = lspInfo(state.lspStatus)
         commandButton(command: command, tooltip: info.tooltip) {
             Image(systemName: info.icon)
-                .font(.system(size: 9))
+                .font(Typography.font(.micro))
                 .foregroundStyle(info.color)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, Spacing.xs)
         }
     }
 
@@ -531,7 +531,7 @@ public struct StatusBarView: View {
             sendAction?(.executeCommand(name: command ?? "indent_picker"))
         }) {
             Text("\(state.indent.label):\(state.indent.size)")
-                .font(.system(size: 11, design: .monospaced))
+                .font(Typography.font(.small, design: .monospaced))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.65))
         }
         .buttonStyle(.plain)
@@ -546,14 +546,14 @@ public struct StatusBarView: View {
         Button(action: {
             sendAction?(.executeCommand(name: command ?? "set_language"))
         }) {
-            HStack(spacing: 3) {
+            HStack(spacing: Spacing.xs) {
                 if !state.icon.isEmpty {
                     Text(state.icon)
-                        .font(.custom("Symbols Nerd Font Mono", size: 11))
+                        .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.small.rawValue))
                         .foregroundStyle(state.iconColor)
                 }
                 Text(state.filetypeDisplay)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.6))
             }
         }
@@ -573,9 +573,9 @@ public struct StatusBarView: View {
             Button(action: {
                 sendAction?(.executeCommand(name: command ?? "buffer_list"))
             }) {
-                HStack(spacing: 3) {
+                HStack(spacing: Spacing.xs) {
                     Text(displayText)
-                        .font(.system(size: 11))
+                        .font(Typography.font(.small))
                         .foregroundStyle(theme.modelineBarFg.opacity(0.65))
                         .lineLimit(1)
                     if modelineText.isEmpty && state.isDirty {
@@ -604,18 +604,18 @@ public struct StatusBarView: View {
     private var positionSegment: some View {
         if state.isAgentWindow {
             Text("\(state.messageCount) msgs")
-                .font(.system(size: 11, design: .monospaced))
+                .font(Typography.font(.small, design: .monospaced))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.7))
         } else if state.selection.isActive {
             Text(state.selection.displayText)
-                .font(.system(size: 11, design: .monospaced))
+                .font(Typography.font(.small, design: .monospaced))
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .foregroundStyle(theme.modelineBarFg.opacity(0.7))
                 .help(state.selection.displayText)
         } else {
             Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
-                .font(.system(size: 11, design: .monospaced))
+                .font(Typography.font(.small, design: .monospaced))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.7))
                 .help("Line \(state.cursorLine), Column \(state.cursorCol)")
         }
@@ -624,7 +624,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var percentSegment: some View {
         Text(percentText)
-            .font(.system(size: 11, design: .monospaced))
+            .font(Typography.font(.small, design: .monospaced))
             .foregroundStyle(theme.modelineBarFg.opacity(0.55))
             .help("Position in file")
     }
@@ -644,7 +644,7 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var showcmdBadge: some View {
         Text(state.pendingKeys)
-            .font(.system(size: 11, design: .monospaced))
+            .font(Typography.font(.small, design: .monospaced))
             .monospacedDigit()
             .foregroundStyle(theme.modelineBarFg.opacity(0.45))
             .lineLimit(1)
@@ -656,12 +656,12 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var safeModeBadge: some View {
         Text("[SAFE]")
-            .font(.system(size: 10, weight: .semibold))
+            .font(Typography.font(.caption, weight: .semibold))
             .foregroundStyle(theme.modelineInfoFg)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.hairline)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .fill(theme.modelineInfoBg)
             )
             .help("Safe mode enabled")
@@ -671,18 +671,18 @@ public struct StatusBarView: View {
     @ViewBuilder
     private var modeBadge: some View {
         let (bg, fg) = modeColors(state.mode)
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             if state.isSafeMode {
                 safeModeBadge
             }
 
             Text(state.modeName)
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typography.font(.caption, weight: .semibold))
                 .foregroundStyle(fg)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.hairline)
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(bg)
                 )
         }
@@ -701,7 +701,7 @@ public struct StatusBarView: View {
 
     @ViewBuilder
     private func customModelineGroup(_ group: StatusBarSegmentGroup) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Spacing.hairline) {
             ForEach(group.segments) { segment in
                 StatusBarModelineSegmentView(segment: segment, sendAction: sendAction)
             }
@@ -712,7 +712,7 @@ public struct StatusBarView: View {
 
     @ViewBuilder
     private var leftFixedControls: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             // File tree toggle
             StatusBarIconButton(
                 icon: "sidebar.leading",
@@ -753,7 +753,7 @@ public struct StatusBarView: View {
             Rectangle()
                 .fill(theme.modelineBarFg.opacity(0.1))
                 .frame(width: 1, height: 14)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, Spacing.sm)
         }
     }
 
@@ -774,7 +774,7 @@ public struct StatusBarView: View {
                 sendAction?(.togglePanel(panel: 3))
             }
         }
-        .padding(.trailing, 8)
+        .padding(.trailing, Spacing.md)
     }
 
     private func leftStatusZone(_ layout: StatusBarModelineLayout) -> some View {
@@ -823,7 +823,7 @@ public struct StatusBarView: View {
     }
 
     private func nativeModelineGroups(_ groups: [StatusBarSegmentGroup]) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.md) {
             ForEach(groups) { group in
                 nativeModelineGroup(group)
             }
@@ -981,14 +981,14 @@ private struct StatusBarModelineSegmentView: View {
         if segment.isItalic {
             text
                 .italic()
-                .padding(.horizontal, 6)
+                .padding(.horizontal, Spacing.sm)
                 .frame(height: 18, alignment: .center)
                 .background(customBackground)
                 .contentShape(Rectangle())
                 .clipped()
         } else {
             text
-                .padding(.horizontal, 6)
+                .padding(.horizontal, Spacing.sm)
                 .frame(height: 18, alignment: .center)
                 .background(customBackground)
                 .contentShape(Rectangle())
@@ -1002,7 +1002,7 @@ private struct StatusBarModelineSegmentView: View {
     }
 
     private var customBackground: some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: Radius.sm)
             .fill(color(segment.bgColor).opacity(0.18))
     }
 
@@ -1019,10 +1019,10 @@ private struct StatusBarModelineSegmentView: View {
 
     private var segmentFont: Font {
         if StatusBarModelineFont.containsPrivateUseGlyph(segment.text) {
-            return .custom("Symbols Nerd Font Mono", size: 11)
+            return .custom("Symbols Nerd Font Mono", size: Typography.Step.small.rawValue)
         }
 
-        return .system(size: 11)
+        return Typography.font(.small)
     }
 
     private var segmentFontWeight: Font.Weight {
@@ -1067,14 +1067,14 @@ private struct StatusBarIconButton: View {
 
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(iconColor)
                 .frame(width: 26, height: barHeight)
                 .contentShape(Rectangle())
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(barFg.opacity(isHovered ? 0.08 : 0))
-                        .padding(.horizontal, 2)
+                        .padding(.horizontal, Spacing.hairline)
                 )
                 .animation(
                     reduceMotion ? nil : .easeInOut(duration: 0.15),

@@ -48,8 +48,8 @@ public enum TextHighlighting {
     public static func attributedString(
         _ text: String,
         matchPositions: Set<Int>,
-        baseFont: Font = .system(size: 13),
-        matchFont: Font = .system(size: 13, weight: .semibold),
+        baseFont: Font = Typography.font(.emphasis),
+        matchFont: Font = Typography.font(.emphasis, weight: .semibold),
         baseColor: Color,
         matchColor: Color
     ) -> AttributedString {

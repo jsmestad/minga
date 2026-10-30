@@ -35,7 +35,7 @@ public struct ObservatoryView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             HStack {
                 Text("BEAM Observatory")
                     .font(.headline)
@@ -50,7 +50,7 @@ public struct ObservatoryView: View {
                 .font(.caption)
                 .foregroundStyle(theme.treeFg.opacity(0.55))
         }
-        .padding(Spacing.md)
+        .padding(Spacing.lg)
     }
 
     private var treeList: some View {
@@ -60,14 +60,14 @@ public struct ObservatoryView: View {
                     row(node)
                 }
             }
-            .padding(.vertical, Spacing.sm)
+            .padding(.vertical, Spacing.md)
         }
         .focusable(false)
         .focusEffectDisabled()
     }
 
     private func row(_ node: ObservatoryNode) -> some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: Spacing.md) {
             Button {
                 activateRow(node)
             } label: {
@@ -94,10 +94,10 @@ public struct ObservatoryView: View {
         // 12pt per depth level (down from 14) keeps deep nodes from starving
         // the name column; the right-side memory/sparkline cluster is tightened
         // in rowMainContent for the same reason.
-        .padding(.leading, CGFloat(node.depth) * Spacing.md + Spacing.sm)
-        .padding(.trailing, Spacing.sm)
+        .padding(.leading, CGFloat(node.depth) * Spacing.lg + Spacing.md)
+        .padding(.trailing, Spacing.md)
         .padding(.vertical, Spacing.xs)
-        .background(selectedNodeId == node.id ? theme.treeSelectionBg.opacity(0.55) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .background(selectedNodeId == node.id ? theme.treeSelectionBg.opacity(0.55) : Color.clear, in: RoundedRectangle(cornerRadius: Radius.md))
     }
 
     private func rowMainContent(_ node: ObservatoryNode) -> some View {

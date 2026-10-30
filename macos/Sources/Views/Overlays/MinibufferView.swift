@@ -45,10 +45,10 @@ public struct MinibufferView: View {
                 HStack {
                     Spacer()
                     Text("↕ \(state.candidates.count) of \(state.totalCandidates)")
-                        .font(.system(size: 10))
+                        .font(Typography.font(.caption))
                         .foregroundStyle(theme.popupFg.opacity(0.3))
-                        .padding(.trailing, 12)
-                        .padding(.vertical, 2)
+                        .padding(.trailing, Spacing.lg)
+                        .padding(.vertical, Spacing.hairline)
                 }
             }
 
@@ -89,9 +89,9 @@ public struct MinibufferView: View {
         HStack(spacing: 0) {
             // Prompt prefix (accent-colored)
             Text(state.prompt)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.font(.emphasis, weight: .semibold))
                 .foregroundStyle(theme.accent)
-                .padding(.leading, 12)
+                .padding(.leading, Spacing.lg)
 
             if state.isInputMode {
                 // Input text with cursor
@@ -106,7 +106,7 @@ public struct MinibufferView: View {
                     actionKeyBadges
                 } else {
                     Text(state.context)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Typography.font(.small, design: .monospaced))
                         .foregroundStyle(theme.popupFg.opacity(0.4))
                 }
             }
@@ -131,7 +131,7 @@ public struct MinibufferView: View {
             // Text before cursor
             if cursorIdx > 0 {
                 Text(String(chars[0..<cursorIdx]))
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(Typography.font(.emphasis, design: .monospaced))
                     .foregroundStyle(theme.popupFg)
             }
 
@@ -143,11 +143,11 @@ public struct MinibufferView: View {
             // Text after cursor
             if cursorIdx < chars.count {
                 Text(String(chars[cursorIdx...]))
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(Typography.font(.emphasis, design: .monospaced))
                     .foregroundStyle(theme.popupFg)
             }
         }
-        .padding(.leading, 4)
+        .padding(.leading, Spacing.xs)
     }
 
     // MARK: - Action key badges (for prompt modes like substitute confirm)
@@ -162,15 +162,15 @@ public struct MinibufferView: View {
         let keysPart = parts.first.map(String.init) ?? state.context
         let countPart = parts.count > 1 ? String(parts[1]) : ""
 
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             ForEach(keysPart.split(separator: "/"), id: \.self) { key in
                 Text(String(key))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(Typography.monospacedSmall)
                     .foregroundStyle(theme.popupFg.opacity(0.8))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.hairline)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: Radius.sm)
                             .fill(theme.popupFg.opacity(0.1))
                     )
                     .accessibilityLabel("Press \(key)")
@@ -178,7 +178,7 @@ public struct MinibufferView: View {
 
             if !countPart.isEmpty {
                 Text(countPart)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             }
         }
@@ -221,14 +221,14 @@ public struct MinibufferView: View {
         Button {
             activate(candidate, offeredGeneration: offeredGeneration)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.md) {
                 // Command name with fuzzy match highlighting
                 highlightedLabel(candidate, isSelected: isSelected)
 
                 // Description (dimmed)
                 if !candidate.description.isEmpty {
                     Text(candidate.description)
-                        .font(.system(size: 12))
+                        .font(Typography.font(.body))
                         .foregroundStyle(isSelected
                             ? theme.popupSelFg.opacity(0.75)
                             : theme.popupFg.opacity(0.4))
@@ -241,21 +241,21 @@ public struct MinibufferView: View {
                 // Keybinding annotation (right-aligned)
                 if !candidate.annotation.isEmpty {
                     Text(candidate.annotation)
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(Typography.font(.small, design: .monospaced))
                         .foregroundStyle(isSelected
                             ? theme.popupSelFg.opacity(0.65)
                             : theme.popupFg.opacity(0.3))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, Spacing.pixel)
                         .background(
-                            RoundedRectangle(cornerRadius: 3)
+                            RoundedRectangle(cornerRadius: Radius.sm)
                                 .fill(isSelected
                                     ? theme.popupSelFg.opacity(0.08)
                                     : theme.popupFg.opacity(0.06))
                         )
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Spacing.lg)
             .frame(height: candidateHeight)
             .background(candidateBackground(isSelected: isSelected, isHovered: isHovered))
             .contentShape(Rectangle())
@@ -302,7 +302,7 @@ public struct MinibufferView: View {
     private func highlightedLabel(_ candidate: MinibufferCandidate, isSelected: Bool) -> some View {
         if candidate.matchPositions.isEmpty {
             Text(candidate.label)
-                .font(.system(size: 13, design: .monospaced))
+                .font(Typography.font(.emphasis, design: .monospaced))
                 .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
                 .lineLimit(1)
         } else {
@@ -311,8 +311,8 @@ public struct MinibufferView: View {
             let attributed = TextHighlighting.attributedString(
                 candidate.label,
                 matchPositions: candidate.matchPositions,
-                baseFont: .system(size: 13, design: .monospaced),
-                matchFont: .system(size: 13, weight: .semibold, design: .monospaced),
+                baseFont: Typography.font(.emphasis, design: .monospaced),
+                matchFont: Typography.font(.emphasis, weight: .semibold, design: .monospaced),
                 baseColor: baseColor,
                 matchColor: matchColor
             )
@@ -324,13 +324,13 @@ public struct MinibufferView: View {
     @ViewBuilder
     private func candidateBackground(isSelected: Bool, isHovered: Bool) -> some View {
         if isSelected {
-            RoundedRectangle(cornerRadius: 3)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .fill(theme.popupSelBg)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, Spacing.xs)
         } else if isHovered {
-            RoundedRectangle(cornerRadius: 3)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .fill(theme.popupFg.opacity(0.06))
-                .padding(.horizontal, 4)
+                .padding(.horizontal, Spacing.xs)
         } else {
             Color.clear
         }

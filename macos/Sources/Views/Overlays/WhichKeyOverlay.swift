@@ -32,17 +32,17 @@ public struct WhichKeyOverlay: View {
                 if !state.prefix.isEmpty {
                     HStack {
                         Text(state.prefix)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .font(Typography.font(.small, weight: .semibold, design: .monospaced))
                             .foregroundStyle(theme.popupKeyFg)
                         Spacer()
                         if state.pageCount > 1 {
                             Text("\(state.page + 1)/\(state.pageCount)")
-                                .font(.system(size: 10))
+                                .font(Typography.font(.caption))
                                 .foregroundStyle(theme.popupFg.opacity(0.4))
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.sm)
 
                     Rectangle()
                         .fill(theme.popupBorder.opacity(0.3))
@@ -51,21 +51,21 @@ public struct WhichKeyOverlay: View {
 
                 // Binding grid
                 bindingGrid
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
             }
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .fill(theme.popupBg)
                     .shadow(color: .black.opacity(0.4), radius: 12, y: -4)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .frame(maxWidth: columnWidth * CGFloat(min(columnCount, maxColumns)) + 24)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.horizontal, Spacing.xl)
+            .padding(.bottom, Spacing.md)
             .allowsHitTesting(false)
             .transition(.opacity.animation(.easeInOut(duration: animDuration)))
         }
@@ -81,7 +81,7 @@ public struct WhichKeyOverlay: View {
         let cols = columnCount
         let rows = max(1, (state.bindings.count + cols - 1) / cols)
 
-        HStack(alignment: .top, spacing: 4) {
+        HStack(alignment: .top, spacing: Spacing.xs) {
             ForEach(0..<cols, id: \.self) { col in
                 VStack(spacing: 0) {
                     ForEach(0..<rows, id: \.self) { row in
@@ -98,16 +98,16 @@ public struct WhichKeyOverlay: View {
 
     @ViewBuilder
     private func bindingRow(_ binding: WhichKeyBinding) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             // Key badge
             Text(binding.key)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(Typography.monospacedSmall)
                 .foregroundStyle(theme.popupKeyFg)
                 .frame(minWidth: 24, alignment: .trailing)
 
             // Description
             Text(binding.description)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(binding.isGroup ? theme.popupGroupFg : theme.popupFg.opacity(0.7))
                 .lineLimit(1)
                 .truncationMode(.tail)

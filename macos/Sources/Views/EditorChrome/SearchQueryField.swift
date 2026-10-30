@@ -24,7 +24,7 @@ struct SearchQueryField: NSViewRepresentable {
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 12)
+        field.font = .systemFont(ofSize: Typography.Step.body.rawValue)
         field.lineBreakMode = .byClipping
         field.isSelectable = true
         field.isEditable = sendAction != nil

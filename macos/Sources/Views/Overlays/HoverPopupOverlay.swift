@@ -34,12 +34,12 @@ public struct HoverPopupOverlay: View {
             popupContent(content)
                 .frame(maxWidth: maxWidth)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Radius.lg)
                         .fill(theme.popupBg)
                         .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Radius.lg)
                         .strokeBorder(
                             content.focused
                                 ? theme.accent.opacity(0.8)
@@ -60,7 +60,7 @@ public struct HoverPopupOverlay: View {
     @ViewBuilder
     private func popupContent(_ content: HoverPopupContent) -> some View {
         ScrollView(.vertical, showsIndicators: showsScrollIndicators(content)) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 ForEach(content.visibleLines) { line in
                     lineView(line)
                 }
@@ -68,17 +68,17 @@ public struct HoverPopupOverlay: View {
                 if content.openActionName != nil {
                     Divider()
                         .background(theme.popupBorder.opacity(0.3))
-                        .padding(.vertical, 4)
+                        .padding(.vertical, Spacing.xs)
 
                     Button("Open") {
                         sendAction?(.open)
                     }
                     .buttonStyle(.borderless)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.font(.body, weight: .semibold))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
         }
     }
 
@@ -91,7 +91,7 @@ public struct HoverPopupOverlay: View {
         case .rule:
             Divider()
                 .background(theme.popupBorder.opacity(0.3))
-                .padding(.vertical, 4)
+                .padding(.vertical, Spacing.xs)
 
         case .code, .codeHeader:
             HStack(spacing: 0) {
@@ -100,16 +100,16 @@ public struct HoverPopupOverlay: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.hairline)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .fill(theme.popupBg.opacity(0.6))
             )
-            .font(.system(size: 12, design: .monospaced))
+            .font(Typography.font(.body, design: .monospaced))
 
         case .blockquote:
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.md) {
                 Rectangle()
                     .fill(theme.popupBorder.opacity(0.5))
                     .frame(width: 3)
@@ -120,7 +120,7 @@ public struct HoverPopupOverlay: View {
                     }
                 }
             }
-            .padding(.vertical, 1)
+            .padding(.vertical, Spacing.pixel)
 
         case .header:
             HStack(spacing: 0) {
@@ -128,7 +128,7 @@ public struct HoverPopupOverlay: View {
                     segmentText(seg)
                 }
             }
-            .padding(.bottom, 2)
+            .padding(.bottom, Spacing.hairline)
 
         default:
             HStack(spacing: 0) {
@@ -151,25 +151,25 @@ public struct HoverPopupOverlay: View {
         let style = seg.style
         switch style {
         case .bold:
-            return .system(size: 13, weight: .semibold)
+            return Typography.font(.emphasis, weight: .semibold)
         case .italic:
-            return .system(size: 13).italic()
+            return Typography.font(.emphasis).italic()
         case .boldItalic:
-            return .system(size: 13, weight: .semibold).italic()
+            return Typography.font(.emphasis, weight: .semibold).italic()
         case .code, .codeBlock, .codeContent:
-            return .system(size: 12, design: .monospaced)
+            return Typography.font(.body, design: .monospaced)
         case .syntaxHighlighted:
             let weight: Font.Weight = seg.flags & 0x01 != 0 ? .semibold : .regular
-            let font = Font.system(size: 12, weight: weight, design: .monospaced)
+            let font = Typography.font(.body, weight: weight, design: .monospaced)
             return seg.flags & 0x02 != 0 ? font.italic() : font
         case .header1:
-            return .system(size: 16, weight: .bold)
+            return Typography.font(.heading, weight: .bold)
         case .header2:
-            return .system(size: 14, weight: .bold)
+            return Typography.font(.title, weight: .bold)
         case .header3:
-            return .system(size: 13, weight: .semibold)
+            return Typography.font(.emphasis, weight: .semibold)
         default:
-            return .system(size: 13)
+            return Typography.font(.emphasis)
         }
     }
 
