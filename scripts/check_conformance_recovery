@@ -289,7 +289,7 @@ def main():
                         shutil.copytree(source, destination, symlinks=False, dirs_exist_ok=True)
                 environment = dict(os.environ, MIX_ENV="test", MIX_DEPS_PATH=str(worktree / "deps"),
                                    MIX_BUILD_PATH=str(worktree / "_build/test"), NO_COLOR="1")
-                pure_command = ["mix", "test", PURE_TEST, "--seed", "0", "--trace"]
+                pure_command = ["mix", "test.llm", PURE_TEST, "--seed", "0"]
                 pure = command(pure_command, worktree, "pure-control", environment)
                 evidence["runs"]["pure-control"] = pure
                 pure_summary = re.search(r"(\d+) tests?, 0 failures?", log_text(output, pure))
