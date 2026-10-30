@@ -22,6 +22,8 @@ struct FocusReplayWindowTests {
 
     @Test("same shared frames establish responder and AX identity", arguments: conformanceSwiftEntries.filter { $0.category == "focus" && $0.go })
     func replay(_ entry: ConformanceIndexEntry) async throws {
+        let application = try FocusTestApplicationScope(entry.name)
+        defer { application.close() }
         var context = try FocusReplayWindowContext()
         defer { context.close() }
         try await context.waitUntilAttached()
@@ -49,13 +51,14 @@ struct FocusReplayWindowTests {
                 editor.focusPolicy.firstFrameDidRender()
                 // MingaApp requests presentation focus after dismissing its first-frame overlay.
                 // Reproduce that startup event once after attachment, rather than repairing focus while polling.
-                _ = editor.focusPolicy.requestPresentationFocus()
+                let requested = editor.focusPolicy.requestPresentationFocus()
+                print("[Focus \(entry.name) step \(index)] presentationRequested=\(requested) \(application.diagnostics)")
             }
             let expect = try #require(step["expect"] as? [String: Any])
             let target = try #require(expect["focus_target"] as? [String: Any])
             ConformanceTranscriptTests.assertFocusTarget(expect, gui: gui, index: index, name: entry.name)
             let kind = try #require(target["responder"] as? String)
-            let responder = try await settle(kind: kind, editor: editor, host: host, window: window)
+            let responder = try await settle(kind: kind, editor: editor, host: host, window: window, application: application)
             try assertIdentity(responder, kind: kind, editor: editor, window: window)
 
             // Explicit lifecycle replay is separate from observing the frame's
@@ -72,19 +75,29 @@ struct FocusReplayWindowTests {
             editor.focusPolicy.windowDidBecomeKey()
             editor.focusPolicy.pointerReturnedToEditor()
             editor.focusPolicy.fileDropDidComplete()
-            _ = try await settle(kind: kind, editor: editor, host: host, window: window)
+            _ = try await settle(kind: kind, editor: editor, host: host, window: window, application: application)
             try assertIdentity(responder, kind: kind, editor: editor, window: window)
         }
     }
 
-    private func settle(kind: String, editor: EditorNSView, host: NSView, window: NSWindow) async throws -> NSView {
+    private func settle(
+        kind: String, editor: EditorNSView, host: NSView, window: NSWindow,
+        application: FocusTestApplicationScope
+    ) async throws -> NSView {
         for _ in 0..<100 {
-            if let target = responder(kind: kind, editor: editor, host: host), hasFocus(target, in: window) {
+            if NSApp.isActive, window.isKeyWindow,
+               let target = responder(kind: kind, editor: editor, host: host),
+               target.window === window, hasFocus(target, in: window) {
                 return target
             }
             try await Task.sleep(for: .milliseconds(10))
         }
         let target = try #require(responder(kind: kind, editor: editor, host: host), "Production field did not register: \(kind)")
+        try #require(
+            NSApp.isActive && window.isKeyWindow,
+            "Production replay requires active/key presentation; visible=\(window.isVisible) canBecomeKey=\(window.canBecomeKey): \(application.diagnostics)"
+        )
+        try #require(target.window === window, "Committed responder must belong to the replay window")
         try #require(
             hasFocus(target, in: window),
             "Committed responder not focused: \(kind); attached=\(editor.window === window) visible=\(window.isVisible) key=\(window.isKeyWindow) active=\(NSApp.isActive) pending=\(editor.focusPolicy.pendingOwnerApply) firstResponder=\(String(describing: window.firstResponder))"
@@ -110,28 +123,25 @@ struct FocusReplayWindowTests {
     }
 
     private func assertIdentity(_ target: NSView, kind: String, editor: EditorNSView, window: NSWindow) throws {
+        try #require(NSApp.isActive && window.isKeyWindow, "AX identity requires the actual active key window")
+        try #require(target.window === window)
         #expect(hasFocus(target, in: window), "First responder must belong to \(kind)")
         if target === editor {
             let panes = try #require(editor.accessibilityChildren() as? [EditorPaneAccessibilityElement])
             let pane = try #require(panes.first)
-            if NSApp.isActive && window.isKeyWindow {
-                #expect(editor.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === pane)
-            } else {
-                #expect(editor.accessibilityFocusedUIElement == nil)
-            }
+            #expect(editor.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === pane)
         } else {
             let field = try #require(target as? NSTextField)
             let fieldEditor = try #require(field.currentEditor())
             #expect(window.firstResponder === fieldEditor)
             #expect(editor.accessibilityFocusedUIElement == nil)
-            if NSApp.isActive && window.isKeyWindow {
-                let selector = NSSelectorFromString("accessibilityFocusedUIElement")
-                try #require(NSApp.responds(to: selector))
-                let focused = NSApp.perform(selector)?.takeUnretainedValue()
-                #expect(focused === field || focused === fieldEditor,
-                        "AX focus must identify the same production native field as the responder")
-            }
+            let selector = NSSelectorFromString("accessibilityFocusedUIElement")
+            try #require(NSApp.responds(to: selector))
+            let focused = NSApp.perform(selector)?.takeUnretainedValue()
+            #expect(focused === field || focused === fieldEditor,
+                    "AX focus must identify the same production native field as the responder")
         }
+        print("[Focus identity] responder=\(kind) fieldID=\(target.accessibilityIdentifier() ?? "-") active=\(NSApp.isActive) key=\(window.isKeyWindow) owner=\(String(describing: editor.focusPolicy.decodedOwner)) firstResponder=\(String(describing: window.firstResponder))")
     }
 }
 

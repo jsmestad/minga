@@ -119,23 +119,7 @@ swift_build() {
 }
 
 swift_test() {
-  local result="$MINGA_DONE_DIR/swift.xcresult"
-  (
-    cd macos || exit
-    xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData \
-      CODE_SIGNING_ALLOWED=NO -only-testing:MingaTests -resultBundlePath "$result"
-  ) >"$MINGA_DONE_DIR/swift-test.log" 2>&1
-  local rc=$?
-  if [ "$rc" -ne 0 ]; then
-    printf 'xcresult: %s\nTest log: %s/swift-test.log\n' "$result" "$MINGA_DONE_DIR"
-    if [ ! -d "$result" ]; then
-      echo "No xcresult bundle was produced; inspect the test log for build or launch errors."
-    elif ! xcrun xcresulttool get test-results tests --path "$result" |
-      jq -er '[.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed") | .nodeIdentifier // .name] | unique | if length == 0 then error("no failing test cases recorded") else .[] end'; then
-      echo "Could not summarize failing tests; inspect the xcresult bundle and test log."
-    fi
-  fi
-  return "$rc"
+  scripts/test_macos_unit --output-dir "$MINGA_DONE_DIR/native-unit"
 }
 
 run format mix format --check-formatted

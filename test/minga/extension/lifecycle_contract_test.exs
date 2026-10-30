@@ -1534,11 +1534,24 @@ defmodule Minga.Extension.LifecycleContractTest do
     old_instance = instance_pid(ctx, name)
     old_runtime_supervisor = runtime_supervisor_pid(ctx, name)
     supervisor_ref = Process.monitor(old_runtime_supervisor)
-    opts = Keyword.put(ctx.opts, :callback_timeout_ms, 25)
+    timeout_ms = 5_000
+    opts = Keyword.put(ctx.opts, :callback_timeout_ms, timeout_ms)
 
     stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+    assert_receive {:infinite_shutdown_ready, ^runtime}
 
-    assert {:error, {:runtime_termination_failed, {:transition_timeout, :terminate, 25}}} =
+    worker_id =
+      eventually(fn ->
+        case :sys.get_state(old_instance) do
+          %{phase: {:stopping, %{worker: %Worker{id: id, kind: :terminate}}}} -> id
+          _state -> nil
+        end
+      end)
+
+    # Exercise the correlated deadline after termination starts, not a scheduler-dependent wall-clock race.
+    send(old_instance, {Worker, :timeout, worker_id, :terminate})
+
+    assert {:error, {:runtime_termination_failed, {:transition_timeout, :terminate, ^timeout_ms}}} =
              Task.await(stop_task, 1_000)
 
     assert_receive {:DOWN, ^runtime_ref, :process, ^runtime, :killed}

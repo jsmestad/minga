@@ -118,6 +118,28 @@ The rest of the docs are organized by what you're trying to do.
 
 Bug reports, feature ideas, and code are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
 
+### Native macOS unit tests
+
+After generating the Xcode project (`cd macos && xcodegen generate`), run
+`scripts/test_macos_unit` from the repository root. This is the authoritative
+Xcode/Metal unit-test entrypoint used by CI and the Swift stage of `make done`;
+SwiftPM is not a substitute for this native gate.
+
+The entrypoint runs three sequential Xcode actions: ordinary `MingaTests`
+excluding the two focus suites, then `EditorFocusPolicyTests` and
+`FocusReplayWindowTests` in separate test-runner processes. These exclusions
+route tests into exclusive AppKit presentation processes; they do not omit
+acceptance coverage. Do not combine the focus selectors or run competing GUI
+tests concurrently: suite-local `.serialized` does not isolate application
+activation and key-window state from other suites.
+
+Use `--output-dir PATH` to retain evidence elsewhere (default:
+`macos-unit-evidence/`). Each invocation preserves separate action logs and
+`.xcresult` bundles, and writes `results.json` with the three actual result
+summaries/test trees, commands, exit statuses, timings, and aggregate counts.
+Missing results, zero executed tests, incomplete focus coverage, or missing or
+reused focus test-runner PIDs fail the gate even if `xcodebuild` exits zero.
+
 ## License
 
 MIT

@@ -22,7 +22,12 @@ defmodule Minga.DoneGateTest do
     dir = String.trim(canonical_dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    for path <- ["scripts/lint", "scripts/credo_changed", "scripts/lib/changed_files.sh"] do
+    for path <- [
+          "scripts/lint",
+          "scripts/credo_changed",
+          "scripts/test_macos_unit",
+          "scripts/lib/changed_files.sh"
+        ] do
       File.cp!(Path.join(@root, path), Path.join(dir, path))
     end
 
@@ -39,7 +44,7 @@ defmodule Minga.DoneGateTest do
     bin = Path.join(dir, "bin")
     File.mkdir_p!(bin)
 
-    for command <- ~w(bash git awk tr mktemp date cat rm mkdir grep jq) do
+    for command <- ~w(bash git awk tr mktemp date cat rm mkdir grep jq python3) do
       File.ln_s!(System.find_executable(command), Path.join(bin, command))
     end
 
@@ -174,7 +179,6 @@ defmodule Minga.DoneGateTest do
     {output, 0} = gate(ctx)
     assert output =~ "[skip] swift.build"
     assert output =~ "[skip] swift.test"
-    assert length(Regex.scan(~r/xcodebuild not found/, output)) == 2
   end
 
   test "protocol schema changes run both Swift stages", ctx do
@@ -193,12 +197,17 @@ defmodule Minga.DoneGateTest do
 
     assert output =~ "[pass] swift.build"
     assert output =~ "[FAIL] swift.test"
-    assert output =~ "xcresult: #{ctx.dir}/results/swift.xcresult"
+    evidence = native_results(ctx.dir)
+    ordinary = hd(evidence["actions"])
+    bundle = Path.join([ctx.dir, "results/native-unit", ordinary["result_bundle"]])
+    log = Path.join([ctx.dir, "results/native-unit", ordinary["log"]])
+    assert output =~ "xcresult: #{bundle}"
     assert output =~ "RenderingTests/testCaret()"
     refute output =~ "testPassing"
     refute output =~ "NOISY"
-    assert File.dir?(Path.join(ctx.dir, "results/swift.xcresult"))
-    assert File.read!(Path.join(ctx.dir, "results/swift-test.log")) =~ "NOISY TEST OUTPUT"
+    assert File.dir?(bundle)
+    assert File.read!(log) =~ "NOISY TEST OUTPUT"
+    refute evidence["success"]
     assert File.read!(Path.join(ctx.dir, "results/swift-build.log")) =~ "NOISY BUILD OUTPUT"
   end
 
@@ -212,7 +221,7 @@ defmodule Minga.DoneGateTest do
     assert output =~ "swift.build failed"
     assert output =~ "Build log: #{ctx.dir}/results/swift-build.log"
     refute output =~ "NOISY"
-    refute File.exists?(Path.join(ctx.dir, "results/swift-test.log"))
+    refute File.exists?(Path.join(ctx.dir, "results/native-unit/results.json"))
   end
 
   test "artifact setup failure preserves earlier stage failures", ctx do
@@ -237,25 +246,56 @@ defmodule Minga.DoneGateTest do
     write!(ctx.dir, "macos/project.yml", "changed\n")
     {output, 1} = gate(ctx, [{"SWIFT_EXIT", "65"}, {"NO_RESULT", "1"}])
     assert output =~ "No xcresult bundle was produced"
-    assert output =~ "Test log: #{ctx.dir}/results/swift-test.log"
+    evidence = native_results(ctx.dir)
+    ordinary = hd(evidence["actions"])
+    assert output =~ "Test log: #{Path.join([ctx.dir, "results/native-unit", ordinary["log"]])}"
     refute output =~ "NOISY"
   end
 
   defp install_swift!(dir) do
     executable!(dir, "xcodebuild", """
     echo 'NOISY TEST OUTPUT'
+    case "$*" in
+      *-only-testing:MingaTests/EditorFocusPolicyTests*) echo '[Focus application nested native modal] startup pid=4101' ;;
+      *-only-testing:MingaTests/FocusReplayWindowTests*) echo '[Focus application picker_open_close] startup pid=4102' ;;
+    esac
     if [ "${NO_RESULT:-0}" = 0 ]; then mkdir -p "${@: -1}"; fi
     exit "${SWIFT_EXIT:-0}"
     """)
 
-    executable!(dir, "xcrun", """
-    cat <<'JSON'
-    {"testNodes":[{"nodeType":"Test Suite","result":"Failed","children":[
-      {"nodeType":"Test Case","result":"Failed","name":"testCaret()","nodeIdentifier":"RenderingTests/testCaret()"},
-      {"nodeType":"Test Case","result":"Passed","nodeIdentifier":"RenderingTests/testPassing()"}
-    ]}]}
-    JSON
+    executable!(dir, "xcrun", ~S"""
+    case "$*" in
+      *"test-results summary"*)
+        case "${@: -1}" in
+          *focus-policy.xcresult) echo '{"totalTestCount":1,"passedTests":1,"failedTests":0,"result":"Passed"}' ;;
+          *focus-replay.xcresult) echo '{"totalTestCount":8,"passedTests":8,"failedTests":0,"result":"Passed"}' ;;
+          *)
+            if [ "${SWIFT_EXIT:-0}" = 0 ]; then
+              echo '{"totalTestCount":2,"passedTests":2,"failedTests":0,"result":"Passed"}'
+            else
+              echo '{"totalTestCount":2,"passedTests":1,"failedTests":1,"result":"Failed"}'
+            fi ;;
+        esac ;;
+      *)
+        case "${@: -1}" in
+          *focus-policy.xcresult)
+            echo '{"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"EditorFocusPolicyTests","result":"Passed","children":[{"nodeType":"Test Case","nodeIdentifier":"EditorFocusPolicyTests/lifecycleAppliesOnlyDecodedOwner()","result":"Passed"}]}]}' ;;
+          *focus-replay.xcresult)
+            echo '{"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"FocusReplayWindowTests","result":"Passed","children":[{"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/corpusIsEnumerated()","result":"Passed"},{"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/replay(_:)","result":"Passed"}]}]}' ;;
+          *)
+            result=Passed
+            if [ "${SWIFT_EXIT:-0}" != 0 ]; then result=Failed; fi
+            printf '{"testNodes":[{"nodeType":"Test Suite","result":"%s","children":[{"nodeType":"Test Case","result":"%s","nodeIdentifier":"RenderingTests/testCaret()"},{"nodeType":"Test Case","result":"Passed","nodeIdentifier":"RenderingTests/testPassing()"}]}]}\n' "$result" "$result" ;;
+        esac ;;
+    esac
     """)
+  end
+
+  defp native_results(dir) do
+    dir
+    |> Path.join("results/native-unit/results.json")
+    |> File.read!()
+    |> Jason.decode!()
   end
 
   defp gate(ctx, extra_env \\ []) do

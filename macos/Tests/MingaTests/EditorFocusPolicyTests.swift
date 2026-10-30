@@ -197,6 +197,8 @@ struct EditorFocusPolicyTests {
 
     @Test("nested native modal and agent visibility lifecycle never infer an editor owner")
     func lifecycleAppliesOnlyDecodedOwner() async throws {
+        let application = try FocusTestApplicationScope("nested native modal")
+        defer { application.close() }
         let fixture = Fixture()
         defer { fixture.close() }
         fixture.policy.register(fixture.inline, as: .inlineEdit)
@@ -216,6 +218,9 @@ struct EditorFocusPolicyTests {
         #expect(fixture.window.initialFirstResponder === fixture.inline)
         #expect(!fixture.hasFocus(fixture.picker))
         #expect(!fixture.hasFocus(fixture.search))
+        // Priming above is synchronous; subsequent simulated focus loss must
+        // happen only after AppKit has actually activated and keyed the window.
+        try await application.waitUntilPresented(fixture.window)
         try #require(fixture.window.makeFirstResponder(nil))
         fixture.policy.agentOverlayVisibilityDidChange(true)
         fixture.policy.agentOverlayVisibilityDidChange(false)
