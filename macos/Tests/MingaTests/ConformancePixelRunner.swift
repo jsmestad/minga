@@ -75,7 +75,7 @@ final class ConformancePixelRunner {
                 cursorBlinkVisible: false, drawableProvider: { drawable },
                 viewportSize: CGSize(width: width, height: height), contentScale: 1,
                 scrollOffset: offset, presentationWindowId: windowID,
-                presentationInputSeq: UInt32(index + 1), onPresented: { waiter.succeed($0) })
+                presentationInputSeq: UInt32(index + 1), onPresented: { self.waiter.succeed($0) })
         }
         guard case .presented = outcome else {
             Issue.record("\(context): production render did not present: \(outcome)")
