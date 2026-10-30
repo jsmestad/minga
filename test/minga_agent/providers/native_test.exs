@@ -32,13 +32,14 @@ defmodule MingaAgent.Providers.NativeTest do
   # Builds a fake llm_client function that returns a StreamResponse yielding
   # the given chunks. This lets us test the full agent loop without hitting
   # any real LLM API.
-  defp fake_llm_client(chunks, usage \\ %{}) do
+  # Non-billing scenarios must not trigger cold catalog pricing.
+  defp fake_llm_client(chunks, usage \\ %{total_cost: 0.001}) do
     fn _model, _messages, _opts ->
       build_stream_response(chunks, usage)
     end
   end
 
-  defp build_stream_response(chunks, usage \\ %{}, response_metadata \\ %{}) do
+  defp build_stream_response(chunks, usage \\ %{total_cost: 0.001}, response_metadata \\ %{}) do
     # MetadataHandle is a GenServer that returns metadata when awaited.
     metadata = Map.merge(%{usage: usage, finish_reason: :stop}, response_metadata)
     {:ok, handle} = MetadataHandle.start_link(fn -> metadata end)
@@ -552,7 +553,9 @@ defmodule MingaAgent.Providers.NativeTest do
       assert "git_status" in tool_names_for.([git_status])
     end
 
-    test "find executes from the fallback working directory when no project is active" do
+    test "find executes from the fallback working directory when no project is active", %{
+      tmp_dir: dir
+    } do
       call_count = :counters.new(1, [:atomics])
 
       client = fn _model, _messages, _opts ->
@@ -577,6 +580,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} =
         start_provider(
+          tmp_dir: dir,
           project_root: nil,
           llm_client: client,
           tools: nil,
@@ -593,7 +597,8 @@ defmodule MingaAgent.Providers.NativeTest do
       assert result =~ "path=#{File.cwd!()}"
     end
 
-    test "an approved shell command completes from the working directory without an active project" do
+    test "an approved shell command completes from the working directory without an active project",
+         %{tmp_dir: dir} do
       call_count = :counters.new(1, [:atomics])
 
       client = fn _model, _messages, _opts ->
@@ -619,6 +624,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(
           project_root: nil,
+          tmp_dir: dir,
           llm_client: client,
           tools: nil,
           process_backend: RecordingProcessBackend,
