@@ -142,7 +142,8 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     Native.send_prompt(provider, request)
   end
 
-  defp build_stream_response(chunks, usage \\ %{}) do
+  # MCP behavior does not depend on catalog loading or fallback pricing.
+  defp build_stream_response(chunks, usage \\ %{total_cost: 0.001}) do
     {:ok, handle} =
       MetadataHandle.start_link(fn ->
         %{usage: usage, finish_reason: :stop}
@@ -152,7 +153,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       stream: chunks,
       metadata_handle: handle,
       cancel: fn -> :ok end,
-      model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+      model: ModelSelectionFixture.selection().request_model,
       context: ReqLLM.Context.new()
     }
 

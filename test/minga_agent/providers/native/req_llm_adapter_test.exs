@@ -221,15 +221,24 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
              ReqLLMAdapter.process_stream(stream_response)
   end
 
-  test "preserves structured content materialized by ReqLLM" do
-    stream_response =
-      build_stream_response([
-        ReqLLM.StreamChunk.text(~s({"answer":"ok"})),
-        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-      ])
+  test "compaction preserves JSON-looking text instead of returning an empty summary" do
+    json = ~s({ "summary": "keep these facts" })
 
-    assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
-    assert result.message.content == [%{type: :object, object: %{"answer" => "ok"}}]
+    client = fn _model, _messages, _opts ->
+      {:ok,
+       build_stream_response([
+         ReqLLM.StreamChunk.thinking("Summarize the facts"),
+         ReqLLM.StreamChunk.text(json),
+         ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+       ])}
+    end
+
+    summary =
+      ReqLLMAdapter.summary_client(client, selection(), %AgentConfig{},
+        env: %{"ANTHROPIC_API_KEY" => "fixture-anthropic-key"}
+      )
+
+    assert {:ok, ^json} = summary.(nil, [], max_tokens: 100)
   end
 
   test "stops the stream accumulator when a callback raises" do
