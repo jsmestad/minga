@@ -389,6 +389,9 @@ jobs:
       - name: Test
         run: scripts/test_macos_unit
 
+      - name: Verify warm native unit reuse
+        run: scripts/test_macos_unit --output-dir macos-unit-evidence/warm
+
       - name: Upload native unit test evidence
         if: always()
         uses: actions/upload-artifact@v4
