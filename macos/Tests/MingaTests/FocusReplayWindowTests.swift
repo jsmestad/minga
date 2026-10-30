@@ -130,8 +130,9 @@ struct FocusReplayWindowTests {
         return NSApp.perform(selector)?.takeUnretainedValue()
     }
 
-    private func nativeAXIdentityMatches(_ focused: AnyObject?, field: NSTextField, fieldEditor: NSText) -> Bool {
-        focused === field || focused === fieldEditor
+    private func nativeAXIdentityMatches(_ focused: AnyObject?, field: NSTextField) -> Bool {
+        guard let cell = field.cell else { return false }
+        return cell.controlView === field && focused === cell
     }
 
     private func hasPublishedAXIdentity(_ target: NSView, editor: EditorNSView) -> Bool {
@@ -140,9 +141,9 @@ struct FocusReplayWindowTests {
                   let pane = (editor.accessibilityChildren() as? [EditorPaneAccessibilityElement])?.first else { return false }
             return editor.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === pane
         }
-        guard let fieldEditor = field.currentEditor() else { return false }
+        guard field.currentEditor() != nil else { return false }
         return editor.accessibilityFocusedUIElement == nil
-            && nativeAXIdentityMatches(applicationAXFocus(), field: field, fieldEditor: fieldEditor)
+            && nativeAXIdentityMatches(applicationAXFocus(), field: field)
     }
 
     private func describeAXObject(_ object: AnyObject?) -> String {
@@ -161,13 +162,15 @@ struct FocusReplayWindowTests {
         } else {
             let field = try #require(target as? NSTextField)
             let fieldEditor = try #require(field.currentEditor())
+            let cell = try #require(field.cell)
+            #expect(cell.controlView === field, "\(observation): the AX cell must belong to the expected production field")
             #expect(window.firstResponder === fieldEditor)
             #expect(editor.accessibilityFocusedUIElement == nil)
             let selector = NSSelectorFromString("accessibilityFocusedUIElement")
             try #require(NSApp.responds(to: selector))
             let focused = applicationAXFocus()
-            #expect(nativeAXIdentityMatches(focused, field: field, fieldEditor: fieldEditor),
-                    "\(observation): AX focus=\(describeAXObject(focused)) must identify the same production native field=\(describeAXObject(field)) or its current field editor=\(describeAXObject(fieldEditor))")
+            #expect(nativeAXIdentityMatches(focused, field: field),
+                    "\(observation): AX focus=\(describeAXObject(focused)) must be cell=\(describeAXObject(cell)) owned by production field=\(describeAXObject(field)); cellControlView=\(describeAXObject(cell.controlView)); fieldEditor=\(describeAXObject(fieldEditor))")
         }
         print("[Focus identity] responder=\(kind) fieldID=\(target.accessibilityIdentifier() ?? "-") active=\(NSApp.isActive) key=\(window.isKeyWindow) owner=\(String(describing: editor.focusPolicy.decodedOwner)) firstResponder=\(String(describing: window.firstResponder))")
     }
