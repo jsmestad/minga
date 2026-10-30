@@ -449,7 +449,7 @@ end
 - **Descriptive names**: `"deleting at start of line joins with previous line"` not `"test delete_before/1"`
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode
-- **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/` to regenerate baselines, then review the diffs before committing.
+- **Screen snapshot tests**: follow `docs/recipes/update-snapshots.md` after intentional UI changes and review every baseline diff before committing.
 
 #### Sandi Metz-style test boundaries
 
@@ -653,13 +653,7 @@ Minga.Log.warning(:lsp, "LSP server crashed: #{inspect(reason)}")
 Logger.debug("[render:content] 24µs")
 ```
 
-Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`, `:config`, `:port`, `:distribution`, `:ext`. If your code doesn't fit any of these, add a new subsystem:
-
-1. Add `:log_level_<name>` to the `option_name` type union in `Minga.Config.Options`
-2. Add a `{:log_level_<name>, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default}` entry to `@option_specs`
-3. Add the subsystem atom to the `@subsystem_options` map in `Minga.Log`
-4. Add the subsystem to the `@type subsystem` union in `Minga.Log`
-5. Document the new subsystem in `docs/CONFIGURATION.md` under the Logging section
+Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`, `:config`, `:port`, `:distribution`, `:ext`. To add one, follow `docs/recipes/new-log-subsystem.md`.
 
 **Two-tier logging model:** These are two distinct tiers of the same pipeline, not competing mechanisms.
 
@@ -854,12 +848,6 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 
 ## Adding New Features
 
-### New feature in an existing module group
-1. Implement the logic in a module under the appropriate group in `lib/minga/`.
-2. If the group has an entry-point module, add a `defdelegate` or short wrapper there
-3. Verify the new module sits in the correct layer (Rule 1): pure logic in Layer 0, stateful services in Layer 1, presentation in Layer 2
-4. Verify struct mutations follow Rule 2: updates go through the owning module
-
 ### Semantic UI first for shared visible chrome
 Shared visible chrome (status bar, tab bar, file tree, picker, popups, agent surfaces, panels, and similar) is delivered as a **Semantic UI** model, not as pre-encoded protocol binaries or cell draws. The canonical path is: build a `Minga.RenderModel.UI.*` semantic struct in a builder under `lib/minga_editor/render_model/ui/`, then encode it with a `Minga.Frontend.Adapter.GUI` encoder under `lib/minga/frontend/adapter/gui/`. The guardrail in `test/minga/render_model/guardrails_test.exs` enforces this: a `Minga.RenderModel.UI.*` struct must not carry a protocol-binary payload field (`:encoded`, `:cmd`, `*_encoded`, `*_cmd`, etc.), and a builder under `lib/minga_editor/render_model/` must not reference `MingaEditor.Frontend.Protocol.GUI`. Both allowlists are empty; keep them empty.
 
@@ -869,40 +857,11 @@ Render and command code selects the semantic path with `Capabilities.semantic_ui
 
 When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. Cross-frontend coverage (macOS SwiftUI, Charm/Go TUI) is tracked in the Semantic UI inventory (#2113); forgetting to update a frontend is a common mistake.
 
-### New command
-1. Add the command to the appropriate `Commands.*` sub-module's `__commands__/0` (implements `Minga.Command.Provider` behaviour). Include name, description, `requires_buffer` flag, and execute function. If no existing sub-module fits, create a new one and add it to the `@command_modules` list in `Minga.Command.Registry`.
-2. Add keybinding in `Minga.Keymap.Defaults`
-3. Test the command function and the keybinding lookup
+### Development recipes
 
-### New motion
-1. Add the implementation in the appropriate `Minga.Editing.Motion.*` sub-module (e.g., `Motion.Word`, `Motion.Line`)
-2. Add a `defdelegate` in `Minga.Editing.Motion` (entry point for motions)
-3. Add a `defdelegate` in `Minga.Editing` (entry point for the editing group) so callers can use `Minga.Editing.my_motion/2`
-4. Register in `Minga.Mode.Normal` and `Minga.Mode.OperatorPending`
-5. Test against known buffer content
-
-### New text object
-1. Add the implementation in `Minga.Editing.TextObject` with `@spec`
-2. Add a `defdelegate` in `Minga.Editing` (entry point) so callers can use `Minga.Editing.my_text_object/2`
-3. Register in `Minga.Mode.OperatorPending`
-4. Test with edge cases (cursor outside delimiters, nested, empty)
-
-### New or modified agent tool
-Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool that reads or writes file content:
-
-1. **File tools route through `MingaAgent.ToolRouter`.** The router checks whether a buffer is open for the target path. If so, it creates a `Buffer.Fork` (lazy, on first write) for in-memory isolation. If a changeset overlay is active, it routes through that instead. Only when neither is available does it fall through to direct filesystem I/O. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the design rationale.
-2. **Do not reintroduce context artifact writing without a reader.** The old writer was deleted because it saved `.minga/context/session-summary-*` files that no code loaded. Add an explicit picker or loader before adding any new writer.
-3. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
-4. **Test the tool function** in `test/minga_agent/tools/`.
-
-### New render command (requires BEAM + frontend changes)
-1. Add the opcode to `docs/protocol_schema.toml`, then run `mix protocol.gen`. Do not hand-edit generated opcode constants.
-2. Add the BEAM encoder/decoder behavior in the relevant protocol module under `lib/minga_editor/frontend/` or `lib/minga/parser/`.
-3. **macOS GUI:** Use the generated constants from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`, add decoder behavior in `macos/Sources/Protocol/ProtocolDecoder.swift`, and add the handler in `CommandDispatcher.swift`.
-4. **TUI:** Use the generated constants from `go/tui/internal/generated/opcodes.go`, then add decoder and handler behavior in the Go renderer under `go/tui/internal/protocol/` and `go/tui/internal/ui/`.
-5. **Linux GUI:** (when it exists) Add decoder and handler behavior in the GTK4 frontend.
-6. Test encode/decode round-trip on all sides. GUI chrome and semantic opcodes are schema-defined and consumed by the GUI and Go TUI frontends. The `minga-parser` Port (`zig/src/protocol.zig`) also decodes the protocol; if a frontend-only opcode can appear on the parser stream, add an explicit decoder skip or no-op handler for it there.
-
-### New tree-sitter grammar
-
-See `zig/AGENTS.md` § "Adding a New Tree-Sitter Grammar" for the full 5-step process (vendor grammar, add query, register in build.zig, register in highlighter.zig, register filetype in Elixir).
+- **New command:** `docs/recipes/new-command.md`
+- **New motion:** `docs/recipes/new-motion.md`
+- **New text object:** `docs/recipes/new-text-object.md`
+- **New or modified agent tool:** `docs/recipes/new-agent-tool.md`
+- **New render command:** `docs/recipes/new-render-command.md`
+- **New tree-sitter grammar:** `docs/recipes/new-grammar.md`

@@ -86,17 +86,7 @@ The parser process handles the parse/highlight commands and parser responses it 
 
 ## Adding a New Tree-Sitter Grammar
 
-1. **Vendor the grammar**: copy the grammar's `src/` directory into `zig/vendor/grammars/{lang}/src/`. You need `parser.c` and optionally `scanner.c`. Add a `VERSION` file with the git tag or commit hash.
-
-2. **Add the highlight query**: place `highlights.scm` at `zig/src/queries/{lang}/highlights.scm`. Start with the grammar repo's query and trim capture names to Minga's supported set: `keyword`, `string`, `comment`, `function`, `type`, `number`, `operator`, `punctuation`, `variable`, `constant`, `property`, `tag`, `attribute`, `namespace`, `label`, `special`.
-
-3. **Register in build.zig**: add a `Grammar` entry to the `grammars` array. Set `has_scanner: true` if the grammar has a `scanner.c`.
-
-4. **Register in highlighter.zig**: add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array with the grammar function and `@embedFile` for the query.
-
-5. **Register the filetype** (if new): add extension/filename mappings in `lib/minga/language/filetype.ex` on the Elixir side so the BEAM sends the correct language name.
-
-After rebuilding (`zig build` or `mix compile`), the grammar is compiled into the binary. No runtime loading needed. Users can override queries at `~/.config/minga/queries/{lang}/highlights.scm` without recompiling.
+Follow [Add a tree-sitter grammar](../docs/recipes/new-grammar.md) for vendoring, query registration, filetype detection, and validation.
 
 ## Build and Test
 
