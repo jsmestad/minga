@@ -376,8 +376,8 @@ def main():
         if args.mutations:
             cases = {
                 "background": (focused, None),
-                "spacing": (["-only-testing:MingaTests/ContentViewTests/conformanceSpacedInputGeometry"], "conformanceSpacedInputGeometry"),
-                "scroll": (["-only-testing:MingaTests/ContentViewTests/conformanceScrollPublicationUsesCapturedCommit"], "conformanceScrollPublicationUsesCapturedCommit"),
+                "spacing": (["-only-testing:MingaTests/ContentViewTests/conformanceSpacedInputGeometry(spacing:)"], "conformanceSpacedInputGeometry"),
+                "scroll": (["-only-testing:MingaTests/ContentViewTests/conformanceScrollPublicationUsesCapturedCommit()"], "conformanceScrollPublicationUsesCapturedCommit"),
             }
             # Controls must pass on precisely the revision whose mutants run.
             for kind, (selectors, needle) in cases.items():
