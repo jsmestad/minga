@@ -66,6 +66,11 @@ defmodule MingaEditor.RenderPipeline.Intent do
   def force_keyframe(%__MODULE__{} = intent),
     do: %{intent | frame: FrameIntent.force_keyframe(intent.frame)}
 
+  @doc "Routes the immutable intent to another frontend without changing editor viewport ownership."
+  @spec for_frontend(t(), GenServer.server(), keyword()) :: t()
+  def for_frontend(%__MODULE__{} = intent, manager, opts),
+    do: %{intent | frame: FrameIntent.for_frontend(intent.frame, manager, opts)}
+
   @spec buffer_versions(%{optional(Window.id()) => Window.t()}) :: %{
           optional(pid()) => non_neg_integer()
         }

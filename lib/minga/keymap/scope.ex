@@ -156,6 +156,17 @@ defmodule Minga.Keymap.Scope do
     Minga.Keymap.Scope.FileTree
   ]
 
+  @doc "Returns the canonical built-in scope declarations without extension contributions."
+  @spec builtin_modules() :: [module()]
+  def builtin_modules, do: @builtin_scopes
+
+  @doc "Returns one snapshot of the currently registered scope declarations."
+  @spec registered_declarations() :: %{scope_name() => module()}
+  def registered_declarations do
+    ensure_registry!()
+    registry_modules()
+  end
+
   @doc "Registers a scope module for a source."
   @spec register(contribution_source(), module()) :: :ok | {:error, register_error()}
   def register(source, module) when is_atom(module) do

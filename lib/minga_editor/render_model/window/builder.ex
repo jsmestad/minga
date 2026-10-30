@@ -406,7 +406,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         buffer,
         snapshot.version,
         text_identity,
-        text_rows
+        text_rows,
+        if(is_integer(state.frame_seq),
+          do: state.frame_seq + 1,
+          else: System.unique_integer([:positive, :monotonic])
+        )
       )
 
     {resident_semantic_state, resident_semantics} =

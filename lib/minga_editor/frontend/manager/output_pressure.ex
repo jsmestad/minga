@@ -16,6 +16,8 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
 
   @type control_key :: non_neg_integer() | {non_neg_integer(), non_neg_integer()}
   @type timeout_disposition :: :continue | {:recover_frame, PendingFrame.t()} | :transport_failure
+  @type recovery_context ::
+          {generation :: pos_integer(), next_frame_seq :: pos_integer()}
 
   @type t :: %__MODULE__{
           current: PendingFrame.t() | nil,
@@ -88,16 +90,18 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
   def revoke_frames(%__MODULE__{} = pressure),
     do: %{pressure | current: nil, replacement: nil}
 
-  @doc "Reserves the next recovery generation and revokes frames from the superseded generation."
-  @spec reserve_recovery_generation(t()) :: {pos_integer(), t()}
-  def reserve_recovery_generation(%__MODULE__{} = pressure) do
+  @doc "Reserves a generation and sequence floor, revoking superseded retained frames."
+  @spec reserve_recovery_context(t()) :: {recovery_context(), t()}
+  def reserve_recovery_context(%__MODULE__{} = pressure) do
     generation =
       max(
         pressure.minimum_ack_generation,
         max(pressure.last_admitted_generation, pressure.last_applied_generation)
       ) + 1
 
-    {generation,
+    next_frame_seq = max(pressure.last_admitted_frame_seq, pressure.last_applied_frame_seq) + 1
+
+    {{generation, next_frame_seq},
      %{
        pressure
        | current: nil,
@@ -105,6 +109,11 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
          minimum_ack_generation: generation
      }}
   end
+
+  @doc "Rejects output from generations superseded by a recovery reservation."
+  @spec obsolete_frame?(t(), PendingFrame.t()) :: boolean()
+  def obsolete_frame?(%__MODULE__{} = pressure, %PendingFrame{} = frame),
+    do: frame.generation < pressure.minimum_ack_generation
 
   @doc "Clears the unwritable interval after every retained batch drains."
   @spec settled(t()) :: t()

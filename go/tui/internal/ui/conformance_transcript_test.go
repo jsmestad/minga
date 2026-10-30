@@ -51,22 +51,34 @@ type conformanceTranscript struct {
 }
 
 type conformanceStep struct {
-	Kind          string                    `json:"kind"`
-	Fixture       *productionFixture        `json:"fixture"`
-	Operations    []productionOperation     `json:"operations"`
-	Opcode        int                       `json:"opcode"`
-	Note          string                    `json:"note"`
-	PayloadBase64 string                    `json:"payload_base64"`
-	ResetFrontend bool                      `json:"reset_frontend"`
-	WindowID      uint16                    `json:"window_id"`
-	RowOffset     int                       `json:"row_offset"`
-	ColOffset     int                       `json:"col_offset"`
-	PointerRow    int                       `json:"pointer_row"`
-	PointerCol    int                       `json:"pointer_col"`
-	Rows          int                       `json:"rows"`
-	Go            *conformanceGoSelector    `json:"go"`
-	Swift         *conformanceSwiftSelector `json:"swift"`
-	Expect        *conformanceExpect        `json:"expect"`
+	Kind                string                    `json:"kind"`
+	Fixture             *productionFixture        `json:"fixture"`
+	Operations          []productionOperation     `json:"operations"`
+	Opcode              int                       `json:"opcode"`
+	Note                string                    `json:"note"`
+	PayloadBase64       string                    `json:"payload_base64"`
+	ResetFrontend       bool                      `json:"reset_frontend"`
+	WindowID            uint16                    `json:"window_id"`
+	RowOffset           int                       `json:"row_offset"`
+	ColOffset           int                       `json:"col_offset"`
+	PointerRow          int                       `json:"pointer_row"`
+	PointerCol          int                       `json:"pointer_col"`
+	Rows                int                       `json:"rows"`
+	Go                  *conformanceGoSelector    `json:"go"`
+	Swift               *conformanceSwiftSelector `json:"swift"`
+	Expect              *conformanceExpect        `json:"expect"`
+	AfterCommands       []string                  `json:"after_commands_base64"`
+	Cols                int                       `json:"cols"`
+	Delta               int                       `json:"delta"`
+	During              string                    `json:"during"`
+	Row                 int                       `json:"row"`
+	Col                 int                       `json:"col"`
+	Event               string                    `json:"event"`
+	Generation          uint32                    `json:"generation"`
+	FrameSeq            uint32                    `json:"frame_seq"`
+	LastAppliedFrameSeq uint32                    `json:"last_applied_frame_seq"`
+	Reason              byte                      `json:"reason"`
+	Disposition         byte                      `json:"disposition"`
 }
 
 type productionFixture struct {
@@ -102,6 +114,14 @@ type conformanceExpect struct {
 	NormalizedBufferLine *int                         `json:"normalized_buffer_line"`
 	Transcript           *conformanceTranscriptExpect `json:"transcript"`
 	FocusTarget          *conformanceFocusTarget      `json:"focus_target"`
+	TransactionResult    *conformanceTransaction      `json:"transaction_result"`
+	LastCommitted        *conformanceCommitted        `json:"last_committed"`
+	ResidentRows         *int                         `json:"resident_rows"`
+	PaneRects            []conformancePane            `json:"pane_rects"`
+	BaseFrameSeq         *uint32                      `json:"base_frame_seq"`
+	WindowRows           map[string][]conformanceRow  `json:"window_rows"`
+	ContentEpochs        map[string]uint32            `json:"content_epochs"`
+	OutOfBand            *conformanceSideChannels     `json:"out_of_band"`
 }
 
 type conformanceFocusTarget struct {
@@ -140,9 +160,10 @@ type conformanceSwiftSelector struct {
 }
 
 type conformanceRow struct {
-	RowID       string `json:"row_id"`
-	ContentHash uint32 `json:"content_hash"`
-	BufLine     uint32 `json:"buf_line"`
+	RowID       string  `json:"row_id"`
+	ContentHash uint32  `json:"content_hash"`
+	BufLine     uint32  `json:"buf_line"`
+	Text        *string `json:"text"`
 }
 
 type conformanceAnchor struct {
@@ -205,20 +226,46 @@ func TestConformanceGoSkipReasons(t *testing.T) {
 
 func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 	t.Helper()
-	model := New(80, 24, nil, nil)
+	out := make(chan []byte, 1024)
+	model := New(80, 24, out, nil)
+	var lastStatus []byte
+	var pendingWheel *conformanceStep
 
 	for i, step := range transcript.Steps {
 		switch step.Kind {
-		case "frame":
-			applyConformanceFrame(t, &model, i, step)
 		case "framed":
 			if step.ResetFrontend {
-				model = New(80, 24, nil, nil)
+				model = New(80, 24, out, nil)
+				pendingWheel = nil
+				lastStatus = nil
+				drainOutboundPackets(out)
 				if _, present := model.committedFocusOwner(); present {
 					t.Fatalf("step %d: fresh frontend retained a focus owner", i)
 				}
 			}
-			applyFocusConformanceBatch(t, &model, i, step)
+			if transcript.Category == "recovery" && (step.Expect == nil || step.Expect.TransactionResult == nil) {
+				t.Fatalf("step %d: recovery frame requires transaction_result", i)
+			}
+			lastStatus = applyRecoveryFrame(t, &model, out, i, step, pendingWheel)
+			pendingWheel = nil
+			assertConformanceFocus(t, &model, i, step.Expect)
+		case "frame_status":
+			assertRecoveryStatus(t, i, step, lastStatus)
+		case "resize":
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: step.Cols, Height: step.Rows})
+			model = updated.(Model)
+		case "wheel":
+			if step.During == "commit" {
+				wheel := step
+				pendingWheel = &wheel
+			} else {
+				applyRecoveryWheel(t, &model, i, step)
+			}
+		case "click_after_settle":
+			step.PointerRow, step.PointerCol = step.Row, step.Col
+			assertConformancePointer(t, &model, i, step)
+		case "frame":
+			applyConformanceFrame(t, &model, i, step)
 		case "production_fixture":
 			applyProductionFixture(t, &model, i, step)
 		case "inject_offset":
@@ -235,25 +282,6 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 			t.Fatalf("step %d: unknown kind %q", i, step.Kind)
 		}
 	}
-}
-
-func applyFocusConformanceBatch(t *testing.T, model *Model, i int, step conformanceStep) {
-	t.Helper()
-	payload, err := base64.StdEncoding.DecodeString(step.PayloadBase64)
-	if err != nil {
-		t.Fatalf("step %d: invalid framed payload: %v", i, err)
-	}
-	var commands []protocol.Command
-	for len(payload) > 0 {
-		command, err := protocol.DecodeCommand(payload)
-		if err != nil || command.Size <= 0 || command.Size > len(payload) {
-			t.Fatalf("step %d: framed command: %+v %v", i, command, err)
-		}
-		commands = append(commands, command)
-		payload = payload[command.Size:]
-	}
-	model.applyCommands(commands)
-	assertConformanceFocus(t, model, i, step.Expect)
 }
 
 func assertConformanceFocus(t *testing.T, model *Model, i int, expect *conformanceExpect) {
@@ -522,6 +550,9 @@ func assertConformanceRows(t *testing.T, i int, step conformanceStep, got []prot
 			t.Fatalf("step %d (%s): row %d id parse: %v", i, step.Note, j, err)
 		}
 		g := got[j]
+		if wantRow.Text != nil && g.Text != *wantRow.Text {
+			t.Fatalf("step %d: row %d text %q, want %q", i, j, g.Text, *wantRow.Text)
+		}
 		if g.ID != wantID || g.ContentHash != wantRow.ContentHash || g.BufferLine != wantRow.BufLine {
 			t.Fatalf("step %d (%s): row %d = {id:%d hash:%d line:%d}, want {id:%d hash:%d line:%d}",
 				i, step.Note, j, g.ID, g.ContentHash, g.BufferLine, wantID, wantRow.ContentHash, wantRow.BufLine)

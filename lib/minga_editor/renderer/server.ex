@@ -2,6 +2,18 @@ defmodule MingaEditor.Renderer.Server do
   @moduledoc """
   Renderer process wrapper.
 
+  Frame submission sequences are requested lower bounds. This process reserves
+  the effective wire identity once, in mailbox order, across ordinary frames,
+  retries and resets. Synchronous receipts report that effective `frame_seq`;
+  the Editor's `intent_revision` is independent and is never renumbered.
+
+  At startup, `:recovery_reserver` supplies the complete
+  `{generation, next_frame_seq}` context. Without an explicit callback,
+  acknowledgement-enabled renderers reserve atomically through
+  `:frontend_manager`; independent pipelines default to `{1, 1}`. The callback
+  is the only context source when supplied. Later reservations only raise the
+  local high-water mark and do not re-reserve an existing attempt.
+
   All frame, acknowledgement, timeout, and recovery workflows live in focused
   handler modules. This module exposes the process API and keeps OTP callbacks
   as routing-only clauses.
@@ -35,7 +47,7 @@ defmodule MingaEditor.Renderer.Server do
     GenServer.cast(server, {:render, submission, frame_seq, monotonic_now()})
   end
 
-  @doc "Runs one frame synchronously inside this renderer process."
+  @doc "Runs one frame synchronously; its receipt reports the actual reserved wire sequence."
   @spec render_sync(GenServer.server(), Submission.t(), non_neg_integer()) ::
           {:ok, RenderReceipt.t()} | {:error, Exception.t()}
   def render_sync(server, submission, frame_seq)
@@ -159,14 +171,19 @@ defmodule MingaEditor.Renderer.Server do
   @impl true
   @spec init(keyword()) :: {:ok, t()}
   def init(opts) do
-    generation_reserver = generation_reserver(opts)
-    recovery_generation = generation_reserver.()
+    if allocator = Keyword.get(opts, :content_epoch_allocator) do
+      MingaEditor.Renderer.ContentEpoch.bind_allocator(allocator)
+    end
+
+    recovery_reserver = recovery_reserver(opts)
+    {recovery_generation, next_frame_seq} = recovery_reserver.()
 
     {:ok,
      State.new(
        Keyword.merge(opts,
-         generation_reserver: generation_reserver,
-         recovery_generation: recovery_generation
+         recovery_reserver: recovery_reserver,
+         recovery_generation: recovery_generation,
+         next_frame_seq: next_frame_seq
        )
      )}
   end
@@ -221,33 +238,33 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   def handle_call({:reset_keyframe, submission, seq, pushed_at}, _from, state) do
-    {state, intent} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq)
     RecoveryHandler.keyframe(state, intent, seq, pushed_at)
   end
 
   def handle_call({:reset_keyframe_sync, submission, seq, pushed_at}, _from, state) do
-    {state, intent} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq)
     RecoveryHandler.keyframe_sync(state, intent, seq, pushed_at)
   end
 
   def handle_call({:reset_connection, submission, seq, pushed_at}, _from, state) do
-    {state, intent} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq)
     RecoveryHandler.reset(state, intent, seq, pushed_at)
   end
 
   def handle_call({:reset_sync, submission, seq, pushed_at}, _from, state) do
-    {state, intent} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq)
     RecoveryHandler.reset_sync(state, intent, seq, pushed_at)
   end
 
   def handle_call({:render_sync, submission, seq, pushed_at}, _from, state) do
-    {state, intent} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq)
     FrameHandler.render_sync(state, intent, seq, pushed_at)
   end
 
   @impl true
   def handle_cast({:render, submission, seq, pushed_at}, state) do
-    {state, intent} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq)
     FrameHandler.enqueue(state, intent, seq, pushed_at)
   end
 
@@ -255,35 +272,37 @@ defmodule MingaEditor.Renderer.Server do
   def handle_info(message, state), do: FrameHandler.dispatch(message, state)
 
   @spec receive_submission(t(), Submission.t(), non_neg_integer()) ::
-          {t(), MingaEditor.RenderPipeline.Intent.t()}
-  defp receive_submission(state, submission, seq) do
+          {t(), MingaEditor.RenderPipeline.Intent.t(), non_neg_integer()}
+  defp receive_submission(state, submission, requested_seq) do
+    {state, seq} = State.reserve_submission_sequence(state, requested_seq)
     FrameHandler.observe_submission(submission, seq)
-    State.receive_submission(state, submission)
+    {state, intent} = State.receive_submission(state, submission)
+    {state, intent, seq}
   end
 
   @spec monotonic_now() :: integer()
   defp monotonic_now, do: System.monotonic_time(:microsecond)
 
-  @spec generation_reserver(keyword()) :: State.generation_reserver()
-  defp generation_reserver(opts) do
-    case Keyword.fetch(opts, :generation_reserver) do
+  @spec recovery_reserver(keyword()) :: State.recovery_reserver()
+  defp recovery_reserver(opts) do
+    case Keyword.fetch(opts, :recovery_reserver) do
       {:ok, reserver} when is_function(reserver, 0) ->
         reserver
 
       :error ->
-        default_generation_reserver(opts)
+        default_recovery_reserver(opts)
     end
   end
 
-  @spec default_generation_reserver(keyword()) :: State.generation_reserver()
-  defp default_generation_reserver(opts) do
+  @spec default_recovery_reserver(keyword()) :: State.recovery_reserver()
+  defp default_recovery_reserver(opts) do
     require_ack? = Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline))
 
     if require_ack? do
       manager = Keyword.get(opts, :frontend_manager, FrontendManager)
-      fn -> FrontendManager.reserve_recovery_generation(manager) end
+      fn -> FrontendManager.reserve_recovery_context(manager) end
     else
-      fn -> 1 end
+      fn -> {1, 1} end
     end
   end
 end

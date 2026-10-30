@@ -40,6 +40,11 @@ defmodule MingaEditor.Frontend.Protocol do
   alias MingaEditor.PresentationTarget
   alias MingaEditor.Mouse.TextEvent
 
+  @doc "Decodes captured renderer frames with their pre-admission command boundaries."
+  @spec decode_recorded_frame(binary(), [pos_integer()]) :: map()
+  def decode_recorded_frame(batch, command_sizes),
+    do: MingaEditor.Frontend.Protocol.RecordedFrame.decode(batch, command_sizes)
+
   @op_key_press Opcodes.key_press()
   @op_resize Opcodes.resize()
   @op_ready Opcodes.ready()

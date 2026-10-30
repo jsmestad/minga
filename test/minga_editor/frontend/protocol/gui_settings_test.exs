@@ -6,6 +6,8 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
   alias MingaEditor.RenderModel.UI.ConfigStateBuilder
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Keymap.Active
+  alias Minga.Keymap.Scope
 
   describe "settings gui_actions" do
     test "decodes config_query" do
@@ -85,6 +87,52 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
       assert Enum.any?(state.keybindings, fn entry ->
                entry.mode == "normal" and entry.key == "j" and entry.command == "move_down"
              end)
+    end
+
+    test "semantic option order is canonical rather than the VM's atom-map order" do
+      state =
+        ConfigStateBuilder.from_wire(%{
+          options: %{wrap: false, theme: :minga_default, cursorline: true},
+          theme_previews: [],
+          keybindings: []
+        })
+
+      assert state.options == [{"cursorline", true}, {"theme", :minga_default}, {"wrap", false}]
+    end
+
+    test "settings use the supplied keymap owner's scope declarations, not the global catalog" do
+      options = start_supervised!({Options, name: nil})
+      keymaps = start_supervised!({Active, name: nil, scope_modules: []})
+      state = ProtocolGUI.config_state(options, keymaps)
+
+      assert Active.scope_declarations(keymaps) == %{}
+      refute Enum.any?(state.keybindings, &String.contains?(&1.mode, "/"))
+      assert Enum.any?(state.keybindings, &(&1.command == "find_file"))
+    end
+
+    test "private base settings ignore other owners' contributions and preserve scope source on reset" do
+      options = start_supervised!({Options, name: nil})
+      scopes = Scope.builtin_modules()
+      keymaps = start_supervised!({Active, name: nil, scope_modules: scopes})
+
+      other =
+        start_supervised!(
+          Supervisor.child_spec({Active, name: nil, scope_modules: []}, id: make_ref())
+        )
+
+      before = ProtocolGUI.config_state(options, keymaps)
+
+      assert :ok = Active.bind(other, :normal, "SPC z z", :move_down, "Other owner's binding")
+      assert ProtocolGUI.config_state(options, keymaps) == before
+
+      assert Enum.any?(
+               ProtocolGUI.config_state(options, other).keybindings,
+               &(&1.key == "SPC z z" and &1.description == "Other owner's binding")
+             )
+
+      assert :ok = Active.reset(keymaps)
+      assert Active.scope_declarations(keymaps) == Map.new(scopes, &{&1.name(), &1})
+      assert ProtocolGUI.config_state(options, keymaps) == before
     end
   end
 end

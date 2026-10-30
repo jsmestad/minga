@@ -41,16 +41,20 @@ defmodule MingaEditor.Frontend.Manager do
   @type admission :: :accepted | :unwritable
   @type lifecycle_admission :: :accepted | :unwritable | :disconnected
 
+  @typedoc "One recovery reservation: fresh generation and next usable wire sequence."
+  @type recovery_context :: OutputPressure.recovery_context()
+
   @transport_failure_reason :frontend_output_transport_failure
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
-          {:name, GenServer.name()}
+          {:name, GenServer.name() | nil}
           | {:renderer_path, String.t()}
           | {:backend, backend()}
           | {:port_mode, MingaEditor.Frontend.Manager.State.port_mode()}
           | {:port_opener, (term(), [term()] -> port())}
           | {:port_commander, MingaEditor.Frontend.Manager.State.port_commander()}
+          | {:command_observer, ([binary()] -> term())}
           | {:output_retry_ms, pos_integer()}
           | {:output_failure_ms, non_neg_integer()}
           | {:tty_path, String.t() | nil}
@@ -107,10 +111,16 @@ defmodule MingaEditor.Frontend.Manager do
   @spec output_pressure(GenServer.server()) :: OutputPressure.stats()
   def output_pressure(server \\ __MODULE__), do: GenServer.call(server, :output_pressure)
 
-  @doc "Atomically reserves the next recovery generation for the live frontend connection."
-  @spec reserve_recovery_generation(GenServer.server()) :: pos_integer()
-  def reserve_recovery_generation(server \\ __MODULE__),
-    do: GenServer.call(server, :reserve_recovery_generation)
+  @doc """
+  Atomically reserves `{generation, next_frame_seq}` for the live connection.
+
+  The sequence floor exceeds every admitted or applied wire sequence. The same
+  reservation revokes retained old frames and fences later old-generation writes
+  and acknowledgements; the renderer remains the sole per-frame sequence writer.
+  """
+  @spec reserve_recovery_context(GenServer.server()) :: recovery_context()
+  def reserve_recovery_context(server \\ __MODULE__),
+    do: GenServer.call(server, :reserve_recovery_context)
 
   @doc "Subscribes the calling process to receive input events."
   @impl MingaEditor.Frontend.Adapter
@@ -162,6 +172,7 @@ defmodule MingaEditor.Frontend.Manager do
       tty_path: tty_path,
       output_pressure: OutputPressure.new(),
       port_commander: Keyword.get(opts, :port_commander, &Port.command/3),
+      command_observer: Keyword.get(opts, :command_observer),
       output_retry_ms: Keyword.get(opts, :output_retry_ms, 2),
       output_failure_ms: Keyword.get(opts, :output_failure_ms, 50)
     }
@@ -212,11 +223,11 @@ defmodule MingaEditor.Frontend.Manager do
     {:reply, OutputPressure.stats(state.output_pressure), state}
   end
 
-  def handle_call(:reserve_recovery_generation, _from, state) do
-    {generation, output_pressure} =
-      OutputPressure.reserve_recovery_generation(state.output_pressure)
+  def handle_call(:reserve_recovery_context, _from, state) do
+    {context, output_pressure} =
+      OutputPressure.reserve_recovery_context(state.output_pressure)
 
-    {:reply, generation, %{state | output_pressure: output_pressure}}
+    {:reply, context, %{state | output_pressure: output_pressure}}
   end
 
   def handle_call({:send_commands, commands}, _from, state) do
@@ -232,6 +243,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   def handle_call({:send_render_commands, commands, sent_at}, _from, state) do
     Telemetry.hop_latency(:send_commands, sent_at)
+    if state.command_observer, do: state.command_observer.(commands)
 
     state
     |> OutputHandler.admit_commands(commands)

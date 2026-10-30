@@ -92,12 +92,16 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
 
   @spec admit_frame(State.t(), PendingFrame.t()) :: output_result()
   defp admit_frame(state, frame) do
-    case OutputPressure.enqueue(state.output_pressure, frame) do
-      {:attempt, output_pressure} ->
-        attempt_output(%{state | output_pressure: output_pressure})
+    if OutputPressure.obsolete_frame?(state.output_pressure, frame) do
+      {:continue, :unwritable, state}
+    else
+      case OutputPressure.enqueue(state.output_pressure, frame) do
+        {:attempt, output_pressure} ->
+          attempt_output(%{state | output_pressure: output_pressure})
 
-      {:coalesced, output_pressure} ->
-        {:continue, :unwritable, %{state | output_pressure: output_pressure}}
+        {:coalesced, output_pressure} ->
+          {:continue, :unwritable, %{state | output_pressure: output_pressure}}
+      end
     end
   end
 

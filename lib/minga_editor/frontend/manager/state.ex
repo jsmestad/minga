@@ -28,6 +28,7 @@ defmodule MingaEditor.Frontend.Manager.State do
             tty_path: nil,
             output_pressure: nil,
             port_commander: nil,
+            command_observer: nil,
             output_retry_ms: 2,
             output_failure_ms: 50
 
@@ -42,6 +43,7 @@ defmodule MingaEditor.Frontend.Manager.State do
           tty_path: String.t() | nil,
           output_pressure: OutputPressure.t(),
           port_commander: port_commander(),
+          command_observer: ([binary()] -> term()) | nil,
           output_retry_ms: pos_integer(),
           output_failure_ms: non_neg_integer()
         }

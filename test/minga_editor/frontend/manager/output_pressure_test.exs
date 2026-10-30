@@ -59,7 +59,7 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     assert stats.retained_bytes == 0
   end
 
-  test "recovery reservations are unique above every connection watermark and revoke old frames" do
+  test "recovery contexts exceed connection watermarks and revoke retained old frames" do
     admitted = frame(50, 0, 5)
     retained = frame(51, 50, 5)
     replacement = frame(52, 51, 5)
@@ -71,21 +71,37 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     {:coalesced, pressure} = OutputPressure.enqueue(pressure, replacement)
     pressure = OutputPressure.retain_control(pressure, 1, <<1>>)
 
-    assert {6, pressure} = OutputPressure.reserve_recovery_generation(pressure)
+    assert {{6, 51}, pressure} = OutputPressure.reserve_recovery_context(pressure)
     assert pressure.current == nil
     assert pressure.replacement == nil
     assert pressure.controls == %{1 => <<1>>}
     assert pressure.last_admitted_generation == 5
     assert pressure.last_applied_generation == 5
     assert OutputPressure.acknowledge(pressure, 5, 50) == :stale
+    assert OutputPressure.obsolete_frame?(pressure, admitted)
+    refute OutputPressure.obsolete_frame?(pressure, frame(51, 0, 6))
 
-    assert {7, pressure} = OutputPressure.reserve_recovery_generation(pressure)
+    assert {{7, 51}, pressure} = OutputPressure.reserve_recovery_context(pressure)
     assert pressure.minimum_ack_generation == 7
   end
 
-  test "a fresh connection reserves generation one" do
-    assert {1, pressure} = OutputPressure.reserve_recovery_generation(OutputPressure.new())
+  test "a fresh connection reserves generation one and wire sequence one" do
+    assert {{1, 1}, pressure} = OutputPressure.reserve_recovery_context(OutputPressure.new())
     assert pressure.minimum_ack_generation == 1
+  end
+
+  test "the sequence floor exceeds both admitted and applied output independently" do
+    for {admitted, applied} <- [{80, 70}, {70, 80}] do
+      pressure = %{
+        OutputPressure.new()
+        | last_admitted_generation: 5,
+          last_admitted_frame_seq: admitted,
+          last_applied_generation: 4,
+          last_applied_frame_seq: applied
+      }
+
+      assert {{6, 81}, _reserved} = OutputPressure.reserve_recovery_context(pressure)
+    end
   end
 
   test "frame admission bounds acknowledgements without future acknowledgements moving diagnostics" do

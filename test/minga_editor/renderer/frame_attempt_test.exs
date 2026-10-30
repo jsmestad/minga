@@ -30,19 +30,14 @@ defmodule MingaEditor.Renderer.FrameAttemptTest do
     assert FrameAttempt.latest(pending, fallback) == pending
   end
 
-  test "latest refreshes nil or older pending with fallback identity" do
+  test "latest selects the fallback without assigning a new wire identity" do
     fallback = FrameAttempt.new(intent(), 12, 20)
 
     from_nil = FrameAttempt.latest(nil, fallback)
     from_older = FrameAttempt.latest(FrameAttempt.new(intent(), 11, 10), fallback)
 
-    assert from_nil.intent == fallback.intent
-    assert from_nil.pushed_at == 20
-    assert from_nil.seq > 12
-
-    assert from_older.intent == fallback.intent
-    assert from_older.pushed_at == 20
-    assert from_older.seq > 12
+    assert from_nil == fallback
+    assert from_older == fallback
   end
 
   defp intent do

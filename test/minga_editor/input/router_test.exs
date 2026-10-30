@@ -409,7 +409,7 @@ defmodule MingaEditor.Input.RouterTest do
            editor_pid: self(),
            pipeline: acknowledged_probe(self()),
            require_ack?: true,
-           generation_reserver: generation_reserver()}
+           recovery_reserver: recovery_reserver()}
         )
 
       state = async_state(renderer)
@@ -431,9 +431,9 @@ defmodule MingaEditor.Input.RouterTest do
     end
   end
 
-  defp generation_reserver do
+  defp recovery_reserver do
     counter = :atomics.new(1, [])
-    fn -> :atomics.add_get(counter, 1, 1) end
+    fn -> {:atomics.add_get(counter, 1, 1), 1} end
   end
 
   describe "dispatch_mouse/7" do

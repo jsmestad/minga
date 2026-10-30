@@ -26,13 +26,16 @@ defmodule MingaEditor.RenderModel.UI.ConfigStateBuilder do
   @doc """
   Converts a wire-shaped settings map into the semantic struct.
 
-  Options become an ordered `{name_string, value}` list, preserving the source
-  map's enumeration order so the encoded bytes stay identical to the legacy push.
+  Options become an ordered `{name_string, value}` list sorted by option name.
+  Atom-keyed map enumeration depends on VM atom allocation and is not a wire order.
   """
   @spec from_wire(wire()) :: ConfigState.t()
   def from_wire(%{options: options, theme_previews: previews, keybindings: bindings}) do
     %ConfigState{
-      options: Enum.map(options, fn {name, value} -> {Atom.to_string(name), value} end),
+      options:
+        options
+        |> Enum.map(fn {name, value} -> {Atom.to_string(name), value} end)
+        |> Enum.sort_by(&elem(&1, 0)),
       theme_previews: previews,
       keybindings: bindings
     }

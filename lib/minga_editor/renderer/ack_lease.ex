@@ -41,6 +41,13 @@ defmodule MingaEditor.Renderer.AckLease do
     matches?(lease, generation, seq) and last_applied == last_acknowledged_seq
   end
 
+  @doc "Keeps rejection identity while projecting the latest coalesced semantic windows."
+  @spec recovery_context(t(), FrameAttempt.t()) :: t()
+  def recovery_context(%__MODULE__{} = lease, %FrameAttempt{} = latest) do
+    attempt = FrameAttempt.new(latest.intent, lease.attempt.seq, latest.pushed_at)
+    %{lease | attempt: attempt}
+  end
+
   @spec cancel_timer(t() | nil) :: :ok
   def cancel_timer(nil), do: :ok
 

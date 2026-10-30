@@ -25,6 +25,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.RenderPipeline.WorkspaceIntent
   alias MingaEditor.Shell.Runtime, as: ShellRuntime
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Renderer.AckLease
   alias MingaEditor.Renderer.FrameAttempt
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Renderer.ObservedBuffers
@@ -182,7 +183,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       name: nil,
       editor_pid: nil,
       require_ack?: false,
-      generation_reserver: generation_reserver()
+      recovery_reserver: recovery_reserver()
     ]
 
     {:ok, renderer} = RendererServer.start_link(opts)
@@ -293,14 +294,15 @@ defmodule MingaEditor.Renderer.ServerTest do
   test "stale search rejects atomically without retrying and advances to the latest intent" do
     parent = self()
     generation = Minga.Search.IndexGeneration.new(self(), 1, 0, 0)
+    stale_intent = %{stub_intent() | revision: 1}
+    latest_intent = %{stale_intent | revision: 2}
 
     pipeline = fn input ->
-      send(parent, {:search_generation_attempt, input.frame_seq})
+      send(parent, {:search_generation_attempt, input.frame_seq, input.intent.revision})
 
-      case input.frame_seq do
-        10 -> raise MingaEditor.Renderer.StaleSearchError, generation: generation
-        11 -> input
-        42 -> raise MingaEditor.Renderer.StaleSearchError, generation: generation
+      case input.intent.revision do
+        1 -> raise MingaEditor.Renderer.StaleSearchError, generation: generation
+        2 -> input
       end
     end
 
@@ -308,22 +310,28 @@ defmodule MingaEditor.Renderer.ServerTest do
     before = :sys.get_state(renderer)
 
     assert {:error, %MingaEditor.Renderer.StaleSearchError{}} =
-             RendererServer.render_sync(renderer, Submission.full(stub_intent()), 42)
+             RendererServer.render_sync(renderer, Submission.full(stale_intent), 42)
 
     after_rejection = :sys.get_state(renderer)
     assert after_rejection.caches == before.caches
-    assert_receive {:search_generation_attempt, 42}, @async_render_timeout
-    refute_receive {:search_generation_attempt, 42}, 50
+    assert_receive {:search_generation_attempt, synchronous_seq, 1}, @async_render_timeout
+    refute_receive {:search_generation_attempt, _, _}, 50
 
     :ok = :sys.suspend(renderer)
-    RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 10)
-    RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 11)
+    RendererServer.cast_snapshot(renderer, Submission.full(stale_intent), 10)
+    RendererServer.cast_snapshot(renderer, Submission.full(latest_intent), 11)
     :ok = :sys.resume(renderer)
 
-    assert_receive {:search_generation_attempt, 10}, @async_render_timeout
-    refute_receive {:search_generation_attempt, 10}, 50
-    assert_receive {:search_generation_attempt, 11}, @async_render_timeout
-    assert_receive {:render_done, %RenderReceipt{frame_seq: 11}}, @async_render_timeout
+    assert_receive {:search_generation_attempt, stale_seq, 1}, @async_render_timeout
+    assert_receive {:search_generation_attempt, latest_seq, 2}, @async_render_timeout
+    assert synchronous_seq < stale_seq
+    assert stale_seq < latest_seq
+    refute_receive {:search_generation_attempt, _, _}, 50
+    refute_receive {:render_done, %RenderReceipt{frame_seq: ^stale_seq}}, 50
+
+    assert_receive {:render_done, %RenderReceipt{frame_seq: ^latest_seq, intent_revision: 2}},
+                   @async_render_timeout
+
     refute renderer_busy?(renderer)
   end
 
@@ -540,6 +548,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       parent = self()
       manager_name = unique_process_name(:generation_manager)
       renderer_name = unique_process_name(:generation_renderer)
+      requested_seq = 60
       active = start_supervised!({Agent, fn -> false end}, id: make_ref())
 
       opener = fn _spec, _opts ->
@@ -581,7 +590,7 @@ defmodule MingaEditor.Renderer.ServerTest do
                active: active,
                parent: parent,
                intent: stub_intent(),
-               frame_seq: 60
+               frame_seq: requested_seq
              ]
            ]}
       }
@@ -606,8 +615,36 @@ defmodule MingaEditor.Renderer.ServerTest do
       send(manager, {port, {:data, <<0x0A, 5::32, 50::32>>}})
       assert Manager.output_pressure(manager_name).last_applied_generation == 5
 
-      Agent.update(active, fn _ -> true end)
       first_renderer = Process.whereis(renderer_name)
+
+      :ok =
+        RendererServer.reset_connection(
+          renderer_name,
+          Submission.full(stub_intent()),
+          requested_seq
+        )
+
+      assert_receive {:wire_batch, old_frame_batch}, @async_render_timeout
+      assert {old_frame_seq, 0, old_generation} = frame_header(old_frame_batch)
+      assert old_frame_seq >= requested_seq
+      assert old_generation > 5
+
+      assert RendererServer.request_recovery(renderer_name, old_generation, 0) ==
+               :recovery_started
+
+      assert_receive {:wire_batch, old_retry_batch}, @async_render_timeout
+      assert {retry_seq, 0, retry_generation} = frame_header(old_retry_batch)
+      assert retry_seq > old_frame_seq
+      assert retry_generation > old_generation
+
+      send(manager, {port, {:data, <<0x0A, retry_generation::32, retry_seq::32>>}})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^retry_seq, keyframe?: true}},
+                     @async_render_timeout
+
+      assert RendererServer.acknowledgement_state(renderer_name) == {retry_generation, retry_seq}
+
+      Agent.update(active, fn _ -> true end)
       first_ref = Process.monitor(first_renderer)
       Process.exit(first_renderer, :kill)
 
@@ -619,28 +656,36 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert replacement_renderer != first_renderer
 
       assert_receive {:wire_batch, recovery_batch}, @async_render_timeout
-      assert {60, 0, recovery_generation} = frame_header(recovery_batch)
-      assert recovery_generation > 5
+      assert {recovery_frame_seq, 0, recovery_generation} = frame_header(recovery_batch)
+      assert recovery_generation > retry_generation
+      assert recovery_frame_seq > retry_seq
 
       send(manager, {port, {:data, <<0x0A, 5::32, 50::32>>}})
       refute_receive {:forwarded, ^replacement_forwarder, _message}, 30
 
-      send(manager, {port, {:data, <<0x0A, recovery_generation::32, 60::32>>}})
+      send(manager, {port, {:data, <<0x0A, recovery_generation::32, recovery_frame_seq::32>>}})
 
       assert_receive {:forwarded, ^replacement_forwarder,
-                      {:minga_input, {:frame_applied, ^recovery_generation, 60}}},
+                      {:minga_input, {:frame_applied, ^recovery_generation, ^recovery_frame_seq}}},
                      @async_render_timeout
 
-      assert_receive {:render_done, %RenderReceipt{frame_seq: 60, keyframe?: true}},
+      assert_receive {:render_done,
+                      %RenderReceipt{frame_seq: ^recovery_frame_seq, keyframe?: true}},
                      @async_render_timeout
 
       refute_receive {:wire_batch, _timeout_catch_up}, 50
-      assert RendererServer.acknowledgement_state(renderer_name) == {recovery_generation, 60}
+
+      assert RendererServer.acknowledgement_state(renderer_name) ==
+               {recovery_generation, recovery_frame_seq}
 
       send(manager, {port, {:data, ready_packet(80, 24)}})
       assert_receive {:replayed_ready, ^replacement_forwarder, 80, 24}, @async_render_timeout
       assert_receive {:wire_batch, duplicate_ready_batch}, @async_render_timeout
-      assert {60, 0, duplicate_ready_generation} = frame_header(duplicate_ready_batch)
+
+      assert {duplicate_ready_seq, 0, duplicate_ready_generation} =
+               frame_header(duplicate_ready_batch)
+
+      assert duplicate_ready_seq > recovery_frame_seq
       assert duplicate_ready_generation > recovery_generation
 
       assert RendererServer.request_recovery(renderer_name, duplicate_ready_generation, 0) ==
@@ -651,10 +696,14 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert {concurrent_frame_seq, 0, concurrent_recovery_generation} =
                frame_header(concurrent_recovery_batch)
 
-      assert concurrent_frame_seq > 60
+      assert concurrent_frame_seq > duplicate_ready_seq
       assert concurrent_recovery_generation > duplicate_ready_generation
 
-      send(manager, {port, {:data, <<0x0A, duplicate_ready_generation::32, 60::32>>}})
+      send(
+        manager,
+        {port, {:data, <<0x0A, duplicate_ready_generation::32, duplicate_ready_seq::32>>}}
+      )
+
       refute_receive {:forwarded, ^replacement_forwarder, _message}, 30
 
       send(
@@ -667,6 +716,127 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       assert RendererServer.acknowledgement_state(renderer_name) ==
                {concurrent_recovery_generation, concurrent_frame_seq}
+    end
+
+    test "an explicit recovery reserver supplies the complete context without consulting a Manager" do
+      counter = :atomics.new(1, [])
+      :ok = :atomics.put(counter, 1, 6)
+      reserver = fn -> {:atomics.add_get(counter, 1, 1), 100} end
+
+      renderer =
+        start_ack_renderer(self(),
+          frontend_manager: {:global, {__MODULE__, make_ref()}},
+          recovery_reserver: reserver
+        )
+
+      intent = %{stub_intent() | revision: 37}
+      assert :sys.get_state(renderer).next_frame_seq == 100
+
+      assert {:ok, %RenderReceipt{frame_seq: 100, intent_revision: 37}} =
+               RendererServer.render_sync(renderer, Submission.full(intent), 1)
+
+      assert_receive {:ack_pipeline, 100, 7, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 7, 100})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 100}}, @async_render_timeout
+
+      assert {:ok, %RenderReceipt{frame_seq: 101, intent_revision: 37}} =
+               RendererServer.reset_keyframe_sync(renderer, Submission.full(intent), 1)
+
+      assert_receive {:ack_pipeline, 101, 8, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 8, 101})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 101}}, @async_render_timeout
+      assert :sys.get_state(renderer).next_frame_seq == 102
+      assert :atomics.get(counter, 1) == 8
+    end
+
+    test "an independent pipeline defaults to its own initial context without a Manager" do
+      renderer =
+        start_supervised!(
+          {RendererServer,
+           name: nil,
+           editor_pid: self(),
+           frontend_manager: {:global, {__MODULE__, make_ref()}},
+           pipeline: acknowledgement_probe_pipeline(self())}
+        )
+
+      assert :sys.get_state(renderer).next_frame_seq == 1
+
+      assert {:ok, %RenderReceipt{frame_seq: 1}} =
+               RendererServer.render_sync(renderer, Submission.full(stub_intent()), 0)
+
+      assert_receive {:ack_pipeline, 1, 1, 0, true}, @async_render_timeout
+      assert :sys.get_state(renderer).next_frame_seq == 2
+      refute RendererServer.rendering?(renderer)
+    end
+
+    for operation <- [
+          :cast_snapshot,
+          :render_sync,
+          :reset_keyframe,
+          :reset_keyframe_sync,
+          :reset_connection,
+          :reset_sync
+        ] do
+      test "#{operation} reserves beyond an acknowledged recovery without renumbering intent revisions" do
+        operation = unquote(operation)
+        renderer = start_ack_renderer(self(), ack_timeout_ms: 60_000)
+
+        assert {:ok, %RenderReceipt{frame_seq: 20}} =
+                 RendererServer.render_sync(renderer, Submission.full(stub_intent()), 20)
+
+        assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+
+        assert {:awaiting_ack, %AckLease{attempt: %FrameAttempt{seq: 20}}, nil} =
+                 :sys.get_state(renderer).frame_credit
+
+        assert RendererServer.acknowledgement_state(renderer) == {1, 0}
+
+        RendererServer.frame_status(
+          renderer,
+          {:frame_rejected, 1, 20, 0, :base_sequence_mismatch, :retryable_recovery}
+        )
+
+        assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
+        RendererServer.frame_status(renderer, {:frame_applied, 2, 21})
+        assert_receive {:render_done, %RenderReceipt{frame_seq: 21}}, @async_render_timeout
+        RendererServer.frame_status(renderer, {:frame_applied, 1, 20})
+        send(renderer, {:frame_ack_timeout, 1, 20})
+        assert :sys.get_state(renderer).next_frame_seq == 22
+
+        for {requested, wire, revision} <- [{21, 22, 37}, {20, 23, 38}] do
+          intent = %{stub_intent() | revision: revision}
+
+          result =
+            apply(RendererServer, operation, [renderer, Submission.full(intent), requested])
+
+          if operation in [:render_sync, :reset_keyframe_sync, :reset_sync] do
+            assert {:ok, %RenderReceipt{frame_seq: ^wire, intent_revision: ^revision}} = result
+          else
+            assert result == :ok
+          end
+
+          assert_receive {:ack_pipeline, ^wire, generation, base, keyframe?},
+                         @async_render_timeout
+
+          if operation in [:cast_snapshot, :render_sync] do
+            assert generation == 2
+            assert base == wire - 1
+            refute keyframe?
+          else
+            assert base == 0
+            assert keyframe?
+          end
+
+          RendererServer.frame_status(renderer, {:frame_applied, generation, wire})
+
+          assert_receive {:render_done,
+                          %RenderReceipt{frame_seq: ^wire, intent_revision: ^revision}},
+                         @async_render_timeout
+
+          assert :sys.get_state(renderer).next_frame_seq == wire + 1
+          refute_receive {:ack_pipeline, _, _, _, _}, 20
+        end
+      end
     end
 
     test "only a matching frame acknowledgement promotes every pending GUI window delta" do
@@ -796,6 +966,11 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert RendererServer.acknowledgement_state(renderer) == {2, 0}
       refute_receive {:ack_pipeline, _, 3, _, _}, 50
       refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
+      RendererServer.frame_status(renderer, {:frame_applied, 2, 21})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 21}}, @async_render_timeout
+      assert :sys.get_state(renderer).next_frame_seq == 22
+      RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 21)
+      assert_receive {:ack_pipeline, 22, 2, 21, false}, @async_render_timeout
     end
 
     test "decoded retryable transcript rejection reaches renderer recovery" do
@@ -1656,7 +1831,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     opts =
       [name: nil, editor_pid: editor_pid]
       |> Keyword.merge(opts)
-      |> Keyword.put_new_lazy(:generation_reserver, &generation_reserver/0)
+      |> Keyword.put_new_lazy(:recovery_reserver, &recovery_reserver/0)
 
     start_supervised!({RendererServer, opts})
   end
@@ -1666,9 +1841,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     start_renderer(editor_pid, Keyword.merge(opts, pipeline: pipeline, require_ack?: true))
   end
 
-  defp generation_reserver do
+  defp recovery_reserver do
     counter = :atomics.new(1, [])
-    fn -> :atomics.add_get(counter, 1, 1) end
+    fn -> {:atomics.add_get(counter, 1, 1), 1} end
   end
 
   defp acknowledgement_probe_pipeline(parent) do
@@ -1985,7 +2160,14 @@ defmodule MingaEditor.Renderer.ServerTest do
         0
       )
 
-    TextPresentation.new(1, self(), 7, :server_test, {:windowed, {visual}})
+    TextPresentation.new(
+      1,
+      self(),
+      7,
+      :server_test,
+      {:windowed, {visual}},
+      System.unique_integer([:positive, :monotonic])
+    )
   end
 
   defp text_event(presentation) do

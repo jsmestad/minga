@@ -191,7 +191,7 @@ defmodule Minga.Conformance.ProductionRenderCorpusTest do
            editor_pid: self(),
            pipeline: gui_emit_pipeline(frames),
            require_ack?: true,
-           generation_reserver: generation_reserver(),
+           recovery_reserver: recovery_reserver(),
            ack_timeout_ms: @render_timeout},
           id: make_ref()
         )
@@ -200,9 +200,9 @@ defmodule Minga.Conformance.ProductionRenderCorpusTest do
     {renderer, frontend, intent}
   end
 
-  defp generation_reserver do
+  defp recovery_reserver do
     counter = :atomics.new(1, [])
-    fn -> :atomics.add_get(counter, 1, 1) end
+    fn -> {:atomics.add_get(counter, 1, 1), 1} end
   end
 
   defp gui_emit_pipeline(frames) do

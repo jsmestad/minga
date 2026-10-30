@@ -84,7 +84,7 @@ defmodule MingaEditor.Renderer.StateTest do
     assert state.frame_credit == {:scheduled, new_token, attempt, 1, nil}
   end
 
-  test "latest successor chooses newer queued work or refreshes fallback" do
+  test "latest successor selects queued work or retains the fallback identity" do
     fallback = attempt(10)
     successor = attempt(11)
 
@@ -93,9 +93,21 @@ defmodule MingaEditor.Renderer.StateTest do
 
     assert State.latest_successor(state, fallback) == successor
 
-    refreshed = State.latest_successor(State.new([]), fallback)
-    assert refreshed.seq > fallback.seq
-    assert %{refreshed | seq: fallback.seq} == fallback
+    assert State.latest_successor(State.new([]), fallback) == fallback
+  end
+
+  test "fresh recovery context only raises the local floor and does not renumber pending work" do
+    pending = attempt(20)
+
+    for {floor, expected_next} <- [{1, 21}, {100, 100}] do
+      state =
+        State.new(recovery_reserver: fn -> {2, floor} end, next_frame_seq: 21)
+        |> State.schedule_frame(pending, make_ref())
+
+      assert {reserved, {2, ^floor}} = State.reserve_recovery_context(state)
+      assert reserved.next_frame_seq == expected_next
+      assert reserved.frame_credit == state.frame_credit
+    end
   end
 
   test "rejection recovery preserves the visible lease until recovered activation" do
@@ -104,7 +116,7 @@ defmodule MingaEditor.Renderer.StateTest do
     assert {:ok, registry} = TextPresentations.activate(registry, 1, old.presentation_id)
 
     state =
-      %{State.new(generation_reserver: fn -> 2 end) | text_presentations: registry}
+      %{State.new(recovery_reserver: fn -> {2, 1} end) | text_presentations: registry}
 
     reader = State.text_interaction_reader(state)
     assert {:noreply, recovered} = RecoveryHandler.transaction(state, attempt(10))
@@ -152,7 +164,14 @@ defmodule MingaEditor.Renderer.StateTest do
         0
       )
 
-    TextPresentation.new(window_id, self(), 7, {:identity, row_id}, {:windowed, {visual}})
+    TextPresentation.new(
+      window_id,
+      self(),
+      7,
+      {:identity, row_id},
+      {:windowed, {visual}},
+      System.unique_integer([:positive, :monotonic])
+    )
   end
 
   defp event(presentation) do

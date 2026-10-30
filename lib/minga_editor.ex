@@ -69,8 +69,9 @@ defmodule MingaEditor do
 
   @typedoc "Options for starting the editor."
   @type start_opt ::
-          {:name, GenServer.name()}
+          {:name, GenServer.name() | nil}
           | {:backend, MingaEditor.State.backend()}
+          | {:rendering, MingaEditor.State.rendering_policy()}
           | {:port_manager, GenServer.server()}
           | {:parser_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
@@ -89,6 +90,7 @@ defmodule MingaEditor do
           | {:swap_dir, String.t()}
           | {:session_dir, String.t()}
           | {:suppress_tool_prompts, boolean()}
+          | {:pane_generation_allocator, (-> pos_integer())}
 
   alias MingaEditor.State, as: EditorState
 
