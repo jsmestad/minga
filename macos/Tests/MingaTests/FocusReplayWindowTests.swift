@@ -24,6 +24,7 @@ struct FocusReplayWindowTests {
     func replay(_ entry: ConformanceIndexEntry) async throws {
         var context = try FocusReplayWindowContext()
         defer { context.close() }
+        try await context.waitUntilAttached()
 
         for (index, step) in try ConformanceTranscriptTests.loadSteps(entry.file).enumerated() {
             if step["reset_frontend"] as? Bool == true {
@@ -31,6 +32,7 @@ struct FocusReplayWindowTests {
                 context = try FocusReplayWindowContext()
                 #expect(context.gui.focusOwnerState.decodedOwner == nil)
                 #expect(context.editor.focusPolicy.decodedOwner == nil)
+                try await context.waitUntilAttached()
             }
             let gui = context.gui
             let dispatcher = context.dispatcher
@@ -45,6 +47,9 @@ struct FocusReplayWindowTests {
             if !context.firstFrameRendered {
                 context.firstFrameRendered = true
                 editor.focusPolicy.firstFrameDidRender()
+                // MingaApp requests presentation focus after dismissing its first-frame overlay.
+                // Reproduce that startup event once after attachment, rather than repairing focus while polling.
+                _ = editor.focusPolicy.requestPresentationFocus()
             }
             let expect = try #require(step["expect"] as? [String: Any])
             let target = try #require(expect["focus_target"] as? [String: Any])
@@ -80,7 +85,10 @@ struct FocusReplayWindowTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         let target = try #require(responder(kind: kind, editor: editor, host: host), "Production field did not register: \(kind)")
-        try #require(hasFocus(target, in: window), "Committed responder not focused: \(kind)")
+        try #require(
+            hasFocus(target, in: window),
+            "Committed responder not focused: \(kind); attached=\(editor.window === window) visible=\(window.isVisible) key=\(window.isKeyWindow) active=\(NSApp.isActive) pending=\(editor.focusPolicy.pendingOwnerApply) firstResponder=\(String(describing: window.firstResponder))"
+        )
         return target
     }
 
@@ -178,6 +186,19 @@ private final class FocusReplayWindowContext {
         self.editor = editor
         self.host = host
         self.window = window
+    }
+
+    /// Production cannot receive a frame until the mounted EditorNSView has supplied its ready dimensions.
+    /// NSHostingView mounts asynchronously in this standalone test window, so observe that prerequisite without laying out the hierarchy or invoking focus policy from the polling loop.
+    func waitUntilAttached() async throws {
+        for _ in 0..<100 {
+            if editor.window === window, editor.bounds.width > 0, editor.bounds.height > 0 {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(editor.window === window, "Production EditorNSView did not attach before the first frame")
+        try #require(editor.bounds.width > 0 && editor.bounds.height > 0, "Production EditorNSView has no ready dimensions")
     }
 
     func close() {

@@ -205,6 +205,10 @@ final class EditorFocusPolicy: EditorFocusControlling {
     /// Brings the window forward and restores the decoded owner after a native modal closes.
     func restoreAfterNativeModal() {
         guard let window = attachedWindow else { return }
+        // Prepare an offscreen window's committed initial responder before AppKit orders it and chooses a field of its own.
+        // Otherwise that incidental field editor looks like native editing and correctly blocks the subsequent owner application.
+        // Visible non-key windows still defer here until ordering delivers the real key-window event.
+        applyDecodedOwner()
         window.makeKeyAndOrderFront(nil)
         applyDecodedOwner()
     }

@@ -17,6 +17,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   An upward dependency (Layer 0 importing from Layer 1 or 2, or Layer 1
   importing from Layer 2) is flagged as a violation.
 
+  Source layers come from paths under `lib/`, never from the checkout directory's name.
+
   See AGENTS.md § "Code Organization" for the full rationale.
   """
 
@@ -602,7 +604,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   end
 
   defp layer_for_service_file(path) do
-    case String.contains?(path, "/minga_agent/") or String.contains?(path, "/minga/") do
+    case String.contains?(path, "/lib/minga_agent/") or String.contains?(path, "/lib/minga/") do
       true -> 1
       false -> nil
     end
@@ -610,15 +612,15 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   defp layer_0_file?(path) do
     Enum.any?(@layer_0_prefixes, fn prefix ->
-      # Convert module prefix to path fragment: "Minga.Core.Face" -> "/minga/core/face"
-      path_fragment = module_to_path_fragment(prefix)
+      # Anchor source paths under lib/ so checkout names cannot assign a layer.
+      path_fragment = "/lib" <> module_to_path_fragment(prefix)
       String.contains?(path, path_fragment)
     end)
   end
 
   defp layer_2_file?(path) do
     Enum.any?(@layer_2_prefixes, fn prefix ->
-      path_fragment = module_to_path_fragment(prefix)
+      path_fragment = "/lib" <> module_to_path_fragment(prefix)
       String.contains?(path, path_fragment)
     end)
   end
