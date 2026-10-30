@@ -948,6 +948,67 @@ struct ContentViewTests {
         #expect(draw.presentation?.offset.y == draw.cellHeight)
     }
 
+    @Test("conformance geometry uses spaced rows in the production IME and hit-test path", arguments: [Float(1), Float(1.2), Float(2)])
+    func conformanceSpacedInputGeometry(spacing: Float) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher,
+                                          encoder: ClosureOutboundActionEncoder { _ in .accepted })
+        let base = try nativeInteractionContent(anchorTop: 0)
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 1,
+            cursorRow: 4, cursorCol: 3, cursorShape: .block,
+            rows: base.rows, selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: [], paneGeometry: base.paneGeometry)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiLineSpacing(spacing: spacing))
+        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.promoteVisibleEditorSnapshot(try #require(dispatcher.committedEditorSnapshot))
+
+        // No window is needed for the production NSTextInputClient cursor rect.
+        let rect = editor.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+        let spacedHeight = editor.cellHeight * CGFloat(spacing)
+        // CI mutation evidence accepts only these behavioral assertions, never renderer/setup failures.
+        #expect(abs(rect.minY - 4 * spacedHeight) < 0.001, "[pixels3520.spacing.ime-row]")
+        #expect(abs(rect.height - spacedHeight) < 0.001, "[pixels3520.spacing.ime-height]")
+
+        // An unshown window supplies the screen conversion used by characterIndex;
+        // it is neither ordered front nor granted Accessibility trust.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = editor
+        let point = NSPoint(x: editor.cellWidth * 3.5, y: spacedHeight * 4.5)
+        let screenPoint = window.convertPoint(toScreen: editor.convert(point, to: nil))
+        #expect(editor.characterIndex(for: screenPoint) == 4 * 80 + 3, "[pixels3520.spacing.hit-test]")
+        window.contentView = nil
+    }
+
+    @Test("conformance scroll publication consumes only the newly drawn echo")
+    func conformanceScrollPublicationUsesCapturedCommit() throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher,
+                                          encoder: ClosureOutboundActionEncoder { _ in .accepted })
+        let initial = try commitScrollFrame(dispatcher, frameSeq: 1, anchorTop: 10)
+        dispatcher.promoteVisibleEditorSnapshot(initial)
+        editor.seedTrackpadReconciliationForTesting(
+            windowId: 1, unconfirmedLines: 2, confirmedAnchorTop: 10, settling: false)
+        let echo = try commitScrollFrame(dispatcher, frameSeq: 2, anchorTop: 11)
+        // CI mutation evidence requires a marked captured-commit assertion and its evaluated expression.
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == initial.frameSeq, "[pixels3520.scroll.unpresented]")
+        let draw = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: echo)
+        #expect(draw.unconfirmedLines == 1, "[pixels3520.scroll.acknowledged-lines]")
+        #expect(draw.lastConfirmedAnchorTop == 11, "[pixels3520.scroll.confirmed-anchor]")
+        #expect(draw.presentation?.offset.y == draw.cellHeight, "[pixels3520.scroll.draw-offset]")
+        dispatcher.promoteVisibleEditorPresentation(snapshot: echo, localTransform: draw.presentation)
+        #expect(dispatcher.visibleEditorSnapshot?.frameSeq == echo.frameSeq, "[pixels3520.scroll.published-echo]")
+        let repeated = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: echo)
+        #expect(repeated.unconfirmedLines == 1, "[pixels3520.scroll.repeated-lines]")
+        #expect(repeated.presentation?.offset.y == draw.cellHeight, "[pixels3520.scroll.repeated-offset]")
+    }
+
     @Test("draw reconciles upward batched commits against the latest captured snapshot exactly once")
     @MainActor func upwardBatchedCommitsUseLatestCapturedCommit() throws {
         let gui = GUIState()

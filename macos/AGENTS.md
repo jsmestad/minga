@@ -263,6 +263,22 @@ Keep production `Minga.app` out of `TEST_HOST` and preserve its deep-codesigning
 Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
 Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
 
+The shared conformance corpus can also assert editor-surface pixels.
+`ConformanceTranscriptTests.Pixels` is serialized and renders the dispatcher's newly committed snapshot through the production Metal renderer, using the same offscreen factories/readback as the temporal suite.
+Fixtures use Menlo 13, scale 1; cell Y coordinates include committed line spacing.
+Region color and glyph-occupancy samples are composition evidence, never model-state gates or golden-image comparisons.
+Rejected frames and accepted transactions that retain an older editor snapshot must not reuse that snapshot for pixels.
+
+```bash
+# From repository root, after generating the corpus/project:
+MINGA_REQUIRE_METAL=1 python3 scripts/check_conformance_pixels --mutations
+```
+
+This is also the existing macOS Swift CI job's test command.
+It runs the unit bundle, records warm focused conformance timings before/after the pixel suite, and checks isolated production-equivalent historical mutations.
+See `test/conformance/corpus/README.md` for the schema, 0.02 squared-RGB tolerance, device-unavailable behavior, the 10-second increment budget, and the distinction between direct Metal evidence and production EditorNSView geometry/scroll regressions.
+Background fill removal can legitimately survive because the production clear already has the same color; never fake a contrasting clear or report a build failure as a mutation kill.
+
 ### Swift 6 Concurrency Patterns
 
 Swift 6 strict concurrency is enforced project-wide. The compiler must be able to prove actor isolation statically. When it can't, you have a design problem, not a compiler limitation.

@@ -294,6 +294,8 @@ jobs:
     env:
       # ViewInspector's glass-effect inspectors require the macOS 26 SDK.
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      # Pixel conformance must fail, not silently skip, without a real GPU.
+      MINGA_REQUIRE_METAL: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -316,6 +318,7 @@ jobs:
 
       - run: mix deps.get
       - run: mix protocol.gen
+      - run: mix conformance.gen
 
       - name: Install pinned XcodeGen
         run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
@@ -386,15 +389,15 @@ jobs:
       - name: Test native result classification
         run: python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
 
-      - name: Test
-        run: scripts/test_macos_unit
+      - name: Test and record focused conformance timing and mutations
+        run: python3 scripts/check_conformance_pixels --mutations
 
       - name: Upload native unit test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: macos-unit-evidence
-          path: macos-unit-evidence/
+          path: conformance-pixel-evidence/unit-bundle/
           if-no-files-found: error
 
       - name: Prove recovery generation policy reaches native commits
@@ -407,6 +410,14 @@ jobs:
           name: conformance-recovery-evidence
           path: conformance-recovery-evidence/
           if-no-files-found: warn
+
+      - name: Upload conformance pixel evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-pixel-evidence
+          path: conformance-pixel-evidence/
+          if-no-files-found: error
 
   swift-integration:
     name: Swift Protocol Integration

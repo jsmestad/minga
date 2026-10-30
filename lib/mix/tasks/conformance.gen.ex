@@ -68,6 +68,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     File.mkdir_p!(Path.join(@corpus_dir, "chat"))
     File.mkdir_p!(Path.join(@corpus_dir, "focus"))
     File.mkdir_p!(Path.join(@corpus_dir, "recovery"))
+    File.mkdir_p!(Path.join(@corpus_dir, "pixels"))
 
     # The chat family uses the semantic transcript selector. It reads the
     # resident byte-cap option from Config, so start its ETS-backed server for
@@ -191,7 +192,8 @@ defmodule Mix.Tasks.Conformance.Gen do
       native_text_editing_returns_to_latest_owner()
     ] ++
       Mix.Tasks.Conformance.FocusScenarios.build_all() ++
-      Mix.Tasks.Conformance.RecoveryScenarios.build_all()
+      Mix.Tasks.Conformance.RecoveryScenarios.build_all() ++
+      Mix.Tasks.Conformance.PixelScenarios.build_all()
   end
 
   # ── Store lifecycle transcripts (AC1) ─────────────────────────────────────

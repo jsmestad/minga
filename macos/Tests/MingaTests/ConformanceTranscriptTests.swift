@@ -47,9 +47,25 @@ struct ConformanceTranscriptTests {
         #expect(!conformanceSwiftEntries.isEmpty, "conformance corpus empty; run `mix conformance.gen`")
     }
 
-    @Test("transcript conforms", arguments: conformanceSwiftEntries)
+    @Test("transcript conforms", arguments: conformanceSwiftEntries.filter { $0.category != "pixels" })
     @MainActor
     func runsTranscript(_ entry: ConformanceIndexEntry) async throws {
+        try await Self.runTranscript(entry)
+    }
+
+    @Suite("Metal pixel transcripts", .serialized,
+           .enabled(if: ConformancePixelRunner.canRun,
+                    "Metal unavailable: pixel composition requires a real Metal device; CI sets MINGA_REQUIRE_METAL=1"))
+    struct Pixels {
+        @Test("pixel transcript conforms", arguments: conformanceSwiftEntries.filter { $0.category == "pixels" })
+        @MainActor
+        func runsPixelTranscript(_ entry: ConformanceIndexEntry) async throws {
+            try await ConformanceTranscriptTests.runTranscript(entry)
+        }
+    }
+
+    @MainActor
+    static func runTranscript(_ entry: ConformanceIndexEntry) async throws {
         let steps = try Self.loadSteps(entry.file)
         var gui = GUIState()
         let setup = try Self.loadSetup(entry.file)
@@ -82,6 +98,7 @@ struct ConformanceTranscriptTests {
             outboundActions.append(result.outboundAction)
         }
 
+        let pixelRunner = entry.category == "pixels" ? try ConformancePixelRunner() : nil
         // Per-window injected local offset (state injection: the point of the
         // input suite is running a transcript against a nonzero local offset).
 
@@ -143,7 +160,13 @@ struct ConformanceTranscriptTests {
                     continue
                 }
                 guard Self.assertTransaction(expect, result: transactionResult, dispatcher: dispatcher,
-                                             gui: gui, index: i, name: entry.name) else { continue }
+                                             gui: gui, index: i, name: entry.name) else {
+                    try await pixelRunner?.assertPixels(
+                        step: step, snapshot: dispatcher.committedEditorSnapshot, result: transactionResult,
+                        rowOffsets: injectedRowOffset, colOffsets: injectedColOffset,
+                        name: entry.name, index: i)
+                    continue
+                }
                 Self.assertFrame(expect, gui: gui, windowId: 1, offsetDiscarded: frameReset,
                                  index: i, name: entry.name)
                 if let effects = expect["out_of_band"] as? [String: Any] {
@@ -162,6 +185,10 @@ struct ConformanceTranscriptTests {
                 await focus?.settle()
                 Self.assertFocusTarget(expect, gui: gui, index: i, name: entry.name)
                 Self.assertFirstResponder(expect, harness: focus, index: i, name: entry.name)
+                try await pixelRunner?.assertPixels(
+                    step: step, snapshot: dispatcher.committedEditorSnapshot, result: transactionResult,
+                    rowOffsets: injectedRowOffset, colOffsets: injectedColOffset,
+                    name: entry.name, index: i)
 
             case "frame_status":
                 if step["event"] as? String == "ack_timeout" {

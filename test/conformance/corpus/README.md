@@ -313,3 +313,85 @@ Recovery sequences (#3516):
 - **resize_between_frames** reproduces the geometry/input ordering boundary from `f85298bd9`: a frontend row-fit change from 24 to 30 reaches Layout before the next frame.
 - **reattach_after_dropped_ack** reproduces `f618c71e2`: an exact lease timeout produces a fresh-generation reattach keyframe.
 - **wheel_during_commit_then_click** reproduces `559792551` and `950ecc3fe`: local input is based on committed rows and pointer normalization includes the settled offset.
+
+## Metal pixel composition (`pixels/*.json`, #3520)
+
+Pixel transcripts use the recovery family's production `framed` step: its `payload_base64` is the actual Manager batch with only the packet-4 transport prefix removed, not hand-authored begin/commit bytes.
+Theme, gutter and pane geometry are committed before the production `CoreTextMetalRenderer` renders the dispatcher's `committedEditorSnapshot` into an offscreen drawable.
+
+```json
+{
+  "kind": "framed",
+  "swift_only": true,
+  "payload_base64": "...",
+  "expect": {
+    "transaction_result": {"kind": "applied", "generation": 1, "frame_seq": 1},
+    "pixels": [
+      {"region": "frame edge", "cells": [5, 35, 1, 1],
+       "assert": "color", "color": "0x202020", "tolerance": 0.02},
+      {"region": "spaced glyph row", "cells": [2, 8, 1, 12],
+       "assert": "occupied", "color": "0x202020"},
+      {"region": "old glyph row", "cells": [4, 8, 1, 12],
+       "assert": "empty", "color": "0x202020"}
+    ]
+  }
+}
+```
+
+`cells` is `[row, col, rows, cols]`, absolute to the **editor surface**, with top-left origin (not relative to the text or gutter).
+Regions are derived from the encoded window's geometry and carried rows.
+Fractional cell coordinates are permitted; there are no pixel-unit regions.
+Swift converts using the fixture font **Menlo 13, scale 1**: X uses `cellWidth`; Y uses `cellHeight × committed lineSpacing`.
+Bounds round outward and must fit the drawable.
+Font spacing is never emulated in the model expectations.
+
+`color` requires every sampled pixel to match `0xRRGGBB`.
+`occupied` requires at least one pixel differing from the reference/background; `empty` requires none.
+`color` defaults to the neutral fixture background `0x202020` when omitted.
+The default tolerance is **0.02 squared Euclidean RGB distance** in normalized, sRGB-encoded readback channels, not an allowed fraction of wrong pixels.
+Saturated red `0xE01010` and blue `0x1010E0` distinguish fixture glyphs.
+Failures identify transcript, step, named region, cell rectangle, measured matching/occupancy count and the sampled centre pixel's RGBA channels.
+
+`swift_only: true` declares **only pixel evidence** Swift-specific.
+`frontends.go` remains true: Go still dispatches the same framed bytes and asserts all model expectations, ignoring only `expect.pixels`.
+Pixels are evidence for composition, **never a substitute for, or gate on, model state**.
+There are no golden images, SwiftUI shell captures, Accessibility trust grants, or displayed windows in the pixel suite.
+
+The nested `ConformanceTranscriptTests.Pixels` suite is serialized.
+Each transcript acquires one Metal device, shared by its production renderer and readback queue, and reuses the renderer across its steps.
+An unavailable device disables the pixel suite locally with a reason; `MINGA_REQUIRE_METAL=1` makes it run and fail instead (required by the existing macOS CI job).
+A rejected or uncommitted frame fails with **"no committed snapshot"**; it never renders the previous good snapshot.
+
+### Timing and honest mutation evidence
+
+The existing Swift CI job runs:
+
+```bash
+mix protocol.gen
+mix conformance.gen
+cd macos && xcodegen generate
+cd ..
+MINGA_REQUIRE_METAL=1 python3 scripts/check_conformance_pixels --mutations
+```
+
+The script delegates the complete unit run to `scripts/test_macos_unit`, so both active-window focus suites execute in separate processes and remain part of the unit evidence.
+It then warms the focused conformance suite and measures it without/with the pixel sub-suite using the same Debug build products.
+`conformance-pixel-evidence/evidence.json` records revision, device information, macOS build, commands, exit codes, wall-clock durations, the added-pixel delta and the historical whole-unit baseline (2026-10-29: **136 s / 1555 tests**).
+The pixel increment budget is **10 s**.
+CI uploads JSON, logs and result bundles; copy measured values into the PR rather than presenting historical numbers as new measurements.
+
+The three scenarios name the actual historical fixes: background fill `6ab625b2c` (#2687), spaced IME/accessibility geometry `966352a7c` (#2674), and captured-snapshot local scroll reconciliation `559792551` (#3397).
+**A direct Metal region cannot prove an IME or view-owned scroll fix.**
+The additional production `ContentViewTests.conformanceSpacedInputGeometry` and `conformanceScrollPublicationUsesCapturedCommit` regressions cover those owners.
+The spacing test uses an unshown window only for the real screen-point conversion; the offscreen Metal transcripts themselves do not need a window.
+
+Because intervening refactors moved the original changes, the script applies explicit **production-equivalent inverses**, not a claimed successful `git revert`, in isolated disposable worktrees.
+Each mutant uses a private Elixir build cache rather than sharing the candidate checkout's mutable build path.
+Spacing rolls current IME row geometry back to unspaced height; scroll reconciliation consumes the old visible snapshot instead of the captured commit.
+A mutation kill requires a passing control and the **named behavioral test** failing in an xcresult.
+Compilation failures, zero tests, missing results and unrelated failures are inconclusive and fail the evidence command.
+
+Background fill is intentionally treated differently: the current explicit quad and production Metal clear both derive from `defaultBg`.
+Removing only the fill is expected to **survive**, demonstrating that the historical composition operation is redundant for these current pixels, not a mutation kill.
+The background transcript still asserts that the frame edge is painted.
+Never change the clear color, fake a snapshot, or claim this surviving historical mutation was killed just to make the evidence look stronger.

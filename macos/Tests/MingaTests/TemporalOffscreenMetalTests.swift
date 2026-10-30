@@ -37,19 +37,13 @@ struct TemporalOffscreenMetalTests {
     }
 
     @MainActor private func nativeTestFactories() -> NativeRenderFactories {
-        var factories = NativeRenderFactories.production
-        factories.makeLibrary = { device in
-            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
-        }
-        return factories
+        offscreenNativeTestFactories()
     }
 
     @MainActor
     private func makeRenderer(factories: NativeRenderFactories,
                              fontManager: FontManager) -> CoreTextMetalRenderer? {
-        guard let renderer = CoreTextMetalRenderer(factories: factories) else { return nil }
-        renderer.setupRenderers(fontManager: fontManager)
-        return renderer
+        makeOffscreenRenderer(factories: factories, fontManager: fontManager)
     }
 
     /// Full-width row of `text` painted with a single saturated background span,
