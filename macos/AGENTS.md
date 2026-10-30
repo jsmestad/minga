@@ -256,9 +256,14 @@ scripts/test_macos_unit
 ```
 
 Run the native unit entrypoint from the repository root after generating the Xcode project.
-It uses scheme `MingaUnitTests`, hosting the existing `MingaTests` bundle in the test-only `MingaTestHost` application.
+The `MingaUnitTests` scheme builds the existing `MingaTests` target for two execution contexts.
+The canonical script first runs ordinary tests bare with explicit empty `TEST_HOST` and `BUNDLE_LOADER` build settings.
+It then rebuilds/relinks with hosted defaults to run all 13 focus-policy functions inside `MingaTestHost`.
+Production-window focus replay runs separately from the exact current hosted `.xctestrun`, with its original product root bound and replay selectors made explicit.
 The host owns AppKit launch and its normal event loop, never production startup or responder policy.
-The three sequential actions isolate ordinary tests, focus-policy tests, and production-window focus replay in separate processes.
+Require resolved product/loader settings and actual runtime identity, not merely requested flags.
+Keep raw pre/post plan receipts and reject missing, ambiguous, stale, or wrong-mode plans rather than reusing old hosted products after a policy failure.
+Preserve aggregate failure when ordinary tests fail, even if later focused diagnostics pass.
 Keep production `Minga.app` out of `TEST_HOST` and preserve its deep-codesigning safeguard.
 Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
 Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.

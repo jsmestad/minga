@@ -253,55 +253,67 @@ defmodule Minga.DoneGateTest do
   end
 
   defp install_swift!(dir) do
-    executable!(dir, "xcodebuild", """
-    echo 'NOISY TEST OUTPUT'
-    case "$*" in
-      *-only-testing:MingaTests/EditorFocusPolicyTests*) echo '[Focus application nested native modal] startup pid=4101' ;;
-      *-only-testing:MingaTests/FocusReplayWindowTests*) echo '[Focus application picker_open_close] startup pid=4102' ;;
-    esac
-    if [ "${NO_RESULT:-0}" = 0 ]; then mkdir -p "${@: -1}"; fi
-    exit "${SWIFT_EXIT:-0}"
+    executable!(dir, "xcodebuild", ~S"""
+    python3 - "$@" <<'PY'
+    import json, os, plistlib, sys
+    from pathlib import Path
+    args = sys.argv[1:]
+    products = Path.cwd() / "DerivedData/Build/Products"
+    host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
+    bare = "TEST_HOST=" in args
+    if "-showBuildSettings" in args:
+        bundle = products / ("Debug/MingaTests.xctest" if bare else "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
+        print(json.dumps([{"target":"MingaTests","buildSettings":{"TEST_HOST":"" if bare else str(host),"BUNDLE_LOADER":"" if bare else str(host),"TARGET_BUILD_DIR":str(bundle.parent),"FULL_PRODUCT_NAME":bundle.name}}]))
+        sys.exit(0)
+    bundle = products / ("Debug/MingaTests.xctest" if bare else "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
+    bundle.mkdir(parents=True, exist_ok=True)
+    if not bare:
+        host.parent.mkdir(parents=True, exist_ok=True)
+        host.touch()
+    print("NOISY TEST OUTPUT")
+    policy = "-only-testing:MingaTests/EditorFocusPolicyTests" in args
+    if bare:
+        print("xctest[4100:123] native runtime")
+    else:
+        pid = 4101 if policy else 4102
+        print(f"[MingaTestHost] didFinishLaunching pid={pid} bundle=com.minga.test-host executable={host}")
+        print(f"[Focus application native fixture] startup pid={pid}")
+    if os.environ.get("NO_RESULT", "0") == "0":
+        Path(args[args.index("-resultBundlePath") + 1]).mkdir(parents=True)
+    status = int(os.environ.get("SWIFT_EXIT", "0"))
+    if policy and status == 0:
+        products.mkdir(parents=True, exist_ok=True)
+        target = {"BlueprintName":"MingaTests","TestHostPath":"__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost","TestBundlePath":"__TESTHOST__/Contents/PlugIns/MingaTests.xctest","EnvironmentVariables":{"MINGA_TEST_PRODUCTION_APP_PATH":"__TESTROOT__/Debug/Minga.app"},"OnlyTestIdentifiers":["EditorFocusPolicyTests"]}
+        (products / "MingaUnitTests_macosx.xctestrun").write_bytes(plistlib.dumps({"TestConfigurations":[{"TestTargets":[target]}]}))
+    sys.exit(status)
+    PY
     """)
 
     executable!(dir, "xcrun", ~S"""
-    case "$*" in
-      *"test-results summary"*)
-        case "${@: -1}" in
-          *focus-policy.xcresult) echo '{"totalTestCount":1,"passedTests":1,"failedTests":0,"result":"Passed"}' ;;
-          *focus-replay.xcresult) echo '{"totalTestCount":2,"passedTests":2,"failedTests":0,"result":"Passed"}' ;;
-          *)
-            if [ "${SWIFT_EXIT:-0}" = 0 ]; then
-              echo '{"totalTestCount":2,"passedTests":2,"failedTests":0,"result":"Passed"}'
-            else
-              echo '{"totalTestCount":2,"passedTests":1,"failedTests":1,"result":"Failed"}'
-            fi ;;
-        esac ;;
-      *)
-        case "${@: -1}" in
-          *focus-policy.xcresult)
-            echo '{"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"EditorFocusPolicyTests","result":"Passed","children":[{"nodeType":"Test Case","nodeIdentifier":"EditorFocusPolicyTests/lifecycleAppliesOnlyDecodedOwner()","result":"Passed"}]}]}' ;;
-          *focus-replay.xcresult)
-            cat <<'JSON'
-    {"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"FocusReplayWindowTests","result":"Passed","children":[
-      {"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/corpusIsEnumerated()","result":"Passed"},
-      {"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/replay(_:)","result":"Passed","children":[
-        {"nodeType":"Arguments","name":"picker_open_close","result":"Passed"},
-        {"nodeType":"Arguments","name":"search_open_close","result":"Passed"},
-        {"nodeType":"Arguments","name":"rename_confirm","result":"Passed"},
-        {"nodeType":"Arguments","name":"rename_cancel","result":"Passed"},
-        {"nodeType":"Arguments","name":"agent_toggle","result":"Passed"},
-        {"nodeType":"Arguments","name":"reattach_keyframe","result":"Passed"},
-        {"nodeType":"Arguments","name":"hover_and_empty","result":"Passed"}
-      ]}
-    ]}]}
-    JSON
-            ;;
-          *)
-            result=Passed
-            if [ "${SWIFT_EXIT:-0}" != 0 ]; then result=Failed; fi
-            printf '{"testNodes":[{"nodeType":"Test Suite","result":"%s","children":[{"nodeType":"Test Case","result":"%s","nodeIdentifier":"RenderingTests/testCaret()"},{"nodeType":"Test Case","result":"Passed","nodeIdentifier":"RenderingTests/testPassing()"}]}]}\n' "$result" "$result" ;;
-        esac ;;
-    esac
+    python3 - "$@" <<'PY'
+    import json, os, sys
+    from pathlib import Path
+    args = sys.argv[1:]
+    action = Path(args[-1]).stem
+    failed = action == "ordinary" and os.environ.get("SWIFT_EXIT", "0") != "0"
+    if "summary" in args:
+        total = 13 if action == "focus-policy" else 2
+        print(json.dumps({"totalTestCount":total,"passedTests":total-int(failed),"failedTests":int(failed),"result":"Failed" if failed else "Passed"}))
+        sys.exit(0)
+    def case(identifier, result="Passed"):
+        return {"nodeType":"Test Case","nodeIdentifier":identifier,"result":result}
+    if action == "focus-policy":
+        functions = ["pickerBeforeKeyWindow","promptAfterNativeModal","inlineHierarchyRebuild","keyframeRestoresOwner","nativeFieldDefersOwner","dismantlingFieldAppliesPendingOwner","markedTextDefersOwner","localLeasesDeferLatestOwner","iconSearchMirrorFocusesNativeField","lifecycleAppliesOnlyDecodedOwner","inlineStemSelectionPrecedesTyping","productionInlineRebuildDoesNotCommit","productionFieldsRegisterAfterLateInjection"]
+        node = {"nodeType":"Test Suite","nodeIdentifier":"EditorFocusPolicyTests","result":"Passed","children":[case(f"EditorFocusPolicyTests/{name}()") for name in functions]}
+    elif action == "focus-replay":
+        replay = case("FocusReplayWindowTests/replay(_:)")
+        replay["children"] = [{"nodeType":"Arguments","name":name,"result":"Passed"} for name in ["picker_open_close","search_open_close","rename_confirm","rename_cancel","agent_toggle","reattach_keyframe","hover_and_empty"]]
+        node = {"nodeType":"Test Suite","nodeIdentifier":"FocusReplayWindowTests","result":"Passed","children":[case("FocusReplayWindowTests/corpusIsEnumerated()"),replay]}
+    else:
+        result = "Failed" if failed else "Passed"
+        node = {"nodeType":"Test Suite","result":result,"children":[case("RenderingTests/testCaret()",result),case("RenderingTests/testPassing()")]}
+    print(json.dumps({"testNodes":[node]}))
+    PY
     """)
   end
 
