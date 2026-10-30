@@ -93,7 +93,7 @@ jobs:
             test/minga_editor/render_pipeline/resident_incremental_test.exs \
             test/perf/production_gate_test.exs
       - name: Check cross-language golden manifest is committed
-        run: MIX_ENV=test mix protocol.golden --check
+        run: MIX_ENV="test" mix protocol.golden --check
       - run: mix native.build.support
       - name: Run Elixir tests except the isolated compile-cache suite
         run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
@@ -176,7 +176,7 @@ jobs:
         run: |
           curl --fail --location --retry 5 --retry-delay 10 --retry-all-errors --output nvim-linux-x86_64.tar.gz "https://github.com/neovim/neovim/releases/download/${NEOVIM_VERSION}/nvim-linux-x86_64.tar.gz"
           tar xzf nvim-linux-x86_64.tar.gz
-          echo "$PWD/nvim-linux-x86_64/bin" >> $GITHUB_PATH
+          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -468,6 +468,44 @@ jobs:
 
       - run: mix deps.get
       - run: mix dialyzer
+
+  ci-gate:
+    name: CI gate
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    # Keep this list in sync with every substantive CI job; docs deploys only on main.
+    needs:
+      - lint
+      - test
+      - keystroke-latency-baseline
+      - conformance
+      - test-zig
+      - test-go-tui
+      - go-tui-boot-smoke
+      - swift
+      - swift-integration
+      - dialyzer
+    steps:
+      - name: Require every substantive job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = {
+              job: details.get("result")
+              for job, details in needs.items()
+              if details.get("result") != "success"
+          }
+          if not needs or failed:
+              print(f"CI gate failed: {json.dumps(failed, sort_keys=True)}")
+              sys.exit(1)
+          print("Every substantive CI job succeeded.")
+          PY
 
   docs:
     name: Deploy Docs

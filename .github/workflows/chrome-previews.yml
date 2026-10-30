@@ -2,13 +2,6 @@ name: Chrome preview evidence
 
 on:
   pull_request:
-    paths:
-      - "macos/**"
-      - "scripts/preview.sh"
-      - "scripts/chrome_preview_evidence.py"
-      - "scripts/chrome_token_migration.json"
-      - "test/scripts/chrome_preview_evidence_test.py"
-      - ".github/workflows/chrome-previews.yml"
   workflow_dispatch:
     inputs:
       base_ref:
@@ -24,8 +17,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    name: Detect preview changes
+    runs-on: ubuntu-latest
+    outputs:
+      capture_required: ${{ steps.paths.outputs.capture_required }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Decide whether captures are required
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+
+          event = os.environ["EVENT_NAME"]
+          if event == "workflow_dispatch":
+              required = True
+          elif event == "pull_request":
+              changed = subprocess.check_output([
+                  "git", "diff", "--name-only", "--no-renames", "-z",
+                  f'{os.environ["BASE_SHA"]}..{os.environ["HEAD_SHA"]}', "--",
+              ]).split(b"\0")
+              relevant_files = {
+                  b"scripts/preview.sh",
+                  b"scripts/chrome_preview_evidence.py",
+                  b"scripts/chrome_token_migration.json",
+                  b"test/scripts/chrome_preview_evidence_test.py",
+                  b".github/workflows/chrome-previews.yml",
+              }
+              required = any(
+                  path.startswith(b"macos/") or path in relevant_files
+                  for path in changed
+              )
+          else:
+              raise SystemExit(f"Unsupported preview event: {event}")
+
+          value = "true" if required else "false"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"capture_required={value}\n")
+          print(f"Preview capture required: {value}")
+          PY
+
   evidence:
     name: Same-runner before and after captures
+    needs: detect-changes
+    if: ${{ needs.detect-changes.result == 'success' && needs.detect-changes.outputs.capture_required == 'true' }}
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -113,3 +159,32 @@ jobs:
           path: ${{ runner.temp }}/chrome-previews
           if-no-files-found: error
           retention-days: 30
+
+  chrome-preview-gate:
+    name: Chrome preview gate
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs: [detect-changes, evidence]
+    steps:
+      - name: Require captures or an explicit no-capture decision
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          detector = needs["detect-changes"]
+          evidence = needs["evidence"]
+          required = detector.get("outputs", {}).get("capture_required")
+          accepted = detector.get("result") == "success" and (
+              (required == "true" and evidence.get("result") == "success")
+              or (required == "false" and evidence.get("result") == "skipped")
+          )
+          if not accepted:
+              print(f"Chrome preview gate failed: {json.dumps(needs, sort_keys=True)}")
+              sys.exit(1)
+          print(f"Chrome preview gate passed (capture_required={required}).")
+          PY
