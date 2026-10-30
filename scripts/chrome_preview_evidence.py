@@ -138,8 +138,8 @@ def preview_sources(name, supplemental=None):
         return ["EditorChrome/BottomPanelView.swift", "Overlays/MessagesContentView.swift"]
     if name == "SettingsView":
         return ["Settings/AppearanceSettingsView.swift", "Settings/EditorSettingsView.swift", "Settings/KeybindingsSettingsView.swift"]
-    if name == "LatencyHUDEmpty":
-        return []
+    if name in {"LatencyHUDOverlay", "LatencyHUDEmpty"}:
+        return ["Overlays/LatencyHUDOverlay.swift"]
     return [f"{directory}/{name}.swift" for directory in ["Overlays", "EditorChrome", "Sidebar"]]
 
 
