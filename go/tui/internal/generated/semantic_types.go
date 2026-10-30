@@ -624,6 +624,13 @@ type GuiWhichKeyFields struct {
 	Visible uint8
 }
 
+type GuiFocusOwnerFields struct {
+	Responder  uint8
+	Surface    uint8
+	WindowID   uint32
+	Generation uint32
+}
+
 type GuiMinibufferFields struct {
 	Visible uint8
 }

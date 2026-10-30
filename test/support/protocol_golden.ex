@@ -26,6 +26,7 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Frontend.Adapter.GUI.FocusOwnerEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
@@ -33,6 +34,7 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.Protocol.GoldenFields
   alias Minga.RenderModel.UI.Breadcrumb
   alias Minga.RenderModel.UI.Completion
+  alias Minga.RenderModel.UI.FocusOwner
   alias Minga.RenderModel.UI.GitStatus
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.SearchState
@@ -64,6 +66,7 @@ defmodule Minga.Test.ProtocolGolden do
       breadcrumb_fixtures() ++
       git_status_fixtures() ++
       search_state_fixtures() ++
+      focus_owner_fixtures() ++
       surface_layout_fixtures() ++
       theme_fixtures()
   end
@@ -154,6 +157,28 @@ defmodule Minga.Test.ProtocolGolden do
 
   @spec picker_command(Picker.t()) :: binary()
   defp picker_command(model), do: PickerEncoder.encode_command(model)
+
+  @spec focus_owner_fixtures() :: [fixture()]
+  defp focus_owner_fixtures do
+    owner = %FocusOwner{
+      responder: :picker_query,
+      surface: :picker,
+      window_id: 70_000,
+      generation: 4_294_967_295
+    }
+
+    {<<0xAA, 10::16, payload::binary-size(10)>>, _caches} =
+      FocusOwnerEncoder.encode(owner, Caches.new())
+
+    [
+      %{
+        name: "focus_owner_picker",
+        decoder: "GuiFocusOwnerFields",
+        payload: payload,
+        expected: %{responder: 1, surface: 8, window_id: 70_000, generation: 4_294_967_295}
+      }
+    ]
+  end
 
   # ── Fixtures: gui_completion (GuiCompletionFields) ───────────────────────
 

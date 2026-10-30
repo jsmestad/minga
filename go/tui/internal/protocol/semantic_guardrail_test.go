@@ -70,6 +70,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiFileTree:             "rendered content sidebar",
 		generated.OPGuiFileTreeSelection:    "stateful file tree selection",
 		generated.OPGuiCursorAnimation:      "Terminal controls cursor animation",
+		generated.OPGuiFocusOwner:           "decoded focus ownership; BEAM retains TUI input routing",
 	}
 	payloads := map[byte][]byte{
 		generated.OPBeginFrame:              {generated.OPBeginFrame, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1},
@@ -134,6 +135,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiFileTree:             {generated.OPGuiFileTree, 0, 0, 0, 0},
 		generated.OPGuiFileTreeSelection:    {generated.OPGuiFileTreeSelection, 0, 1, 0},
 		generated.OPGuiCursorAnimation:      {generated.OPGuiCursorAnimation, 0, 1, 0},
+		generated.OPGuiFocusOwner:           {0xAA, 0, 10, 1, 8, 0, 0, 0, 7, 0, 0, 0, 9},
 	}
 
 	schemaOpcodes := make(map[byte]struct{}, len(generated.GoRequiredOpcodes)+len(generated.GoSkippedOpcodes))
@@ -200,6 +202,12 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 				}
 			} else if command.Kind == CommandNoop {
 				t.Fatalf("required opcode %s (0x%02X) silently returned CommandNoop", generated.GoRequiredOpcodes[opcode], opcode)
+			}
+			if opcode == generated.OPGuiFocusOwner {
+				want := generated.GuiFocusOwnerFields{Responder: 1, Surface: 8, WindowID: 7, Generation: 9}
+				if command.Kind != CommandChrome || command.Chrome.Opcode != opcode || command.Chrome.FocusOwner != want {
+					t.Fatalf("focus owner must decode as typed no-op chrome state: %+v", command)
+				}
 			}
 		})
 	}

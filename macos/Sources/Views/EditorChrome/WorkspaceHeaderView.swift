@@ -16,6 +16,7 @@ public struct WorkspaceHeaderView: View {
     }
     public let workspaceState: WorkspaceState
     @Environment(\.themeColors) private var theme
+    @Environment(\.editorFocusPolicy) private var focusPolicy
 
     public let sendAction: ViewActionHandler<Action>?
 
@@ -98,9 +99,18 @@ public struct WorkspaceHeaderView: View {
                 .frame(minWidth: 90, maxWidth: 180)
                 .focused($renameFieldFocused)
                 .onSubmit { commitRename(workspace) }
-                .onExitCommand { isRenaming = false }
+                .onExitCommand {
+                    isRenaming = false
+                    focusPolicy?.endLocalTextEditing(.workspaceRename(workspace.id))
+                }
                 .onChange(of: renameFieldFocused) { _, focused in
                     if !focused { commitRename(workspace) }
+                }
+                .onChange(of: focusPolicy?.focusOwnerState.localTextEditing, initial: true) { _, editing in
+                    renameFieldFocused = editing == .workspaceRename(workspace.id)
+                }
+                .onDisappear {
+                    focusPolicy?.endLocalTextEditing(.workspaceRename(workspace.id))
                 }
         } else {
             Text(workspace.label)
@@ -241,12 +251,13 @@ public struct WorkspaceHeaderView: View {
     private func beginRename(_ workspace: WorkspacePresentationEntry) {
         renameText = workspace.label
         isRenaming = true
-        Task { @MainActor in renameFieldFocused = true }
+        focusPolicy?.beginLocalTextEditing(.workspaceRename(workspace.id))
     }
 
     private func commitRename(_ workspace: WorkspacePresentationEntry) {
         guard isRenaming else { return }
         isRenaming = false
+        focusPolicy?.endLocalTextEditing(.workspaceRename(workspace.id))
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != workspace.label else { return }
         sendAction?(.rename(id: workspace.id, name: trimmed))

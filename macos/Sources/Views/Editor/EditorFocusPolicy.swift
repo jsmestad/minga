@@ -1,12 +1,14 @@
 import AppKit
 import Combine
+import MingaProtocol
+@_spi(FocusPolicy) import MingaUI
 
 /// Owns AppKit focus reclamation and overlay key-routing lifetime for one editor view.
 @MainActor
-final class EditorFocusPolicy {
+final class EditorFocusPolicy: EditorFocusControlling {
     private static let maximumLoggedFirstResponderEvents = 32
 
-    private weak var editorView: EditorNSView?
+    private weak var editorView: NSView?
     private weak var attachedWindow: NSWindow?
     private let focusDiagnosticLog = EditorFocusDiagnosticLog()
     private var firstResponderTask: Task<Void, Never>?
@@ -17,11 +19,81 @@ final class EditorFocusPolicy {
     private var nativeModalDepth = 0
     private var presentationFocusRequested = false
     private var firstResponderEventCount = 0
+    let focusOwnerState: FocusOwnerState
+    private(set) var decodedOwner: Wire.FocusOwner?
+    private(set) var localTextEditing: LocalTextEditing?
+    private(set) var pendingOwnerApply = false
+    private weak var pickerQuery: NSResponder?
+    private weak var searchQuery: NSResponder?
+    private weak var inlineEdit: NSResponder?
+    private var applyingOwner = false
 
     private(set) var agentOverlayVisible = false
 
-    init(editorView: EditorNSView) {
+    convenience init(editorView: EditorNSView) {
+        self.init(editorView: editorView, focusOwnerState: editorView.dispatcher.guiState.focusOwnerState)
+    }
+
+    /// Accepts a real NSView so offscreen-window tests exercise the AppKit responder chain.
+    init(editorView: NSView, focusOwnerState: FocusOwnerState) {
         self.editorView = editorView
+        self.focusOwnerState = focusOwnerState
+    }
+
+    /// Records the authoritative owner only after its frame commits.
+    func focusOwnerDidChange(_ owner: Wire.FocusOwner) {
+        decodedOwner = owner
+        focusOwnerState.publish(owner: owner)
+        applyDecodedOwner()
+    }
+
+    /// Registers a field even when SwiftUI has not attached it to its window yet.
+    func register(_ responder: NSResponder, as kind: Wire.FocusOwner.Responder) {
+        switch kind {
+        case .editorView: return
+        case .pickerQuery: pickerQuery = responder
+        case .searchQuery: searchQuery = responder
+        case .inlineEdit: inlineEdit = responder
+        }
+        applyDecodedOwner()
+        scheduleDeferredReclaim()
+    }
+
+    /// Removes only this instance; dismantling an old hierarchy cannot unregister its replacement.
+    func unregister(_ responder: NSResponder, as kind: Wire.FocusOwner.Responder) {
+        guard self.responder(for: kind) === responder else { return }
+        unregister(kind: kind)
+    }
+
+    func unregister(kind: Wire.FocusOwner.Responder) {
+        switch kind {
+        case .editorView: return
+        case .pickerQuery: pickerQuery = nil
+        case .searchQuery: searchQuery = nil
+        case .inlineEdit: inlineEdit = nil
+        }
+        applyDecodedOwner()
+    }
+
+    /// Grants immediate frontend-local focus, without a BEAM round trip.
+    func beginLocalTextEditing(_ editing: LocalTextEditing) {
+        guard nativeModalDepth == 0 else { return }
+        localTextEditing = editing
+        focusOwnerState.publish(localTextEditing: editing)
+    }
+
+    /// Releases only the matching lease, then retries the latest decoded owner.
+    func endLocalTextEditing(_ editing: LocalTextEditing) {
+        guard localTextEditing == editing else { return }
+        localTextEditing = nil
+        focusOwnerState.publish(localTextEditing: nil)
+        applyDecodedOwner()
+        scheduleDeferredReclaim()
+    }
+
+    /// Retries after the native field editor has finished its end-editing notification.
+    func nativeTextEditingDidEnd() {
+        scheduleDeferredReclaim()
     }
 
     deinit {
@@ -36,12 +108,13 @@ final class EditorFocusPolicy {
     func attach(to window: NSWindow) {
         guard attachedWindow !== window else {
             reconcileAgentKeyMonitor()
+            applyDecodedOwner()
             return
         }
 
         detach()
         attachedWindow = window
-        window.initialFirstResponder = editorView
+        applyDecodedOwner()
         firstResponderTask = Task { @MainActor [weak self, weak window] in
             guard let window else { return }
             for await _ in window.publisher(for: \.firstResponder, options: [.new]).values {
@@ -54,7 +127,7 @@ final class EditorFocusPolicy {
             guard let window else { return }
             for await _ in NotificationCenter.default.notifications(named: NSWindow.didUpdateNotification, object: window) {
                 guard let self else { return }
-                self.reclaimEditorIfNeeded(in: window, respectingNativeTextInput: true)
+                self.applyDecodedOwner()
             }
         }
         applicationActivationTask = Task { @MainActor [weak self] in
@@ -72,9 +145,7 @@ final class EditorFocusPolicy {
 
     /// Detaches all focus hooks and invalidates work queued for the old window.
     func detach() {
-        if attachedWindow?.initialFirstResponder === editorView {
-            attachedWindow?.initialFirstResponder = nil
-        }
+        attachedWindow?.initialFirstResponder = nil
         firstResponderTask?.cancel()
         firstResponderTask = nil
         windowUpdateTask?.cancel()
@@ -98,50 +169,51 @@ final class EditorFocusPolicy {
         recordFocusDiagnostic(point: "first-frame")
     }
 
-    /// Reclaims editor focus after the attached window becomes key.
+    /// Reclaims the decoded owner after the attached window becomes key.
     func windowDidBecomeKey() {
         recordFocusDiagnostic(point: "window-did-become-key")
+        applyDecodedOwner()
         reconcileRequestedPresentationFocus()
         scheduleDeferredReclaim()
     }
 
-    /// Reclaims editor focus immediately when a pointer interaction explicitly returns to the editor.
+    /// Reapplies the decoded owner when a pointer interaction returns to the editor.
     func pointerReturnedToEditor() {
-        guard let window = attachedWindow else { return }
-        reclaimEditorIfNeeded(in: window, respectingNativeTextInput: false)
+        applyDecodedOwner()
     }
 
-    /// Reclaims editor focus after AppKit completes a file-drop interaction.
+    /// Reclaims the decoded owner after AppKit completes a file-drop interaction.
     func fileDropDidComplete() {
         scheduleDeferredReclaim()
     }
 
-    /// Suspends editor focus reclamation while an AppKit sheet or modal panel owns focus.
+    /// Suspends owner application while an AppKit sheet or modal panel owns focus.
     func beginNativeModal() {
         nativeModalDepth += 1
         deferredReclaimTask?.cancel()
         deferredReclaimTask = nil
     }
 
-    /// Ends one native modal scope and restores the editor responder when the last scope closes.
+    /// Ends one native modal scope and restores the named responder when the last scope closes.
     func endNativeModalAndRestore() {
         nativeModalDepth = max(0, nativeModalDepth - 1)
         guard nativeModalDepth == 0 else { return }
         restoreAfterNativeModal()
     }
 
-    /// Brings the attached editor window forward and restores its responder after a native modal closes.
+    /// Brings the window forward and restores the decoded owner after a native modal closes.
     func restoreAfterNativeModal() {
         guard let window = attachedWindow else { return }
         window.makeKeyAndOrderFront(nil)
-        reclaimEditorIfNeeded(in: window, respectingNativeTextInput: false)
+        applyDecodedOwner()
     }
 
-    /// Updates overlay key routing and returns focus when the overlay closes.
+    /// Updates overlay key routing and reapplies the decoded owner.
     func agentOverlayVisibilityDidChange(_ visible: Bool) {
         guard agentOverlayVisible != visible else { return }
         agentOverlayVisible = visible
         reconcileAgentKeyMonitor()
+        applyDecodedOwner()
         if !visible {
             scheduleDeferredReclaim()
         }
@@ -153,18 +225,13 @@ final class EditorFocusPolicy {
         return window.firstResponder is NSText
     }
 
-    /// Returns native keyboard focus to the editor for an accessibility focus request.
+    /// Activates the window without overriding the owner named by the BEAM.
     func requestAccessibilityFocus() -> Bool {
-        guard let window = attachedWindow,
-              let editorView,
-              editorView.window === window
-        else { return false }
+        guard let window = attachedWindow else { return false }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        if window.firstResponder !== editorView {
-            window.makeFirstResponder(editorView)
-        }
-        return NSApp.isActive && window.isKeyWindow && window.firstResponder === editorView
+        applyDecodedOwner()
+        return NSApp.isActive && window.isKeyWindow && decodedResponderHasFocus()
     }
 
     /// Activates the app and returns whether the requested editor focus postcondition now holds.
@@ -175,8 +242,7 @@ final class EditorFocusPolicy {
             return false
         }
         guard let window = attachedWindow,
-              let editorView,
-              editorView.window === window
+              editorView?.window === window
         else {
             recordFocusDiagnostic(point: "presentation-focus-result", requestResult: false)
             return false
@@ -184,31 +250,22 @@ final class EditorFocusPolicy {
         presentationFocusRequested = true
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        if !nativeTextEditingIsActive(), window.firstResponder !== editorView {
-            window.makeFirstResponder(editorView)
-        }
+        applyDecodedOwner()
         reconcileRequestedPresentationFocus()
         let result = presentationFocusReady()
         recordFocusDiagnostic(point: "presentation-focus-result", requestResult: result)
         return result
     }
 
-    /// Reclaims and verifies the AppKit responder state required by a native open receipt.
+    /// Verifies the named responder postcondition required by a native open receipt.
     func presentationFocusReady() -> Bool {
-        guard nativeModalDepth == 0 else { return false }
-        guard let window = attachedWindow,
-              let editorView,
-              editorView.window === window,
-              window.isVisible,
-              !window.isMiniaturized,
-              NSApp.isActive,
-              window.isKeyWindow,
-              !nativeTextEditingIsActive()
+        guard nativeModalDepth == 0, localTextEditing == nil,
+              let window = attachedWindow,
+              window.isVisible, !window.isMiniaturized,
+              NSApp.isActive, window.isKeyWindow
         else { return false }
-        if window.firstResponder !== editorView {
-            window.makeFirstResponder(editorView)
-        }
-        return window.firstResponder === editorView
+        applyDecodedOwner()
+        return decodedResponderHasFocus()
     }
 
     /// Routes one overlay event through the editor's existing responder methods when policy permits.
@@ -216,7 +273,7 @@ final class EditorFocusPolicy {
         guard nativeModalDepth == 0,
               agentOverlayVisible,
               let window = attachedWindow,
-              let editorView,
+              let editorView = editorView as? EditorNSView,
               editorView.window === window
         else {
             return event
@@ -278,14 +335,15 @@ final class EditorFocusPolicy {
         deferredReclaimTask?.cancel()
         deferredReclaimTask = Task { @MainActor [weak self] in
             await Task.yield()
-            guard !Task.isCancelled, let self, let window = self.attachedWindow else { return }
-            self.reclaimEditorIfNeeded(in: window, respectingNativeTextInput: true)
+            guard !Task.isCancelled, let self else { return }
+            self.applyDecodedOwner()
         }
     }
 
     private func applicationDidBecomeActive() {
         recordFocusDiagnostic(point: "application-did-become-active")
         reconcileRequestedPresentationFocus()
+        applyDecodedOwner()
     }
 
     private func recordFirstResponderEvent() {
@@ -310,7 +368,9 @@ final class EditorFocusPolicy {
     }
 
     private func windowFirstResponderDidChange() {
-        guard presentationFocusReady(), let editorView else { return }
+        if !applyingOwner { applyDecodedOwner() }
+        guard presentationFocusRequested, presentationFocusReady(),
+              let editorView = editorView as? EditorNSView else { return }
         presentationFocusRequested = false
         editorView.nativeApplicationFocusDidSettle()
     }
@@ -318,26 +378,60 @@ final class EditorFocusPolicy {
     private func reconcileRequestedPresentationFocus() {
         guard presentationFocusRequested,
               presentationFocusReady(),
-              let editorView
+              let editorView = editorView as? EditorNSView
         else { return }
         presentationFocusRequested = false
         editorView.nativeApplicationFocusDidSettle()
     }
 
-    private func reclaimEditorIfNeeded(in window: NSWindow, respectingNativeTextInput: Bool) {
-        guard nativeModalDepth == 0,
-              attachedWindow === window,
-              let editorView,
-              editorView.window === window
-        else {
+    private func responder(for kind: Wire.FocusOwner.Responder) -> NSResponder? {
+        switch kind {
+        case .editorView: return editorView
+        case .pickerQuery: return pickerQuery
+        case .searchQuery: return searchQuery
+        case .inlineEdit: return inlineEdit
+        }
+    }
+
+    private func responderForDecodedOwner() -> NSResponder? {
+        guard let kind = decodedOwner?.responderKind else { return nil }
+        return responder(for: kind)
+    }
+
+    private func hasFocus(_ responder: NSResponder, in window: NSWindow) -> Bool {
+        if window.firstResponder === responder { return true }
+        guard let field = responder as? NSTextField, let editor = field.currentEditor() else { return false }
+        return window.firstResponder === editor
+    }
+
+    private func decodedResponderHasFocus() -> Bool {
+        guard let window = attachedWindow, let responder = responderForDecodedOwner() else { return false }
+        return hasFocus(responder, in: window)
+    }
+
+    /// The only native first-responder writer. Missing fields and text/modal leases
+    /// retain the latest owner until registration or a lifecycle retry can apply it.
+    private func applyDecodedOwner() {
+        guard !applyingOwner, decodedOwner != nil else { return }
+        pendingOwnerApply = true
+        guard nativeModalDepth == 0, localTextEditing == nil,
+              let window = attachedWindow,
+              let responder = responderForDecodedOwner(),
+              let view = responder as? NSView, view.window === window
+        else { return }
+        guard (editorView as? EditorNSView)?.hasMarkedText() != true else { return }
+        if hasFocus(responder, in: window) {
+            pendingOwnerApply = false
+            (responder as? any EditorFocusReceiving)?.editorFocusDidApply()
             return
         }
-        if respectingNativeTextInput, window.firstResponder is NSText {
-            return
-        }
-        if window.firstResponder !== editorView {
-            window.makeFirstResponder(editorView)
-        }
+        guard !nativeTextEditingIsActive() else { return }
+        applyingOwner = true
+        window.initialFirstResponder = view
+        let applied = window.makeFirstResponder(responder)
+        if applied { (responder as? any EditorFocusReceiving)?.editorFocusDidApply() }
+        applyingOwner = false
+        pendingOwnerApply = !applied
     }
 
     private func reconcileAgentKeyMonitor() {
@@ -383,7 +477,7 @@ private final class EditorFocusDiagnosticLog {
         point: String,
         applicationIsActive: Bool,
         window: NSWindow?,
-        editorView: EditorNSView?,
+        editorView: NSView?,
         nativeModalDepth: Int,
         presentationFocusRequested: Bool,
         firstResponderEventCount: Int,

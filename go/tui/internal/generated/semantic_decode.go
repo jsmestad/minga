@@ -2478,6 +2478,38 @@ func DecodeGuiWhichKeyFields(data []byte, offset int, windowEnd int) (GuiWhichKe
 	}, pos, nil
 }
 
+// Command field decoder for gui_focus_owner
+
+func DecodeGuiFocusOwnerFields(data []byte, offset int, windowEnd int) (GuiFocusOwnerFields, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "responder"); err != nil {
+		return GuiFocusOwnerFields{}, offset, err
+	}
+	responder := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "surface"); err != nil {
+		return GuiFocusOwnerFields{}, offset, err
+	}
+	surface := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+4, "window_id"); err != nil {
+		return GuiFocusOwnerFields{}, offset, err
+	}
+	windowID := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "generation"); err != nil {
+		return GuiFocusOwnerFields{}, offset, err
+	}
+	generation := decodeU32(data, pos)
+	pos += 4
+	return GuiFocusOwnerFields{
+		Responder:  responder,
+		Surface:    surface,
+		WindowID:   windowID,
+		Generation: generation,
+	}, pos, nil
+}
+
 // Command field decoder for gui_minibuffer
 
 func DecodeGuiMinibufferFields(data []byte, offset int, windowEnd int) (GuiMinibufferFields, int, error) {

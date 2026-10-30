@@ -46,7 +46,7 @@ extension GUIFrameImpact {
             return [.shell, .windowOverlay]
 
         case .beginFrame, .commitFrame, .presentationOperation, .setTitle, .setWindowBg,
-             .clipboardWrite, .guiConfigState:
+             .clipboardWrite, .guiConfigState, .guiFocusOwner:
             return []
 
         case .applicationQuitResponse, .guiRequest:
@@ -504,7 +504,7 @@ struct PreparedFrameTransactionBuilder {
             registeredFontIds.insert(id)
             stageReplacing(command, key: .font(id), weight: resourceWeight, domain: .resource)
 
-        case .setCursorShape, .setLinkCursor, .guiFileTreeSelection:
+        case .setCursorShape, .setLinkCursor, .guiFileTreeSelection, .guiFocusOwner:
             stageReplacing(
                 command, key: .command(command.preparedUpdateKey),
                 weight: resourceWeight, domain: .focus
@@ -1051,6 +1051,7 @@ private extension RenderCommand {
         case .guiCompletionSelection: 60
         case .guiPickerSelection: 61
         case .guiTextPresentation: 62
+        case .guiFocusOwner: 64
         }
     }
 }

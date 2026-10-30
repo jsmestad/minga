@@ -460,6 +460,8 @@ A frame is atomic on the wire. The Emit stage brackets every frame's semantic an
 
 **Frontend presentation between commits.** The BEAM owns semantic content, placement, stacking, and authoritative editor state. A frontend may apply cursor blink, spinners, smooth scroll, and local scrollback between commits. It must resolve pointer targets from the exact presentation it displays, including those local transforms. A committed frame is not proof that a native renderer has displayed it.
 
+**Keyboard ownership.** The BEAM names the keyboard owner in each changed frame and every keyframe through [`gui_focus_owner`](GUI_PROTOCOL.md#0xaa-gui_focus_owner). The native focus policy applies that committed owner, deferring during native modals, native text editing, and frontend-local text leases; lifecycle events never infer a different responder.
+
 **Frontend-local interaction state.** Semantic frontends are not dumb terminals. The BEAM owns the authoritative semantic model, durable editor state, placement, stacking, containment, and validation of committed actions. Frontends own zero-latency local interaction state when it can be resolved from the last committed semantic model and has no durable effect until activation. This is not about event frequency. It is about whether the interaction should feel instant without waiting for a BEAM render transaction.
 
 Each frontend holds a single local-presentation container with one discard entry point, parameterized by transform kind. Two transform kinds exist:

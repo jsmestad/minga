@@ -72,6 +72,46 @@ defmodule MingaEditor.Input.Router do
   end
 
   @doc """
+  Returns the first shell handler that claims a key, discarding its returned state.
+
+  Like dispatch, this invokes handlers, including their effects. It is a test
+  oracle, not a side-effect-free ownership query for the render path.
+  """
+  @spec claiming_handler(EditorState.t(), non_neg_integer(), non_neg_integer()) :: module() | nil
+  def claiming_handler(%EditorState{} = state, codepoint, modifiers) do
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+
+    %{overlay: handlers} =
+      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
+
+    case find_claiming_handler(handlers, state, codepoint, modifiers) do
+      {:claimed, handler} ->
+        handler
+
+      {:passthrough, state} ->
+        %{surface: handlers} =
+          MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
+
+        case find_claiming_handler(handlers, state, codepoint, modifiers) do
+          {:claimed, handler} -> handler
+          {:passthrough, _state} -> nil
+        end
+    end
+  end
+
+  defp find_claiming_handler([], state, _codepoint, _modifiers), do: {:passthrough, state}
+
+  defp find_claiming_handler([handler | rest], state, codepoint, modifiers) do
+    case invoke_key_handler(handler, state, codepoint, modifiers) do
+      {:handled, _state} -> {:claimed, handler_module(handler)}
+      {:passthrough, state} -> find_claiming_handler(rest, state, codepoint, modifiers)
+    end
+  end
+
+  defp handler_module({handler, _source}), do: handler
+  defp handler_module(handler) when is_atom(handler), do: handler
+
+  @doc """
   Dispatches a decoded paste event to the focused input owner and runs universal post-action housekeeping.
   """
   @spec dispatch_paste(EditorState.t(), String.t()) :: EditorState.t()

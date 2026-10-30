@@ -62,7 +62,8 @@ version = "2.0.0"
 # append stable item identities and generations, activated through surfaces 4/5.
 # Scroll and fold actions name the window and its u64 presentation generation.
 # File-tree drop appends the observed tree generation as u32 after source paths.
-protocol_version = 28
+# protocol_version 29 adds gui_focus_owner: the BEAM names the keyboard owner on every changed frame and every keyframe.
+protocol_version = 29
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1026,6 +1027,14 @@ value = 0xA9
 direction = "beam_to_frontend"
 consumers = ["swift", "go"]
 framing = "len32"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_focus_owner"
+value = 0xAA
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len16"
 
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
@@ -2436,6 +2445,15 @@ conditional_tail = { guard = "visible == 1", fields = [
 [[command_fields]]
 opcode = "gui_which_key"
 fields = [{ name = "visible", type = "u8" }]
+
+[[command_fields]]
+opcode = "gui_focus_owner"
+fields = [
+  { name = "responder", type = "u8" },
+  { name = "surface", type = "u8" },
+  { name = "window_id", type = "u32" },
+  { name = "generation", type = "u32" },
+]
 
 [[command_fields]]
 opcode = "gui_minibuffer"

@@ -3083,6 +3083,7 @@ final class EditorNSView: MTKView {
         let hadMarkedText = imeComposition.hasMarkedText
         imeComposition.clear()
         imeCommitTarget = nil
+        focusPolicy.nativeTextEditingDidEnd()
         textInputCallbacksSuppressed = true
         if hadMarkedText { inputContext?.discardMarkedText() }
         needsDisplay = true
@@ -3662,6 +3663,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         let targetIsCurrent = !wasComposing || imeCommitTargetIsCurrent
         imeComposition.clear()
         imeCommitTarget = nil
+        focusPolicy.nativeTextEditingDidEnd()
         if wasComposing && !targetIsCurrent { textInputCallbacksSuppressed = true }
 
         // Send committed text to the BEAM.
@@ -3707,6 +3709,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
             if !targetIsCurrent { textInputCallbacksSuppressed = true }
         }
         imeCommitTarget = nil
+        focusPolicy.nativeTextEditingDidEnd()
         needsDisplay = true
     }
 

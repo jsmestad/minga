@@ -123,6 +123,7 @@ defmodule MingaEditor.Frontend.Emit do
          base_frame_seq,
          keyframe?
        ) do
+    {focus_commands, chrome_commands} = focus_owner_commands(encoded_frame, caches)
     caches = %{caches | adapter_gui_caches: encoded_frame.caches}
     input_seq = ctx.intent.frame.last_input_seq
 
@@ -138,8 +139,9 @@ defmodule MingaEditor.Frontend.Emit do
       [Protocol.encode_begin_frame(frame_seq, base_frame_seq, caches.recovery_generation)] ++
         presentation_target_commands(ctx) ++
         font_registration_commands ++
+        focus_commands ++
         encoded_frame.metal_commands ++
-        encoded_frame.chrome_commands ++
+        chrome_commands ++
         [surface_layout_command, Protocol.encode_commit_frame(frame_seq, input_seq)]
 
     if keyframe? do
@@ -174,6 +176,28 @@ defmodule MingaEditor.Frontend.Emit do
       Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
       {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx}
+  end
+
+  # Ownership is chrome state, but must precede window content on the wire.
+  # Unchanged frames avoid even walking the chrome list.
+  @spec focus_owner_commands(Minga.Frontend.Adapter.GUI.EncodedFrame.t(), Caches.t()) ::
+          {[binary()], [binary()]}
+  defp focus_owner_commands(
+         %{caches: %{last_focus_owner_fp: fp}, chrome_commands: commands},
+         %{adapter_gui_caches: %{last_focus_owner_fp: fp}}
+       ),
+       do: {[], commands}
+
+  defp focus_owner_commands(%{chrome_commands: commands}, _caches),
+    do: take_focus_owner_command(commands)
+
+  @spec take_focus_owner_command([binary()]) :: {[binary()], [binary()]}
+  defp take_focus_owner_command([]), do: {[], []}
+  defp take_focus_owner_command([<<0xAA, _::binary>> = owner | rest]), do: {[owner], rest}
+
+  defp take_focus_owner_command([command | rest]) do
+    {owner, remaining} = take_focus_owner_command(rest)
+    {owner, [command | remaining]}
   end
 
   @spec presentation_target_commands(ctx()) :: [binary()]

@@ -92,6 +92,8 @@ var minimalBodyOverrides = map[byte][]byte{
 	// gui_resident_semantics (len32): its fixed header through the empty guide
 	// replacement count is 56 bytes, larger than the generic zero probe bound.
 	generated.OPGuiResidentSemantics: append([]byte{generated.OPGuiResidentSemantics, 0x00, 0x00, 0x00, 0x38}, make([]byte, 56)...),
+	// gui_focus_owner (len16): the body must contain exactly 10 bytes.
+	generated.OPGuiFocusOwner: {generated.OPGuiFocusOwner, 0, 10, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {

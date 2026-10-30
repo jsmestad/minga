@@ -117,6 +117,41 @@ func frame(commands ...protocol.Command) []protocol.Command {
 	return out
 }
 
+func TestGUIFocusOwnerDoesNotChangeTerminalPresentation(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	_ = model.applyCommands(frame(protocol.Command{
+		Kind: protocol.CommandWindowContent,
+		Window: protocol.WindowContent{
+			ID:   7,
+			Rows: []protocol.WindowRow{{Text: "focus stays BEAM-routed"}},
+		},
+	}))
+	before := model.View().Content
+
+	for _, owner := range []struct {
+		responder byte
+		surface   byte
+	}{
+		{0, 7}, // A prompt still routes through the editor.
+		{1, 8}, // A native picker responder must not open a TUI picker.
+		{2, 11},
+		{3, 5},
+	} {
+		payload := []byte{generated.OPGuiFocusOwner, 0, 10, owner.responder, owner.surface, 0, 0, 0, 7, 0, 0, 0, 9}
+		command, err := protocol.DecodeCommand(payload)
+		if err != nil {
+			t.Fatalf("DecodeCommand returned error: %v", err)
+		}
+		model.applyMutation(command)
+		if got := model.View().Content; got != before {
+			t.Fatalf("focus owner responder %d changed terminal presentation:\n%s", owner.responder, got)
+		}
+		if model.chrome[generated.OPGuiFocusOwner].FocusOwner != command.Chrome.FocusOwner {
+			t.Fatalf("focus owner was not retained as no-op chrome state")
+		}
+	}
+}
+
 func TestFloatingPickerRendersOverEditorAndSuppressesFooterOverlays(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{

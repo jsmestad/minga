@@ -125,6 +125,7 @@ enum RenderCommand: Sendable {
     case guiIndentGuides(data: IndentGuideData)
     case guiLineSpacing(spacing: Float)
     case guiCursorAnimation(enabled: Bool)
+    case guiFocusOwner(Wire.FocusOwner)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
@@ -2700,6 +2701,23 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         return (.guiCursorAnimation(enabled: data[rest + 2] != 0), 1 + 2 + caPayloadLen)
+
+    case .guiFocusOwner:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLength = Int(try readU16(data, rest))
+        guard payloadLength == 10, data.count >= rest + 2 + payloadLength else {
+            throw ProtocolDecodeError.malformed
+        }
+        let start = rest + 2
+        guard data[start] <= 3, data[start + 1] <= 11 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let (fields, _) = try GeneratedProtocol.decodeGuiFocusOwnerFields(data, start, start + payloadLength)
+        let owner = Wire.FocusOwner(
+            responder: fields.responder, surface: fields.surface,
+            windowID: fields.windowID, generation: fields.generation
+        )
+        return (.guiFocusOwner(owner), 3 + payloadLength)
 
     case .guiEditTimeline:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

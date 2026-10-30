@@ -52,6 +52,7 @@ enum PickerQueryKeyRouting {
 
 /// Native single-line picker editor with optimistic local caret and selection state.
 struct PickerQueryField: NSViewRepresentable {
+    @Environment(\.editorFocusPolicy) private var focusPolicy
     enum Action: Equatable, Sendable {
         case queryChanged(generation: UInt32, editSequence: UInt32, text: String)
         case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
@@ -85,7 +86,7 @@ struct PickerQueryField: NSViewRepresentable {
         field.cell?.wraps = false
         context.coordinator.apply(style: style, to: field)
         context.coordinator.reconcile(field: field, generation: generation, acknowledgedSequence: acknowledgedEditSequence, authoritativeText: authoritativeText)
-        context.coordinator.focus(field)
+        context.coordinator.reconcileFocusPolicy(focusPolicy, field: field)
         return field
     }
 
@@ -96,15 +97,14 @@ struct PickerQueryField: NSViewRepresentable {
         field.placeholderString = placeholder
         context.coordinator.apply(style: style, to: field)
 
-        let generationChanged = context.coordinator.reconciler.generation != generation
         context.coordinator.reconcile(field: field, generation: generation, acknowledgedSequence: acknowledgedEditSequence, authoritativeText: authoritativeText)
-        if generationChanged {
-            context.coordinator.focus(field)
-        }
+        context.coordinator.reconcileFocusPolicy(focusPolicy, field: field)
     }
 
     static func dismantleNSView(_ field: PickerNSTextField, coordinator: Coordinator) {
+        coordinator.focusPolicy?.unregister(field, as: .pickerQuery)
         field.window?.endEditing(for: field)
+        coordinator.focusPolicy?.nativeTextEditingDidEnd()
     }
 
     @MainActor
@@ -112,6 +112,7 @@ struct PickerQueryField: NSViewRepresentable {
         var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle
         var reconciler = PickerQueryReconciler()
+        weak var focusPolicy: (any EditorFocusControlling)?
         private var applyingAuthoritativeText = false
 
         init(sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle) {
@@ -119,12 +120,13 @@ struct PickerQueryField: NSViewRepresentable {
             self.style = style
         }
 
-        func focus(_ field: NSTextField) {
-            DispatchQueue.main.async { [weak field] in
-                guard let field, let window = field.window else { return }
-                window.makeFirstResponder(field)
-            }
+        func reconcileFocusPolicy(_ policy: (any EditorFocusControlling)?, field: NSTextField) {
+            guard focusPolicy !== policy else { return }
+            focusPolicy?.unregister(field, as: .pickerQuery)
+            focusPolicy = policy
+            policy?.register(field, as: .pickerQuery)
         }
+
 
         func reconcile(field: NSTextField, generation: UInt32, acknowledgedSequence: UInt32, authoritativeText: String) {
             reconcile(field: field, editor: field.currentEditor() as? NSTextView, generation: generation, acknowledgedSequence: acknowledgedSequence, authoritativeText: authoritativeText)
@@ -155,6 +157,10 @@ struct PickerQueryField: NSViewRepresentable {
         func controlTextDidBeginEditing(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             apply(style: style, to: field)
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            focusPolicy?.nativeTextEditingDidEnd()
         }
 
         func controlTextDidChange(_ notification: Notification) {

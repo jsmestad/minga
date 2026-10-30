@@ -354,6 +354,13 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
+    case .guiFocusOwner(let owner):
+        return [
+            "type": "gui_focus_owner", "responder": Int(owner.responder),
+            "surface": Int(owner.surface), "window_id": Int(owner.windowID),
+            "generation": Int(owner.generation)
+        ]
+
     case .guiResidentSemantics(let update):
         var result: [String: Any] = [
             "type": "gui_resident_semantics", "version": Int(update.version),

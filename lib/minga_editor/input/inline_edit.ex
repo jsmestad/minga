@@ -77,8 +77,9 @@ defmodule MingaEditor.Input.InlineEdit do
   defp scroll_delta(?j), do: 1
   defp scroll_delta(?k), do: -1
 
+  @doc "Returns the inline edit overlay access and lifecycle configuration."
   @spec spec() :: Overlay.spec()
-  defp spec do
+  def spec do
     %{
       store: fn state ->
         MingaEditor.Shell.Traditional.State.inline_edits(state.shell_runtime.state)

@@ -101,6 +101,60 @@ private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
+    @Test("gui_focus_owner round-trips every responder and surface with UInt32 identities")
+    func decodeFocusOwner() throws {
+        #expect(OP_GUI_FOCUS_OWNER == 0xAA)
+        for responder in UInt8(0)...3 {
+            for surface in UInt8(0)...11 {
+                var packet = Data([0xFF, OP_GUI_FOCUS_OWNER, 0, 10, responder, surface])
+                appendWireU32(&packet, 0xA1B2_C3D4)
+                appendWireU32(&packet, 0x1234_5678)
+                packet.append(contentsOf: [OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 0])
+                let (command, consumed) = try decodeCommand(data: packet, offset: 1)
+                #expect(consumed == 13)
+                guard case .guiFocusOwner(let owner) = command else {
+                    Issue.record("Expected gui_focus_owner")
+                    return
+                }
+                #expect(owner.responder == responder)
+                #expect(owner.surface == surface)
+                #expect(owner.windowID == 0xA1B2_C3D4)
+                #expect(owner.generation == 0x1234_5678)
+                let (next, _) = try decodeCommand(data: packet, offset: consumed + 1)
+                guard case .commitFrame(7, _) = next else {
+                    Issue.record("Focus owner consumed the following command")
+                    return
+                }
+            }
+        }
+    }
+
+    @Test("gui_focus_owner rejects malformed envelopes, truncation, and unknown enum bytes")
+    func decodeMalformedFocusOwner() {
+        for length in [0, 1, 9, 11] {
+            var packet = Data([OP_GUI_FOCUS_OWNER, 0, UInt8(length)])
+            packet.append(Data(repeating: 0, count: length))
+            #expect(throws: ProtocolDecodeError.self) {
+                _ = try decodeCommand(data: packet, offset: 0)
+            }
+        }
+        let complete = Data([OP_GUI_FOCUS_OWNER, 0, 10, 1, 8, 0, 0, 0, 1, 0, 0, 0, 7])
+        for count in 1..<complete.count {
+            #expect(throws: ProtocolDecodeError.self) {
+                _ = try decodeCommand(data: Data(complete.prefix(count)), offset: 0)
+            }
+        }
+        let invalidValues: [(UInt8, UInt8)] = [(4, 0), (0, 12), (255, 255)]
+        for (responder, surface) in invalidValues {
+            var packet = complete
+            packet[3] = responder
+            packet[4] = surface
+            #expect(throws: ProtocolDecodeError.self) {
+                _ = try decodeCommand(data: packet, offset: 0)
+            }
+        }
+    }
+
     @Test("Resident semantics decode all 65,536 guide runs")
     func decodeMaximumResidentGuideRunCount() throws {
         var body = Data()

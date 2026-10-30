@@ -146,6 +146,9 @@ public final class GUIState {
     /// Which-key popup state.
     public let whichKeyState = WhichKeyState()
 
+    /// Read-only keyboard owner and frontend-local text lease mirror.
+    public let focusOwnerState = FocusOwnerState()
+
     /// Breadcrumb path bar state.
     public let breadcrumbState = BreadcrumbState()
 

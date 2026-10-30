@@ -957,6 +957,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             ("ObservatoryState", "Sources/Views/Sidebar/ObservatoryState.swift", []),
             ("GitStatusState", "Sources/Views/Sidebar/GitStatusState.swift", []),
             ("EditTimelineState", "Sources/Views/Shared/EditTimelineState.swift", []),
+            ("FocusOwnerState", "Sources/Views/Shared/FocusOwnerState.swift", []),
             ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", [
                 "@ObservationIgnored private let localPresentationStore: LocalPresentationStore",
             ]),
@@ -996,7 +997,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private let localPresentationStore: LocalPresentationStore": "dependency",
         ]
         let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder", "dependency"]
-        #expect(owners.count == 29)
+        #expect(owners.count == 30)
         #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
         #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))
 
@@ -1062,10 +1063,31 @@ struct GUIFrameSwiftUIInvalidationTests {
         let sourcesRoot = macosRoot.appendingPathComponent("Sources")
         let sourceEnumerator = try #require(FileManager.default.enumerator(at: sourcesRoot, includingPropertiesForKeys: nil))
         var firstResponderOwners: Set<String> = []
+        var literalFocusStateWriters: Set<String> = []
+        var mirrorWriters: Set<String> = []
+        let namedFocusLiteral = try NSRegularExpression(pattern: #"\b[A-Za-z_]\w*Focused\s*=\s*(?:true|false)\b"#)
+        let focusDeclaration = try NSRegularExpression(pattern: #"@FocusState\s+(?:(?:private|public|fileprivate|internal)\s+)?var\s+(\w+)"#)
         for case let sourceURL as URL in sourceEnumerator where sourceURL.pathExtension == "swift" {
             let source = try String(contentsOf: sourceURL, encoding: .utf8)
             if source.contains("makeFirstResponder(") {
                 firstResponderOwners.insert(sourceURL.path.replacingOccurrences(of: sourcesRoot.path + "/", with: ""))
+            }
+            let relativePath = sourceURL.path.replacingOccurrences(of: sourcesRoot.path + "/", with: "")
+            if source.contains("focusOwnerState.publish(") { mirrorWriters.insert(relativePath) }
+            if relativePath != "Views/Editor/EditorFocusPolicy.swift" {
+                let nsSource = source as NSString
+                if namedFocusLiteral.firstMatch(in: source, range: NSRange(location: 0, length: nsSource.length)) != nil {
+                    literalFocusStateWriters.insert(relativePath)
+                }
+                for declaration in focusDeclaration.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) {
+                    let name = nsSource.substring(with: declaration.range(at: 1))
+                    let literalAssignment = try NSRegularExpression(
+                        pattern: #"\b"# + NSRegularExpression.escapedPattern(for: name) + #"\s*=\s*(?:true|false)\b"#
+                    )
+                    if literalAssignment.firstMatch(in: source, range: NSRange(location: 0, length: nsSource.length)) != nil {
+                        literalFocusStateWriters.insert(relativePath)
+                    }
+                }
             }
         }
 
@@ -1073,26 +1095,23 @@ struct GUIFrameSwiftUIInvalidationTests {
         #expect(policy.contains("NSWindow.didUpdateNotification"))
         #expect(policy.contains("NSApplication.didBecomeActiveNotification"))
         #expect(policy.contains("window.publisher(for: \\.firstResponder, options: [.new]).values"))
-        #expect(policy.contains("window.initialFirstResponder = editorView"))
+        #expect(policy.contains("window.initialFirstResponder = view"))
         #expect(policy.contains("NSEvent.addLocalMonitorForEvents"))
         #expect(policy.contains("windowUpdateTask"))
         #expect(policy.contains("applicationActivationTask"))
         #expect(policy.contains("firstResponderTask"))
         #expect(!policy.contains("window.observe(\\.firstResponder"))
         #expect(policy.contains("deinit {\n        firstResponderTask?.cancel()\n        firstResponderTask = nil"))
-        #expect(policy.contains("func detach() {\n        if attachedWindow?.initialFirstResponder === editorView"))
+        #expect(policy.contains("func detach() {\n        attachedWindow?.initialFirstResponder = nil"))
         #expect(policy.components(separatedBy: "firstResponderTask?.cancel()\n        firstResponderTask = nil").count == 3)
         #expect(policy.contains("deferredReclaimTask"))
         #expect(editorView.contains("nsView.swiftUIUpdateDidOccur()"))
         #expect(!editorNSView.contains("FirstResponderGuard"))
         #expect(!editorNSView.contains("NSEvent.addLocalMonitorForEvents"))
         #expect(!editorNSView.contains("window.firstResponder is NSText"))
-        #expect(firstResponderOwners == [
-            "Views/Editor/EditorFocusPolicy.swift",
-            "Views/Editor/InlineEditField.swift",
-            "Views/EditorChrome/SearchQueryField.swift",
-            "Views/Overlays/PickerQueryField.swift",
-        ])
+        #expect(firstResponderOwners == ["Views/Editor/EditorFocusPolicy.swift"])
+        #expect(literalFocusStateWriters.isEmpty)
+        #expect(mirrorWriters == ["Views/Editor/EditorFocusPolicy.swift"])
         #expect(!FileManager.default.fileExists(atPath: macosRoot.appendingPathComponent("Sources/Views/Shared/MingaWindow.swift").path))
     }
 

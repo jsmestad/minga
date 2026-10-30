@@ -15,6 +15,7 @@ public struct WorkspaceIconPicker: View {
     public let currentIcon: String
     public let accentColor: Color
     @Environment(\.themeColors) private var theme
+    @Environment(\.editorFocusPolicy) private var focusPolicy
     public let onSelect: (String) -> Void
 
     @State private var searchText: String = ""
@@ -99,7 +100,14 @@ public struct WorkspaceIconPicker: View {
             }
             .frame(width: 220, height: 280)
         }
-        .onAppear { searchFocused = true }
+        .onAppear { focusPolicy?.beginLocalTextEditing(.workspaceIconSearch) }
+        .onChange(of: focusPolicy?.focusOwnerState.localTextEditing, initial: true) { _, editing in
+            searchFocused = editing == .workspaceIconSearch
+        }
+        .onChange(of: searchFocused) { _, focused in
+            if !focused { focusPolicy?.endLocalTextEditing(.workspaceIconSearch) }
+        }
+        .onDisappear { focusPolicy?.endLocalTextEditing(.workspaceIconSearch) }
     }
 
     @ViewBuilder

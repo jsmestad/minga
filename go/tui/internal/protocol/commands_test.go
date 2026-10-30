@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1104,6 +1105,84 @@ func TestDecodeWindowCursorlineSection(t *testing.T) {
 	}
 	if !command.Window.Cursorline.Visible || command.Window.Cursorline.Row != 1 || command.Window.Cursorline.BG != 0x112233 {
 		t.Fatalf("cursorline decoded incorrectly: %+v", command.Window.Cursorline)
+	}
+}
+
+func TestDecodeGUIFocusOwner(t *testing.T) {
+	tests := []struct {
+		name      string
+		responder uint8
+		surface   uint8
+	}{
+		{"editor", 0, 0},
+		{"file_tree", 0, 1},
+		{"agent", 0, 2},
+		{"git_status", 0, 3},
+		{"conflict", 0, 4},
+		{"inline_edit", 3, 5},
+		{"inline_ask", 0, 6},
+		{"prompt", 0, 7},
+		{"picker", 1, 8},
+		{"completion", 0, 9},
+		{"command_completion", 0, 10},
+		{"search", 2, 11},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := []byte{generated.OPGuiFocusOwner, 0, 10, tt.responder, tt.surface, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}
+			// DecodeCommand receives the remaining batch, not just this command.
+			batch := append(payload, generated.OPCommitFrame, 0, 0, 0, 7, 0, 0, 0, 0)
+			command, err := DecodeCommand(batch)
+			if err != nil {
+				t.Fatalf("DecodeCommand returned error: %v", err)
+			}
+			if command.Kind != CommandChrome || command.Size != 13 || command.Chrome.Bytes != 13 {
+				t.Fatalf("focus owner framing = kind %v, size %d, chrome bytes %d", command.Kind, command.Size, command.Chrome.Bytes)
+			}
+			if command.Chrome.Opcode != generated.OPGuiFocusOwner || command.Chrome.Name != "focus owner" || command.Chrome.Summary != "tui no-op" {
+				t.Fatalf("focus owner chrome metadata = %+v", command.Chrome)
+			}
+			want := generated.GuiFocusOwnerFields{
+				Responder:  tt.responder,
+				Surface:    tt.surface,
+				WindowID:   0x12345678,
+				Generation: 0x9ABCDEF0,
+			}
+			if command.Chrome.FocusOwner != want {
+				t.Fatalf("focus owner = %+v, want %+v", command.Chrome.FocusOwner, want)
+			}
+			next, err := DecodeCommand(batch[command.Size:])
+			if err != nil || next.Kind != CommandCommitFrame || next.FrameSeq != 7 {
+				t.Fatalf("following commit = %+v, err = %v", next, err)
+			}
+		})
+	}
+}
+
+func TestDecodeGUIFocusOwnerRejectsTruncation(t *testing.T) {
+	payload := []byte{generated.OPGuiFocusOwner, 0, 10, 1, 8, 0, 0, 0, 7, 0, 0, 0, 9}
+	for size := 1; size < len(payload); size++ {
+		t.Run(fmt.Sprintf("bytes_%d", size), func(t *testing.T) {
+			if command, err := DecodeCommand(payload[:size]); err == nil {
+				t.Fatalf("truncated focus owner accepted: %+v", command)
+			}
+		})
+	}
+}
+
+func TestDecodeGUIFocusOwnerRejectsWrongPayloadLength(t *testing.T) {
+	for _, length := range []uint16{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 256, 65535} {
+		t.Run(fmt.Sprintf("length_%d", length), func(t *testing.T) {
+			payload := make([]byte, 3+int(length))
+			payload[0] = generated.OPGuiFocusOwner
+			binary.BigEndian.PutUint16(payload[1:3], length)
+			// Even a complete envelope followed by another command is invalid
+			// unless its own body is exactly 10 bytes.
+			payload = append(payload, generated.OPCommitFrame, 0, 0, 0, 7, 0, 0, 0, 0)
+			if command, err := DecodeCommand(payload); err == nil {
+				t.Fatalf("wrong focus owner payload length accepted: %+v", command)
+			}
+		})
 	}
 }
 

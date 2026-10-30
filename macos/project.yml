@@ -94,6 +94,8 @@ targets:
         type: file
       - path: Sources/Views/Shared/GUIState.swift
         type: file
+      - path: Sources/Views/Shared/FocusOwnerState.swift
+        type: file
       - path: Sources/Views/Shared/LocalPresentationStore.swift
         type: file
       - path: Sources/Views/Shared/SparklineView.swift
@@ -189,6 +191,7 @@ targets:
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
+          - "Views/Shared/FocusOwnerState.swift"
           - "Views/Shared/LocalPresentationStore.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -335,6 +338,7 @@ targets:
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
+          - "Views/Shared/FocusOwnerState.swift"
           - "Views/Shared/LocalPresentationStore.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -443,6 +447,7 @@ targets:
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
+          - "Views/Shared/FocusOwnerState.swift"
           - "Views/Shared/LocalPresentationStore.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -526,6 +531,7 @@ targets:
           - "Views/Shared/GUIFramePresentationMetrics.swift"
           - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
+          - "Views/Shared/FocusOwnerState.swift"
           - "Views/Shared/LocalPresentationStore.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"

@@ -189,6 +189,34 @@ defmodule MingaEditor.Frontend.EmitTest do
              "keyframe carries full window content"
     end
 
+    test "focus owner emits once before content on keyframes and changed deltas only" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+      {keyframe, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      assert_focus_before_content(keyframe)
+
+      caches = acknowledge(caches, 11)
+      {delta, caches} = emit_and_capture(frame, state, caches, frame_seq: 22)
+      refute Enum.any?(delta, &match?(<<0xAA, _::binary>>, &1))
+
+      caches = acknowledge(caches, 22)
+      changed = %{state | workspace: SessionState.set_keymap_scope(state.workspace, :agent)}
+      {delta, caches} = emit_and_capture(frame, changed, caches, frame_seq: 33)
+
+      assert [<<0xAA, 10::16, 0, 2, _window::32, 0::32>>] =
+               Enum.filter(delta, &match?(<<0xAA, _::binary>>, &1))
+
+      caches = acknowledge(caches, 33)
+
+      {forced, caches} =
+        emit_and_capture(frame, changed, caches, frame_seq: 44, force_keyframe?: true)
+
+      assert_focus_before_content(forced)
+      caches = Caches.reset_frontend_state(caches, caches.recovery_generation)
+      {recovered, _caches} = emit_and_capture(frame, changed, caches, frame_seq: 55)
+      assert_focus_before_content(recovered)
+    end
+
     test "a successful Port write does not become a delta base without acknowledgement" do
       frame = window_frame_with_content()
       state = semantic_state()
@@ -498,6 +526,15 @@ defmodule MingaEditor.Frontend.EmitTest do
     spans = [%{span | font_id: font_id}]
     row = %{row | spans: spans, content_hash: RenderRow.compute_hash(row.text, spans)}
     %{frame | windows: [%{window | rows: [row]}]}
+  end
+
+  defp assert_focus_before_content(commands) do
+    assert [_owner] = Enum.filter(commands, &match?(<<0xAA, _::binary>>, &1))
+    owner_index = Enum.find_index(commands, &match?(<<0xAA, _::binary>>, &1))
+    content_index = Enum.find_index(commands, &match?(<<0x80, _::binary>>, &1))
+    assert is_integer(content_index)
+    assert owner_index < content_index
+    assert FrameTransaction.validate(commands) == :ok
   end
 
   # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,

@@ -53,6 +53,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       theme: ThemeBuilder.build(ctx.intent.frame.theme),
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
       which_key: build_which_key(ctx),
+      focus_owner: build_focus_owner(ctx),
       notifications: NotificationsBuilder.build(ctx.intent.frame.notifications),
       search_state: SearchStateBuilder.build(ctx.workspace.search),
       git_status: build_git_status(ctx),
@@ -108,6 +109,9 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   end
 
   defp build_which_key(_ctx), do: nil
+
+  @spec build_focus_owner(Context.t()) :: Minga.RenderModel.UI.FocusOwner.t()
+  defp build_focus_owner(%Context{intent: %{frame: %{focus_owner: owner}}}), do: owner
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
