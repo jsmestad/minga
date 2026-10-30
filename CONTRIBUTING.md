@@ -149,6 +149,41 @@ To verify telemetry overhead is negligible:
 mix run benchmarks/telemetry_overhead.exs
 ```
 
+## Collecting stale-intent session evidence
+
+The shared runtime log can contain warnings from both normal editor use and tests. It cannot establish per-session rejection rates by itself. For [#3513](https://github.com/jsmestad/minga/issues/3513), `scripts/collect_rejection_sessions.py` brackets one operator-confirmed session, retains its dedicated debug log and canonical-log byte interval, and reports rejections by surface, generation, and reason. The collector owns evidence, not native app lifecycle.
+
+Use a private app built from a known post-target-contract commit, not an arbitrary installed app with the same version number. The collection setup supplies `~/.local/share/minga/rejection-sessions/build.json`, which records that actual build's command, immutable source commit, app path, and payload hash. The collector verifies the payload at both boundaries. A payload hash alone does not establish source provenance; review the build receipt before accepting sessions.
+
+Quit any existing Minga instance normally before collection. The collector refuses to begin or finish while Minga is running; it never terminates an app. Confirm that `:log_level_editor` permits warnings (`:debug`, `:info`, or `:warning`), and keep that setting throughout the session. The level is an operator declaration, not a runtime measurement.
+
+```bash
+/usr/bin/python3 scripts/collect_rejection_sessions.py begin \
+  --build "$HOME/.local/share/minga/rejection-sessions/build.json" \
+  --kind real --warning-level warning \
+  --note "Normal work on the application project" .
+```
+
+Run the printed `Run:` command. It uses the private app's standard bundled launcher, with only diagnostic output redirection added. The collector does not launch, reopen, wait for, or replace native instances. If the singleton window is restored closed, click that app's Dock icon. Use it for normal work, quit normally, then run the printed `Finish:` command.
+
+Finish asks you to confirm the prescribed launch, one uninterrupted session without replacement or restart, normal work for real captures, clean quit, and uninterrupted warning capture. Answer no if any condition is uncertain. If you cancel before launching, finish and answer no to release the bracket while retaining an unknown count. A canonical log can have only one unfinished bracket, even when collection roots differ. Python 3.9 or later is required; the example uses the system Python tested on macOS.
+
+These are **operator-bracketed, log-verified real-session candidates**, not independently observed native lifetimes. The timestamps are collection boundaries. Neither the human work, native instance continuity, native exit, nor warning configuration can be proved by these logs alone. The operator's exact-launch and no-restart confirmation is part of the evidence.
+
+Each capture directory retains `session.json`, `debug.log`, `canonical.log`, `native-output.log`, `launcher-output.log`, and `report.json`, plus its generated launch scripts and launcher status. Final byte counts and SHA-256 hashes detect later evidence loss or modification. Session directories are private, but their contents can include file paths and other sensitive editor messages. Review before sharing.
+
+```bash
+/usr/bin/python3 scripts/collect_rejection_sessions.py report
+```
+
+The report lists candidates, not an automatic decision to close the investigation. Review their work notes, build provenance, and declarations. Captures with `--kind smoke` never count as real sessions. Missing or changed logs, failed debug writers, restarts, unconfirmed boundaries, registry gaps, changed canonical-log boundaries, and missing or ambiguous rejection matches produce an unknown count, not zero. An attested clean quit may end with the registry's exact terminal `:shutdown` marker; a mid-session shutdown or recovery remains a gap. Unattributed canonical rejections also make the count unknown, so avoid running rejection-producing tests during collection.
+
+Copied captures are not additional sessions; the cohort count deduplicates validated debug-log hashes.
+
+The default canonical path is the native app's `~/.local/share/minga/minga.log`. Launch Services does not inherit a shell-only `XDG_DATA_HOME`; use `--canonical` only when the native app is explicitly configured to write elsewhere.
+
+Ten accepted real sessions satisfy the frequency sample, including complete sessions with zero rejections. They do not replace the recovery-cost measurement, preview inventory, or written protocol decision required by #3513.
+
 ## Commit Messages
 
 ```

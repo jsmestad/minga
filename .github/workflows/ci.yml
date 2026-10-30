@@ -37,6 +37,9 @@ jobs:
           key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
+      - name: Check real-session evidence integrity
+        run: python3 -m unittest discover -s test/scripts -p collect_rejection_sessions_test.py
+
       - run: mix deps.get
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Stale-intent investigation tooling can capture real native editor sessions with build provenance, dedicated debug logs, canonical-log correlation, and per-surface rejection counts. Synthetic smoke captures and incomplete evidence do not count toward the real-session cohort.
 - Semantic GUI activations now retain a typed target through decoding, resolution, and application. EX9015 rejects active-subject reads in targeted clauses and index-only GUI decoders, with reasoned exemptions for existing narrow workspace and window identities.
 - macOS chrome now uses shared spacing, typography, and radius scales, including a 6pt compact step and one monospaced small candidate/key style. A balanced-argument source guard rejects new literal decisions outside editor geometry. The preview command can capture every registered view, and CI attaches real before/after contact sheets with an exact pixel-change manifest for review.
 - `make done` now runs the local pre-review gates in one command: fast lint, the non-heavy ExUnit suite, and the macOS build and `MingaTests` bundle when macOS inputs changed. Lint and changed-file Credo share the same change detector. Swift skips report their reason; test failures name failed tests and retain the xcresult bundle and logs.
