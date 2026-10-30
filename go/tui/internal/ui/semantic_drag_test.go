@@ -99,7 +99,7 @@ func fileTreeDragModel(t *testing.T) Model {
 	t.Helper()
 	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 30, Rows: []protocol.FileTreeRow{
+		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Generation: 7, Width: 30, Rows: []protocol.FileTreeRow{
 			{ID: "/p/src", Path: "src", PathHash: 0x11111111, Name: "src", Directory: true},
 			{ID: "/p/a.ex", Path: "a.ex", PathHash: 0x22222222, Name: "a.ex"},
 			{ID: "/p/b.ex", Path: "b.ex", PathHash: 0x33333333, Name: "b.ex"},
@@ -123,7 +123,7 @@ func TestChromeDragDropsFileOntoDirectoryRow(t *testing.T) {
 	if !handled {
 		t.Fatal("release after a file-tree drag should be consumed")
 	}
-	want := protocol.EncodeGUIFileTreeDrop(0, 0x11111111, true, 0, "/p/src", "src", []string{"a.ex"})
+	want := protocol.EncodeGUIFileTreeDrop(0, 0x11111111, true, 0, "/p/src", "src", []string{"a.ex"}, 7)
 	if !bytes.Equal(packet, want) {
 		t.Fatalf("file_tree_drop packet = %v, want %v", packet, want)
 	}
@@ -139,6 +139,22 @@ func TestChromeDragDropOntoSameRowDoesNothing(t *testing.T) {
 
 	if packet != nil {
 		t.Fatalf("dropping a row onto itself should not emit file_tree_drop, got %v", packet)
+	}
+}
+
+func TestChromeDragRejectsReplacedFileTreeGeneration(t *testing.T) {
+	model := fileTreeDragModel(t)
+	origin := waitForZone(t, model, zoneIDFileTreeRow(1))
+	target := waitForZone(t, model, zoneIDFileTreeRow(0))
+	model, _, _ = model.handleChromeDrag(clickAt(origin))
+	model, _, _ = model.handleChromeDrag(dragAt(target))
+	chrome := model.chrome[generated.OPGuiFileTree]
+	chrome.Tree.Generation++
+	chrome.Tree.Rows[1].Path = "replacement.ex"
+	model.chrome[generated.OPGuiFileTree] = chrome
+	_, packet, handled := model.handleChromeDrag(releaseAt(target))
+	if !handled || packet != nil {
+		t.Fatalf("stale tree drag must be consumed without retargeting, handled=%v packet=%v", handled, packet)
 	}
 }
 

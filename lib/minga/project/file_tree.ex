@@ -91,6 +91,17 @@ defmodule Minga.Project.FileTree do
     %{tree | cursor: index |> max(0) |> min(max_idx)}
   end
 
+  @doc "Selects an exact resident path, without clamping or consulting the filesystem."
+  @spec select_path(t(), String.t()) :: {:ok, t()} | :error
+  def select_path(%__MODULE__{entries: entries} = tree, path) when is_list(entries) do
+    case Enum.find_index(entries, &(&1.path == path)) do
+      nil -> :error
+      index -> {:ok, %{tree | cursor: index}}
+    end
+  end
+
+  def select_path(%__MODULE__{}, _path), do: :error
+
   # ── Expand / Collapse ─────────────────────────────────────────────────────
 
   @doc """

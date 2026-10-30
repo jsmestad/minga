@@ -1,6 +1,9 @@
 defmodule Minga.RenderModel.UI.Minibuffer do
   @moduledoc """
   Semantic minibuffer model for GUI adapters.
+
+  Command candidates use their command label as `Candidate.id`. `generation`
+  belongs to the command-completion modal lifecycle, not the rendered input.
   """
 
   alias Minga.RenderModel.UI.Minibuffer.Candidate
@@ -21,6 +24,7 @@ defmodule Minga.RenderModel.UI.Minibuffer do
 
   @type t :: %__MODULE__{
           visible?: boolean(),
+          generation: non_neg_integer(),
           mode: mode(),
           cursor_pos: non_neg_integer() | nil,
           prompt: String.t(),
@@ -32,6 +36,7 @@ defmodule Minga.RenderModel.UI.Minibuffer do
         }
 
   defstruct visible?: false,
+            generation: 0,
             mode: :command,
             cursor_pos: nil,
             prompt: "",

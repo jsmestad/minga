@@ -29,10 +29,11 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
     test "encodes a visible timeline with entries" do
       model = %EditTimeline{
         visible?: true,
+        generation: 41,
         viewing_index: 1,
         entries: [
-          %Entry{index: 0, tool_name: "edit_file", timestamp_delta: 0},
-          %Entry{index: 1, tool_name: "write_file", timestamp_delta: 500}
+          %Entry{entry_id: "a:tc1", index: 0, tool_name: "edit_file", timestamp_delta: 0},
+          %Entry{entry_id: "a:tc2", index: 1, tool_name: "write_file", timestamp_delta: 500}
         ]
       }
 
@@ -42,12 +43,15 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
       assert visible == 1
       assert viewing == 1
       assert count == 2
-      assert <<0, 9, "edit_file", 0::32, 1, 10, "write_file", 500::32, 0::8>> = rest
+
+      assert <<0, 9, "edit_file", 0::32, 1, 10, "write_file", 500::32, 0::8, 41::32, 5::16,
+               "a:tc1", 5::16, "a:tc2">> = rest
     end
 
     test "encodes file summary rows after active entries" do
       model = %EditTimeline{
         visible?: true,
+        generation: 52,
         viewing_index: nil,
         entries: [],
         files: [
@@ -63,7 +67,8 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
 
       <<_opcode, payload_len::16, payload::binary-size(payload_len)>> = encode(model)
 
-      assert <<1::8, 0xFFFF::16, 0::8, 1::8, 8::16, "lib/a.ex", 2::8, 10::32, 3::32, 1::8>> =
+      assert <<1::8, 0xFFFF::16, 0::8, 1::8, 8::16, "lib/a.ex", 2::8, 10::32, 3::32, 1::8,
+               52::32>> =
                payload
     end
 
@@ -82,7 +87,7 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
     end
 
     test "encodes a nil viewing index as 0xFFFF when visible" do
-      <<_opcode, _len::16, _visible, viewing::16, _count, _file_count>> =
+      <<_opcode, _len::16, _visible, viewing::16, _count, _file_count, 0::32>> =
         encode(%EditTimeline{visible?: true, viewing_index: nil, entries: []})
 
       assert viewing == 0xFFFF
@@ -115,6 +120,14 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
 
       {cmd2, _caches} = EditTimelineEncoder.encode(changed, caches)
       assert cmd2 != nil
+    end
+
+    test "re-encodes when only the entry generation changes" do
+      model = %EditTimeline{visible?: true, generation: 9}
+      {_cmd, caches} = EditTimelineEncoder.encode(model, Caches.new())
+
+      assert {cmd, _caches} = EditTimelineEncoder.encode(%{model | generation: 10}, caches)
+      assert is_binary(cmd)
     end
   end
 end

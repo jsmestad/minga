@@ -346,7 +346,11 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
         |> EditTimeline.set_viewing("lib/foo.ex", 0)
 
-      assert EditTimeline.reset(timeline) == EditTimeline.new()
+      reset = EditTimeline.reset(timeline)
+      assert reset.entries == %{}
+      assert reset.cumulative_hunks == %{}
+      assert reset.viewing == %{}
+      assert reset.generation != timeline.generation
     end
 
     test "cleans up file-backed entry snapshots" do
@@ -362,8 +366,50 @@ defmodule MingaEditor.Agent.EditTimelineTest do
 
       [%{snapshot: {:file, path}}] = EditTimeline.entries_for(timeline, "lib/foo.ex")
       assert File.exists?(path)
-      assert EditTimeline.reset(timeline) == EditTimeline.new()
+      reset = EditTimeline.reset(timeline)
+      assert reset.entries == %{}
+      assert reset.generation != timeline.generation
       refute File.exists?(path)
+    end
+  end
+
+  describe "stable GUI targets" do
+    test "entry identity binds path, tool call and index, not viewing or review state" do
+      path = "lib/foo.ex"
+
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.record_edit(path, "tc1", "edit_file", "v0", "v1")
+
+      [entry] = EditTimeline.entries_for(timeline, path)
+      id = EditTimeline.entry_id(path, entry)
+      assert id == EditTimeline.entry_id(path, entry)
+      assert id != EditTimeline.entry_id("lib/other.ex", entry)
+      assert id != EditTimeline.entry_id(path, %{entry | tool_call_id: "tc2"})
+      assert id != EditTimeline.entry_id(path, %{entry | index: 1})
+
+      viewed = EditTimeline.set_viewing(timeline, path, 0)
+      live = EditTimeline.go_live(viewed, path)
+      reprojected = EditTimeline.reproject(live, path, ["v0"], ["v0"])
+      assert reprojected.generation == timeline.generation
+      assert [^entry] = EditTimeline.entries_for(reprojected, path)
+      assert EditTimeline.entry_id(path, hd(EditTimeline.entries_for(reprojected, path))) == id
+    end
+
+    test "entry mutations and resets invalidate generations even when identities repeat" do
+      path = "lib/foo.ex"
+      empty = EditTimeline.new()
+      first = EditTimeline.record_edit(empty, path, "tc1", "edit_file", "v0", "v1")
+      second = EditTimeline.record_edit(first, path, "tc2", "edit_file", "v1", "v2")
+      reset = EditTimeline.reset(second)
+      repeated = EditTimeline.record_edit(reset, path, "tc1", "edit_file", "v0", "v1")
+
+      generations = Enum.map([empty, first, second, reset, repeated], & &1.generation)
+      assert Enum.uniq(generations) == generations
+      [entry] = EditTimeline.entries_for(first, path)
+      [repeated_entry] = EditTimeline.entries_for(repeated, path)
+      assert EditTimeline.entry_id(path, repeated_entry) == EditTimeline.entry_id(path, entry)
+      assert hd(EditTimeline.entries_for(second, path)) == entry
     end
   end
 

@@ -8,7 +8,6 @@ import SwiftUI
 
 public struct BottomPanelView: View {
     public enum Action: Equatable, Sendable {
-        case switchTab(index: UInt8)
         case dismiss
         case resize(heightPercent: UInt8)
         case openFile(path: String)
@@ -122,16 +121,11 @@ public struct BottomPanelView: View {
     private func tabButton(tab: BottomPanelTab) -> some View {
         let isActive = tab.id == state.activeTabIndex
 
-        return Button(action: {
-            sendAction?(.switchTab(index: UInt8(tab.id)))
-        }) {
-            Text(tab.name)
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive ? theme.tabActiveFg : theme.tabInactiveFg)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
+        return Text(tab.name)
+            .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+            .foregroundStyle(isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
         .background(
             isActive
                 ? theme.tabActiveBg.opacity(0.5)

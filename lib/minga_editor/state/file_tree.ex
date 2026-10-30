@@ -680,18 +680,43 @@ defmodule MingaEditor.State.FileTree do
       nil ->
         {:closed, ft}
 
-      %FileTree{root: live_root} ->
+      %FileTree{root: live_root} = live_tree ->
         case {Path.expand(live_root) == expanded_root,
               is_binary(ft.project_root) and Path.expand(ft.project_root) == expanded_root,
               Path.expand(result_root) == expanded_root, is_nil(ft.filter_request)} do
-          {false, _project_matches?, _result_matches?, _filter_idle?} -> {:rerooted, ft}
-          {true, false, _result_matches?, _filter_idle?} -> {:rerooted, ft}
-          {true, true, false, _filter_idle?} -> {:stale, ft}
-          {true, true, true, false} -> {:stale, ft}
-          {true, true, true, true} -> {:accepted, replace_tree(ft, refreshed_tree)}
+          {false, _project_matches?, _result_matches?, _filter_idle?} ->
+            {:rerooted, ft}
+
+          {true, false, _result_matches?, _filter_idle?} ->
+            {:rerooted, ft}
+
+          {true, true, false, _filter_idle?} ->
+            {:stale, ft}
+
+          {true, true, true, false} ->
+            {:stale, ft}
+
+          {true, true, true, true} ->
+            refreshed_tree = preserve_refresh_selection(refreshed_tree, live_tree)
+            {:accepted, replace_tree(ft, refreshed_tree)}
         end
     end
   end
+
+  # Worker cursors belong to the scan's old row ordering. Resolve the selection
+  # from the resident tree at acceptance time, including input received in flight.
+  @spec preserve_refresh_selection(FileTree.t(), FileTree.t()) :: FileTree.t()
+  defp preserve_refresh_selection(refreshed_tree, %FileTree{entries: entries, cursor: cursor})
+       when is_list(entries) do
+    with %{path: path} <- Enum.at(entries, cursor),
+         {:ok, selected_tree} <- FileTree.select_path(refreshed_tree, path) do
+      selected_tree
+    else
+      _missing_selection -> refreshed_tree
+    end
+  end
+
+  defp preserve_refresh_selection(refreshed_tree, _live_tree), do: refreshed_tree
 
   @spec classify_current_tree(t(), String.t()) :: {:current | :closed | :rerooted, t()}
   defp classify_current_tree(%__MODULE__{} = ft, root) do

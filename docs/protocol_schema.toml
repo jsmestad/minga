@@ -57,7 +57,12 @@ version = "2.0.0"
 # completion/picker selection echoes, and one semantic activation action whose
 # opaque item identity is validated by the owning BEAM surface.
 # protocol_version 26 binds editor text input to retained presentation rows and adds an ordered input-presentation lifecycle.
-protocol_version = 27
+# protocol_version 28 (2026-10-29, #3507) retires index-targeted GUI actions and
+# the unused breadcrumb/panel-tab actions. Command completion and edit timeline
+# append stable item identities and generations, activated through surfaces 4/5.
+# Scroll and fold actions name the window and its u64 presentation generation.
+# File-tree drop appends the observed tree generation as u32 after source paths.
+protocol_version = 28
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -958,32 +963,12 @@ name = "close_tab"
 value = 0x02
 
 [[gui_actions]]
-name = "file_tree_click"
-value = 0x03
-
-[[gui_actions]]
-name = "file_tree_toggle"
-value = 0x04
-
-[[gui_actions]]
-name = "completion_select"
-value = 0x05
-
-[[gui_actions]]
-name = "breadcrumb_click"
-value = 0x06
-
-[[gui_actions]]
 name = "toggle_panel"
 value = 0x07
 
 [[gui_actions]]
 name = "new_tab"
 value = 0x08
-
-[[gui_actions]]
-name = "panel_switch_tab"
-value = 0x09
 
 [[gui_actions]]
 name = "panel_dismiss"
@@ -996,14 +981,6 @@ value = 0x0B
 [[gui_actions]]
 name = "open_file"
 value = 0x0C
-
-[[gui_actions]]
-name = "file_tree_new_file"
-value = 0x0D
-
-[[gui_actions]]
-name = "file_tree_new_folder"
-value = 0x0E
 
 [[gui_actions]]
 name = "file_tree_collapse_all"
@@ -1021,10 +998,6 @@ value = 0x15
 [[gui_actions]]
 name = "execute_command"
 value = 0x16
-
-[[gui_actions]]
-name = "minibuffer_select"
-value = 0x17
 
 [[gui_actions]]
 name = "git_stage_file"
@@ -1101,24 +1074,9 @@ name = "file_tree_edit_cancel"
 value = 0x2E
 
 [[gui_actions]]
+# Payload: window_id(u16) + generation(u64) + line(u32).
 name = "scroll_to_line"
 value = 0x2F
-
-[[gui_actions]]
-name = "file_tree_delete"
-value = 0x30
-
-[[gui_actions]]
-name = "file_tree_rename"
-value = 0x31
-
-[[gui_actions]]
-name = "file_tree_duplicate"
-value = 0x32
-
-[[gui_actions]]
-name = "file_tree_move"
-value = 0x33
 
 [[gui_actions]]
 name = "system_will_sleep"
@@ -1159,10 +1117,6 @@ name = "git_pull_and_retry"
 value = 0x3C
 
 [[gui_actions]]
-name = "file_tree_open_in_split"
-value = 0x3D
-
-[[gui_actions]]
 name = "tab_copy_path"
 value = 0x3E
 
@@ -1171,10 +1125,12 @@ name = "hover_open_action"
 value = 0x3F
 
 [[gui_actions]]
+# Payload retains target observation metadata and appends generation(u32).
 name = "file_tree_drop"
 value = 0x40
 
 [[gui_actions]]
+# Payload: window_id(u16) + generation(u64) + buffer_line(u32).
 name = "fold_toggle_at_line"
 value = 0x41
 
@@ -1229,10 +1185,6 @@ value = 0x4D
 [[gui_actions]]
 name = "font_size_adjust"
 value = 0x4E
-
-[[gui_actions]]
-name = "timeline_navigate"
-value = 0x4F
 
 [[gui_actions]]
 name = "extension_panel_action"
@@ -1344,6 +1296,9 @@ value = 0x64
 # Activates one exact item from a frontend-local presentation. Payload:
 # surface(u8) + intent(u8) + generation(u32) + item_id(string16). `item_id` is
 # opaque bytes authored by the owning BEAM surface; frontends only echo it.
+# Surfaces: 1 completion, 2 picker, 3 file_tree, 4 command_completion, 5 timeline.
+# File-tree intents 7/8 create a file/folder under the named parent (empty = root).
+# Command-completion intent 1 accepts a candidate; timeline intent 1 navigates.
 [[gui_actions]]
 name = "semantic_item_activate"
 value = 0x65

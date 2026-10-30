@@ -20,10 +20,12 @@ const (
 // intervening drag motion is a plain click (handled by semanticMousePacket),
 // not a reorder/drop.
 type chromeDrag struct {
-	kind  chromeDragKind
-	index int    // origin tab index or file-tree row index
-	id    uint32 // origin tab id (chromeDragTab only)
-	moved bool
+	kind       chromeDragKind
+	index      int    // origin tab index or file-tree row index
+	id         uint32 // origin tab id (chromeDragTab only)
+	moved      bool
+	generation uint32
+	sourcePath string
 }
 
 // handleChromeDrag tracks press-drag-release over tabs and file-tree rows and
@@ -33,7 +35,7 @@ type chromeDrag struct {
 // the single-click and raw-forward paths).
 //
 // A plain press is recorded but NOT consumed, so the existing select_tab /
-// file_tree_click click path still fires on press (matching the macOS
+// semantic file-tree activation path still fires on press (matching the macOS
 // tap-to-select plus drag-to-reorder split). Motion during an active drag is
 // consumed so it does not leak to the buffer as a selection drag. Release is
 // consumed when a drag was active; it emits the reorder/drop only if the
@@ -89,7 +91,7 @@ func (m Model) chromeDragOrigin(msg tea.MouseMsg) *chromeDrag {
 		for index := range tree.Rows {
 			zone := m.zones.Get(zoneIDFileTreeRow(index))
 			if zone != nil && zone.InBounds(msg) {
-				return &chromeDrag{kind: chromeDragFileTreeRow, index: index}
+				return &chromeDrag{kind: chromeDragFileTreeRow, index: index, generation: tree.Generation, sourcePath: tree.Rows[index].Path}
 			}
 		}
 	}
@@ -135,13 +137,9 @@ func (m Model) tabReorderPacket(drag *chromeDrag, msg tea.MouseMsg) []byte {
 // validates the target against its own tree via the echoed path hash.
 func (m Model) fileTreeDropPacket(drag *chromeDrag, msg tea.MouseMsg) []byte {
 	tree, ok := m.fileTree()
-	if !ok || !tree.Visible {
+	if !ok || !tree.Visible || tree.Generation != drag.generation {
 		return nil
 	}
-	if drag.index < 0 || drag.index >= len(tree.Rows) {
-		return nil
-	}
-	source := tree.Rows[drag.index]
 	for index, row := range tree.Rows {
 		zone := m.zones.Get(zoneIDFileTreeRow(index))
 		if zone == nil || !zone.InBounds(msg) {
@@ -157,7 +155,8 @@ func (m Model) fileTreeDropPacket(drag *chromeDrag, msg tea.MouseMsg) []byte {
 			0,
 			row.ID,
 			row.Path,
-			[]string{source.Path},
+			[]string{drag.sourcePath},
+			tree.Generation,
 		)
 	}
 	return nil

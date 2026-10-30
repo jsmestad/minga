@@ -499,7 +499,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 			{text: entry.ToolName, width: toolWidth},
 			{text: fmt.Sprintf("%d", entry.TimestampDelta), width: ageWidth},
 		})
-		lines = append(lines, m.zones.Mark(zoneIDTimelineEntry(entry.Index), row))
+		lines = append(lines, m.zones.Mark(zoneIDTimelineEntry(timeline.Generation, entry.EntryID), row))
 	}
 	return takeLines(lines, height)
 }

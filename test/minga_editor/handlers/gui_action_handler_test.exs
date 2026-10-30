@@ -65,7 +65,13 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     snapshot = MingaEditor.Input.Router.capture_snapshot(state)
     revision = state.render.render_correlation.latest_intent_revision
 
-    handled = GuiActionHandler.dispatch(state, {:scroll_to_line, 1})
+    window = state.workspace.windows.map[state.workspace.windows.active]
+
+    handled =
+      GuiActionHandler.dispatch(
+        state,
+        {:scroll_to_line, window.id, window.accessibility_generation, 1}
+      )
 
     assert handled.render.render_correlation.latest_intent_revision == revision
 
@@ -213,35 +219,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert NotificationCenter.find(state.feedback.notifications, "build:test") == nil
     assert [%{id: "other"}] = NotificationCenter.list(state.feedback.notifications)
-  end
-
-  test "legacy breadcrumb_click is ignored without mutating state", %{sidebar_registry: table} do
-    state = base_state(table)
-
-    assert GuiActionHandler.dispatch(state, {:breadcrumb_click, 0}) == state
-  end
-
-  test "panel_switch_tab is an explicit no-op", %{sidebar_registry: table} do
-    panel = %BottomPanel{visible: true, focused: true, filter: :warnings, height_percent: 45}
-
-    state =
-      base_state(table)
-      |> then(fn root ->
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_bottom_panel(
-            MingaEditor.Shell.Runtime.state(root.shell_runtime),
-            panel
-          )
-
-        %{
-          root
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
-        }
-      end)
-
-    assert GuiActionHandler.dispatch(state, {:panel_switch_tab, 255}).shell_runtime.state.bottom_panel ==
-             panel
   end
 
   test "panel_dismiss hides the panel through the owner", %{sidebar_registry: table} do
@@ -574,6 +551,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert FileTreeState.tree(unknown.workspace.file_tree).cursor == 0
     assert unknown.render.render_correlation.keyframe_pending?
 
+    # Toggling a named file is a no-op, not an implicit selection or open.
     resolved =
       GuiActionHandler.dispatch(
         state,
@@ -581,7 +559,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
          Path.expand(Path.join(tmp_dir, "b.ex"))}
       )
 
-    assert FileTreeState.tree(resolved.workspace.file_tree).cursor == 1
+    assert FileTreeState.tree(resolved.workspace.file_tree).cursor == 0
   end
 
   test "optional GUI commands report scheduling failures instead of no-op", %{
@@ -1019,6 +997,459 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert log =~ "invalid_project_root"
   end
 
+  @tag :tmp_dir
+  test "named tree operations leave the unrelated selected row untouched", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    for intent <- [:toggle, :rename, :delete, :duplicate, :new_file, :new_folder] do
+      directory = Path.join(root, Atom.to_string(intent))
+      File.mkdir_p!(directory)
+      {state, target} = targeted_tree_state(table, directory)
+      generation = FileTreeState.presentation_generation(state.workspace.file_tree)
+      selected = ProjectFileTree.selected_entry(FileTreeState.tree(state.workspace.file_tree))
+
+      result =
+        GuiActionHandler.dispatch(
+          state,
+          {:semantic_item_activate, :file_tree, intent, generation, target.path}
+        )
+
+      assert ProjectFileTree.selected_entry(FileTreeState.tree(result.workspace.file_tree)).path ==
+               selected.path
+
+      assert result.workspace.buffers.active == state.workspace.buffers.active
+
+      assert Minga.Buffer.content(result.workspace.buffers.active) ==
+               Minga.Buffer.content(state.workspace.buffers.active)
+
+      case intent do
+        :toggle ->
+          assert MapSet.member?(
+                   FileTreeState.tree(result.workspace.file_tree).expanded,
+                   target.path
+                 )
+
+        :rename ->
+          assert FileTreeState.editing(result.workspace.file_tree).source_path == target.path
+
+        :delete ->
+          assert result.workspace.editing.mode == :delete_confirm
+          assert result.workspace.editing.mode_state.path == target.path
+
+        :duplicate ->
+          assert File.read!(Path.join(directory, "target copy/inside.txt")) == "target"
+          assert File.read!(Path.join(target.path, "inside.txt")) == "target"
+
+        creation when creation in [:new_file, :new_folder] ->
+          editing = FileTreeState.editing(result.workspace.file_tree)
+          assert editing.parent_path == target.path
+          assert editing.type == creation
+      end
+    end
+  end
+
+  @tag :tmp_dir
+  test "header creation admits root independently of the selected nested parent", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    {state, target} = targeted_tree_state(table, root)
+    tree = FileTreeState.tree(state.workspace.file_tree)
+    {:ok, tree} = ProjectFileTree.select_path(tree, target.path)
+    file_tree = FileTreeState.set_tree(state.workspace.file_tree, tree)
+    state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
+    generation = FileTreeState.presentation_generation(file_tree)
+
+    for intent <- [:new_file, :new_folder] do
+      result =
+        GuiActionHandler.dispatch(
+          state,
+          {:semantic_item_activate, :file_tree, intent, generation, ""}
+        )
+
+      editing = FileTreeState.editing(result.workspace.file_tree)
+      assert editing.parent_path == root
+
+      assert ProjectFileTree.selected_entry(FileTreeState.tree(result.workspace.file_tree)).path ==
+               target.path
+
+      if intent == :new_folder do
+        confirmed =
+          GuiActionHandler.dispatch(result, {:file_tree_edit_confirm, editing.token, "at-root"})
+
+        assert File.dir?(Path.join(root, "at-root"))
+        refute File.exists?(Path.join(target.path, "at-root"))
+
+        assert ProjectFileTree.selected_entry(FileTreeState.tree(confirmed.workspace.file_tree)).path ==
+                 target.path
+      end
+    end
+  end
+
+  test "completion acceptance uses the named candidate instead of the highlighted candidate", %{
+    sidebar_registry: table
+  } do
+    active = CompletionItem.from_fields(:test, %{label: "active"})
+    target = CompletionItem.from_fields(:test, %{label: "target"})
+    completion = Completion.new([active, target], {0, 0})
+    payload = CompletionPayload.new(1, completion: completion)
+    state = table |> base_state() |> ModalWorkflow.open({:completion, payload})
+
+    result =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :completion, :accept,
+         CompletionPayload.presentation_generation(payload), CompletionItem.wire_id(target)}
+      )
+
+    assert Minga.Buffer.content(result.workspace.buffers.active) =~ "target"
+    refute Minga.Buffer.content(result.workspace.buffers.active) =~ "active"
+    assert ModalWorkflow.completion(result) == nil
+  end
+
+  test "command completion accepts a named nonselected label and invalidates the old offer", %{
+    sidebar_registry: table
+  } do
+    state = command_target_state(base_state(table))
+    payload = ModalWorkflow.command_completion(state)
+    target = Enum.at(payload.candidates, 1)
+    assert target
+
+    result =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :command_completion, :accept, payload.generation, target.label}
+      )
+
+    assert result.workspace.editing.mode_state.input == target.label
+
+    assert Minga.Buffer.content(result.workspace.buffers.active) ==
+             Minga.Buffer.content(state.workspace.buffers.active)
+
+    assert ModalWorkflow.command_completion(result).generation != payload.generation
+  end
+
+  @tag :tmp_dir
+  test "timeline navigation opens the named path, independently of the active buffer", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    state = base_state(table)
+    path = Path.join(root, "named.ex")
+    File.write!(path, "named document")
+
+    timeline =
+      MingaEditor.Agent.EditTimeline.record_edit(
+        MingaEditor.Agent.EditTimeline.new(),
+        path,
+        "tool",
+        "edit",
+        "before",
+        "after"
+      )
+
+    [entry] = MingaEditor.Agent.EditTimeline.entries_for(timeline, path)
+    ui = MingaEditor.Agent.UIState.replace_edit_timeline(state.workspace.agent_ui, timeline)
+    state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+    original = Minga.Buffer.content(state.workspace.buffers.active)
+
+    result =
+      GuiActionHandler.dispatch(
+        state,
+        {:semantic_item_activate, :timeline, :navigate, timeline.generation,
+         MingaEditor.Agent.EditTimeline.entry_id(path, entry)}
+      )
+
+    assert Minga.Buffer.file_path(result.workspace.buffers.active) == path
+
+    assert MingaEditor.Agent.EditTimeline.viewing_index(
+             result.workspace.agent_ui.view.edit_timeline,
+             path
+           ) == entry.index
+
+    assert Minga.Buffer.content(state.workspace.buffers.active) == original
+    assert File.read!(path) == "named document"
+  end
+
+  @tag :tmp_dir
+  test "every surface rejects stale or missing identities with reason, no semantic changes, and render reset",
+       %{sidebar_registry: table, tmp_dir: root} do
+    state = base_state(table)
+    {trees, target} = targeted_tree_state(table, root)
+    tree_generation = FileTreeState.presentation_generation(trees.workspace.file_tree)
+    item = CompletionItem.from_fields(:test, %{label: "candidate"})
+    completion = Completion.new([item], {0, 0})
+    payload = CompletionPayload.new(1, completion: completion)
+    completions = ModalWorkflow.open(state, {:completion, payload})
+    commands = command_target_state(state)
+    command_payload = ModalWorkflow.command_completion(commands)
+
+    picker_state =
+      %MingaEditor.State.Picker{
+        picker:
+          MingaEditor.UI.Picker.new([%MingaEditor.UI.Picker.Item{id: :named, label: "Named"}])
+      }
+      |> MingaEditor.State.Picker.begin_query_session()
+
+    pickers =
+      ModalWorkflow.open(
+        state,
+        {:picker, MingaEditor.State.ModalOverlay.Picker.new(picker_state)}
+      )
+
+    [{picker_id, _, _}] = picker_state.activation_offer.items
+
+    timeline =
+      MingaEditor.Agent.EditTimeline.record_edit(
+        MingaEditor.Agent.EditTimeline.new(),
+        target.path,
+        "tool",
+        "edit",
+        "old",
+        "new"
+      )
+
+    [entry] = MingaEditor.Agent.EditTimeline.entries_for(timeline, target.path)
+
+    timelines =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        MingaEditor.Agent.UIState.replace_edit_timeline(state.workspace.agent_ui, timeline)
+      )
+
+    window = state.workspace.windows.map[1]
+
+    drop =
+      MingaEditor.FileTree.DropIntent.new(
+        source_paths: [],
+        target_index: 999,
+        target_id: target.path,
+        target_path_hash: :erlang.phash2(Path.expand(target.path), 0xFFFFFFFF),
+        target_path: target.path,
+        target_dir?: true,
+        modifiers: 0,
+        generation: tree_generation + 1
+      )
+
+    cases = [
+      {state, {:close_tab, 999}, :tab, :not_found},
+      {state, {:focus_window, 1, window.accessibility_generation + 1}, :window,
+       :stale_generation},
+      {state, {:scroll_to_line, 1, window.accessibility_generation + 1, 2}, :window,
+       :stale_generation},
+      {state, {:fold_toggle_at_line, 1, window.accessibility_generation + 1, 0}, :window,
+       :stale_generation},
+      {completions,
+       {:semantic_item_activate, :completion, :accept,
+        CompletionPayload.presentation_generation(payload) + 1, CompletionItem.wire_id(item)},
+       :completion, :stale_generation},
+      {pickers,
+       {:semantic_item_activate, :picker, :activate_item,
+        picker_state.activation_offer.generation + 1, <<picker_id::32>>}, :picker,
+       :stale_generation},
+      {trees, {:semantic_item_activate, :file_tree, :delete, tree_generation + 1, target.path},
+       :file_tree, :stale_generation},
+      {trees, {:file_tree_drop, drop}, :file_tree, :stale_generation},
+      {commands,
+       {:semantic_item_activate, :command_completion, :accept, command_payload.generation + 1,
+        hd(command_payload.candidates).label}, :command_completion, :stale_generation},
+      {timelines,
+       {:semantic_item_activate, :timeline, :navigate, timeline.generation + 1,
+        MingaEditor.Agent.EditTimeline.entry_id(target.path, entry)}, :timeline,
+       :stale_generation},
+      {trees, {:semantic_item_activate, :file_tree, :delete, tree_generation, ""}, :file_tree,
+       :target_mismatch}
+    ]
+
+    for {snapshot, action, surface, reason} <- cases do
+      log =
+        capture_log(fn ->
+          result = GuiActionHandler.dispatch(snapshot, action)
+          assert Map.delete(result, :render) == Map.delete(snapshot, :render)
+          assert result.render.render_correlation.keyframe_pending?
+
+          assert Minga.Buffer.content(result.workspace.buffers.active) ==
+                   Minga.Buffer.content(snapshot.workspace.buffers.active)
+        end)
+
+      assert log =~ "surface=#{surface}"
+      assert log =~ "generation="
+      assert log =~ "id="
+      assert log =~ "reason=#{reason}"
+    end
+  end
+
+  @tag :tmp_dir
+  test "nonactive window scroll modifies only the named window and retains focus", %{
+    sidebar_registry: table,
+    tmp_dir: _root
+  } do
+    state = base_state(table)
+    target = Window.new(2, state.workspace.buffers.active, 24, 80)
+    windows = %{state.workspace.windows | map: Map.put(state.workspace.windows.map, 2, target)}
+    state = %{state | workspace: SessionState.set_windows(state.workspace, windows)}
+
+    result =
+      GuiActionHandler.dispatch(
+        state,
+        {:scroll_to_line, target.id, target.accessibility_generation, 2}
+      )
+
+    assert result.workspace.windows.active == state.workspace.windows.active
+    assert result.workspace.windows.map[1] == state.workspace.windows.map[1]
+    assert result.workspace.windows.map[2].viewport.top == 2
+  end
+
+  defp command_target_state(state) do
+    workspace =
+      SessionState.transition_mode(state.workspace, :command, Minga.Mode.CommandState.new("e"))
+
+    %{state | workspace: workspace} |> MingaEditor.KeyDispatch.refresh_command_completion()
+  end
+
+  defp targeted_tree_state(table, root) do
+    target_path = Path.join(root, "target")
+    File.mkdir_p!(target_path)
+    File.write!(Path.join(target_path, "inside.txt"), "target")
+    File.write!(Path.join(root, "active.txt"), "active")
+
+    active = %{
+      path: Path.join(root, "active.txt"),
+      name: "active.txt",
+      dir?: false,
+      depth: 0,
+      last_child?: false,
+      guides: []
+    }
+
+    target = %{
+      path: target_path,
+      name: "target",
+      dir?: true,
+      depth: 0,
+      last_child?: true,
+      guides: []
+    }
+
+    tree = ProjectFileTree.new(root) |> ProjectFileTree.put_entries([active, target])
+    file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+    state = base_state(table)
+    {%{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}, target}
+  end
+
+  @tag :tmp_dir
+  test "named primary and split opens navigate to the resolved file", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    for intent <- [:primary, :open_in_split] do
+      state = base_state(table)
+      first_path = Path.join(root, "#{intent}-active.txt")
+      target_path = Path.join(root, "#{intent}-named.txt")
+      File.write!(first_path, "active")
+      File.write!(target_path, "named")
+
+      entries = [
+        %{
+          path: first_path,
+          name: Path.basename(first_path),
+          dir?: false,
+          depth: 0,
+          last_child?: false,
+          guides: []
+        },
+        %{
+          path: target_path,
+          name: Path.basename(target_path),
+          dir?: false,
+          depth: 0,
+          last_child?: true,
+          guides: []
+        }
+      ]
+
+      tree = ProjectFileTree.new(root) |> ProjectFileTree.put_entries(entries)
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+      state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
+
+      result =
+        GuiActionHandler.dispatch(
+          state,
+          {:semantic_item_activate, :file_tree, intent, file_tree.presentation_generation,
+           target_path}
+        )
+
+      assert Minga.Buffer.file_path(result.workspace.buffers.active) == target_path
+      assert Minga.Buffer.content(result.workspace.buffers.active) == "named"
+
+      assert Minga.Buffer.content(state.workspace.buffers.active) ==
+               "line one\nline two\nline three"
+
+      assert FileTreeState.tree(result.workspace.file_tree).cursor ==
+               if(intent == :primary, do: 1, else: 0)
+
+      if intent == :open_in_split, do: assert(map_size(result.workspace.windows.map) == 2)
+    end
+  end
+
+  test "nonactive gutter folding changes the named pane without changing focus", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table)
+
+    target =
+      Window.new(2, state.workspace.buffers.active, 24, 80)
+      |> Window.set_fold_ranges([Minga.Editing.Fold.Range.new!(0, 2)])
+
+    windows = %{state.workspace.windows | map: Map.put(state.workspace.windows.map, 2, target)}
+    state = %{state | workspace: SessionState.set_windows(state.workspace, windows)}
+
+    result =
+      GuiActionHandler.dispatch(
+        state,
+        {:fold_toggle_at_line, 2, target.accessibility_generation, 0}
+      )
+
+    assert result.workspace.windows.active == 1
+    assert result.workspace.windows.map[1] == state.workspace.windows.map[1]
+    assert MingaEditor.FoldMap.fold_at(result.workspace.windows.map[2].fold_map, 0) != :none
+    assert result.workspace.buffers.active == state.workspace.buffers.active
+  end
+
+  @tag :tmp_dir
+  test "drop uses its named destination even when the frontend index names another row", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    project_root = Path.join(root, "project")
+    {state, target} = targeted_tree_state(table, project_root)
+    source_root = Path.join(root, "external")
+    File.mkdir_p!(source_root)
+    source = Path.join(source_root, "copy.txt")
+    File.write!(source, "external")
+    generation = FileTreeState.presentation_generation(state.workspace.file_tree)
+
+    intent =
+      MingaEditor.FileTree.DropIntent.new(
+        source_paths: [source],
+        target_index: 0,
+        target_id: target.path,
+        target_path_hash: :erlang.phash2(Path.expand(target.path), 0xFFFFFFFF),
+        target_path: target.path,
+        target_dir?: true,
+        modifiers: 0,
+        generation: generation
+      )
+
+    result = GuiActionHandler.dispatch(state, {:file_tree_drop, intent})
+
+    assert File.read!(Path.join(target.path, "copy.txt")) == "external"
+    assert FileTreeState.tree(result.workspace.file_tree).cursor == 0
+    assert result.workspace.buffers.active == state.workspace.buffers.active
+    refute File.exists?(Path.join(project_root, "copy.txt"))
+  end
+
   defp base_state(sidebar_registry, opts \\ []) do
     opts = Keyword.put(opts, :sidebar_registry, sidebar_registry)
     state = TestHelpers.base_state(opts)
@@ -1053,5 +1484,142 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   defp power_thermal_events_registry do
     :"power_thermal_events_#{System.unique_integer([:positive])}"
+  end
+end
+
+defmodule MingaEditor.Handlers.GuiActionHandlerPublicTargetTest do
+  use ExUnit.Case, async: true
+  use Minga.Test.EditorCase
+
+  @moduletag :tmp_dir
+
+  for operation <- [
+        :tab_pin,
+        :tab_unpin,
+        :tab_move_left,
+        :tab_move_right,
+        :tab_reorder,
+        :tab_copy_path,
+        :close_tab,
+        :select_tab
+      ] do
+    @operation operation
+    test "#{operation} names the inactive tab rather than the current one", %{tmp_dir: root} do
+      first_path = Path.join(root, "first.txt")
+      target_path = Path.join(root, "target.txt")
+      active_path = Path.join(root, "active.txt")
+      File.write!(first_path, "first")
+      File.write!(target_path, "target")
+      File.write!(active_path, "active")
+      ctx = start_editor("first", file_path: first_path)
+      send_ex_sync(ctx, "e #{target_path}")
+      send_ex_sync(ctx, "e #{active_path}")
+      workspace = active_workspace_id(ctx)
+      tabs = visible_file_tabs(ctx, workspace)
+      target = Enum.find(tabs, &(&1.label == "target.txt"))
+      assert target
+      active = active_buffer(ctx)
+      before = Enum.map(tabs, & &1.id)
+
+      if @operation == :tab_unpin, do: send_gui_action(ctx, {:tab_pin, target.id})
+
+      action =
+        if @operation == :tab_reorder,
+          do: {:tab_reorder, target.id, 0},
+          else: {@operation, target.id}
+
+      send_gui_action(ctx, action)
+      after_tabs = visible_file_tabs(ctx, workspace)
+      named = Enum.find(after_tabs, &(&1.id == target.id))
+
+      case @operation do
+        :tab_pin ->
+          assert named.pinned?
+
+        :tab_unpin ->
+          refute named.pinned?
+
+        :tab_move_left ->
+          assert Enum.find_index(after_tabs, &(&1.id == target.id)) ==
+                   Enum.find_index(tabs, &(&1.id == target.id)) - 1
+
+        :tab_move_right ->
+          assert Enum.find_index(after_tabs, &(&1.id == target.id)) ==
+                   Enum.find_index(tabs, &(&1.id == target.id)) + 1
+
+        :tab_reorder ->
+          assert hd(after_tabs).id == target.id
+
+        :tab_copy_path ->
+          assert notice_message(ctx) == "Copied #{target_path}"
+
+        :close_tab ->
+          refute named
+
+        :select_tab ->
+          assert active_content(ctx) == "target"
+      end
+
+      unless @operation == :select_tab do
+        assert active_buffer(ctx) == active
+        assert active_content(ctx) == "active"
+      end
+
+      if @operation in [:tab_copy_path, :select_tab],
+        do: assert(Enum.map(after_tabs, & &1.id) == before)
+
+      assert buffer_content(ctx) == "first"
+      assert File.read!(target_path) == "target"
+    end
+  end
+
+  test "typing between render and command acceptance rejects the old identity without replacing input" do
+    ctx = start_editor("unchanged")
+    send_keys_sync(ctx, ":e")
+    offered = MingaEditor.MinibufferData.from_state(editor_state(ctx))
+    candidate = hd(offered.candidates)
+    send_keys_sync(ctx, "d")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send_gui_action(
+          ctx,
+          {:semantic_item_activate, :command_completion, :accept, offered.generation,
+           candidate.label}
+        )
+      end)
+
+    assert minibuffer(ctx) == ":ed"
+    assert buffer_content(ctx) == "unchanged"
+    assert log =~ "surface=command_completion"
+    assert log =~ "reason=stale_generation"
+  end
+
+  test "picker activates the named unhighlighted buffer through the editor", %{tmp_dir: root} do
+    first_path = Path.join(root, "first.txt")
+    target_path = Path.join(root, "named.txt")
+    File.write!(first_path, "first buffer")
+    File.write!(target_path, "named buffer")
+    ctx = start_editor("first buffer", file_path: first_path)
+    send_ex_sync(ctx, "e #{target_path}")
+    send_gui_action(ctx, {:execute_command, "buffer_list"})
+    payload = modal_picker!(ctx)
+    offer = payload.picker_ui.activation_offer
+
+    {id, _index, item} =
+      Enum.find(offer.items, fn {_id, _index, item} ->
+        item.description == target_path
+      end)
+
+    assert item
+
+    send_gui_action(
+      ctx,
+      {:semantic_item_activate, :picker, :activate_item, offer.generation, <<id::32>>}
+    )
+
+    assert active_content(ctx) == "named buffer"
+    assert buffer_content(ctx) == "first buffer"
+    refute picker_open?(ctx)
   end
 end

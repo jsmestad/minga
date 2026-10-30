@@ -6,6 +6,9 @@ defmodule Minga.RenderModel.UI.EditTimeline do
   currently being viewed (nil when live at the latest), and the timeline entries
   (tool name and a timestamp delta from the first entry). The GUI adapter
   (`Minga.Frontend.Adapter.GUI.EditTimelineEncoder`) owns the wire encoding.
+
+  `generation` comes from the timeline owner; each `Entry.entry_id` is stable
+  across navigation and binds the entry to its file path.
   """
 
   alias __MODULE__.Entry
@@ -13,23 +16,25 @@ defmodule Minga.RenderModel.UI.EditTimeline do
 
   @type t :: %__MODULE__{
           visible?: boolean(),
+          generation: non_neg_integer(),
           viewing_index: non_neg_integer() | nil,
           entries: [Entry.t()],
           files: [FileEntry.t()]
         }
 
-  defstruct visible?: false, viewing_index: nil, entries: [], files: []
+  defstruct visible?: false, generation: 0, viewing_index: nil, entries: [], files: []
 
   defmodule Entry do
     @moduledoc "One edit-timeline entry: its index, the tool that made the edit, and a delta from the first entry's timestamp."
 
     @type t :: %__MODULE__{
+            entry_id: String.t(),
             index: non_neg_integer(),
             tool_name: String.t(),
             timestamp_delta: non_neg_integer()
           }
 
     @enforce_keys [:index, :tool_name, :timestamp_delta]
-    defstruct [:index, :tool_name, :timestamp_delta]
+    defstruct [:index, :tool_name, :timestamp_delta, entry_id: ""]
   end
 end

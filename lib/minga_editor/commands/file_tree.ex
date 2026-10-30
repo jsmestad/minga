@@ -135,6 +135,97 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
+  @doc "Opens the exact resolved entry, selecting it only for a primary activation."
+  @spec activate_entry(state(), FileTree.t(), FileTree.entry(), :primary | :toggle) :: state()
+  def activate_entry(state, tree, entry, :primary) do
+    {:ok, selected} = FileTree.select_path(tree, entry.path)
+    state = update_file_tree(state, &FileTreeState.set_tree(&1, selected))
+    open_or_toggle_entry(state, selected, entry)
+  end
+
+  def activate_entry(state, tree, %{dir?: true} = entry, :toggle) do
+    {:ok, selected} = FileTree.select_path(tree, entry.path)
+    toggled = selected |> FileTree.toggle_expand() |> FileTree.ensure_entries()
+    sync_and_update(state, restore_tree_selection(toggled, tree))
+  end
+
+  def activate_entry(state, _tree, %{dir?: false}, :toggle), do: state
+
+  @doc "Starts creation at an admitted parent, independently of the tree cursor."
+  @spec new_entry_at(state(), FileTree.t(), FileTree.entry() | nil, :new_file | :new_folder) ::
+          state()
+  def new_entry_at(state, tree, entry, type) do
+    {parent_path, index, prepared} =
+      case entry do
+        nil ->
+          {tree.root, 0, tree}
+
+        %{dir?: true, path: path} ->
+          {:ok, selected} = FileTree.select_path(tree, path)
+          prepared = selected |> ensure_expanded(path) |> FileTree.ensure_entries()
+          {path, selected.cursor + 1, prepared}
+
+        %{path: path} ->
+          {:ok, selected} = FileTree.select_path(tree, path)
+          {Path.dirname(path), selected.cursor + 1, tree}
+      end
+
+    file_tree =
+      file_tree_state(state)
+      |> FileTreeState.start_editing(
+        index,
+        type,
+        parent_path,
+        FileTreeFreshness.next_edit_token()
+      )
+      |> FileTreeState.replace_tree(restore_tree_selection(prepared, tree))
+
+    state |> set_file_tree(file_tree) |> sync_buffer()
+  end
+
+  @doc "Starts renaming an admitted entry without changing tree selection."
+  @spec rename_entry(state(), FileTree.t(), FileTree.entry()) :: state()
+  def rename_entry(state, tree, entry) do
+    {:ok, selected} = FileTree.select_path(tree, entry.path)
+
+    file_tree =
+      FileTreeState.start_rename(
+        file_tree_state(state),
+        selected.cursor,
+        entry,
+        FileTreeFreshness.next_edit_token()
+      )
+
+    set_file_tree(state, file_tree)
+  end
+
+  @doc "Prompts to delete the admitted entry, not the selected row."
+  @spec delete_entry(state(), FileTree.entry()) :: state()
+  def delete_entry(state, entry) do
+    child_count = if entry.dir?, do: count_children(entry.path), else: 0
+    mode_state = DeleteConfirmState.new(entry.path, entry.name, entry.dir?, child_count)
+    %{state | workspace: State.transition_mode(state.workspace, :delete_confirm, mode_state)}
+  end
+
+  @doc "Duplicates the admitted entry without selecting it."
+  @spec duplicate_entry(state(), FileTree.entry()) :: state()
+  def duplicate_entry(state, entry) do
+    destination = unique_copy_path(entry.path)
+    backend = state.interaction.file_tree_duplicate_backend
+    entry_type = if entry.dir?, do: :directory, else: :file
+    duplicate_claimed_destination(state, backend, entry, destination, entry_type)
+  end
+
+  @spec restore_tree_selection(FileTree.t(), FileTree.t()) :: FileTree.t()
+  defp restore_tree_selection(tree, original) do
+    with %{path: path} <- FileTree.selected_entry(original),
+         {:ok, restored} <- FileTree.select_path(tree, path) do
+      restored
+    else
+      _ -> tree
+    end
+  end
+
   @spec open_or_toggle_entry(state(), FileTree.t(), FileTree.entry() | nil) :: state()
   defp open_or_toggle_entry(state, tree, %{dir?: true}) do
     new_tree = FileTree.toggle_expand(tree)
@@ -550,13 +641,7 @@ defmodule MingaEditor.Commands.FileTree do
   def delete(state) do
     with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{} = entry <- FileTree.selected_entry(tree) do
-      child_count = if entry.dir?, do: count_children(entry.path), else: 0
-      ms = DeleteConfirmState.new(entry.path, entry.name, entry.dir?, child_count)
-
-      %{
-        state
-        | workspace: State.transition_mode(state.workspace, :delete_confirm, ms)
-      }
+      delete_entry(state, entry)
     else
       _ -> state
     end
@@ -567,11 +652,7 @@ defmodule MingaEditor.Commands.FileTree do
   def duplicate(state) do
     with %FileTree{} = tree <- FileTreeState.tree(file_tree_state(state)),
          %{} = entry <- FileTree.selected_entry(tree) do
-      dest = unique_copy_path(entry.path)
-      backend = state.interaction.file_tree_duplicate_backend
-      entry_type = if entry.dir?, do: :directory, else: :file
-
-      duplicate_claimed_destination(state, backend, entry, dest, entry_type)
+      duplicate_entry(state, entry)
     else
       _ -> state
     end
@@ -656,47 +737,6 @@ defmodule MingaEditor.Commands.FileTree do
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(message)
   end
 
-  @doc """
-  Moves a file/directory from `source_index` into the directory at `target_dir_index`.
-
-  If the target is not a directory, uses its parent directory.
-  """
-  @spec move(state(), non_neg_integer(), non_neg_integer()) :: state()
-  def move(state, source_index, target_dir_index) do
-    case FileTreeState.tree(file_tree_state(state)) do
-      nil -> move_without_tree(state)
-      tree -> move_with_tree(state, tree, source_index, target_dir_index)
-    end
-  end
-
-  @spec move_without_tree(state()) :: state()
-  defp move_without_tree(state), do: state
-
-  @spec move_with_tree(state(), FileTree.t(), non_neg_integer(), non_neg_integer()) :: state()
-  defp move_with_tree(state, tree, source_index, target_dir_index) do
-    entries = FileTree.visible_entries(tree)
-    source = Enum.at(entries, source_index)
-    target = Enum.at(entries, target_dir_index)
-
-    case {source, target} do
-      {nil, _} ->
-        state
-
-      {_, nil} ->
-        state
-
-      {src, tgt} ->
-        target_dir = if tgt.dir?, do: tgt.path, else: Path.dirname(tgt.path)
-        new_path = Path.join(target_dir, src.name)
-
-        if src.path == new_path do
-          state
-        else
-          execute_move(state, src.path, new_path, src.name)
-        end
-    end
-  end
-
   @doc "Handles a native GUI file-tree drop intent with BEAM-owned filesystem operations."
   @spec drop(state(), DropIntent.t()) :: state()
 
@@ -709,6 +749,21 @@ defmodule MingaEditor.Commands.FileTree do
       tree ->
         drop_with_tree(state, tree, intent)
     end
+  end
+
+  @doc "Applies a drop to the resolved row, without looking up a frontend index."
+  @spec drop_at(state(), FileTree.t(), FileTree.entry(), DropIntent.t()) :: state()
+  def drop_at(state, tree, entry, intent) do
+    {state, changed?} =
+      apply_drop_sources(
+        state,
+        intent.source_paths,
+        drop_target_dir_path(entry),
+        tree.entries,
+        tree.root
+      )
+
+    refresh_after_drop(state, changed?)
   end
 
   @spec drop_with_tree(state(), FileTree.t(), DropIntent.t()) :: state()
@@ -1244,7 +1299,7 @@ defmodule MingaEditor.Commands.FileTree do
   # Validates the GUI-reported drop target against the current BEAM-owned tree.
   @spec drop_target_dir([FileTree.entry()], DropIntent.t()) :: {:ok, String.t()} | :error
   defp drop_target_dir(entries, %DropIntent{} = intent) do
-    case Enum.at(entries, intent.target_index) do
+    case Enum.find(entries, &same_path?(&1.path, intent.target_id)) do
       nil ->
         :error
 
@@ -1397,11 +1452,11 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec log_stale_drop_target([FileTree.entry()], DropIntent.t()) :: :ok
   defp log_stale_drop_target(entries, %DropIntent{} = intent) do
-    current = Enum.at(entries, intent.target_index)
+    current = Enum.find(entries, &same_path?(&1.path, intent.target_id))
 
     Log.warning(
       :editor,
-      "[file-tree] Drop rejected: stale target index=#{intent.target_index} target=#{intent.target_path} id=#{intent.target_id} hash=#{intent.target_path_hash}; current=#{drop_target_debug(current)}"
+      "[file-tree] Drop rejected: stale target=#{intent.target_path} id=#{intent.target_id} hash=#{intent.target_path_hash}; current=#{drop_target_debug(current)}"
     )
   end
 
@@ -1675,26 +1730,6 @@ defmodule MingaEditor.Commands.FileTree do
     if path_entry_exists?(candidate),
       do: find_unique_copy(base, ext, n + 1),
       else: candidate
-  end
-
-  @spec execute_move(state(), String.t(), String.t(), String.t()) :: state()
-  defp execute_move(state, old_path, new_path, name) do
-    case guarded_rename(old_path, new_path) do
-      :ok ->
-        state = sync_moved_buffer_path(state, old_path, new_path, "Move")
-
-        Log.info(:editor, "[file-tree] Moved: #{name} → #{Path.dirname(new_path)}")
-
-        refresh(state)
-
-      {:error, reason} ->
-        Log.warning(
-          :editor,
-          "[file-tree] Move failed: #{old_path} → #{new_path}: #{inspect(reason)}"
-        )
-
-        state
-    end
   end
 
   command(:toggle_file_tree, "Toggle file tree", requires_buffer: false, execute: &toggle/1)

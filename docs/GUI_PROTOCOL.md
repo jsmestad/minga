@@ -637,10 +637,16 @@ When visible:
   + prompt_len(1) + prompt(prompt_len)
   + input_len(2) + input(input_len)
   + context_len(2) + context(context_len)
-  + selected_index(2) + candidate_count(2) + candidates...
+  + selected_index(2) + candidate_count(2) + total_candidates(2) + candidates...
+  + generation(4) + candidate_ids...
 
 Per candidate:
   match_score(1) + label_len(2) + label(label_len) + desc_len(2) + desc(desc_len)
+  + annotation_len(2) + annotation(annotation_len)
+  + match_position_count(1) + match_positions(match_position_count * 2)
+
+Per candidate ID (same order as candidates):
+  id_len(2) + id(id_len)
 
 When hidden:
   opcode(1) + 0(1)
@@ -663,6 +669,8 @@ Mode values:
 | 10 | text_prompt | `"Add project: "` | yes | (empty) |
 
 `cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-9). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
+
+Command candidates use their complete candidate text as `id`. The owning command-completion overlay advances `generation` when input changes and when the overlay reopens. Activate a candidate with `semantic_item_activate` surface 4, intent 1, and the observed generation and ID. Do not derive a target from `selected_index`.
 
 ### 0x80 — gui_window_content (len32 sectioned format)
 
@@ -1140,16 +1148,22 @@ opcode(1) + payload_len(2) + payload(payload_len)
 
 Payload:
   visible(1) + viewing_index(2) + entry_count(1) + entries... + file_count(1) + files...
+  + generation(4) + entry_ids...
 
 Per entry:
   index(1) + tool_name_len(1) + tool_name(tool_name_len) + timestamp_delta(4)
 
 Per file:
   path_len(2) + path(path_len) + entry_count(1) + lines_added(4) + lines_removed(4) + review_status(1)
+
+Per entry ID (same order as entries):
+  entry_id_len(2) + entry_id(entry_id_len)
 ```
 
 `viewing_index` is `0xFFFF` when the timeline is live at the latest state. When `file_count` is greater than zero, frontends should show the aggregate changed-file view and use the per-file rows for navigation and review status.
 `review_status`: 0 = pending, 1 = reviewing.
+
+The opaque entry ID binds the entry to its file. The timeline owner advances `generation` when entries change or the timeline resets. Activate with `semantic_item_activate` surface 5, intent 1. Navigation uses the resolved file and entry, never the active buffer or a list offset. Hidden timelines retain the existing header and empty-list fields and omit the identity trailer.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
@@ -1163,23 +1177,15 @@ opcode(1) + action_type(1) + payload...
 |-------------|------|---------|-------------|
 | 0x01 | select_tab | id(4) | User clicked a tab |
 | 0x02 | close_tab | id(4) | User closed a tab |
-| 0x03 | file_tree_click | index(2) | User clicked a file tree entry |
-| 0x04 | file_tree_toggle | index(2) | User toggled a directory |
-| 0x05 | completion_select | index(2) | User selected a completion item |
-| 0x06 | breadcrumb_click | segment_index(1) | Legacy input retained for compatibility; current frontends render breadcrumbs display-only and BEAM ignores this action |
 | 0x07 | toggle_panel | panel(1) | User toggled a panel |
 | 0x08 | new_tab | (empty) | User requested a new tab |
-| 0x09 | panel_switch_tab | tab_index(1) | User clicked a bottom panel tab |
 | 0x0A | panel_dismiss | (empty) | User dismissed the bottom panel |
 | 0x0B | panel_resize | height_percent(1) | User resized the bottom panel |
 | 0x0C | open_file | path_len(2) + path(path_len) | Open or switch to a file |
-| 0x0D | file_tree_new_file | parent_index(2) | Create new file under or near the selected entry |
-| 0x0E | file_tree_new_folder | parent_index(2) | Create new folder under or near the selected entry |
 | 0x0F | file_tree_collapse_all | (empty) | Collapse all directories in tree |
 | 0x10 | file_tree_refresh | (empty) | Refresh file tree |
 | 0x15 | agent_tool_toggle | message_id(4) | Toggle collapse/expand of the agent tool or thinking entry with the stable transcript message ID |
 | 0x16 | execute_command | name_len(2) + name(name_len) | Execute a named command from the BEAM command registry |
-| 0x17 | minibuffer_select | index(2) | Select minibuffer candidate at index |
 | 0x18 | git_stage_file | path_len(2) + path(path_len) | Stage a file |
 | 0x19 | git_unstage_file | path_len(2) + path(path_len) | Unstage a file |
 | 0x1A | git_discard_file | path_len(2) + path(path_len) | Discard working-tree changes |
@@ -1198,13 +1204,9 @@ opcode(1) + action_type(1) + payload...
 | 0x2B | agent_dismiss | (empty) | Dismiss agent review UI |
 | 0x2D | file_tree_edit_confirm | edit_token(4) + text_len(2) + text(text_len) | Confirm the matching admitted file tree inline edit |
 | 0x2E | file_tree_edit_cancel | (empty) | Cancel file tree inline edit |
-| 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
-| 0x30 | file_tree_delete | index(2) | Delete a file tree entry |
-| 0x31 | file_tree_rename | index(2) | Rename a file tree entry |
-| 0x32 | file_tree_duplicate | index(2) | Duplicate a file tree entry |
-| 0x33 | file_tree_move | source_index(2) + target_dir_index(2) | Move a file tree entry |
-| 0x40 | file_tree_drop | target_index(2) + target_path_hash(4) + target_kind(1) + modifiers(1) + target_id_len(2) + target_id + target_path_len(2) + target_path + source_count(2) + sources... | Report file tree drag/drop intent for BEAM-owned filesystem handling |
-| 0x41 | fold_toggle_at_line | window_id(2) + buffer_line(4) | Toggle the fold at a gutter-targeted buffer line without moving the cursor |
+| 0x2F | scroll_to_line | window_id(2) + generation(8) + line(4) | Scroll the named window without changing focus |
+| 0x40 | file_tree_drop | target_index(2) + target_path_hash(4) + target_kind(1) + modifiers(1) + target_id_len(2) + target_id + target_path_len(2) + target_path + source_count(2) + sources... + generation(4) | Report an identity-bound drag/drop intent |
+| 0x41 | fold_toggle_at_line | window_id(2) + generation(8) + buffer_line(4) | Toggle the fold in the named window without moving focus or cursor |
 | 0x43 | config_update | key_len(1) + key + type_tag(1) + value_payload | Update a typed config option from the native Settings UI |
 | 0x44 | config_query | (empty) | Request the current native Settings state |
 | 0x45 | notification_dismiss | id_len(2) + id | Dismiss one notification |
@@ -1228,7 +1230,7 @@ opcode(1) + action_type(1) + payload...
 | 0x62 | search_focus | replace_mode(1) | Open or focus the native search toolbar |
 | 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
 | 0x64 | focus_window | window_id(2) + generation(8) | Request semantic activation of the exact accessible pane; the BEAM ignores a stale pane generation |
-| 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate the exact source-owned item identity for completion, picker, or file tree |
+| 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate an exact completion, picker, file-tree, command-completion, or timeline item |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1238,16 +1240,21 @@ opcode(1) + action_type(1) + payload...
 | 0x3A | git_fetch | (empty) | Fetch remote refs |
 | 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Legacy compatibility action for amending the previous commit; new frontends should send `git_commit` with `amend = 1` instead |
 | 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
-| 0x3D | file_tree_open_in_split | index(2) | Open a file tree entry in a vertical split |
 | 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
 | 0x42 | git_open_diff | path_len(2) + path(path_len) + section(1) | Open a diff view for a git status file in the selected section |
 
-`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, and `3 = file_tree`. Completion intent `1` accepts the item. Picker intents are `1 = activate item` and `2 = activate action`. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, and `6 = duplicate`. The BEAM accepts the action only when the generation and item ID still belong to the named surface. A stale generation or missing item cannot activate a replacement; the owner rejects it and requests or emits an authoritative resync where needed.
+`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, and `5 = timeline`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item` and `2 = activate action`. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry.
+
+All targeted handling resolves the BEAM-issued identity before applying the action. A stale generation or missing target leaves editor semantics unchanged, logs a warning with the surface, generation, ID, and reason, and resets frontend render observations so the next frame is authoritative. Tab actions retain their monotonic, non-reused tab IDs and separate sub-opcodes. Destination positions such as `tab_reorder.new_index` are not target identities.
+
+Buffer-picker choices retain the buffer process identity, not its current list position. Removing an earlier buffer cannot redirect a queued selection or Kill action. Named file-tree mutations preserve the current selected path when their asynchronous refresh arrives, including a selection made while the refresh was pending.
+
+Protocol version 28 retires `file_tree_click` (0x03), `file_tree_toggle` (0x04), `completion_select` (0x05), `breadcrumb_click` (0x06), `panel_switch_tab` (0x09), `file_tree_new_file` (0x0D), `file_tree_new_folder` (0x0E), `minibuffer_select` (0x17), `file_tree_delete` (0x30), `file_tree_rename` (0x31), `file_tree_duplicate` (0x32), `file_tree_move` (0x33), `file_tree_open_in_split` (0x3D), and `timeline_navigate` (0x4F). These sub-opcodes reject all payloads. Breadcrumb and panel-tab actions had no behavior and have no replacement.
 
 Older path-only `git_open_diff` payloads are accepted as a compatibility fallback only when the path is unambiguous. Native frontends should always send the section-aware form.
 
-For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. Frontends should send both the target index and stable target identity so the BEAM can reject stale drops safely; drops onto files are resolved to the file's parent directory by the BEAM.
+For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. The BEAM validates the generation and resolves the stable target ID before handling the drop. The retained target index is observation metadata, not an activation target. Drops onto files resolve to that named file's parent directory.
 
 For `extension_action`, shared decoding stops after `extension_id` and `action`; the remaining bytes are passed unchanged to the active shell or extension adapter. Frontends should use this only for extension-owned actions, not for shared chrome interactions that need a durable cross-frontend contract.
 

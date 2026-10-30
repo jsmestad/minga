@@ -168,7 +168,8 @@ defmodule MingaEditor.MouseTest do
       win_id = state.workspace.windows.active
       state = mark_resident(state, win_id)
 
-      state = GuiActionHandler.dispatch(state, {:scroll_to_line, 30})
+      generation = state.workspace.windows.map[win_id].accessibility_generation
+      state = GuiActionHandler.dispatch(state, {:scroll_to_line, win_id, generation, 30})
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
       # The committed top is recorded as a free-scroll echo, exactly like the wheel
@@ -183,7 +184,8 @@ defmodule MingaEditor.MouseTest do
       win_id = state.workspace.windows.active
       BufferProcess.move_to(buffer, {50, 0})
 
-      state = GuiActionHandler.dispatch(state, {:scroll_to_line, 0})
+      generation = state.workspace.windows.map[win_id].accessibility_generation
+      state = GuiActionHandler.dispatch(state, {:scroll_to_line, win_id, generation, 0})
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
       # Thumb drag is VSCode-style viewport-only: the cursor stays put and
@@ -203,7 +205,8 @@ defmodule MingaEditor.MouseTest do
       state = mark_resident(state, win_id)
       state = set_window_top(state, win_id, 10)
 
-      state = GuiActionHandler.dispatch(state, {:scroll_to_line, 72})
+      generation = state.workspace.windows.map[win_id].accessibility_generation
+      state = GuiActionHandler.dispatch(state, {:scroll_to_line, win_id, generation, 72})
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
       # The committed anchor lands exactly on the requested line so the frontend's

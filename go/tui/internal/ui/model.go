@@ -1029,6 +1029,10 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 				previous.Geometry = command.Window.Geometry
 				previous.GeometrySet = true
 			}
+			if command.Window.AccessibilitySet {
+				previous.AccessibilityGeneration = command.Window.AccessibilityGeneration
+				previous.AccessibilitySet = true
+			}
 			working[command.Window.ID] = previous
 		case protocol.CommandResidentSemantics:
 			wire := command.ResidentSemantics
@@ -1303,6 +1307,10 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 	if delta.GeometrySet {
 		window.Geometry = delta.Geometry
 		window.GeometrySet = true
+	}
+	if delta.AccessibilitySet {
+		window.AccessibilityGeneration = delta.AccessibilityGeneration
+		window.AccessibilitySet = true
 	}
 	rowsChanged := delta.Rows != nil || delta.RowSplicesSet
 	if !rowsChanged {

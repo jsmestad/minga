@@ -5,28 +5,32 @@ import Observation
 @MainActor
 @Observable
 public final class EditTimelineState {
-    public init(visible: Bool = false, viewingIndex: Int = -1, entries: [TimelineEntry] = [], files: [TimelineFile] = []) {
+    public init(visible: Bool = false, viewingIndex: Int = -1, entries: [TimelineEntry] = [], files: [TimelineFile] = [], generation: UInt32 = 0) {
         self.visible = visible
         self.viewingIndex = viewingIndex
         self.entries = entries
         self.files = files
+        self.generation = generation
     }
     public var visible: Bool = false
+    public var generation: UInt32 = 0
     public var viewingIndex: Int = -1
     public var entries: [TimelineEntry] = []
     public var files: [TimelineFile] = []
 
     public struct TimelineEntry: Identifiable {
-        public init(index: Int, toolName: String, timestampDelta: UInt32) {
+        public init(entryID: String, index: Int, toolName: String, timestampDelta: UInt32) {
+            self.entryID = entryID
             self.index = index
             self.toolName = toolName
             self.timestampDelta = timestampDelta
         }
         public let index: Int
+        public let entryID: String
         public let toolName: String
         public let timestampDelta: UInt32
 
-        public var id: Int { index }
+        public var id: String { entryID }
     }
 
     public struct TimelineFile: Identifiable {
@@ -47,11 +51,13 @@ public final class EditTimelineState {
         public var name: String { URL(fileURLWithPath: path).lastPathComponent }
     }
 
-    public func update(visible: Bool, viewingIndex: UInt16, wireEntries: [Wire.TimelineEntry], wireFiles: [Wire.TimelineFile]) {
+    public func update(visible: Bool, viewingIndex: UInt16, wireEntries: [Wire.TimelineEntry], wireFiles: [Wire.TimelineFile], generation: UInt32) {
         self.visible = visible
+        self.generation = generation
         self.viewingIndex = viewingIndex == 0xFFFF ? -1 : Int(viewingIndex)
         self.entries = wireEntries.map { entry in
             TimelineEntry(
+                entryID: entry.entryID,
                 index: Int(entry.index),
                 toolName: entry.toolName,
                 timestampDelta: entry.timestampDelta

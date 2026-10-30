@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderModel.UI.MinibufferBuilder do
   def build(%MinibufferData{} = data) do
     %Minibuffer{
       visible?: data.visible,
+      generation: data.generation,
       mode: mode_model(data.mode),
       cursor_pos: cursor_pos_model(data.cursor_pos),
       prompt: data.prompt,
@@ -42,8 +43,11 @@ defmodule MingaEditor.RenderModel.UI.MinibufferBuilder do
 
   @spec candidate_model(MinibufferData.candidate()) :: Candidate.t()
   defp candidate_model(candidate) do
+    label = Map.fetch!(candidate, :label)
+
     %Candidate{
-      label: Map.fetch!(candidate, :label),
+      id: label,
+      label: label,
       description: Map.get(candidate, :description, ""),
       match_score: Map.get(candidate, :match_score, 0),
       match_positions: Map.get(candidate, :match_positions, []),

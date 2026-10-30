@@ -195,7 +195,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(text, limit: Int(UInt16.max))
         case .fileTreeEditConfirm(_, let text):
             return oversizedString(text, limit: Int(UInt16.max))
-        case .fileTreeDrop(let sourcePaths, _, let targetID, _, let targetPath, _, _):
+        case .fileTreeDrop(let sourcePaths, _, let targetID, _, let targetPath, _, _, _):
             return fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetID, targetPath: targetPath)
                 .map(OutboundActionRejection.invalidPayload)
         case .sidebarAction(let sidebarID, let kind, let action):
@@ -238,17 +238,15 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
              .selectTab, .closeTab, .tabCopyPath, .tabReorder, .tabPin, .tabUnpin,
              .tabMoveLeft, .tabMoveRight, .hoverOpen, .pickerItemActivate,
-             .pickerActionActivate, .fileTreeClick, .fileTreeToggle, .fileTreeOpenInSplit,
-             .fileTreeNewFile, .fileTreeNewFolder, .fileTreeEditCancel, .fileTreeDelete,
-             .fileTreeRename, .fileTreeDuplicate, .fileTreeMove, .fileTreeCollapseAll,
-             .fileTreeRefresh, .completionSelect, .togglePanel, .newTab, .systemWillSleep,
-             .systemDidWake, .powerThermalState, .commandCopy, .commandCut, .panelSwitchTab,
-             .panelDismiss, .panelResize, .agentToolToggle, .minibufferSelect, .gitStageAll,
+             .pickerActionActivate, .fileTreeEditCancel, .fileTreeCollapseAll,
+             .fileTreeRefresh, .togglePanel, .newTab, .systemWillSleep,
+             .systemDidWake, .powerThermalState, .commandCopy, .commandCut,
+             .panelDismiss, .panelResize, .agentToolToggle, .gitStageAll,
              .gitUnstageAll, .gitPush, .gitPull, .gitFetch, .gitPullAndRetry,
              .workspaceClose, .spaceLeaderChord, .spaceLeaderRetract, .agentApprove,
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
              .chatReturnedToBottom, .scrollToLine, .foldToggleAtLine, .focusWindow,
-             .configQuery, .fontSizeAdjust, .timelineNavigate, .searchFocus, .searchNext,
+             .configQuery, .fontSizeAdjust, .searchFocus, .searchNext,
              .searchPrevious, .searchDismiss:
             return nil
         }
@@ -313,21 +311,11 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .pickerQueryChanged(let generation, let editSequence, let text): encodePickerQueryChanged(generation: generation, editSeq: editSequence, text: text)
         case .pickerItemActivate(let generation, let activationID): encodePickerItemActivate(generation: generation, activationID: activationID)
         case .pickerActionActivate(let generation, let activationID): encodePickerActionActivate(generation: generation, activationID: activationID)
-        case .fileTreeClick(let index): encodeFileTreeClick(index: index)
-        case .fileTreeToggle(let index): encodeFileTreeToggle(index: index)
-        case .fileTreeOpenInSplit(let index): encodeFileTreeOpenInSplit(index: index)
-        case .fileTreeNewFile(let parentIndex): encodeFileTreeNewFile(parentIndex: parentIndex)
-        case .fileTreeNewFolder(let parentIndex): encodeFileTreeNewFolder(parentIndex: parentIndex)
         case .fileTreeEditConfirm(let token, let text): encodeFileTreeEditConfirm(token: token, text: text)
         case .fileTreeEditCancel: encodeFileTreeEditCancel()
-        case .fileTreeDelete(let index): encodeFileTreeDelete(index: index)
-        case .fileTreeRename(let index): encodeFileTreeRename(index: index)
-        case .fileTreeDuplicate(let index): encodeFileTreeDuplicate(index: index)
-        case .fileTreeMove(let sourceIndex, let targetDirectoryIndex): encodeFileTreeMove(sourceIndex: sourceIndex, targetDirIndex: targetDirectoryIndex)
-        case .fileTreeDrop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers): encodeFileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetId: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDir: targetIsDirectory, modifiers: modifiers)
+        case .fileTreeDrop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers, let generation): encodeFileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetId: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDir: targetIsDirectory, modifiers: modifiers, generation: generation)
         case .fileTreeCollapseAll: encodeFileTreeCollapseAll()
         case .fileTreeRefresh: encodeFileTreeRefresh()
-        case .completionSelect(let itemID): encodeCompletionSelect(itemID: itemID)
         case .semanticItemActivate(let surface, let intent, let generation, let itemID): encodeSemanticItemActivate(surface: surface, intent: intent, generation: generation, itemID: itemID)
         case .togglePanel(let panel): encodeTogglePanel(panel: panel)
         case .sidebarAction(let sidebarID, let kind, let action): encodeSidebarAction(sidebarId: sidebarID, kind: kind, action: action)
@@ -339,12 +327,10 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .powerThermalState(let lowPowerMode, let thermalState): encodePowerThermalState(lowPowerMode: lowPowerMode, thermalState: thermalState)
         case .commandCopy: encodeCmdCopy()
         case .commandCut: encodeCmdCut()
-        case .panelSwitchTab(let index): encodePanelSwitchTab(index: index)
         case .panelDismiss: encodePanelDismiss()
         case .panelResize(let heightPercent): encodePanelResize(heightPercent: heightPercent)
         case .agentToolToggle(let messageID): encodeAgentToolToggle(messageID: messageID)
         case .executeCommand(let name): encodeExecuteCommand(name: name)
-        case .minibufferSelect(let index): encodeMinibufferSelect(index: index)
         case .openFile(let path): encodeOpenFile(path: path)
         case .gitStageFile(let path): encodeGitStageFile(path: path)
         case .gitUnstageFile(let path): encodeGitUnstageFile(path: path)
@@ -370,8 +356,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .agentDismiss: encodeAgentDismiss()
         case .chatScrolledAwayFromBottom: encodeChatScrolledAwayFromBottom()
         case .chatReturnedToBottom: encodeChatReturnedToBottom()
-        case .scrollToLine(let line): encodeScrollToLine(line: line)
-        case .foldToggleAtLine(let windowID, let bufferLine): encodeFoldToggleAtLine(windowId: windowID, bufferLine: bufferLine)
+        case .scrollToLine(let windowID, let generation, let line): encodeScrollToLine(windowID: windowID, generation: generation, line: line)
+        case .foldToggleAtLine(let windowID, let generation, let bufferLine): encodeFoldToggleAtLine(windowId: windowID, generation: generation, bufferLine: bufferLine)
         case .focusWindow(let windowID, let generation): encodeFocusWindow(windowId: windowID, generation: generation)
         case .configQuery: encodeConfigQuery()
         case .configUpdate(let key, let value): encodeConfigUpdate(key: key, value: value)
@@ -379,7 +365,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .notificationAction(let id, let actionID): encodeNotificationAction(id: id, actionId: actionID)
         case .observatoryInspect(let pid): encodeObservatoryInspect(pid: pid)
         case .fontSizeAdjust(let direction): encodeFontSizeAdjust(direction: direction)
-        case .timelineNavigate(let index): encodeTimelineNavigate(index: index)
         case .searchFocus(let replaceMode): encodeSearchFocus(replaceMode: replaceMode)
         case .searchQuery(let sessionID, let editSequence, let query, let flags): encodeSearchQuery(sessionID: sessionID, editSeq: editSequence, query: query, flags: flags)
         case .searchNext: encodeSearchNext()
@@ -815,53 +800,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: file_tree_click. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeFileTreeClick(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_CLICK
-        writeU16(&buf, 2, index)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_toggle. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeFileTreeToggle(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_TOGGLE
-        writeU16(&buf, 2, index)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_open_in_split. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeFileTreeOpenInSplit(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT
-        writeU16(&buf, 2, index)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_new_file. Layout: opcode(1) + action_type(1) + parent_index(2).
-    private func encodeFileTreeNewFile(parentIndex: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_NEW_FILE
-        buf[2] = UInt8(parentIndex >> 8)
-        buf[3] = UInt8(parentIndex & 0xFF)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_new_folder. Layout: opcode(1) + action_type(1) + parent_index(2).
-    private func encodeFileTreeNewFolder(parentIndex: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_NEW_FOLDER
-        buf[2] = UInt8(parentIndex >> 8)
-        buf[3] = UInt8(parentIndex & 0xFF)
-        writeFrame(buf)
-    }
-
     /// Send a gui_action: file_tree_edit_confirm. Layout: opcode(1) + action_type(1) + edit_token(4) + text_len(2) + text(N).
     private func encodeFileTreeEditConfirm(token: UInt32, text: String) {
         let textData = text.data(using: .utf8) ?? Data()
@@ -883,50 +821,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: file_tree_delete. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeFileTreeDelete(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_DELETE
-        buf[2] = UInt8(index >> 8)
-        buf[3] = UInt8(index & 0xFF)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_rename. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeFileTreeRename(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_RENAME
-        buf[2] = UInt8(index >> 8)
-        buf[3] = UInt8(index & 0xFF)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_duplicate. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeFileTreeDuplicate(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_DUPLICATE
-        buf[2] = UInt8(index >> 8)
-        buf[3] = UInt8(index & 0xFF)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_move. Layout: opcode(1) + action_type(1) + source(2) + target(2).
-    private func encodeFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16) {
-        var buf = Data(count: 6)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_FILE_TREE_MOVE
-        buf[2] = UInt8(sourceIndex >> 8)
-        buf[3] = UInt8(sourceIndex & 0xFF)
-        buf[4] = UInt8(targetDirIndex >> 8)
-        buf[5] = UInt8(targetDirIndex & 0xFF)
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: file_tree_drop. Layout: opcode(1) + action_type(1) + target_index(2) + target_hash(4) + target_kind(1) + modifiers(1) + target_id + target_path + sources.
-    private func encodeFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8) {
+    /// Sends the observed target identity and source paths, followed by the tree generation.
+    private func encodeFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8, generation: UInt32) {
         var buf = Data()
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_FILE_TREE_DROP)
@@ -941,6 +837,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         for path in sourcePaths {
             appendString16(&buf, path)
         }
+        appendU32(&buf, generation)
 
         writeFrame(buf)
     }
@@ -958,17 +855,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_REFRESH
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: completion_select. Layout: opcode(1) + action_type(1) + item_id(string8).
-    private func encodeCompletionSelect(itemID: String) {
-        let idBytes = Array(itemID.utf8.prefix(255))
-        var buf = Data(count: 3 + idBytes.count)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_COMPLETION_SELECT
-        buf[2] = UInt8(idBytes.count)
-        buf.replaceSubrange(3..<(3 + idBytes.count), with: idBytes)
         writeFrame(buf)
     }
 
@@ -1068,15 +954,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: panel_switch_tab. Layout: opcode(1) + action_type(1) + tab_index(1).
-    private func encodePanelSwitchTab(index: UInt8) {
-        var buf = Data(count: 3)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_PANEL_SWITCH_TAB
-        buf[2] = index
-        writeFrame(buf)
-    }
-
     /// Send a gui_action: panel_dismiss. Layout: opcode(1) + action_type(1).
     private func encodePanelDismiss() {
         var buf = Data(count: 2)
@@ -1118,15 +995,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         if nameLen > 0 {
             buf.replaceSubrange(4..<4 + nameLen, with: utf8.prefix(nameLen))
         }
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: minibuffer_select. Accepts a candidate by index.
-    private func encodeMinibufferSelect(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_MINIBUFFER_SELECT
-        writeU16(&buf, 2, index)
         writeFrame(buf)
     }
 
@@ -1377,22 +1245,25 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     }
 
 
-    /// Send a gui_action: scroll_to_line. Layout: opcode(1) + action_type(1) + line(4).
-    private func encodeScrollToLine(line: UInt32) {
-        var buf = Data(count: 6)
+    /// Send scroll_to_line with the observed pane identity and target line.
+    private func encodeScrollToLine(windowID: UInt16, generation: UInt64, line: UInt32) {
+        var buf = Data(count: 16)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SCROLL_TO_LINE
-        writeU32(&buf, 2, line)
+        writeU16(&buf, 2, windowID)
+        writeU64(&buf, 4, generation)
+        writeU32(&buf, 12, line)
         writeFrame(buf)
     }
 
-    /// Send a gui_action: fold_toggle_at_line. Layout: opcode(1) + action_type(1) + window_id(2) + buffer_line(4).
-    private func encodeFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
-        var buf = Data(count: 8)
+    /// Send fold_toggle_at_line with the observed pane identity and buffer line.
+    private func encodeFoldToggleAtLine(windowId: UInt16, generation: UInt64, bufferLine: UInt32) {
+        var buf = Data(count: 16)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FOLD_TOGGLE_AT_LINE
         writeU16(&buf, 2, windowId)
-        writeU32(&buf, 4, bufferLine)
+        writeU64(&buf, 4, generation)
+        writeU32(&buf, 12, bufferLine)
         writeFrame(buf)
     }
 
@@ -1461,15 +1332,6 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FONT_SIZE_ADJUST
         buf[2] = direction
-        writeFrame(buf)
-    }
-
-    /// Send a gui_action: timeline_navigate. Layout: opcode(1) + action_type(1) + index(2).
-    private func encodeTimelineNavigate(index: UInt16) {
-        var buf = Data(count: 4)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_TIMELINE_NAVIGATE
-        writeU16(&buf, 2, index)
         writeFrame(buf)
     }
 

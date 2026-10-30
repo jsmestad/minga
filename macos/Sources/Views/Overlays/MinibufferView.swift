@@ -13,7 +13,7 @@ import MingaProtocol
 
 public struct MinibufferView: View {
     public enum Action: Equatable, Sendable {
-        case select(index: UInt16)
+        case select(generation: UInt32, itemID: String)
     }
 
     public init(state: MinibufferState, sendAction: ViewActionHandler<Action>?) {
@@ -216,9 +216,10 @@ public struct MinibufferView: View {
         let isSelected = candidate.id == Int(state.selectedIndex)
         let isHovered = hoveredIndex == candidate.id
         let offeredInputVersion = state.inputVersion
+        let offeredGeneration = state.generation
 
         Button {
-            activate(candidate, offeredInputVersion: offeredInputVersion)
+            activate(candidate, offeredGeneration: offeredGeneration)
         } label: {
             HStack(spacing: 8) {
                 // Command name with fuzzy match highlighting
@@ -285,21 +286,11 @@ public struct MinibufferView: View {
         return candidate.description.isEmpty ? selection : "\(selection), \(candidate.description)"
     }
 
-    private func activate(_ offeredCandidate: MinibufferCandidate, offeredInputVersion: Int) {
+    private func activate(_ offeredCandidate: MinibufferCandidate, offeredGeneration: UInt32) {
         guard state.visible,
-              state.inputVersion == offeredInputVersion,
-              let currentCandidate = state.candidates.first(where: { $0.id == offeredCandidate.id }),
-              candidatesMatch(currentCandidate, offeredCandidate) else { return }
-        sendAction?(.select(index: UInt16(currentCandidate.id)))
-    }
-
-    private func candidatesMatch(_ lhs: MinibufferCandidate, _ rhs: MinibufferCandidate) -> Bool {
-        lhs.id == rhs.id &&
-            lhs.matchScore == rhs.matchScore &&
-            lhs.label == rhs.label &&
-            lhs.description == rhs.description &&
-            lhs.annotation == rhs.annotation &&
-            lhs.matchPositions == rhs.matchPositions
+              state.generation == offeredGeneration,
+              state.candidates.contains(where: { $0.itemID == offeredCandidate.itemID }) else { return }
+        sendAction?(.select(generation: offeredGeneration, itemID: offeredCandidate.itemID))
     }
 
     private func updateAccessibilityFocus() {
@@ -358,10 +349,11 @@ public struct MinibufferView: View {
         context: "",
         selectedIndex: 0,
         totalCandidates: 23,
+        generation: 1,
         rawCandidates: [
-            Wire.MinibufferCandidate(matchScore: 95, label: "org-mode", description: "Toggle Org major mode", annotation: "SPC m o", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
-            Wire.MinibufferCandidate(matchScore: 80, label: "org-mode-restart", description: "Restart Org mode parser", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
-            Wire.MinibufferCandidate(matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
+            Wire.MinibufferCandidate(id: "org-mode", matchScore: 95, label: "org-mode", description: "Toggle Org major mode", annotation: "SPC m o", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+            Wire.MinibufferCandidate(id: "org-mode-restart", matchScore: 80, label: "org-mode-restart", description: "Restart Org mode parser", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+            Wire.MinibufferCandidate(id: "org-modernize", matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
         ]
     )
     return MinibufferView(state: state, sendAction: { _ in })

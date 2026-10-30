@@ -7,14 +7,6 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 )
 
-func TestEncodeGUIFileTreeClick(t *testing.T) {
-	got := EncodeGUIFileTreeClick(7)
-	want := []byte{generated.OPGuiAction, generated.GUIActionFileTreeClick, 0, 7}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("file tree click packet = %v, want %v", got, want)
-	}
-}
-
 func TestEncodeGUITabReorder(t *testing.T) {
 	got := EncodeGUITabReorder(0x01020304, 5)
 	want := []byte{generated.OPGuiAction, generated.GUIActionTabReorder, 0x01, 0x02, 0x03, 0x04, 0, 5}
@@ -24,7 +16,7 @@ func TestEncodeGUITabReorder(t *testing.T) {
 }
 
 func TestEncodeGUIFileTreeDrop(t *testing.T) {
-	got := EncodeGUIFileTreeDrop(2, 0xAABBCCDD, true, 0, "id", "p", []string{"src/a.ex"})
+	got := EncodeGUIFileTreeDrop(2, 0xAABBCCDD, true, 0, "id", "p", []string{"src/a.ex"}, 0x01020304)
 	want := []byte{
 		generated.OPGuiAction, generated.GUIActionFileTreeDrop,
 		0, 2, // target_index
@@ -35,6 +27,7 @@ func TestEncodeGUIFileTreeDrop(t *testing.T) {
 		0, 1, 'p', // target_path (string16)
 		0, 1, // source_count
 		0, 8, 's', 'r', 'c', '/', 'a', '.', 'e', 'x', // source path (string16)
+		1, 2, 3, 4, // observed tree generation
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("file_tree_drop packet = %v, want %v", got, want)
@@ -42,7 +35,7 @@ func TestEncodeGUIFileTreeDrop(t *testing.T) {
 }
 
 func TestEncodeGUIFileTreeDropFileTarget(t *testing.T) {
-	got := EncodeGUIFileTreeDrop(0, 0, false, 0, "", "", nil)
+	got := EncodeGUIFileTreeDrop(0, 0, false, 0, "", "", nil, 7)
 	// target_kind byte must be 0 for a file target, source_count 0.
 	if got[8] != 0 {
 		t.Fatalf("target_kind = %d, want 0 for a file target", got[8])
@@ -62,14 +55,6 @@ func TestEncodeGUIAgentToolToggle(t *testing.T) {
 	want := []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, 0x01, 0x02, 0x03, 0x04}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("agent tool toggle packet = %v, want %v", got, want)
-	}
-}
-
-func TestEncodeGUICompletionSelect(t *testing.T) {
-	got := EncodeGUICompletionSelect(258)
-	want := []byte{generated.OPGuiAction, generated.GUIActionCompletionSelect, 1, 2}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("completion select packet = %v, want %v", got, want)
 	}
 }
 
@@ -128,15 +113,17 @@ func TestEncodeGUIObservatoryInspect(t *testing.T) {
 	}
 }
 
-func TestEncodeGUITimelineNavigate(t *testing.T) {
-	// index is a big-endian u16, matching macOS sendTimelineNavigate (writeU16).
-	got := EncodeGUITimelineNavigate(258)
-	want := []byte{
-		generated.OPGuiAction, generated.GUIActionTimelineNavigate,
-		0x01, 0x02,
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("timeline navigate packet = %v, want %v", got, want)
+func TestEncodeSemanticTimelineAndCommandCompletion(t *testing.T) {
+	for _, surface := range []byte{4, 5} {
+		got := EncodeGUISemanticItemActivate(surface, 1, 258, []byte("offered-id"))
+		want := []byte{
+			generated.OPGuiAction, generated.GUIActionSemanticItemActivate,
+			surface, 1, 0, 0, 1, 2,
+			0, 10, 'o', 'f', 'f', 'e', 'r', 'e', 'd', '-', 'i', 'd',
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("semantic surface %d packet = %v, want %v", surface, got, want)
+		}
 	}
 }
 

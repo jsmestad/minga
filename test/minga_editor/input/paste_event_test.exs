@@ -390,7 +390,16 @@ defmodule MingaEditor.Input.PasteEventTest do
               send_key_sync(ctx, 9)
 
             :gui ->
-              send(ctx.editor, {:minga_input, {:gui_action, {:minibuffer_select, 0}}})
+              data = MingaEditor.MinibufferData.from_state(editor_state(ctx))
+
+              send(
+                ctx.editor,
+                {:minga_input,
+                 {:gui_action,
+                  {:semantic_item_activate, :command_completion, :accept, data.generation,
+                   candidate.label}}}
+              )
+
               editor_state(ctx)
           end
 

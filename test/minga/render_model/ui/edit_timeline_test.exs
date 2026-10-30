@@ -11,14 +11,22 @@ defmodule Minga.RenderModel.UI.EditTimelineTest do
       refute timeline.visible?
       assert timeline.viewing_index == nil
       assert timeline.entries == []
+      assert timeline.generation == 0
     end
 
     test "carries viewing index and entries" do
-      entry = %Entry{index: 0, tool_name: "edit_file", timestamp_delta: 0}
-      timeline = %EditTimeline{visible?: true, viewing_index: 1, entries: [entry]}
+      entry = %Entry{
+        entry_id: "path-bound-id",
+        index: 0,
+        tool_name: "edit_file",
+        timestamp_delta: 0
+      }
+
+      timeline = %EditTimeline{visible?: true, generation: 17, viewing_index: 1, entries: [entry]}
 
       assert timeline.viewing_index == 1
-      assert [%Entry{tool_name: "edit_file"}] = timeline.entries
+      assert timeline.generation == 17
+      assert [%Entry{entry_id: "path-bound-id", tool_name: "edit_file"}] = timeline.entries
     end
   end
 

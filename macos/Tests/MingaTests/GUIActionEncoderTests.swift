@@ -81,36 +81,22 @@ struct GUIActionEncoderTests {
     func foldToggleAtLine() {
         let spy = SpyEncoder()
         let encoder: OutboundActionEncoding = spy
-        encoder.send(.foldToggleAtLine(windowID: 7, bufferLine: 42))
+        encoder.send(.foldToggleAtLine(windowID: 7, generation: 9, bufferLine: 42))
 
-        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, bufferLine: 42)])
+        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, generation: 9, bufferLine: 42)])
     }
 
-    @Test("sendFileTreeClick records index")
-    func fileTreeClick() {
+    @Test("semantic actions record stable identity and offered generation")
+    func semanticActions() {
         let spy = SpyEncoder()
         let encoder: OutboundActionEncoding = spy
-        encoder.send(.fileTreeClick(index: 5))
-
-        #expect(spy.actions == [.fileTreeClick(index: 5)])
-    }
-
-    @Test("sendFileTreeToggle records index")
-    func fileTreeToggle() {
-        let spy = SpyEncoder()
-        let encoder: OutboundActionEncoding = spy
-        encoder.send(.fileTreeToggle(index: 3))
-
-        #expect(spy.actions == [.fileTreeToggle(index: 3)])
-    }
-
-    @Test("sendCompletionSelect records stable item ID")
-    func completionSelect() {
-        let spy = SpyEncoder()
-        let encoder: OutboundActionEncoding = spy
-        encoder.send(.completionSelect(itemID: "item-0"))
-
-        #expect(spy.actions == [.completionSelect(itemID: "item-0")])
+        let actions: [OutboundAction] = [
+            .semanticItemActivate(surface: .fileTree, intent: 1, generation: 7, itemID: Data("row-5".utf8)),
+            .semanticItemActivate(surface: .fileTree, intent: 2, generation: 7, itemID: Data("row-3".utf8)),
+            .semanticItemActivate(surface: .completion, intent: 1, generation: 8, itemID: Data("item-0".utf8))
+        ]
+        for action in actions { encoder.send(action) }
+        #expect(spy.actions == actions)
     }
 
 
@@ -137,12 +123,10 @@ struct GUIActionEncoderTests {
     func panelActions() {
         let spy = SpyEncoder()
         let encoder: OutboundActionEncoding = spy
-        encoder.send(.panelSwitchTab(index: 2))
         encoder.send(.panelDismiss)
         encoder.send(.panelResize(heightPercent: 40))
 
         #expect(spy.actions == [
-            .panelSwitchTab(index: 2),
             .panelDismiss,
             .panelResize(heightPercent: 40)
         ])
@@ -152,13 +136,14 @@ struct GUIActionEncoderTests {
     func fileTreeManagement() {
         let spy = SpyEncoder()
         let encoder: OutboundActionEncoding = spy
-        encoder.send(.fileTreeNewFile(parentIndex: 5))
-        encoder.send(.fileTreeNewFolder(parentIndex: 3))
+        encoder.send(.semanticItemActivate(surface: .fileTree, intent: 7, generation: 9, itemID: Data("dir-5".utf8)))
+        encoder.send(.semanticItemActivate(surface: .fileTree, intent: 8, generation: 9, itemID: Data()))
         encoder.send(.fileTreeCollapseAll)
         encoder.send(.fileTreeRefresh)
 
         #expect(spy.actions == [
-            .fileTreeNewFile(parentIndex: 5), .fileTreeNewFolder(parentIndex: 3),
+            .semanticItemActivate(surface: .fileTree, intent: 7, generation: 9, itemID: Data("dir-5".utf8)),
+            .semanticItemActivate(surface: .fileTree, intent: 8, generation: 9, itemID: Data()),
             .fileTreeCollapseAll, .fileTreeRefresh
         ])
     }
@@ -167,10 +152,10 @@ struct GUIActionEncoderTests {
     func fileTreeDropAction() {
         let spy = SpyEncoder()
         let encoder: OutboundActionEncoding = spy
-        encoder.send(.fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetID: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0))
+        encoder.send(.fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetID: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0, generation: 7))
 
         #expect(spy.actions == [
-            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetID: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0)
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetID: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0, generation: 7)
         ])
     }
 
@@ -261,7 +246,7 @@ struct GUIActionEncoderTests {
         let encoder: OutboundActionEncoding = spy
         encoder.send(.selectTab(id: 1))
         encoder.send(.paste("hello"))
-        encoder.send(.fileTreeClick(index: 0))
+        encoder.send(.semanticItemActivate(surface: .fileTree, intent: 1, generation: 1, itemID: Data("row-0".utf8)))
 
         #expect(spy.actions.count == 3)
         #expect(spy.pasteCalls.count == 1)

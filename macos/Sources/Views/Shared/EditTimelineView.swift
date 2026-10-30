@@ -2,7 +2,7 @@ import SwiftUI
 
 public struct EditTimelineView: View {
     public enum Action: Equatable, Sendable {
-        case navigate(index: UInt16)
+        case navigate(generation: UInt32, entryID: String)
     }
 
     public init(state: EditTimelineState, sendAction: ViewActionHandler<Action>?) {
@@ -52,6 +52,7 @@ public struct EditTimelineView: View {
             HStack(spacing: 0) {
                 GeometryReader { geometry in
                     let count = state.entries.count
+                    let generation = state.generation
                     let width = geometry.size.width - 32
                     let spacing = count > 1 ? width / CGFloat(count - 1) : width / 2
 
@@ -79,7 +80,7 @@ public struct EditTimelineView: View {
                                        height: isActive || isLast ? 10 : 7)
                                 .position(x: x, y: geometry.size.height / 2)
                                 .onTapGesture {
-                                    sendAction?(.navigate(index: UInt16(entry.index)))
+                                    sendAction?(.navigate(generation: generation, entryID: entry.entryID))
                                 }
                                 .help("\(entry.toolName) (edit \(entry.index + 1)/\(count))")
                         }

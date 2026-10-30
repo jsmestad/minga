@@ -19,6 +19,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
     test "encodes visible command minibuffer with two candidates and total count" do
       model = %Minibuffer{
         visible?: true,
+        generation: 42,
         mode: :command,
         cursor_pos: 1,
         prompt: ":",
@@ -27,6 +28,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
         selected_index: 0,
         candidates: [
           %Candidate{
+            id: "write",
             label: "write",
             description: "Save the current buffer",
             match_score: 150,
@@ -34,6 +36,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
             match_positions: [0]
           },
           %Candidate{
+            id: "wq",
             label: "wq",
             description: "Save and quit",
             match_score: 140,
@@ -50,12 +53,13 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
                <<@op_gui_minibuffer, 1::8, 0::8, 1::16, 1::8, ":", 1::16, "w", 0::16, "", 0::16,
                  2::16, 47::16, 150::8, 5::16, "write", 23::16, "Save the current buffer", 0::16,
                  "", 1::8, 0::16, 140::8, 2::16, "wq", 13::16, "Save and quit", 0::16, "", 1::8,
-                 0::16>>
+                 0::16, 42::32, 5::16, "write", 2::16, "wq">>
     end
 
     test "encodes visible minibuffer with annotation and match positions" do
       model = %Minibuffer{
         visible?: true,
+        generation: 73,
         mode: :command,
         cursor_pos: 1,
         prompt: ":",
@@ -64,6 +68,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
         selected_index: 2,
         candidates: [
           %Candidate{
+            id: "write",
             label: "write",
             description: "Save",
             match_score: 80,
@@ -81,7 +86,8 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
                context_len::16, context::binary-size(context_len), 2::16, 1::16, 9::16, score::8,
                label_len::16, label::binary-size(label_len), desc_len::16,
                desc::binary-size(desc_len), annotation_len::16,
-               annotation::binary-size(annotation_len), 2::8, 0::16, 2::16>> = cmd
+               annotation::binary-size(annotation_len), 2::8, 0::16, 2::16, 73::32, 5::16,
+               "write">> = cmd
 
       assert prompt == ":"
       assert input == "w"
@@ -109,7 +115,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
 
       assert cmd ==
                <<@op_gui_minibuffer, 1::8, 1::8, 5::16, 1::8, "/", 5::16, "hello", 7::16,
-                 "3 of 42", 0::16, 0::16, 0::16>>
+                 "3 of 42", 0::16, 0::16, 0::16, 0::32>>
     end
 
     test "encodes text prompt mode" do
@@ -129,7 +135,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
 
       assert cmd ==
                <<@op_gui_minibuffer, 1::8, 10::8, 6::16, 13::8, "Add project: ", 6::16, "~/code",
-                 0::16, "", 0::16, 0::16, 0::16>>
+                 0::16, "", 0::16, 0::16, 0::16, 0::32>>
     end
 
     test "encodes no-cursor confirmation mode with sentinel" do
@@ -149,7 +155,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
 
       assert cmd ==
                <<@op_gui_minibuffer, 1::8, 5::8, 0xFFFF::16, 17::8, "replace with foo?", 0::16,
-                 "", 17::16, "y/n/a/q (2 of 15)", 0::16, 0::16, 0::16>>
+                 "", 17::16, "y/n/a/q (2 of 15)", 0::16, 0::16, 0::16, 0::32>>
     end
 
     test "encodes unicode input with byte length" do
@@ -169,7 +175,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
       input_bytes = byte_size("héllo")
 
       assert <<@op_gui_minibuffer, 1::8, 1::8, 3::16, 1::8, "?", ^input_bytes::16, "héllo", 0::16,
-               "", 0::16, 0::16, 0::16>> = cmd
+               "", 0::16, 0::16, 0::16, 0::32>> = cmd
     end
 
     test "raises instead of clamping an out-of-range candidate score" do
@@ -191,6 +197,14 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
 
       assert cmd1 != nil
       assert cmd2 == nil
+    end
+
+    test "re-encodes identical content when its owning generation changes" do
+      model = %Minibuffer{visible?: true, generation: 7}
+      {_cmd, caches} = MinibufferEncoder.encode(model, Caches.new())
+
+      assert {cmd, _caches} = MinibufferEncoder.encode(%{model | generation: 8}, caches)
+      assert is_binary(cmd)
     end
   end
 end

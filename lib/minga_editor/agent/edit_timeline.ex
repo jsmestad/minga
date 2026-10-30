@@ -9,6 +9,9 @@ defmodule MingaEditor.Agent.EditTimeline do
   Cumulative hunks are the per-path review authority. They represent the
   first pre-agent content to latest post-image without storing another full
   baseline copy.
+
+  `generation` invalidates GUI targets when entries change or the timeline resets.
+  Viewing and cumulative-review reprojection do not change entry identity.
   """
 
   alias MingaEditor.Agent.DiffSnapshot
@@ -30,6 +33,7 @@ defmodule MingaEditor.Agent.EditTimeline do
   end
 
   @type t :: %__MODULE__{
+          generation: non_neg_integer(),
           entries: %{String.t() => [Entry.t()]},
           cumulative_hunks: %{String.t() => [Minga.Core.Diff.hunk()]},
           viewing: %{String.t() => non_neg_integer() | nil}
@@ -45,7 +49,8 @@ defmodule MingaEditor.Agent.EditTimeline do
           review_status: review_status()
         }
 
-  defstruct entries: %{},
+  defstruct generation: 0,
+            entries: %{},
             cumulative_hunks: %{},
             viewing: %{}
 
@@ -83,6 +88,7 @@ defmodule MingaEditor.Agent.EditTimeline do
     %{
       timeline
       | entries: Map.put(timeline.entries, path, Enum.concat(existing, [entry])),
+        generation: next_generation(),
         cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks)
     }
   end
@@ -97,6 +103,14 @@ defmodule MingaEditor.Agent.EditTimeline do
   @spec entries_for(t(), String.t()) :: [Entry.t()]
   def entries_for(%__MODULE__{entries: entries}, path) do
     Map.get(entries, path, [])
+  end
+
+  @doc "Returns an opaque stable identity bound to the path, tool call, and entry index."
+  @spec entry_id(String.t(), Entry.t()) :: String.t()
+  def entry_id(path, %Entry{tool_call_id: tool_call_id, index: index}) when is_binary(path) do
+    {path, tool_call_id, index}
+    |> :erlang.term_to_binary()
+    |> Base.url_encode64(padding: false)
   end
 
   @spec content_at(t(), String.t(), non_neg_integer()) :: {:ok, String.t()} | :error
@@ -187,8 +201,12 @@ defmodule MingaEditor.Agent.EditTimeline do
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = timeline) do
     cleanup_snapshots(timeline)
-    new()
+    %__MODULE__{generation: next_generation()}
   end
+
+  @spec next_generation() :: pos_integer()
+  defp next_generation,
+    do: Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1
 
   @spec cleanup_snapshots(t()) :: :ok
   defp cleanup_snapshots(%__MODULE__{entries: entries}) do

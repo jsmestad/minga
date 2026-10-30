@@ -72,6 +72,17 @@ type Minibuffer struct {
 	SelectedIndex uint16
 	Candidates    uint16
 	Total         uint16
+	Generation    uint32
+	Items         []MinibufferCandidate
+}
+
+type MinibufferCandidate struct {
+	ID             string
+	MatchScore     byte
+	Label          string
+	Description    string
+	Annotation     string
+	MatchPositions []uint16
 }
 
 type Completion struct {
@@ -537,12 +548,14 @@ type AgentUsage struct {
 type EditTimeline struct {
 	Visible      bool
 	ViewingIndex uint16
+	Generation   uint32
 	Entries      []TimelineEntry
 	Files        []TimelineFile
 }
 
 type TimelineEntry struct {
 	Index          byte
+	EntryID        string
 	ToolName       string
 	TimestampDelta uint32
 }
