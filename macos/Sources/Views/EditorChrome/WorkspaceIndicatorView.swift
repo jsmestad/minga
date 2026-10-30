@@ -30,10 +30,10 @@ public struct WorkspaceIndicatorView: View {
     @FocusState private var renameFieldFocused: Bool
 
     public var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Button(action: showWorkspaceIconPicker) {
                 Image(systemName: workspace.icon.isEmpty ? "folder" : workspace.icon)
-                    .font(.system(size: 10))
+                    .font(Typography.font(.caption))
                     .foregroundStyle(workspace.color)
                     .contentShape(Rectangle())
             }
@@ -53,16 +53,16 @@ public struct WorkspaceIndicatorView: View {
             if isRenaming {
                 TextField("", text: $renameText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .focused($renameFieldFocused)
                     .frame(minWidth: 40, maxWidth: 160)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.hairline)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: Radius.sm)
                             .fill(theme.tabActiveBg)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 4)
+                                RoundedRectangle(cornerRadius: Radius.sm)
                                     .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
                             )
                     )
@@ -86,7 +86,7 @@ public struct WorkspaceIndicatorView: View {
                     }
             } else {
                 Text(workspace.label)
-                    .font(.system(size: 11))
+                    .font(Typography.font(.small))
                     .lineLimit(1)
                     .foregroundStyle(theme.tabActiveFg)
                     .onTapGesture(count: 2) {
@@ -116,14 +116,14 @@ public struct WorkspaceIndicatorView: View {
 
             Button(action: showWorkspaceList) {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
+                    .font(Typography.font(.tiny, weight: .bold))
                     .foregroundStyle(theme.tabInactiveFg)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("workspace-list-\(workspace.id)")
             .accessibilityLabel("Show workspace list")
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Spacing.md)
         .frame(height: barHeight)
         .contextMenu {
             Button("Rename Workspace...") {

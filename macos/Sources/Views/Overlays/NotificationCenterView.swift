@@ -22,14 +22,14 @@ public struct NotificationCenterView: View {
     public let bottomInset: CGFloat
 
     public var body: some View {
-        VStack(alignment: .trailing, spacing: 10) {
+        VStack(alignment: .trailing, spacing: Spacing.md) {
             ForEach(state.notifications) { notification in
                 NotificationCard(notification: notification, sendAction: sendAction)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 18)
+        .padding(.trailing, Spacing.xl)
         .padding(.bottom, bottomInset)
         .allowsHitTesting(!state.notifications.isEmpty)
         .animation(.easeOut(duration: 0.16), value: state.notifications)
@@ -42,15 +42,15 @@ private struct NotificationCard: View {
     let sendAction: ViewActionHandler<NotificationCenterView.Action>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .top, spacing: Spacing.md) {
                 severityIcon
                     .frame(width: 18)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(notification.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(Typography.font(.emphasis, weight: .semibold))
                             .foregroundStyle(theme.popupFg)
                             .lineLimit(2)
 
@@ -61,7 +61,7 @@ private struct NotificationCard: View {
                                 sendAction?(.dismiss(id: notification.id))
                             } label: {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .bold))
+                                    .font(Typography.font(.caption, weight: .bold))
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(theme.popupMutedFg)
@@ -75,32 +75,32 @@ private struct NotificationCard: View {
 
             if !notification.body.isEmpty {
                 Text(notification.body)
-                    .font(.system(size: 12))
+                    .font(Typography.font(.body))
                     .foregroundStyle(theme.popupSecondaryFg)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if !notification.actions.isEmpty {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.sm) {
                     ForEach(notification.actions) { action in
                         Button(action.label) {
                             sendAction?(.invoke(id: notification.id, actionID: action.id))
                         }
                         .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
+                        .font(Typography.font(.small, weight: .medium))
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.xs)
+                        .background(theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.sm))
                         .foregroundStyle(theme.accent)
                     }
                 }
             }
         }
-        .padding(12)
+        .padding(Spacing.lg)
         .frame(width: 360, alignment: .leading)
-        .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.popupBg, in: RoundedRectangle(cornerRadius: Radius.lg))
         .overlay {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: Radius.lg)
                 .strokeBorder(notificationBorderColor, lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.32), radius: 16, x: 0, y: 8)
@@ -114,26 +114,26 @@ private struct NotificationCard: View {
                     .tint(severityColor)
             } else {
                 Image(systemName: iconName)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(Typography.font(.emphasis, weight: .bold))
                     .foregroundStyle(severityColor)
             }
         }
     }
 
     private var metadataRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             Text(notification.levelName.uppercased())
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typography.font(.caption, weight: .semibold))
                 .foregroundStyle(severityColor)
 
             if !notification.source.isEmpty {
                 Text(notification.source)
-                    .font(.system(size: 10))
+                    .font(Typography.font(.caption))
                     .foregroundStyle(theme.popupMutedFg)
             }
 
             Text(notification.updatedAt, style: .relative)
-                .font(.system(size: 10))
+                .font(Typography.font(.caption))
                 .foregroundStyle(theme.popupDisabledFg)
         }
     }
@@ -182,7 +182,7 @@ private struct NotificationCard: View {
             ]
         ),
     ])
-    return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
+    return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: Spacing.section + Spacing.md)
         .frame(width: 800, height: 600)
         .background(theme.editorBg)
         .environment(theme)
@@ -232,7 +232,7 @@ private struct NotificationCard: View {
             actions: []
         ),
     ])
-    return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: 40)
+    return NotificationCenterView(state: state, sendAction: { _ in }, bottomInset: Spacing.section + Spacing.md)
         .frame(width: 800, height: 600)
         .background(theme.editorBg)
         .environment(theme)

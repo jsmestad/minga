@@ -152,24 +152,24 @@ private struct ObservatorySidebarHeader: View {
     let leadingPadding: CGFloat
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             Image(systemName: item.icon.isEmpty ? "network" : item.icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.font(.emphasis, weight: .semibold))
                 .foregroundStyle(theme.treeDirFg.opacity(0.85))
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: Spacing.pixel) {
                 Text(item.displayName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.font(.body, weight: .semibold))
                     .foregroundStyle(theme.tabActiveFg.opacity(0.85))
                 Text("\(state.processCount) processes")
-                    .font(.system(size: 10, weight: .regular))
+                    .font(Typography.font(.caption, weight: .regular))
                     .foregroundStyle(theme.treeFg.opacity(0.55))
             }
 
             Spacer(minLength: 0)
         }
         .padding(.leading, leadingPadding)
-        .padding(.trailing, 12)
+        .padding(.trailing, Spacing.lg)
     }
 }
 
@@ -179,20 +179,20 @@ private struct GenericSidebarFallbackHeader: View {
     let leadingPadding: CGFloat
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             Image(systemName: "questionmark.square.dashed")
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.font(.emphasis, weight: .semibold))
                 .foregroundStyle(theme.treeDirFg.opacity(0.85))
 
             Text(item.displayName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .foregroundStyle(theme.tabActiveFg.opacity(0.85))
                 .lineLimit(1)
 
             Spacer(minLength: 0)
         }
         .padding(.leading, leadingPadding)
-        .padding(.trailing, 12)
+        .padding(.trailing, Spacing.lg)
     }
 }
 
@@ -201,15 +201,15 @@ private struct GenericSidebarFallbackView: View {
     @Environment(\.themeColors) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Unsupported sidebar")
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .foregroundStyle(theme.tabActiveFg)
             Text("The native frontend does not have an adapter for \"\(item.semanticKind.wireValue)\".")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.treeFg.opacity(0.65))
         }
-        .padding(12)
+        .padding(Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(theme.treeBg)
     }

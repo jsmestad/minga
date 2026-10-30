@@ -31,12 +31,12 @@ public struct FloatPopupOverlay: View {
                 if !content.title.isEmpty {
                     HStack {
                         Text(content.title)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(Typography.font(.body, weight: .semibold, design: .monospaced))
                             .foregroundStyle(theme.popupFg)
                         Spacer()
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.sm)
                     .background(theme.popupBg.opacity(0.8))
 
                     Divider()
@@ -48,24 +48,24 @@ public struct FloatPopupOverlay: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(content.lines.enumerated()), id: \.offset) { _, line in
                             Text(line.isEmpty ? " " : line)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(Typography.font(.body, design: .monospaced))
                                 .foregroundStyle(theme.popupFg.opacity(0.9))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.md)
                 }
             }
             .frame(maxWidth: CGFloat(content.width) * cellWidth, maxHeight: CGFloat(content.height) * cellHeight)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .fill(theme.popupBg)
                     .shadow(color: .black.opacity(0.5), radius: 16, y: 4)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .transition(.opacity.animation(.easeIn(duration: animDuration)))

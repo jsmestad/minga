@@ -36,7 +36,7 @@ public struct FileTreeHeaderView: View {
     }
 
     public var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             projectContext
                 .layoutPriority(2)
 
@@ -50,7 +50,7 @@ public struct FileTreeHeaderView: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: headerAnimationDuration), value: isHovered)
         }
         .padding(.leading, leadingPadding)
-        .padding(.trailing, 10)
+        .padding(.trailing, Spacing.md)
         .contentShape(Rectangle())
         .accessibilityLabel(accessibilityLabelText)
         .onHover { hovering in
@@ -66,13 +66,13 @@ public struct FileTreeHeaderView: View {
 
     @ViewBuilder
     private var projectContext: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             Text("\u{F0256}")
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
+                .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
                 .foregroundStyle(theme.treeDirFg)
 
             Text(projectName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.font(.body, weight: .semibold))
                 .foregroundStyle(theme.tabActiveFg)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -89,13 +89,13 @@ public struct FileTreeHeaderView: View {
     }
 
     private func secondaryLabel(icon: String, label: String) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Text(icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 11))
+                .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.small.rawValue))
                 .foregroundStyle(theme.treeDirFg.opacity(0.48))
 
             Text(label)
-                .font(.system(size: 11, weight: .regular))
+                .font(Typography.font(.small, weight: .regular))
                 .foregroundStyle(theme.tabActiveFg.opacity(0.56))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -127,7 +127,7 @@ public struct FileTreeHeaderView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 10.5, weight: .medium))
+                .font(Typography.font(.small, weight: .medium))
                 .foregroundStyle(theme.tabInactiveFg.opacity(0.55))
                 .frame(width: 28, height: 34)
                 .contentShape(Rectangle())

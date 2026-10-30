@@ -20,7 +20,7 @@ public struct SignatureHelpOverlay: View {
 
     public var body: some View {
         if let content = state.content, !content.signatures.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 signatureLabel(content)
 
                 if let paramDoc = activeParameterDoc(content), !paramDoc.isEmpty {
@@ -28,28 +28,28 @@ public struct SignatureHelpOverlay: View {
                         .background(theme.popupBorder.opacity(0.3))
 
                     Text(paramDoc)
-                        .font(.system(size: 12))
+                        .font(Typography.font(.body))
                         .foregroundStyle(theme.popupFg.opacity(0.75))
                         .lineLimit(4)
                 }
 
                 if content.signatures.count > 1 {
                     Text("\(content.activeSignature + 1)/\(content.signatures.count)")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(Typography.font(.caption, design: .monospaced))
                         .foregroundStyle(theme.popupFg.opacity(0.4))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
             .frame(maxWidth: maxWidth)
             .fixedSize(horizontal: false, vertical: true)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .fill(theme.popupBg)
                     .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .allowsHitTesting(false)
@@ -74,7 +74,7 @@ public struct SignatureHelpOverlay: View {
     private func signatureLabel(_ content: SignatureHelpContent) -> some View {
         if let sig = activeSignatureInfo(content) {
             highlightedSignature(sig, content: content)
-                .font(.system(size: 12, design: .monospaced))
+                .font(Typography.font(.body, design: .monospaced))
         }
     }
 

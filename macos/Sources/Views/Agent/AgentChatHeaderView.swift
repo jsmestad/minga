@@ -19,7 +19,7 @@ public struct AgentChatHeaderView: View {
     @State private var isHelpHovered: Bool = false
 
     public var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             // Status indicator
             Circle()
                 .fill(statusColor)
@@ -29,7 +29,7 @@ public struct AgentChatHeaderView: View {
             modelPickerButton
 
             Text("·")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.agentDisabledFg)
 
             thinkingLevelMenu
@@ -43,7 +43,7 @@ public struct AgentChatHeaderView: View {
             Spacer()
 
             Text(state.statusLabel)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.agentMutedFg)
 
             Button {
@@ -51,11 +51,11 @@ public struct AgentChatHeaderView: View {
                 sendAction?(.keyPress(codepoint: 0x3F, modifiers: 0, sequence: 0))
             } label: {
                 Image(systemName: "questionmark.circle")
-                    .font(.system(size: 13))
+                    .font(Typography.font(.emphasis))
                     .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentMutedFg)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, Spacing.xs)
+                    .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))
             }
             .buttonStyle(.plain)
             .help("Keyboard shortcuts (?)")
@@ -67,8 +67,8 @@ public struct AgentChatHeaderView: View {
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.md)
         .background(theme.agentHeaderBg)
 
         Rectangle()
@@ -84,16 +84,16 @@ public struct AgentChatHeaderView: View {
                 sendAction?(.executeCommand(name: "agent_pick_model"))
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Text(state.displayModel.isEmpty ? "Agent" : state.displayModel)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Typography.font(.body, weight: .medium))
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.font(.micro, weight: .semibold))
             }
             .foregroundStyle(state.isThinking ? theme.agentSecondaryFg : theme.agentHeaderFg)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 4).fill(isModelHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isModelHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
         }
         .buttonStyle(.plain)
         .allowsHitTesting(!state.isThinking)
@@ -149,18 +149,18 @@ public struct AgentChatHeaderView: View {
     }
 
     private var thinkingLevelLabel: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Image(systemName: state.thinkingIconName)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
             Text(state.thinkingLabel)
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.font(.body, weight: .medium))
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
+                .font(Typography.font(.symbol, weight: .semibold))
         }
         .foregroundStyle(state.isThinking ? theme.agentSecondaryFg : theme.agentHeaderFg.opacity(0.9))
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(RoundedRectangle(cornerRadius: 4).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
     }
 
     private func thinkingDisplayName(_ level: String) -> String {

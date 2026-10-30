@@ -51,12 +51,12 @@ public struct PickerOverlay: View {
                     }
                     .frame(width: min(panelWidth, geo.size.width - 40))
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: Radius.md)
                             .fill(theme.popupBg)
                             .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: Radius.md)
                             .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
                     )
                     .overlay(alignment: .center) {
@@ -64,7 +64,7 @@ public struct PickerOverlay: View {
                             actionMenuOverlay(menu)
                         }
                     }
-                    .padding(.top, 1)
+                    .padding(.top, Spacing.pixel)
 
                     Spacer()
                 }
@@ -93,9 +93,9 @@ public struct PickerOverlay: View {
 
     @ViewBuilder
     private var searchField: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
+                .font(Typography.font(.emphasis))
                 .foregroundStyle(theme.popupFg.opacity(0.4))
 
             if !state.modePrefix.isEmpty {
@@ -120,10 +120,10 @@ public struct PickerOverlay: View {
 
             if state.markedCount > 0 {
                 Text("\(state.markedCount) marked")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Typography.font(.small, weight: .medium))
                     .foregroundStyle(theme.accent)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.hairline)
                     .background(
                         Capsule()
                             .fill(theme.accent.opacity(0.14))
@@ -132,21 +132,21 @@ public struct PickerOverlay: View {
 
             if state.totalCount > 0 {
                 Text("\(state.filteredCount)/\(state.totalCount)")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Typography.font(.small, design: .monospaced))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
     }
 
     @ViewBuilder
     private var modePrefixBadge: some View {
         Text("[\(state.modePrefix)]")
-            .font(.system(size: 12, design: .monospaced))
+            .font(Typography.font(.body, design: .monospaced))
             .foregroundStyle(theme.accent)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.hairline)
             .background(
                 Capsule()
                     .fill(theme.accent.opacity(0.14))
@@ -160,11 +160,11 @@ public struct PickerOverlay: View {
     private func resultsList(maxListHeight: CGFloat) -> some View {
         Group {
             if case .loading = state.loadStatus {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.sm) {
                     ProgressView()
                         .controlSize(.small)
                     Text(state.title.isEmpty ? "Loading..." : "\(state.title)...")
-                        .font(.system(size: 13))
+                        .font(Typography.font(.emphasis))
                         .foregroundStyle(theme.popupFg.opacity(0.35))
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -172,14 +172,14 @@ public struct PickerOverlay: View {
                 .frame(minHeight: 48)
             } else if case .error(let message) = state.loadStatus {
                 Text(message)
-                    .font(.system(size: 13))
+                    .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .frame(maxHeight: maxListHeight)
                     .frame(minHeight: 48)
             } else if state.items.isEmpty && !state.query.isEmpty {
                 Text("No matches")
-                    .font(.system(size: 13))
+                    .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .frame(maxHeight: maxListHeight)
@@ -240,15 +240,15 @@ public struct PickerOverlay: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Actions")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.font(.body, weight: .semibold))
                     .foregroundStyle(theme.popupFg.opacity(0.6))
                 Spacer()
                 Text("C-o")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(Typography.font(.caption, design: .monospaced))
                     .foregroundStyle(theme.popupFg.opacity(0.3))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
 
             Rectangle()
                 .fill(theme.popupBorder.opacity(0.3))
@@ -262,15 +262,15 @@ public struct PickerOverlay: View {
                 } label: {
                     HStack {
                         Text(entry.label)
-                            .font(.system(size: 13))
+                            .font(Typography.font(.emphasis))
                             .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
                         Spacer()
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.sm)
                     .background(
                         isSelected
-                            ? RoundedRectangle(cornerRadius: 4).fill(theme.accent).padding(.horizontal, 4)
+                            ? RoundedRectangle(cornerRadius: Radius.sm).fill(theme.accent).padding(.horizontal, Spacing.xs)
                             : nil
                     )
                     .contentShape(Rectangle())
@@ -290,12 +290,12 @@ public struct PickerOverlay: View {
         }
         .frame(width: 200)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Radius.lg)
                 .fill(theme.popupBg)
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Radius.lg)
                 .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
@@ -399,7 +399,7 @@ private struct PickerItemRow: View {
     @Environment(\.themeColors) private var theme
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.sm) {
             itemCheckmark
             itemIcon
             highlightedLabel
@@ -411,7 +411,7 @@ private struct PickerItemRow: View {
             Spacer(minLength: 4)
             itemAnnotation
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Spacing.md)
         .frame(height: itemHeight)
         .background(selectionBackground)
         .id(item.id)
@@ -425,7 +425,7 @@ private struct PickerItemRow: View {
     @ViewBuilder
     private var itemCheckmark: some View {
         Image(systemName: "checkmark.circle.fill")
-            .font(.system(size: 11))
+            .font(Typography.font(.small))
             .foregroundStyle(theme.accent)
             .frame(width: 14)
             .opacity(item.isMarked ? 1 : 0)
@@ -436,7 +436,7 @@ private struct PickerItemRow: View {
     private var itemIcon: some View {
         if item.hasLeadingIcon {
             Text(item.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 13))
+                .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.emphasis.rawValue))
                 .foregroundStyle(iconColor(item.iconColor))
                 .frame(width: 18, alignment: .center)
         }
@@ -446,12 +446,12 @@ private struct PickerItemRow: View {
     private var itemAnnotation: some View {
         if !item.annotation.isEmpty {
             Text(item.annotation)
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(Typography.font(.small, design: .monospaced))
                 .foregroundStyle(theme.popupFg.opacity(0.3))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.pixel)
                 .background(
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(theme.popupFg.opacity(0.06))
                 )
         }
@@ -467,13 +467,15 @@ private struct PickerItemRow: View {
 
         if matchSet.isEmpty {
             Text(label)
-                .font(.system(size: 13))
+                .font(Typography.monospacedSmall)
                 .foregroundStyle(fg)
                 .lineLimit(1)
         } else {
             Text(TextHighlighting.attributedString(
                 label,
                 matchPositions: matchSet,
+                baseFont: Typography.monospacedSmall,
+                matchFont: Typography.font(.small, weight: .semibold, design: .monospaced),
                 baseColor: Color(fg),
                 matchColor: Color(theme.accent)
             ))
@@ -489,7 +491,7 @@ private struct PickerItemRow: View {
 
         if descPositions.isEmpty {
             Text(desc)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(fg)
                 .lineLimit(1)
                 .truncationMode(.head)
@@ -497,8 +499,8 @@ private struct PickerItemRow: View {
             Text(TextHighlighting.attributedString(
                 desc,
                 matchPositions: descPositions,
-                baseFont: .system(size: 12),
-                matchFont: .system(size: 12, weight: .semibold),
+                baseFont: Typography.font(.body),
+                matchFont: Typography.font(.body, weight: .semibold),
                 baseColor: Color(fg),
                 matchColor: Color(theme.accent)
             ))
@@ -512,9 +514,9 @@ private struct PickerItemRow: View {
     @ViewBuilder
     private var selectionBackground: some View {
         if isSelected {
-            RoundedRectangle(cornerRadius: 3)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .fill(theme.popupSelBg.opacity(0.7))
-                .padding(.horizontal, 2)
+                .padding(.horizontal, Spacing.hairline)
         } else {
             Color.clear
         }

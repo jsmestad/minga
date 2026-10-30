@@ -46,7 +46,7 @@ public struct MessagesContentView: View {
                     MessageEntryRow(entry: entry, sendAction: sendAction)
                 }
             }
-            .padding(.horizontal, Spacing.sm)
+            .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.xs)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
@@ -71,7 +71,7 @@ public struct MessagesContentView: View {
                             .onAppear { state.scrolledToBottom() }
                             .onDisappear { state.scrolledUp() }
                     }
-                    .padding(.horizontal, Spacing.sm)
+                    .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.xs)
                 }
                 // Position at the newest entry on open. Tailing is handled
@@ -109,18 +109,18 @@ public struct MessagesContentView: View {
         Button(action: { state.jumpToLatest() }) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(Typography.font(.micro, weight: .bold))
                 Text("New messages")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(Typography.font(.caption, weight: .medium))
             }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, 5)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.xs)
             .background(theme.accent.opacity(0.9))
             .foregroundStyle(.white)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-        .padding(Spacing.md)
+        .padding(Spacing.lg)
     }
 }
 
@@ -132,20 +132,20 @@ private struct MessagesFilterBar: View {
 
 
     var body: some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: Spacing.md) {
             levelDots
             subsystemMenu
             searchField
                 .layoutPriority(1)
 
-            Spacer(minLength: Spacing.sm)
+            Spacer(minLength: Spacing.md)
 
             severitySummary
             if state.isFiltering {
                 resetButton
             }
         }
-        .padding(.horizontal, Spacing.sm)
+        .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .background(theme.tabBg.opacity(0.5))
     }
@@ -212,7 +212,7 @@ private struct MessagesFilterBar: View {
         // font (~13pt), oversized next to the rest of the toolbar. controlSize
         // + an explicit font pin it to match.
         .controlSize(.small)
-        .font(.system(size: 11, weight: .medium))
+        .font(Typography.font(.small, weight: .medium))
         .fixedSize()
     }
 
@@ -236,10 +236,10 @@ private struct MessagesFilterBar: View {
                     .foregroundStyle(theme.accent)
             }
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
+                .font(Typography.font(.symbol, weight: .semibold))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.4))
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(Typography.font(.small, weight: .medium))
     }
 
     // MARK: Search
@@ -247,19 +247,19 @@ private struct MessagesFilterBar: View {
     private var searchField: some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 9))
+                .font(Typography.font(.micro))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.4))
             TextField("Filter messages…", text: $state.searchText)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .textFieldStyle(.plain)
                 .frame(minWidth: 120, maxWidth: 220)
         }
         .padding(.horizontal, Spacing.xs)
-        .padding(.vertical, 3)
+        .padding(.vertical, Spacing.xs)
         .background(theme.editorBg.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
         .overlay(
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: Radius.sm)
                 .stroke(theme.treeSeparatorFg.opacity(0.3), lineWidth: 0.5)
         )
     }
@@ -269,20 +269,20 @@ private struct MessagesFilterBar: View {
     /// A live count per severity (errors first) replaces the dead total. Color
     /// carries meaning here, so a non-zero error count is visible at a glance.
     private var severitySummary: some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: Spacing.md) {
             ForEach(levelCounts(), id: \.level) { item in
-                HStack(spacing: 3) {
+                HStack(spacing: Spacing.xs) {
                     Circle()
                         .fill(MessageEntry.levelColor(for: item.level))
                         .frame(width: 6, height: 6)
                     Text("\(item.count)")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(Typography.font(.caption, design: .monospaced))
                         .foregroundStyle(MessageEntry.levelColor(for: item.level).opacity(0.85))
                 }
             }
             if state.isFiltering {
                 Text("filtered")
-                    .font(.system(size: 10))
+                    .font(Typography.font(.caption))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.4))
             }
         }
@@ -303,7 +303,7 @@ private struct MessagesFilterBar: View {
     private var resetButton: some View {
         Button(action: { state.resetFilters() }) {
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.5))
         }
         .buttonStyle(.plain)
@@ -319,7 +319,7 @@ private struct MessageEntryRow: View {
     let sendAction: ViewActionHandler<MessagesContentView.Action>?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
             // Level dot
             Circle()
                 .fill(entry.levelColor)
@@ -328,19 +328,19 @@ private struct MessageEntryRow: View {
 
             // Timestamp
             Text(entry.timestamp)
-                .font(.system(size: 10, design: .monospaced))
+                .font(Typography.font(.caption, design: .monospaced))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.5))
 
             // Subsystem: muted colored text in a fixed column (not a filled badge)
             // so it stays scannable without interrupting the message reading path.
             Text(entry.subsystemName)
-                .font(.system(size: 9, weight: .medium))
+                .font(Typography.font(.micro, weight: .medium))
                 .foregroundStyle(entry.subsystemColor.opacity(0.7))
                 .frame(width: 52, alignment: .leading)
 
             // Message text
             Text(entry.text)
-                .font(.system(size: 11))
+                .font(Typography.font(.small))
                 .foregroundStyle(theme.editorFg)
                 .textSelection(.enabled)
                 .lineLimit(nil)
@@ -353,7 +353,7 @@ private struct MessageEntryRow: View {
                     sendAction?(.openFile(path: entry.filePath))
                 }) {
                     Text(entry.filePath)
-                        .font(.system(size: 10))
+                        .font(Typography.font(.caption))
                         .foregroundStyle(theme.accent)
                         .underline()
                 }

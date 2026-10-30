@@ -76,7 +76,7 @@ struct PickerQueryField: NSViewRepresentable {
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        field.font = .monospacedSystemFont(ofSize: Typography.Step.emphasis.rawValue, weight: .regular)
         field.lineBreakMode = .byClipping
         field.isSelectable = true
         field.isEditable = isEditable && sendAction != nil

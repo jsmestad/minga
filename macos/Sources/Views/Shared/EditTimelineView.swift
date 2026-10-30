@@ -16,36 +16,36 @@ public struct EditTimelineView: View {
 
     public var body: some View {
         if state.visible && !state.files.isEmpty {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.md) {
                 ForEach(state.files) { file in
-                    HStack(spacing: 6) {
+                    HStack(spacing: Spacing.sm) {
                         Circle()
                             .fill(file.reviewStatus == 1 ? themeColors.accent : themeColors.editorFg.opacity(0.35))
                             .frame(width: 6, height: 6)
 
                         Text(file.name)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(Typography.font(.small, weight: .medium))
                             .foregroundStyle(themeColors.editorFg)
                             .lineLimit(1)
 
                         Text("\(file.entryCount)")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(Typography.font(.caption, design: .monospaced))
                             .foregroundStyle(themeColors.editorFg.opacity(0.65))
 
                         Text("+\(file.linesAdded)/-\(file.linesRemoved)")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(Typography.font(.caption, design: .monospaced))
                             .foregroundStyle(themeColors.editorFg.opacity(0.65))
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.xs)
                     .background(themeColors.editorFg.opacity(0.08))
-                    .clipShape(.rect(cornerRadius: 4))
+                    .clipShape(.rect(cornerRadius: Radius.sm))
                     .help(file.path)
                 }
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Spacing.md)
             .frame(height: 24)
             .background(themeColors.editorBg.opacity(0.95))
         } else if state.visible && !state.entries.isEmpty {
@@ -53,7 +53,7 @@ public struct EditTimelineView: View {
                 GeometryReader { geometry in
                     let count = state.entries.count
                     let generation = state.generation
-                    let width = geometry.size.width - 32
+                    let width = geometry.size.width - Spacing.section
                     let spacing = count > 1 ? width / CGFloat(count - 1) : width / 2
 
                     ZStack(alignment: .leading) {
@@ -61,13 +61,13 @@ public struct EditTimelineView: View {
                         Rectangle()
                             .fill(themeColors.editorFg.opacity(0.15))
                             .frame(height: 2)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, Spacing.xl)
 
                         // Markers
                         ForEach(state.entries) { entry in
                             let x = count > 1
-                                ? 16 + spacing * CGFloat(entry.index)
-                                : 16 + width / 2
+                                ? Spacing.xl + spacing * CGFloat(entry.index)
+                                : Spacing.xl + width / 2
 
                             let isActive = entry.index == state.viewingIndex
                             let isLast = entry.index == count - 1 && state.viewingIndex == -1

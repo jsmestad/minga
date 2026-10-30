@@ -43,7 +43,7 @@ public struct EmptyStateView: View {
 
             watermark
 
-            VStack(alignment: .leading, spacing: Spacing.xl) {
+            VStack(alignment: .leading, spacing: Spacing.xxl) {
                 ForEach(state.sections) { section in
                     sectionView(section)
                 }
@@ -94,9 +94,9 @@ public struct EmptyStateView: View {
 
     /// A small-caps section label with a trailing hairline rule (RECENT / START).
     private func ruleLabel(_ title: String) -> some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: Spacing.md) {
             Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typography.font(.caption, weight: .semibold))
                 .tracking(1.5)
                 .foregroundStyle(theme.chromeMutedFg)
             Rectangle()
@@ -107,7 +107,7 @@ public struct EmptyStateView: View {
 
     @ViewBuilder
     private func rowsSection<Row: View>(_ section: EmptyStateSectionModel, @ViewBuilder row: @escaping (EmptyStateItemModel) -> Row) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
             ruleLabel(section.title)
                 .padding(.bottom, Spacing.xs)
             ForEach(section.items) { item in
@@ -129,28 +129,28 @@ public struct EmptyStateView: View {
             ? theme.gutterWarningFg
             : (focused ? theme.accent : theme.chromeMutedFg)
 
-        return VStack(spacing: 2) {
+        return VStack(spacing: Spacing.hairline) {
             ForEach(section.items) { item in
                 cardRow(item)
             }
         }
-        .padding(.vertical, Spacing.sm)
-        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.md)
+        .padding(.horizontal, Spacing.md)
         .frame(maxWidth: .infinity)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Radius.lg)
                 .stroke(borderColor, lineWidth: 1)
         )
         .overlay(alignment: .topLeading) {
             // Title embedded in the top border edge (VSCode titled-border style).
             Text(section.title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Typography.font(.small, weight: .semibold))
                 .foregroundStyle(titleColor)
-                .padding(.horizontal, 5)
+                .padding(.horizontal, Spacing.xs)
                 .background(theme.editorBg)
                 .offset(x: 14, y: -7)
         }
-        .padding(.top, 7)
+        .padding(.top, Spacing.md)
     }
 
     private func cardRow(_ item: EmptyStateItemModel) -> some View {
@@ -158,12 +158,12 @@ public struct EmptyStateView: View {
         // else a return glyph indicating Enter activates the focused card.
         let leadingChip = item.jumpKey.isEmpty ? "\u{21B5}" : item.jumpKey
         return rowButton(item) {
-            HStack(spacing: Spacing.md) {
+            HStack(spacing: Spacing.lg) {
                 keycap(leadingChip)
                 Text(item.label)
-                    .font(.system(size: 13))
+                    .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.editorFg)
-                Spacer(minLength: Spacing.md)
+                Spacer(minLength: Spacing.lg)
                 detailVisual(item)
             }
         }
@@ -173,7 +173,7 @@ public struct EmptyStateView: View {
 
     private func recentRow(_ item: EmptyStateItemModel) -> some View {
         rowButton(item) {
-            HStack(spacing: Spacing.md) {
+            HStack(spacing: Spacing.lg) {
                 if item.jumpKey.isEmpty {
                     Color.clear.frame(width: keycapWidth, height: 1)
                 } else {
@@ -181,13 +181,13 @@ public struct EmptyStateView: View {
                 }
                 devicon(item)
                 Text(item.label)
-                    .font(.system(size: 13))
+                    .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.editorFg)
                     .lineLimit(1)
-                Spacer(minLength: Spacing.md)
+                Spacer(minLength: Spacing.lg)
                 if !item.detail.isEmpty {
                     Text(item.detail)
-                        .font(.system(size: 12))
+                        .font(Typography.font(.body))
                         .foregroundStyle(theme.chromeMutedFg)
                         .lineLimit(1)
                 }
@@ -199,12 +199,12 @@ public struct EmptyStateView: View {
 
     private func actionRow(_ item: EmptyStateItemModel) -> some View {
         rowButton(item) {
-            HStack(spacing: Spacing.md) {
+            HStack(spacing: Spacing.lg) {
                 devicon(item)
                 Text(item.label)
-                    .font(.system(size: 13))
+                    .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.editorFg)
-                Spacer(minLength: Spacing.md)
+                Spacer(minLength: Spacing.lg)
                 inputVisual(item)
             }
         }
@@ -213,26 +213,26 @@ public struct EmptyStateView: View {
     // MARK: - Footer
 
     private func footerView(_ section: EmptyStateSectionModel) -> some View {
-        HStack(spacing: Spacing.sm) {
+        HStack(spacing: Spacing.md) {
             ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
                 if index > 0 {
                     Text("\u{00B7}")
-                        .font(.system(size: 12))
+                        .font(Typography.font(.body))
                         .foregroundStyle(theme.chromeDisabledFg)
                 }
-                HStack(spacing: 5) {
+                HStack(spacing: Spacing.xs) {
                     // The hint's key leads: a jump keycap chip (`i` write) or
                     // an accent ex command (`:q` quit); the verb stays muted.
                     if !item.jumpKey.isEmpty {
                         keycap(item.jumpKey)
                     } else if item.detail.hasPrefix(":") {
                         Text(item.detail)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(Typography.font(.body, weight: .semibold, design: .monospaced))
                             .foregroundStyle(theme.accent)
                     }
                     if !item.label.isEmpty {
                         Text(item.label)
-                            .font(.system(size: 12))
+                            .font(Typography.font(.body))
                             .foregroundStyle(theme.chromeMutedFg)
                     }
                 }
@@ -259,11 +259,11 @@ public struct EmptyStateView: View {
             keycap(item.jumpKey)
         } else if item.detail.hasPrefix(":") {
             Text(item.detail)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(Typography.font(.body, weight: .semibold, design: .monospaced))
                 .foregroundStyle(theme.accent)
         } else if !item.detail.isEmpty {
             Text(item.detail)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(theme.chromeMutedFg)
         }
     }
@@ -274,11 +274,11 @@ public struct EmptyStateView: View {
     private func detailVisual(_ item: EmptyStateItemModel) -> some View {
         if item.isExCommandDetail || (item.jumpKey.isEmpty && item.detail.hasPrefix(":")) {
             Text(item.detail)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(Typography.font(.body, weight: .semibold, design: .monospaced))
                 .foregroundStyle(theme.accent)
         } else if !item.detail.isEmpty {
             Text(item.detail)
-                .font(.system(size: 12))
+                .font(Typography.font(.body))
                 .foregroundStyle(theme.chromeMutedFg)
         }
     }
@@ -289,23 +289,23 @@ public struct EmptyStateView: View {
 
     private func keycap(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(Typography.font(.small, weight: .semibold, design: .monospaced))
             .foregroundStyle(theme.editorFg)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.hairline)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .fill(theme.editorFg.opacity(0.08))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: Radius.sm)
                     .stroke(theme.popupBorder.opacity(0.6), lineWidth: 1)
             )
     }
 
     private func devicon(_ item: EmptyStateItemModel) -> some View {
         Text(item.icon.isEmpty ? "\u{2022}" : item.icon)
-            .font(.custom(nerdFont, size: 13))
+            .font(.custom(nerdFont, size: Typography.Step.emphasis.rawValue))
             .foregroundStyle(item.iconColor ?? theme.chromeMutedFg)
             .frame(width: 18, alignment: .center)
     }
@@ -318,11 +318,11 @@ public struct EmptyStateView: View {
         let focused = state.isFocused(item.itemId)
         let hovered = hoverId == item.itemId
         content()
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.md)
                     .fill(rowFill(focused: focused, hovered: hovered))
             )
             .contentShape(Rectangle())
