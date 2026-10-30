@@ -8,9 +8,6 @@ enum MingaTestHost {
         let application = NSApplication.shared
         let delegate = MingaTestHostDelegate()
         application.delegate = delegate
-        guard application.setActivationPolicy(.regular) else {
-            fatalError("MingaTestHost requires regular activation policy")
-        }
         withExtendedLifetime(delegate) {
             application.run()
         }
@@ -20,6 +17,12 @@ enum MingaTestHost {
 @MainActor
 private final class MingaTestHostDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let application = NSApplication.shared
+        let previousPolicy = application.activationPolicy()
+        let requested = application.setActivationPolicy(.regular)
+        guard application.activationPolicy() == .regular else {
+            fatalError("MingaTestHost requires regular activation policy after launch; previous=\(previousPolicy.rawValue) requested=\(requested) actual=\(application.activationPolicy().rawValue)")
+        }
         print("[MingaTestHost] didFinishLaunching pid=\(ProcessInfo.processInfo.processIdentifier) bundle=\(Bundle.main.bundleIdentifier ?? "-") executable=\(Bundle.main.executableURL?.path ?? "-")")
     }
 
