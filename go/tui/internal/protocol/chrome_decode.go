@@ -2,7 +2,7 @@ package protocol
 
 import "github.com/jsmestad/minga/go/tui/internal/generated"
 
-func decodeChrome(payload []byte) ChromePayload {
+func decodeChrome(payload []byte) (ChromePayload, bool) {
 	opcode := payload[0]
 	chrome := ChromePayload{Opcode: opcode, Name: opcodeName(opcode), Bytes: len(payload)}
 
@@ -69,18 +69,12 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.WindowGutter, chrome.Summary, chrome.Bytes = decodeGutter(payload)
 	case generated.OPGuiIndentGuides:
 		chrome.IndentGuides, chrome.Summary, chrome.Bytes = decodeIndentGuides(payload)
-	case generated.OPGuiLineSpacing:
-		chrome.LineSpacing, chrome.Summary, chrome.Bytes = decodeLineSpacing(payload)
 	case generated.OPGuiFileTreeSelection:
 		chrome.FileTreeSelection, chrome.Summary, chrome.Bytes = decodeFileTreeSelection(payload)
 	case generated.OPGuiCompletionSelection:
 		chrome.CompletionSelection, chrome.Summary, chrome.Bytes = decodeCompletionSelection(payload)
 	case generated.OPGuiPickerSelection:
 		chrome.PickerSelection, chrome.Summary, chrome.Bytes = decodePickerSelection(payload)
-	case generated.OPGuiCursorAnimation:
-		chrome.CursorAnimation, chrome.Summary, chrome.Bytes = decodeCursorAnimation(payload)
-	case generated.OPGuiConfigState:
-		chrome.ConfigState, chrome.Summary, chrome.Bytes = decodeConfigState(payload)
 	case generated.OPGuiSplitSeparators:
 		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
 	case generated.OPGuiSurfaceLayout:
@@ -88,14 +82,8 @@ func decodeChrome(payload []byte) ChromePayload {
 	case generated.OPGuiEmptyState:
 		chrome.EmptyState, chrome.Summary, chrome.Bytes = decodeEmptyState(payload)
 	default:
-		// Size unhandled chrome through the schema authority; fall back to the
-		// sectioned envelope only if the opcode is not generically sized.
-		if size, status := generated.CommandSize(payload); status == generated.CommandSizeOK {
-			chrome.Bytes = size
-		} else if size := sectionedSize(payload); size > 0 {
-			chrome.Bytes = size
-		}
+		return ChromePayload{}, false
 	}
 
-	return chrome
+	return chrome, true
 }

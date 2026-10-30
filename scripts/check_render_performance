@@ -62,6 +62,7 @@ build_harness() {
 
   swiftc -O -I "$module_dir" -L "$module_dir" -lMingaProtocol \
     macos/.generated/protocol/ProtocolOpcodes.generated.swift \
+    macos/.generated/protocol/ProtocolConsumers.generated.swift \
     macos/.generated/protocol/ProtocolCommandSize.generated.swift \
     macos/.generated/protocol/ProtocolSemanticDecode.generated.swift \
     macos/Sources/Protocol/ProtocolConstants.swift \

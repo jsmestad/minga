@@ -145,15 +145,16 @@ struct ProtocolDecoderTests {
         #expect(semantics.guideReplacements.first?.runs.count == 65_536)
     }
 
-    @Test("Parser commands accept their exact 12-byte fixed payloads")
-    func decodeExactLengthParserCommands() throws {
+    @Test("Parser commands are rejected even with complete payloads")
+    func rejectCompleteParserCommands() throws {
         var parseBuffer = Data([OP_PARSE_BUFFER])
         appendWireU32(&parseBuffer, 7)
         appendWireU32(&parseBuffer, 11)
         appendWireU32(&parseBuffer, 0)
 
-        let (_, parseSize) = try decodeCommand(data: parseBuffer, offset: 0)
-        #expect(parseSize == 13)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: parseBuffer, offset: 0)
+        }
         #expect(throws: ProtocolDecodeError.self) {
             _ = try decodeCommand(data: Data(parseBuffer.dropLast()), offset: 0)
         }
@@ -163,8 +164,9 @@ struct ProtocolDecoderTests {
         appendWireU32(&queryLanguage, 23)
         appendWireU32(&queryLanguage, 41)
 
-        let (_, querySize) = try decodeCommand(data: queryLanguage, offset: 0)
-        #expect(querySize == 13)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: queryLanguage, offset: 0)
+        }
         #expect(throws: ProtocolDecodeError.self) {
             _ = try decodeCommand(data: Data(queryLanguage.dropLast()), offset: 0)
         }
@@ -519,48 +521,22 @@ struct ProtocolDecoderTests {
 
     // Per-frontend framing contract (generalized from PR #2347).
     //
-    // Why this exists: three times in this project's history a hand-written framing
-    // authority drifted from the generated schema and desynced a frontend's command
-    // stream. PR #2347 was the third: this decoder's deleted fallback assumed unknown
-    // 0x90+ opcodes were len16-prefixed, mis-sized the sectioned gui_surface_layout
-    // (0xA4), corrupted the stream, and looped the loader. The generated commandSize
-    // table is now the single framing authority. skipKnownSizedCommandWithoutRendererHandler
-    // above covers ONE opcode; this test generalizes it across EVERY beam_to_frontend
-    // opcode the live decodeCommand path frames so a fourth instance is impossible.
-    //
-    // What it asserts: for every framed opcode, a minimal payload followed by a
-    // commit_frame sentinel must be consumed EXACTLY to the sentinel boundary by the
-    // live decodeCommand, and the sentinel must decode as the next command. A sizer
-    // that fell back to data.count on truncation would swallow the commit_frame and
-    // fail (the #2322 sentinel guarantee).
-    //
-    // How opcodes are enumerated (self-updating on schema regen): the test parses the
-    // generated opcode constants file (ProtocolOpcodes.generated.swift: `let OP_* :
-    // UInt8 = 0x..`) for the full real opcode set, located relative to this source via
-    // #filePath. There is no hand-maintained opcode list to rot; a new opcode added to
-    // docs/protocol_schema.toml regenerates that file and enters this loop. Each opcode
-    // is then classified through the live commandSize: .sized/.custom opcodes are framed
-    // by the renderer path; .unknown opcodes are input/parser-response opcodes the
-    // renderer never frames and are skipped.
-    //
-    // How minimal payloads are synthesized: a single zero-fill synthesizer, framing-kind
-    // agnostic. For each framed opcode it searches the smallest zero-filled body
-    // (opcode + N zero bytes) such that decodeCommand frames it to exactly its own length
-    // and the appended commit_frame decodes intact. Zero bytes mean zero section/array
-    // counts and zero-length strings, so the search converges on each opcode's true
-    // minimal bounded frame for both generated-sized framings (fixed / len16 / len32 /
-    // sectioned) and the custom decoders this file still owns (set_font, gui_git_status,
-    // the parser commands, etc.). Opcodes whose decoder requires a nonzero length prefix
-    // go in minimalBodyOverrides.
-    //
-    // FAILURE BY DEFAULT IS THE POINT: a new opcode that no zero-filled body within the
-    // probe bound can frame (a new custom needing nonzero structure, or a real
-    // mis-framing) fails this test loudly by name. Fix the framing or add an override;
-    // do not silence it.
+    // The generated direction set enumerates exactly the BEAM-to-frontend opcodes;
+    // parser and input opcodes must never enter the renderer's framing contract.
+    // Generated sizing owns fixed/length/sectioned boundaries. Required custom
+    // commands use the live semantic decoder to find their smallest zero-filled
+    // body. Only generated consumer skips may advance without a render command.
+    // A trailing commit_frame guards against swallowing the next command.
     @Test("Framing contract: every beam_to_frontend opcode is exactly framed")
     func framingContractEveryFramedOpcode() throws {
-        let opcodes = try Self.loadGeneratedOpcodes()
-        #expect(opcodes.count > 30, "opcode enumeration parsed too few constants; the generated format may have changed")
+        let opcodes = beamToFrontendOpcodes.sorted().map { value in
+            GeneratedOpcode(
+                name: SwiftRequiredOpcode(rawValue: value).map { String(describing: $0) }
+                    ?? String(format: "skipped opcode 0x%02X", value),
+                value: value
+            )
+        }
+        #expect(!opcodes.isEmpty, "generated BEAM-to-frontend opcode set is empty")
 
         var framed = 0
         for op in opcodes {
@@ -573,17 +549,16 @@ struct ProtocolDecoderTests {
             //              frame, for every fixed / len16 / len32 / sectioned opcode,
             //              including ones whose hand decoder rejects empty content (the
             //              decoder's content validation is orthogonal to framing). This
-            //              is the exact #2347 class: a sized-but-unhandled opcode that
-            //              must be skipped by its commandSize size, not a guessed one.
+            //              is the exact #2347 class: declared skipped opcodes must
+            //              use their generated size, never a guessed boundary.
             //
             //   .custom -> the opcode uses bespoke framing; its live decoder owns sizing.
             //              Here the live decodeCommand IS the framing authority, so the
             //              contract drives it directly (zero-fill search, or an override
             //              for a content-strict custom).
             //
-            //   .unknown -> input / parser-response opcode the renderer never frames.
-            //   .incomplete -> only on a truncated probe; the probe is generously sized
-            //                  so this means the opcode is not a real framed command.
+            //   .unknown/.incomplete -> invalid for a declared output opcode on
+            //                          this generously sized probe; fail closed.
             let probe = [op.value] + [UInt8](repeating: 0, count: Self.maxMinimalBodyProbe)
             switch commandSize(probe) {
             case .sized:
@@ -597,11 +572,11 @@ struct ProtocolDecoderTests {
                 }
                 Self.assertCustomFramesToSentinel(op: op, body: body)
             case .unknown, .incomplete:
-                continue
+                Issue.record("Declared output opcode \(op.name) has no complete framing")
             }
         }
 
-        #expect(framed > 30, "discovered too few framed opcodes; classification silently broke")
+        #expect(framed == opcodes.count, "every declared output opcode must be framed")
     }
 
     // commit_frame is a complete fixed:9 command appended as the sentinel.
@@ -708,40 +683,6 @@ struct ProtocolDecoderTests {
         let value: UInt8
     }
 
-    // loadGeneratedOpcodes parses the generated opcode constants for the real opcode
-    // set. The file is located relative to this test source (#filePath) so the list
-    // tracks whatever `mix protocol.gen` last wrote.
-    static func loadGeneratedOpcodes() throws -> [GeneratedOpcode] {
-        // .../macos/Tests/MingaTests/ProtocolTests.swift -> .../macos/.generated/protocol/ProtocolOpcodes.generated.swift
-        let testFile = URL(fileURLWithPath: #filePath)
-        let generated = testFile
-            .deletingLastPathComponent()  // MingaTests
-            .deletingLastPathComponent()  // Tests
-            .deletingLastPathComponent()  // macos
-            .appendingPathComponent(".generated/protocol/ProtocolOpcodes.generated.swift")
-
-        let source = try String(contentsOf: generated, encoding: .utf8)
-
-        // Matches: let OP_FOO: UInt8 = 0x1A   (only OP_-prefixed UInt8 wire opcodes;
-        // GUI_ACTION_* sub-opcodes and PROTOCOL_VERSION are excluded by the pattern).
-        let pattern = #"let\s+(OP_[A-Z0-9_]+)\s*:\s*UInt8\s*=\s*(0x[0-9A-Fa-f]+)"#
-        let regex = try NSRegularExpression(pattern: pattern)
-        let full = NSRange(source.startIndex..<source.endIndex, in: source)
-
-        var opcodes: [GeneratedOpcode] = []
-        var seen = Set<UInt8>()
-        regex.enumerateMatches(in: source, range: full) { match, _, _ in
-            guard let match,
-                  let nameRange = Range(match.range(at: 1), in: source),
-                  let valueRange = Range(match.range(at: 2), in: source),
-                  let value = UInt8(String(source[valueRange]).dropFirst(2), radix: 16)
-            else { return }
-            if seen.insert(value).inserted {
-                opcodes.append(GeneratedOpcode(name: String(source[nameRange]), value: value))
-            }
-        }
-        return opcodes
-    }
 
     @Test("Decode protocol_error command")
     func decodeProtocolError() throws {
@@ -1005,8 +946,8 @@ struct ProtocolDecoderTests {
         #expect(ligatures == false)
     }
 
-    @Test("Skip highlight opcodes without error")
-    func skipHighlightOpcodes() throws {
+    @Test("Reject parser highlight commands instead of silently skipping")
+    func rejectHighlightOpcodes() throws {
         // set_language with buffer_id=1 and name "elixir"
         var data = Data()
         data.append(OP_SET_LANGUAGE)
@@ -1014,9 +955,9 @@ struct ProtocolDecoderTests {
         data.append(contentsOf: [0x00, 0x06]) // name_len=6
         data.append(contentsOf: "elixir".utf8)
 
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(cmd == nil) // Skipped
-        #expect(size == 13) // 1 + 4 + 2 + 6
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
     }
 }
 

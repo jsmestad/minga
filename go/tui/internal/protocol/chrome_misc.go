@@ -32,18 +32,6 @@ type PickerSelection struct {
 	SelectedActionID uint32
 }
 
-type CursorAnimation struct {
-	Enabled bool
-}
-
-type LineSpacing struct {
-	SpacingX100 uint16
-}
-
-type ConfigState struct {
-	Present bool
-}
-
 func decodeCursorlineChrome(payload []byte) (CursorlineChrome, string, int) {
 	if len(payload) < 6 {
 		return CursorlineChrome{}, "", len(payload)
@@ -125,28 +113,4 @@ func decodePickerSelection(payload []byte) (PickerSelection, string, int) {
 		SelectedActionID: u32(payload, 11),
 	}
 	return selection, "picker selection", size
-}
-
-func decodeCursorAnimation(payload []byte) (CursorAnimation, string, int) {
-	size := payloadLen16Size(payload)
-	if size == 0 || len(payload) < 4 {
-		return CursorAnimation{}, "", len(payload)
-	}
-	return CursorAnimation{Enabled: payload[3] != 0}, "tui no-op", size
-}
-
-func decodeLineSpacing(payload []byte) (LineSpacing, string, int) {
-	size := payloadLen16Size(payload)
-	if size == 0 || len(payload) < 5 {
-		return LineSpacing{}, "", len(payload)
-	}
-	return LineSpacing{SpacingX100: u16(payload, 3)}, "tui no-op", size
-}
-
-func decodeConfigState(payload []byte) (ConfigState, string, int) {
-	size := payloadLen16Size(payload)
-	if size == 0 {
-		return ConfigState{}, "", len(payload)
-	}
-	return ConfigState{Present: true}, "tui no-op", size
 }

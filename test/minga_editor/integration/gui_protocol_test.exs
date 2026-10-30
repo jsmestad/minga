@@ -826,7 +826,15 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = PickerEncoder.encode_command(model)
-      decoded = round_trip(harness, cmd, "gui_picker")
+      # Split the bundled picker and preview because each harness call expects one response.
+      picker_size = byte_size(cmd) - 2
+      preview_opcode = Opcodes.gui_picker_preview()
+      assert <<picker::binary-size(^picker_size), ^preview_opcode, 0>> = cmd
+
+      decoded = round_trip(harness, picker, "gui_picker")
+      preview = round_trip(harness, <<preview_opcode, 0>>, "gui_picker_preview")
+
+      assert preview["visible"] == false
 
       assert decoded["type"] == "gui_picker"
       assert decoded["visible"] == true

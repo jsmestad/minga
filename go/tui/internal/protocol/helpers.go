@@ -16,7 +16,7 @@ func skipString16(payload []byte, lengthOffset int, name string) (Command, error
 	if len(payload) < size {
 		return Command{}, fmt.Errorf("short %s payload", name)
 	}
-	return Command{Kind: CommandNoop, Size: size}, nil
+	return skippedCommand(payload[0], size)
 }
 
 func skipFontFallback(payload []byte) (Command, error) {
@@ -34,7 +34,21 @@ func skipFontFallback(payload []byte) (Command, error) {
 			return Command{}, fmt.Errorf("short set_font_fallback name")
 		}
 	}
-	return Command{Kind: CommandNoop, Size: offset}, nil
+	return skippedCommand(payload[0], offset)
+}
+
+func skippedCommand(opcode byte, size int) (Command, error) {
+	if _, skipped := generated.GoSkippedOpcodes[opcode]; !skipped {
+		return Command{}, unhandledOpcodeError(opcode)
+	}
+	return Command{Kind: CommandNoop, Size: size}, nil
+}
+
+func unhandledOpcodeError(opcode byte) error {
+	if name, required := generated.GoRequiredOpcodes[opcode]; required {
+		return fmt.Errorf("unhandled opcode %s (0x%02X): no Go consumer or declared skip", name, opcode)
+	}
+	return fmt.Errorf("unhandled opcode 0x%02X: no Go consumer or declared skip", opcode)
 }
 
 func sectionedSize(payload []byte) int {

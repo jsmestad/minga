@@ -70,6 +70,7 @@ ruler_paths=(
 
 generated_protocol_paths=(
   macos/.generated/protocol/ProtocolOpcodes.generated.swift
+  macos/.generated/protocol/ProtocolConsumers.generated.swift
   macos/.generated/protocol/ProtocolCommandSize.generated.swift
   macos/.generated/protocol/ProtocolSemanticDecode.generated.swift
 )

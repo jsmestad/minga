@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -1170,8 +1171,8 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommand line spacing returned error: %v", err)
 	}
-	if command.Chrome.LineSpacing.SpacingX100 != 120 {
-		t.Fatalf("line spacing decoded incorrectly: %+v", command.Chrome.LineSpacing)
+	if command.Kind != CommandNoop || command.Size != len(lineSpacing) {
+		t.Fatalf("line spacing should be a bounded native-only no-op: %+v", command)
 	}
 
 	cursorAnimation := []byte{generated.OPGuiCursorAnimation, 0, 1, 1}
@@ -1179,8 +1180,8 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommand cursor animation returned error: %v", err)
 	}
-	if !command.Chrome.CursorAnimation.Enabled {
-		t.Fatalf("cursor animation decoded incorrectly: %+v", command.Chrome.CursorAnimation)
+	if command.Kind != CommandNoop || command.Size != len(cursorAnimation) {
+		t.Fatalf("cursor animation should be a bounded native-only no-op: %+v", command)
 	}
 
 	configState := []byte{generated.OPGuiConfigState, 0, 0}
@@ -1188,8 +1189,8 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommand config state returned error: %v", err)
 	}
-	if !command.Chrome.ConfigState.Present {
-		t.Fatalf("config state decoded incorrectly: %+v", command.Chrome.ConfigState)
+	if command.Kind != CommandNoop || command.Size != len(configState) {
+		t.Fatalf("config state should be a bounded native-only no-op: %+v", command)
 	}
 }
 
@@ -1527,4 +1528,46 @@ func string16(value string) []byte {
 func string8(value string) []byte {
 	out := []byte{byte(len(value))}
 	return append(out, []byte(value)...)
+}
+
+func TestDecodeRejectsUndeclaredOpcodes(t *testing.T) {
+	for _, opcode := range []byte{0x00, 0x13, generated.OPMeasureText, 0x70, 0xB0, 0xFF} {
+		t.Run(opcodeName(opcode), func(t *testing.T) {
+			_, err := DecodeCommand([]byte{opcode, 0, 0, 0, 0, 0, 0})
+			if err == nil {
+				t.Fatalf("undeclared opcode 0x%02X was silently accepted", opcode)
+			}
+			if !strings.Contains(err.Error(), opcodeName(opcode)) {
+				t.Fatalf("error %q does not identify opcode 0x%02X", err, opcode)
+			}
+		})
+	}
+}
+
+func TestSizingOnlyPathsRejectRequiredOpcodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		decode func() (Command, error)
+	}{
+		{"set_title", func() (Command, error) {
+			return skipString16([]byte{generated.OPSetTitle, 0, 0}, 1, "set_title")
+		}},
+		{"set_cursor_shape", func() (Command, error) {
+			return skipFontFallback([]byte{generated.OPSetCursorShape, 0})
+		}},
+		{"begin_frame", func() (Command, error) {
+			return decodeSkipOrChrome([]byte{generated.OPBeginFrame, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1})
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := test.decode()
+			if err == nil {
+				t.Fatal("sizing-only path accepted a required opcode without a consumer")
+			}
+			if !strings.Contains(err.Error(), test.name) {
+				t.Fatalf("error %q does not identify required opcode %s", err, test.name)
+			}
+		})
+	}
 }

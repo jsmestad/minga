@@ -46,6 +46,7 @@ defmodule Mix.Tasks.Swift.Harness do
   @harness_app_sources [
     "macos/Sources/MainRunLoopAction.swift",
     "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
+    "macos/.generated/protocol/ProtocolConsumers.generated.swift",
     "macos/.generated/protocol/ProtocolCommandSize.generated.swift",
     "macos/.generated/protocol/ProtocolSemanticDecode.generated.swift",
     "macos/Sources/Protocol/ProtocolConstants.swift",

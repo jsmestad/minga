@@ -8,6 +8,27 @@ Frontend identity is opaque to Minga product behavior. The BEAM may adapt to dec
 
 Stream identity is producer-assigned and carried on the wire, never inferred by the consumer.
 
+## Required frontend consumers
+
+A message with valid framing must not disappear because a frontend lacks a decoder. `docs/protocol_schema.toml` classifies every `beam_to_frontend` opcode for both live frontends. Each frontend appears exactly once: in `consumers`, or in `skip` with a non-empty, one-line reason. Generation rejects missing, duplicate, and unknown frontend names.
+
+For example, font selection belongs to the native GUI, while a terminal controls its own font:
+
+```toml
+[[opcodes]]
+category = "config"
+name = "set_font"
+value = 0x50
+direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal controls font selection" }
+framing = "custom"
+```
+
+Run `mix protocol.gen` after editing the schema. It writes `macos/.generated/protocol/ProtocolConsumers.generated.swift` and `go/tui/internal/generated/consumers.go`. Swift dispatches through the generated `SwiftRequiredOpcode` enum with an exhaustive switch, so a missing arm fails compilation. The Go guardrail probes every opcode and compares its result with `GoRequiredOpcodes` and `GoSkippedOpcodes`, so a missing arm or a decoded skip fails `go test ./...`.
+
+Only declared skips may use a sizing-only path. Unknown opcodes fail decoding instead of silently disappearing. Consumer declarations describe decoder obligations, not runtime capability negotiation. See [Add a render command](recipes/new-render-command.md) for the change workflow.
+
 ## Transport
 
 The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM → Frontend) and stdout (Frontend → BEAM).
@@ -999,4 +1020,4 @@ See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of Semanti
 
 ## Future: Buffer Fork UI
 
-When [buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) lands, the protocol may need new opcodes for fork-related UI elements: fork status indicators in the modeline, merge conflict region rendering, or a fork branch picker. These will be additive (new opcodes, no changes to existing ones). Frontend implementors can safely ignore unknown opcodes by reading and discarding the payload based on the length prefix.
+When [buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) lands, the protocol may need new opcodes for fork-related UI elements: fork status indicators in the modeline, merge conflict region rendering, or a fork branch picker. These will be additive (new opcodes, no changes to existing ones). Each new opcode must declare its frontend consumers or intentional skips in the schema.
