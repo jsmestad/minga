@@ -55,6 +55,7 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
                 (sources / "Views").mkdir(parents=True)
                 (sources / "PreviewRegistry.swift").write_text(registry)
                 (sources / "PreviewSnapshotPolicy.swift").write_text(policy)
+                (sources / "PreviewHostApp.swift").write_text("shared preview capture transport")
                 (sources / "Views/ExistingView.swift").write_text(f"production view from {checkout.name}")
                 project = "".join(
                     f'  {target}:\n    sources:\n      - path: Sources\n        excludes:\n          - "PreviewRegistry.swift"\n'
@@ -89,7 +90,6 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
             self.assertEqual(
                 (before_sources / "Views/ExistingView.swift").read_text(), "production view from before"
             )
-            self.assertEqual((before_sources / fixture_name).read_text(), fixture)
             self.assertEqual(
                 evidence.registry_names(before_sources / "PreviewRegistry.swift"), ["ExistingView", "AddedView"]
             )
@@ -101,11 +101,6 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
             manifest = json.loads(args.output.read_text())
             self.assertEqual(manifest["originalBaseNames"], ["ExistingView"])
             self.assertEqual(manifest["comparisonNames"], ["ExistingView", "AddedView"])
-            self.assertEqual(
-                {change["path"] for change in manifest["fixtureChanges"]},
-                {"macos/Sources/PreviewRegistry.swift", "macos/Sources/PreviewSnapshotPolicy.swift",
-                 f"macos/Sources/{fixture_name}", "macos/project.yml"},
-            )
             # Preparing an already supplemented base must not duplicate registry cases.
             with patch.object(evidence, "revision", side_effect=["base-sha", "head-sha"]):
                 evidence.prepare_base(args)

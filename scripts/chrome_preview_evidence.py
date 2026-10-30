@@ -64,7 +64,7 @@ def isolate_preview_extensions(project):
 
 
 def prepare_base(args):
-    """Install identical new fixture definitions, never proposed production views, in the base."""
+    """Install identical preview fixtures and capture transport, never proposed production views, in the base."""
     if args.before_root.resolve() == args.after_root.resolve():
         raise ValueError("before and after must be separate checkouts")
     sources = Path("macos/Sources")
@@ -85,6 +85,10 @@ def prepare_base(args):
     shutil.copyfile(args.after_root / fixture, args.before_root / fixture)
     changes.append({"path": str(fixture), "scope": "identical preview-only fixture definitions",
                     "sha256": hashlib.sha256((args.before_root / fixture).read_bytes()).hexdigest()})
+    capture = sources / "PreviewHostApp.swift"
+    shutil.copyfile(args.after_root / capture, args.before_root / capture)
+    changes.append({"path": str(capture), "scope": "identical preview-only capture transport; non-Sendable ScreenCaptureKit objects remain outside MainActor",
+                    "sha256": hashlib.sha256((args.before_root / capture).read_bytes()).hexdigest()})
     project = Path("macos/project.yml")
     destination = args.before_root / project
     destination.write_text(isolate_preview_extensions(destination.read_text()))
@@ -93,7 +97,7 @@ def prepare_base(args):
     manifest = {
         "baseRevision": revision(args.before_root),
         "fixtureRevision": revision(args.after_root),
-        "scope": "Only preview dispatch, preview sizes, the additional fixture file, and non-preview target membership exclusions are installed. Production Views sources remain those of the base checkout.",
+        "scope": "Only preview dispatch, preview sizes, the additional fixture file, identical PreviewHost capture transport, and non-preview target membership exclusions are installed. Production Views sources remain those of the base checkout.",
         "originalBaseNames": before_names,
         "comparisonNames": registry_names(args.before_root / registry_path),
         "fixtureChanges": changes,

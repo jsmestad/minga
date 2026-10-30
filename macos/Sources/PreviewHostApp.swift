@@ -92,7 +92,11 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
 
         if PreviewSnapshotPolicy.shouldUseRenderedWindowCapture(viewName) {
             do {
-                let image = try await captureRenderedWindow(window)
+                let scale = window.backingScaleFactor
+                let image = try await Self.captureRenderedWindow(
+                    windowID: CGWindowID(window.windowNumber),
+                    width: Int(window.frame.width * scale),
+                    height: Int(window.frame.height * scale))
                 let normalized = normalizeRenderedCapture(image, expectedPixelSize: expectedPixelSize, viewName: viewName)
                 return encodePNG(from: normalized, expectedPixelSize: expectedPixelSize, viewName: viewName)
             } catch {
@@ -159,18 +163,16 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func captureRenderedWindow(_ window: NSWindow) async throws -> CGImage {
+    private nonisolated static func captureRenderedWindow(windowID: CGWindowID, width: Int, height: Int) async throws -> CGImage {
         let content = try await SCShareableContent.currentProcess
-        let windowID = CGWindowID(window.windowNumber)
         guard let shareableWindow = content.windows.first(where: { $0.windowID == windowID }) else {
             throw PreviewCaptureError.windowNotShareable
         }
 
         let filter = SCContentFilter(desktopIndependentWindow: shareableWindow)
         let config = SCStreamConfiguration()
-        let scale = window.backingScaleFactor
-        config.width = Int(window.frame.width * scale)
-        config.height = Int(window.frame.height * scale)
+        config.width = width
+        config.height = height
         config.showsCursor = false
 
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
