@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local lint gate behind `make lint` (fast) and `make lint.full`.
+# Local gate behind `make lint` (fast), `make lint.full`, and `make done`.
 #
 # Independent checks run concurrently. Each check writes to its own log, and the logs are replayed in a fixed order once everything finishes, so output stays readable and deterministic. Independent checks all run even when one fails; only the checks that need BEAM files (Dialyzer, Reach) are skipped when compile fails.
 #
@@ -8,19 +8,24 @@
 #       When no Elixir-relevant file changed against the base ref (docs-only branches), the compile chain and ExDNA are skipped.
 # full: format, full Credo, ExDNA                              (no compile, run in parallel)
 #       compile -> classic Dialyzer + Reach arch and smells     (followers run in parallel once compile passes)
+# done: fast lint, then the non-heavy ExUnit suite, then Swift build and MingaTests when macOS inputs changed.
 set -uo pipefail
 
 mode=${1:-fast}
 case "$mode" in
-  fast|full) ;;
+  fast|full|done) ;;
   *)
-    echo "usage: scripts/lint [fast|full]" >&2
+    echo "usage: scripts/lint [fast|full|done]" >&2
     exit 2
     ;;
 esac
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
+source scripts/lib/changed_files.sh
+if [ "$mode" != full ]; then
+  changed=$(changed_files) || exit 2
+fi
 
 if [ -t 1 ]; then
   red=$'\033[31m'; green=$'\033[32m'; dim=$'\033[2m'; bold=$'\033[1m'; reset=$'\033[0m'
@@ -103,25 +108,41 @@ chain() {
   ) &
 }
 
-# Did anything that can change compile, Dialyzer, or clone results change? Same change set as scripts/credo_changed: branch vs merge-base, staged, unstaged, untracked. Collected into a variable first: `grep -q` closing the pipe early would trip `pipefail`.
-elixir_changed() {
-  local base_ref=${CREDO_CHANGED_BASE_REF:-main}
-  local merge_base changed
-  merge_base=$(git merge-base HEAD "$base_ref" 2>/dev/null) || return 0
-  changed=$(
-    git diff --name-only --diff-filter=ACMRD "$merge_base...HEAD"
-    git diff --name-only --diff-filter=ACMRD --cached
-    git diff --name-only --diff-filter=ACMRD
-    git ls-files --others --exclude-standard
-  )
-  grep -q -E '\.(ex|exs|erl|lock)$|^config/|^extensions/|^credo/|^docs/protocol_schema\.toml$|^zig/src/protocol\.zig$' <<<"$changed"
+# Keep Swift artifacts outside the disposable lint logs so failures remain inspectable.
+swift_build() {
+  mix swift.build >"$MINGA_DONE_DIR/swift-build.log" 2>&1
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'Swift build failed. Build log: %s/swift-build.log\n' "$MINGA_DONE_DIR"
+  fi
+  return "$rc"
+}
+
+swift_test() {
+  local result="$MINGA_DONE_DIR/swift.xcresult"
+  (
+    cd macos || exit
+    xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData \
+      CODE_SIGNING_ALLOWED=NO -only-testing:MingaTests -resultBundlePath "$result"
+  ) >"$MINGA_DONE_DIR/swift-test.log" 2>&1
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'xcresult: %s\nTest log: %s/swift-test.log\n' "$result" "$MINGA_DONE_DIR"
+    if [ ! -d "$result" ]; then
+      echo "No xcresult bundle was produced; inspect the test log for build or launch errors."
+    elif ! xcrun xcresulttool get test-results tests --path "$result" |
+      jq -er '[.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed") | .nodeIdentifier // .name] | unique | if length == 0 then error("no failing test cases recorded") else .[] end'; then
+      echo "Could not summarize failing tests; inspect the xcresult bundle and test log."
+    fi
+  fi
+  return "$rc"
 }
 
 run format mix format --check-formatted
-if [ "$mode" = fast ]; then
-  run credo scripts/credo_changed
-else
+if [ "$mode" = full ]; then
   run credo mix credo --strict
+else
+  run credo scripts/credo_changed
 fi
 
 if [ "$mode" = full ]; then
@@ -129,7 +150,7 @@ if [ "$mode" = full ]; then
   chain compile "mix compile --warnings-as-errors" \
     dialyzer "mix dialyzer" \
     reach "mix reach.check --arch --smells"
-elif elixir_changed; then
+elif elixir_changed "$changed"; then
   run ex-dna mix ex_dna --max-clones 0
   chain compile "mix compile --warnings-as-errors" \
     dialyzer "mix dialyzer.incremental" \
@@ -143,13 +164,43 @@ fi
 
 wait
 
+if [ "$mode" = done ]; then
+  run test.llm mix test.llm
+  wait
+
+  if ! macos_changed "$changed"; then
+    skip swift.build "no macOS-relevant file changed"
+    skip swift.test "no macOS-relevant file changed"
+  elif ! command -v xcodebuild >/dev/null 2>&1; then
+    skip swift.build "xcodebuild not found"
+    skip swift.test "xcodebuild not found"
+  else
+    if {
+      MINGA_DONE_DIR=${MINGA_DONE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/minga-done.XXXXXX")} &&
+        mkdir -p "$MINGA_DONE_DIR" &&
+        MINGA_DONE_DIR=$(cd "$MINGA_DONE_DIR" && pwd -P)
+    } >"$log_dir/swift-setup.log" 2>&1; then
+      run swift.build swift_build
+    else
+      run swift.build bash -c 'cat "$1"; exit 1' bash "$log_dir/swift-setup.log"
+    fi
+    wait
+    if [ "$(status_of swift.build)" = 0 ]; then
+      run swift.test swift_test
+      wait
+    else
+      skip swift.test "swift.build failed"
+    fi
+  fi
+fi
+
 failed=""
 for name in "${names[@]}"; do
   rc=$(status_of "$name")
   seconds=$(cat "$log_dir/$name.seconds" 2>/dev/null || echo "?")
   case "$rc" in
     0)    printf '%s[pass]%s %-9s %4ss\n' "$green" "$reset" "$name" "$seconds" ;;
-    skip) printf '%s[skip]%s %-9s %s\n' "$dim" "$reset" "$name" "$(cat "$log_dir/$name.log")" ;;
+    skip) printf '%s[skip]%s %-9s %4ss (%s)\n' "$dim" "$reset" "$name" "$seconds" "$(cat "$log_dir/$name.log")" ;;
     *)
       failed="$failed $name"
       printf '%s[FAIL]%s %-9s %4ss\n' "$red" "$reset" "$name" "$seconds"
@@ -174,4 +225,8 @@ if [ -n "$failed" ]; then
   exit 1
 fi
 
-printf '\n%s%s lint checks passed.%s\n' "$green" "$mode" "$reset"
+if [ "$mode" = done ]; then
+  printf '\n%sAll local review checks passed.%s\n' "$green" "$reset"
+else
+  printf '\n%s%s lint checks passed.%s\n' "$green" "$mode" "$reset"
+fi

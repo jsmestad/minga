@@ -378,16 +378,16 @@ mix test.debug test/minga/foo_test.exs    # The test file that covers what you t
 mix format                                # Whole project, ~3s. Run before Tier 2; its output is not negotiable.
 ```
 
-**Tier 2, once before review (about 25s warm, plus about 100s for the suite):**
+**Tier 2, once before review (about 2 minutes warm, or about 4 minutes with macOS changes on Apple silicon):**
 
 ```bash
-make lint                                 # format check + changed-file Credo + ExDNA in parallel with compile -> incremental Dialyzer + Reach arch policy.
-mix test.llm                              # Full non-heavy suite, module-level summary, stops at 5 failures.
+make done                                 # Fast lint + full non-heavy suite + Swift build and MingaTests when macOS inputs changed.
 mix zig.lint                              # Only if you touched .zig files.
-mix swift.build                           # Only if you touched .swift files; then run the Swift tests.
 ```
 
 `make lint` is a gate, not a compiler. Do not run it after every edit; Tier 1 gives the same compile and test signal faster. It prints one `[pass]`, `[FAIL]`, or `[skip]` line per check with its duration, then the full log of every failed check (and of a passing compile that emitted warnings). Independent checks all run even when one fails, so fix everything it lists in one pass; only Dialyzer and Reach are skipped when compile fails, because they need BEAM files. On a branch that changes no Elixir-relevant file (docs, Swift, Go, Zig only), the compile chain, Reach, and ExDNA are skipped and the gate finishes in a few seconds. It refuses to run when the active Elixir differs from the `.tool-versions` pin, because that mismatch silently costs a full recompile.
+
+`make done` runs the fast lint stages, then `mix test.llm`, and then `mix swift.build` and the `MingaTests` bundle when any file under `macos/` or `docs/protocol_schema.toml` changed. Lint, changed-file Credo, and the Swift gate share one change detector: branch changes against the merge-base with `main`, staged changes, unstaged changes, and untracked files. Set `CREDO_CHANGED_BASE_REF` to compare against another base. Both Swift stages report a skip reason when no macOS input changed or `xcodebuild` is unavailable. Swift test failures name the failing tests and retain the xcresult bundle and logs in a printed temporary directory; set `MINGA_DONE_DIR` to choose that directory (use a fresh directory for each run).
 
 **Never run locally (CI owns these):** `make lint.full`, `mix dialyzer` (classic, cold PLT), `mix reach.check --smells` (advisory only: it exits 0 with hundreds of findings and takes about 4 minutes; `--arch` alone is a 12s gate and is already in `make lint`), `mix credo --strict` on the whole project, and `mix test` with default output (use `mix test.llm`).
 
@@ -397,11 +397,9 @@ mix swift.build                           # Only if you touched .swift files; th
 
 **Before requesting review, do this self-check:**
 
-1. **Run `make lint`** once. Agents should not run `make lint.full`; CI owns the full project-wide gate.
-2. **Run `mix test.llm`**. Fix any failures.
-3. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
-4. **If you touched `.zig` files**, run `mix zig.lint`.
-5. **If you touched `.swift` files**, run `mix swift.build` and Swift tests.
+1. **Run `make done`** once and fix any failures. This is the local pre-review gate; agents should not run `make lint.full`, which CI owns.
+2. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
+3. **If you touched `.zig` files**, run `mix zig.lint`.
 
 If any check fails, fix it before committing. No exceptions.
 
