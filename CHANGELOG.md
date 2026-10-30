@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Native agents now use the upstream ReqLLM 1.29 release instead of a pinned fork, bringing Codex reasoning-continuation fixes, preserved streamed JSON text and thinking, and transport security fixes. Updated compatible Hex dependencies, including Req 0.7.5, Bandit 1.14.1, Exqlite 0.43.0, Hammox 1.0, and the October LLM model catalog.
 - Agent guides now use verified paths and module entry points, list all fourteen custom Credo checks with unique IDs, and link focused development recipes. Regression tests keep guide references and the check inventory synchronized with the repository.
 - Production parser and hook-runner binaries now use Zig `ReleaseSafe`, with Zig's build cache selecting the correct optimization mode. Parser queries compile only for languages in use instead of prewarming every bundled language. Editor launchers retain ERTS's specialized memory allocators instead of disabling them.
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
