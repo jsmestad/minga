@@ -153,6 +153,8 @@ A leaf transition goes directly to its owner. The calling workflow may install t
 
 External work stays in the focused workflow that requested it. `MingaEditor.TabWorkflow` owns shell resolution, remote replay, session and transcript synchronization, timers, and modal presentation around the pure root tab transition. `MingaEditor.Handlers.BufferRegistry` creates buffer monitors and performs parser and logging cleanup around pure registration and removal transitions. `MingaEditor.FeatureStateWorkflow` resolves shell registrations before atomic cleanup, `MingaEditor.BufferFileIdentity` derives project-aware file references before identity-preserving tab and workspace rebinding, and `MingaEditor.Renderer.ReceiptProjection` purely projects an accepted receipt through its three value owners. Slow resource work uses typed `MingaEditor.Effect.Request` and `MingaEditor.Effect.Outcome` values through `MingaEditor.EffectScheduler`; the scheduler owns admission and worker lifecycle, while each originating workflow owns domain staleness, state application, feedback, and rendering. There is no universal effect dispatcher. See [ADR-0002](adr/0002-editor-state-transitions-have-explicit-owners.md) for the full ownership ledger and contributor rules.
 
+Historical note (recorded 2026-10-29): #1403 established typed workspace snapshots instead of intermediate `Map.from_struct` conversions. Snapshot callers use `MingaEditor.Session.State.to_tab_context/1`; EX9006 prevents the raw-map pattern from returning.
+
 ### Per-process garbage collection
 
 Each BEAM process has its own heap and its own garbage collector. When a buffer process GCs, it doesn't pause the editor or the renderer. A large file's buffer can collect its garbage without affecting the responsiveness of a small file you're actively editing.
@@ -436,6 +438,10 @@ Chrome and shared UI (tab bars, file trees, status bars, which-key popups, compl
 
 Because the model carries character offsets, not pixel positions, the same model drives both monospaced and variable-width font rendering in GUI frontends: a monospaced frontend multiplies by cell width; a proportional frontend measures preceding characters to find the pixel X. The `measure_text` opcode handles the cases where the BEAM needs the frontend to measure precise display widths.
 
+#### Resident-store history
+
+Historical note (recorded 2026-10-29): epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 completed that work and deleted velocity-aware overscan prefetch. The windowed emit path remains for wrapped/folded buffers and the brief pre-promotion arming frame, with fixed overscan rather than velocity tiers. New scrollable surfaces reuse that lifecycle instead of defining per-surface reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).
+
 #### What survives of the DisplayList
 
 `MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
@@ -572,6 +578,8 @@ Each scope module implements the `Minga.Keymap.Scope` behaviour, declaring its k
 
 Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines which keys are active, the same way `python-mode` or `magit-status-mode` provide buffer-type-specific keymaps in Emacs.
 
+Historical note (recorded 2026-10-29): #1278 introduced bulk registration of named binding groups into each scope's trie. This keeps scopes flat and explicit while allowing shared leader sequences; scope-local bindings override group bindings on conflict.
+
 ---
 
 ### Mouse Event Routing
@@ -604,6 +612,8 @@ Each content-type handler interprets input against its own data model. Wheel eve
 The GUI supplies `NSEvent.clickCount`. The TUI supplies `click_count=1`, and BEAM detects repeated clicks using a timing window and semantic target identity. Buffer/version and window/row identity keep unrelated source presentations from sharing a click sequence.
 
 Node-aware built-in FocusTree handlers implement `handle_mouse_at_node/8` directly when they need routed node context; they should not add coordinate-only `handle_mouse/7` wrappers that rebuild the tree and self-hit-test after the router has already selected a node. The `handle_mouse_at_node/8` and legacy `handle_mouse/7` callbacks are optional on `Input.Handler`. Router keeps `handle_mouse/7` as the legacy fallback for external or simple handlers without node context, including simple built-in handlers that do not need node metadata. Nodes without a mouse-capable handler pass through during FocusTree bubbling. This keeps keyboard-only handlers simple until they need mouse support.
+
+Historical note (recorded 2026-10-29): #217 tracks the Doom Emacs mouse-support baseline across frontends. Mouse support remains a shared requirement, including selection, wheel scrolling, clickable chrome, and native GUI interactions.
 
 ---
 
@@ -809,11 +819,15 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 ## Semantic render and command path
 
-Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. There is no cell path left to branch against. The legacy Zig cell-grid TUI, the last consumer of cell draws, was removed in #2223; the BEAM-side cell chrome/layout builders it fed (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, `sidebar_renderer.ex`) were deleted in #2235, and `picker_ui.ex` is now pure picker state that the semantic `RenderModel.UI.PickerBuilder` consumes; its old cell renderer is gone with the rest of the cell paradigm.
+Render and command code does **not** branch on `Capabilities.gui?`. Every live frontend (the macOS GUI and the Go TUI) advertises `semantic_ui` in its `ready` handshake and takes a single semantic path: the BEAM builds a semantic render model (`Chrome.GUI`, `Layout.GUI`, the `RenderModel.UI.*` builders) and the frontend renders it natively. There is no cell path left to branch against.
+
+Historical note (recorded 2026-10-29): #2223 removed the legacy Zig cell-grid TUI, leaving Zig as parser infrastructure. #2235 deleted the BEAM-side cell chrome/layout builders (`Chrome.TUI`, `Layout.TUI`, `tree_renderer.ex`, and `sidebar_renderer.ex`). #2236 removed the cell renderer from `picker_ui.ex` while retaining its picker orchestration API (`open/3`, `handle_key/3`, `close/1`, `refresh_items/1`, and `update_picker/2`); the semantic `RenderModel.UI.PickerBuilder` consumes that state. `ProtocolGUI.encode_gui_*` remains only as a byte-for-byte parity oracle, not a path for adding shared chrome.
+
+Historical note (recorded 2026-10-29): #2113 established the Semantic UI cross-frontend inventory. Changes to chrome model fields must reach both the macOS SwiftUI client and the Charm/Go TUI, including schema, adapter, decoder, and rendering coverage.
 
 **The predicate is `Capabilities.semantic_ui?`, not `gui?`.** `gui?` (true only for `frontend_type: :native_gui`) remains available for genuinely native-window-only concerns that are not render/command dispatch: native-renderer config (line spacing, cursor animation), GUI defaults (absolute line numbers), the native-window title, GUI-only key bindings, and the GUI settings-panel config push. Do not use `gui?` to gate semantic chrome or semantic-capable features (e.g. the BEAM observatory, which the Go TUI renders), or you will strand the Go TUI.
 
-**Command dispatch is single-path.** Shared chrome commands (bottom panel, message tray) live directly in their command module with no `Commands.Foo.GUI` / `Commands.Foo.TUI` submodules and no `Frontend` behaviour. The chrome and layout builders call `Chrome.GUI` / `Layout.GUI` unconditionally; the `Chrome.TUI` / `Layout.TUI` cell builders were deleted in #2235.
+**Command dispatch is single-path.** Shared chrome commands (bottom panel, message tray) live directly in their command module with no `Commands.Foo.GUI` / `Commands.Foo.TUI` submodules and no `Frontend` behaviour. The chrome and layout builders call `Chrome.GUI` / `Layout.GUI` unconditionally.
 
 ---
 
@@ -854,7 +868,7 @@ The practical benefit: `Minga.Runtime.start/1` boots Layers 0 and 1 without any 
 
 ## MingaAgent Internal Levels
 
-Epic [#2075](https://github.com/jsmestad/minga/issues/2075) adds a second dependency map inside the agent platform. The top-level namespace rule still applies: `MingaAgent.*` must not depend on `MingaEditor.*`. The internal rule answers a more specific question: when provider, tool, MCP, and UI integrations become optional packs, which agent modules are safe to import from which other agent modules?
+Historical note (recorded 2026-10-29): epic [#2075](https://github.com/jsmestad/minga/issues/2075) introduced the second dependency map inside the agent platform. The top-level namespace rule still applies: `MingaAgent.*` must not depend on `MingaEditor.*`. The internal rule answers a more specific question: when provider, tool, MCP, and UI integrations become optional packs, which agent modules are safe to import from which other agent modules?
 
 Dependencies flow downward only:
 
