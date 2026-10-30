@@ -213,18 +213,27 @@ class MacOSUnitResultsTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 native.validate_hosted_plan(plan, products)
 
-    def test_relocated_replay_plan_binds_original_root_and_replaces_policy_filters(self):
+    def test_relocated_focus_plans_preserve_launch_metadata_and_replace_only_target_filters(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "replay.xctestrun"
             products = Path("/original/Products")
-            native.pin_replay_plan(hosted_plan(), products, output)
-            plan = plistlib.loads(output.read_bytes())
-            native.validate_hosted_plan(plan, products)
-            target = native.plan_target(plan)
-            self.assertEqual(target["OnlyTestIdentifiers"], [native.REPLAY])
-            self.assertNotIn("SkipTestIdentifiers", target)
-            self.assertTrue(target["TestHostPath"].startswith(str(products)))
-            self.assertEqual(target["DependentProductPaths"], ["__PLATFORMS__/MacOSX.platform"])
+            original = hosted_plan()
+            original["SkipTestIdentifiers"] = ["unrelated metadata"]
+            policy_path = Path(directory) / "policy.xctestrun"
+            policy = native.pin_focus_plan(original, products, policy_path, native.POLICY)
+            replay_path = Path(directory) / "replay.xctestrun"
+            native.pin_focus_plan(policy, products, replay_path, native.REPLAY)
+            for path, suite in ((policy_path, native.POLICY), (replay_path, native.REPLAY)):
+                plan = plistlib.loads(path.read_bytes())
+                native.validate_hosted_plan(plan, products)
+                target = native.plan_target(plan)
+                self.assertEqual(target["OnlyTestIdentifiers"], [suite])
+                self.assertNotIn("SkipTestIdentifiers", target)
+                self.assertEqual(plan["SkipTestIdentifiers"], original["SkipTestIdentifiers"])
+                self.assertTrue(target["TestHostPath"].startswith(str(products)))
+                self.assertEqual(target["DependentProductPaths"], ["__PLATFORMS__/MacOSX.platform"])
+                self.assertEqual(target["EnvironmentVariables"], {"MINGA_TEST_PRODUCTION_APP_PATH": str(products / "Debug/Minga.app")})
+            self.assertEqual(native.plan_target(policy)["OnlyTestIdentifiers"], [native.POLICY])
+            self.assertEqual(native.plan_target(original)["SkipTestIdentifiers"], [native.REPLAY])
 
     def test_probe_failures_retain_causes_instead_of_becoming_missing_target_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -120,7 +120,7 @@ def validate_action(name, summary, tests, log, exit_code):
     return errors, pids
 
 
-def validate_execution_identity(settings, log, products, hosted):
+def validate_build_identity(settings, products, hosted):
     targets = [item.get("buildSettings", {}) for item in settings if item.get("target") == "MingaTests"] if isinstance(settings, list) else []
     if len(targets) != 1:
         return ["Missing unique MingaTests build-settings identity"]
@@ -135,6 +135,12 @@ def validate_execution_identity(settings, log, products, hosted):
         errors.append(f"Wrong actual test-bundle placement: {actual_bundle}; expected {bundle}")
     if not bundle.is_dir() or (hosted and not host.is_file()):
         errors.append("Expected bare/hosted test product is missing from the observed build location")
+    return errors
+
+
+def validate_execution_identity(settings, log, products, hosted):
+    errors = validate_build_identity(settings, products, hosted)
+    host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
     host_pids = set(re.findall(r"\[MingaTestHost\] didFinishLaunching pid=(\d+)", log))
     scope_pids = set(re.findall(r"\[Focus application .+?\] startup pid=(\d+)\b", log))
     if hosted:
@@ -183,9 +189,9 @@ def validate_hosted_plan(plan, products):
         raise ValueError("Plan has missing or wrong production-app environment")
 
 
-def select_hosted_plan(before, after, products, policy_success):
-    if not policy_success:
-        raise ValueError("Replay dependency failed: current policy action did not pass")
+def select_hosted_plan(before, after, products, build_success):
+    if not build_success:
+        raise ValueError("Focus dependency failed: current hosted build did not pass")
     matches, rejected = [], []
     for source, receipt in after.items():
         name = Path(source).name
@@ -204,7 +210,7 @@ def select_hosted_plan(before, after, products, policy_success):
     return matches[0]
 
 
-def pin_replay_plan(plan, products, destination):
+def pin_focus_plan(plan, products, destination, suite):
     # Bind only the relocation-sensitive root, retaining Xcode's other placeholders.
     def bind(value):
         if isinstance(value, str):
@@ -212,16 +218,19 @@ def pin_replay_plan(plan, products, destination):
         if isinstance(value, list):
             return [bind(child) for child in value]
         if isinstance(value, dict):
-            return {key: bind(child) for key, child in value.items() if key != "SkipTestIdentifiers"}
+            return {key: bind(child) for key, child in value.items()}
         return value
     pinned = bind(plan)
-    plan_target(pinned)["OnlyTestIdentifiers"] = [REPLAY]
+    target = plan_target(pinned)
+    target.pop("SkipTestIdentifiers", None)
+    target["OnlyTestIdentifiers"] = [suite]
     with destination.open("wb") as stream:
         plistlib.dump(pinned, stream)
+    return pinned
 
 
 def capture_build_settings(common, overrides, destination, cwd):
-    command = ["xcodebuild", *common, *overrides, "-showBuildSettings", "-json"]
+    command = ["xcodebuild", "build-for-testing", *common, *overrides, "-destination", "platform=macOS", "-showBuildSettings", "-json"]
     stderr = destination.with_suffix(".log")
     probe = {"command": command, "stdout": str(destination), "stderr": str(stderr), "exit_code": None, "error": None}
     with destination.open("w") as output, stderr.open("w") as errors:
@@ -241,6 +250,45 @@ def capture_build_settings(common, overrides, destination, cwd):
         probe["error"] = f"Could not read/decode build-settings probe JSON: {error}"
         return probe, None
     return probe, value
+
+
+def prepare_hosted_policy(common, products, run, cwd):
+    before = snapshot_plans(products, run / "policy-plans-before")
+    command = ["xcodebuild", "build-for-testing", *common, "-destination", "platform=macOS"]
+    log = run / "focus-policy.build.log"
+    execution_error = None
+    with log.open("w") as stream:
+        try:
+            exit_code = subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT, check=False).returncode
+        except OSError as error:
+            execution_error = str(error)
+            stream.write(execution_error + "\n")
+            exit_code = 127
+    after = snapshot_plans(products, run / "policy-plans-after")
+    settings_path = run / "focus-policy.build-settings.json"
+    probe, settings = capture_build_settings(common, [], settings_path, cwd)
+    receipt = {
+        "build": {"command": command, "log": str(log.relative_to(run.parent)), "executed": True, "exit_code": exit_code, "execution_error": execution_error},
+        "settings": str(settings_path.relative_to(run.parent)), "settings_command": probe["command"], "settings_probe": probe,
+        "plans_before": str((run / "policy-plans-before/receipts.json").relative_to(run.parent)),
+        "plans_after": str((run / "policy-plans-after/receipts.json").relative_to(run.parent)),
+    }
+    errors = validate_build_identity(settings, products, True)
+    if exit_code != 0:
+        errors.append(f"Hosted policy build exited {exit_code}; log={log}")
+    if probe["error"]:
+        errors.append(f"focus-policy: {probe['error']}; JSON={probe['stdout']}; stderr={probe['stderr']}")
+    policy_plan = None
+    try:
+        source, plan = select_hosted_plan(before, after, products, exit_code == 0)
+        receipt["source_plan"] = source
+        if not errors:
+            path = run / "focus-policy.xctestrun"
+            policy_plan = pin_focus_plan(plan, products, path, POLICY)
+            receipt["policy_plan"] = str(path.relative_to(run.parent))
+    except (ValueError, OSError) as error:
+        errors.append(str(error))
+    return settings, receipt, errors, policy_plan
 
 
 def extract_result(bundle, kind, destination):
@@ -287,7 +335,7 @@ def main():
     # Three actions, never three selectors in one runner: Swift Testing's per-suite .serialized trait does not serialize unrelated suites.
     selections = [
         ("ordinary", "test", ["-only-testing:MingaTests", f"-skip-testing:MingaTests/{POLICY}", f"-skip-testing:MingaTests/{REPLAY}"]),
-        ("focus-policy", "test", [f"-only-testing:MingaTests/{POLICY}"]),
+        ("focus-policy", "test-without-building", [f"-only-testing:MingaTests/{POLICY}"]),
         ("focus-replay", "test-without-building", [f"-only-testing:MingaTests/{REPLAY}"]),
     ]
     started = time.monotonic()
@@ -295,6 +343,7 @@ def main():
     products = root / "macos/DerivedData/Build/Products"
     pinned_plan = run / "focus-replay.xctestrun"
     hosted_settings, hosted_receipt = None, {}
+    policy_plan = None
     save_results(output, actions, started)
     try:
         for name, operation, selectors in selections:
@@ -302,14 +351,26 @@ def main():
             log = run / f"{name}.log"
             overrides = ["TEST_HOST=", "BUNDLE_LOADER="] if name == "ordinary" else []
             command = ["xcodebuild", operation, *common, *overrides, *selectors, "-resultBundlePath", str(bundle)]
-            if name == "focus-replay":
-                command = ["xcodebuild", operation, "-xctestrun", str(pinned_plan), "-destination", "platform=macOS", *selectors, "-resultBundlePath", str(bundle)]
-            before = snapshot_plans(products, run / "policy-plans-before") if name == "focus-policy" else {}
+            if name != "ordinary":
+                input_plan = run / f"{name}.xctestrun"
+                command = ["xcodebuild", operation, "-xctestrun", str(input_plan), "-destination", "platform=macOS", *selectors, "-resultBundlePath", str(bundle)]
             action_started = time.monotonic()
-            executed = name != "focus-replay" or (actions[1]["success"] and pinned_plan.is_file())
+            receipt = dict(hosted_receipt) if name == "focus-replay" else {}
+            preparation_errors = []
+            if name == "focus-policy":
+                hosted_settings, receipt, preparation_errors, policy_plan = prepare_hosted_policy(common, products, run, root / "macos")
+            executed = name == "ordinary" or (name == "focus-policy" and not preparation_errors) or (name == "focus-replay" and actions[1]["success"] and pinned_plan.is_file())
+            action = {
+                "name": name, "command": command, "exit_code": 125, "seconds": 0,
+                "summary": None, "tests": None, "log": str(log.relative_to(output)),
+                "result_bundle": str(bundle.relative_to(output)), "validation_errors": preparation_errors,
+                "test_process_ids": [], "success": False, "executed": False, "execution_identity": receipt,
+            }
+            actions.append(action)
+            save_results(output, actions, started)
             with log.open("w") as stream:
                 if not executed:
-                    stream.write("Replay dependency failed: no verified current successful hosted policy build\n")
+                    stream.write(f"{name} dependency failed: no verified current successful hosted {'build' if name == 'focus-policy' else 'policy execution'}\n")
                     exit_code = 125
                 else:
                     try:
@@ -320,10 +381,10 @@ def main():
             summary = extract_result(bundle, "summary", run / f"{name}.summary.json") if bundle.is_dir() else None
             tests = extract_result(bundle, "tests", run / f"{name}.tests.json") if bundle.is_dir() else None
             errors, pids = validate_action(name, summary, tests, log.read_text(errors="replace"), exit_code)
+            errors = preparation_errors + errors
             if not executed:
-                errors.append("Replay dependency failed: no verified current successful hosted policy build")
-            receipt = dict(hosted_receipt) if name == "focus-replay" else {}
-            if name != "focus-replay":
+                errors.append(f"{name} dependency failed: no verified current successful hosted {'build' if name == 'focus-policy' else 'policy execution'}")
+            if name == "ordinary":
                 settings_path = run / f"{name}.build-settings.json"
                 probe, settings = capture_build_settings(common, overrides, settings_path, root / "macos")
                 receipt.update({"settings": str(settings_path.relative_to(output)), "settings_command": probe["command"], "settings_probe": probe})
@@ -333,26 +394,21 @@ def main():
                 settings = hosted_settings
             errors.extend(validate_execution_identity(settings, log.read_text(errors="replace"), products, name != "ordinary"))
             if name == "focus-policy":
-                after = snapshot_plans(products, run / "policy-plans-after")
-                receipt.update({"plans_before": str((run / "policy-plans-before/receipts.json").relative_to(output)), "plans_after": str((run / "policy-plans-after/receipts.json").relative_to(output))})
-                try:
-                    source, plan = select_hosted_plan(before, after, products, not errors)
-                    pin_replay_plan(plan, products, pinned_plan)
-                    receipt.update({"source_plan": source, "replay_plan": str(pinned_plan.relative_to(output))})
-                except (ValueError, OSError) as error:
-                    errors.append(str(error))
-                hosted_settings, hosted_receipt = settings, receipt
+                if not errors:
+                    try:
+                        pin_focus_plan(policy_plan, products, pinned_plan, REPLAY)
+                        receipt["replay_plan"] = str(pinned_plan.relative_to(output))
+                    except (ValueError, OSError) as error:
+                        errors.append(f"Could not pin replay from the accepted policy input: {error}")
+                hosted_receipt = receipt
             if not bundle.is_dir():
                 errors.append("No xcresult bundle was produced; inspect the retained test log")
-            action = {
-                "name": name, "command": command, "exit_code": exit_code,
-                "seconds": time.monotonic() - action_started,
+            action.update({
+                "exit_code": exit_code, "seconds": time.monotonic() - action_started,
                 "summary": summary, "tests": tests,
-                "log": str(log.relative_to(output)), "result_bundle": str(bundle.relative_to(output)),
                 "validation_errors": errors, "test_process_ids": pids, "success": not errors,
-                "executed": executed, "execution_identity": receipt,
-            }
-            actions.append(action)
+                "executed": executed,
+            })
             if name == "focus-replay":
                 policy_pids = actions[1]["test_process_ids"]
                 if pids and set(pids) & set(policy_pids):

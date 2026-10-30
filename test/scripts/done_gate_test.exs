@@ -252,6 +252,26 @@ defmodule Minga.DoneGateTest do
     refute output =~ "NOISY"
   end
 
+  test "a failed hosted build leaves both focused runners unexecuted", ctx do
+    install_swift!(ctx.dir)
+    write!(ctx.dir, "macos/project.yml", "changed\n")
+    {_output, 1} = gate(ctx, [{"HOSTED_BUILD_EXIT", "65"}])
+    evidence = native_results(ctx.dir)
+    [ordinary, policy, replay] = evidence["actions"]
+    assert ordinary["success"]
+    assert policy["execution_identity"]["build"]["exit_code"] == 65
+
+    for action <- [policy, replay] do
+      refute action["success"]
+      refute action["executed"]
+      assert action["exit_code"] == 125
+      assert action["summary"] == nil
+      assert action["tests"] == nil
+    end
+
+    refute evidence["success"]
+  end
+
   defp install_swift!(dir) do
     executable!(dir, "xcodebuild", ~S"""
     python3 - "$@" <<'PY'
@@ -262,6 +282,9 @@ defmodule Minga.DoneGateTest do
     host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
     bare = "TEST_HOST=" in args
     if "-showBuildSettings" in args:
+        if "build-for-testing" not in args:
+            print(json.dumps([{"target":"Minga","action":"build","buildSettings":{}}]))
+            sys.exit(0)
         bundle = products / ("Debug/MingaTests.xctest" if bare else "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
         print(json.dumps([{"target":"MingaTests","buildSettings":{"TEST_HOST":"" if bare else str(host),"BUNDLE_LOADER":"" if bare else str(host),"TARGET_BUILD_DIR":str(bundle.parent),"FULL_PRODUCT_NAME":bundle.name}}]))
         sys.exit(0)
@@ -270,6 +293,12 @@ defmodule Minga.DoneGateTest do
     if not bare:
         host.parent.mkdir(parents=True, exist_ok=True)
         host.touch()
+    if "build-for-testing" in args:
+        status = int(os.environ.get("HOSTED_BUILD_EXIT", "0"))
+        if status == 0:
+            target = {"BlueprintName":"MingaTests","TestHostPath":"__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost","TestBundlePath":"__TESTHOST__/Contents/PlugIns/MingaTests.xctest","EnvironmentVariables":{"MINGA_TEST_PRODUCTION_APP_PATH":"__TESTROOT__/Debug/Minga.app"}}
+            (products / "MingaUnitTests_macosx.xctestrun").write_bytes(plistlib.dumps({"TestConfigurations":[{"TestTargets":[target]}]}))
+        sys.exit(status)
     print("NOISY TEST OUTPUT")
     policy = "-only-testing:MingaTests/EditorFocusPolicyTests" in args
     if bare:
@@ -281,10 +310,6 @@ defmodule Minga.DoneGateTest do
     if os.environ.get("NO_RESULT", "0") == "0":
         Path(args[args.index("-resultBundlePath") + 1]).mkdir(parents=True)
     status = int(os.environ.get("SWIFT_EXIT", "0"))
-    if policy and status == 0:
-        products.mkdir(parents=True, exist_ok=True)
-        target = {"BlueprintName":"MingaTests","TestHostPath":"__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost","TestBundlePath":"__TESTHOST__/Contents/PlugIns/MingaTests.xctest","EnvironmentVariables":{"MINGA_TEST_PRODUCTION_APP_PATH":"__TESTROOT__/Debug/Minga.app"},"OnlyTestIdentifiers":["EditorFocusPolicyTests"]}
-        (products / "MingaUnitTests_macosx.xctestrun").write_bytes(plistlib.dumps({"TestConfigurations":[{"TestTargets":[target]}]}))
     sys.exit(status)
     PY
     """)
