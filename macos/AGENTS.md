@@ -256,9 +256,17 @@ scripts/test_macos_unit
 ```
 
 Run the native unit entrypoint from the repository root after generating the Xcode project.
-It uses scheme `MingaUnitTests`, hosting the existing `MingaTests` bundle in the test-only `MingaTestHost` application.
+The `MingaUnitTests` scheme builds the existing `MingaTests` target for two execution contexts.
+The canonical script first runs ordinary tests bare with explicit empty `TEST_HOST` and `BUNDLE_LOADER` build settings.
+It then uses explicit hosted `build-for-testing` to restore/relink products and produce a fresh `.xctestrun`.
+Verify the testing-graph settings and plan before running all 13 policy functions with `test-without-building` from a pinned policy copy.
+Only accepted policy execution authorizes production-window focus replay in a separate process from a replay copy of that same input, with its original product root bound and suite selectors explicit.
 The host owns AppKit launch and its normal event loop, never production startup or responder policy.
-The three sequential actions isolate ordinary tests, focus-policy tests, and production-window focus replay in separate processes.
+Query settings with `build-for-testing -showBuildSettings -json`, not the default build graph that omits testing-only targets.
+For this scheme, require the observed format-1 top-level `MingaTests` plan and application-bundle `TestHostPath`; do not infer the plan host path from the executable-valued build setting.
+Require resolved product/loader settings and actual runtime identity, not merely requested flags.
+Keep the hosted build receipt and raw pre/post plan receipts; failed builds and missing, ambiguous, stale, or wrong-mode plans leave dependent runners explicitly unexecuted.
+Preserve aggregate failure when ordinary tests fail, even if later focused diagnostics pass.
 Keep production `Minga.app` out of `TEST_HOST` and preserve its deep-codesigning safeguard.
 Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
 Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
