@@ -5,27 +5,35 @@ import Testing
 /// Run these tests with exclusive presentation ownership; suite-local serialization does not exclude other suites.
 @MainActor
 final class FocusTestApplicationScope {
-    private static var launchCompletionRequested = false
-
     private let label: String
-    private let previousPolicy: NSApplication.ActivationPolicy
+    private let initialPolicy: NSApplication.ActivationPolicy
     private let previousFrontmost: NSRunningApplication?
     private weak var previousKeyWindow: NSWindow?
     private let initiallyActive: Bool
     private let initiallyFinishedLaunching: Bool
-    private var policyAccepted = false
-    private var requestedLaunchCompletion = false
     private var notifications: [String] = []
     private var observationTasks: [Task<Void, Never>] = []
 
-    init(_ label: String) throws {
+    init(_ label: String) async throws {
         let app = NSApplication.shared
         self.label = label
-        previousPolicy = app.activationPolicy()
+        initialPolicy = app.activationPolicy()
         previousFrontmost = NSWorkspace.shared.frontmostApplication
         previousKeyWindow = app.keyWindow
         initiallyActive = app.isActive
         initiallyFinishedLaunching = NSRunningApplication.current.isFinishedLaunching
+
+        try #require(Bundle.main.bundleIdentifier == "com.minga.test-host", "Focus tests require MingaTestHost: \(diagnostics)")
+        try #require(Bundle.main.bundleURL.lastPathComponent == "MingaTestHost.app", "Unexpected host bundle: \(diagnostics)")
+        try #require(Bundle.main.executableURL?.lastPathComponent == "MingaTestHost", "Unexpected host executable: \(diagnostics)")
+        // The host owns run() and launch completion; this scope only observes.
+        for _ in 0..<100 {
+            if app.isRunning && NSRunningApplication.current.isFinishedLaunching { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(app.isRunning, "Native host has no application event loop: \(diagnostics)")
+        try #require(NSRunningApplication.current.isFinishedLaunching, "Native host has not finished launching: \(diagnostics)")
+        try #require(app.activationPolicy() == .regular, "Native host must establish regular activation policy: \(diagnostics)")
 
         let names: [Notification.Name] = [
             NSApplication.didFinishLaunchingNotification,
@@ -45,20 +53,6 @@ final class FocusTestApplicationScope {
             }
         }
 
-        // MingaApp establishes this policy in applicationDidFinishLaunching.
-        // Merely constructing NSApplication.shared in xctest does not do so.
-        policyAccepted = app.setActivationPolicy(.regular)
-        if !policyAccepted {
-            close()
-        }
-        try #require(policyAccepted, "AppKit rejected regular activation policy: \(diagnostics)")
-        if !NSRunningApplication.current.isFinishedLaunching && !Self.launchCompletionRequested {
-            Self.launchCompletionRequested = true
-            requestedLaunchCompletion = true
-            app.finishLaunching()
-        }
-        // Launch completion is process-owned and irreversible.
-        // In particular, isRunning describes an event loop, not whether launch has completed.
         app.activate(ignoringOtherApps: true)
         print("[Focus application \(label)] startup \(diagnostics)")
     }
@@ -68,7 +62,7 @@ final class FocusTestApplicationScope {
     }
 
     var diagnostics: String {
-        "pid=\(ProcessInfo.processInfo.processIdentifier) initialPolicy=\(previousPolicy.rawValue) policyAccepted=\(policyAccepted) policy=\(NSApp.activationPolicy().rawValue) initiallyActive=\(initiallyActive) active=\(NSApp.isActive) initiallyFinishedLaunching=\(initiallyFinishedLaunching) requestedLaunchCompletion=\(requestedLaunchCompletion) finishedLaunching=\(NSRunningApplication.current.isFinishedLaunching) isRunning=\(NSApp.isRunning) notifications=\(notifications)"
+        "pid=\(ProcessInfo.processInfo.processIdentifier) host=\(Bundle.main.bundleIdentifier ?? "-") bundle=\(Bundle.main.bundleURL.path) executable=\(Bundle.main.executableURL?.path ?? "-") initialPolicy=\(initialPolicy.rawValue) policy=\(NSApp.activationPolicy().rawValue) initiallyActive=\(initiallyActive) active=\(NSApp.isActive) initiallyFinishedLaunching=\(initiallyFinishedLaunching) finishedLaunching=\(NSRunningApplication.current.isFinishedLaunching) isRunning=\(NSApp.isRunning) notifications=\(notifications)"
     }
 
     /// Observe activation only.
@@ -83,7 +77,7 @@ final class FocusTestApplicationScope {
     }
 
     /// Call after the test's consumer windows have detached and closed.
-    /// Never restore an arbitrary first responder or pretend to undo finishLaunching.
+    /// Never restore arbitrary first responders or alter the host's launch lifecycle.
     func close() {
         print("[Focus application \(label)] teardown \(diagnostics)")
         for task in observationTasks { task.cancel() }
@@ -91,7 +85,6 @@ final class FocusTestApplicationScope {
         if let previousKeyWindow, previousKeyWindow.isVisible {
             previousKeyWindow.makeKeyAndOrderFront(nil)
         }
-        NSApp.setActivationPolicy(previousPolicy)
         if !initiallyActive, let previousFrontmost,
            previousFrontmost.processIdentifier != NSRunningApplication.current.processIdentifier {
             previousFrontmost.activate(options: [])

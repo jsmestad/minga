@@ -75,6 +75,28 @@ def native_control_passes(run, named_case=TARGET):
             and (named_case is None or test_named(run.get("tests"), named_case, "passed")))
 
 
+def paired_passed_runs(before, after):
+    """Count actual parameter executions, not xcresult's logical test functions."""
+    def counter(run):
+        rows = (run.get("summary") or {}).get("devicesAndConfigurations")
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            raise RuntimeError("Expected one native device/configuration execution count")
+        row = rows[0]
+        device = (row.get("device") or {}).get("deviceId")
+        configuration = (row.get("testPlanConfiguration") or {}).get("configurationId")
+        passed = row.get("passedTests")
+        if (not isinstance(device, str) or not device or not isinstance(configuration, str)
+                or not configuration or type(passed) is not int or passed < 1):
+            raise RuntimeError("Missing actual native parameter-run count or destination identity")
+        return (device, configuration), passed
+
+    before_identity, before_count = counter(before)
+    after_identity, after_count = counter(after)
+    if before_identity != after_identity:
+        raise RuntimeError("Paired native runs changed device or test configuration")
+    return after_count - before_count
+
+
 def native_generation_failure(run):
     """A build/launch failure, missing/zero tests, or unrelated issue is inconclusive."""
     summary = run.get("summary") or {}
@@ -155,6 +177,13 @@ def test_targets(value):
     elif isinstance(value, list):
         for child in value:
             yield from test_targets(child)
+
+
+def current_host_plan(value):
+    """Exclude cached bare-xctest plans from the dedicated hosted unit build."""
+    targets = list(test_targets(value))
+    return (len(targets) == 1 and str(targets[0].get("TestHostPath", "")).endswith(
+        "/MingaTestHost.app/Contents/MacOS/MingaTestHost"))
 
 
 def absolute_testroot(value, root):
@@ -351,10 +380,10 @@ def main():
             return
         candidates = []
         for plan in (args.derived_data.resolve() / "Build/Products").glob("*.xctestrun"):
-            if list(test_targets(plistlib.loads(plan.read_bytes()))):
+            if current_host_plan(plistlib.loads(plan.read_bytes())):
                 candidates.append(plan)
         if len(candidates) != 1:
-            raise RuntimeError("Expected one ordinary-unit MingaTests .xctestrun; found " + str(candidates))
+            raise RuntimeError("Expected one hosted MingaUnitTests .xctestrun; found " + str(candidates))
         original = candidates[0]
         evidence["native_build"] = {"xctestrun": str(original), "sha256": sha256(original),
                                     "developer_dir": os.environ.get("DEVELOPER_DIR")}
@@ -373,11 +402,12 @@ def main():
         before_seconds = suite_seconds(log_text(output, before))
         after_seconds = suite_seconds(log_text(output, after))
         added_cases = after["consumed_transcript_count"] - before["consumed_transcript_count"]
-        reported_delta = after["summary"]["passedTests"] - before["summary"]["passedTests"]
+        reported_delta = paired_passed_runs(before, after)
         evidence["native_timing"] = {
             "baseline_transcripts": before["consumed_transcript_count"],
             "candidate_transcripts": after["consumed_transcript_count"],
-            "actual_added_cases": added_cases, "xcresult_passed_tests_delta": reported_delta,
+            "actual_added_cases": added_cases, "xcresult_passed_runs_delta": reported_delta,
+            "xcresult_logical_tests_delta": after["summary"]["passedTests"] - before["summary"]["passedTests"],
             "baseline_generic_suite_seconds": before_seconds,
             "candidate_generic_suite_seconds": after_seconds,
             "generic_suite_increment_seconds": after_seconds - before_seconds,

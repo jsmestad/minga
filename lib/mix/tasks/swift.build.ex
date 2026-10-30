@@ -6,7 +6,8 @@ defmodule Mix.Tasks.Swift.Build do
 
       mix swift.build
 
-  Additional arguments are passed directly to `xcodebuild`, so use `mix swift.build -- -project macos/Minga.xcodeproj -scheme Minga test` when you need a custom action.
+  Additional arguments are passed directly to `xcodebuild`, so use `mix swift.build -- -project macos/Minga.xcodeproj -scheme Minga -configuration Release build` when you need a custom build.
+  Run `scripts/test_macos_unit` for native tests through the dedicated `MingaUnitTests` scheme and AppKit host.
   """
 
   use Mix.Task

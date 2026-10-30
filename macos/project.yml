@@ -13,9 +13,7 @@ settings:
     SWIFT_VERSION: "6.0"
     MINGA_APP_BUNDLE_IDENTIFIER: com.minga.editor
     # NOTE: The Metal toolchain pin (TOOLCHAINS) is intentionally NOT global.
-    # It lives only on the targets that compile Metal (Minga, MingaTests,
-    # PreviewHost) so the Metal-free framework targets (MingaProtocol, MingaUI)
-    # build — and render SwiftUI canvas previews — without the Metal toolchain.
+    # It lives only on the targets that compile Metal (Minga, MingaTestHost, MingaTests, NativeRenderPerformance, PreviewHost) so the Metal-free framework targets can render SwiftUI canvas previews without that toolchain.
 
 packages:
   ViewInspector:
@@ -282,6 +280,23 @@ targets:
           codesign --force --deep --sign - --options runtime --entitlements "${SRCROOT}/Entitlements.plist" "${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}"
         basedOnDependencyAnalysis: false
 
+  MingaTestHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: TestSupport/MingaTestHost/MingaTestHost.swift
+        type: file
+      # Preserve Bundle.main's real default.metallib for existing native tests.
+      - path: Sources/Renderer/CoreTextShaders.metal
+        type: file
+    settings:
+      base:
+        PRODUCT_NAME: MingaTestHost
+        PRODUCT_BUNDLE_IDENTIFIER: com.minga.test-host
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+
   MingaTests:
     type: bundle.unit-test
     platform: macOS
@@ -365,10 +380,13 @@ targets:
       base:
         PRODUCT_NAME: MingaTests
         GENERATE_INFOPLIST_FILE: "YES"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/MingaTestHost.app/Contents/MacOS/MingaTestHost"
+        BUNDLE_LOADER: "$(TEST_HOST)"
         # Compiles Renderer/ Metal sources; needs the Metal toolchain pin.
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MINGA_SNAPSHOT_RENDERER"
     dependencies:
+      - target: MingaTestHost
       - target: MingaProtocol
       - target: MingaUI
       - package: ViewInspector
@@ -594,17 +612,21 @@ targets:
 schemes:
   Minga:
     build:
-      # parallelizeBuild off makes Xcode build in listed order: the app first,
-      # so MingaTests' `@testable import Minga` resolves on a cold checkout
-      # without a target dependency (which would infer TEST_HOST and embed the
-      # xctest into the app, breaking the app's --deep codesign script).
+      targets:
+        Minga: all
+  MingaUnitTests:
+    build:
+      # Build the shipping module and app probes first, without making Minga an application host or embedding tests in its deep-signed product.
       parallelizeBuild: false
       targets:
         Minga: all
+        MingaTestHost: [test]
         MingaTests: [test]
     test:
       targets:
         - MingaTests
+      environmentVariables:
+        MINGA_TEST_PRODUCTION_APP_PATH: "$(BUILT_PRODUCTS_DIR)/Minga.app"
   PreviewHost:
     build:
       targets:

@@ -357,13 +357,15 @@ defmodule MingaAgent.EventLogTest do
   test "blocked writer dies when its EventLog owner is killed" do
     name = unique_name("killed-owner-log")
     log = start_controlled_event_log(name)
-    writer = open_controlled_writer()
+    assert_receive {:event_log_store_open, writer, _path}, @event_timeout
+    writer_ref = Process.monitor(writer)
+    # The reply follows the monitor signal to this writer, before any insert can block.
+    send(writer, {:event_log_store_open_result, :ok})
 
     assert {:queued, _receipt} =
              EventLog.record("session", :session_started, %{sequence: 1}, name)
 
     assert_receive {:event_log_store_insert, ^writer, _record}
-    writer_ref = Process.monitor(writer)
     Process.exit(log, :kill)
 
     assert_receive {:DOWN, ^writer_ref, :process, ^writer, :killed}

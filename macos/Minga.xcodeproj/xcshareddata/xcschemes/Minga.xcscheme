@@ -3,7 +3,7 @@
    LastUpgradeVersion = "1600"
    version = "1.7">
    <BuildAction
-      parallelizeBuildables = "NO"
+      parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
       runPostActionsOnFailure = "NO">
       <BuildActionEntries>
@@ -18,20 +18,6 @@
                BlueprintIdentifier = "D96277718552247F338DD197"
                BuildableName = "Minga.app"
                BlueprintName = "Minga"
-               ReferencedContainer = "container:Minga.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "2734C1C657DD572768745C3F"
-               BuildableName = "MingaTests.xctest"
-               BlueprintName = "MingaTests"
                ReferencedContainer = "container:Minga.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -53,20 +39,7 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "2734C1C657DD572768745C3F"
-               BuildableName = "MingaTests.xctest"
-               BlueprintName = "MingaTests"
-               ReferencedContainer = "container:Minga.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

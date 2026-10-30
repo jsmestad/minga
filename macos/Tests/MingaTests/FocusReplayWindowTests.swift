@@ -22,7 +22,7 @@ struct FocusReplayWindowTests {
 
     @Test("same shared frames establish responder and AX identity", arguments: conformanceSwiftEntries.filter { $0.category == "focus" && $0.go })
     func replay(_ entry: ConformanceIndexEntry) async throws {
-        let application = try FocusTestApplicationScope(entry.name)
+        let application = try await FocusTestApplicationScope(entry.name)
         defer { application.close() }
         var context = try FocusReplayWindowContext()
         defer { context.close() }

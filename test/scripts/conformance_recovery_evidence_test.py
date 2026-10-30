@@ -113,6 +113,20 @@ class RecoveryEvidenceTest(unittest.TestCase):
                 if key not in evidence.WIRE_FIELDS or original["kind"] != "framed":
                     self.assertEqual(step[key], value)
 
+    def test_plan_selection_rejects_cached_bare_and_unrelated_hosts(self):
+        target = {"BlueprintName": "MingaTests", "TestBundlePath": "__TESTROOT__/MingaTests.xctest",
+                  "TestHostPath": "__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"}
+        plan = {"TestConfigurations": [{"TestTargets": [target]}]}
+        self.assertTrue(evidence.current_host_plan(plan))
+        for host in ("", "/Developer/usr/bin/xctest",
+                     "__TESTROOT__/Debug/Minga.app/Contents/MacOS/Minga"):
+            changed = copy.deepcopy(plan)
+            changed["TestConfigurations"][0]["TestTargets"][0]["TestHostPath"] = host
+            with self.subTest(host=host):
+                self.assertFalse(evidence.current_host_plan(changed))
+        plan["TestConfigurations"][0]["TestTargets"].append(copy.deepcopy(target))
+        self.assertFalse(evidence.current_host_plan(plan))
+
     def test_relocated_xctestrun_injects_real_data_paths_and_preserves_binary_paths(self):
         for modern in (False, True):
             with self.subTest(modern=modern), tempfile.TemporaryDirectory() as directory:
@@ -159,6 +173,23 @@ class RecoveryEvidenceTest(unittest.TestCase):
             (receipts / "unselected.json").write_bytes(source.read_bytes())
             with self.assertRaises(RuntimeError):
                 evidence.verify_receipts(root, run, corpus, [entry])
+
+    def test_timing_counts_parameter_runs_not_logical_functions_on_the_same_destination(self):
+        row = {"device": {"deviceId": "native-device"},
+               "testPlanConfiguration": {"configurationId": "1"}, "passedTests": 38}
+        before = {"summary": {"passedTests": 2, "devicesAndConfigurations": [row]}}
+        after = copy.deepcopy(before)
+        after["summary"]["devicesAndConfigurations"][0]["passedTests"] = 44
+        self.assertEqual(evidence.paired_passed_runs(before, after), 6)
+        for rows in (None, [], [row, row], [{"passedTests": 44}]):
+            with self.subTest(rows=rows), self.assertRaises(RuntimeError):
+                evidence.paired_passed_runs(before, {"summary": {"devicesAndConfigurations": rows}})
+        for key in ("device", "testPlanConfiguration"):
+            changed = copy.deepcopy(after)
+            changed["summary"]["devicesAndConfigurations"][0][key] = {
+                "deviceId": "another-device", "configurationId": "2"}
+            with self.subTest(identity=key), self.assertRaises(RuntimeError):
+                evidence.paired_passed_runs(before, changed)
 
     def test_timing_is_completed_suite_time_not_xcode_wall_time(self):
         self.assertEqual(evidence.suite_seconds('✔ Suite "Frontend conformance transcripts" passed after 20.125 seconds.'), 20.125)

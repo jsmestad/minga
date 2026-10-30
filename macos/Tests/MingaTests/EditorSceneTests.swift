@@ -14,8 +14,12 @@ struct EditorSceneTests {
 
     @Test("duplicate editor window requests reuse the existing window")
     @MainActor func duplicateRequestsReuseWindow() async throws {
-        let productsDirectory = Bundle(for: EditorSceneTestBundleMarker.self).bundleURL.deletingLastPathComponent()
-        let applicationURL = productsDirectory.appendingPathComponent("Minga.app")
+        let applicationPath = try #require(ProcessInfo.processInfo.environment["MINGA_TEST_PRODUCTION_APP_PATH"])
+        let applicationURL = URL(fileURLWithPath: applicationPath, isDirectory: true)
+        try #require(applicationURL.lastPathComponent == "Minga.app", "Probe requires the separately built production app")
+        let bundle = try #require(Bundle(url: applicationURL))
+        let executable = try #require(bundle.executableURL)
+        try #require(executable.lastPathComponent == "Minga" && FileManager.default.isExecutableFile(atPath: executable.path))
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("minga-editor-window-\(UUID().uuidString).json")
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
@@ -58,5 +62,3 @@ struct EditorSceneTests {
         #expect(source.contains("applicationShouldTerminateAfterLastWindowClosed"))
     }
 }
-
-private final class EditorSceneTestBundleMarker: NSObject {}

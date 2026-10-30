@@ -268,7 +268,7 @@ defmodule Minga.DoneGateTest do
       *"test-results summary"*)
         case "${@: -1}" in
           *focus-policy.xcresult) echo '{"totalTestCount":1,"passedTests":1,"failedTests":0,"result":"Passed"}' ;;
-          *focus-replay.xcresult) echo '{"totalTestCount":8,"passedTests":8,"failedTests":0,"result":"Passed"}' ;;
+          *focus-replay.xcresult) echo '{"totalTestCount":2,"passedTests":2,"failedTests":0,"result":"Passed"}' ;;
           *)
             if [ "${SWIFT_EXIT:-0}" = 0 ]; then
               echo '{"totalTestCount":2,"passedTests":2,"failedTests":0,"result":"Passed"}'
@@ -281,7 +281,21 @@ defmodule Minga.DoneGateTest do
           *focus-policy.xcresult)
             echo '{"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"EditorFocusPolicyTests","result":"Passed","children":[{"nodeType":"Test Case","nodeIdentifier":"EditorFocusPolicyTests/lifecycleAppliesOnlyDecodedOwner()","result":"Passed"}]}]}' ;;
           *focus-replay.xcresult)
-            echo '{"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"FocusReplayWindowTests","result":"Passed","children":[{"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/corpusIsEnumerated()","result":"Passed"},{"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/replay(_:)","result":"Passed"}]}]}' ;;
+            cat <<'JSON'
+    {"testNodes":[{"nodeType":"Test Suite","nodeIdentifier":"FocusReplayWindowTests","result":"Passed","children":[
+      {"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/corpusIsEnumerated()","result":"Passed"},
+      {"nodeType":"Test Case","nodeIdentifier":"FocusReplayWindowTests/replay(_:)","result":"Passed","children":[
+        {"nodeType":"Arguments","name":"picker_open_close","result":"Passed"},
+        {"nodeType":"Arguments","name":"search_open_close","result":"Passed"},
+        {"nodeType":"Arguments","name":"rename_confirm","result":"Passed"},
+        {"nodeType":"Arguments","name":"rename_cancel","result":"Passed"},
+        {"nodeType":"Arguments","name":"agent_toggle","result":"Passed"},
+        {"nodeType":"Arguments","name":"reattach_keyframe","result":"Passed"},
+        {"nodeType":"Arguments","name":"hover_and_empty","result":"Passed"}
+      ]}
+    ]}]}
+    JSON
+            ;;
           *)
             result=Passed
             if [ "${SWIFT_EXIT:-0}" != 0 ]; then result=Failed; fi

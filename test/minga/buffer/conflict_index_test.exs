@@ -196,6 +196,8 @@ defmodule Minga.Buffer.ConflictIndexTest do
     index = ConflictIndex.new(document)
     document = Document.move_to(document, {line, 0})
     {:edited, next_document, delta} = Operation.insert_at_cursor(document, "x")
+    # Exclude fixture-construction garbage from the edit-complexity measurement.
+    :erlang.garbage_collect()
 
     {:reductions, before_count} = Process.info(self(), :reductions)
     Enum.each(1..50, fn _ -> ConflictIndex.apply_edit(index, next_document, delta) end)

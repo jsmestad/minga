@@ -248,11 +248,20 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 
 ### Testing
 
+Build the shipping application with scheme `Minga`.
+
 ```bash
-cd macos
-xcodebuild build -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
-xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
+(cd macos && xcodebuild build -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO)
+scripts/test_macos_unit
 ```
+
+Run the native unit entrypoint from the repository root after generating the Xcode project.
+It uses scheme `MingaUnitTests`, hosting the existing `MingaTests` bundle in the test-only `MingaTestHost` application.
+The host owns AppKit launch and its normal event loop, never production startup or responder policy.
+The three sequential actions isolate ordinary tests, focus-policy tests, and production-window focus replay in separate processes.
+Keep production `Minga.app` out of `TEST_HOST` and preserve its deep-codesigning safeguard.
+Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
+Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
 
 ### Swift 6 Concurrency Patterns
 
