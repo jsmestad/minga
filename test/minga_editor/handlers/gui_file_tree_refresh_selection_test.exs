@@ -52,7 +52,12 @@ defmodule MingaEditor.Handlers.GuiFileTreeRefreshSelectionTest do
       mutated =
         GuiActionHandler.dispatch(
           state,
-          {:semantic_item_activate, :file_tree, :duplicate, generation, target_path}
+          %MingaEditor.Target{
+            surface: :file_tree,
+            intent: :duplicate,
+            generation: generation,
+            item_id: target_path
+          }
         )
 
       assert File.read!(Path.join(root, "a-target copy.txt")) == "target"

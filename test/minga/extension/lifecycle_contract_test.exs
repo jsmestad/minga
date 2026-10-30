@@ -1570,17 +1570,34 @@ defmodule Minga.Extension.LifecycleContractTest do
       receive do: (:never -> :ok)
     end
 
+    # Deliver the deadline only after the finalizer starts, as for cleanup below.
+    finalizer_timeout_ms = 5_000
+
     finalizer_opts =
       ctx.opts
-      |> Keyword.put(:callback_timeout_ms, 25)
+      |> Keyword.put(:callback_timeout_ms, finalizer_timeout_ms)
       |> Keyword.put(:callbacks, %{editor_effects: blocked_finalizer})
 
     finalizer_stop = Task.async(fn -> stop_extension(ctx, finalizer_name, finalizer_opts) end)
-    assert_receive {:timeout_worker, :finalizer, finalizer_worker}
+    assert_receive {:timeout_worker, :finalizer, finalizer_worker}, finalizer_timeout_ms
     finalizer_ref = Process.monitor(finalizer_worker)
+    authority = instance_pid(ctx, finalizer_name)
+
+    assert {:stopping,
+            %{
+              worker: %Worker{
+                id: finalizer_worker_id,
+                kind: {:finalizer, :editor_effects},
+                pid: ^finalizer_worker
+              }
+            }} =
+             Instance.phase(authority)
+
+    send(authority, {Worker, :timeout, finalizer_worker_id, {:finalizer, :editor_effects}})
 
     assert {:error,
-            {:source_quiesce_failed, {:transition_timeout, {:finalizer, :editor_effects}, 25}}} =
+            {:source_quiesce_failed,
+             {:transition_timeout, {:finalizer, :editor_effects}, ^finalizer_timeout_ms}}} =
              Task.await(finalizer_stop)
 
     assert_receive {:DOWN, ^finalizer_ref, :process, ^finalizer_worker, :killed}

@@ -41,13 +41,31 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     test "decodes exact source identity for each local presentation surface" do
       opcode = Minga.Protocol.Opcodes.gui_action_semantic_item_activate()
 
-      assert {:ok, {:semantic_item_activate, :completion, :accept, 7, "completion-2"}} ==
+      assert {:ok,
+              %MingaEditor.Target{
+                surface: :completion,
+                intent: :accept,
+                generation: 7,
+                item_id: "completion-2"
+              }} ==
                ProtocolGUI.decode_gui_action(opcode, <<1, 1, 7::32, 12::16, "completion-2">>)
 
-      assert {:ok, {:semantic_item_activate, :picker, :activate_action, 8, <<42::32>>}} ==
+      assert {:ok,
+              %MingaEditor.Target{
+                surface: :picker,
+                intent: :activate_action,
+                generation: 8,
+                item_id: <<42::32>>
+              }} ==
                ProtocolGUI.decode_gui_action(opcode, <<2, 2, 8::32, 4::16, 42::32>>)
 
-      assert {:ok, {:semantic_item_activate, :file_tree, :rename, 9, "row-id"}} ==
+      assert {:ok,
+              %MingaEditor.Target{
+                surface: :file_tree,
+                intent: :rename,
+                generation: 9,
+                item_id: "row-id"
+              }} ==
                ProtocolGUI.decode_gui_action(opcode, <<3, 5, 9::32, 6::16, "row-id">>)
 
       for {surface, intent, name, operation, id} <- [
@@ -56,7 +74,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
             {4, 1, :command_completion, :accept, "write"},
             {5, 1, :timeline, :navigate, "entry-id"}
           ] do
-        assert {:ok, {:semantic_item_activate, name, operation, 10, id}} ==
+        assert {:ok,
+                %MingaEditor.Target{surface: name, intent: operation, generation: 10, item_id: id}} ==
                  ProtocolGUI.decode_gui_action(
                    opcode,
                    <<surface, intent, 10::32, byte_size(id)::16, id::binary>>

@@ -55,23 +55,56 @@ defmodule MingaEditor.TargetTest do
       {tabs, {:tab, 17}, {:tab, tab}},
       {state, {:window, 1, window.accessibility_generation}, {:window, window}},
       {completions,
-       {:surface_item, :completion, CompletionPayload.presentation_generation(payload),
-        CompletionItem.wire_id(item)}, {:completion, completion}},
-      {pickers, {:surface_item, :picker, picker_generation, <<picker_id::32>>},
-       {:picker_item, picker_generation, picker_id}},
-      {pickers, {:surface_item, :picker, picker_generation, <<action_id::32>>},
-       {:picker_action, picker_generation, action_id}},
-      {trees, {:surface_item, :file_tree, file_tree.presentation_generation, entry.path},
-       {:file_tree, tree, entry}},
-      {trees, {:surface_item, :file_tree, file_tree.presentation_generation, ""},
-       {:file_tree, tree, nil}},
+       %MingaEditor.Target{
+         surface: :completion,
+         intent: :resolve,
+         generation: CompletionPayload.presentation_generation(payload),
+         item_id: CompletionItem.wire_id(item)
+       }, {:completion, completion}},
+      {pickers,
+       %MingaEditor.Target{
+         surface: :picker,
+         intent: :resolve,
+         generation: picker_generation,
+         item_id: <<picker_id::32>>
+       }, {:picker_item, picker_generation, picker_id}},
+      {pickers,
+       %MingaEditor.Target{
+         surface: :picker,
+         intent: :resolve,
+         generation: picker_generation,
+         item_id: <<action_id::32>>
+       }, {:picker_action, picker_generation, action_id}},
+      {trees,
+       %MingaEditor.Target{
+         surface: :file_tree,
+         intent: :resolve,
+         generation: file_tree.presentation_generation,
+         item_id: entry.path
+       }, {:file_tree, tree, entry}},
+      {trees,
+       %MingaEditor.Target{
+         surface: :file_tree,
+         intent: :resolve,
+         generation: file_tree.presentation_generation,
+         item_id: ""
+       }, {:file_tree, tree, nil}},
       {commands,
-       {:surface_item, :command_completion, command_payload.generation, candidate.label},
-       {:command_completion, candidate.label}},
+       %MingaEditor.Target{
+         surface: :command_completion,
+         intent: :resolve,
+         generation: command_payload.generation,
+         item_id: candidate.label
+       }, {:command_completion, candidate.label}},
       {timelines, {:timeline_entry, timeline.generation, timeline_id},
        {:timeline_entry, "/project/named.ex", timeline_entry}},
-      {timelines, {:surface_item, :timeline, timeline.generation, timeline_id},
-       {:timeline_entry, "/project/named.ex", timeline_entry}}
+      {timelines,
+       %MingaEditor.Target{
+         surface: :timeline,
+         intent: :resolve,
+         generation: timeline.generation,
+         item_id: timeline_id
+       }, {:timeline_entry, "/project/named.ex", timeline_entry}}
     ]
 
     for {snapshot, target, expected} <- cases do
@@ -106,31 +139,89 @@ defmodule MingaEditor.TargetTest do
       {state, {:window, 999, 1}, :not_found},
       {state, {:window, 1, window.accessibility_generation + 1}, :stale_generation},
       {mismatched_window, {:window, 1, window.accessibility_generation}, :target_mismatch},
-      {completions, {:surface_item, :completion, completion_generation, "missing"}, :not_found},
       {completions,
-       {:surface_item, :completion, completion_generation + 1, CompletionItem.wire_id(item)},
-       :stale_generation},
-      {pickers, {:surface_item, :completion, completion_generation, CompletionItem.wire_id(item)},
-       :target_mismatch},
-      {pickers, {:surface_item, :picker, picker_generation, <<0::32>>}, :not_found},
-      {pickers, {:surface_item, :picker, picker_generation + 1, <<picker_id::32>>},
-       :stale_generation},
-      {pickers, {:surface_item, :picker, picker_generation, "invalid"}, :target_mismatch},
-      {trees, {:surface_item, :file_tree, file_tree.presentation_generation, "missing"},
-       :not_found},
-      {trees, {:surface_item, :file_tree, file_tree.presentation_generation + 1, ""},
-       :stale_generation},
-      {commands, {:surface_item, :command_completion, command_payload.generation, "missing"},
-       :not_found},
+       %MingaEditor.Target{
+         surface: :completion,
+         intent: :resolve,
+         generation: completion_generation,
+         item_id: "missing"
+       }, :not_found},
+      {completions,
+       %MingaEditor.Target{
+         surface: :completion,
+         intent: :resolve,
+         generation: completion_generation + 1,
+         item_id: CompletionItem.wire_id(item)
+       }, :stale_generation},
+      {pickers,
+       %MingaEditor.Target{
+         surface: :completion,
+         intent: :resolve,
+         generation: completion_generation,
+         item_id: CompletionItem.wire_id(item)
+       }, :target_mismatch},
+      {pickers,
+       %MingaEditor.Target{
+         surface: :picker,
+         intent: :resolve,
+         generation: picker_generation,
+         item_id: <<0::32>>
+       }, :not_found},
+      {pickers,
+       %MingaEditor.Target{
+         surface: :picker,
+         intent: :resolve,
+         generation: picker_generation + 1,
+         item_id: <<picker_id::32>>
+       }, :stale_generation},
+      {pickers,
+       %MingaEditor.Target{
+         surface: :picker,
+         intent: :resolve,
+         generation: picker_generation,
+         item_id: "invalid"
+       }, :target_mismatch},
+      {trees,
+       %MingaEditor.Target{
+         surface: :file_tree,
+         intent: :resolve,
+         generation: file_tree.presentation_generation,
+         item_id: "missing"
+       }, :not_found},
+      {trees,
+       %MingaEditor.Target{
+         surface: :file_tree,
+         intent: :resolve,
+         generation: file_tree.presentation_generation + 1,
+         item_id: ""
+       }, :stale_generation},
       {commands,
-       {:surface_item, :command_completion, command_payload.generation + 1, candidate.label},
-       :stale_generation},
-      {state, {:surface_item, :command_completion, command_payload.generation, candidate.label},
-       :target_mismatch},
+       %MingaEditor.Target{
+         surface: :command_completion,
+         intent: :resolve,
+         generation: command_payload.generation,
+         item_id: "missing"
+       }, :not_found},
+      {commands,
+       %MingaEditor.Target{
+         surface: :command_completion,
+         intent: :resolve,
+         generation: command_payload.generation + 1,
+         item_id: candidate.label
+       }, :stale_generation},
+      {state,
+       %MingaEditor.Target{
+         surface: :command_completion,
+         intent: :resolve,
+         generation: command_payload.generation,
+         item_id: candidate.label
+       }, :target_mismatch},
       {timelines, {:timeline_entry, timeline.generation, "missing"}, :not_found},
       {timelines, {:timeline_entry, timeline.generation + 1, timeline_id}, :stale_generation},
       {timelines, {:timeline_entry, timeline.generation, nil}, :target_mismatch},
-      {state, {:surface_item, :unknown, 1, "named"}, :target_mismatch}
+      {state,
+       %MingaEditor.Target{surface: :unknown, intent: :resolve, generation: 1, item_id: "named"},
+       :target_mismatch}
     ]
 
     for {snapshot, target, reason} <- cases do
@@ -147,7 +238,12 @@ defmodule MingaEditor.TargetTest do
     retired = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
 
     for id <- [item_id, action_id] do
-      assert Target.resolve(retired, {:surface_item, :picker, generation, <<id::32>>}) ==
+      assert Target.resolve(retired, %MingaEditor.Target{
+               surface: :picker,
+               intent: :resolve,
+               generation: generation,
+               item_id: <<id::32>>
+             }) ==
                {:error, :not_found}
     end
   end
@@ -164,7 +260,12 @@ defmodule MingaEditor.TargetTest do
 
     assert Target.resolve(
              changed,
-             {:surface_item, :command_completion, payload.generation, candidate.label}
+             %MingaEditor.Target{
+               surface: :command_completion,
+               intent: :resolve,
+               generation: payload.generation,
+               item_id: candidate.label
+             }
            ) ==
              {:error, :stale_generation}
   end
