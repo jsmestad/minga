@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Native single-line search editor that preserves AppKit marked text until IME commit.
 struct SearchQueryField: NSViewRepresentable {
+    @Environment(\.editorFocusPolicy) private var focusPolicy
     enum Action: Equatable, Sendable {
         case query(sessionID: UInt32, editSequence: UInt32, query: String, flags: UInt8)
         case previous
@@ -34,8 +35,7 @@ struct SearchQueryField: NSViewRepresentable {
         field.cell?.wraps = false
         context.coordinator.apply(style: style, to: field)
         context.coordinator.reconcile(field: field, query: searchState.query)
-        context.coordinator.sessionID = searchState.sessionID
-        context.coordinator.focus(field)
+        context.coordinator.reconcileFocusPolicy(focusPolicy, field: field)
         return field
     }
 
@@ -46,14 +46,13 @@ struct SearchQueryField: NSViewRepresentable {
         context.coordinator.apply(style: style, to: field)
         context.coordinator.reconcile(field: field, query: searchState.query)
 
-        if context.coordinator.sessionID != searchState.sessionID {
-            context.coordinator.sessionID = searchState.sessionID
-            context.coordinator.focus(field)
-        }
+        context.coordinator.reconcileFocusPolicy(focusPolicy, field: field)
     }
 
     static func dismantleNSView(_ field: SearchNSTextField, coordinator: Coordinator) {
+        coordinator.focusPolicy?.unregister(field, as: .searchQuery)
         field.window?.endEditing(for: field)
+        coordinator.focusPolicy?.nativeTextEditingDidEnd()
     }
 
     @MainActor
@@ -61,7 +60,7 @@ struct SearchQueryField: NSViewRepresentable {
         let searchState: SearchState
         var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle
-        var sessionID: UInt32 = 0
+        weak var focusPolicy: (any EditorFocusControlling)?
         private var applyingAuthoritativeText = false
 
         init(searchState: SearchState, sendAction: ViewActionHandler<Action>?, style: InlineEditFieldStyle) {
@@ -70,11 +69,11 @@ struct SearchQueryField: NSViewRepresentable {
             self.style = style
         }
 
-        func focus(_ field: NSTextField) {
-            DispatchQueue.main.async { [weak field] in
-                guard let field, let window = field.window else { return }
-                window.makeFirstResponder(field)
-            }
+        func reconcileFocusPolicy(_ policy: (any EditorFocusControlling)?, field: NSTextField) {
+            guard focusPolicy !== policy else { return }
+            focusPolicy?.unregister(field, as: .searchQuery)
+            focusPolicy = policy
+            policy?.register(field, as: .searchQuery)
         }
 
         func reconcile(field: NSTextField, query: String) {
@@ -100,6 +99,10 @@ struct SearchQueryField: NSViewRepresentable {
         func controlTextDidBeginEditing(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             apply(style: style, to: field)
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            focusPolicy?.nativeTextEditingDidEnd()
         }
 
         func controlTextDidChange(_ notification: Notification) {

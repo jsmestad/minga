@@ -20,6 +20,7 @@ public struct WorkspaceIndicatorView: View {
     public let presentationRevision: UInt64
     public let owner: TabBarState
     @Environment(\.themeColors) private var theme
+    @Environment(\.editorFocusPolicy) private var focusPolicy
     public let sendAction: ViewActionHandler<Action>?
     public let barHeight: CGFloat
 
@@ -70,11 +71,18 @@ public struct WorkspaceIndicatorView: View {
                     }
                     .onExitCommand {
                         isRenaming = false
+                        focusPolicy?.endLocalTextEditing(.workspaceRename(workspace.id))
                     }
                     .onChange(of: renameFieldFocused) { _, focused in
                         if !focused {
                             commitRename()
                         }
+                    }
+                    .onChange(of: focusPolicy?.focusOwnerState.localTextEditing, initial: true) { _, editing in
+                        renameFieldFocused = editing == .workspaceRename(workspace.id)
+                    }
+                    .onDisappear {
+                        focusPolicy?.endLocalTextEditing(.workspaceRename(workspace.id))
                     }
             } else {
                 Text(workspace.label)
@@ -136,6 +144,7 @@ public struct WorkspaceIndicatorView: View {
     private func commitRename() {
         guard isRenaming else { return }
         isRenaming = false
+        focusPolicy?.endLocalTextEditing(.workspaceRename(workspace.id))
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != workspace.label else { return }
         performTargetedAction(.rename(trimmed))
@@ -154,7 +163,7 @@ public struct WorkspaceIndicatorView: View {
         guard targetIsCurrent else { return }
         renameText = workspace.label
         isRenaming = true
-        DispatchQueue.main.async { renameFieldFocused = true }
+        focusPolicy?.beginLocalTextEditing(.workspaceRename(workspace.id))
     }
 
     private func closeWorkspace() {

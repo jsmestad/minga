@@ -54,6 +54,7 @@ var GoRequiredOpcodes = map[byte]string{
 	OPGuiPickerSelection:     "gui_picker_selection",
 	OPGuiTextPresentation:    "gui_text_presentation",
 	OPGuiResidentSemantics:   "gui_resident_semantics",
+	OPGuiFocusOwner:          "gui_focus_owner",
 }
 
 var GoSkippedOpcodes = map[byte]string{

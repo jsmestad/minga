@@ -17,6 +17,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder
   alias Minga.Frontend.Adapter.GUI.FileTreeEncoder
   alias Minga.Frontend.Adapter.GUI.FloatPopupEncoder
+  alias Minga.Frontend.Adapter.GUI.FocusOwnerEncoder
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.GutterSeparatorEncoder
   alias Minga.Frontend.Adapter.GUI.HoverPopupEncoder
@@ -44,6 +45,7 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:theme, ThemeEncoder},
     {:breadcrumb, BreadcrumbEncoder},
     {:which_key, WhichKeyEncoder},
+    {:focus_owner, FocusOwnerEncoder},
     {:notifications, NotificationsEncoder},
     {:search_state, SearchStateEncoder},
     {:git_status, GitStatusEncoder},

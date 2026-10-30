@@ -27,6 +27,10 @@ defmodule MingaEditor.State.ModalOverlay do
 
   @variants [:picker, :prompt, :completion, :command_completion, :conflict]
 
+  @doc "Returns every registered active modal tag."
+  @spec variants() :: [variant()]
+  def variants, do: @variants
+
   @doc "Returns the closed modal value."
   @spec none() :: t()
   def none, do: :none

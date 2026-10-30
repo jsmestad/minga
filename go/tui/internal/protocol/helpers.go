@@ -163,6 +163,8 @@ func opcodeName(opcode byte) string {
 		return "picker selection"
 	case generated.OPGuiCursorAnimation:
 		return "cursor animation"
+	case generated.OPGuiFocusOwner:
+		return "focus owner"
 	case generated.OPGuiConfigState:
 		return "config state"
 	case generated.OPGuiSplitSeparators:

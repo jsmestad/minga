@@ -43,6 +43,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiFloatPopupFields":
 		v, n, err := DecodeGuiFloatPopupFields(payload, 0, len(payload))
 		return v, n, err
+	case "GuiFocusOwnerFields":
+		v, n, err := DecodeGuiFocusOwnerFields(payload, 0, len(payload))
+		return v, n, err
 	case "GuiGitStatusFields":
 		v, n, err := DecodeGuiGitStatusFields(payload, 0, len(payload))
 		return v, n, err

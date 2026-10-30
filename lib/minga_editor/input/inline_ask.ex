@@ -38,7 +38,7 @@ defmodule MingaEditor.Input.InlineAsk do
     end
   end
 
-  @doc false
+  @doc "Routes inline ask keys with the supplied session execution options."
   @spec handle_key(state(), non_neg_integer(), non_neg_integer(), keyword()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, codepoint, modifiers, opts) when is_list(opts) do
@@ -98,8 +98,9 @@ defmodule MingaEditor.Input.InlineAsk do
   defp scroll_delta(?j), do: 1
   defp scroll_delta(?k), do: -1
 
+  @doc "Returns the inline ask overlay access and lifecycle configuration."
   @spec spec(keyword()) :: Overlay.spec()
-  defp spec(opts) do
+  def spec(opts) do
     %{
       store: fn state ->
         MingaEditor.Shell.Traditional.State.inline_asks(state.shell_runtime.state)

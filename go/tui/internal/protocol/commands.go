@@ -121,6 +121,7 @@ type ChromePayload struct {
 	FileTreeSelection   FileTreeSelection
 	CompletionSelection CompletionSelection
 	PickerSelection     PickerSelection
+	FocusOwner          generated.GuiFocusOwnerFields
 	Splits              SplitSeparators
 	EmptyState          EmptyState
 	// Placements carries the authoritative per-frame surface layout from
@@ -667,7 +668,11 @@ func decodeExtensionRuntime(payload []byte) (Command, error) {
 func decodeSkipOrChrome(payload []byte) (Command, error) {
 	opcode := payload[0]
 	if opcode >= 0x70 {
-		if chrome, handled := decodeChrome(payload); handled {
+		chrome, handled, err := decodeChrome(payload)
+		if err != nil {
+			return Command{}, err
+		}
+		if handled {
 			return Command{Kind: CommandChrome, Size: chrome.Bytes, Chrome: chrome}, nil
 		}
 	}

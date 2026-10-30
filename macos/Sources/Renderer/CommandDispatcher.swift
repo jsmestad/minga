@@ -71,6 +71,7 @@ enum ApplicationCommitEffect: Equatable {
     case linkCursorChanged(Bool)
     case lineSpacingChanged(Float)
     case cursorAnimationChanged(Bool)
+    case focusOwnerChanged(Wire.FocusOwner)
     case accessibilityModeChanged(String)
     case agentChatVisibilityChanged(Bool)
 }
@@ -1143,6 +1144,11 @@ final class CommandDispatcher {
 
         case .guiCursorAnimation(let enabled):
             effects.append(.application(.cursorAnimationChanged(enabled)))
+
+        case .guiFocusOwner(let owner):
+            // The policy owns the observable mirror as well as the native effect.
+            // Delivery occurs only after this frame has passed atomic validation.
+            effects.append(.application(.focusOwnerChanged(owner)))
 
         case .clipboardWrite(let target, let text):
             effects.append(.clipboardWrite(target: target, text: text))

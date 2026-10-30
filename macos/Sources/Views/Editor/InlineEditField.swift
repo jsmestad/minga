@@ -40,6 +40,7 @@ public struct InlineEditFieldStyle {
 }
 
 public struct InlineEditField: NSViewRepresentable {
+    @Environment(\.editorFocusPolicy) private var focusPolicy
     public init(initialText: String, selectStem: Bool, style: InlineEditFieldStyle, onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.initialText = initialText
         self.selectStem = selectStem
@@ -55,32 +56,20 @@ public struct InlineEditField: NSViewRepresentable {
     public let onCancel: () -> Void
 
     public func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = InlineEditTextField()
         field.isBezeled = false
         field.drawsBackground = false
         field.font = .systemFont(ofSize: 12)
         field.focusRingType = .none
         field.stringValue = initialText
         field.delegate = context.coordinator
+        field.focusCoordinator = context.coordinator
         field.cell?.isScrollable = true
         field.cell?.wraps = false
         Self.applyStyle(style, to: field)
 
-        // Schedule focus for next run loop to ensure the view is in the hierarchy
-        DispatchQueue.main.async {
-            field.window?.makeFirstResponder(field)
-            Self.applyStyle(self.style, to: field)
-
-            if self.selectStem {
-                let nsName = field.stringValue as NSString
-                let ext = nsName.pathExtension
-                let stemLength = ext.isEmpty ? nsName.length : nsName.length - (ext as NSString).length - 1
-                field.currentEditor()?.selectedRange = NSRange(location: 0, length: stemLength)
-            } else {
-                // Select all for new file/folder
-                field.currentEditor()?.selectAll(nil)
-            }
-        }
+        context.coordinator.selectStem = selectStem
+        context.coordinator.reconcileFocusPolicy(focusPolicy, field: field)
 
         return field
     }
@@ -88,12 +77,20 @@ public struct InlineEditField: NSViewRepresentable {
     public func updateNSView(_ nsView: NSTextField, context: Context) {
         context.coordinator.style = style
         Self.applyStyle(style, to: nsView)
+        context.coordinator.reconcileFocusPolicy(focusPolicy, field: nsView)
         // Don't update stringValue on subsequent SwiftUI updates;
         // the user is actively typing and we'd reset their input.
     }
 
     public func makeCoordinator() -> Coordinator {
         Coordinator(style: style, onCommit: onCommit, onCancel: onCancel)
+    }
+
+    public static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
+        coordinator.retire()
+        coordinator.focusPolicy?.unregister(field, as: .inlineEdit)
+        field.window?.endEditing(for: field)
+        coordinator.focusPolicy?.nativeTextEditingDidEnd()
     }
 
     @MainActor private static func applyStyle(_ style: InlineEditFieldStyle, to field: NSTextField) {
@@ -103,16 +100,47 @@ public struct InlineEditField: NSViewRepresentable {
         style.apply(to: editor)
     }
 
+    @MainActor
     public final class Coordinator: NSObject, NSTextFieldDelegate {
         public var style: InlineEditFieldStyle
         public let onCommit: (String) -> Void
         public let onCancel: () -> Void
         private var committed = false
+        weak var focusPolicy: (any EditorFocusControlling)?
+        var selectStem = false
+        private var selectedInitialText = false
 
         public init(style: InlineEditFieldStyle, onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
             self.style = style
             self.onCommit = onCommit
             self.onCancel = onCancel
+        }
+
+        func reconcileFocusPolicy(_ policy: (any EditorFocusControlling)?, field: NSTextField) {
+            guard focusPolicy !== policy else { return }
+            focusPolicy?.unregister(field, as: .inlineEdit)
+            focusPolicy = policy
+            policy?.register(field, as: .inlineEdit)
+        }
+
+        /// Dismantle is not a user submit or cancellation.
+        func retire() {
+            committed = true
+        }
+
+        func focusDidApply(to field: NSTextField) {
+            guard !selectedInitialText,
+                  let editor = field.currentEditor() as? NSTextView else { return }
+            selectedInitialText = true
+            style.apply(to: editor)
+            if selectStem {
+                let name = field.stringValue as NSString
+                let ext = name.pathExtension as NSString
+                let stemLength = ext.length == 0 ? name.length : name.length - ext.length - 1
+                editor.setSelectedRange(NSRange(location: 0, length: stemLength))
+            } else {
+                editor.selectAll(nil)
+            }
         }
 
         public func controlTextDidBeginEditing(_ obj: Notification) {
@@ -125,6 +153,7 @@ public struct InlineEditField: NSViewRepresentable {
         }
 
         public func controlTextDidEndEditing(_ obj: Notification) {
+            focusPolicy?.nativeTextEditingDidEnd()
             guard !committed else { return }
             committed = true
 
@@ -145,6 +174,7 @@ public struct InlineEditField: NSViewRepresentable {
             _ control: NSControl, textView: NSTextView,
             doCommandBy commandSelector: Selector
         ) -> Bool {
+            guard !committed else { return false }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 committed = true
                 onCancel()
@@ -152,5 +182,14 @@ public struct InlineEditField: NSViewRepresentable {
             }
             return false
         }
+    }
+}
+
+/// Selection setup follows successful policy focus, before the first text mutation.
+private final class InlineEditTextField: NSTextField, EditorFocusReceiving {
+    weak var focusCoordinator: InlineEditField.Coordinator?
+
+    func editorFocusDidApply() {
+        focusCoordinator?.focusDidApply(to: self)
     }
 }

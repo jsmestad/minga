@@ -56,6 +56,7 @@ struct MingaApp: App {
                     }
                 }
             )
+                .environment(\.editorFocusPolicy, appDelegate.appState.editorNSView?.focusPolicy)
                 .frame(minWidth: 160, minHeight: 80)
                 // Disable SwiftUI's focus system so it doesn't steal
                 // first responder from the EditorNSView.
@@ -678,6 +679,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .cursorAnimationChanged(let enabled):
             editorNSView?.coreTextRenderer.setCursorAnimateConfigEnabled(enabled)
             editorNSView?.renderFrame()
+        case .focusOwnerChanged(let owner):
+            editorNSView?.focusPolicy.focusOwnerDidChange(owner)
         case .accessibilityModeChanged(let modeName):
             guard let editorNSView else { return }
             editorNSView.statusBarModeDidChange()

@@ -2103,6 +2103,11 @@ defmodule MingaEditor.Renderer.ServerTest do
       backend: :tui,
       layout: nil,
       focus_tree: nil,
+      focus_owner: %Minga.RenderModel.UI.FocusOwner{
+        responder: :editor_view,
+        surface: :editor,
+        window_id: 1
+      },
       diff_views: %{},
       git_syncing: false,
       status_bar_data: nil,

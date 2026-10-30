@@ -1,8 +1,12 @@
 package protocol
 
-import "github.com/jsmestad/minga/go/tui/internal/generated"
+import (
+	"fmt"
 
-func decodeChrome(payload []byte) (ChromePayload, bool) {
+	"github.com/jsmestad/minga/go/tui/internal/generated"
+)
+
+func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 	opcode := payload[0]
 	chrome := ChromePayload{Opcode: opcode, Name: opcodeName(opcode), Bytes: len(payload)}
 
@@ -75,6 +79,16 @@ func decodeChrome(payload []byte) (ChromePayload, bool) {
 		chrome.CompletionSelection, chrome.Summary, chrome.Bytes = decodeCompletionSelection(payload)
 	case generated.OPGuiPickerSelection:
 		chrome.PickerSelection, chrome.Summary, chrome.Bytes = decodePickerSelection(payload)
+	case generated.OPGuiFocusOwner:
+		size := payloadLen16Size(payload)
+		if size != 13 {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_focus_owner: expected 10-byte payload")
+		}
+		owner, _, err := generated.DecodeGuiFocusOwnerFields(payload, 3, size)
+		if err != nil {
+			return ChromePayload{}, true, err
+		}
+		chrome.FocusOwner, chrome.Summary, chrome.Bytes = owner, "tui no-op", size
 	case generated.OPGuiSplitSeparators:
 		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
 	case generated.OPGuiSurfaceLayout:
@@ -82,8 +96,8 @@ func decodeChrome(payload []byte) (ChromePayload, bool) {
 	case generated.OPGuiEmptyState:
 		chrome.EmptyState, chrome.Summary, chrome.Bytes = decodeEmptyState(payload)
 	default:
-		return ChromePayload{}, false
+		return ChromePayload{}, false, nil
 	}
 
-	return chrome, true
+	return chrome, true, nil
 }

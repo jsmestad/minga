@@ -51,6 +51,50 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Basic commands
 
+    @Test("focus owner effect and policy mirror publish only on an accepted atomic commit")
+    @MainActor func focusOwnerFollowsAtomicCommit() throws {
+        let gui = GUIState()
+        let editor = NSView()
+        let policy = EditorFocusPolicy(editorView: editor, focusOwnerState: gui.focusOwnerState)
+        var deliveredOwners: [Wire.FocusOwner] = []
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui, applicationEffectSink: { effect in
+            if case .focusOwnerChanged(let owner) = effect {
+                deliveredOwners.append(owner)
+                policy.focusOwnerDidChange(owner)
+            }
+        })
+        let original = Wire.FocusOwner(responder: 1, surface: 8, windowID: 1, generation: 5)
+        let rejected = Wire.FocusOwner(responder: 3, surface: 5, windowID: 1, generation: 6)
+        let recovery = Wire.FocusOwner(responder: 0, surface: 7, windowID: 1, generation: 7)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiFocusOwner(original))
+        #expect(deliveredOwners.isEmpty)
+        #expect(gui.focusOwnerState.decodedOwner == nil)
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(deliveredOwners == [original])
+        #expect(gui.focusOwnerState.decodedOwner?.responderKind == .pickerQuery)
+        #expect(gui.focusOwnerState.decodedOwner?.generation == 5)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiFocusOwner(rejected))
+        #expect(deliveredOwners == [original])
+        dispatcher.dispatch(.commitFrame(frameSeq: 99, seq: 0))
+        #expect(deliveredOwners == [original])
+        #expect(gui.focusOwnerState.decodedOwner?.responderKind == .pickerQuery)
+        #expect(gui.focusOwnerState.decodedOwner?.generation == 5)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiFocusOwner(recovery))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(deliveredOwners == [original, recovery])
+        #expect(gui.focusOwnerState.decodedOwner?.responderKind == .editorView)
+        #expect(gui.focusOwnerState.decodedOwner?.surface == 7)
+        #expect(gui.focusOwnerState.decodedOwner?.generation == 7)
+    }
+
     @Test("empty keyframe prunes retained windows and stale gutter globals")
     @MainActor func emptyKeyframePrunesRetainedWindowState() throws {
         let (dispatcher, gui) = makeDispatcher()
@@ -3490,6 +3534,7 @@ struct CommandDispatcherStagingTests {
             case .cursorAnimationChanged: events.append("cursor-animation")
             case .agentChatVisibilityChanged: events.append("agent-chat")
             case .linkCursorChanged: events.append("link")
+            case .focusOwnerChanged: events.append("focus-owner")
             }
         }
         gui.frontendExtensions.register(

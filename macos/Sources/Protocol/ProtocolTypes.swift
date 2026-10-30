@@ -59,6 +59,29 @@ public enum NotificationLevel: Sendable, Equatable {
 /// Namespace for all binary protocol data types decoded from the BEAM.
 public enum Wire {
 
+    /// The keyboard owner named by a committed BEAM frame.
+    public struct FocusOwner: Sendable, Equatable {
+        /// Native responder kinds, projected directly from the wire byte.
+        public enum Responder: UInt8, CaseIterable, Sendable {
+            case editorView = 0, pickerQuery = 1, searchQuery = 2, inlineEdit = 3
+        }
+
+        public let responder: UInt8
+        public let surface: UInt8
+        public let windowID: UInt32
+        public let generation: UInt32
+
+        public init(responder: UInt8, surface: UInt8, windowID: UInt32, generation: UInt32) {
+            self.responder = responder
+            self.surface = surface
+            self.windowID = windowID
+            self.generation = generation
+        }
+
+        /// Typed policy projection; never inferred from GUI state.
+        public var responderKind: Responder? { Responder(rawValue: responder) }
+    }
+
     // MARK: - Sidebars
 
     /// Semantic sidebar metadata decoded from the BEAM sidebar host payload.

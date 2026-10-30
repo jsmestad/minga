@@ -71,6 +71,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0xA6 | gui_completion_selection | Narrow completion selection and documentation update. |
 | 0xA7 | gui_picker_selection | Narrow picker item and action selection update. |
 | 0xA9 | gui_resident_semantics | Atomic absolute-rank semantics for retained editor rows. |
+| 0xAA | gui_focus_owner | Authoritative keyboard responder and owning surface, changed frames and every keyframe. |
 
 ### 0xA3 — gui_extension_runtime
 
@@ -1396,6 +1397,7 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use a
 - `OP_GUI_FILE_TREE (0x93)` — semantic file tree rows (32-bit length-prefixed)
 - `OP_GUI_CURSOR_ANIMATION (0x95)` — cursor movement animation preference (16-bit length-prefixed)
 - `OP_GUI_HOVER_ACTION (0x96)` — optional hover popup action metadata (16-bit length-prefixed)
+- `OP_GUI_FOCUS_OWNER (0xAA)`: authoritative keyboard owner (16-bit length-prefixed).
 
 ### 0x95 — gui_cursor_animation
 
@@ -1417,6 +1419,33 @@ opcode(1) + payload_len(2) + visible(1) + action_len(2) + action(action_len)
 ```
 
 When `visible` is `0`, the payload is only `visible(1)` and the frontend clears any current hover action. When `visible` is `1`, `action` is stable action metadata that tells the frontend to render an Open control. The frontend sends the generic `hover_open_action` (0x3F), and the BEAM executes the current popup's stored action.
+
+### 0xAA: gui_focus_owner
+
+When a picker opens while Minga is in the background, bringing its window forward must focus the picker query, not the editor. The BEAM names the keyboard owner so native lifecycle events restore the right responder without guessing from the view hierarchy.
+
+```
+opcode(1=0xAA) + payload_length(2=10) + responder(1) + surface(1) + window_id(4) + generation(4)
+```
+
+All integers use big-endian byte order. The payload is exactly 10 bytes; frontends reject other payload lengths.
+
+| Field | Meaning |
+|-------|---------|
+| `responder` | `0` editor view, `1` picker query, `2` search query, `3` inline edit field |
+| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search |
+| `window_id` | Active BEAM editor window ID, unsigned 32-bit |
+| `generation` | Picker activation, insert completion, or command-completion presentation generation; zero for surfaces without a generation, unsigned 32-bit |
+
+The owner follows keyboard dispatch precedence: conflict, active inline edit, active inline ask, prompt, picker, populated insert-mode completion, command completion, active search, then the active keymap scope. A pending completion trigger without a populated popup does not claim input. File tree, agent, Git status, and editor scopes use the editor view. Prompt, conflict, inline ask, completion, and command-completion keys also route through that view to the BEAM. Search keys remain in the native search field.
+
+One existing router exception takes precedence over the modal tag: the agent scope claims Escape through its scoped trie even when command completion is open. In that combination the named surface is agent (or active native search), not command completion. File tree and Git status yield command-mode input to the command handler. The agreement table records this difference without changing router order.
+
+The semantic UI encoder sends exactly one command when the owner changes and on every keyframe, before window content. It sends none when the owner is unchanged in a delta frame. The command belongs to the frame transaction: a rejected frame must not change focus. A recovery keyframe restores the authoritative owner even when the previous frontend state was lost.
+
+Native frontends apply the named responder; they never choose a responder the frame did not name. If a field is not registered yet, they retain the owner and apply it when the field enters the hierarchy. Native modals and active native text editing, including input method composition, defer owner application until editing ends. Frontend-local workspace rename and icon-search fields acquire an immediate local text lease without a BEAM round trip; an owner change waits until that lease ends. Window activation, hierarchy rebuild, file drop, and native modal completion reapply the last committed owner.
+
+The Go TUI decodes this command as intentional no-op state. It has no native responder chain. See [frontend ownership](ARCHITECTURE.md#frame-transactions) for the boundary between authoritative keyboard ownership and local presentation.
 
 ### 0x91 — gui_indent_guides
 
