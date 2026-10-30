@@ -97,21 +97,79 @@ def paired_passed_runs(before, after):
     return after_count - before_count
 
 
+def selected_test_records(run):
+    """Retain the complete native issue tree; summary failures can omit later assertions."""
+    if run.get("extraction_errors") or not isinstance(run.get("tests"), dict):
+        return None
+    roots = run["tests"].get("testNodes")
+    if not isinstance(roots, list) or not roots:
+        return None
+    records = []
+    def visit(node, ancestors):
+        if not isinstance(node, dict) or node.get("nodeType") not in (
+                "Test Plan", "Unit test bundle", "Test Suite", "Test Case", "Arguments",
+                "Failure Message", "Runtime Warning"):
+            return False
+        identities = [node.get(key) for key in ("nodeIdentifier", "name", "nodeIdentifierURL")]
+        if not any(isinstance(identity, str) and identity.strip() for identity in identities):
+            return False
+        lineage = (*ancestors, node)
+        records.append((node, lineage))
+        children = node.get("children", [])
+        return isinstance(children, list) and all(visit(child, lineage) for child in children)
+    return records if all(visit(root, ()) for root in roots) else None
+
+
 def native_generation_failure(run):
-    """A build/launch failure, missing/zero tests, or unrelated issue is inconclusive."""
+    """Require the named generation failure in its actual argument, not a truncated summary."""
     summary = run.get("summary") or {}
-    failures = summary.get("testFailures") or []
-    if not (run.get("bundle_exists") is True and run.get("exit_code") not in (None, 0)
-            and summary.get("failedTests") == 1 and failures
-            and test_named(run.get("tests"), TARGET, "failed")):
+    failures = summary.get("testFailures")
+    records = selected_test_records(run)
+    if not (run.get("bundle_exists") is True and run.get("exit_code") == 65
+            and summary.get("failedTests") == 1 and isinstance(failures, list) and failures and records):
         return False
-    messages = [failure.get("failureText", "") for failure in failures]
-    # The selected mutant case can also fail its exact transaction-result and acknowledgement assertions because those retain baseline generation two.
-    related = (GENERATION_ASSERTION, TARGET + " step 2: transaction_result",
-               TARGET + " step 3: frame_status")
-    return (any(GENERATION_ASSERTION in message and "lastCommittedGeneration" in message
-                for message in messages)
-            and all(any(marker in message for marker in related) for message in messages))
+    identifier = "ConformanceTranscriptTests/runsTranscript(_:)"
+    enumerator = "ConformanceTranscriptTests/corpusIsPopulated()"
+    cases = [node for node, _ in records if node["nodeType"] == "Test Case"]
+    owners = [node for node in cases if node.get("nodeIdentifier") == identifier]
+    enumerators = [node for node in cases if node.get("nodeIdentifier") == enumerator]
+    if (len(cases) != 2 or len(owners) != 1 or owners[0].get("result") != "Failed"
+            or len(enumerators) != 1 or enumerators[0].get("result") != "Passed"):
+        return False
+    owner = owners[0]
+    url = owner.get("nodeIdentifierURL")
+    if not isinstance(url, str) or not url.startswith("test://") or not url.endswith("/" + identifier):
+        return False
+    arguments = [(node, ancestors) for node, ancestors in records if node["nodeType"] == "Arguments"]
+    if (len(arguments) != 1 or arguments[0][0].get("name") != TARGET
+            or arguments[0][0].get("result") != "Failed"
+            or next((node for node in reversed(arguments[0][1][:-1]) if node["nodeType"] == "Test Case"), None) is not owner):
+        return False
+    argument = arguments[0][0]
+    related = (GENERATION_ASSERTION, TARGET + " step 2: transaction_result", TARGET + " step 3: frame_status")
+    def promised_failure(message):
+        if not isinstance(message, str):
+            return False
+        message = re.sub(r"^[^\n]+\.swift:\d+(?::\d+)?: ", "", message, count=1)
+        return (message.startswith("Expectation failed:")
+                and not any(word in message.casefold() for word in ("crash", "fatal error", "signal", "requirement failed"))
+                and sum(marker in message for marker in related) == 1)
+    messages = []
+    for failure in failures:
+        if (not isinstance(failure, dict) or failure.get("testIdentifierString") != identifier
+                or failure.get("testIdentifierURL") != url or not promised_failure(failure.get("failureText"))):
+            return False
+    for node, ancestors in records:
+        if node.get("result") == "Skipped" or node["nodeType"] == "Runtime Warning":
+            return False
+        if node["nodeType"] == "Failure Message":
+            execution = next((parent for parent in reversed(ancestors[:-1])
+                              if parent["nodeType"] in ("Test Case", "Arguments")), None)
+            if execution is not argument or not promised_failure(node.get("name")):
+                return False
+            messages.append(node["name"])
+    return any(GENERATION_ASSERTION in message and "lastCommittedGeneration" in message and "→" in message
+               for message in messages)
 
 
 def exunit_generation_failure(run, text):
