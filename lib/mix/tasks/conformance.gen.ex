@@ -30,9 +30,11 @@ defmodule Mix.Tasks.Conformance.Gen do
   alias Minga.Frontend.Adapter.GUI.FocusOwnerEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.FocusOwner
+  alias Minga.RenderModel.UI.Theme
   alias Minga.RenderModel.Window, as: RW
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.PaneGeometry
@@ -40,9 +42,6 @@ defmodule Mix.Tasks.Conformance.Gen do
   alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.ScrollPresentation
   alias Minga.RenderModel.Window.Viewport
-  alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.RenderModel.UI.ThemeBuilder
-  alias MingaEditor.UI.Theme, as: EditorTheme
 
   @corpus_dir "test/conformance/corpus"
 
@@ -1394,18 +1393,34 @@ defmodule Mix.Tasks.Conformance.Gen do
 
   @spec focus_transaction({map(), pos_integer()}) :: map()
   defp focus_transaction({%{"kind" => "frame", "payload_base64" => encoded} = step, sequence}) do
-    {theme, _caches} =
-      :minga_default
-      |> EditorTheme.get!()
-      |> ThemeBuilder.build()
-      |> ThemeEncoder.encode(Caches.new())
+    # Focus does not depend on theme colors; supply every required slot through the real encoder.
+    slots = Enum.concat([1..0x17, 0x20..0x2A, 0x30..0x3A, [0x40], 0x50..0x62, 0xA0..0xAE])
+    model = %Theme{name: :focus_conformance, color_slots: Enum.map(slots, &{&1, 0})}
+    {theme, _caches} = ThemeEncoder.encode(model, Caches.new())
+
+    begin_frame =
+      :begin_frame
+      |> Writer.new()
+      |> Writer.uint8(:opcode, Opcodes.begin_frame())
+      |> Writer.uint32(:frame_seq, sequence)
+      |> Writer.uint32(:base_frame_seq, 0)
+      |> Writer.uint32(:generation, 1)
+      |> Writer.finish()
+
+    commit_frame =
+      :commit_frame
+      |> Writer.new()
+      |> Writer.uint8(:opcode, Opcodes.commit_frame())
+      |> Writer.uint32(:frame_seq, sequence)
+      |> Writer.uint32(:input_seq, 0)
+      |> Writer.finish()
 
     payload =
       IO.iodata_to_binary([
-        Protocol.encode_begin_frame(sequence, 0, 1),
+        begin_frame,
         theme,
         Base.decode64!(encoded),
-        Protocol.encode_commit_frame(sequence)
+        commit_frame
       ])
 
     %{step | "payload_base64" => Base.encode64(payload)}
