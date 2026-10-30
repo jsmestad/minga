@@ -91,12 +91,12 @@ final class FocusConformanceHarness {
             policy.endLocalTextEditing(lease)
         case "responder_registered":
             let kind = try responderKind(args)
-            let field = try #require(field(for: kind))
+            let field = try #require(self.field(for: kind))
             if field.superview == nil { container.addSubview(field) }
             policy.register(field, as: kind)
         case "responder_unregistered":
             let kind = try responderKind(args)
-            let field = try #require(field(for: kind))
+            let field = try #require(self.field(for: kind))
             policy.unregister(field, as: kind)
             window.endEditing(for: field)
             field.removeFromSuperview()
