@@ -123,6 +123,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias MingaEditor.FileTree.DropIntent
+  alias MingaEditor.Target
 
   alias Minga.Protocol.Opcodes
 
@@ -312,8 +313,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              activation_id :: non_neg_integer()}
           | {:picker_action_activate, generation :: non_neg_integer(),
              activation_id :: non_neg_integer()}
-          | {:semantic_item_activate, surface :: atom(), intent :: atom(),
-             generation :: non_neg_integer(), item_id :: binary()}
+          | Target.t()
           | {:search_query, session_id :: non_neg_integer(), edit_seq :: non_neg_integer(),
              query :: String.t(), flags :: non_neg_integer()}
           | {:search_focus, replace_mode :: boolean()}
@@ -841,7 +841,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ) do
     with {:ok, surface_name} <- decode_semantic_surface(surface),
          {:ok, intent_name} <- decode_semantic_intent(surface_name, intent) do
-      {:ok, {:semantic_item_activate, surface_name, intent_name, generation, item_id}}
+      {:ok,
+       %Target{
+         surface: surface_name,
+         intent: intent_name,
+         generation: generation,
+         item_id: item_id
+       }}
     end
   end
 

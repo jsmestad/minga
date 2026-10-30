@@ -319,9 +319,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Commands.Launchpad.activate(state, item_id)
   end
 
-  defp dispatch_action(state, {:semantic_item_activate, surface, intent, generation, item_id}) do
-    target = {:surface_item, surface, generation, item_id}
-
+  defp dispatch_action(state, %Target{intent: intent} = target) do
     with_target(state, target, fn resolved ->
       apply_semantic_target(state, target, intent, resolved)
     end)
@@ -335,7 +333,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:file_tree_drop, intent}) do
-    target = {:surface_item, :file_tree, intent.generation, intent.target_id}
+    target = %MingaEditor.Target{
+      surface: :file_tree,
+      intent: :resolve,
+      generation: intent.generation,
+      item_id: intent.target_id
+    }
 
     with_target(state, target, fn
       {:file_tree, tree, %{path: path, dir?: dir?} = entry} ->
@@ -704,14 +707,24 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:picker_item_activate, generation, activation_id}) do
     dispatch_action(
       state,
-      {:semantic_item_activate, :picker, :activate_item, generation, <<activation_id::32>>}
+      %MingaEditor.Target{
+        surface: :picker,
+        intent: :activate_item,
+        generation: generation,
+        item_id: <<activation_id::32>>
+      }
     )
   end
 
   defp dispatch_action(state, {:picker_action_activate, generation, activation_id}) do
     dispatch_action(
       state,
-      {:semantic_item_activate, :picker, :activate_action, generation, <<activation_id::32>>}
+      %MingaEditor.Target{
+        surface: :picker,
+        intent: :activate_action,
+        generation: generation,
+        item_id: <<activation_id::32>>
+      }
     )
   end
 
@@ -1179,24 +1192,34 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp apply_tab_context(tab_bar, :tab_move_left, id), do: TabBar.move_tab_left(tab_bar, id)
   defp apply_tab_context(tab_bar, :tab_move_right, id), do: TabBar.move_tab_right(tab_bar, id)
 
-  @spec apply_semantic_target(state(), Target.target(), atom(), Target.resolved()) :: state()
-  defp apply_semantic_target(state, _target, :accept, {:completion, completion}) do
+  @spec apply_semantic_target(state(), Target.t(), atom(), Target.resolved()) :: state()
+  defp apply_semantic_target(state, %Target{} = _target, :accept, {:completion, completion}) do
     state
     |> MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(fn _ -> completion end)
     |> MingaEditor.do_accept_completion(completion)
   end
 
-  defp apply_semantic_target(state, _target, :activate_item, {:picker_item, generation, id}) do
+  defp apply_semantic_target(
+         state,
+         %Target{} = _target,
+         :activate_item,
+         {:picker_item, generation, id}
+       ) do
     case PickerUI.activate_item(state, generation, id) do
       {next, {:execute_command, command}} -> MingaEditor.dispatch_command(next, command)
       next -> next
     end
   end
 
-  defp apply_semantic_target(state, _target, :activate_action, {:picker_action, generation, id}),
-    do: PickerUI.activate_action(state, generation, id)
+  defp apply_semantic_target(
+         state,
+         %Target{},
+         :activate_action,
+         {:picker_action, generation, id}
+       ),
+       do: PickerUI.activate_action(state, generation, id)
 
-  defp apply_semantic_target(state, _target, :accept, {:command_completion, label}) do
+  defp apply_semantic_target(state, %Target{} = _target, :accept, {:command_completion, label}) do
     mode_state = CommandState.replace_input(state.workspace.editing.mode_state, label)
 
     state
@@ -1204,20 +1227,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> MingaEditor.KeyDispatch.refresh_command_completion()
   end
 
-  defp apply_semantic_target(state, _target, :navigate, {:timeline_entry, path, entry}),
+  defp apply_semantic_target(state, %Target{}, :navigate, {:timeline_entry, path, entry}),
     do: Commands.EditTimeline.navigate_to_entry(state, path, entry)
 
-  defp apply_semantic_target(state, _target, intent, {:file_tree, tree, entry})
+  defp apply_semantic_target(state, %Target{}, intent, {:file_tree, tree, entry})
        when intent in [:new_file, :new_folder],
        do: Commands.FileTree.new_entry_at(state, tree, entry, intent)
 
-  defp apply_semantic_target(state, _target, intent, {:file_tree, tree, %{} = entry})
+  defp apply_semantic_target(state, %Target{}, intent, {:file_tree, tree, %{} = entry})
        when intent in [:primary, :toggle],
        do: Commands.FileTree.activate_entry(state, tree, entry, intent)
 
   defp apply_semantic_target(
          state,
-         _target,
+         %Target{} = _target,
          :open_in_split,
          {:file_tree, _tree, %{dir?: false, path: path}}
        ) do
@@ -1228,16 +1251,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> open_file_by_path_in_active_window(path)
   end
 
-  defp apply_semantic_target(state, _target, :delete, {:file_tree, _tree, %{} = entry}),
+  defp apply_semantic_target(state, %Target{}, :delete, {:file_tree, _tree, %{} = entry}),
     do: Commands.FileTree.delete_entry(state, entry)
 
-  defp apply_semantic_target(state, _target, :rename, {:file_tree, tree, %{} = entry}),
+  defp apply_semantic_target(state, %Target{}, :rename, {:file_tree, tree, %{} = entry}),
     do: Commands.FileTree.rename_entry(state, tree, entry)
 
-  defp apply_semantic_target(state, _target, :duplicate, {:file_tree, _tree, %{} = entry}),
+  defp apply_semantic_target(state, %Target{}, :duplicate, {:file_tree, _tree, %{} = entry}),
     do: Commands.FileTree.duplicate_entry(state, entry)
 
-  defp apply_semantic_target(state, target, _intent, _resolved),
+  defp apply_semantic_target(state, %Target{} = target, _intent, _resolved),
     do: reject_target(state, target, :target_mismatch)
 
   @spec reject_target(state(), Target.target(), Target.reason()) :: state()
@@ -1247,8 +1270,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp reject_target(state, {:window, id, generation}, reason),
     do: reject_semantic_activation(state, :window, {generation, id}, reason)
 
-  defp reject_target(state, {:surface_item, surface, generation, id}, reason),
-    do: reject_semantic_activation(state, surface, {generation, id}, reason)
+  defp reject_target(
+         state,
+         %Target{surface: surface, generation: generation, item_id: id},
+         reason
+       ),
+       do: reject_semantic_activation(state, surface, {generation, id}, reason)
 
   @spec reject_semantic_activation(
           state(),

@@ -1249,6 +1249,8 @@ opcode(1) + action_type(1) + payload...
 
 All targeted handling resolves the BEAM-issued identity before applying the action. A stale generation or missing target leaves editor semantics unchanged, logs a warning with the surface, generation, ID, and reason, and resets frontend render observations so the next frame is authoritative. Tab actions retain their monotonic, non-reused tab IDs and separate sub-opcodes. Destination positions such as `tab_reorder.new_index` are not target identities.
 
+The BEAM decoder constructs `%MingaEditor.Target{surface: surface, intent: intent, generation: generation, item_id: item_id}` for semantic activations. Handlers pass this value through resolution and application; they do not replace it with an index or reselect the subject from active editor state. EX9015 enforces this source contract without changing the wire format.
+
 Buffer-picker choices retain the buffer process identity, not its current list position. Removing an earlier buffer cannot redirect a queued selection or Kill action. Named file-tree mutations preserve the current selected path when their asynchronous refresh arrives, including a selection made while the refresh was pending.
 
 Protocol version 28 retires `file_tree_click` (0x03), `file_tree_toggle` (0x04), `completion_select` (0x05), `breadcrumb_click` (0x06), `panel_switch_tab` (0x09), `file_tree_new_file` (0x0D), `file_tree_new_folder` (0x0E), `minibuffer_select` (0x17), `file_tree_delete` (0x30), `file_tree_rename` (0x31), `file_tree_duplicate` (0x32), `file_tree_move` (0x33), `file_tree_open_in_split` (0x3D), and `timeline_navigate` (0x4F). These sub-opcodes reject all payloads. Breadcrumb and panel-tab actions had no behavior and have no replacement.
