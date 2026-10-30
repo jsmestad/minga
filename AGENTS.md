@@ -365,6 +365,7 @@ Minga has project-specific Credo checks in `credo/checks/`. These enforce archit
 | `EditorStateOwnershipCheck` | EX9012 | Editor state values have one writer and pure owner APIs. |
 | `NoEventBusBroadcastInTestCheck` | EX9013 | Do not broadcast on the global EventBus in tests. |
 | `NoLossyGuiEncoderCheck` | EX9014 | GUI encoders must not silently truncate out-of-range values. |
+| `ExplicitTargetCheck` | EX9015 | Targeted clauses cannot rediscover their subject from active state; GUI activations carry identity, not a list position. |
 
 ### Feedback Loop and Pre-commit Checks (enforced by commit-gate extension)
 

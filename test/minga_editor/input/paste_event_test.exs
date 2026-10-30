@@ -396,8 +396,12 @@ defmodule MingaEditor.Input.PasteEventTest do
                 ctx.editor,
                 {:minga_input,
                  {:gui_action,
-                  {:semantic_item_activate, :command_completion, :accept, data.generation,
-                   candidate.label}}}
+                  %MingaEditor.Target{
+                    surface: :command_completion,
+                    intent: :accept,
+                    generation: data.generation,
+                    item_id: candidate.label
+                  }}}
               )
 
               editor_state(ctx)

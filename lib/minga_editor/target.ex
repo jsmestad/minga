@@ -17,11 +17,21 @@ defmodule MingaEditor.Target do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Window
 
+  @enforce_keys [:surface, :intent, :generation, :item_id]
+  defstruct [:surface, :intent, :generation, :item_id]
+
+  @type t :: %__MODULE__{
+          surface: surface(),
+          intent: atom(),
+          generation: non_neg_integer(),
+          item_id: binary()
+        }
+
   @type surface :: :completion | :picker | :file_tree | :command_completion | :timeline
   @type target ::
           {:tab, Tab.id()}
           | {:window, Window.id(), non_neg_integer()}
-          | {:surface_item, surface(), non_neg_integer(), binary()}
+          | t()
           | {:timeline_entry, non_neg_integer(), binary()}
   @type reason :: :not_found | :stale_generation | :target_mismatch
   @type resolved ::
@@ -66,7 +76,7 @@ defmodule MingaEditor.Target do
     end
   end
 
-  def resolve(state, {:surface_item, :completion, generation, id}) do
+  def resolve(state, %__MODULE__{surface: :completion, generation: generation, item_id: id}) do
     with %Completion{} = completion <- ModalWorkflow.completion(state),
          :ok <- generation(ModalWorkflow.completion_generation(state), generation) do
       case Completion.select_wire_id(completion, id) do
@@ -79,7 +89,7 @@ defmodule MingaEditor.Target do
     end
   end
 
-  def resolve(state, {:surface_item, :picker, generation, <<id::32>>}) do
+  def resolve(state, %__MODULE__{surface: :picker, generation: generation, item_id: <<id::32>>}) do
     case state.shell_runtime.state do
       %{modal: {:picker, %{picker_ui: %{activation_offer: offer}}}} ->
         with :ok <- generation(offer.generation, generation) do
@@ -91,7 +101,7 @@ defmodule MingaEditor.Target do
     end
   end
 
-  def resolve(state, {:surface_item, :file_tree, generation, id}) do
+  def resolve(state, %__MODULE__{surface: :file_tree, generation: generation, item_id: id}) do
     file_tree = state.workspace.file_tree
 
     case FileTreeState.tree(file_tree) do
@@ -105,7 +115,11 @@ defmodule MingaEditor.Target do
     end
   end
 
-  def resolve(state, {:surface_item, :command_completion, requested_generation, id}) do
+  def resolve(state, %__MODULE__{
+        surface: :command_completion,
+        generation: requested_generation,
+        item_id: id
+      }) do
     case {state.workspace.editing.mode, ModalWorkflow.command_completion(state)} do
       {:command, %{generation: current, candidates: candidates, filter_text: input}} ->
         with :ok <- generation(current, requested_generation),
@@ -124,7 +138,7 @@ defmodule MingaEditor.Target do
     end
   end
 
-  def resolve(state, {:surface_item, :timeline, generation, id}),
+  def resolve(state, %__MODULE__{surface: :timeline, generation: generation, item_id: id}),
     do: resolve(state, {:timeline_entry, generation, id})
 
   def resolve(state, {:timeline_entry, generation, id}) when is_binary(id) do

@@ -161,8 +161,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     stale =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :completion, :accept, generation + 1,
-         CompletionItem.wire_id(item)}
+        %MingaEditor.Target{
+          surface: :completion,
+          intent: :accept,
+          generation: generation + 1,
+          item_id: CompletionItem.wire_id(item)
+        }
       )
 
     assert ModalWorkflow.completion(stale) == completion
@@ -172,7 +176,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     unknown =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :completion, :accept, generation, "unknown-item"}
+        %MingaEditor.Target{
+          surface: :completion,
+          intent: :accept,
+          generation: generation,
+          item_id: "unknown-item"
+        }
       )
 
     assert ModalWorkflow.completion(unknown) == completion
@@ -535,8 +544,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     stale =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :file_tree, :primary, generation + 1,
-         Path.expand(Path.join(tmp_dir, "b.ex"))}
+        %MingaEditor.Target{
+          surface: :file_tree,
+          intent: :primary,
+          generation: generation + 1,
+          item_id: Path.expand(Path.join(tmp_dir, "b.ex"))
+        }
       )
 
     assert FileTreeState.tree(stale.workspace.file_tree).cursor == 0
@@ -545,7 +558,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     unknown =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :file_tree, :primary, generation, "missing-row"}
+        %MingaEditor.Target{
+          surface: :file_tree,
+          intent: :primary,
+          generation: generation,
+          item_id: "missing-row"
+        }
       )
 
     assert FileTreeState.tree(unknown.workspace.file_tree).cursor == 0
@@ -555,8 +573,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     resolved =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :file_tree, :toggle, generation,
-         Path.expand(Path.join(tmp_dir, "b.ex"))}
+        %MingaEditor.Target{
+          surface: :file_tree,
+          intent: :toggle,
+          generation: generation,
+          item_id: Path.expand(Path.join(tmp_dir, "b.ex"))
+        }
       )
 
     assert FileTreeState.tree(resolved.workspace.file_tree).cursor == 0
@@ -1012,7 +1034,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       result =
         GuiActionHandler.dispatch(
           state,
-          {:semantic_item_activate, :file_tree, intent, generation, target.path}
+          %MingaEditor.Target{
+            surface: :file_tree,
+            intent: intent,
+            generation: generation,
+            item_id: target.path
+          }
         )
 
       assert ProjectFileTree.selected_entry(FileTreeState.tree(result.workspace.file_tree)).path ==
@@ -1065,7 +1092,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       result =
         GuiActionHandler.dispatch(
           state,
-          {:semantic_item_activate, :file_tree, intent, generation, ""}
+          %MingaEditor.Target{
+            surface: :file_tree,
+            intent: intent,
+            generation: generation,
+            item_id: ""
+          }
         )
 
       editing = FileTreeState.editing(result.workspace.file_tree)
@@ -1099,8 +1131,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     result =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :completion, :accept,
-         CompletionPayload.presentation_generation(payload), CompletionItem.wire_id(target)}
+        %MingaEditor.Target{
+          surface: :completion,
+          intent: :accept,
+          generation: CompletionPayload.presentation_generation(payload),
+          item_id: CompletionItem.wire_id(target)
+        }
       )
 
     assert Minga.Buffer.content(result.workspace.buffers.active) =~ "target"
@@ -1119,7 +1155,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     result =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :command_completion, :accept, payload.generation, target.label}
+        %MingaEditor.Target{
+          surface: :command_completion,
+          intent: :accept,
+          generation: payload.generation,
+          item_id: target.label
+        }
       )
 
     assert result.workspace.editing.mode_state.input == target.label
@@ -1157,8 +1198,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     result =
       GuiActionHandler.dispatch(
         state,
-        {:semantic_item_activate, :timeline, :navigate, timeline.generation,
-         MingaEditor.Agent.EditTimeline.entry_id(path, entry)}
+        %MingaEditor.Target{
+          surface: :timeline,
+          intent: :navigate,
+          generation: timeline.generation,
+          item_id: MingaEditor.Agent.EditTimeline.entry_id(path, entry)
+        }
       )
 
     assert Minga.Buffer.file_path(result.workspace.buffers.active) == path
@@ -1241,25 +1286,48 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       {state, {:fold_toggle_at_line, 1, window.accessibility_generation + 1, 0}, :window,
        :stale_generation},
       {completions,
-       {:semantic_item_activate, :completion, :accept,
-        CompletionPayload.presentation_generation(payload) + 1, CompletionItem.wire_id(item)},
-       :completion, :stale_generation},
+       %MingaEditor.Target{
+         surface: :completion,
+         intent: :accept,
+         generation: CompletionPayload.presentation_generation(payload) + 1,
+         item_id: CompletionItem.wire_id(item)
+       }, :completion, :stale_generation},
       {pickers,
-       {:semantic_item_activate, :picker, :activate_item,
-        picker_state.activation_offer.generation + 1, <<picker_id::32>>}, :picker,
-       :stale_generation},
-      {trees, {:semantic_item_activate, :file_tree, :delete, tree_generation + 1, target.path},
-       :file_tree, :stale_generation},
+       %MingaEditor.Target{
+         surface: :picker,
+         intent: :activate_item,
+         generation: picker_state.activation_offer.generation + 1,
+         item_id: <<picker_id::32>>
+       }, :picker, :stale_generation},
+      {trees,
+       %MingaEditor.Target{
+         surface: :file_tree,
+         intent: :delete,
+         generation: tree_generation + 1,
+         item_id: target.path
+       }, :file_tree, :stale_generation},
       {trees, {:file_tree_drop, drop}, :file_tree, :stale_generation},
       {commands,
-       {:semantic_item_activate, :command_completion, :accept, command_payload.generation + 1,
-        hd(command_payload.candidates).label}, :command_completion, :stale_generation},
+       %MingaEditor.Target{
+         surface: :command_completion,
+         intent: :accept,
+         generation: command_payload.generation + 1,
+         item_id: hd(command_payload.candidates).label
+       }, :command_completion, :stale_generation},
       {timelines,
-       {:semantic_item_activate, :timeline, :navigate, timeline.generation + 1,
-        MingaEditor.Agent.EditTimeline.entry_id(target.path, entry)}, :timeline,
-       :stale_generation},
-      {trees, {:semantic_item_activate, :file_tree, :delete, tree_generation, ""}, :file_tree,
-       :target_mismatch}
+       %MingaEditor.Target{
+         surface: :timeline,
+         intent: :navigate,
+         generation: timeline.generation + 1,
+         item_id: MingaEditor.Agent.EditTimeline.entry_id(target.path, entry)
+       }, :timeline, :stale_generation},
+      {trees,
+       %MingaEditor.Target{
+         surface: :file_tree,
+         intent: :delete,
+         generation: tree_generation,
+         item_id: ""
+       }, :file_tree, :target_mismatch}
     ]
 
     for {snapshot, action, surface, reason} <- cases do
@@ -1376,8 +1444,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       result =
         GuiActionHandler.dispatch(
           state,
-          {:semantic_item_activate, :file_tree, intent, file_tree.presentation_generation,
-           target_path}
+          %MingaEditor.Target{
+            surface: :file_tree,
+            intent: intent,
+            generation: file_tree.presentation_generation,
+            item_id: target_path
+          }
         )
 
       assert Minga.Buffer.file_path(result.workspace.buffers.active) == target_path
@@ -1584,8 +1656,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerPublicTargetTest do
       ExUnit.CaptureLog.capture_log(fn ->
         send_gui_action(
           ctx,
-          {:semantic_item_activate, :command_completion, :accept, offered.generation,
-           candidate.label}
+          %MingaEditor.Target{
+            surface: :command_completion,
+            intent: :accept,
+            generation: offered.generation,
+            item_id: candidate.label
+          }
         )
       end)
 
@@ -1615,7 +1691,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerPublicTargetTest do
 
     send_gui_action(
       ctx,
-      {:semantic_item_activate, :picker, :activate_item, offer.generation, <<id::32>>}
+      %MingaEditor.Target{
+        surface: :picker,
+        intent: :activate_item,
+        generation: offer.generation,
+        item_id: <<id::32>>
+      }
     )
 
     assert active_content(ctx) == "named buffer"

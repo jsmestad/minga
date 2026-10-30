@@ -951,8 +951,12 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
     GuiActionHandler.dispatch(
       state,
-      {:semantic_item_activate, :file_tree, :rename,
-       FileTreeState.presentation_generation(ft(state)), MingaEditor.FileTree.Row.id_for(entry)}
+      %MingaEditor.Target{
+        surface: :file_tree,
+        intent: :rename,
+        generation: FileTreeState.presentation_generation(ft(state)),
+        item_id: MingaEditor.FileTree.Row.id_for(entry)
+      }
     )
   end
 
