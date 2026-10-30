@@ -114,17 +114,17 @@ class RecoveryEvidenceTest(unittest.TestCase):
                     self.assertEqual(step[key], value)
 
     def test_plan_selection_rejects_cached_bare_and_unrelated_hosts(self):
-        target = {"BlueprintName": "MingaTests", "TestBundlePath": "__TESTROOT__/MingaTests.xctest",
-                  "TestHostPath": "__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"}
-        plan = {"TestConfigurations": [{"TestTargets": [target]}]}
+        target = {"BlueprintName": "MingaTests", "TestBundlePath": "__TESTHOST__/Contents/PlugIns/MingaTests.xctest",
+                  "TestHostPath": "__TESTROOT__/Debug/MingaTestHost.app"}
+        plan = {"MingaTests": target, "__xctestrun_metadata__": {"FormatVersion": 1}}
         self.assertTrue(evidence.current_host_plan(plan))
-        for host in ("", "/Developer/usr/bin/xctest",
-                     "__TESTROOT__/Debug/Minga.app/Contents/MacOS/Minga"):
+        for host in ("", "/Developer/usr/bin/xctest", "__TESTROOT__/Debug/Minga.app",
+                     "__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"):
             changed = copy.deepcopy(plan)
-            changed["TestConfigurations"][0]["TestTargets"][0]["TestHostPath"] = host
+            changed["MingaTests"]["TestHostPath"] = host
             with self.subTest(host=host):
                 self.assertFalse(evidence.current_host_plan(changed))
-        plan["TestConfigurations"][0]["TestTargets"].append(copy.deepcopy(target))
+        plan["OtherTests"] = copy.deepcopy(target)
         self.assertFalse(evidence.current_host_plan(plan))
 
     def test_relocated_xctestrun_injects_real_data_paths_and_preserves_binary_paths(self):

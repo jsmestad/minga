@@ -183,7 +183,7 @@ def current_host_plan(value):
     """Exclude cached bare-xctest plans from the dedicated hosted unit build."""
     targets = list(test_targets(value))
     return (len(targets) == 1 and str(targets[0].get("TestHostPath", "")).endswith(
-        "/MingaTestHost.app/Contents/MacOS/MingaTestHost"))
+        "/MingaTestHost.app"))
 
 
 def absolute_testroot(value, root):
