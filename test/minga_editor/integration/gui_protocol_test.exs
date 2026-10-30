@@ -61,6 +61,63 @@ defmodule Minga.Integration.GUIProtocolTest do
     GUIHarness.round_trip!(harness, command, expected_type)
   end
 
+  test "command completion round-trips the generation and candidate identities", %{
+    harness: harness
+  } do
+    alias Minga.Frontend.Adapter.GUI.MinibufferEncoder
+    alias Minga.RenderModel.UI.Minibuffer
+    alias Minga.RenderModel.UI.Minibuffer.Candidate
+
+    model = %Minibuffer{
+      visible?: true,
+      generation: 0xFFFFFFFE,
+      prompt: ":",
+      input: "w",
+      candidates: [
+        %Candidate{id: "write", label: "write", description: "Save the file"},
+        %Candidate{id: "wq", label: "wq", description: "Save and quit"}
+      ],
+      total_candidates: 2
+    }
+
+    decoded = round_trip(harness, MinibufferEncoder.encode_command(model), "gui_minibuffer")
+    assert decoded["generation"] == model.generation
+    assert Enum.map(decoded["candidates"], & &1["id"]) == ["write", "wq"]
+  end
+
+  test "timeline round-trips path-bound identities independently of display indices", %{
+    harness: harness
+  } do
+    alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
+    alias Minga.RenderModel.UI.EditTimeline
+
+    model = %EditTimeline{
+      visible?: true,
+      generation: 0xFFFFFFFD,
+      entries: [
+        %EditTimeline.Entry{
+          entry_id: "file-a/tool-α/0",
+          index: 0,
+          tool_name: "edit",
+          timestamp_delta: 0
+        },
+        %EditTimeline.Entry{
+          entry_id: "file-a/tool-β/1",
+          index: 1,
+          tool_name: "write",
+          timestamp_delta: 25
+        }
+      ]
+    }
+
+    {encoded, _caches} = EditTimelineEncoder.encode(model, %Caches{})
+    decoded = round_trip(harness, encoded, "gui_edit_timeline")
+    assert decoded["generation"] == model.generation
+
+    assert Enum.map(decoded["entries"], & &1["entry_id"]) ==
+             Enum.map(model.entries, & &1.entry_id)
+  end
+
   describe "resident semantic production encoder round-trip" do
     test "keyframe preserves positive row revision and all absolute semantic layers", %{
       harness: harness

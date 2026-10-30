@@ -83,13 +83,12 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: EditTimelineView.Action) -> OutboundAction {
         switch action {
-        case .navigate(let index): .timelineNavigate(index: index)
+        case .navigate(let generation, let entryID): .semanticItemActivate(surface: .timeline, intent: 1, generation: generation, itemID: Data(entryID.utf8))
         }
     }
 
     public static func outbound(_ action: BottomPanelView.Action) -> OutboundAction {
         switch action {
-        case .switchTab(let index): .panelSwitchTab(index: index)
         case .dismiss: .panelDismiss
         case .resize(let heightPercent): .panelResize(heightPercent: heightPercent)
         case .openFile(let path): .openFile(path: path)
@@ -111,7 +110,7 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: MinibufferView.Action) -> OutboundAction {
         switch action {
-        case .select(let index): .minibufferSelect(index: index)
+        case .select(let generation, let itemID): .semanticItemActivate(surface: .commandCompletion, intent: 1, generation: generation, itemID: Data(itemID.utf8))
         }
     }
 
@@ -154,8 +153,8 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: FileTreeHeaderView.Action) -> OutboundAction {
         switch action {
-        case .newFile(let parentIndex): .fileTreeNewFile(parentIndex: parentIndex)
-        case .newFolder(let parentIndex): .fileTreeNewFolder(parentIndex: parentIndex)
+        case .newFile(let generation, let parentID): .semanticItemActivate(surface: .fileTree, intent: 7, generation: generation, itemID: Data(parentID.utf8))
+        case .newFolder(let generation, let parentID): .semanticItemActivate(surface: .fileTree, intent: 8, generation: generation, itemID: Data(parentID.utf8))
         case .refresh: .fileTreeRefresh
         case .collapseAll: .fileTreeCollapseAll
         }
@@ -163,17 +162,9 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: FileTreeView.Action) -> OutboundAction {
         switch action {
-        case .click(let index): .fileTreeClick(index: index)
-        case .toggle(let index): .fileTreeToggle(index: index)
-        case .openInSplit(let index): .fileTreeOpenInSplit(index: index)
-        case .newFile(let parentIndex): .fileTreeNewFile(parentIndex: parentIndex)
-        case .newFolder(let parentIndex): .fileTreeNewFolder(parentIndex: parentIndex)
         case .editConfirm(let token, let text): .fileTreeEditConfirm(token: token, text: text)
         case .editCancel: .fileTreeEditCancel
-        case .delete(let index): .fileTreeDelete(index: index)
-        case .rename(let index): .fileTreeRename(index: index)
-        case .duplicate(let index): .fileTreeDuplicate(index: index)
-        case .drop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers): .fileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetID: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDirectory: targetIsDirectory, modifiers: modifiers)
+        case .drop(let sourcePaths, let targetIndex, let targetID, let targetPathHash, let targetPath, let targetIsDirectory, let modifiers, let generation): .fileTreeDrop(sourcePaths: sourcePaths, targetIndex: targetIndex, targetID: targetID, targetPathHash: targetPathHash, targetPath: targetPath, targetIsDirectory: targetIsDirectory, modifiers: modifiers, generation: generation)
         case .refresh: .fileTreeRefresh
         case .semantic(let intent, let generation, let itemID): .semanticItemActivate(surface: .fileTree, intent: intent.rawValue, generation: generation, itemID: Data(itemID.utf8))
         }

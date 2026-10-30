@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
@@ -169,6 +170,29 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   @spec next_completion_generation() :: pos_integer()
   defp next_completion_generation,
     do: Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1
+
+  @doc "Builds command completion, retaining identity only while its input and candidates match."
+  @spec new_command_completion_payload(EditorState.t(), keyword()) :: CommandCompletionPayload.t()
+  def new_command_completion_payload(state, opts) do
+    input = Keyword.get(opts, :filter_text, "")
+    candidates = Keyword.get(opts, :candidates, [])
+
+    generation =
+      case command_completion(state) do
+        %CommandCompletionPayload{
+          filter_text: ^input,
+          candidates: ^candidates,
+          generation: generation
+        }
+        when generation > 0 ->
+          generation
+
+        _ ->
+          next_completion_generation()
+      end
+
+    CommandCompletionPayload.new(Keyword.put(opts, :generation, generation))
+  end
 
   @doc "Returns the active command-completion payload."
   @spec command_completion(EditorState.t() | Input.t()) ::

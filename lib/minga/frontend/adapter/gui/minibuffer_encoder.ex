@@ -21,6 +21,8 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
   end
 
   @spec encode_command(Minibuffer.t()) :: binary()
+  # Visible payloads append generation u32 and one string16 id per candidate,
+  # after all legacy candidate fields. Hidden payloads remain opcode + zero.
   def encode_command(%Minibuffer{visible?: false}), do: <<@op_gui_minibuffer, 0::8>>
 
   def encode_command(%Minibuffer{} = model) do
@@ -37,8 +39,13 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
       |> Writer.uint16(:candidate_count, Enum.count(model.candidates))
       |> Writer.uint16(:total_candidates, model.total_candidates)
 
+    writer = Enum.reduce(model.candidates, writer, &encode_candidate/2)
+    writer = Writer.uint32(writer, :generation, model.generation)
+
     model.candidates
-    |> Enum.reduce(writer, &encode_candidate/2)
+    |> Enum.reduce(writer, fn candidate, acc ->
+      Writer.string16(acc, :candidate_id, candidate.id)
+    end)
     |> Writer.finish()
   end
 
@@ -47,7 +54,8 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
 
   defp fingerprint(%Minibuffer{} = model) do
     {model.visible?, model.mode, model.cursor_pos, model.prompt, model.input, model.context,
-     model.selected_index, Enum.count(model.candidates), model.total_candidates, model.candidates}
+     model.selected_index, Enum.count(model.candidates), model.total_candidates, model.candidates,
+     model.generation}
   end
 
   @spec encode_mode(Minibuffer.mode()) :: non_neg_integer()

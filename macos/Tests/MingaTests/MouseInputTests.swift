@@ -138,7 +138,8 @@ struct MouseInputTests {
         for gutter: Wire.WindowGutter,
         rows: [GUIVisualRow] = [],
         geometry: GUIPaneGeometry? = nil,
-        scrollPresentation: GUIScrollPresentation? = nil
+        scrollPresentation: GUIScrollPresentation? = nil,
+        accessibilityGeneration: UInt64 = 0
     ) throws -> GUIWindowContent {
         try GUIWindowContent(
             windowId: gutter.windowId, fullRefresh: true,
@@ -147,7 +148,8 @@ struct MouseInputTests {
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: [],
             paneGeometry: geometry ?? paneGeometry(for: gutter),
-            scrollPresentation: scrollPresentation
+            scrollPresentation: scrollPresentation,
+            accessibilityGeneration: accessibilityGeneration
         )
     }
 
@@ -626,7 +628,8 @@ struct MouseInputTests {
                 windowId: 7, resetRequired: false, anchorTop: 42, anchorLeft: 0, anchorVisualRowOffset: 0,
                 visibleStartLine: 42, visibleEndLine: 43, overscanStartLine: 41, overscanEndLine: 43,
                 contentEpoch: 1, layoutGeneration: 1
-            )
+            ),
+            accessibilityGeneration: 77
         )
         try commitEditorFrame(
             view,
@@ -638,7 +641,7 @@ struct MouseInputTests {
                                      location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }
         view.mouseDown(with: event)
 
-        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, bufferLine: 42)])
+        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, generation: 77, bufferLine: 42)])
         #expect(spy.mouseEventCalls.isEmpty)
     }
 
@@ -684,7 +687,8 @@ struct MouseInputTests {
                 windowId: 7, resetRequired: false, anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 1,
                 visibleStartLine: 10, visibleEndLine: 12, overscanStartLine: 10, overscanEndLine: 12,
                 contentEpoch: 1, layoutGeneration: 1
-            )
+            ),
+            accessibilityGeneration: 88
         )
         try commitEditorFrame(view, contents: [content], gutters: [gutter])
 
@@ -692,7 +696,7 @@ struct MouseInputTests {
                                      location: NSPoint(x: cw * 6.2, y: ch * 0.5)) else { return }
         view.mouseDown(with: event)
 
-        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, bufferLine: 10)])
+        #expect(spy.actions == [.foldToggleAtLine(windowID: 7, generation: 88, bufferLine: 10)])
         #expect(spy.mouseEventCalls.isEmpty)
     }
 

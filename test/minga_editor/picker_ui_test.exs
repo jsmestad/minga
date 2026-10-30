@@ -36,12 +36,8 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
 
-  defp marked_buffer_picker do
-    [
-      %Item{id: 0, label: "alpha"},
-      %Item{id: 1, label: "beta"},
-      %Item{id: 2, label: "gamma"}
-    ]
+  defp marked_buffer_picker(buffers) do
+    Enum.map(buffers, &%Item{id: {:buffer, &1}, label: Minga.Buffer.content(&1)})
     |> Picker.new(title: "Switch buffer", max_visible: 10)
     |> Picker.move_down()
     |> Picker.toggle_mark()
@@ -58,23 +54,15 @@ defmodule MingaEditor.PickerUITest do
         Buffers.add_background(acc, pid)
       end)
 
+    state = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
+
     picker_state = %PickerState{
-      picker: marked_buffer_picker(),
+      picker: marked_buffer_picker(buffers.list),
       source: MingaEditor.UI.Picker.BufferSource,
       restore: 0
     }
 
-    state
-    |> then(fn state ->
-      %{
-        state
-        | workspace:
-            then(state.workspace, fn workspace ->
-              MingaEditor.Session.State.set_buffers(workspace, buffers)
-            end)
-      }
-    end)
-    |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+    ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
   end
 
   defp preview_promotion_state do
@@ -551,10 +539,9 @@ defmodule MingaEditor.PickerUITest do
       {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
         new_state.shell_runtime.state.modal
 
-      assert actions == [
-               {"Kill all marked",
-                {:bulk, :kill_marked, Picker.marked_items(marked_buffer_picker())}}
-             ]
+      assert [{"Kill all marked", {:bulk, :kill_marked, items}}] = actions
+      [_active | marked] = state.workspace.buffers.list
+      assert Enum.map(items, & &1.id) == Enum.map(marked, &{:buffer, &1})
     end
 
     test "Enter applies source bulk select when items are marked" do
@@ -826,8 +813,7 @@ defmodule MingaEditor.PickerUITest do
       assert Map.get(repeated, :selected_item_id) == :second
       assert Map.get(repeated, :selection_count) == 1
 
-      assert repeated.shell_runtime.state.notice.message ==
-               "Picker choice changed; select it again"
+      assert repeated.shell_runtime.state.notice == result.shell_runtime.state.notice
 
       assert repeated.render.render_correlation.keyframe_pending?
     end
@@ -849,7 +835,7 @@ defmodule MingaEditor.PickerUITest do
 
       assert {:picker, %{picker_ui: %{picker: current}}} = result.shell_runtime.state.modal
       assert current.query == "f"
-      assert result.shell_runtime.state.notice.message == "Picker choice changed; select it again"
+      assert result.shell_runtime.state.notice == state.shell_runtime.state.notice
       assert result.render.render_correlation.keyframe_pending?
       refute Map.has_key?(result, :selected_item_id)
     end

@@ -2175,9 +2175,18 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("old.ex")]))
         dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
+        dispatcher.dispatch(.guiEditTimeline(
+            visible: true,
+            viewingIndex: 0,
+            entries: [Wire.TimelineEntry(entryID: "old-entry", index: 0, toolName: "edit", timestampDelta: 0)],
+            files: [],
+            generation: 41
+        ))
         dispatcher.dispatch(.commitFrame(frameSeq: 90, seq: 0))
         dispatcher.dispatch(.protocolError(message: "old handshake failed"))
         #expect(gui.protocolErrorState.isPresented)
+        #expect(gui.editTimelineState.generation == 41)
+        #expect(gui.editTimelineState.entries.first?.entryID == "old-entry")
         let oldSnapshot = try #require(dispatcher.committedEditorSnapshot)
         dispatcher.promoteVisibleEditorPresentation(
             snapshot: oldSnapshot, localTransform: nil, connectionID: 1
@@ -2207,6 +2216,8 @@ struct CommandDispatcherStagingTests {
         #expect(gui.tabBarState.tabs.isEmpty)
         #expect(gui.windowContents.isEmpty)
         #expect(gui.protocolErrorState.isPresented == false)
+        #expect(gui.editTimelineState.generation == 0)
+        #expect(gui.editTimelineState.entries.isEmpty)
 
         let lateOld = try decodedFrame([
             .beginFrame(frameSeq: 93, baseFrameSeq: 90, generation: 40),

@@ -472,6 +472,8 @@ struct ProtocolDecoderTests {
         appendWireU32(&payload, 10)
         appendWireU32(&payload, 3)
         payload.append(1)
+        appendWireU32(&payload, 17)
+        appendWireString16(&payload, "lib/a.ex:call-123")
 
         var data = Data([OP_GUI_EDIT_TIMELINE])
         appendWireU16(&data, UInt16(payload.count))
@@ -479,7 +481,7 @@ struct ProtocolDecoderTests {
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        guard case .guiEditTimeline(let visible, let viewingIndex, let entries, let files) = cmd else {
+        guard case .guiEditTimeline(let visible, let viewingIndex, let entries, let files, let generation) = cmd else {
             Issue.record("Expected .guiEditTimeline, got \(String(describing: cmd))")
             return
         }
@@ -490,12 +492,62 @@ struct ProtocolDecoderTests {
         #expect(entries[0].index == 0)
         #expect(entries[0].toolName == "write_file")
         #expect(entries[0].timestampDelta == 12)
+        #expect(generation == 17)
+        #expect(entries[0].entryID == "lib/a.ex:call-123")
         #expect(files.count == 1)
         #expect(files[0].path == "lib/a.ex")
         #expect(files[0].entryCount == 2)
         #expect(files[0].linesAdded == 10)
         #expect(files[0].linesRemoved == 3)
         #expect(files[0].reviewStatus == 1)
+    }
+
+    @Test("Visible minibuffer decodes appended generation and candidate identities")
+    func decodeMinibufferIdentityTrailer() throws {
+        var data = Data([OP_GUI_MINIBUFFER, 1, 0, 0, 3])
+        appendWireString8(&data, "M-x ")
+        appendWireString16(&data, "org")
+        appendWireString16(&data, "")
+        appendWireU16(&data, 1)
+        appendWireU16(&data, 2)
+        appendWireU16(&data, 20)
+        for label in ["org-mode", "org-agenda"] {
+            data.append(99)
+            appendWireString16(&data, label)
+            appendWireString16(&data, "description")
+            appendWireString16(&data, "key")
+            data.append(2)
+            appendWireU16(&data, 0)
+            appendWireU16(&data, 2)
+        }
+        appendWireU32(&data, 0x0102_0304)
+        appendWireString16(&data, "id-mode")
+        appendWireString16(&data, "id-agenda")
+        let boundary = data.count
+        data.append(contentsOf: [OP_GUI_MINIBUFFER, 0])
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiMinibuffer(let visible, _, _, _, _, _, let selected, let total, let candidates, let generation) = command else {
+            Issue.record("Expected minibuffer")
+            return
+        }
+        #expect(visible)
+        #expect(size == boundary)
+        #expect(generation == 0x0102_0304)
+        #expect(selected == 1)
+        #expect(total == 20)
+        #expect(candidates.map(\.id) == ["id-mode", "id-agenda"])
+        #expect(candidates[1].matchPositions == [0, 2])
+        for end in (boundary - 4)..<boundary {
+            #expect(throws: ProtocolDecodeError.self) {
+                _ = try decodeCommand(data: Data(data.prefix(end)), offset: 0)
+            }
+        }
+    }
+
+    @Test("Hidden minibuffer has no identity trailer")
+    func hiddenMinibufferHasNoTrailer() throws {
+        let (_, size) = try decodeCommand(data: Data([OP_GUI_MINIBUFFER, 0, OP_GUI_MINIBUFFER, 0]), offset: 0)
+        #expect(size == 2)
     }
 
     @Test("Skip known sized command without renderer handler")
@@ -1062,6 +1114,12 @@ struct FrontendActionCompositionTests {
         #expect(FrontendActionComposition.outbound(FrontendExtensionViewContext.Action.invoke(extensionID: "outline", action: "open", payload: Data([1, 2]))) == .extensionAction(extensionID: "outline", action: "open", payload: Data([1, 2])))
         #expect(FrontendActionComposition.outbound(CompletionOverlay.Action.select(generation: 7, itemID: "cmp-1")) == .semanticItemActivate(surface: .completion, intent: 1, generation: 7, itemID: Data("cmp-1".utf8)))
         #expect(FrontendActionComposition.outbound(PickerOverlay.Action.activateItem(generation: 8, activationID: 42)) == .semanticItemActivate(surface: .picker, intent: 1, generation: 8, itemID: Data([0, 0, 0, 42])))
+        #expect(FrontendActionComposition.outbound(MinibufferView.Action.select(generation: 17, itemID: "write")) == .semanticItemActivate(surface: .commandCompletion, intent: 1, generation: 17, itemID: Data("write".utf8)))
+        #expect(FrontendActionComposition.outbound(EditTimelineView.Action.navigate(generation: 18, entryID: "path:call")) == .semanticItemActivate(surface: .timeline, intent: 1, generation: 18, itemID: Data("path:call".utf8)))
+        #expect(FrontendActionComposition.outbound(FileTreeHeaderView.Action.newFile(generation: 19, parentID: "")) == .semanticItemActivate(surface: .fileTree, intent: 7, generation: 19, itemID: Data()))
+        #expect(FrontendActionComposition.outbound(FileTreeHeaderView.Action.newFolder(generation: 19, parentID: "")) == .semanticItemActivate(surface: .fileTree, intent: 8, generation: 19, itemID: Data()))
+        #expect(FrontendActionComposition.outbound(FileTreeView.Action.semantic(intent: .newFile, generation: 20, itemID: "parent")) == .semanticItemActivate(surface: .fileTree, intent: 7, generation: 20, itemID: Data("parent".utf8)))
+        #expect(FrontendActionComposition.outbound(FileTreeView.Action.semantic(intent: .newFolder, generation: 20, itemID: "parent")) == .semanticItemActivate(surface: .fileTree, intent: 8, generation: 20, itemID: Data("parent".utf8)))
     }
 
     @Test("settings handler is absent without a transport")

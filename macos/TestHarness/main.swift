@@ -417,7 +417,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
     case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
                          let input, let context, let selectedIndex,
-                         let totalCandidates, let candidates):
+                         let totalCandidates, let candidates, let generation):
         var result: [String: Any] = [:]
         result["type"] = "gui_minibuffer"
         result["visible"] = visible
@@ -428,10 +428,36 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["context"] = context
         result["selected_index"] = Int(selectedIndex)
         result["total_candidates"] = Int(totalCandidates)
+        result["generation"] = Int(generation)
         result["candidates"] = candidates.map { c in
-            ["match_score": Int(c.matchScore), "label": c.label, "description": c.description] as [String: Any]
+            ["id": c.id, "match_score": Int(c.matchScore), "label": c.label, "description": c.description] as [String: Any]
         }
         return result
+
+    case .guiEditTimeline(let visible, let viewingIndex, let entries, let files, let generation):
+        return [
+            "type": "gui_edit_timeline",
+            "visible": visible,
+            "viewing_index": Int(viewingIndex),
+            "generation": Int(generation),
+            "entries": entries.map { entry in
+                [
+                    "entry_id": entry.entryID,
+                    "index": Int(entry.index),
+                    "tool_name": entry.toolName,
+                    "timestamp_delta": Int(entry.timestampDelta)
+                ] as [String: Any]
+            },
+            "files": files.map { file in
+                [
+                    "path": file.path,
+                    "entry_count": Int(file.entryCount),
+                    "lines_added": Int(file.linesAdded),
+                    "lines_removed": Int(file.linesRemoved),
+                    "review_status": Int(file.reviewStatus)
+                ] as [String: Any]
+            }
+        ]
 
     default:
         return nil

@@ -89,19 +89,25 @@ defmodule MingaEditor.Commands.EditTimeline do
     NoticeWorkflow.publish(state, "Edit timeline toggled")
   end
 
-  @spec navigate_to_index(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  def navigate_to_index(state, index) do
-    with_timeline(state, fn path, timeline ->
-      count = EditTimeline.entry_count(timeline, path)
+  @doc "Navigates to the resolved entry's file, never inferring a path from the active buffer."
+  @spec navigate_to_entry(EditorState.t(), String.t(), EditTimeline.Entry.t()) :: EditorState.t()
+  def navigate_to_entry(state, path, entry) do
+    case BufferRegistry.open_file_by_path_result(state, path) do
+      {:ok, opened} ->
+        timeline = opened.workspace.agent_ui.view.edit_timeline
+        count = EditTimeline.entry_count(timeline, path)
+        timeline = EditTimeline.set_viewing(timeline, path, entry.index)
 
-      if index < count do
-        timeline = EditTimeline.set_viewing(timeline, path, index)
-        state = set_timeline(state, timeline)
-        NoticeWorkflow.publish(state, "Edit #{index + 1}/#{count}")
-      else
-        state
-      end
-    end)
+        opened
+        |> set_timeline(timeline)
+        |> NoticeWorkflow.publish("Edit #{entry.index + 1}/#{count}")
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(
+          state,
+          "Could not open agent change file #{path}: #{inspect(reason)}"
+        )
+    end
   end
 
   defp with_timeline(state, fun) do

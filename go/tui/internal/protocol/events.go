@@ -197,10 +197,6 @@ func EncodeTextPresentationState(windowID uint16, presentationID uint64, state b
 	}
 }
 
-func EncodeGUIFileTreeClick(index uint16) []byte {
-	return []byte{generated.OPGuiAction, generated.GUIActionFileTreeClick, byte(index >> 8), byte(index)}
-}
-
 func EncodeGUISelectTab(id uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionSelectTab, byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
 }
@@ -221,13 +217,13 @@ func EncodeGUITabReorder(id uint32, newIndex uint16) []byte {
 // EncodeGUIFileTreeDrop encodes a file_tree_drop action. Wire format:
 // <gui_action, 0x40, target_index:u16, target_path_hash:u32, target_kind:u8,
 // modifiers:u8, target_id(string16), target_path(string16), source_count:u16,
-// source_paths(string16)...>. target_kind is 1 for a directory, 0 for a file.
+// source_paths(string16)..., generation:u32>. target_kind is 1 for a directory, 0 for a file.
 // The BEAM validates the drop against its own tree by re-hashing the target
 // path, so target_path_hash must be the per-row hash the BEAM emitted for the
 // target row (FileTreeRow.PathHash), and target_id/target_path must match that
 // row. Mirrors the macOS encoder (ProtocolEncoder.swift sendFileTreeDrop) and
 // the BEAM decoder (gui.ex decode_file_tree_drop).
-func EncodeGUIFileTreeDrop(targetIndex uint16, targetPathHash uint32, targetIsDir bool, modifiers byte, targetID, targetPath string, sourcePaths []string) []byte {
+func EncodeGUIFileTreeDrop(targetIndex uint16, targetPathHash uint32, targetIsDir bool, modifiers byte, targetID, targetPath string, sourcePaths []string, generation uint32) []byte {
 	out := []byte{generated.OPGuiAction, generated.GUIActionFileTreeDrop}
 	out = append(out, byte(targetIndex>>8), byte(targetIndex))
 	out = append(out, byte(targetPathHash>>24), byte(targetPathHash>>16), byte(targetPathHash>>8), byte(targetPathHash))
@@ -247,6 +243,7 @@ func EncodeGUIFileTreeDrop(targetIndex uint16, targetPathHash uint32, targetIsDi
 	for _, path := range sourcePaths[:count] {
 		out = appendString16(out, path)
 	}
+	out = append(out, byte(generation>>24), byte(generation>>16), byte(generation>>8), byte(generation))
 	return out
 }
 
@@ -261,13 +258,6 @@ func EncodeGUIExecuteCommand(command string) []byte {
 
 func EncodeGUIAgentToolToggle(messageID uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
-}
-
-// EncodeGUICompletionSelect encodes a completion_select action. Wire format:
-// <gui_action, 0x05, index:u16>. The GUI sends the selected completion item
-// index (CompletionOverlay.swift:93).
-func EncodeGUICompletionSelect(index uint16) []byte {
-	return []byte{generated.OPGuiAction, generated.GUIActionCompletionSelect, byte(index >> 8), byte(index)}
 }
 
 // EncodeGUISemanticItemActivate activates one exact BEAM-authored item identity.
@@ -333,15 +323,6 @@ func EncodeGUIObservatoryInspect(pid string) []byte {
 	return appendString16(out, pid)
 }
 
-// EncodeGUITimelineNavigate encodes a timeline_navigate action. Wire format:
-// <gui_action, 0x4F, index:u16 big-endian>. Mirrors the macOS timeline circle
-// tap (ProtocolEncoder.swift:1123 sendTimelineNavigate): a click on a timeline
-// entry sends that entry's index, the same destination the keyboard
-// timeline_next_edit/timeline_prev_edit commands land on.
-func EncodeGUITimelineNavigate(index uint16) []byte {
-	return []byte{generated.OPGuiAction, generated.GUIActionTimelineNavigate, byte(index >> 8), byte(index)}
-}
-
 // EncodeGUIFloatPopupDismiss encodes a float_popup_dismiss action. Wire format:
 // <gui_action, 0x59> with an empty payload (#2338). There is no macOS sender:
 // the macOS FloatPopupOverlay is display-only with no dismiss gesture, so this
@@ -395,13 +376,15 @@ func appendString16(out []byte, value string) []byte {
 }
 
 // EncodeGUIFoldToggleAtLine encodes a fold_toggle_at_line action. Wire format:
-// <gui_action, 0x41, window_id:u16, buffer_line:u32>, matching the macOS encoder
+// <gui_action, 0x41, window_id:u16, generation:u64, buffer_line:u32>, matching the macOS encoder
 // (ProtocolEncoder.swift sendFoldToggleAtLine) and the BEAM decoder
 // (gui.ex decode_gui_action @gui_action_fold_toggle_at_line).
-func EncodeGUIFoldToggleAtLine(windowID uint16, bufferLine uint32) []byte {
+func EncodeGUIFoldToggleAtLine(windowID uint16, generation uint64, bufferLine uint32) []byte {
 	return []byte{
 		generated.OPGuiAction, generated.GUIActionFoldToggleAtLine,
 		byte(windowID >> 8), byte(windowID),
+		byte(generation >> 56), byte(generation >> 48), byte(generation >> 40), byte(generation >> 32),
+		byte(generation >> 24), byte(generation >> 16), byte(generation >> 8), byte(generation),
 		byte(bufferLine >> 24), byte(bufferLine >> 16), byte(bufferLine >> 8), byte(bufferLine),
 	}
 }

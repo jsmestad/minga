@@ -2882,9 +2882,10 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 		generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
 			Visible:      true,
 			ViewingIndex: 0,
+			Generation:   23,
 			Entries: []protocol.TimelineEntry{
-				{Index: 0, ToolName: "write_file", TimestampDelta: 12},
-				{Index: 1, ToolName: "apply_patch", TimestampDelta: 4},
+				{Index: 0, EntryID: "path:call-1", ToolName: "write_file", TimestampDelta: 12},
+				{Index: 1, EntryID: "path:call-2", ToolName: "apply_patch", TimestampDelta: 4},
 			},
 		}},
 	}
@@ -2898,15 +2899,14 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
-	// Each entry row carries a zone keyed by its index; a click routes
-	// timeline_navigate(index).
-	entry := waitForZone(t, model, zoneIDTimelineEntry(1))
+	// The presentation zone and action both carry the offered semantic identity.
+	entry := waitForZone(t, model, zoneIDTimelineEntry(23, "path:call-2"))
 	if entry.StartY < 20 || entry.StartY >= 24 {
 		t.Fatalf("timeline entry zone Y %d outside the band rows 20..23", entry.StartY)
 	}
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.StartX + 1, Y: entry.StartY}))
-	if !ok || !bytes.Equal(cmd, protocol.EncodeGUITimelineNavigate(1)) {
-		t.Fatalf("timeline row click should route timeline_navigate(1), ok=%v packet=%v", ok, cmd)
+	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISemanticItemActivate(5, 1, 23, []byte("path:call-2"))) {
+		t.Fatalf("timeline row click should route semantic navigation, ok=%v packet=%v", ok, cmd)
 	}
 
 	// A click that misses every timeline zone falls through (ok=false) so the BEAM

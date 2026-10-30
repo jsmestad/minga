@@ -810,26 +810,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, {:close_tab, 42}}} = Protocol.decode_event(payload)
     end
 
-    test "file_tree_click with index" do
-      payload = <<0x07, 0x03, 15::16-big>>
-      assert {:ok, {:gui_action, {:file_tree_click, 15}}} = Protocol.decode_event(payload)
-    end
-
-    test "file_tree_toggle with index" do
-      payload = <<0x07, 0x04, 7::16-big>>
-      assert {:ok, {:gui_action, {:file_tree_toggle, 7}}} = Protocol.decode_event(payload)
-    end
-
-    test "completion_select with stable item ID" do
-      payload = <<0x07, 0x05, 6, "item-3">>
-      assert {:ok, {:gui_action, {:completion_select, "item-3"}}} = Protocol.decode_event(payload)
-    end
-
-    test "breadcrumb_click with segment index" do
-      payload = <<0x07, 0x06, 2>>
-      assert {:ok, {:gui_action, {:breadcrumb_click, 2}}} = Protocol.decode_event(payload)
-    end
-
     test "toggle_panel with panel id" do
       payload = <<0x07, 0x07, 1>>
       assert {:ok, {:gui_action, {:toggle_panel, 1}}} = Protocol.decode_event(payload)
@@ -878,16 +858,6 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, :cmd_cut}} = Protocol.decode_event(payload)
     end
 
-    test "file_tree_new_file with parent_index" do
-      payload = <<0x07, 0x0D, 0x00, 0x05>>
-      assert {:ok, {:gui_action, {:file_tree_new_file, 5}}} = Protocol.decode_event(payload)
-    end
-
-    test "file_tree_new_folder with parent_index" do
-      payload = <<0x07, 0x0E, 0x00, 0x03>>
-      assert {:ok, {:gui_action, {:file_tree_new_folder, 3}}} = Protocol.decode_event(payload)
-    end
-
     test "file_tree_edit_confirm with text" do
       text = "newfile.txt"
       text_bytes = text
@@ -922,7 +892,8 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       payload =
         <<0x07, 0x40, 8::16, 0xAABBCCDD::32, 1::8, 2::8, byte_size(target_id)::16,
           target_id::binary, byte_size(target_path)::16, target_path::binary, 2::16,
-          byte_size(source_a)::16, source_a::binary, byte_size(source_b)::16, source_b::binary>>
+          byte_size(source_a)::16, source_a::binary, byte_size(source_b)::16, source_b::binary,
+          19::32>>
 
       assert {:ok, {:gui_action, {:file_tree_drop, intent}}} = Protocol.decode_event(payload)
       assert %MingaEditor.FileTree.DropIntent{} = intent
@@ -931,6 +902,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert intent.target_dir? == true
       assert intent.modifiers == 2
       assert intent.target_id == target_id
+      assert intent.generation == 19
       assert intent.target_path == target_path
       assert intent.source_paths == [source_a, source_b]
     end

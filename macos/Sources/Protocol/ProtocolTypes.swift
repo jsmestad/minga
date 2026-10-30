@@ -573,13 +573,15 @@ public enum Wire {
     // MARK: - Minibuffer
 
     public struct MinibufferCandidate: Sendable {
+        public var id: String
         public let matchScore: UInt8
         public let label: String
         public let description: String
         public let annotation: String
         public let matchPositions: [UInt16]
 
-        public init(matchScore: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16]) {
+        public init(id: String, matchScore: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16]) {
+            self.id = id
             self.matchScore = matchScore
             self.label = label
             self.description = description
@@ -1230,13 +1232,15 @@ public enum Wire {
     }
 
     public struct TimelineEntry: Sendable, Identifiable {
+        public var entryID: String
         public let index: UInt8
         public let toolName: String
         public let timestampDelta: UInt32
 
-        public var id: Int { Int(index) }
+        public var id: String { entryID }
 
-        public init(index: UInt8, toolName: String, timestampDelta: UInt32) {
+        public init(entryID: String, index: UInt8, toolName: String, timestampDelta: UInt32) {
+            self.entryID = entryID
             self.index = index
             self.toolName = toolName
             self.timestampDelta = timestampDelta

@@ -32,6 +32,7 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
     timeline_entries =
       Enum.map(entries, fn entry ->
         %EditTimeline.Entry{
+          entry_id: EditTimelineState.entry_id(path, entry),
           index: entry.index,
           tool_name: entry.tool_name,
           timestamp_delta: abs(entry.timestamp - first_ts)
@@ -40,6 +41,7 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
 
     %EditTimeline{
       visible?: true,
+      generation: timeline.generation,
       viewing_index: viewing,
       entries: timeline_entries,
       files: file_entries(timeline, path)

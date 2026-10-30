@@ -50,7 +50,9 @@ defmodule MingaEditor.Commands.TargetedTabCloseTest do
     first_request = register_wait(first, ctx.tmp, "first")
     second_request = register_wait(second, ctx.tmp, "second")
 
-    assert GuiActionHandler.dispatch(state, {:close_tab, 999_999}) == state
+    rejected = GuiActionHandler.dispatch(state, {:close_tab, 999_999})
+    assert Map.delete(rejected, :render) == Map.delete(state, :render)
+    assert rejected.render.render_correlation.keyframe_pending?
     assert Process.alive?(first) and Process.alive?(second)
     assert Buffer.content(first) == first_content
     assert Buffer.cursor(second) == second_cursor
@@ -67,8 +69,9 @@ defmodule MingaEditor.Commands.TargetedTabCloseTest do
     removed_before_delivery = install_tab_bar(state, without_first)
     active_request = register_wait(third, ctx.tmp, "third")
 
-    assert GuiActionHandler.dispatch(removed_before_delivery, {:close_tab, first_id}) ==
-             removed_before_delivery
+    rejected = GuiActionHandler.dispatch(removed_before_delivery, {:close_tab, first_id})
+    assert Map.delete(rejected, :render) == Map.delete(removed_before_delivery, :render)
+    assert rejected.render.render_correlation.keyframe_pending?
 
     assert wait_pending?(third, active_request)
     refute_received %WaitRequestCompletion{request_id: ^active_request}
@@ -77,7 +80,9 @@ defmodule MingaEditor.Commands.TargetedTabCloseTest do
     assert TabBar.get(tab_bar(closed), second_id) == nil
     assert tab_bar(closed).active_id == third_id
     assert Process.alive?(first) and Process.alive?(second) and Process.alive?(third)
-    assert GuiActionHandler.dispatch(closed, {:close_tab, second_id}) == closed
+    duplicate = GuiActionHandler.dispatch(closed, {:close_tab, second_id})
+    assert Map.delete(duplicate, :render) == Map.delete(closed, :render)
+    assert duplicate.render.render_correlation.keyframe_pending?
     assert wait_pending?(third, active_request)
     refute_received %WaitRequestCompletion{request_id: ^active_request}
   end

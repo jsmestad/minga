@@ -18,7 +18,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias Minga.Clipboard
-  alias Minga.Editing.Completion
   alias Minga.FileWatcher
   alias Minga.Git
   alias Minga.LSP.Supervisor, as: LspSupervisor
@@ -33,7 +32,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.GitRepositoryResolver
   alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
-  alias MingaEditor.FileTree.Row, as: FileTreeRow
   alias MingaEditor.Commands
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
@@ -42,11 +40,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
   alias MingaEditor.Input.Observatory
-  alias MingaEditor.MinibufferData
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
   alias MingaEditor.PickerUI
   alias MingaEditor.Session.State
   alias MingaEditor.Viewport
+  alias MingaEditor.Target
   alias MingaEditor.VimState
   alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.Window
@@ -69,8 +67,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Startup
-
-  alias Minga.Project.FileTree
 
   @typedoc "Editor state (re-exported for brevity)."
   @type state :: EditorState.t()
@@ -257,10 +253,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:observatory_inspect, _pid_string}), do: state
 
-  defp dispatch_action(state, {:timeline_navigate, index}) do
-    MingaEditor.Commands.EditTimeline.navigate_to_index(state, index)
-  end
-
   defp dispatch_action(state, {:extension_panel_action, ext_name, action_name, context}) do
     route_panel_action_to_extension(state, ext_name, action_name, context)
   end
@@ -293,31 +285,24 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:select_tab, id}) do
-    MingaEditor.TabWorkflow.switch(state, id)
+    with_target(state, {:tab, id}, fn {:tab, tab} ->
+      MingaEditor.TabWorkflow.switch(state, tab.id)
+    end)
   end
 
   defp dispatch_action(state, {:tab_copy_path, id}) do
-    copy_tab_path(state, id)
+    with_target(state, {:tab, id}, fn {:tab, tab} -> copy_tab_path(state, tab.id) end)
   end
 
   defp dispatch_action(state, {:tab_reorder, id, new_index}) do
-    reorder_tab(state, id, new_index)
+    with_target(state, {:tab, id}, fn {:tab, tab} -> reorder_tab(state, tab.id, new_index) end)
   end
 
-  defp dispatch_action(state, {:tab_pin, id}) do
-    update_tab_bar(state, &TabBar.pin_tab(&1, id))
-  end
-
-  defp dispatch_action(state, {:tab_unpin, id}) do
-    update_tab_bar(state, &TabBar.unpin_tab(&1, id))
-  end
-
-  defp dispatch_action(state, {:tab_move_left, id}) do
-    update_tab_bar(state, &TabBar.move_tab_left(&1, id))
-  end
-
-  defp dispatch_action(state, {:tab_move_right, id}) do
-    update_tab_bar(state, &TabBar.move_tab_right(&1, id))
+  defp dispatch_action(state, {action, id})
+       when action in [:tab_pin, :tab_unpin, :tab_move_left, :tab_move_right] do
+    with_target(state, {:tab, id}, fn {:tab, tab} ->
+      update_tab_bar(state, &apply_tab_context(&1, action, tab.id))
+    end)
   end
 
   defp dispatch_action(state, :hover_open_action) do
@@ -325,78 +310,21 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:close_tab, id}) do
-    Commands.BufferManagement.execute(state, {:close_tab, id})
+    with_target(state, {:tab, id}, fn {:tab, tab} ->
+      Commands.BufferManagement.execute(state, {:close_tab, tab.id})
+    end)
   end
 
   defp dispatch_action(state, {:empty_state_activate, item_id}) do
     Commands.Launchpad.activate(state, item_id)
   end
 
-  defp dispatch_action(
-         state,
-         {:semantic_item_activate, :completion, :accept, generation, item_id}
-       ) do
-    modal_workflow = MingaEditor.Shell.Traditional.ModalWorkflow
+  defp dispatch_action(state, {:semantic_item_activate, surface, intent, generation, item_id}) do
+    target = {:surface_item, surface, generation, item_id}
 
-    case {modal_workflow.completion_generation(state), modal_workflow.completion(state)} do
-      {^generation, %Completion{} = completion} when generation != 0 ->
-        accept_completion_item(state, completion, item_id)
-
-      _stale ->
-        reject_semantic_activation(state, :completion, generation, item_id)
-    end
-  end
-
-  defp dispatch_action(
-         state,
-         {:semantic_item_activate, :picker, intent, generation, <<activation_id::32>>}
-       )
-       when intent in [:activate_item, :activate_action] do
-    case intent do
-      :activate_item ->
-        dispatch_action(state, {:picker_item_activate, generation, activation_id})
-
-      :activate_action ->
-        dispatch_action(state, {:picker_action_activate, generation, activation_id})
-    end
-  end
-
-  defp dispatch_action(
-         state,
-         {:semantic_item_activate, :file_tree, intent, generation, item_id}
-       ) do
-    case resolve_file_tree_item(state.workspace.file_tree, generation, item_id) do
-      {:ok, index} -> dispatch_file_tree_identity(state, intent, index)
-      :stale -> reject_semantic_activation(state, :file_tree, generation, item_id)
-    end
-  end
-
-  defp dispatch_action(
-         state,
-         {:semantic_item_activate, surface, _intent, generation, item_id}
-       ),
-       do: reject_semantic_activation(state, surface, generation, item_id)
-
-  defp dispatch_action(state, {:file_tree_click, index}) do
-    gui_tree_action(state, index, :click)
-  end
-
-  defp dispatch_action(state, {:file_tree_toggle, index}) do
-    gui_tree_action(state, index, :toggle)
-  end
-
-  defp dispatch_action(state, {:file_tree_open_in_split, index}) do
-    open_file_tree_entry_in_split(state, index)
-  end
-
-  defp dispatch_action(state, {:file_tree_new_file, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.new_file(state)
-  end
-
-  defp dispatch_action(state, {:file_tree_new_folder, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.new_folder(state)
+    with_target(state, target, fn resolved ->
+      apply_semantic_target(state, target, intent, resolved)
+    end)
   end
 
   defp dispatch_action(state, {:file_tree_edit_confirm, token, text}),
@@ -406,27 +334,21 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Commands.FileTree.cancel_editing(state)
   end
 
-  defp dispatch_action(state, {:file_tree_delete, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.delete(state)
-  end
-
-  defp dispatch_action(state, {:file_tree_rename, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.rename(state)
-  end
-
-  defp dispatch_action(state, {:file_tree_duplicate, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.duplicate(state)
-  end
-
-  defp dispatch_action(state, {:file_tree_move, source_index, target_dir_index}) do
-    Commands.FileTree.move(state, source_index, target_dir_index)
-  end
-
   defp dispatch_action(state, {:file_tree_drop, intent}) do
-    Commands.FileTree.drop(state, intent)
+    target = {:surface_item, :file_tree, intent.generation, intent.target_id}
+
+    with_target(state, target, fn
+      {:file_tree, tree, %{path: path, dir?: dir?} = entry} ->
+        if Path.expand(path) == Path.expand(intent.target_path) and dir? == intent.target_dir? and
+             :erlang.phash2(Path.expand(path), 0xFFFFFFFF) == intent.target_path_hash do
+          Commands.FileTree.drop_at(state, tree, entry, intent)
+        else
+          reject_target(state, target, :target_mismatch)
+        end
+
+      _ ->
+        reject_target(state, target, :target_mismatch)
+    end)
   end
 
   defp dispatch_action(state, :file_tree_collapse_all) do
@@ -435,21 +357,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, :file_tree_refresh) do
     Commands.FileTree.refresh(state)
-  end
-
-  defp dispatch_action(state, {:completion_select, item_id}) do
-    case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
-      %Completion{} = comp ->
-        accept_completion_item(state, comp, item_id)
-
-      nil ->
-        state
-    end
-  end
-
-  defp dispatch_action(state, {:breadcrumb_click, _segment_index}) do
-    # Legacy frontends may still emit breadcrumb clicks; breadcrumbs are display-only.
-    state
   end
 
   defp dispatch_action(state, {:toggle_panel, 0}) do
@@ -504,10 +411,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Commands.BufferManagement.execute(state, :new_buffer)
   end
 
-  defp dispatch_action(state, {:panel_switch_tab, _tab_index}) do
-    state
-  end
-
   defp dispatch_action(state, :panel_dismiss) do
     shell_state =
       MingaEditor.Shell.Traditional.State.install_bottom_panel(
@@ -559,26 +462,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
 
     state
-  end
-
-  defp dispatch_action(state, {:minibuffer_select, index}) do
-    case state.workspace.editing do
-      %{mode: :command, mode_state: ms} ->
-        {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
-        clamped = MinibufferData.clamp_index(index, Enum.count(candidates))
-
-        case Enum.at(candidates, clamped) do
-          nil ->
-            state
-
-          %{label: label} ->
-            new_ms = CommandState.replace_input(ms, label)
-            set_vim_mode_state(state, new_ms)
-        end
-
-      _ ->
-        state
-    end
   end
 
   defp dispatch_action(state, {:execute_command, "workspace_goto_id:" <> workspace_id}) do
@@ -708,54 +591,43 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     MingaEditor.Commands.execute(state, cmd)
   end
 
-  defp dispatch_action(state, {:scroll_to_line, line}) do
-    # Scroll the active window's viewport to the target line. This is the
-    # scrollbar thumb-drag / track-click commit path (#2665). It gets the same
-    # free-scroll treatment as the wheel/trackpad path in `Mouse.apply_scroll_intent`:
-    #
-    #   * `mark_scroll_echo/2` records the committed top so `settle_scroll_seq/1`
-    #     treats it as a frontend-reported echo and does NOT bump `scroll_seq`.
-    #     Without this, the drag's own committed anchor would look like a
-    #     BEAM-initiated jump and discard the frontend's same-frame local
-    #     presentation over resident rows (AC2).
-    #   * `record_scroll_event/3` marks `scroll_detach_cursor` so cursor-follow is
-    #     suppressed: the viewport stays where it was dragged and the cursor stays
-    #     put (VSCode wheel semantics, #2684/#2691). A thumb drag never moves the
-    #     cursor, so without this the next frame would re-anchor the viewport to
-    #     the cursor line and yank the content back — a settle-jump.
-    active_win_id = state.workspace.windows.active
-    win_map = state.workspace.windows.map
+  defp dispatch_action(state, {:scroll_to_line, window_id, generation, line}) do
+    with_target(state, {:window, window_id, generation}, fn {:window, window} ->
+      viewport = Viewport.put_top(window.viewport, max(line, 0))
+      updated = scroll_to_line_commit(window, viewport)
 
-    case Map.get(win_map, active_win_id) do
-      nil ->
-        state
+      windows =
+        Windows.set_map(
+          state.workspace.windows,
+          Map.put(state.workspace.windows.map, window.id, updated)
+        )
 
-      window ->
-        vp = window.viewport
-        new_vp = Viewport.put_top(vp, max(line, 0))
-        new_win = scroll_to_line_commit(window, new_vp)
-        new_map = Map.put(win_map, active_win_id, new_win)
-
-        new_state =
-          %{
-            state
-            | workspace:
-                State.set_windows(
-                  state.workspace,
-                  (&Windows.set_map(&1, new_map)).(state.workspace.windows)
-                )
-          }
-
-        new_state
-    end
+      %{state | workspace: State.set_windows(state.workspace, windows)}
+    end)
   end
 
-  defp dispatch_action(state, {:fold_toggle_at_line, window_id, line}) do
-    Commands.Folding.execute_at_line(state, window_id, line)
+  defp dispatch_action(state, {:fold_toggle_at_line, window_id, generation, line}) do
+    target = {:window, window_id, generation}
+
+    with_target(state, target, fn
+      {:window, %Window{content: {:buffer, buffer}} = window} when is_pid(buffer) ->
+        Commands.Folding.execute_at_line(state, window.id, line)
+
+      _ ->
+        reject_target(state, target, :target_mismatch)
+    end)
   end
 
   defp dispatch_action(state, {:focus_window, window_id, generation}) do
-    WindowFocus.focus_accessibility_target(state, window_id, generation)
+    with_target(state, {:window, window_id, generation}, fn {:window, window} ->
+      case WindowFocus.focus_result(state, window.id) do
+        {:ok, focused} ->
+          focused
+
+        {:error, _reason} ->
+          reject_target(state, {:window, window_id, generation}, :target_mismatch)
+      end
+    end)
   end
 
   defp dispatch_action(state, :cmd_copy) do
@@ -830,14 +702,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     do: GuiSearchWorkflow.replace_all(state, replacement)
 
   defp dispatch_action(state, {:picker_item_activate, generation, activation_id}) do
-    case PickerUI.activate_item(state, generation, activation_id) do
-      {new_state, {:execute_command, command}} -> MingaEditor.dispatch_command(new_state, command)
-      new_state -> new_state
-    end
+    dispatch_action(
+      state,
+      {:semantic_item_activate, :picker, :activate_item, generation, <<activation_id::32>>}
+    )
   end
 
   defp dispatch_action(state, {:picker_action_activate, generation, activation_id}) do
-    PickerUI.activate_action(state, generation, activation_id)
+    dispatch_action(
+      state,
+      {:semantic_item_activate, :picker, :activate_action, generation, <<activation_id::32>>}
+    )
   end
 
   defp dispatch_action(state, :search_dismiss) do
@@ -1289,66 +1164,102 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp git_admission_error_message(:scheduler_full), do: "Git effect scheduler is full"
   defp git_admission_error_message(reason), do: "Git action not scheduled: #{reason}"
 
-  # ── Completion helpers ─────────────────────────────────────────────
-
-  @spec accept_completion_item(state(), Completion.t(), String.t()) :: state()
-  defp accept_completion_item(state, comp, item_id) do
-    case Completion.select_wire_id(comp, item_id) do
-      :stale ->
-        reject_semantic_activation(state, :completion, 0, item_id)
-
-      {:ok, updated} ->
-        next =
-          MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, fn _ -> updated end)
-
-        MingaEditor.do_accept_completion(next, updated)
+  # All identity failures share one log and authoritative render reset.
+  @spec with_target(state(), Target.target(), (Target.resolved() -> state())) :: state()
+  defp with_target(state, target, apply_target) do
+    case Target.resolve(state, target) do
+      {:ok, resolved} -> apply_target.(resolved)
+      {:error, reason} -> reject_target(state, target, reason)
     end
   end
 
-  @spec resolve_file_tree_item(FileTreeState.t(), non_neg_integer(), binary()) ::
-          {:ok, non_neg_integer()} | :stale
-  defp resolve_file_tree_item(%FileTreeState{} = file_tree, generation, item_id) do
-    with ^generation when generation != 0 <- FileTreeState.presentation_generation(file_tree),
-         %FileTree{} = tree <- FileTreeState.tree(file_tree),
-         %FileTree{entries: entries} <- FileTree.ensure_entries(tree),
-         index when is_integer(index) <-
-           Enum.find_index(entries, &(FileTreeRow.id_for(&1) == item_id)) do
-      {:ok, index}
-    else
-      _stale -> :stale
+  @spec apply_tab_context(TabBar.t(), atom(), Tab.id()) :: TabBar.t()
+  defp apply_tab_context(tab_bar, :tab_pin, id), do: TabBar.pin_tab(tab_bar, id)
+  defp apply_tab_context(tab_bar, :tab_unpin, id), do: TabBar.unpin_tab(tab_bar, id)
+  defp apply_tab_context(tab_bar, :tab_move_left, id), do: TabBar.move_tab_left(tab_bar, id)
+  defp apply_tab_context(tab_bar, :tab_move_right, id), do: TabBar.move_tab_right(tab_bar, id)
+
+  @spec apply_semantic_target(state(), Target.target(), atom(), Target.resolved()) :: state()
+  defp apply_semantic_target(state, _target, :accept, {:completion, completion}) do
+    state
+    |> MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(fn _ -> completion end)
+    |> MingaEditor.do_accept_completion(completion)
+  end
+
+  defp apply_semantic_target(state, _target, :activate_item, {:picker_item, generation, id}) do
+    case PickerUI.activate_item(state, generation, id) do
+      {next, {:execute_command, command}} -> MingaEditor.dispatch_command(next, command)
+      next -> next
     end
   end
 
-  @spec dispatch_file_tree_identity(state(), atom(), non_neg_integer()) :: state()
-  defp dispatch_file_tree_identity(state, :primary, index),
-    do: gui_tree_action(state, index, :click)
+  defp apply_semantic_target(state, _target, :activate_action, {:picker_action, generation, id}),
+    do: PickerUI.activate_action(state, generation, id)
 
-  defp dispatch_file_tree_identity(state, :toggle, index),
-    do: gui_tree_action(state, index, :toggle)
+  defp apply_semantic_target(state, _target, :accept, {:command_completion, label}) do
+    mode_state = CommandState.replace_input(state.workspace.editing.mode_state, label)
 
-  defp dispatch_file_tree_identity(state, :open_in_split, index),
-    do: open_file_tree_entry_in_split(state, index)
-
-  defp dispatch_file_tree_identity(state, :delete, index) do
-    state |> move_tree_cursor(index) |> Commands.FileTree.delete()
+    state
+    |> set_vim_mode_state(mode_state)
+    |> MingaEditor.KeyDispatch.refresh_command_completion()
   end
 
-  defp dispatch_file_tree_identity(state, :rename, index) do
-    state |> move_tree_cursor(index) |> Commands.FileTree.rename()
+  defp apply_semantic_target(state, _target, :navigate, {:timeline_entry, path, entry}),
+    do: Commands.EditTimeline.navigate_to_entry(state, path, entry)
+
+  defp apply_semantic_target(state, _target, intent, {:file_tree, tree, entry})
+       when intent in [:new_file, :new_folder],
+       do: Commands.FileTree.new_entry_at(state, tree, entry, intent)
+
+  defp apply_semantic_target(state, _target, intent, {:file_tree, tree, %{} = entry})
+       when intent in [:primary, :toggle],
+       do: Commands.FileTree.activate_entry(state, tree, entry, intent)
+
+  defp apply_semantic_target(
+         state,
+         _target,
+         :open_in_split,
+         {:file_tree, _tree, %{dir?: false, path: path}}
+       ) do
+    state
+    |> unfocus_file_tree_for_split()
+    |> Commands.Movement.execute(:split_vertical)
+    |> Commands.Movement.execute(:window_right)
+    |> open_file_by_path_in_active_window(path)
   end
 
-  defp dispatch_file_tree_identity(state, :duplicate, index) do
-    state |> move_tree_cursor(index) |> Commands.FileTree.duplicate()
-  end
+  defp apply_semantic_target(state, _target, :delete, {:file_tree, _tree, %{} = entry}),
+    do: Commands.FileTree.delete_entry(state, entry)
 
-  defp dispatch_file_tree_identity(state, _intent, _index),
-    do: reject_semantic_activation(state, :file_tree, 0, <<>>)
+  defp apply_semantic_target(state, _target, :rename, {:file_tree, tree, %{} = entry}),
+    do: Commands.FileTree.rename_entry(state, tree, entry)
 
-  @spec reject_semantic_activation(state(), atom(), non_neg_integer(), binary()) :: state()
-  defp reject_semantic_activation(state, surface, generation, item_id) do
+  defp apply_semantic_target(state, _target, :duplicate, {:file_tree, _tree, %{} = entry}),
+    do: Commands.FileTree.duplicate_entry(state, entry)
+
+  defp apply_semantic_target(state, target, _intent, _resolved),
+    do: reject_target(state, target, :target_mismatch)
+
+  @spec reject_target(state(), Target.target(), Target.reason()) :: state()
+  defp reject_target(state, {:tab, id}, reason),
+    do: reject_semantic_activation(state, :tab, {nil, id}, reason)
+
+  defp reject_target(state, {:window, id, generation}, reason),
+    do: reject_semantic_activation(state, :window, {generation, id}, reason)
+
+  defp reject_target(state, {:surface_item, surface, generation, id}, reason),
+    do: reject_semantic_activation(state, surface, {generation, id}, reason)
+
+  @spec reject_semantic_activation(
+          state(),
+          atom(),
+          {non_neg_integer() | nil, term()},
+          Target.reason()
+        ) :: state()
+  defp reject_semantic_activation(state, surface, {generation, id}, reason) do
     Minga.Log.warning(
       :editor,
-      "Rejected stale semantic activation surface=#{surface} generation=#{generation} item=#{inspect(item_id)}"
+      "Rejected semantic activation surface=#{surface} generation=#{inspect(generation)} id=#{inspect(id)} reason=#{reason}"
     )
 
     EditorState.reset_frontend_render_state(state)
@@ -1373,76 +1284,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         |> PickerUI.open(MingaEditor.UI.Picker.FileSource, %{project_root: installed_root})
 
       {:error, _reason} ->
-        state
-    end
-  end
-
-  # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
-  @spec move_tree_cursor(state(), non_neg_integer()) :: state()
-  defp move_tree_cursor(state, index) do
-    case FileTreeState.tree(state.workspace.file_tree) do
-      nil ->
-        state
-
-      tree ->
-        %{
-          state
-          | workspace:
-              State.set_file_tree(
-                state.workspace,
-                FileTreeState.set_tree(state.workspace.file_tree, FileTree.select(tree, index))
-              )
-        }
-    end
-  end
-
-  # Moves the file tree cursor to the given index and performs the action.
-  @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
-  defp gui_tree_action(state, index, action) do
-    if FileTreeState.tree(state.workspace.file_tree) == nil do
-      state
-    else
-      do_gui_tree_action(state, index, action)
-    end
-  end
-
-  @spec do_gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
-  defp do_gui_tree_action(state, index, action) do
-    state = move_tree_cursor(state, index)
-
-    case action do
-      :click -> Commands.FileTree.open_or_toggle(state)
-      :toggle -> Commands.FileTree.open_or_toggle(state)
-    end
-  end
-
-  @spec open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
-  defp open_file_tree_entry_in_split(state, index) do
-    if FileTreeState.tree(state.workspace.file_tree) == nil do
-      state
-    else
-      do_open_file_tree_entry_in_split(state, index)
-    end
-  end
-
-  @spec do_open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
-  defp do_open_file_tree_entry_in_split(state, index) do
-    state =
-      state
-      |> move_tree_cursor(index)
-      |> unfocus_file_tree_for_split()
-
-    case state.workspace.file_tree |> FileTreeState.tree() |> FileTree.selected_entry() do
-      %{dir?: false, path: path} ->
-        state
-        |> Commands.Movement.execute(:split_vertical)
-        |> Commands.Movement.execute(:window_right)
-        |> open_file_by_path_in_active_window(path)
-
-      %{dir?: true} ->
-        state
-
-      nil ->
         state
     end
   end

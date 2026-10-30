@@ -81,10 +81,11 @@ extension PreviewRegistry {
             context: "",
             selectedIndex: 0,
             totalCandidates: 23,
+            generation: 1,
             rawCandidates: [
-                Wire.MinibufferCandidate(matchScore: 95, label: "org-mode", description: "Toggle Org major mode", annotation: "SPC m o", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
-                Wire.MinibufferCandidate(matchScore: 80, label: "org-mode-restart", description: "Restart Org mode parser", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
-                Wire.MinibufferCandidate(matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
+                Wire.MinibufferCandidate(id: "org-mode", matchScore: 95, label: "org-mode", description: "Toggle Org major mode", annotation: "SPC m o", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+                Wire.MinibufferCandidate(id: "org-mode-restart", matchScore: 80, label: "org-mode-restart", description: "Restart Org mode parser", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+                Wire.MinibufferCandidate(id: "org-modernize", matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
             ]
         )
 

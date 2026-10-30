@@ -1088,8 +1088,8 @@ final class CommandDispatcher {
         case .guiNotifications(let notifications):
             guiState.notificationCenterState.update(rawNotifications: notifications)
 
-        case .guiEditTimeline(let visible, let viewingIndex, let entries, let files):
-            guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries, wireFiles: files)
+        case .guiEditTimeline(let visible, let viewingIndex, let entries, let files, let generation):
+            guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries, wireFiles: files, generation: generation)
 
         case .guiTheme(let slots):
             guiState.replaceTheme(slots: slots)
@@ -1292,12 +1292,12 @@ final class CommandDispatcher {
 
         case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
                              let input, let context, let selectedIndex,
-                             let totalCandidates, let candidates):
+                             let totalCandidates, let candidates, let generation):
             if visible {
                 guiState.minibufferState.update(
                     visible: true, mode: mode, cursorPos: cursorPos,
                     prompt: prompt, input: input, context: context,
-                    selectedIndex: selectedIndex, totalCandidates: totalCandidates,
+                    selectedIndex: selectedIndex, totalCandidates: totalCandidates, generation: generation,
                     rawCandidates: candidates
                 )
             } else {

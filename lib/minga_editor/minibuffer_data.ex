@@ -32,6 +32,7 @@ defmodule MingaEditor.MinibufferData do
   @typedoc "Structured minibuffer data for GUI encoding."
   @type t :: %__MODULE__{
           visible: boolean(),
+          generation: non_neg_integer(),
           mode: non_neg_integer(),
           cursor_pos: non_neg_integer(),
           prompt: String.t(),
@@ -44,6 +45,7 @@ defmodule MingaEditor.MinibufferData do
 
   @enforce_keys [:visible]
   defstruct visible: false,
+            generation: 0,
             mode: 0,
             cursor_pos: 0xFFFF,
             prompt: "",
@@ -128,11 +130,12 @@ defmodule MingaEditor.MinibufferData do
 
   def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}} = state) do
     input = ms.input
-    {candidates, total} = command_candidates(state, input)
+    {candidates, total, generation} = command_candidates(state, input)
     selected = clamp_index(ms.candidate_index, Enum.count(candidates))
 
     %__MODULE__{
       visible: true,
+      generation: generation,
       mode: @mode_command,
       cursor_pos: ms.cursor,
       prompt: ":",
@@ -382,7 +385,8 @@ defmodule MingaEditor.MinibufferData do
   # redraws with unchanged input) does not rescan the command registry. Fall
   # back to computing only when the overlay is absent or stale (e.g. the first
   # frame on entry, or a programmatic input change the dispatcher hasn't synced).
-  @spec command_candidates(map(), String.t()) :: {[candidate()], non_neg_integer()}
+  @spec command_candidates(map(), String.t()) ::
+          {[candidate()], non_neg_integer(), non_neg_integer()}
   defp command_candidates(%{shell_runtime: %{state: shell_state}}, input),
     do: command_candidates(%{shell_state: shell_state}, input)
 
@@ -390,16 +394,20 @@ defmodule MingaEditor.MinibufferData do
          %{
            shell_state: %{
              modal:
-               {:command_completion, %{filter_text: ft, candidates: candidates, total: total}}
+               {:command_completion,
+                %{filter_text: ft, candidates: candidates, total: total, generation: generation}}
            }
          },
          input
        )
        when ft == input do
-    {candidates, total}
+    {candidates, total, generation}
   end
 
-  defp command_candidates(_state, input), do: complete_ex_command(input)
+  defp command_candidates(_state, input) do
+    {candidates, total} = complete_ex_command(input)
+    {candidates, total, 0}
+  end
 
   # When input is empty, show commonly used commands
   @spec popular_commands() :: {[candidate()], non_neg_integer()}

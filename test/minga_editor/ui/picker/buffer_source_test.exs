@@ -158,23 +158,55 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
   end
 
   describe "selection" do
-    test "selecting an indexed buffer switches the active buffer" do
-      state = state_with_buffers(["alpha", "beta"])
-      item = %Item{id: 1, label: "beta"}
+    test "a buffer removed before activation cannot retarget the offered choice" do
+      state = state_with_buffers(["alpha", "beta", "gamma"])
+      [alpha, beta, gamma] = state.workspace.buffers.list
 
-      selected = BufferSource.on_select(item, state)
+      item =
+        BufferSource.candidates(fake_state(state.workspace.buffers.list))
+        |> Enum.find(&(&1.description == "beta"))
 
-      assert Buffer.content(selected.workspace.buffers.active) == "beta"
+      buffers = Buffers.remove(state.workspace.buffers, alpha)
+
+      changed = %{
+        state
+        | workspace: MingaEditor.Session.State.set_buffers(state.workspace, buffers)
+      }
+
+      selected = BufferSource.on_select(item, changed)
+
+      assert selected.workspace.buffers.active == beta
+      assert Buffer.content(gamma) == "gamma"
+    end
+
+    test "kill resolves the offered buffer after earlier rows disappear" do
+      state = state_with_buffers(["alpha", "beta", "gamma"])
+      [alpha, beta, gamma] = state.workspace.buffers.list
+
+      item =
+        BufferSource.candidates(fake_state(state.workspace.buffers.list))
+        |> Enum.find(&(&1.description == "beta"))
+
+      buffers = Buffers.remove(state.workspace.buffers, alpha)
+
+      changed = %{
+        state
+        | workspace: MingaEditor.Session.State.set_buffers(state.workspace, buffers)
+      }
+
+      monitor = Process.monitor(beta)
+
+      killed = BufferSource.on_action(:kill, item, changed)
+
+      assert_receive {:DOWN, ^monitor, :process, ^beta, :normal}
+      assert killed.workspace.buffers.list == [gamma]
+      assert Buffer.content(gamma) == "gamma"
     end
 
     test "bulk select enters the launchpad when all open buffers are killed" do
       state = state_with_buffers(["alpha", "beta", "gamma"])
 
-      items = [
-        %Item{id: 0, label: "alpha"},
-        %Item{id: 1, label: "beta"},
-        %Item{id: 2, label: "gamma"}
-      ]
+      items = Enum.map(state.workspace.buffers.list, &%Item{id: {:buffer, &1}, label: "buffer"})
 
       selected = BufferSource.on_bulk_select(items, state)
 
@@ -184,12 +216,6 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
       assert MingaEditor.Session.State.active_window_struct(selected.workspace).content ==
                {:empty, :semantic}
-    end
-
-    test "bulk actions expose kill all marked" do
-      assert BufferSource.bulk_actions([%Item{id: 1, label: "beta"}]) == [
-               {"Kill all marked", :kill_marked}
-             ]
     end
   end
 

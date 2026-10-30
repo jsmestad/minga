@@ -72,12 +72,9 @@ func zoneIDObservatoryNode(pid string) string {
 	return zonePrefixObservatoryNode + url.QueryEscape(pid)
 }
 
-// zoneIDTimelineEntry tags one edit-timeline row by its entry index, mirroring
-// the macOS circle tap (EditTimelineView.swift:40 sendTimelineNavigate). A
-// click routes timeline_navigate(index) to jump to that edit, the same
-// destination the keyboard timeline_next_edit/timeline_prev_edit land on (#2335).
-func zoneIDTimelineEntry(index byte) string {
-	return fmt.Sprintf("%s%d", zonePrefixTimelineEntry, index)
+// zoneIDTimelineEntry binds the rendered hit region to its offered identity.
+func zoneIDTimelineEntry(generation uint32, entryID string) string {
+	return fmt.Sprintf("%s%d:%s", zonePrefixTimelineEntry, generation, url.QueryEscape(entryID))
 }
 
 func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
@@ -348,7 +345,7 @@ func (m Model) gutterFoldMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if entry.DisplayType != 1 && entry.DisplayType != 4 {
 		return nil, false
 	}
-	return protocol.EncodeGUIFoldToggleAtLine(gutter.WindowID, entry.BufferLine), true
+	return protocol.EncodeGUIFoldToggleAtLine(gutter.WindowID, window.AccessibilityGeneration, entry.BufferLine), true
 }
 
 // floatPopupMousePacket maps a click in the float popup's overlay band but
@@ -424,7 +421,7 @@ func (m Model) observatoryMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 
 // editTimelineMousePacket maps a click on an edit-timeline row to the same
 // semantic gui_action the macOS frontend sends (EditTimelineView.swift):
-// timeline_navigate for the clicked entry's index. A click that hits no row zone
+// semantic_item_activate with the clicked entry's identity and generation. A click that hits no row zone
 // returns ok=false so the overlay's BEAM containment swallows it (the surface is
 // registry-placed, #2281), satisfying the AC2 containment fallback (#2335).
 func (m Model) editTimelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
@@ -433,9 +430,9 @@ func (m Model) editTimelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		return nil, false
 	}
 	for _, entry := range timeline.Entries {
-		zoneInfo := m.zones.Get(zoneIDTimelineEntry(entry.Index))
+		zoneInfo := m.zones.Get(zoneIDTimelineEntry(timeline.Generation, entry.EntryID))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
-			return protocol.EncodeGUITimelineNavigate(uint16(entry.Index)), true
+			return protocol.EncodeGUISemanticItemActivate(5, 1, timeline.Generation, []byte(entry.EntryID)), true
 		}
 	}
 	return nil, false

@@ -25,6 +25,7 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoder do
   # Wire format: opcode + len(2) + payload
   #   payload: visible(1) + viewing_index(2) + count(1) + entries...
   #   entry: index(1) + tool_name_len(1) + tool_name + timestamp_delta(4)
+  #   visible-only trailer after files: generation(4) + entry_ids (string16 each)
   # viewing_index of 0xFFFF means "live at latest" (nil).
   @spec encode_binary(EditTimeline.t()) :: binary()
   defp encode_binary(%EditTimeline{} = model) do
@@ -35,12 +36,24 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoder do
       |> Writer.uint8(:entry_count, Enum.count(model.entries))
       |> Writer.append(Enum.map(model.entries, &encode_entry/1))
       |> Writer.append(encode_files(model.files))
+      |> encode_targets(model)
       |> Writer.finish()
 
     Writer.new(@command)
     |> Writer.uint8(:opcode, @op_gui_edit_timeline)
     |> Writer.payload16(:payload, payload)
     |> Writer.finish()
+  end
+
+  @spec encode_targets(Writer.t(), EditTimeline.t()) :: Writer.t()
+  defp encode_targets(writer, %EditTimeline{visible?: false}), do: writer
+
+  defp encode_targets(writer, %EditTimeline{} = model) do
+    writer = Writer.uint32(writer, :generation, model.generation)
+
+    Enum.reduce(model.entries, writer, fn entry, acc ->
+      Writer.string16(acc, :entry_id, entry.entry_id)
+    end)
   end
 
   @spec encode_viewing_index(Writer.t(), non_neg_integer() | nil) :: Writer.t()

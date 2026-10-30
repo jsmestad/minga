@@ -2,6 +2,7 @@ defmodule Minga.RenderModel.UI.Minibuffer.Candidate do
   @moduledoc false
 
   @type t :: %__MODULE__{
+          id: String.t(),
           label: String.t(),
           description: String.t(),
           match_score: non_neg_integer(),
@@ -10,7 +11,8 @@ defmodule Minga.RenderModel.UI.Minibuffer.Candidate do
         }
 
   @enforce_keys [:label]
-  defstruct label: "",
+  defstruct id: "",
+            label: "",
             description: "",
             match_score: 0,
             match_positions: [],

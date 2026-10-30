@@ -4,7 +4,7 @@ package generated
 
 // ProtocolVersion is the wire-contract version the frontend exchanges with
 // the BEAM in the ready handshake. A mismatch yields an explicit protocol_error.
-const ProtocolVersion uint16 = 27
+const ProtocolVersion uint16 = 28
 
 const (
 	// Input
@@ -136,23 +136,15 @@ const (
 
 	GUIActionSelectTab                  byte = 0x01
 	GUIActionCloseTab                   byte = 0x02
-	GUIActionFileTreeClick              byte = 0x03
-	GUIActionFileTreeToggle             byte = 0x04
-	GUIActionCompletionSelect           byte = 0x05
-	GUIActionBreadcrumbClick            byte = 0x06
 	GUIActionTogglePanel                byte = 0x07
 	GUIActionNewTab                     byte = 0x08
-	GUIActionPanelSwitchTab             byte = 0x09
 	GUIActionPanelDismiss               byte = 0x0A
 	GUIActionPanelResize                byte = 0x0B
 	GUIActionOpenFile                   byte = 0x0C
-	GUIActionFileTreeNewFile            byte = 0x0D
-	GUIActionFileTreeNewFolder          byte = 0x0E
 	GUIActionFileTreeCollapseAll        byte = 0x0F
 	GUIActionFileTreeRefresh            byte = 0x10
 	GUIActionAgentToolToggle            byte = 0x15
 	GUIActionExecuteCommand             byte = 0x16
-	GUIActionMinibufferSelect           byte = 0x17
 	GUIActionGitStageFile               byte = 0x18
 	GUIActionGitUnstageFile             byte = 0x19
 	GUIActionGitDiscardFile             byte = 0x1A
@@ -172,10 +164,6 @@ const (
 	GUIActionFileTreeEditConfirm        byte = 0x2D
 	GUIActionFileTreeEditCancel         byte = 0x2E
 	GUIActionScrollToLine               byte = 0x2F
-	GUIActionFileTreeDelete             byte = 0x30
-	GUIActionFileTreeRename             byte = 0x31
-	GUIActionFileTreeDuplicate          byte = 0x32
-	GUIActionFileTreeMove               byte = 0x33
 	GUIActionSystemWillSleep            byte = 0x34
 	GUIActionSystemDidWake              byte = 0x35
 	GUIActionCmdCopy                    byte = 0x36
@@ -185,7 +173,6 @@ const (
 	GUIActionGitFetch                   byte = 0x3A
 	GUIActionGitCommitAmend             byte = 0x3B
 	GUIActionGitPullAndRetry            byte = 0x3C
-	GUIActionFileTreeOpenInSplit        byte = 0x3D
 	GUIActionTabCopyPath                byte = 0x3E
 	GUIActionHoverOpenAction            byte = 0x3F
 	GUIActionFileTreeDrop               byte = 0x40
@@ -203,7 +190,6 @@ const (
 	GUIActionTabMoveRight               byte = 0x4C
 	GUIActionObservatoryInspect         byte = 0x4D
 	GUIActionFontSizeAdjust             byte = 0x4E
-	GUIActionTimelineNavigate           byte = 0x4F
 	GUIActionExtensionPanelAction       byte = 0x50
 	GUIActionSearchQuery                byte = 0x51
 	GUIActionSearchNext                 byte = 0x52

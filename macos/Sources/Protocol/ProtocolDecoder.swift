@@ -116,7 +116,7 @@ enum RenderCommand: Sendable {
     case guiWindowViewportDelta(data: GUIWindowRowsDelta)
     case guiWindowRowsDelta(data: GUIWindowRowsDelta)
     case guiResidentSemantics(data: GUIResidentSemanticsUpdate)
-    case guiMinibuffer(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
+    case guiMinibuffer(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate], generation: UInt32)
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
     case guiHoverAction(visible: Bool, actionName: String)
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [Wire.Signature])
@@ -131,7 +131,7 @@ enum RenderCommand: Sendable {
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
-    case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry], files: [Wire.TimelineFile])
+    case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry], files: [Wire.TimelineFile], generation: UInt32)
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
     case guiExtensionPanel([Wire.ExtensionPanelEntry])
     case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
@@ -2133,7 +2133,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let mbVisible = data[rest] != 0
         guard mbVisible else {
             return (.guiMinibuffer(visible: false, mode: .command, cursorPos: 0xFFFF, prompt: "",
-                                    input: "", context: "", selectedIndex: 0, totalCandidates: 0, candidates: []), 2)
+                                    input: "", context: "", selectedIndex: 0, totalCandidates: 0, candidates: [], generation: 0), 2)
         }
         // mode(1) + cursor_pos(2) + prompt_len(1)
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
@@ -2198,12 +2198,25 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 matchPositions.append(try readU16(data, mbPos)); mbPos += 2
             }
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            mbCandidates.append(Wire.MinibufferCandidate(matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
+            mbCandidates.append(Wire.MinibufferCandidate(id: "", matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
+        }
+        guard mbCandidates.count == mbCandCount, data.count >= mbPos + 4 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let mbGeneration = try readU32(data, mbPos)
+        mbPos += 4
+        for index in mbCandidates.indices {
+            guard data.count >= mbPos + 2 else { throw ProtocolDecodeError.malformed }
+            let idLength = Int(try readU16(data, mbPos))
+            mbPos += 2
+            guard data.count >= mbPos + idLength else { throw ProtocolDecodeError.malformed }
+            mbCandidates[index].id = try decodeUTF8(data[mbPos..<(mbPos + idLength)]) ?? ""
+            mbPos += idLength
         }
         return (.guiMinibuffer(visible: true, mode: MinibufferMode(rawValue: mbMode), cursorPos: mbCursorPos,
                                 prompt: mbPrompt, input: mbInput, context: mbContext,
                                 selectedIndex: mbSelIndex, totalCandidates: mbTotalCandidates,
-                                candidates: mbCandidates), mbPos - offset)
+                                candidates: mbCandidates, generation: mbGeneration), mbPos - offset)
 
     case OP_GUI_HOVER_POPUP:
         // visible(1)
@@ -2777,7 +2790,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let tsDelta = try readU32(data, ePos)
             ePos += 4
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-            entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
+            entries.append(Wire.TimelineEntry(entryID: "", index: idx, toolName: toolName, timestampDelta: tsDelta))
         }
         var files: [Wire.TimelineFile] = []
         if ePos < pStart + payloadLen {
@@ -2802,7 +2815,23 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 files.append(Wire.TimelineFile(path: path, entryCount: entryCount, linesAdded: linesAdded, linesRemoved: linesRemoved, reviewStatus: reviewStatus))
             }
         }
-        return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries, files: files), 1 + 2 + payloadLen)
+        var generation: UInt32 = 0
+        if visible {
+            guard entries.count == entryCount, ePos + 4 <= pStart + payloadLen else {
+                throw ProtocolDecodeError.malformed
+            }
+            generation = try readU32(data, ePos)
+            ePos += 4
+            for index in entries.indices {
+                guard ePos + 2 <= pStart + payloadLen else { throw ProtocolDecodeError.malformed }
+                let idLength = Int(try readU16(data, ePos))
+                ePos += 2
+                guard ePos + idLength <= pStart + payloadLen else { throw ProtocolDecodeError.malformed }
+                entries[index].entryID = try decodeUTF8(data[ePos..<(ePos + idLength)]) ?? ""
+                ePos += idLength
+            }
+        }
+        return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries, files: files, generation: generation), 1 + 2 + payloadLen)
 
     case OP_GUI_EXTENSION_OVERLAY:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

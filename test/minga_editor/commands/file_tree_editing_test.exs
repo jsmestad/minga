@@ -947,7 +947,13 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   end
 
   defp start_gui_rename(%EditorState{} = state) do
-    GuiActionHandler.dispatch(state, {:file_tree_rename, tree(state).cursor})
+    entry = FileTree.selected_entry(tree(state))
+
+    GuiActionHandler.dispatch(
+      state,
+      {:semantic_item_activate, :file_tree, :rename,
+       FileTreeState.presentation_generation(ft(state)), MingaEditor.FileTree.Row.id_for(entry)}
+    )
   end
 
   defp replace_tree(%EditorState{} = state, %FileTree{} = tree) do
