@@ -68,78 +68,9 @@ The renderer uses **CoreText line textures** composited by Metal. This is NOT a 
    - Split separators (vertical and horizontal)
 4. Selection highlights, search matches, and diagnostic underlines are overlay quads, not baked into text textures. This means selection changes don't trigger re-rasterization.
 
-## Project Structure
+## Directory Layout
 
-```
-macos/
-  project.yml                              # XcodeGen project definition
-  Minga.xcodeproj/                         # Generated Xcode project (do not hand-edit)
-  Sources/
-    MingaApp.swift                         # App entry point, AppDelegate, SwiftUI wiring
-    BEAMProcessManager.swift               # Spawns and manages the BEAM child process
-    Instrumentation.swift                  # Performance timing helpers
-
-    Protocol/
-      ProtocolConstants.swift              # Non-opcode protocol constants
-      # Generated opcode values live at macos/.generated/protocol/ProtocolOpcodes.generated.swift
-      ProtocolDecoder.swift                # Binary → RenderCommand enum + all data types
-      ProtocolEncoder.swift                # Input/GUI events → binary on stdout
-      ProtocolReader.swift                 # Background thread reading {:packet,4} from stdin
-      PortLogger.swift                     # Thread-safe logging to BEAM via protocol
-
-    Renderer/
-      CoreTextMetalRenderer.swift          # Multi-pass Metal renderer (bg, text, cursor, gutter)
-      CoreTextShaders.metal                # MSL vertex/fragment shaders
-      FrameState.swift                     # Per-frame metadata (cursor, gutter, grid dims, theme)
-      CommandDispatcher.swift              # Routes decoded commands to FrameState and GUIState
-      WindowContent.swift                  # GUIWindowContent data type (0x80 opcode payload)
-      WindowContentRenderer.swift          # Styled runs → NSAttributedString → Metal textures
-      BitmapRasterizer.swift               # Shared CTLine → CGBitmapContext → MTLTexture
-      LineTextureAtlas.swift               # LRU texture cache keyed by content hash
-      CachedLineTexture.swift              # Single cached line: texture + metadata
-      SlotAllocator.swift                  # Atlas slot management
-      PipelineCache.swift                  # Metal pipeline state object cache
-
-    Font/
-      FontFace.swift                       # CoreText font loader with fallback chain
-      FontManager.swift                    # Font registry (primary + per-ID fonts)
-
-    Views/
-      GUIState.swift                       # Container for all @Observable chrome sub-states
-      EditorView.swift                     # NSViewRepresentable wrapper for SwiftUI
-      EditorNSView.swift                   # NSView: Metal layer, keyboard, mouse, IME input
-      ThemeColors.swift                    # Theme color slots from guiTheme opcode
-      ScrollAccumulator.swift              # Smooth trackpad scroll → discrete line events
-      TextHighlighting.swift               # Attributed string styling helpers
-      IMEComposition.swift                 # Input Method Editor composition state
-      BlinkingCursor.swift                 # Cursor blink animation timer
-
-      # Chrome views (each has a *State.swift + *View.swift pair)
-      TabBarState.swift / TabBarView.swift
-      FileTreeState.swift / FileTreeView.swift / FileTreeHeaderContent.swift
-      GitStatusState.swift / GitStatusView.swift / GitStatusHeaderContent.swift
-      SidebarContainer.swift / SidebarHeaderButton.swift
-      StatusBarView.swift
-      PickerState.swift / PickerOverlay.swift
-      CompletionState.swift / CompletionOverlay.swift
-      WhichKeyState.swift / WhichKeyOverlay.swift
-      MinibufferState.swift / MinibufferView.swift
-      HoverPopupState.swift / HoverPopupOverlay.swift
-      SignatureHelpState.swift / SignatureHelpOverlay.swift
-      FloatPopupState.swift / FloatPopupOverlay.swift
-      BreadcrumbBar.swift
-      AgentChatState.swift / AgentChatView.swift
-      BottomPanelState.swift / BottomPanelView.swift
-      MessagesContentState.swift / MessagesContentView.swift
-      WorkspaceIconPicker.swift
-
-    Extensions/
-      FrontendExtensionRuntime.swift       # Generic runtime hook for extension-owned decoders and views
-
-  Tests/
-    MingaTests/
-      ProtocolTests.swift                  # Protocol encode/decode round-trip tests
-```
+Start in `macos/Sources/`: `macos/Sources/Protocol/` owns wire types and codecs, `macos/Sources/Renderer/` owns CoreText and Metal rendering, and `macos/Sources/Font/` owns font loading. Views are grouped under `macos/Sources/Views/Shared/`, `macos/Sources/Views/Editor/`, `macos/Sources/Views/EditorChrome/`, and `macos/Sources/Views/Overlays/`; use the owning surface's State + View pair rather than assuming a flat Views directory. Protocol tests live in `macos/Tests/MingaTests/`, and `macos/project.yml` defines the generated Xcode project.
 
 ## Code Organization Rules
 
