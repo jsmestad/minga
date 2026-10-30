@@ -166,21 +166,22 @@ def snapshot_plans(products, destination):
 def plan_target(plan):
     if not isinstance(plan, dict):
         raise ValueError("Plan is not an xctestrun dictionary")
-    targets = [target for config in plan.get("TestConfigurations", []) if config.get("IsEnabled", True) for target in config.get("TestTargets", [])]
-    if len(targets) != 1 or targets[0].get("BlueprintName") != "MingaTests":
+    if plan.get("__xctestrun_metadata__", {}).get("FormatVersion") != 1:
+        raise ValueError("Plan must use the emitted MingaUnitTests xctestrun format 1")
+    targets = {key: value for key, value in plan.items() if key != "__xctestrun_metadata__"}
+    if set(targets) != {"MingaTests"} or not isinstance(targets["MingaTests"], dict) or targets["MingaTests"].get("BlueprintName") != "MingaTests":
         raise ValueError("Plan must select exactly the MingaTests target")
-    return targets[0]
+    return targets["MingaTests"]
 
 
 def validate_hosted_plan(plan, products):
     target = plan_target(plan)
     host_bundle = products / "Debug/MingaTestHost.app"
-    host = host_bundle / "Contents/MacOS/MingaTestHost"
     bundle = host_bundle / "Contents/PlugIns/MingaTests.xctest"
     def resolve(value):
         return str(value).replace("__TESTROOT__", str(products)).replace("__TESTHOST__", str(host_bundle)).replace("$(BUILT_PRODUCTS_DIR)", str(products / "Debug"))
-    if resolve(target.get("TestHostPath", "")) != str(host) or resolve(target.get("TestBundlePath", "")) != str(bundle):
-        raise ValueError("Plan has wrong hosted executable or test bundle")
+    if resolve(target.get("TestHostPath", "")) != str(host_bundle) or resolve(target.get("TestBundlePath", "")) != str(bundle):
+        raise ValueError("Plan has wrong hosted application bundle or test bundle")
     if target.get("IsAppHostedTestBundle") is False or target.get("IsUITestBundle", False):
         raise ValueError("Plan contradicts hosted unit-test execution")
     environments = [target.get(key, {}) for key in ("EnvironmentVariables", "TestingEnvironmentVariables")]

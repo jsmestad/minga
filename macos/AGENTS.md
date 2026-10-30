@@ -263,6 +263,7 @@ Verify the testing-graph settings and plan before running all 13 policy function
 Only accepted policy execution authorizes production-window focus replay in a separate process from a replay copy of that same input, with its original product root bound and suite selectors explicit.
 The host owns AppKit launch and its normal event loop, never production startup or responder policy.
 Query settings with `build-for-testing -showBuildSettings -json`, not the default build graph that omits testing-only targets.
+For this scheme, require the observed format-1 top-level `MingaTests` plan and application-bundle `TestHostPath`; do not infer the plan host path from the executable-valued build setting.
 Require resolved product/loader settings and actual runtime identity, not merely requested flags.
 Keep the hosted build receipt and raw pre/post plan receipts; failed builds and missing, ambiguous, stale, or wrong-mode plans leave dependent runners explicitly unexecuted.
 Preserve aggregate failure when ordinary tests fail, even if later focused diagnostics pass.

@@ -296,8 +296,8 @@ defmodule Minga.DoneGateTest do
     if "build-for-testing" in args:
         status = int(os.environ.get("HOSTED_BUILD_EXIT", "0"))
         if status == 0:
-            target = {"BlueprintName":"MingaTests","TestHostPath":"__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost","TestBundlePath":"__TESTHOST__/Contents/PlugIns/MingaTests.xctest","EnvironmentVariables":{"MINGA_TEST_PRODUCTION_APP_PATH":"__TESTROOT__/Debug/Minga.app"}}
-            (products / "MingaUnitTests_macosx.xctestrun").write_bytes(plistlib.dumps({"TestConfigurations":[{"TestTargets":[target]}]}))
+            target = {"BlueprintName":"MingaTests","TestHostPath":"__TESTROOT__/Debug/MingaTestHost.app","TestBundlePath":"__TESTHOST__/Contents/PlugIns/MingaTests.xctest","EnvironmentVariables":{"MINGA_TEST_PRODUCTION_APP_PATH":"__TESTROOT__/Debug/Minga.app"}}
+            (products / "MingaUnitTests_macosx.xctestrun").write_bytes(plistlib.dumps({"__xctestrun_metadata__":{"FormatVersion":1},"MingaTests":target}))
         sys.exit(status)
     print("NOISY TEST OUTPUT")
     policy = "-only-testing:MingaTests/EditorFocusPolicyTests" in args

@@ -59,15 +59,15 @@ def policy_tree():
 
 
 def hosted_plan():
-    return {"TestConfigurations": [{"TestTargets": [{
+    return {"__xctestrun_metadata__": {"FormatVersion": 1}, "MingaTests": {
         "BlueprintName": "MingaTests",
-        "TestHostPath": "__TESTROOT__/Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost",
+        "TestHostPath": "__TESTROOT__/Debug/MingaTestHost.app",
         "TestBundlePath": "__TESTHOST__/Contents/PlugIns/MingaTests.xctest",
         "EnvironmentVariables": {"MINGA_TEST_PRODUCTION_APP_PATH": "__TESTROOT__/Debug/Minga.app"},
         "OnlyTestIdentifiers": [native.POLICY],
         "SkipTestIdentifiers": [native.REPLAY],
         "DependentProductPaths": ["__PLATFORMS__/MacOSX.platform"],
-    }]}]}
+    }}
 
 
 def log(pid=4102):
@@ -187,7 +187,9 @@ class MacOSUnitResultsTest(unittest.TestCase):
             source = products / "MingaUnitTests_macosx.xctestrun"
             source.write_bytes(plistlib.dumps(hosted_plan()))
             before = native.snapshot_plans(products, Path(directory) / "before")
-            source.write_bytes(plistlib.dumps({**hosted_plan(), "currentBuild": True}))
+            current = hosted_plan()
+            current["__xctestrun_metadata__"]["currentBuild"] = True
+            source.write_bytes(plistlib.dumps(current))
             after = native.snapshot_plans(products, Path(directory) / "after")
             selected, _ = native.select_hosted_plan(before, after, products, True)
             self.assertEqual(selected, str(source))
@@ -212,12 +214,18 @@ class MacOSUnitResultsTest(unittest.TestCase):
             native.plan_target(plan)[key] = value
             with self.assertRaises(ValueError):
                 native.validate_hosted_plan(plan, products)
+        for plan in (
+            {**hosted_plan(), "OtherTests": {}},
+            {**hosted_plan(), "__xctestrun_metadata__": {"FormatVersion": 2}},
+        ):
+            with self.assertRaises(ValueError):
+                native.validate_hosted_plan(plan, products)
 
     def test_relocated_focus_plans_preserve_launch_metadata_and_replace_only_target_filters(self):
         with tempfile.TemporaryDirectory() as directory:
             products = Path("/original/Products")
             original = hosted_plan()
-            original["SkipTestIdentifiers"] = ["unrelated metadata"]
+            original["__xctestrun_metadata__"]["SkipTestIdentifiers"] = ["unrelated metadata"]
             policy_path = Path(directory) / "policy.xctestrun"
             policy = native.pin_focus_plan(original, products, policy_path, native.POLICY)
             replay_path = Path(directory) / "replay.xctestrun"
@@ -228,7 +236,7 @@ class MacOSUnitResultsTest(unittest.TestCase):
                 target = native.plan_target(plan)
                 self.assertEqual(target["OnlyTestIdentifiers"], [suite])
                 self.assertNotIn("SkipTestIdentifiers", target)
-                self.assertEqual(plan["SkipTestIdentifiers"], original["SkipTestIdentifiers"])
+                self.assertEqual(plan["__xctestrun_metadata__"], original["__xctestrun_metadata__"])
                 self.assertTrue(target["TestHostPath"].startswith(str(products)))
                 self.assertEqual(target["DependentProductPaths"], ["__PLATFORMS__/MacOSX.platform"])
                 self.assertEqual(target["EnvironmentVariables"], {"MINGA_TEST_PRODUCTION_APP_PATH": str(products / "Debug/Minga.app")})

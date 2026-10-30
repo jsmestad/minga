@@ -139,6 +139,7 @@ Use `--output-dir PATH` to retain evidence elsewhere (default: `macos-unit-evide
 Each invocation preserves separate action logs and `.xcresult` bundles, and writes `results.json` with the three actual result summaries/test trees, commands, exit statuses, timings, and aggregate logical-function counts.
 Global xcresult counts do not count parameterized executions; replay acceptance requires the enumerator and all seven actual named passed argument nodes.
 Evidence includes settings queried from the testing build graph, actual bare/hosted runtime identity, the hosted build command/status/log, and raw pre/post plan signatures and copies.
+For this scheme, the pinned Xcode emits format 1 with a top-level `MingaTests` target and an application-bundle `TestHostPath`; unsupported formats fail explicitly.
 The default build graph omits the test target, and `test` alone does not produce the persisted plan required for replay.
 Failed builds and missing, ambiguous, stale, or wrong-mode hosted plans block focused execution rather than fall back to cached products.
 Any ordinary failure remains an aggregate failure even if subsequent hosted diagnostics pass.
