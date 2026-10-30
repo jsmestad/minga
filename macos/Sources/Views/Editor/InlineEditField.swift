@@ -100,6 +100,7 @@ public struct InlineEditField: NSViewRepresentable {
         style.apply(to: editor)
     }
 
+    @MainActor
     public final class Coordinator: NSObject, NSTextFieldDelegate {
         public var style: InlineEditFieldStyle
         public let onCommit: (String) -> Void
