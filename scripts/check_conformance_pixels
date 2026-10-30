@@ -349,7 +349,7 @@ def main():
         save()
         if unit_result.returncode != 0 or not unit_manifest["success"]:
             raise RuntimeError("Native unit actions failed; inspect unit-bundle/results.json")
-        # Reuse the ordinary action's build products for the focused timing measurements.
+        # Reuse the verified hosted products left by the canonical unit lifecycle for focused timing.
         for label, selectors, action in [
             ("focused-warmup", without_pixels, "test-without-building"),
             ("focused-without-pixels", without_pixels, "test-without-building"),

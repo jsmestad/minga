@@ -134,6 +134,8 @@ Only accepted policy execution authorizes `FocusReplayWindowTests` in a separate
 Both plan copies bind their original product root, select their own suite explicitly, and remove conflicting target-local skip filters.
 These exclusions route tests between execution contexts; they do not omit acceptance coverage.
 Production-window replay observes responder and positive AX identity within the same bounded wait; observation never assigns focus or substitutes an expected AX object.
+For native fields, AX identity means the exact AppKit cell installed on the expected production field, with the cell's `controlView` pointing back to that field.
+CI repeats the canonical lifecycle against the same DerivedData and retains a separate warm manifest, so hosted-to-bare reuse is exercised rather than inferred from a cache.
 Do not combine the focus selectors or run competing GUI tests concurrently: suite-local `.serialized` does not isolate application activation and key-window state from other suites.
 
 Use `--output-dir PATH` to retain evidence elsewhere (default: `macos-unit-evidence/`).
