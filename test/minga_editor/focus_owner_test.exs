@@ -193,6 +193,104 @@ defmodule MingaEditor.FocusOwnerTest do
     assert_owner_agrees(state, :editor_view, :editor, 27, :pending_completion)
   end
 
+  @tag :tmp_dir
+  test "file-tree rename admits the native field and confirm or cancel restores tree routing", %{
+    tmp_dir: root
+  } do
+    path = Path.join(root, "original.swift")
+    File.write!(path, "original\n")
+    ctx = start_editor("original\n", file_path: path, project_root: root)
+    state = ctx |> editor_state() |> activate_scope(:file_tree, root)
+
+    for completion <- [:confirm_editing, :cancel_editing] do
+      editing = MingaEditor.Commands.FileTree.rename(state)
+      token = FileTreeState.editing(editing.workspace.file_tree).token
+
+      assert %{responder: :inline_edit, surface: :inline_edit, generation: ^token} =
+               FocusOwner.derive(editing)
+
+      finished = apply(MingaEditor.Commands.FileTree, completion, [editing])
+      assert FileTreeState.editing(finished.workspace.file_tree) == nil
+      assert finished.workspace.keymap_scope == :file_tree
+      assert %{responder: :editor_view, surface: :file_tree} = FocusOwner.derive(finished)
+    end
+  end
+
+  test "focused hover and empty launchpad name the actual BEAM-routed surface" do
+    alias Mix.Tasks.Conformance.FocusScenarios
+    base = %MingaEditor.State{workspace: %SessionState{}}
+    hover = FocusScenarios.transition(base, :hover_open)
+    assert %{responder: :editor_view, surface: :hover_popup} = FocusOwner.derive(hover)
+    search = FocusScenarios.transition(hover, :search_open)
+    assert %{responder: :search_query, surface: :search} = FocusOwner.derive(search)
+    empty = FocusScenarios.transition(base, :empty_state)
+    assert %{responder: :editor_view, surface: :empty_state} = FocusOwner.derive(empty)
+  end
+
+  @tag :tmp_dir
+  test "normal leader ownership follows the launchpad and sidebar admission rules", %{
+    tmp_dir: root
+  } do
+    ctx = start_editor("leader target")
+    send_keys_sync(ctx, " ")
+    leader = editor_state(ctx)
+    assert Minga.Editing.in_leader?(leader)
+
+    launchpad =
+      MingaEditor.State.Launchpad.new(recents: [], session_file_count: 0, crashed?: false)
+
+    empty = %{leader | workspace: SessionState.set_launchpad(leader.workspace, launchpad)}
+    assert {:passthrough, _} = MingaEditor.Input.EmptyState.handle_key(empty, 0xF701, 0)
+    assert %{responder: :editor_view, surface: :editor, generation: 0} = FocusOwner.derive(empty)
+
+    file_tree = activate_scope(leader, :file_tree, root)
+
+    assert %{responder: :editor_view, surface: :editor, generation: 0} =
+             FocusOwner.derive(file_tree)
+
+    assert {:handled, after_down} =
+             MingaEditor.Input.FileTreeHandler.handle_key(file_tree, 0xF701, 0)
+
+    refute Minga.Editing.in_leader?(after_down)
+
+    git_status = activate_scope(leader, :git_status, root)
+
+    assert %{responder: :editor_view, surface: :editor, generation: 0} =
+             FocusOwner.derive(git_status)
+  end
+
+  @tag :tmp_dir
+  test "leader projection preserves higher-priority native edit and hover admission", %{
+    tmp_dir: root
+  } do
+    path = Path.join(root, "original.swift")
+    File.write!(path, "original\n")
+    ctx = start_editor("original\n", file_path: path, project_root: root)
+    send_keys_sync(ctx, " ")
+    leader = editor_state(ctx)
+    assert Minga.Editing.in_leader?(leader)
+
+    editing = leader |> activate_scope(:file_tree, root) |> MingaEditor.Commands.FileTree.rename()
+    token = FileTreeState.editing(editing.workspace.file_tree).token
+
+    assert %{responder: :inline_edit, surface: :inline_edit, generation: ^token} =
+             FocusOwner.derive(editing)
+
+    hover = Mix.Tasks.Conformance.FocusScenarios.transition(leader, :hover_open)
+    assert %{responder: :editor_view, surface: :hover_popup} = FocusOwner.derive(hover)
+    assert {:handled, _} = MingaEditor.Input.Hover.handle_key(hover, ?j, 0)
+  end
+
+  test "agent leader admission is not generalized past its navigation fallback" do
+    ctx = start_editor("agent leader")
+    send_keys_sync(ctx, " ")
+    agent = activate_scope(editor_state(ctx), :agent, nil)
+    assert Minga.Editing.in_leader?(agent)
+    assert {:passthrough, _} = MingaEditor.Input.Scoped.handle_key(agent, ?j, 0)
+    assert {:handled, _} = MingaEditor.Input.AgentNav.handle_key(agent, ?j, 0)
+    assert %{responder: :editor_view, surface: :agent} = FocusOwner.derive(agent)
+  end
+
   defp activate_modal(ctx, :none, _path), do: editor_state(ctx)
   defp activate_modal(ctx, :prompt, _path), do: PromptUI.open(editor_state(ctx), WorkspaceRename)
   defp activate_modal(ctx, :picker, _path), do: PickerUI.open(editor_state(ctx), CommandSource)

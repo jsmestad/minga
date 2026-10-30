@@ -160,24 +160,33 @@ defmodule Minga.Test.ProtocolGolden do
 
   @spec focus_owner_fixtures() :: [fixture()]
   defp focus_owner_fixtures do
-    owner = %FocusOwner{
-      responder: :picker_query,
-      surface: :picker,
-      window_id: 70_000,
-      generation: 4_294_967_295
-    }
+    for {name, surface, responder, surface_byte, responder_byte} <- [
+          {"picker", :picker, :picker_query, 8, 1},
+          {"hover", :hover_popup, :editor_view, 12, 0},
+          {"empty_state", :empty_state, :editor_view, 13, 0}
+        ] do
+      owner = %FocusOwner{
+        responder: responder,
+        surface: surface,
+        window_id: 70_000,
+        generation: 4_294_967_295
+      }
 
-    {<<0xAA, 10::16, payload::binary-size(10)>>, _caches} =
-      FocusOwnerEncoder.encode(owner, Caches.new())
+      {<<0xAA, 10::16, payload::binary-size(10)>>, _caches} =
+        FocusOwnerEncoder.encode(owner, Caches.new())
 
-    [
       %{
-        name: "focus_owner_picker",
+        name: "focus_owner_#{name}",
         decoder: "GuiFocusOwnerFields",
         payload: payload,
-        expected: %{responder: 1, surface: 8, window_id: 70_000, generation: 4_294_967_295}
+        expected: %{
+          responder: responder_byte,
+          surface: surface_byte,
+          window_id: 70_000,
+          generation: 4_294_967_295
+        }
       }
-    ]
+    end
   end
 
   # ── Fixtures: gui_completion (GuiCompletionFields) ───────────────────────

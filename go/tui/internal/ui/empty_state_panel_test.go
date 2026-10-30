@@ -150,6 +150,7 @@ func TestEmptyStateLocalFocusEchoOnJ(t *testing.T) {
 	out := make(chan []byte, 4)
 	model := New(80, 30, out, nil)
 	model.chrome[generated.OPGuiEmptyState] = protocol.ChromePayload{Opcode: generated.OPGuiEmptyState, EmptyState: returningUserEmptyState()}
+	model.applyMutation(focusOwnerCommand(0, 13))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	model = updated.(Model)

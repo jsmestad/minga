@@ -127,7 +127,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiExtensionPanel:       {generated.OPGuiExtensionPanel, 0, 1, 0},
 		generated.OPGuiSearchState:          {generated.OPGuiSearchState, 0, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		generated.OPGuiSidebars:             {generated.OPGuiSidebars, 0, 0, 0, 0},
-		generated.OPGuiWindowOverlayDelta:   {generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0},
+		generated.OPGuiWindowOverlayDelta:   {generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF},
 		generated.OPGuiWindowViewportDelta:  append(append([]byte{generated.OPGuiWindowViewportDelta, 2}, section32Semantic(0x01, []byte{0, 8, 0x12, 0x34, 0x56, 0x78, 0x01, 0, 0, 0x02, 0, 2, 0, 0})...), section32Semantic(0x02, []byte{0, 0, 0, 0})...),
 		generated.OPGuiWindowRowsDelta:      append(append([]byte{generated.OPGuiWindowRowsDelta, 2}, section32Semantic(0x01, []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0x00, 0, 0, 0x02, 0, 2, 0, 0})...), section32Semantic(0x02, []byte{0, 0, 0, 0})...),
 		generated.OPGuiIndentGuides:         {generated.OPGuiIndentGuides, 0, 6, 0, 1, 2, 0xFF, 0xFF, 0},
@@ -206,7 +206,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 			if opcode == generated.OPGuiFocusOwner {
 				want := generated.GuiFocusOwnerFields{Responder: 1, Surface: 8, WindowID: 7, Generation: 9}
 				if command.Kind != CommandChrome || command.Chrome.Opcode != opcode || command.Chrome.FocusOwner != want {
-					t.Fatalf("focus owner must decode as typed no-op chrome state: %+v", command)
+					t.Fatalf("focus owner must decode as typed committed chrome state: %+v", command)
 				}
 			}
 		})

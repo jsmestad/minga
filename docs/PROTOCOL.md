@@ -48,7 +48,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 28). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 28 retires index-targeted GUI actions and binds item activations, window actions, and file-tree drops to their rendered identities. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#gui-action-input-opcode-frontend--beam).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 30). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 30 extends committed keyboard ownership to focused hover and the empty launchpad; version 29 native decoders reject those surface values. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#0xaa-gui_focus_owner).
 
 ---
 
@@ -382,7 +382,7 @@ caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" 
 protocol_version: u16           exact wire-contract version the frontend was generated against
 ```
 
-**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 26. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
+**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 30. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
 
 ### `0x04` mouse_event
 
@@ -842,7 +842,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 28). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 27 added atomic resident semantic state for locally scrolled retained rows. Version 28 retires index-targeted and unused GUI actions, adds identity and generation trailers to command completion and edit timelines, and makes window actions and file-tree drops generation-aware. The schema's version comments record earlier changes. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 30). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 27 added atomic resident semantic state for locally scrolled retained rows. Version 28 retired index-targeted and unused GUI actions, added identity and generation trailers to command completion and edit timelines, and made window actions and file-tree drops generation-aware. Version 29 added `gui_focus_owner`. Version 30 extends that existing opcode's surface table with focused hover (12) and the empty launchpad (13), values that version 29 native decoders reject. The schema's version comments record earlier changes. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 

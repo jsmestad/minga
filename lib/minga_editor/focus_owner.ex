@@ -79,8 +79,61 @@ defmodule MingaEditor.FocusOwner do
     do: {:editor_view, :command_completion, generation}
 
   defp modal_owner(_tag, _modal, state) do
-    search_owner(Search.gui_search_active?(state.workspace.search), state.workspace.keymap_scope)
+    if Search.gui_search_active?(state.workspace.search) do
+      {:search_query, :search, 0}
+    else
+      hover_owner(Runtime.state(state.shell_runtime), state)
+    end
   end
+
+  # Hover is an overlay handler above surface routing, but below the modals.
+  defp hover_owner(%ShellState{hover_popup: %{focused: true}}, _state),
+    do: {:editor_view, :hover_popup, 0}
+
+  defp hover_owner(_shell, state) do
+    surface_owner(state)
+  end
+
+  defp surface_owner(%{workspace: %{keymap_scope: :file_tree, file_tree: ft}} = state) do
+    case MingaEditor.State.FileTree.editing(ft) do
+      %{token: token} -> {:inline_edit, :inline_edit, token}
+      nil -> normal_source_owner(state)
+    end
+  end
+
+  defp surface_owner(state), do: normal_source_owner(state)
+
+  # EmptyState and GitStatus yield leader input to ModeFSM; FileTree browse
+  # delegates it there. Native editing/help/filter admission happens first.
+  defp normal_source_owner(%{workspace: %{editing: %{mode: :normal}}} = state) do
+    if Minga.Editing.in_leader?(state) and yields_to_leader?(state) do
+      {:editor_view, :editor, 0}
+    else
+      scope_owner(state)
+    end
+  end
+
+  defp normal_source_owner(state), do: scope_owner(state)
+
+  defp yields_to_leader?(%{
+         workspace: %{keymap_scope: :file_tree, file_tree: %{interaction: :browse}}
+       }),
+       do: true
+
+  defp yields_to_leader?(%{workspace: %{keymap_scope: scope}})
+       when scope in [:editor, :git_status],
+       do: true
+
+  # Scoped yields some agent leader keys, but AgentNav still admits navigation;
+  # focused composer input also stays agent-owned. Hover runs above this layer.
+  defp yields_to_leader?(_state), do: false
+
+  defp scope_owner(%{
+         workspace: %{keymap_scope: :editor, launchpad: %{}, editing: %{mode: :normal}}
+       }),
+       do: {:editor_view, :empty_state, 0}
+
+  defp scope_owner(state), do: search_owner(false, state.workspace.keymap_scope)
 
   defp search_owner(true, _scope), do: {:search_query, :search, 0}
   defp search_owner(false, :file_tree), do: {:editor_view, :file_tree, 0}

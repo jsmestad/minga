@@ -264,11 +264,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.toggleHUD(msg) {
 			break
 		}
-		if packet, handled := m.localPreviewActivationPacket(msg); handled {
+		component, _ := m.focusedComponent()
+		if packet, handled := m.localPreviewActivationPacket(msg, component); handled {
 			m.send(packet)
 			break
 		}
-		if chat, ok := m.agentChat(); ok {
+		if chat, ok := m.agentChat(); ok && component == "agent" {
 			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(), msg); handled {
 				m.send(packet)
 				break
@@ -279,17 +280,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// offset and repaints same-frame. The key is still forwarded so the BEAM's
 		// authoritative scroll/pin state stays in sync (it just no longer gates the
 		// paint).
-		m.queueAgentTranscriptScroll(msg)
+		if component == "agent" {
+			m.queueAgentTranscriptScroll(msg)
+		}
 		// Stamp the latency correlation sequence (ticket #2215) before
 		// encoding so the resulting frame's commit_frame resolves the sample.
 		seq := m.latency.Stamp()
 		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
 		}
-		m.previewCompletionNavigation(msg)
-		m.previewPickerNavigation(msg)
-		if !m.modalOverlayActive() {
+		switch component {
+		case "completion":
+			m.previewCompletionNavigation(msg)
+		case "picker":
+			m.previewPickerNavigation(msg)
+		case "file_tree":
 			m.previewFileTreeNavigation(msg)
+		case "empty_state":
 			m.previewEmptyStateNavigation(msg)
 		}
 	case tea.PasteMsg:

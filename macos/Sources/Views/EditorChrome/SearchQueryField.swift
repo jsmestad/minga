@@ -21,6 +21,7 @@ struct SearchQueryField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SearchNSTextField {
         let field = SearchNSTextField()
+        field.setAccessibilityIdentifier("minga.search.query")
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none

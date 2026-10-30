@@ -50,4 +50,6 @@ defmodule Minga.Frontend.Adapter.GUI.FocusOwnerEncoder do
   defp surface_byte(:completion), do: 9
   defp surface_byte(:command_completion), do: 10
   defp surface_byte(:search), do: 11
+  defp surface_byte(:hover_popup), do: 12
+  defp surface_byte(:empty_state), do: 13
 end

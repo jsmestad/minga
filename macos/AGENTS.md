@@ -105,6 +105,12 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 
 `GUIState` holds all sub-states as `let` properties (not a flat bag of fields). Each sub-state is independently observable. Adding a new chrome element means adding one State class, one View, and one `let` property on `GUIState`. No existing code changes.
 
+### Keyboard focus
+
+The BEAM's committed `gui_focus_owner` fact owns keyboard focus. `FocusResolution` projects that fact plus local modal, key-window, and native-text-editing state to a responder. `EditorFocusPolicy` is the only AppKit first-responder writer. Register a field, never focus it: an `NSViewRepresentable` registers its actual field with the injected `editorFocusPolicy`, unregisters only that instance at teardown, and reports native editing completion. Do not infer focus from picker/search/sidebar visibility or add an appearance-time focus grab.
+
+Workspace rename and icon search are frontend-local text leases, not BEAM surfaces. Their existing SwiftUI focus bindings are counted, reasoned exceptions in `FocusWriterGuardrailTests`; the picker, search, and inline-edit fields have no exceptions. Preserve IME composition and leases when changing the pure resolver or policy. The shared `focus/` corpus exercises real commits and the production `ContentView` window replay proves responder and accessibility identity. Neither test requires Accessibility trust.
+
 ## Chrome tokens
 
 Use the frontend scales in `Sources/Views/Shared/ChromeTokens.swift` instead of inventing a padding, gap, font size, or corner radius. They describe chrome, not editor cells. They do not read the theme, protocol state, or editor font.

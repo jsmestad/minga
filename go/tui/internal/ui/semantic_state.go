@@ -19,6 +19,64 @@ const (
 	fileTreeLocalNavigationUpKey   rune = 'k'
 )
 
+// committedFocusOwner reads the one retained wire fact. TUI input continues
+// through the BEAM; this is the focused component, not a native responder.
+func (m *Model) committedFocusOwner() (generated.GuiFocusOwnerFields, bool) {
+	payload, ok := m.chrome[generated.OPGuiFocusOwner]
+	return payload.FocusOwner, ok
+}
+
+func (m *Model) focusedComponent() (string, bool) {
+	owner, ok := m.committedFocusOwner()
+	if !ok {
+		return "", false
+	}
+	expectedResponder := byte(0)
+	switch owner.Surface {
+	case 5:
+		expectedResponder = 3
+	case 8:
+		expectedResponder = 1
+	case 11:
+		expectedResponder = 2
+	}
+	if owner.Responder != expectedResponder {
+		return "", false
+	}
+	switch owner.Surface {
+	case 0:
+		return "editor", true
+	case 1:
+		return "file_tree", true
+	case 2:
+		return "agent", true
+	case 3:
+		return "git_status", true
+	case 4:
+		return "conflict", true
+	case 5:
+		return "inline_edit", true
+	case 6:
+		return "inline_ask", true
+	case 7:
+		return "prompt", true
+	case 8:
+		return "picker", true
+	case 9:
+		return "completion", true
+	case 10:
+		return "command_completion", true
+	case 11:
+		return "search", true
+	case 12:
+		return "hover_popup", true
+	case 13:
+		return "empty_state", true
+	default:
+		return "", false
+	}
+}
+
 func (m *Model) reconcileFileTree(tree protocol.FileTree) {
 	retained := make(map[string]struct{}, len(tree.Rows))
 	for _, row := range tree.Rows {
@@ -114,7 +172,7 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 	}
 
 	payload, ok := m.fileTree()
-	if !ok || !payload.Visible || !payload.Focused || payload.Flags&fileTreeLocalNavigationFlag == 0 || payload.Status != fileTreeReadyStatus || len(payload.Rows) == 0 {
+	if !ok || !payload.Visible || payload.Flags&fileTreeLocalNavigationFlag == 0 || payload.Status != fileTreeReadyStatus || len(payload.Rows) == 0 {
 		return false
 	}
 
@@ -243,7 +301,7 @@ func (m Model) effectiveCompletionIndex(completion protocol.Completion) int {
 	return min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
 }
 
-func (m Model) localPreviewActivationPacket(msg tea.KeyPressMsg) ([]byte, bool) {
+func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component string) ([]byte, bool) {
 	key := msg.Key()
 	if key.Code != tea.KeyEnter && key.Code != tea.KeyKpEnter {
 		return nil, false
@@ -251,12 +309,12 @@ func (m Model) localPreviewActivationPacket(msg tea.KeyPressMsg) ([]byte, bool) 
 	if key.Mod.Contains(tea.ModCtrl) || key.Mod.Contains(tea.ModShift) || key.Mod.Contains(tea.ModAlt) || key.Mod.Contains(tea.ModSuper) {
 		return nil, false
 	}
-	if preview, ok := m.localPresentation.identityPreview(presentationCompletion); ok {
+	if preview, ok := m.localPresentation.identityPreview(presentationCompletion); component == "completion" && ok {
 		if completion, present := m.completion(); present && completion.Visible && preview.generation == completion.Generation && completionItemIndex(completion, preview.itemID) >= 0 {
 			return protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, preview.generation, []byte(preview.itemID)), true
 		}
 	}
-	if preview, ok := m.localPresentation.identityPreview(presentationPicker); ok {
+	if preview, ok := m.localPresentation.identityPreview(presentationPicker); component == "picker" && ok {
 		if picker, present := m.picker(); present && picker.Visible && preview.generation == picker.Generation {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
@@ -266,7 +324,7 @@ func (m Model) localPreviewActivationPacket(msg tea.KeyPressMsg) ([]byte, bool) 
 			}
 		}
 	}
-	if !m.modalOverlayActive() {
+	if component == "file_tree" {
 		if preview, ok := m.localPresentation.identityPreview(presentationFileTree); ok {
 			if tree, present := m.fileTree(); present && tree.Visible && preview.generation == tree.Generation && fileTreeItemIndex(tree, preview.itemID) >= 0 {
 				return protocol.EncodeGUISemanticItemActivate(byte(presentationFileTree), 1, preview.generation, []byte(preview.itemID)), true

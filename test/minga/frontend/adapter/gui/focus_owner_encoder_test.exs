@@ -7,6 +7,7 @@ defmodule Minga.Frontend.Adapter.GUI.FocusOwnerEncoderTest do
   alias Minga.RenderModel.UI.FocusOwner
 
   test "encodes every responder and surface in the fixed ten-byte len16 payload" do
+    assert Minga.Protocol.Opcodes.protocol_version() >= 30
     responders = [editor_view: 0, picker_query: 1, search_query: 2, inline_edit: 3]
 
     surfaces = [
@@ -21,7 +22,9 @@ defmodule Minga.Frontend.Adapter.GUI.FocusOwnerEncoderTest do
       picker: 8,
       completion: 9,
       command_completion: 10,
-      search: 11
+      search: 11,
+      hover_popup: 12,
+      empty_state: 13
     ]
 
     for {responder, responder_byte} <- responders, {surface, surface_byte} <- surfaces do

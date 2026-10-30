@@ -57,6 +57,7 @@ public struct InlineEditField: NSViewRepresentable {
 
     public func makeNSView(context: Context) -> NSTextField {
         let field = InlineEditTextField()
+        field.setAccessibilityIdentifier("minga.file-tree.inline-edit")
         field.isBezeled = false
         field.drawsBackground = false
         field.font = .systemFont(ofSize: 12)

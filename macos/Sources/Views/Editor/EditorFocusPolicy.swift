@@ -167,6 +167,7 @@ final class EditorFocusPolicy: EditorFocusControlling {
     /// Records native state when the first render frame reaches the application.
     func firstFrameDidRender() {
         recordFocusDiagnostic(point: "first-frame")
+        applyDecodedOwner()
     }
 
     /// Reclaims the decoded owner after the attached window becomes key.
@@ -363,6 +364,8 @@ final class EditorFocusPolicy: EditorFocusControlling {
             nativeModalDepth: nativeModalDepth,
             presentationFocusRequested: presentationFocusRequested,
             firstResponderEventCount: firstResponderEventCount,
+            committedOwner: decodedOwner,
+            resolvedKind: attachedWindow.flatMap { resolvedKind(in: $0) },
             requestResult: requestResult
         )
     }
@@ -414,24 +417,37 @@ final class EditorFocusPolicy: EditorFocusControlling {
     private func applyDecodedOwner() {
         guard !applyingOwner, decodedOwner != nil else { return }
         pendingOwnerApply = true
-        guard nativeModalDepth == 0, localTextEditing == nil,
-              let window = attachedWindow,
-              let responder = responderForDecodedOwner(),
-              let view = responder as? NSView, view.window === window
-        else { return }
-        guard (editorView as? EditorNSView)?.hasMarkedText() != true else { return }
+        guard let window = attachedWindow else { return }
+        guard let kind = resolvedKind(in: window),
+              let responder = responder(for: kind),
+              let view = responder as? NSView, view.window === window else { return }
         if hasFocus(responder, in: window) {
             pendingOwnerApply = false
             (responder as? any EditorFocusReceiving)?.editorFocusDidApply()
             return
         }
-        guard !nativeTextEditingIsActive() else { return }
         applyingOwner = true
         window.initialFirstResponder = view
         let applied = window.makeFirstResponder(responder)
         if applied { (responder as? any EditorFocusReceiving)?.editorFocusDidApply() }
         applyingOwner = false
         pendingOwnerApply = !applied
+    }
+
+    private func resolvedKind(in window: NSWindow) -> Wire.FocusOwner.Responder? {
+        let alreadyFocused = responderForDecodedOwner().map { hasFocus($0, in: window) } ?? false
+        return FocusResolution.resolve(
+            committed: decodedOwner,
+            lifecycle: FocusLifecycleState(
+                nativeModalDepth: nativeModalDepth,
+                // Offscreen hierarchies may prepare their initial responder;
+                // visible non-key windows never steal native input.
+                windowIsKey: window.isKeyWindow || !window.isVisible,
+                nativeTextEditingActive: localTextEditing != nil
+                    || (editorView as? EditorNSView)?.hasMarkedText() == true
+                    || (nativeTextEditingIsActive() && !alreadyFocused)
+            )
+        )
     }
 
     private func reconcileAgentKeyMonitor() {
@@ -481,6 +497,8 @@ private final class EditorFocusDiagnosticLog {
         nativeModalDepth: Int,
         presentationFocusRequested: Bool,
         firstResponderEventCount: Int,
+        committedOwner: Wire.FocusOwner?,
+        resolvedKind: Wire.FocusOwner.Responder?,
         requestResult: Bool?
     ) {
         guard let outputURL, records.count < Self.maximumRecords else { return }
@@ -503,6 +521,10 @@ private final class EditorFocusDiagnosticLog {
                 nativeModalDepth: nativeModalDepth,
                 presentationFocusRequested: presentationFocusRequested,
                 firstResponderEventCount: firstResponderEventCount,
+                committedOwner: committedOwner.map {
+                    "\($0.responder):\($0.surface):\($0.windowID):\($0.generation)"
+                },
+                resolvedKind: resolvedKind.map { String(describing: $0) },
                 requestResult: requestResult
             )
         )
@@ -532,6 +554,8 @@ private final class EditorFocusDiagnosticLog {
         let nativeModalDepth: Int
         let presentationFocusRequested: Bool
         let firstResponderEventCount: Int
+        let committedOwner: String?
+        let resolvedKind: String?
         let requestResult: Bool?
     }
 }

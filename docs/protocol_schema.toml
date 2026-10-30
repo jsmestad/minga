@@ -63,7 +63,10 @@ version = "2.0.0"
 # Scroll and fold actions name the window and its u64 presentation generation.
 # File-tree drop appends the observed tree generation as u32 after source paths.
 # protocol_version 29 adds gui_focus_owner: the BEAM names the keyboard owner on every changed frame and every keyframe.
-protocol_version = 29
+# protocol_version 30 (2026-10-30, #3518) extends gui_focus_owner.surface with
+# focused hover (12) and empty launchpad (13). Version 29 native clients reject
+# these values, so the exact ready handshake must exclude those stale decoders.
+protocol_version = 30
 description = "Minga port protocol opcode registry"
 
 # Directions:

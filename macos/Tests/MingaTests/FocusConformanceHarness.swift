@@ -192,7 +192,7 @@ struct FocusLifecycleConformanceTests {
         let mapped = Set(FocusConformanceHarness.eventMethods.values)
         #expect(methods.subtracting(excluded) == mapped, "unmapped lifecycle methods: \(methods.subtracting(excluded).subtracting(mapped)); obsolete mappings: \(mapped.subtracting(methods))")
         var recorded: Set<String> = []
-        let entries = ConformanceTranscriptTests.loadIndex().filter { $0.category == "focus" }
+        let entries = ConformanceTranscriptTests.loadIndex().filter { $0.category == "focus" && !$0.go }
         #expect(!entries.isEmpty, "missing focus corpus; run mix conformance.gen")
         for entry in entries {
             for step in try ConformanceTranscriptTests.loadSteps(entry.file) where step["kind"] as? String == "native_event" {

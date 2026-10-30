@@ -26,6 +26,7 @@ func residentModel(t *testing.T, count int) Model {
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiAgentChat: {AgentChat: visibleAgentChat()},
 	}
+	model.applyMutation(focusOwnerCommand(0, 2))
 	msgs := make([]protocol.AgentChatMessage, 0, count)
 	for i := 1; i <= count; i++ {
 		msgs = append(msgs, protocol.AgentChatMessage{ID: uint32(i), Kind: 0x01, Text: fmt.Sprintf("USERMSG_%d", i)})
