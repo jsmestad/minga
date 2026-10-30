@@ -58,8 +58,9 @@ struct FocusReplayWindowTests {
             let target = try #require(expect["focus_target"] as? [String: Any])
             ConformanceTranscriptTests.assertFocusTarget(expect, gui: gui, index: index, name: entry.name)
             let kind = try #require(target["responder"] as? String)
-            let responder = try await settle(kind: kind, editor: editor, host: host, window: window, application: application)
-            try assertIdentity(responder, kind: kind, editor: editor, window: window)
+            let observation = "\(entry.name) step \(index)"
+            let responder = try await settle(kind: kind, editor: editor, host: host, window: window, application: application, observation: "\(observation) committed")
+            try assertIdentity(responder, kind: kind, editor: editor, window: window, observation: "\(observation) committed")
 
             // Explicit lifecycle replay is separate from observing the frame's
             // production registration/update hooks establish focus above.
@@ -75,19 +76,20 @@ struct FocusReplayWindowTests {
             editor.focusPolicy.windowDidBecomeKey()
             editor.focusPolicy.pointerReturnedToEditor()
             editor.focusPolicy.fileDropDidComplete()
-            _ = try await settle(kind: kind, editor: editor, host: host, window: window, application: application)
-            try assertIdentity(responder, kind: kind, editor: editor, window: window)
+            _ = try await settle(kind: kind, editor: editor, host: host, window: window, application: application, observation: "\(observation) restored")
+            try assertIdentity(responder, kind: kind, editor: editor, window: window, observation: "\(observation) restored")
         }
     }
 
     private func settle(
         kind: String, editor: EditorNSView, host: NSView, window: NSWindow,
-        application: FocusTestApplicationScope
+        application: FocusTestApplicationScope, observation: String
     ) async throws -> NSView {
-        for _ in 0..<100 {
+        for iteration in 0..<100 {
             if NSApp.isActive, window.isKeyWindow,
                let target = responder(kind: kind, editor: editor, host: host),
-               target.window === window, hasFocus(target, in: window) {
+               target.window === window, hasFocus(target, in: window), hasPublishedAXIdentity(target, editor: editor) {
+                print("[Focus settled] \(observation) responder=\(kind) iteration=\(iteration)")
                 return target
             }
             try await Task.sleep(for: .milliseconds(10))
@@ -122,7 +124,33 @@ struct FocusReplayWindowTests {
         return window.firstResponder === fieldEditor
     }
 
-    private func assertIdentity(_ target: NSView, kind: String, editor: EditorNSView, window: NSWindow) throws {
+    private func applicationAXFocus() -> AnyObject? {
+        let selector = NSSelectorFromString("accessibilityFocusedUIElement")
+        guard NSApp.responds(to: selector) else { return nil }
+        return NSApp.perform(selector)?.takeUnretainedValue()
+    }
+
+    private func nativeAXIdentityMatches(_ focused: AnyObject?, field: NSTextField, fieldEditor: NSText) -> Bool {
+        focused === field || focused === fieldEditor
+    }
+
+    private func hasPublishedAXIdentity(_ target: NSView, editor: EditorNSView) -> Bool {
+        guard let field = target as? NSTextField else {
+            guard target === editor,
+                  let pane = (editor.accessibilityChildren() as? [EditorPaneAccessibilityElement])?.first else { return false }
+            return editor.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === pane
+        }
+        guard let fieldEditor = field.currentEditor() else { return false }
+        return editor.accessibilityFocusedUIElement == nil
+            && nativeAXIdentityMatches(applicationAXFocus(), field: field, fieldEditor: fieldEditor)
+    }
+
+    private func describeAXObject(_ object: AnyObject?) -> String {
+        guard let object else { return "nil" }
+        return "\(String(reflecting: type(of: object))) \(ObjectIdentifier(object)): \(String(describing: object))"
+    }
+
+    private func assertIdentity(_ target: NSView, kind: String, editor: EditorNSView, window: NSWindow, observation: String) throws {
         try #require(NSApp.isActive && window.isKeyWindow, "AX identity requires the actual active key window")
         try #require(target.window === window)
         #expect(hasFocus(target, in: window), "First responder must belong to \(kind)")
@@ -137,9 +165,9 @@ struct FocusReplayWindowTests {
             #expect(editor.accessibilityFocusedUIElement == nil)
             let selector = NSSelectorFromString("accessibilityFocusedUIElement")
             try #require(NSApp.responds(to: selector))
-            let focused = NSApp.perform(selector)?.takeUnretainedValue()
-            #expect(focused === field || focused === fieldEditor,
-                    "AX focus must identify the same production native field as the responder")
+            let focused = applicationAXFocus()
+            #expect(nativeAXIdentityMatches(focused, field: field, fieldEditor: fieldEditor),
+                    "\(observation): AX focus=\(describeAXObject(focused)) must identify the same production native field=\(describeAXObject(field)) or its current field editor=\(describeAXObject(fieldEditor))")
         }
         print("[Focus identity] responder=\(kind) fieldID=\(target.accessibilityIdentifier() ?? "-") active=\(NSApp.isActive) key=\(window.isKeyWindow) owner=\(String(describing: editor.focusPolicy.decodedOwner)) firstResponder=\(String(describing: window.firstResponder))")
     }

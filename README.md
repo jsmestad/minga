@@ -133,6 +133,7 @@ It then runs an explicit hosted `build-for-testing` phase, verifies the fresh pl
 Only accepted policy execution authorizes `FocusReplayWindowTests` in a separate host process from a replay copy of that same input.
 Both plan copies bind their original product root, select their own suite explicitly, and remove conflicting target-local skip filters.
 These exclusions route tests between execution contexts; they do not omit acceptance coverage.
+Production-window replay observes responder and positive AX identity within the same bounded wait; observation never assigns focus or substitutes an expected AX object.
 Do not combine the focus selectors or run competing GUI tests concurrently: suite-local `.serialized` does not isolate application activation and key-window state from other suites.
 
 Use `--output-dir PATH` to retain evidence elsewhere (default: `macos-unit-evidence/`).
