@@ -197,16 +197,30 @@ struct EditorFocusPolicyTests {
 
     @Test("nested native modal and agent visibility lifecycle never infer an editor owner")
     func lifecycleAppliesOnlyDecodedOwner() async throws {
+        let application = try await FocusTestApplicationScope("nested native modal")
+        defer { application.close() }
         let fixture = Fixture()
         defer { fixture.close() }
         fixture.policy.register(fixture.inline, as: .inlineEdit)
         fixture.policy.beginNativeModal()
         fixture.policy.beginNativeModal()
         fixture.policy.focusOwnerDidChange(owner(.inlineEdit, surface: 5))
+        #expect(fixture.policy.pendingOwnerApply)
+        #expect(fixture.window.initialFirstResponder == nil)
         fixture.policy.endNativeModalAndRestore()
         #expect(!fixture.hasFocus(fixture.inline))
+        #expect(!fixture.window.isVisible, "An inner modal must not order the editor window")
         fixture.policy.endNativeModalAndRestore()
-        try #require(fixture.hasFocus(fixture.inline))
+        try #require(
+            fixture.hasFocus(fixture.inline),
+            "Modal restore must prepare the committed inline responder before AppKit chooses a field; key=\(fixture.window.isKeyWindow) pending=\(fixture.policy.pendingOwnerApply) firstResponder=\(String(describing: fixture.window.firstResponder))"
+        )
+        #expect(fixture.window.initialFirstResponder === fixture.inline)
+        #expect(!fixture.hasFocus(fixture.picker))
+        #expect(!fixture.hasFocus(fixture.search))
+        // Priming above is synchronous; subsequent simulated focus loss must
+        // happen only after AppKit has actually activated and keyed the window.
+        try await application.waitUntilPresented(fixture.window)
         try #require(fixture.window.makeFirstResponder(nil))
         fixture.policy.agentOverlayVisibilityDidChange(true)
         fixture.policy.agentOverlayVisibilityDidChange(false)

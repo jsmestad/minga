@@ -401,9 +401,9 @@ const overlayDeltaCursorlineFlag = 0x02
 
 func decodeOverlayDelta(payload []byte) (Command, error) {
 	// opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) +
-	// cursor_col(2) + cursor_shape(1) = 13 bytes, plus a flat 5-byte cursorline
-	// (row:2, r, g, b) when the flags cursorline bit is set. The size must be
-	// bounded: returning len(payload) here would swallow the rest of the batch.
+	// cursor_col(2) + cursor_shape(1), optional cursorline(5), then the mandatory
+	// accessibility_cursor_utf16(4). The TUI does not expose native AX, but must
+	// consume its trailer so it never becomes the next opcode in a wire batch.
 	const base = 13
 	if len(payload) < base {
 		return Command{}, fmt.Errorf("short overlay delta")
@@ -425,6 +425,10 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 			return Command{}, fmt.Errorf("short overlay delta cursorline")
 		}
 		window.Cursorline = Cursorline{Visible: true, Row: u16(payload, base), BG: u24(payload, base+2)}
+	}
+	size += 4
+	if len(payload) < size {
+		return Command{}, fmt.Errorf("short overlay delta accessibility cursor")
 	}
 
 	return Command{Kind: CommandWindowDelta, Size: size, Window: window}, nil

@@ -18,6 +18,48 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     |> run_check(DependencyDirectionCheck, [])
   end
 
+  describe "checkout-independent source layers" do
+    test "build tasks do not inherit the checkout directory's layer" do
+      source = """
+      defmodule Mix.Tasks.CheckoutFixture do
+        alias MingaEditor.State
+      end
+      """
+
+      for checkout <- [
+            "/build/minga",
+            "/build/minga_agent",
+            "/build/minga/core",
+            "/build/minga_editor"
+          ] do
+        source
+        |> check(Path.join(checkout, "lib/mix/tasks/checkout_fixture.ex"))
+        |> refute_issues()
+      end
+    end
+
+    test "checkout names cannot hide or relabel an upward service dependency" do
+      source = """
+      defmodule Minga.LSP.Client do
+        alias MingaEditor.State
+      end
+      """
+
+      for checkout <- [
+            "/build/minga",
+            "/build/minga_agent",
+            "/build/minga/core",
+            "/build/minga_editor"
+          ] do
+        source
+        |> check(Path.join(checkout, "lib/minga/lsp/client.ex"))
+        |> assert_issue(fn issue ->
+          assert issue.message =~ "Layer 1 module references Layer 2"
+        end)
+      end
+    end
+  end
+
   describe "Layer 0 violations (pure modules must not depend on Layer 1 or 2)" do
     test "flags Layer 0 module aliasing a Layer 1 module" do
       """

@@ -146,8 +146,11 @@ func TestGUIFocusOwnerDoesNotChangeTerminalPresentation(t *testing.T) {
 		if got := model.View().Content; got != before {
 			t.Fatalf("focus owner responder %d changed terminal presentation:\n%s", owner.responder, got)
 		}
-		if model.chrome[generated.OPGuiFocusOwner].FocusOwner != command.Chrome.FocusOwner {
-			t.Fatalf("focus owner was not retained as no-op chrome state")
+		if got, ok := model.committedFocusOwner(); !ok || got != command.Chrome.FocusOwner {
+			t.Fatalf("focus owner was not retained as explicit committed state")
+		}
+		if _, ok := model.focusedComponent(); !ok {
+			t.Fatalf("committed focus owner did not resolve a focused component")
 		}
 	}
 }
@@ -1625,6 +1628,7 @@ func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 		{ID: 33, Kind: agentKindAssistant, Text: "ok"},
 		{ID: 44, Kind: agentKindThinking, Text: "second", Collapsed: false},
 	}})
+	model.applyMutation(focusOwnerCommand(0, 2))
 
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModCtrl | tea.ModAlt}))
 	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(44); !bytes.Equal(got, want) {
@@ -1644,6 +1648,7 @@ func TestAgentChatShortcutTogglesLatestToolBlock(t *testing.T) {
 		{ID: 33, Kind: agentKindAssistant, Text: "ok"},
 		{ID: 44, Kind: agentKindStyledTool, Name: "grep", Collapsed: false},
 	}})
+	model.applyMutation(focusOwnerCommand(0, 2))
 
 	_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
 	if got, want := <-out, protocol.EncodeGUIAgentToolToggle(44); !bytes.Equal(got, want) {
@@ -2442,6 +2447,7 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 		out := make(chan []byte, 1)
 		model := New(30, 6, out, nil)
 		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
+		model.applyMutation(focusOwnerCommand(0, 1))
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
 		model = updated.(Model)
@@ -2459,6 +2465,7 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 		out := make(chan []byte, 1)
 		model := New(30, 6, out, nil)
 		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "b", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b", Selected: true, Focused: true}}}}}
+		model.applyMutation(focusOwnerCommand(0, 1))
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
 		model = updated.(Model)
@@ -2477,6 +2484,7 @@ func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(30, 6, out, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
+	model.applyMutation(focusOwnerCommand(0, 1))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
 	model = updated.(Model)
@@ -2490,25 +2498,30 @@ func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	}
 }
 
-func TestModalOverlaySuppressesFileTreeNavigation(t *testing.T) {
+func TestCommittedOverlayOwnerSuppressesFileTreeNavigation(t *testing.T) {
 	eligibleTree := protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}
 	jKey := tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)})
 
 	for _, tc := range []struct {
 		name    string
 		overlay map[byte]protocol.ChromePayload
+		owner   protocol.Command
 	}{
-		{"picker", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiPicker: {Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}}}}},
-		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}}}}},
-		{"agent-chat", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 2, ModelName: "test"}}}},
+		{"picker", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiPicker: {Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}}}}, focusOwnerCommand(1, 8)},
+		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}}}}, focusOwnerCommand(0, 0)},
+		{"agent-chat", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 2, ModelName: "test"}}}, focusOwnerCommand(0, 2)},
 	} {
 		t.Run(tc.name+" suppresses local navigation", func(t *testing.T) {
 			out := make(chan []byte, 1)
 			model := New(30, 6, out, nil)
 			model.chrome = tc.overlay
+			model.applyMutation(tc.owner)
 
 			updated, _ := model.Update(jKey)
 			model = updated.(Model)
+			if _, preview := model.localPresentation.identityPreview(presentationFileTree); preview {
+				t.Fatalf("file tree stole navigation from committed %s owner", tc.name)
+			}
 
 			tree := model.chrome[generated.OPGuiFileTree].Tree
 			if tree.Selected != "a" || !tree.Rows[0].Selected {
@@ -3318,6 +3331,7 @@ func TestCompletionLocalNavigationCtrlNAdvancesPreview(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(30, 10, out, nil)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 0)
+	model.applyMutation(focusOwnerCommand(0, 9))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 	model = updated.(Model)
@@ -3336,6 +3350,7 @@ func TestCompletionLocalPreviewEnterActivatesExactIdentity(t *testing.T) {
 	model := New(30, 10, out, nil)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(3, 0)
 	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "completion-2")
+	model.applyMutation(focusOwnerCommand(0, 9))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(Model)
@@ -3351,6 +3366,7 @@ func TestCompletionLocalNavigationCtrlPRetreatsPreview(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(30, 10, out, nil)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 3)
+	model.applyMutation(focusOwnerCommand(0, 9))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
 	model = updated.(Model)
@@ -3364,6 +3380,7 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 	t.Run("clamps at bottom", func(t *testing.T) {
 		model := New(30, 10, nil, nil)
 		model.chrome[generated.OPGuiCompletion] = completionChrome(3, 2)
+		model.applyMutation(focusOwnerCommand(0, 9))
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 		model = updated.(Model)
@@ -3376,6 +3393,7 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 	t.Run("clamps at top", func(t *testing.T) {
 		model := New(30, 10, nil, nil)
 		model.chrome[generated.OPGuiCompletion] = completionChrome(3, 0)
+		model.applyMutation(focusOwnerCommand(0, 9))
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
 		model = updated.(Model)
@@ -3389,6 +3407,7 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 func TestCompletionLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 	model := New(30, 10, nil, nil)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 1)
+	model.applyMutation(focusOwnerCommand(0, 9))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 	model = updated.(Model)
@@ -3401,6 +3420,7 @@ func TestCompletionLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 func TestCompletionLocalNavigationIgnoredWhenPopupHidden(t *testing.T) {
 	model := New(30, 10, nil, nil)
 	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: false, Items: []protocol.CompletionItem{{Kind: 1, Label: "x"}}}}
+	model.applyMutation(focusOwnerCommand(0, 9))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 	model = updated.(Model)
@@ -3471,6 +3491,7 @@ func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(30, 10, out, nil)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 0)
+	model.applyMutation(focusOwnerCommand(1, 8))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	model = updated.(Model)
@@ -3488,6 +3509,7 @@ func TestPickerLocalNavigationKRetreatsPreview(t *testing.T) {
 	out := make(chan []byte, 1)
 	model := New(30, 10, out, nil)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 3)
+	model.applyMutation(focusOwnerCommand(1, 8))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
 	model = updated.(Model)
@@ -3501,6 +3523,7 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 	t.Run("clamps at bottom", func(t *testing.T) {
 		model := New(30, 10, nil, nil)
 		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 2)
+		model.applyMutation(focusOwnerCommand(1, 8))
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 		model = updated.(Model)
@@ -3513,6 +3536,7 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 	t.Run("clamps at top", func(t *testing.T) {
 		model := New(30, 10, nil, nil)
 		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 0)
+		model.applyMutation(focusOwnerCommand(1, 8))
 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
 		model = updated.(Model)
@@ -3526,6 +3550,7 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 	model := New(30, 10, nil, nil)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 1)
+	model.applyMutation(focusOwnerCommand(1, 8))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	model = updated.(Model)
@@ -3538,6 +3563,7 @@ func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 func TestPickerLocalNavigationIgnoredWhenHidden(t *testing.T) {
 	model := New(30, 10, nil, nil)
 	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: false, Items: []protocol.PickerItem{{Label: "x"}}}}
+	model.applyMutation(focusOwnerCommand(1, 8))
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	model = updated.(Model)

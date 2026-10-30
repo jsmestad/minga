@@ -25,7 +25,7 @@ test/conformance/corpus/
   store/*.json         # store-lifecycle transcripts (AC1)
   input/*.json         # input-resolution transcripts (AC2)
   chat/*.json          # resident agent-transcript transcripts (0x86, #2654)
-  focus/*.json         # native keyboard-owner transcripts (0xAA, #3512)
+  focus/*.json         # ten native lifecycle (#3512) and seven shared owner (#3518) transcripts
 ```
 
 | Category | Contract | Swift | Go |
@@ -33,7 +33,8 @@ test/conformance/corpus/
 | `store` | Resident window lifecycle and production render boundaries | Runs | Runs |
 | `input` | Pointer normalization and local scroll reconciliation | Runs | Runs supported seams; index declares skips |
 | `chat` | Resident agent transcript updates and reading position | Runs | Runs |
-| `focus` | Committed keyboard owner through native lifecycle events | Runs against AppKit | Explicit skip for every named entry |
+| `focus` (native-only) | Committed keyboard owner through native lifecycle events (#3512) | Runs against AppKit harness | Explicit skip for each of ten named entries |
+| `focus` (shared) | BEAM-derived owner through real encoded frame transactions (#3518) | Pure resolver plus separate production ContentView replay | Runs all seven entries against committed component resolution |
 
 `index.json` is the enumeration authority. A frontend that cannot yet run a transcript must skip it *by name from this list* (a skipped-but-enumerated transcript is the deliverable); silent omission is not allowed.
 
@@ -122,9 +123,9 @@ Both frontends run every chat transcript; there are no `go_skip` entries in this
 
 ### Focus steps (native keyboard ownership, 0xAA, #3512)
 
-A picker that owns the keyboard must keep it when its window becomes key or a file drop finishes. Focus transcripts make that promise executable instead of checking only that the owner decoded. The Swift runner uses a real offscreen `NSWindow`, real views and fields, and the production `EditorFocusPolicy`. It checks the window's actual `firstResponder`, including an `NSTextField`'s active field editor. It does not assign the expected responder itself.
+A picker that owns the keyboard must keep it when its window becomes key or a file drop finishes. The ten native-only focus transcripts make that promise executable instead of checking only that the owner decoded. The Swift runner creates `FocusConformanceHarness` only for entries whose category is `focus` and whose actual consumer designation is `go: false`. It uses a real offscreen `NSWindow`, real views and fields, and the production `EditorFocusPolicy`. It checks the window's actual `firstResponder`, including an `NSTextField`'s active field editor. It does not assign the expected responder itself.
 
-Focus transcripts use ordinary **frame** steps containing a real `FocusOwnerEncoder` command (`gui_focus_owner`, opcode 170), followed by **native_event** steps. Each focus payload includes production-encoded `begin_frame`, a complete theme, the focus command, and `commit_frame`. The runner dispatches those decoded commands through the production transaction boundary and requires an accepted commit before checking the responder. Other corpus categories keep their existing apply path. Each generated focus frame uses a fresh encoder cache, so the keyframe case emits the same owner twice rather than accidentally testing an omitted command.
+Native-only focus transcripts use ordinary **frame** steps containing a real `FocusOwnerEncoder` command (`gui_focus_owner`, opcode 170), followed by **native_event** steps. Each native-only focus payload includes production-encoded `begin_frame`, a complete theme, the focus command, and `commit_frame`. The runner dispatches those decoded commands through the production transaction boundary and requires an accepted commit before checking the responder. Other corpus categories keep their existing apply path. Each generated native-only focus frame uses a fresh encoder cache, so its keyframe case emits the same owner twice rather than accidentally testing an omitted command.
 
 ```json
 {
@@ -165,9 +166,23 @@ Responders are registered at setup unless a transcript declares otherwise:
 
 Only the late-registration transcript uses that metadata. It establishes `editor_view` first, then commits an inline owner whose field is missing. That frame must leave the editor focused; `responder_registered` must apply the pending inline owner without another frame. Later unregister/register steps remove an inactive field, avoiding an unrelated AppKit fallback-responder assertion.
 
-Every focus entry declares `swift: true`, `go: false`, and the exact reason `"no native responder chain; keyboard owner is BEAM-routed"`. The Go runner emits `skipped for Go: <reason>` for each named entry. Its skip-reason test requires every Go-disabled transcript, in every category, to explain the skip.
+Every native-only focus entry declares `swift: true`, `go: false`, and the exact reason `"no native responder chain; keyboard owner is BEAM-routed"`. The Go runner emits `skipped for Go: <reason>` for each named entry. Its skip-reason test requires every Go-disabled transcript, in every category, to explain the skip. The seven shared focus entries below are not skipped and never instantiate this bare native harness.
 
 The Swift lifecycle coverage guard compares the public policy entry points with the corpus event coverage and an explicit infrastructure/query exclusion list. Adding a lifecycle method without exercising it is a test failure. Focus assertion failures identify the transcript, step index, expected responder, and actual responder on one line.
+
+### Shared focus frames (#3518)
+
+The seven shared `focus/` entries, selected by their actual `go: true` consumer designation, use `kind: "framed"`: `payload_base64` is the complete raw wire batch, including `begin_frame` and `commit_frame`, without the outer packet4 length. `command_sizes` records encoder-produced command boundaries for the BEAM oracle. Consumers decode the batch with their production decoder and dispatch the transaction, not the test-only unframed mutator.
+
+Each shared step carries `expect.focus_target = {surface, responder, window_id, generation}`, derived by the existing `MingaEditor.FocusOwner.derive/1` over the scenario's editor state. The same owner is encoded by the production semantic adapter. Swift asserts the pure `FocusResolution`; Go resolves the committed focused component and checks the retained wire responder and source generation. Every shared focus transcript runs on both consumers. The additional production `ContentView`/`NSWindow` replay is macOS-specific, separate from the native-event harness above.
+
+A framed step may set `reset_frontend: true` (otherwise false). Before decoding that step, discard the entire frontend consumer and its local presentation state. The producer's editor state is not reset. The reattach scenario marks its third step this way: the real encoder sends a keyframe while the picker remains open, but Swift and Go must recover its owner into fresh stores. The native replay destroys the previous window, GUI state, policy, and registered hierarchy, then hosts a fresh production `ContentView` before applying that same keyframe. The BEAM oracle clears its retained consumer owner before consuming the keyframe's encoded fact.
+
+Responder waits only observe the production hierarchy and first responder while yielding the runloop; they never call focus policy hooks, force layout, or reapply an owner to make an assertion pass. Explicit native lifecycle replay runs separately after each frame has established its own responder and AX identity. First-frame notification occurs only once per fresh consumer.
+
+Scenarios cover picker open-close with an unchanged delta, native search open-close, file-tree rename confirm and cancel, agent toggle, a reattach keyframe while the picker owns focus, focused hover, and the empty launchpad. Rename transcripts exercise the admitted edit lifecycle; filesystem rename effects remain covered by the file-tree workflow tests. Agent input uses the editor responder and BEAM `agent` scope, not a new native field. Generations retain their source meaning: picker activation generation or file-tree edit token, and zero where there is no source generation.
+
+Regenerate with `mix conformance.gen` after compilation and dependencies are available. Run the BEAM leg with `mix test.llm test/conformance/focus_corpus_test.exs test/minga_editor/focus_owner_test.exs`, and Go with `cd go/tui && go test ./internal/ui -run TestConformanceTranscripts`. On macOS, run `ConformanceTranscriptTests`, `FocusReplayWindowTests`, `FocusResolutionTests`, `FocusWriterGuardrailTests`, `EditorFocusPolicyTests`, `GUIObservationGuardrailTests`, and `GUIFrameSwiftUIInvalidationTests` in the existing `MingaTests` CI job. The window replay checks first responder unconditionally and AX identity when the app is active and its window is key. The signed-app Accessibility workflow remains an on-device smoke, not a prerequisite for these in-process tests.
 
 ### `expect` fields
 
@@ -182,6 +197,7 @@ A runner asserts only the keys present on a step; absent keys are not checked.
 | `offset_discarded` | Whether applying this frame forced the frontend to discard its local offset (the real reconciliation decision). |
 | `normalized_buffer_line` | (pointer steps) `anchor_top + normalized_content_row` after the offset transform. |
 | `first_responder` | (focus frames and native events) Actual native responder identity, resolving an active field editor back to its owning field. |
+| `focus_target` | The committed BEAM owner `{surface, responder, window_id, generation}`, checked through the frontend resolver. |
 
 A `production_fixture` step is the compact production-size form. Its `fixture` object defines deterministic carrier sizes, row counts, edit coordinates, epochs, and generations; `operations` defines shared expected statuses and row-operation counts. It intentionally has no `payload_base64`: each client expands the same descriptor through its real resident store so repeated multi-megabyte JSON is never checked in.
 

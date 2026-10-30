@@ -118,6 +118,37 @@ The rest of the docs are organized by what you're trying to do.
 
 Bug reports, feature ideas, and code are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
 
+### Native macOS unit tests
+
+After generating the Xcode project (`cd macos && xcodegen generate`), run `scripts/test_macos_unit` from the repository root.
+This is the authoritative Xcode/Metal unit-test entrypoint used by CI and the Swift stage of `make done`; SwiftPM is not a substitute for this native gate.
+
+Scheme `MingaUnitTests` builds the existing `MingaTests` target for two execution contexts, without changing its source ownership.
+Production `Minga.app` builds separately and must never host or embed the unit tests.
+Production-app probes receive its explicit path through the scheme's `MINGA_TEST_PRODUCTION_APP_PATH` environment variable.
+The host compiles the existing production Metal shader so `Bundle.main` retains real shader-library coverage.
+
+The entrypoint runs ordinary tests bare with explicit empty `TEST_HOST` and `BUNDLE_LOADER` build settings, excluding the two focus suites.
+It then runs an explicit hosted `build-for-testing` phase, verifies the fresh plan and products, and executes all 13 `EditorFocusPolicyTests` functions from a pinned policy copy.
+Only accepted policy execution authorizes `FocusReplayWindowTests` in a separate host process from a replay copy of that same input.
+Both plan copies bind their original product root, select their own suite explicitly, and remove conflicting target-local skip filters.
+These exclusions route tests between execution contexts; they do not omit acceptance coverage.
+Production-window replay observes responder and positive AX identity within the same bounded wait; observation never assigns focus or substitutes an expected AX object.
+For native fields, AX identity means the exact AppKit cell installed on the expected production field, with the cell's `controlView` pointing back to that field.
+CI repeats the canonical lifecycle against the same DerivedData and retains a separate warm manifest, so hosted-to-bare reuse is exercised rather than inferred from a cache.
+Do not combine the focus selectors or run competing GUI tests concurrently: suite-local `.serialized` does not isolate application activation and key-window state from other suites.
+
+Use `--output-dir PATH` to retain evidence elsewhere (default: `macos-unit-evidence/`).
+Each invocation preserves separate action logs and `.xcresult` bundles, and writes `results.json` with the three actual result summaries/test trees, commands, exit statuses, timings, and aggregate logical-function counts.
+Global xcresult counts do not count parameterized executions; replay acceptance requires the enumerator and all seven actual named passed argument nodes.
+Evidence includes settings queried from the testing build graph, actual bare/hosted runtime identity, the hosted build command/status/log, and raw pre/post plan signatures and copies.
+For this scheme, the pinned Xcode emits format 1 with a top-level `MingaTests` target and an application-bundle `TestHostPath`; unsupported formats fail explicitly.
+The default build graph omits the test target, and `test` alone does not produce the persisted plan required for replay.
+Failed builds and missing, ambiguous, stale, or wrong-mode hosted plans block focused execution rather than fall back to cached products.
+Any ordinary failure remains an aggregate failure even if subsequent hosted diagnostics pass.
+Missing results, zero executed tests, incomplete focus coverage, or missing or reused focus test-runner PIDs fail the gate even if `xcodebuild` exits zero.
+The empty-setting transition and warm hosted-to-bare reuse require actual macOS verification; command flags alone are not native proof.
+
 ## License
 
 MIT

@@ -51,20 +51,17 @@ struct ConformanceTranscriptTests {
     @MainActor
     func runsTranscript(_ entry: ConformanceIndexEntry) async throws {
         let steps = try Self.loadSteps(entry.file)
-        let gui = GUIState()
+        var gui = GUIState()
         let setup = try Self.loadSetup(entry.file)
-        let focus = entry.category == "focus"
+        let focus = entry.category == "focus" && !entry.go
             ? FocusConformanceHarness(unregistered: Set(setup["unregistered_responders"] as? [String] ?? []))
             : nil
         defer { focus?.close() }
         var frameReset = false
-        let dispatcher = CommandDispatcher(
-            cols: 80, rows: 24, guiState: gui,
-            applicationEffectSink: { effect in
-                if case .scrollPresentationReset = effect { frameReset = true }
-                if case .focusOwnerChanged(let owner) = effect { focus?.policy.focusOwnerDidChange(owner) }
-            }
-        )
+        var focusPolicy: EditorFocusPolicy? = entry.category == "focus"
+            ? (focus?.policy ?? EditorFocusPolicy(editorView: NSView(), focusOwnerState: gui.focusOwnerState))
+            : nil
+        var dispatcher = Self.makeDispatcher(gui: gui, focusPolicy: focusPolicy) { frameReset = true }
         var transactionResult: FrameTransactionResult?
         dispatcher.onTransactionResult = { transactionResult = $0 }
 
@@ -78,7 +75,7 @@ struct ConformanceTranscriptTests {
             switch kind {
             case "frame":
                 frameReset = false
-                let commands = try Self.decodeFrame(step, index: i, name: entry.name)
+                let commands = try Self.decodeCommands(step, index: i, name: entry.name)
                 transactionResult = nil
                 for command in commands {
                     if focus != nil {
@@ -102,6 +99,26 @@ struct ConformanceTranscriptTests {
                     Self.assertFirstResponder(expect, harness: focus, index: i, name: entry.name)
                 }
 
+            case "framed":
+                if step["reset_frontend"] as? Bool == true {
+                    gui = GUIState()
+                    focusPolicy = EditorFocusPolicy(editorView: NSView(), focusOwnerState: gui.focusOwnerState)
+                    dispatcher = Self.makeDispatcher(gui: gui, focusPolicy: focusPolicy) { frameReset = true }
+                    dispatcher.onTransactionResult = { transactionResult = $0 }
+                    frameReset = false
+                    injectedRowOffset.removeAll()
+                    injectedColOffset.removeAll()
+                    #expect(gui.focusOwnerState.decodedOwner == nil)
+                }
+                guard let b64 = step["payload_base64"] as? String,
+                      let payload = Data(base64Encoded: b64) else {
+                    throw ConformanceError.badPayload("\(entry.name) step \(i)")
+                }
+                dispatcher.dispatch(try decodeFrame(from: payload))
+                if let expect = step["expect"] as? [String: Any] {
+                    Self.assertFocusTarget(expect, gui: gui, index: i, name: entry.name)
+                }
+
             case "production_fixture":
                 try Self.assertProductionFixture(
                     step, index: i, name: entry.name, dispatcher: dispatcher, gui: gui
@@ -120,7 +137,7 @@ struct ConformanceTranscriptTests {
                                    index: i, name: entry.name)
 
             case "transcript_frame":
-                let commands = try Self.decodeFrame(step, index: i, name: entry.name)
+                let commands = try Self.decodeCommands(step, index: i, name: entry.name)
                 for command in commands { dispatcher.applyForTesting(command) }
                 if let expect = step["expect"] as? [String: Any],
                    let transcript = expect["transcript"] as? [String: Any] {
@@ -139,7 +156,7 @@ struct ConformanceTranscriptTests {
                 }
 
             case "native_event":
-                let harness = try #require(focus, "\(entry.name) step \(i): native_event outside focus category")
+                let harness = try #require(focus, "\(entry.name) step \(i): native_event outside native-only focus transcript")
                 let event = try #require(step["event"] as? String)
                 try await harness.perform(event: event, args: step["args"] as? [String: Any] ?? [:])
                 let expect = try #require(step["expect"] as? [String: Any])
@@ -160,7 +177,43 @@ struct ConformanceTranscriptTests {
         }
     }
 
+    @MainActor
+    private static func makeDispatcher(
+        gui: GUIState, focusPolicy: EditorFocusPolicy?, onScrollReset: @escaping () -> Void
+    ) -> CommandDispatcher {
+        CommandDispatcher(cols: 80, rows: 24, guiState: gui, applicationEffectSink: { effect in
+            if case .scrollPresentationReset = effect { onScrollReset() }
+            if case .focusOwnerChanged(let owner) = effect { focusPolicy?.focusOwnerDidChange(owner) }
+        })
+    }
+
     // MARK: - Frame assertions
+    @MainActor
+    static func assertFocusTarget(_ expect: [String: Any], gui: GUIState, index: Int, name: String) {
+        guard let target = expect["focus_target"] as? [String: Any] else { return }
+        guard let owner = gui.focusOwnerState.decodedOwner else {
+            Issue.record("\(name) step \(index): no committed focus owner")
+            return
+        }
+        let surfaces = ["editor", "file_tree", "agent", "git_status", "conflict", "inline_edit",
+                        "inline_ask", "prompt", "picker", "completion", "command_completion",
+                        "search", "hover_popup", "empty_state"]
+        let responders = ["editor_view", "picker_query", "search_query", "inline_edit"]
+        #expect(surfaces.indices.contains(Int(owner.surface)))
+        if surfaces.indices.contains(Int(owner.surface)) {
+            #expect(surfaces[Int(owner.surface)] == target["surface"] as? String,
+                    "\(name) step \(index): wrong committed surface")
+        }
+        let resolved = FocusResolution.resolve(committed: owner, lifecycle: FocusLifecycleState())
+        #expect(resolved != nil)
+        if let resolved {
+            #expect(responders[Int(resolved.rawValue)] == target["responder"] as? String,
+                    "\(name) step \(index): wrong pure responder resolution")
+        }
+        #expect(Int(owner.generation) == target["generation"] as? Int)
+        #expect(Int(owner.windowID) == target["window_id"] as? Int)
+    }
+
 
     @MainActor
     static func assertFrame(_ expect: [String: Any], gui: GUIState, windowId: UInt16,
@@ -546,7 +599,7 @@ struct ConformanceTranscriptTests {
 
     // MARK: - Decoding
 
-    static func decodeFrame(_ step: [String: Any], index: Int, name: String) throws -> [RenderCommand] {
+    static func decodeCommands(_ step: [String: Any], index: Int, name: String) throws -> [RenderCommand] {
         guard let b64 = step["payload_base64"] as? String, let payload = Data(base64Encoded: b64) else {
             throw ConformanceError.badPayload("\(name) step \(index)")
         }

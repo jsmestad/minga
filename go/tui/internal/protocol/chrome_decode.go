@@ -88,7 +88,7 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 		if err != nil {
 			return ChromePayload{}, true, err
 		}
-		chrome.FocusOwner, chrome.Summary, chrome.Bytes = owner, "tui no-op", size
+		chrome.FocusOwner, chrome.Summary, chrome.Bytes = owner, "committed focus owner", size
 	case generated.OPGuiSplitSeparators:
 		chrome.Splits, chrome.Summary, chrome.Bytes = decodeSplitSeparators(payload)
 	case generated.OPGuiSurfaceLayout:

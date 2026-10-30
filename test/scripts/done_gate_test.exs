@@ -22,7 +22,12 @@ defmodule Minga.DoneGateTest do
     dir = String.trim(canonical_dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    for path <- ["scripts/lint", "scripts/credo_changed", "scripts/lib/changed_files.sh"] do
+    for path <- [
+          "scripts/lint",
+          "scripts/credo_changed",
+          "scripts/test_macos_unit",
+          "scripts/lib/changed_files.sh"
+        ] do
       File.cp!(Path.join(@root, path), Path.join(dir, path))
     end
 
@@ -39,7 +44,7 @@ defmodule Minga.DoneGateTest do
     bin = Path.join(dir, "bin")
     File.mkdir_p!(bin)
 
-    for command <- ~w(bash git awk tr mktemp date cat rm mkdir grep jq) do
+    for command <- ~w(bash git awk tr mktemp date cat rm mkdir grep jq python3) do
       File.ln_s!(System.find_executable(command), Path.join(bin, command))
     end
 
@@ -174,7 +179,6 @@ defmodule Minga.DoneGateTest do
     {output, 0} = gate(ctx)
     assert output =~ "[skip] swift.build"
     assert output =~ "[skip] swift.test"
-    assert length(Regex.scan(~r/xcodebuild not found/, output)) == 2
   end
 
   test "protocol schema changes run both Swift stages", ctx do
@@ -193,12 +197,17 @@ defmodule Minga.DoneGateTest do
 
     assert output =~ "[pass] swift.build"
     assert output =~ "[FAIL] swift.test"
-    assert output =~ "xcresult: #{ctx.dir}/results/swift.xcresult"
+    evidence = native_results(ctx.dir)
+    ordinary = hd(evidence["actions"])
+    bundle = Path.join([ctx.dir, "results/native-unit", ordinary["result_bundle"]])
+    log = Path.join([ctx.dir, "results/native-unit", ordinary["log"]])
+    assert output =~ "xcresult: #{bundle}"
     assert output =~ "RenderingTests/testCaret()"
     refute output =~ "testPassing"
     refute output =~ "NOISY"
-    assert File.dir?(Path.join(ctx.dir, "results/swift.xcresult"))
-    assert File.read!(Path.join(ctx.dir, "results/swift-test.log")) =~ "NOISY TEST OUTPUT"
+    assert File.dir?(bundle)
+    assert File.read!(log) =~ "NOISY TEST OUTPUT"
+    refute evidence["success"]
     assert File.read!(Path.join(ctx.dir, "results/swift-build.log")) =~ "NOISY BUILD OUTPUT"
   end
 
@@ -212,7 +221,7 @@ defmodule Minga.DoneGateTest do
     assert output =~ "swift.build failed"
     assert output =~ "Build log: #{ctx.dir}/results/swift-build.log"
     refute output =~ "NOISY"
-    refute File.exists?(Path.join(ctx.dir, "results/swift-test.log"))
+    refute File.exists?(Path.join(ctx.dir, "results/native-unit/results.json"))
   end
 
   test "artifact setup failure preserves earlier stage failures", ctx do
@@ -237,25 +246,107 @@ defmodule Minga.DoneGateTest do
     write!(ctx.dir, "macos/project.yml", "changed\n")
     {output, 1} = gate(ctx, [{"SWIFT_EXIT", "65"}, {"NO_RESULT", "1"}])
     assert output =~ "No xcresult bundle was produced"
-    assert output =~ "Test log: #{ctx.dir}/results/swift-test.log"
+    evidence = native_results(ctx.dir)
+    ordinary = hd(evidence["actions"])
+    assert output =~ "Test log: #{Path.join([ctx.dir, "results/native-unit", ordinary["log"]])}"
     refute output =~ "NOISY"
   end
 
+  test "a failed hosted build leaves both focused runners unexecuted", ctx do
+    install_swift!(ctx.dir)
+    write!(ctx.dir, "macos/project.yml", "changed\n")
+    {_output, 1} = gate(ctx, [{"HOSTED_BUILD_EXIT", "65"}])
+    evidence = native_results(ctx.dir)
+    [ordinary, policy, replay] = evidence["actions"]
+    assert ordinary["success"]
+    assert policy["execution_identity"]["build"]["exit_code"] == 65
+
+    for action <- [policy, replay] do
+      refute action["success"]
+      refute action["executed"]
+      assert action["exit_code"] == 125
+      assert action["summary"] == nil
+      assert action["tests"] == nil
+    end
+
+    refute evidence["success"]
+  end
+
   defp install_swift!(dir) do
-    executable!(dir, "xcodebuild", """
-    echo 'NOISY TEST OUTPUT'
-    if [ "${NO_RESULT:-0}" = 0 ]; then mkdir -p "${@: -1}"; fi
-    exit "${SWIFT_EXIT:-0}"
+    executable!(dir, "xcodebuild", ~S"""
+    python3 - "$@" <<'PY'
+    import json, os, plistlib, sys
+    from pathlib import Path
+    args = sys.argv[1:]
+    products = Path.cwd() / "DerivedData/Build/Products"
+    host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
+    bare = "TEST_HOST=" in args
+    if "-showBuildSettings" in args:
+        if "build-for-testing" not in args:
+            print(json.dumps([{"target":"Minga","action":"build","buildSettings":{}}]))
+            sys.exit(0)
+        bundle = products / ("Debug/MingaTests.xctest" if bare else "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
+        print(json.dumps([{"target":"MingaTests","buildSettings":{"TEST_HOST":"" if bare else str(host),"BUNDLE_LOADER":"" if bare else str(host),"TARGET_BUILD_DIR":str(bundle.parent),"FULL_PRODUCT_NAME":bundle.name}}]))
+        sys.exit(0)
+    bundle = products / ("Debug/MingaTests.xctest" if bare else "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
+    bundle.mkdir(parents=True, exist_ok=True)
+    if not bare:
+        host.parent.mkdir(parents=True, exist_ok=True)
+        host.touch()
+    if "build-for-testing" in args:
+        status = int(os.environ.get("HOSTED_BUILD_EXIT", "0"))
+        if status == 0:
+            target = {"BlueprintName":"MingaTests","TestHostPath":"__TESTROOT__/Debug/MingaTestHost.app","TestBundlePath":"__TESTHOST__/Contents/PlugIns/MingaTests.xctest","EnvironmentVariables":{"MINGA_TEST_PRODUCTION_APP_PATH":"__TESTROOT__/Debug/Minga.app"}}
+            (products / "MingaUnitTests_macosx.xctestrun").write_bytes(plistlib.dumps({"__xctestrun_metadata__":{"FormatVersion":1},"MingaTests":target}))
+        sys.exit(status)
+    print("NOISY TEST OUTPUT")
+    policy = "-only-testing:MingaTests/EditorFocusPolicyTests" in args
+    if bare:
+        print("xctest[4100:123] native runtime")
+    else:
+        pid = 4101 if policy else 4102
+        print(f"[MingaTestHost] didFinishLaunching pid={pid} bundle=com.minga.test-host executable={host}")
+        print(f"[Focus application native fixture] startup pid={pid}")
+    if os.environ.get("NO_RESULT", "0") == "0":
+        Path(args[args.index("-resultBundlePath") + 1]).mkdir(parents=True)
+    status = int(os.environ.get("SWIFT_EXIT", "0"))
+    sys.exit(status)
+    PY
     """)
 
-    executable!(dir, "xcrun", """
-    cat <<'JSON'
-    {"testNodes":[{"nodeType":"Test Suite","result":"Failed","children":[
-      {"nodeType":"Test Case","result":"Failed","name":"testCaret()","nodeIdentifier":"RenderingTests/testCaret()"},
-      {"nodeType":"Test Case","result":"Passed","nodeIdentifier":"RenderingTests/testPassing()"}
-    ]}]}
-    JSON
+    executable!(dir, "xcrun", ~S"""
+    python3 - "$@" <<'PY'
+    import json, os, sys
+    from pathlib import Path
+    args = sys.argv[1:]
+    action = Path(args[-1]).stem
+    failed = action == "ordinary" and os.environ.get("SWIFT_EXIT", "0") != "0"
+    if "summary" in args:
+        total = 13 if action == "focus-policy" else 2
+        print(json.dumps({"totalTestCount":total,"passedTests":total-int(failed),"failedTests":int(failed),"result":"Failed" if failed else "Passed"}))
+        sys.exit(0)
+    def case(identifier, result="Passed"):
+        return {"nodeType":"Test Case","nodeIdentifier":identifier,"result":result}
+    if action == "focus-policy":
+        functions = ["pickerBeforeKeyWindow","promptAfterNativeModal","inlineHierarchyRebuild","keyframeRestoresOwner","nativeFieldDefersOwner","dismantlingFieldAppliesPendingOwner","markedTextDefersOwner","localLeasesDeferLatestOwner","iconSearchMirrorFocusesNativeField","lifecycleAppliesOnlyDecodedOwner","inlineStemSelectionPrecedesTyping","productionInlineRebuildDoesNotCommit","productionFieldsRegisterAfterLateInjection"]
+        node = {"nodeType":"Test Suite","nodeIdentifier":"EditorFocusPolicyTests","result":"Passed","children":[case(f"EditorFocusPolicyTests/{name}()") for name in functions]}
+    elif action == "focus-replay":
+        replay = case("FocusReplayWindowTests/replay(_:)")
+        replay["children"] = [{"nodeType":"Arguments","name":name,"result":"Passed"} for name in ["picker_open_close","search_open_close","rename_confirm","rename_cancel","agent_toggle","reattach_keyframe","hover_and_empty"]]
+        node = {"nodeType":"Test Suite","nodeIdentifier":"FocusReplayWindowTests","result":"Passed","children":[case("FocusReplayWindowTests/corpusIsEnumerated()"),replay]}
+    else:
+        result = "Failed" if failed else "Passed"
+        node = {"nodeType":"Test Suite","result":result,"children":[case("RenderingTests/testCaret()",result),case("RenderingTests/testPassing()")]}
+    print(json.dumps({"testNodes":[node]}))
+    PY
     """)
+  end
+
+  defp native_results(dir) do
+    dir
+    |> Path.join("results/native-unit/results.json")
+    |> File.read!()
+    |> Jason.decode!()
   end
 
   defp gate(ctx, extra_env \\ []) do

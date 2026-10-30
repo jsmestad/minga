@@ -6,10 +6,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// modalOverlayActive reports whether a modal overlay (picker, which-key, or
-// agent chat) is visible. When true, local side-effects like file-tree
-// navigation preview are suppressed so keystrokes pass through to the BEAM
-// without the frontend acting on them independently.
+// modalOverlayActive reports modal visibility for footer composition only.
+// Keyboard ownership comes from focusedComponent, never this visibility query.
 func (m Model) modalOverlayActive() bool {
 	return m.pickerVisible() || m.whichKeyVisible() || m.agentChatVisible()
 }

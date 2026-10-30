@@ -826,6 +826,8 @@ accessibility_cursor_utf16 is the BEAM-resolved row-local UTF-16 cursor offset. 
 
 The frontend applies the delta only when it already has `gui_window_content` for the same `window_id` and `content_epoch`. If the epoch is missing or stale, it ignores the delta and waits for the next full 0x80 refresh.
 
+The accessibility cursor trailer is mandatory even for terminal consumers. A0 is exactly 17 bytes without cursorline and 22 bytes with cursorline; a batch decoder must advance past all four trailer bytes before reading the next command. `0xFFFFFFFF` means the accessible cursor is absent, not that the trailer is omitted.
+
 ### 0xA1 - gui_window_viewport_delta and 0xA2 - gui_window_rows_delta
 
 `gui_window_viewport_delta` (A1) remains a complete ordered row snapshot for viewport-only changes. `gui_window_rows_delta` (A2) evolves in protocol v11 to carry bounded structural splices. This is an evolution of A2, not a new opcode or semantic surface.
@@ -1424,6 +1426,8 @@ When `visible` is `0`, the payload is only `visible(1)` and the frontend clears 
 
 When a picker opens while Minga is in the background, bringing its window forward must focus the picker query, not the editor. The BEAM names the keyboard owner so native lifecycle events restore the right responder without guessing from the view hierarchy.
 
+Protocol version 30 adds focused hover and the empty launchpad to the existing surface table below. Version 29 native clients reject values 12 and 13, so the exact `ready` version handshake rejects those clients before any frames are streamed. The opcode and ten-byte payload shape are unchanged.
+
 ```
 opcode(1=0xAA) + payload_length(2=10) + responder(1) + surface(1) + window_id(4) + generation(4)
 ```
@@ -1433,19 +1437,27 @@ All integers use big-endian byte order. The payload is exactly 10 bytes; fronten
 | Field | Meaning |
 |-------|---------|
 | `responder` | `0` editor view, `1` picker query, `2` search query, `3` inline edit field |
-| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search |
+| `surface` | `0` editor, `1` file tree, `2` agent, `3` Git status, `4` conflict, `5` inline edit, `6` inline ask, `7` prompt, `8` picker, `9` completion, `10` command completion, `11` search, `12` focused hover popup, `13` empty launchpad |
 | `window_id` | Active BEAM editor window ID, unsigned 32-bit |
-| `generation` | Picker activation, insert completion, or command-completion presentation generation; zero for surfaces without a generation, unsigned 32-bit |
+| `generation` | Picker activation, insert completion, command-completion presentation generation, or admitted file-tree edit token; zero for surfaces without a source generation, unsigned 32-bit |
 
-The owner follows keyboard dispatch precedence: conflict, active inline edit, active inline ask, prompt, picker, populated insert-mode completion, command completion, active search, then the active keymap scope. A pending completion trigger without a populated popup does not claim input. File tree, agent, Git status, and editor scopes use the editor view. Prompt, conflict, inline ask, completion, and command-completion keys also route through that view to the BEAM. Search keys remain in the native search field.
+The owner follows keyboard dispatch precedence: conflict, active inline edit, active inline ask, prompt, picker, populated insert-mode completion, command completion, active native search, focused hover, then the active keymap scope. A pending completion trigger without a populated popup does not claim input. A file-tree scope with an admitted edit token names the inline edit field; confirm and cancel restore the editor responder with file-tree surface. Other file-tree, agent, Git status, hover, launchpad, and editor input uses the editor view. Prompt, conflict, inline ask, completion, and command-completion keys also route through that view to the BEAM. Search keys remain in the native search field.
 
 One existing router exception takes precedence over the modal tag: the agent scope claims Escape through its scoped trie even when command completion is open. In that combination the named surface is agent (or active native search), not command completion. File tree and Git status yield command-mode input to the command handler. The agreement table records this difference without changing router order.
+
+Normal-mode leader sequences name `editor_view / editor` when the underlying source yields to the leader FSM: the launchpad, file-tree browse, and Git status. This decision comes from BEAM input admission, not which-key visibility. Native file-tree edits and focused hover keep their earlier handler priority. Agent admission is not the same rule: its navigation fallback still claims navigation during a leader sequence, and focused composer input also remains agent-owned; the derivation preserves that existing routing rather than inventing a frontend exception.
 
 The semantic UI encoder sends exactly one command when the owner changes and on every keyframe, before window content. It sends none when the owner is unchanged in a delta frame. The command belongs to the frame transaction: a rejected frame must not change focus. A recovery keyframe restores the authoritative owner even when the previous frontend state was lost.
 
 Native frontends apply the named responder; they never choose a responder the frame did not name. If a field is not registered yet, they retain the owner and apply it when the field enters the hierarchy. Native modals and active native text editing, including input method composition, defer owner application until editing ends. Frontend-local workspace rename and icon-search fields acquire an immediate local text lease without a BEAM round trip; an owner change waits until that lease ends. Window activation, hierarchy rebuild, file drop, and native modal completion reapply the last committed owner.
 
-The Go TUI decodes this command as intentional no-op state. It has no native responder chain. See [frontend ownership](ARCHITECTURE.md#frame-transactions) for the boundary between authoritative keyboard ownership and local presentation.
+The Go TUI retains the decoded owner in its committed chrome store and resolves its focused component from that fact, never from surface visibility. It has no native responder chain and continues sending keys to the BEAM. Agent input likewise uses the editor responder on macOS: `agent` is the BEAM-routed surface, not a separate native text field. Command input is `command_completion` or `prompt`, not a new minibuffer responder. Source generations are not a frontend-created counter; the enclosing frame identifies every committed change.
+
+The Go keyboard dispatcher uses that resolved component to gate local navigation, retained-preview activation, agent shortcuts, and transcript-key scrolling. It checks responder and surface together: a native inline-edit owner cannot activate file-tree rows. Missing or invalid ownership falls through to BEAM input, never a visibility-derived fallback.
+
+The generated `focus/` conformance family replays complete frame transactions on Swift, Go, and the BEAM oracle. Every step asserts `expect.focus_target = {surface, responder, window_id, generation}` derived from `MingaEditor.FocusOwner.derive/1`. Picker/search open-close, rename confirm-cancel, agent toggle, unchanged deltas, focused hover, launchpad, and reattach keyframes share the same bytes. Swift additionally hosts production `ContentView` and its registered native fields in `NSWindow`, asserting responder and focused accessibility identity. Activation-dependent AX checks require `NSApp.isActive && window.isKeyWindow`; first-responder checks are unconditional. See the [corpus format](../test/conformance/corpus/README.md).
+
+The reattach keyframe carries `reset_frontend: true` as corpus input. Shared runners replace their consumer before decoding it; the native replay also replaces the entire production window hierarchy. Assertions therefore cannot reuse the picker owner or responder established by the preceding frame. Responder waits are observational only, with no repeated focus-policy calls to repair the outcome.
 
 ### 0x91 — gui_indent_guides
 

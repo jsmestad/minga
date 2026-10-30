@@ -386,14 +386,22 @@ jobs:
             test/macos/native_ipc_helper_integration_test.exs \
             --include macos_ipc_helper
 
+      - name: Test native result classification
+        run: python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
+
       - name: Test
-        run: |
-          cd macos
-          xcodebuild test \
-            -scheme Minga \
-            -configuration Debug \
-            -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO
+        run: scripts/test_macos_unit
+
+      - name: Verify warm native unit reuse
+        run: scripts/test_macos_unit --output-dir macos-unit-evidence/warm
+
+      - name: Upload native unit test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-unit-evidence
+          path: macos-unit-evidence/
+          if-no-files-found: error
 
   swift-integration:
     name: Swift Protocol Integration

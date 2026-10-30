@@ -41,6 +41,10 @@ The Charm renderer targets the Semantic UI path, not the legacy cell-grid path. 
 
 It renders roughly 9 of the shared-chrome components today. Decoding and rendering the remaining components is tracked in #2100, and overall cross-frontend coverage is tracked in the Semantic UI inventory (#2113).
 
+Keyboard-local presentation follows the committed `gui_focus_owner`, not whichever overlay is visible. `Model.Update` resolves that single fact before preview navigation, preview activation, agent shortcuts, or transcript-key scrolling. Visibility still says whether candidates can be presented; it does not grant them keyboard ownership. Missing or invalid ownership disables local interception and leaves the key routed to the BEAM. A retained preview cannot capture Enter after another surface takes focus.
+
+For example, beginning a normal-mode leader sequence on the launchpad changes the committed owner to the editor's leader FSM while the launchpad stays visible. Down therefore goes to the BEAM without moving the local launchpad highlight. Which-key visibility is only rendering data; it is never a substitute focus gate.
+
 ## Editor pointer input
 
 The TUI resolves text clicks and drags from the committed row store, terminal grapheme widths, clipping, and local scroll transform used to render the editor. It sends `editor_text_event` with the presentation ID, absolute row-store rank, row ID, and composed UTF-16 offset. The renderer maps that position to source bytes; the BEAM owns selection and editing behavior.

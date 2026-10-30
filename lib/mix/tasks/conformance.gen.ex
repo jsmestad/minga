@@ -12,6 +12,10 @@ defmodule Mix.Tasks.Conformance.Gen do
   Window expectations follow the render-model structs and the reconciliation rule in `docs/GUI_PROTOCOL.md`; focus expectations follow the committed owner and native lifecycle contract.
   No wire bytes are hand-typed.
 
+  The ten native-only focus scenarios exercise AppKit lifecycle events. The seven
+  shared focus scenarios derive their committed owner from `MingaEditor.FocusOwner`
+  and run the same complete frame batches on both frontend consumers.
+
   ## Usage
 
       mix conformance.gen
@@ -126,7 +130,7 @@ defmodule Mix.Tasks.Conformance.Gen do
       owner_applied_when_responder_registers_late(),
       keyframe_reasserts_owner(),
       native_text_editing_returns_to_latest_owner()
-    ]
+    ] ++ Mix.Tasks.Conformance.FocusScenarios.build_all()
   end
 
   # ── Store lifecycle transcripts (AC1) ─────────────────────────────────────

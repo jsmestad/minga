@@ -105,6 +105,12 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 
 `GUIState` holds all sub-states as `let` properties (not a flat bag of fields). Each sub-state is independently observable. Adding a new chrome element means adding one State class, one View, and one `let` property on `GUIState`. No existing code changes.
 
+### Keyboard focus
+
+The BEAM's committed `gui_focus_owner` fact owns keyboard focus. `FocusResolution` projects that fact plus local modal, key-window, and native-text-editing state to a responder. `EditorFocusPolicy` is the only AppKit first-responder writer. Register a field, never focus it: an `NSViewRepresentable` registers its actual field with the injected `editorFocusPolicy`, unregisters only that instance at teardown, and reports native editing completion. Do not infer focus from picker/search/sidebar visibility or add an appearance-time focus grab.
+
+Workspace rename and icon search are frontend-local text leases, not BEAM surfaces. Their existing SwiftUI focus bindings are counted, reasoned exceptions in `FocusWriterGuardrailTests`; the picker, search, and inline-edit fields have no exceptions. Preserve IME composition and leases when changing the pure resolver or policy. The shared `focus/` corpus exercises real commits and the production `ContentView` window replay proves responder and accessibility identity. Neither test requires Accessibility trust.
+
 ## Chrome tokens
 
 Use the frontend scales in `Sources/Views/Shared/ChromeTokens.swift` instead of inventing a padding, gap, font size, or corner radius. They describe chrome, not editor cells. They do not read the theme, protocol state, or editor font.
@@ -242,11 +248,30 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 
 ### Testing
 
+Build the shipping application with scheme `Minga`.
+
 ```bash
-cd macos
-xcodebuild build -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
-xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
+(cd macos && xcodebuild build -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO)
+scripts/test_macos_unit
 ```
+
+Run the native unit entrypoint from the repository root after generating the Xcode project.
+The `MingaUnitTests` scheme builds the existing `MingaTests` target for two execution contexts.
+The canonical script first runs ordinary tests bare with explicit empty `TEST_HOST` and `BUNDLE_LOADER` build settings.
+It then uses explicit hosted `build-for-testing` to restore/relink products and produce a fresh `.xctestrun`.
+Verify the testing-graph settings and plan before running all 13 policy functions with `test-without-building` from a pinned policy copy.
+Only accepted policy execution authorizes production-window focus replay in a separate process from a replay copy of that same input, with its original product root bound and suite selectors explicit.
+The host owns AppKit launch and its normal event loop, never production startup or responder policy.
+Query settings with `build-for-testing -showBuildSettings -json`, not the default build graph that omits testing-only targets.
+For this scheme, require the observed format-1 top-level `MingaTests` plan and application-bundle `TestHostPath`; do not infer the plan host path from the executable-valued build setting.
+Require resolved product/loader settings and actual runtime identity, not merely requested flags.
+Keep the hosted build receipt and raw pre/post plan receipts; failed builds and missing, ambiguous, stale, or wrong-mode plans leave dependent runners explicitly unexecuted.
+CI repeats the canonical unit lifecycle without clearing DerivedData and retains `macos-unit-evidence/warm/results.json` to prove hosted-to-bare reuse.
+Preserve aggregate failure when ordinary tests fail, even if later focused diagnostics pass.
+Keep production `Minga.app` out of `TEST_HOST` and preserve its deep-codesigning safeguard.
+Native-field AX replay requires application focus to equal the exact `field.cell` and `cell.controlView` to equal that production field; the shared field editor remains the separate responder assertion.
+Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
+Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
 
 ### Swift 6 Concurrency Patterns
 

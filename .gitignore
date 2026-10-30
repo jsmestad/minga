@@ -19,6 +19,7 @@ go/tui/bin/
 macos/.build/
 macos/.swiftpm/
 macos/.generated/
+/macos-unit-evidence/
 macos/Minga.xcodeproj/xcuserdata/
 macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 

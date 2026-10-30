@@ -60,7 +60,7 @@ func TestDecodePacketDoesNotSwallowAfterIndentGuides(t *testing.T) {
 }
 
 // gui_window_overlay_delta (0xA0) is custom-framed: its decoder owns sizing.
-// It must return a bounded size (13 bytes, or 18 with a cursorline) rather than
+// It must return a bounded size (17 bytes, or 22 with a cursorline) rather than
 // len(payload); otherwise an overlay-only cursor update swallows commit_frame and
 // any following chrome, the same blank/stale-frame failure this PR prevents.
 func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
@@ -77,6 +77,7 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 			// opcode + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1)
 			batch = append(batch, generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 2, tc.flags, 0, 3, 0, 4, 1)
 			batch = append(batch, tc.extra...)
+			batch = append(batch, 0, 0, 0, 4)                                                // mandatory accessibility_cursor_utf16
 			batch = append(batch, generated.OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB) // sectioned
 			batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)           // fixed:9 (frame_seq + echoed input_seq)
 

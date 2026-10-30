@@ -1109,6 +1109,9 @@ func TestDecodeWindowCursorlineSection(t *testing.T) {
 }
 
 func TestDecodeGUIFocusOwner(t *testing.T) {
+	if generated.ProtocolVersion < 30 {
+		t.Fatal("hover and launchpad focus owners require the v30 handshake")
+	}
 	tests := []struct {
 		name      string
 		responder uint8
@@ -1126,6 +1129,8 @@ func TestDecodeGUIFocusOwner(t *testing.T) {
 		{"completion", 0, 9},
 		{"command_completion", 0, 10},
 		{"search", 2, 11},
+		{"hover_popup", 0, 12},
+		{"empty_state", 0, 13},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1139,7 +1144,7 @@ func TestDecodeGUIFocusOwner(t *testing.T) {
 			if command.Kind != CommandChrome || command.Size != 13 || command.Chrome.Bytes != 13 {
 				t.Fatalf("focus owner framing = kind %v, size %d, chrome bytes %d", command.Kind, command.Size, command.Chrome.Bytes)
 			}
-			if command.Chrome.Opcode != generated.OPGuiFocusOwner || command.Chrome.Name != "focus owner" || command.Chrome.Summary != "tui no-op" {
+			if command.Chrome.Opcode != generated.OPGuiFocusOwner || command.Chrome.Name != "focus owner" || command.Chrome.Summary != "committed focus owner" {
 				t.Fatalf("focus owner chrome metadata = %+v", command.Chrome)
 			}
 			want := generated.GuiFocusOwnerFields{

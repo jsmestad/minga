@@ -2709,7 +2709,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         let start = rest + 2
-        guard data[start] <= 3, data[start + 1] <= 11 else {
+        guard data[start] <= 3, data[start + 1] <= 13 else {
             throw ProtocolDecodeError.malformed
         }
         let (fields, _) = try GeneratedProtocol.decodeGuiFocusOwnerFields(data, start, start + payloadLength)

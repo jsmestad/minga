@@ -57,6 +57,7 @@ type conformanceStep struct {
 	Opcode        int                       `json:"opcode"`
 	Note          string                    `json:"note"`
 	PayloadBase64 string                    `json:"payload_base64"`
+	ResetFrontend bool                      `json:"reset_frontend"`
 	WindowID      uint16                    `json:"window_id"`
 	RowOffset     int                       `json:"row_offset"`
 	ColOffset     int                       `json:"col_offset"`
@@ -100,6 +101,14 @@ type conformanceExpect struct {
 	OffsetDiscarded      *bool                        `json:"offset_discarded"`
 	NormalizedBufferLine *int                         `json:"normalized_buffer_line"`
 	Transcript           *conformanceTranscriptExpect `json:"transcript"`
+	FocusTarget          *conformanceFocusTarget      `json:"focus_target"`
+}
+
+type conformanceFocusTarget struct {
+	Surface    string `json:"surface"`
+	Responder  string `json:"responder"`
+	WindowID   uint32 `json:"window_id"`
+	Generation uint32 `json:"generation"`
 }
 
 // conformanceTranscriptExpect is the resident agent-transcript store state after
@@ -141,6 +150,29 @@ type conformanceAnchor struct {
 	Left uint16 `json:"left"`
 }
 
+func TestFocusConformanceCorpusEnumerated(t *testing.T) {
+	shared, nativeOnly := 0, 0
+	for _, entry := range loadConformanceIndex(t).Transcripts {
+		if entry.Category != "focus" {
+			continue
+		}
+		if !entry.Swift {
+			t.Fatalf("focus corpus must run on Swift: %+v", entry)
+		}
+		if !entry.Go {
+			nativeOnly++
+			if entry.GoSkipReason != "no native responder chain; keyboard owner is BEAM-routed" {
+				t.Fatalf("native-only focus entry lost its named skip reason: %+v", entry)
+			}
+			continue
+		}
+		shared++
+	}
+	if shared != 7 || nativeOnly != 10 {
+		t.Fatalf("focus scenarios = %d shared + %d native-only, want 7 + 10; run mix conformance.gen", shared, nativeOnly)
+	}
+}
+
 func TestConformanceTranscripts(t *testing.T) {
 	index := loadConformanceIndex(t)
 	if len(index.Transcripts) == 0 {
@@ -179,6 +211,14 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 		switch step.Kind {
 		case "frame":
 			applyConformanceFrame(t, &model, i, step)
+		case "framed":
+			if step.ResetFrontend {
+				model = New(80, 24, nil, nil)
+				if _, present := model.committedFocusOwner(); present {
+					t.Fatalf("step %d: fresh frontend retained a focus owner", i)
+				}
+			}
+			applyFocusConformanceBatch(t, &model, i, step)
 		case "production_fixture":
 			applyProductionFixture(t, &model, i, step)
 		case "inject_offset":
@@ -194,6 +234,46 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 		default:
 			t.Fatalf("step %d: unknown kind %q", i, step.Kind)
 		}
+	}
+}
+
+func applyFocusConformanceBatch(t *testing.T, model *Model, i int, step conformanceStep) {
+	t.Helper()
+	payload, err := base64.StdEncoding.DecodeString(step.PayloadBase64)
+	if err != nil {
+		t.Fatalf("step %d: invalid framed payload: %v", i, err)
+	}
+	var commands []protocol.Command
+	for len(payload) > 0 {
+		command, err := protocol.DecodeCommand(payload)
+		if err != nil || command.Size <= 0 || command.Size > len(payload) {
+			t.Fatalf("step %d: framed command: %+v %v", i, command, err)
+		}
+		commands = append(commands, command)
+		payload = payload[command.Size:]
+	}
+	model.applyCommands(commands)
+	assertConformanceFocus(t, model, i, step.Expect)
+}
+
+func assertConformanceFocus(t *testing.T, model *Model, i int, expect *conformanceExpect) {
+	t.Helper()
+	if expect == nil || expect.FocusTarget == nil {
+		return
+	}
+	want := expect.FocusTarget
+	owner, ok := model.committedFocusOwner()
+	if !ok {
+		t.Fatalf("step %d: no committed focus owner", i)
+	}
+	component, resolved := model.focusedComponent()
+	if !resolved || component != want.Surface {
+		t.Fatalf("step %d: focused component %q, want %q", i, component, want.Surface)
+	}
+	responders := [...]string{"editor_view", "picker_query", "search_query", "inline_edit"}
+	if int(owner.Responder) >= len(responders) || responders[owner.Responder] != want.Responder ||
+		owner.WindowID != want.WindowID || owner.Generation != want.Generation {
+		t.Fatalf("step %d: committed focus %+v, want %+v", i, owner, want)
 	}
 }
 
