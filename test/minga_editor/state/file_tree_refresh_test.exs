@@ -278,6 +278,85 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert FileTreeState.content(finished_again) == reusable_content
   end
 
+  test "refresh preserves the selected path when rows are inserted, removed, or reordered" do
+    root = "/tmp/minga-refresh-selected-path"
+    original_tree = tree(root, Enum.map(["a.ex", "m.ex", "z.ex"], &entry(root, &1)))
+    {:ok, original_tree} = FileTree.select_path(original_tree, Path.join(root, "m.ex"))
+
+    for names <- [
+          ["a copy.ex", "a.ex", "m.ex", "z.ex"],
+          ["m.ex", "z.ex"],
+          ["z.ex", "a.ex", "m.ex"]
+        ] do
+      request = make_ref()
+
+      tracked =
+        %FileTreeState{}
+        |> FileTreeState.open(original_tree, nil)
+        |> FileTreeState.track_refresh_request(root, request)
+
+      refreshed_tree =
+        root
+        |> tree(Enum.map(names, &entry(root, &1)))
+        |> FileTree.select(1)
+
+      assert {:accepted, accepted} =
+               FileTreeState.accept_refresh_result(tracked, root, request, refreshed_tree)
+
+      accepted_tree = FileTreeState.tree(accepted)
+      assert FileTree.selected_entry(accepted_tree).path == Path.join(root, "m.ex")
+      assert accepted_tree.entries == refreshed_tree.entries
+      assert accepted.refresh.phase == {:idle, 0}
+
+      assert FileTreeState.presentation_generation(accepted) ==
+               FileTreeState.presentation_generation(tracked)
+    end
+  end
+
+  test "refresh preserves selection changed after request admission rather than the worker cursor" do
+    root = "/tmp/minga-refresh-selection-moved"
+    request = make_ref()
+    original_tree = tree(root, Enum.map(["a.ex", "m.ex", "z.ex"], &entry(root, &1)))
+    {:ok, original_tree} = FileTree.select_path(original_tree, Path.join(root, "m.ex"))
+
+    tracked =
+      %FileTreeState{}
+      |> FileTreeState.open(original_tree, nil)
+      |> FileTreeState.track_refresh_request(root, request)
+
+    {:ok, current_tree} = FileTree.select_path(original_tree, Path.join(root, "z.ex"))
+    current = FileTreeState.set_tree(tracked, current_tree)
+    refreshed_tree = tree(root, Enum.map(["a copy.ex", "a.ex", "m.ex", "z.ex"], &entry(root, &1)))
+
+    assert {:accepted, accepted} =
+             FileTreeState.accept_refresh_result(current, root, request, refreshed_tree)
+
+    assert FileTree.selected_entry(FileTreeState.tree(accepted)).path == Path.join(root, "z.ex")
+    assert FileTreeState.tree(accepted).cursor == 3
+  end
+
+  test "refresh retains its existing fallback when the current selection vanished or is unavailable" do
+    root = "/tmp/minga-refresh-selection-fallback"
+    selected_tree = tree(root, [entry(root, "removed.ex")])
+    unavailable_tree = FileTree.new(root)
+    empty_tree = tree(root, [])
+    refreshed_tree = tree(root, [entry(root, "a.ex"), entry(root, "z.ex")]) |> FileTree.select(1)
+
+    for original_tree <- [selected_tree, unavailable_tree, empty_tree] do
+      request = make_ref()
+
+      tracked =
+        %FileTreeState{}
+        |> FileTreeState.open(original_tree, nil)
+        |> FileTreeState.track_refresh_request(root, request)
+
+      assert {:accepted, accepted} =
+               FileTreeState.accept_refresh_result(tracked, root, request, refreshed_tree)
+
+      assert FileTreeState.tree(accepted) == refreshed_tree
+    end
+  end
+
   defp open_tree(root) do
     FileTreeState.open(%FileTreeState{}, tree(root, []), nil)
   end

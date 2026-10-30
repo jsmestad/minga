@@ -475,13 +475,14 @@ func TestDecodeMinibufferChrome(t *testing.T) {
 	packet := append([]byte{generated.OPGuiMinibuffer, 1, 2, 0, 3, 1, ':'}, string16("w")...)
 	packet = append(packet, string16("write file")...)
 	packet = append(packet, 0, 0, 0, 0, 0, 0)
+	packet = appendWireU32(packet, 17)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
 	mini := command.Chrome.Mini
-	if !mini.Visible || mini.Prompt != ":" || mini.Input != "w" || mini.Context != "write file" {
+	if !mini.Visible || mini.Prompt != ":" || mini.Input != "w" || mini.Context != "write file" || mini.Generation != 17 {
 		t.Fatalf("minibuffer decoded incorrectly: %+v", mini)
 	}
 	if command.Chrome.Summary != ":w write file" {
@@ -1469,12 +1470,15 @@ func TestDecodeAgentTimelineChrome(t *testing.T) {
 	timelinePayload := []byte{1, 0xFF, 0xFF, 1, 3}
 	timelinePayload = append(timelinePayload, string8("apply_patch")...)
 	timelinePayload = append(timelinePayload, 0, 0, 0, 4)
+	timelinePayload = append(timelinePayload, 0) // file count
+	timelinePayload = appendWireU32(timelinePayload, 23)
+	timelinePayload = append(timelinePayload, string16("path:call-2")...)
 	timeline := append([]byte{generated.OPGuiEditTimeline, byte(len(timelinePayload) >> 8), byte(len(timelinePayload))}, timelinePayload...)
 	command, err := DecodeCommand(timeline)
 	if err != nil {
 		t.Fatalf("DecodeCommand timeline returned error: %v", err)
 	}
-	if !command.Chrome.Timeline.Visible || len(command.Chrome.Timeline.Entries) != 1 || command.Chrome.Timeline.Entries[0].ToolName != "apply_patch" {
+	if !command.Chrome.Timeline.Visible || command.Chrome.Timeline.Generation != 23 || len(command.Chrome.Timeline.Entries) != 1 || command.Chrome.Timeline.Entries[0].ToolName != "apply_patch" || command.Chrome.Timeline.Entries[0].EntryID != "path:call-2" {
 		t.Fatalf("timeline decoded incorrectly: %+v", command.Chrome.Timeline)
 	}
 }

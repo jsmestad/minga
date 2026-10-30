@@ -49,11 +49,8 @@ defmodule MingaEditor.UI.Picker.BufferSource do
 
     listed =
       buffers
-      |> Enum.with_index()
-      |> Enum.reject(fn {buf, _idx} ->
-        reject_buffer?(buf, include_special)
-      end)
-      |> Enum.map(fn {buf, idx} -> format_candidate(buf, idx) end)
+      |> Enum.reject(&reject_buffer?(&1, include_special))
+      |> Enum.map(&format_candidate(&1, {:buffer, &1}))
 
     if include_special do
       extra = extra_special_buffers(buffers_state)
@@ -66,7 +63,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   @doc """
   Returns candidate entries for special buffers (messages) that are
   alive but not currently in the buffer list. Uses `{:pid, pid}` as the item
-  key so `on_select` can distinguish them from list-indexed buffers.
+  key so `on_select` can distinguish extra buffers from registered `{:buffer, pid}` items.
   """
   @spec extra_special_buffers(Buffers.t()) :: [Item.t()]
   def extra_special_buffers(%Buffers{list: list}) do
@@ -90,8 +87,14 @@ defmodule MingaEditor.UI.Picker.BufferSource do
     MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
   end
 
-  def on_select(%Item{id: idx}, state) when is_integer(idx) do
-    MingaEditor.BufferActivation.activate(state, idx)
+  def on_select(%Item{id: {:buffer, pid}}, state) when is_pid(pid) do
+    buffers = state.workspace.buffers
+
+    if Enum.member?(buffers.list, pid) do
+      MingaEditor.BufferActivation.activate(state, Buffers.switch_to_pid(buffers, pid))
+    else
+      state
+    end
   end
 
   @impl true
@@ -186,7 +189,11 @@ defmodule MingaEditor.UI.Picker.BufferSource do
 
   @spec item_pid(Item.t(), [pid()]) :: pid() | nil
   defp item_pid(%Item{id: {:pid, pid}}, _buffers) when is_pid(pid), do: pid
-  defp item_pid(%Item{id: idx}, buffers) when is_integer(idx), do: Enum.at(buffers, idx)
+
+  defp item_pid(%Item{id: {:buffer, pid}}, buffers) when is_pid(pid) do
+    if Enum.member?(buffers, pid), do: pid
+  end
+
   defp item_pid(_item, _buffers), do: nil
 
   @spec stop_buffer(pid()) :: :ok

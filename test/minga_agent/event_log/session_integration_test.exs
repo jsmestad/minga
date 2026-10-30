@@ -198,7 +198,8 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     @impl true
     def init(opts) do
-      {:ok, %{subscriber: Keyword.fetch!(opts, :subscriber)}}
+      {:ok,
+       %{subscriber: Keyword.fetch!(opts, :subscriber), test_pid: Keyword.fetch!(opts, :test_pid)}}
     end
 
     @impl true
@@ -218,6 +219,8 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
       )
 
       ProviderRequest.complete(state.subscriber, request, text)
+      MingaAgent.Session.status(state.subscriber)
+      send(state.test_pid, :todo_provider_finished)
       {:noreply, state}
     end
 
@@ -288,6 +291,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
         {Session,
          session_id: "todo-session",
          provider: TodoProvider,
+         provider_opts: [test_pid: self()],
          event_log_server: log_name,
          persist?: false,
          hooks_enabled?: false}
@@ -295,8 +299,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "plan this")
-    :sys.get_state(session)
-    :sys.get_state(log_pid)
+    assert_receive :todo_provider_finished, @event_timeout
 
     db = open_read_connection!(tmp_dir, log_pid)
     events = wait_for_event(db, "todo-session", :todo_plan_updated, session, log_pid)

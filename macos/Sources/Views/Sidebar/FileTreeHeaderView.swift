@@ -8,8 +8,8 @@ import SwiftUI
 
 public struct FileTreeHeaderView: View {
     public enum Action: Equatable, Sendable {
-        case newFile(parentIndex: UInt16)
-        case newFolder(parentIndex: UInt16)
+        case newFile(generation: UInt32, parentID: String)
+        case newFolder(generation: UInt32, parentID: String)
         case refresh
         case collapseAll
     }
@@ -103,9 +103,10 @@ public struct FileTreeHeaderView: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 0) {
+        let generation = fileTreeState.generation
+        return HStack(spacing: 0) {
             headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
-                sendAction?(.newFile(parentIndex: UInt16(fileTreeState.selectedIndex)))
+                sendAction?(.newFile(generation: generation, parentID: ""))
             }
 
             overflowMenu
@@ -113,9 +114,10 @@ public struct FileTreeHeaderView: View {
     }
 
     private var overflowMenu: some View {
-        Menu {
+        let generation = fileTreeState.generation
+        return Menu {
             Button("New Folder…") {
-                sendAction?(.newFolder(parentIndex: UInt16(fileTreeState.selectedIndex)))
+                sendAction?(.newFolder(generation: generation, parentID: ""))
             }
             Button("Refresh") {
                 sendAction?(.refresh)

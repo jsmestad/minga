@@ -108,7 +108,7 @@ public final class GUIState {
         signatureHelpState.hide()
         floatPopupState.hide()
         agentContextBarState.hide()
-        editTimelineState.update(visible: false, viewingIndex: 0xFFFF, wireEntries: [], wireFiles: [])
+        editTimelineState.update(visible: false, viewingIndex: 0xFFFF, wireEntries: [], wireFiles: [], generation: 0)
         extensionOverlayState.update([])
         extensionPanelState.update([])
         searchState.reset()

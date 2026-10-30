@@ -550,6 +550,8 @@ final class EditorNSView: MTKView {
     /// keep the round-trip `sendScrollToLine` path (`thumbDragSession` stays nil). It outlives the
     /// button-held phase until the BEAM's echo-marked commit reaches the target or an authoritative interrupt or watchdog fires.
     private var thumbDragSession: ThumbDragSession?
+    /// Pane identity captured at scrollbar press, retained through throttled reconciliation.
+    private var scrollIndicatorTarget: (windowID: UInt16, generation: UInt64)?
 
     /// Cell position that owns the current precise scroll gesture.
     /// Nil means the gesture has not latched onto a scroll target yet.
@@ -599,6 +601,7 @@ final class EditorNSView: MTKView {
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
         thumbDragSession = nil
+        scrollIndicatorTarget = nil
         isDraggingScrollIndicator = false
         scrollIndicatorDragOffset = nil
         hardResetSmoothScroll()
@@ -1366,6 +1369,10 @@ final class EditorNSView: MTKView {
         // accumulator and reconciliation bookkeeping. Reset before residency routing so the
         // round-trip path cannot leave an old settle or rebound visible either.
         resetSmoothScrollState()
+        scrollIndicatorTarget = nil
+        guard let targetWindowID = activeWindowId,
+              let targetContent = editorPresentationSnapshot?.content(for: targetWindowID) else { return }
+        scrollIndicatorTarget = (windowID: targetWindowID, generation: targetContent.accessibilityGeneration)
         guard let snapshot = editorPresentationSnapshot,
               let windowId = activeWindowId,
               let content = snapshot.content(for: windowId),
@@ -1376,11 +1383,11 @@ final class EditorNSView: MTKView {
         else {
             thumbDragSession = nil
             // Windowed pane: send the initial jump on the round-trip path (today's behavior).
-            encoder.send(.scrollToLine(line: targetLine))
+            sendScrollIndicatorIntent(targetLine)
             return
         }
         var session = ThumbDragSession(windowId: windowId, targetLine: targetLine)
-        if let intent = session.takeIntent() { encoder.send(.scrollToLine(line: intent)) }
+        if let intent = session.takeIntent() { sendScrollIndicatorIntent(intent) }
         thumbDragSession = session
         applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
         needsDisplay = true
@@ -1394,7 +1401,7 @@ final class EditorNSView: MTKView {
             applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
             needsDisplay = true
         } else {
-            encoder.send(.scrollToLine(line: targetLine))
+            sendScrollIndicatorIntent(targetLine)
         }
     }
 
@@ -1404,7 +1411,7 @@ final class EditorNSView: MTKView {
     private func endThumbDragPresentation() {
         guard var session = thumbDragSession, session.phase == .dragging else { return }
         if let intent = session.release(committed: committedThumbDrag(for: session.windowId), now: CACurrentMediaTime()) {
-            encoder.send(.scrollToLine(line: intent))
+            sendScrollIndicatorIntent(intent)
         }
         thumbDragSession = session
         needsDisplay = true
@@ -1416,7 +1423,7 @@ final class EditorNSView: MTKView {
     /// paths that must discard local presentation (Reduce Motion toggle, window resign-key).
     private func cancelThumbDragWithFlush() {
         guard var session = thumbDragSession else { return }
-        if let intent = session.cancelWithFlush() { encoder.send(.scrollToLine(line: intent)) }
+        if let intent = session.cancelWithFlush() { sendScrollIndicatorIntent(intent) }
         thumbDragSession = nil
         scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
         needsDisplay = true
@@ -1453,7 +1460,7 @@ final class EditorNSView: MTKView {
         let buttonHeld = NSEvent.pressedMouseButtons & 0x1 != 0
         let outcome = session.advance(committed: committed, now: CACurrentMediaTime(), buttonHeld: buttonHeld)
 
-        if let intent = outcome.intent { encoder.send(.scrollToLine(line: intent)) }
+        if let intent = outcome.intent { sendScrollIndicatorIntent(intent) }
         if outcome.finished {
             thumbDragSession = nil
             scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
@@ -1464,6 +1471,11 @@ final class EditorNSView: MTKView {
             }
         }
         if outcome.needsRedraw { needsDisplay = true }
+    }
+
+    private func sendScrollIndicatorIntent(_ line: UInt32) {
+        guard let target = scrollIndicatorTarget else { return }
+        encoder.send(.scrollToLine(windowID: target.windowID, generation: target.generation, line: line))
     }
 
     /// Pixel offset that shifts resident rows so `targetLine` renders at the viewport top, given
@@ -3260,8 +3272,9 @@ final class EditorNSView: MTKView {
     }
 
     private func handleFoldChevronClick(at point: NSPoint) -> Bool {
-        guard let (gutter, entry) = foldChevronEntry(at: point) else { return false }
-        encoder.send(.foldToggleAtLine(windowID: gutter.windowId, bufferLine: entry.bufLine))
+        guard let (gutter, entry) = foldChevronEntry(at: point),
+              let content = editorPresentationSnapshot?.content(for: gutter.windowId) else { return false }
+        encoder.send(.foldToggleAtLine(windowID: gutter.windowId, generation: content.accessibilityGeneration, bufferLine: entry.bufLine))
         return true
     }
 

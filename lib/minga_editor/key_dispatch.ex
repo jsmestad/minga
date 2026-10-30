@@ -23,7 +23,6 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
-  alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Mode
@@ -253,7 +252,8 @@ defmodule MingaEditor.KeyDispatch do
     selected = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
 
     payload =
-      CommandCompletionPayload.new(
+      MingaEditor.Shell.Traditional.ModalWorkflow.new_command_completion_payload(
+        state,
         candidates: candidates,
         selected: selected,
         filter_text: ms.input,

@@ -17,20 +17,14 @@ public struct FileTreeView: View {
         case delete = 4
         case rename = 5
         case duplicate = 6
+        case newFile = 7
+        case newFolder = 8
     }
 
     public enum Action: Equatable, Sendable {
-        case click(index: UInt16)
-        case toggle(index: UInt16)
-        case openInSplit(index: UInt16)
-        case newFile(parentIndex: UInt16)
-        case newFolder(parentIndex: UInt16)
         case editConfirm(token: UInt32, text: String)
         case editCancel
-        case delete(index: UInt16)
-        case rename(index: UInt16)
-        case duplicate(index: UInt16)
-        case drop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8)
+        case drop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8, generation: UInt32)
         case refresh
         case semantic(intent: SemanticIntent, generation: UInt32, itemID: String)
     }
@@ -153,6 +147,7 @@ public struct FileTreeView: View {
 
     @ViewBuilder
     private var stateContent: some View {
+        let generation = fileTreeState.generation
         VStack(spacing: 10) {
             switch fileTreeState.treeState {
             case .loading:
@@ -162,7 +157,7 @@ public struct FileTreeView: View {
             case .empty:
                 stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
                 Button("New File…") {
-                    sendAction?(.newFile(parentIndex: UInt16(fileTreeState.selectedIndex)))
+                    sendAction?(.semantic(intent: .newFile, generation: generation, itemID: ""))
                 }
                 .buttonStyle(primaryStateButtonStyle)
                 Button("Refresh") {
@@ -304,16 +299,17 @@ public struct FileTreeView: View {
 
     @ViewBuilder
     private func entryRow(_ entry: FileTreeEntry) -> some View {
+        let generation = fileTreeState.generation
         if entry.isEditing {
             fileTreeRow(entry, onActivate: {})
                 .id(entry.id)
         } else {
-            fileTreeRow(entry, onActivate: { activateEntry(id: entry.id) })
+            fileTreeRow(entry, onActivate: { activateEntry(id: entry.id, generation: generation) })
                 .id(entry.id)
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
                 .onTapGesture {
-                    activateEntry(id: entry.id)
+                    activateEntry(id: entry.id, generation: generation)
                 }
                 .modifier(
                     FileTreeEntryAccessibilityActions(
@@ -336,7 +332,7 @@ public struct FileTreeView: View {
                     .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 4))
                 }
                 .dropDestination(for: URL.self) { urls, _ in
-                    handleDrop(urls: urls, onto: entry)
+                    handleDrop(urls: urls, onto: entry, generation: generation)
                 } isTargeted: { isTargeted in
                     dropTargetEntryId = isTargeted ? entry.id : nil
                 }
@@ -367,16 +363,17 @@ public struct FileTreeView: View {
     @ViewBuilder
     private func entryContextMenu(_ entry: FileTreeEntry) -> some View {
         let entryId = entry.id
+        let generation = fileTreeState.generation
 
         if !entry.isDir {
             Button("Open") {
                 withCurrentEntry(entryId) { entry in
-                    sendAction?(.semantic(intent: .primary, generation: fileTreeState.generation, itemID: entry.id))
+                    sendAction?(.semantic(intent: .primary, generation: generation, itemID: entry.id))
                 }
             }
             Button("Open in Split") {
                 withCurrentEntry(entryId) { entry in
-                    sendAction?(.semantic(intent: .openInSplit, generation: fileTreeState.generation, itemID: entry.id))
+                    sendAction?(.semantic(intent: .openInSplit, generation: generation, itemID: entry.id))
                 }
             }
             Divider()
@@ -384,26 +381,22 @@ public struct FileTreeView: View {
 
         if entry.isDir {
             Button("New File…") {
-                withCurrentEntry(entryId) { entry in
-                    sendAction?(.newFile(parentIndex: UInt16(entry.index)))
-                }
+                sendAction?(.semantic(intent: .newFile, generation: generation, itemID: entryId))
             }
             Button("New Folder…") {
-                withCurrentEntry(entryId) { entry in
-                    sendAction?(.newFolder(parentIndex: UInt16(entry.index)))
-                }
+                sendAction?(.semantic(intent: .newFolder, generation: generation, itemID: entryId))
             }
             Divider()
         }
 
         Button("Rename") {
             withCurrentEntry(entryId) { entry in
-                sendAction?(.semantic(intent: .rename, generation: fileTreeState.generation, itemID: entry.id))
+                sendAction?(.semantic(intent: .rename, generation: generation, itemID: entry.id))
             }
         }
         Button("Duplicate") {
             withCurrentEntry(entryId) { entry in
-                sendAction?(.semantic(intent: .duplicate, generation: fileTreeState.generation, itemID: entry.id))
+                sendAction?(.semantic(intent: .duplicate, generation: generation, itemID: entry.id))
             }
         }
 
@@ -445,7 +438,7 @@ public struct FileTreeView: View {
 
         Button(role: .destructive) {
             withCurrentEntry(entryId) { entry in
-                sendAction?(.semantic(intent: .delete, generation: fileTreeState.generation, itemID: entry.id))
+                sendAction?(.semantic(intent: .delete, generation: generation, itemID: entry.id))
             }
         } label: {
             Text("Move to Trash")
@@ -466,43 +459,43 @@ public struct FileTreeView: View {
 
     /// Handles single and double-click without SwiftUI's 300ms delay.
     /// Uses the user's system double-click interval.
-    private func handleEntryTap(_ entry: FileTreeEntry) {
+    private func handleEntryTap(_ entry: FileTreeEntry, generation: UInt32) {
         let now = Date()
         let timeSinceLastClick = lastClickTime.map { now.timeIntervalSince($0) } ?? .infinity
         let isDoubleClick = lastClickEntryId == entry.id && timeSinceLastClick < NSEvent.doubleClickInterval
 
         if isDoubleClick {
             // Double-click: always open (files open permanently)
-            sendAction?(.semantic(intent: .primary, generation: fileTreeState.generation, itemID: entry.id))
+            sendAction?(.semantic(intent: .primary, generation: generation, itemID: entry.id))
             lastClickEntryId = nil
             lastClickTime = nil
         } else {
             // Single-click: toggle directories, select/preview files
             if entry.isDir {
-                sendAction?(.semantic(intent: .toggle, generation: fileTreeState.generation, itemID: entry.id))
+                sendAction?(.semantic(intent: .toggle, generation: generation, itemID: entry.id))
             } else {
-                sendAction?(.semantic(intent: .primary, generation: fileTreeState.generation, itemID: entry.id))
+                sendAction?(.semantic(intent: .primary, generation: generation, itemID: entry.id))
             }
             lastClickEntryId = entry.id
             lastClickTime = now
         }
     }
 
-    private func activateEntry(id: String) {
+    private func activateEntry(id: String, generation: UInt32) {
         guard let entry = fileTreeState.entry(withID: id) else { return }
-        handleEntryTap(entry)
+        handleEntryTap(entry, generation: generation)
     }
 
     // MARK: - Drop handling
 
     /// Handles a drop of URLs onto a tree entry by sending intent to the BEAM.
     /// The BEAM validates stale targets, resolves file targets to their parent directory, and performs filesystem work.
-    public func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
+    public func handleDrop(urls: [URL], onto entry: FileTreeEntry, generation: UInt32) -> Bool {
         let sourcePaths = urls.map(\.path).filter { !$0.isEmpty }
         guard !sourcePaths.isEmpty else { return false }
         guard let sendAction else { return false }
 
-        sendAction(.drop(sourcePaths: sourcePaths, targetIndex: UInt16(entry.index), targetID: entry.id, targetPathHash: entry.pathHash, targetPath: fileTreeState.fullPath(for: entry), targetIsDirectory: entry.isDir, modifiers: currentModifierBits()))
+        sendAction(.drop(sourcePaths: sourcePaths, targetIndex: UInt16(entry.index), targetID: entry.id, targetPathHash: entry.pathHash, targetPath: fileTreeState.fullPath(for: entry), targetIsDirectory: entry.isDir, modifiers: currentModifierBits(), generation: generation))
 
         return true
     }
@@ -606,11 +599,11 @@ private struct FileTreeEntryAccessibilityActions: ViewModifier {
                 }
                 .accessibilityAction(named: Text("New File…")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    sendAction?(.newFile(parentIndex: UInt16(entry.index)))
+                    sendAction?(.semantic(intent: .newFile, generation: generation, itemID: entry.id))
                 }
                 .accessibilityAction(named: Text("New Folder…")) {
                     guard let entry = resolveEntry(entry.id) else { return }
-                    sendAction?(.newFolder(parentIndex: UInt16(entry.index)))
+                    sendAction?(.semantic(intent: .newFolder, generation: generation, itemID: entry.id))
                 }
                 .accessibilityAction(named: Text("Rename")) {
                     guard let entry = resolveEntry(entry.id) else { return }

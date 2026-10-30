@@ -5,6 +5,8 @@ public enum SemanticItemSurface: UInt8, Equatable, Sendable {
     case completion = 1
     case picker = 2
     case fileTree = 3
+    case commandCompletion = 4
+    case timeline = 5
 }
 
 /// A position in the immutable composed row that the frontend displayed.
@@ -65,21 +67,11 @@ public enum OutboundAction: Equatable, Sendable {
     case pickerQueryChanged(generation: UInt32, editSequence: UInt32, text: String)
     case pickerItemActivate(generation: UInt32, activationID: UInt32)
     case pickerActionActivate(generation: UInt32, activationID: UInt32)
-    case fileTreeClick(index: UInt16)
-    case fileTreeToggle(index: UInt16)
-    case fileTreeOpenInSplit(index: UInt16)
-    case fileTreeNewFile(parentIndex: UInt16)
-    case fileTreeNewFolder(parentIndex: UInt16)
     case fileTreeEditConfirm(token: UInt32, text: String)
     case fileTreeEditCancel
-    case fileTreeDelete(index: UInt16)
-    case fileTreeRename(index: UInt16)
-    case fileTreeDuplicate(index: UInt16)
-    case fileTreeMove(sourceIndex: UInt16, targetDirectoryIndex: UInt16)
-    case fileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8)
+    case fileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8, generation: UInt32)
     case fileTreeCollapseAll
     case fileTreeRefresh
-    case completionSelect(itemID: String)
     case semanticItemActivate(surface: SemanticItemSurface, intent: UInt8, generation: UInt32, itemID: Data)
     case togglePanel(panel: UInt8)
     case sidebarAction(sidebarID: String, kind: String, action: String)
@@ -91,12 +83,10 @@ public enum OutboundAction: Equatable, Sendable {
     case powerThermalState(lowPowerMode: Bool, thermalState: UInt8)
     case commandCopy
     case commandCut
-    case panelSwitchTab(index: UInt8)
     case panelDismiss
     case panelResize(heightPercent: UInt8)
     case agentToolToggle(messageID: UInt32)
     case executeCommand(name: String)
-    case minibufferSelect(index: UInt16)
     case openFile(path: String)
     case gitStageFile(path: String)
     case gitUnstageFile(path: String)
@@ -122,8 +112,8 @@ public enum OutboundAction: Equatable, Sendable {
     case agentDismiss
     case chatScrolledAwayFromBottom
     case chatReturnedToBottom
-    case scrollToLine(line: UInt32)
-    case foldToggleAtLine(windowID: UInt16, bufferLine: UInt32)
+    case scrollToLine(windowID: UInt16, generation: UInt64, line: UInt32)
+    case foldToggleAtLine(windowID: UInt16, generation: UInt64, bufferLine: UInt32)
     case focusWindow(windowID: UInt16, generation: UInt64)
     case configQuery
     case configUpdate(key: String, value: SettingValue)
@@ -131,7 +121,6 @@ public enum OutboundAction: Equatable, Sendable {
     case notificationAction(id: String, actionID: String)
     case observatoryInspect(pid: String)
     case fontSizeAdjust(direction: UInt8)
-    case timelineNavigate(index: UInt16)
     case searchFocus(replaceMode: Bool)
     case searchQuery(sessionID: UInt32, editSequence: UInt32, query: String, flags: UInt8)
     case searchNext

@@ -9,8 +9,9 @@ import MingaProtocol
 
 /// A single completion candidate for the minibuffer.
 public struct MinibufferCandidate: Identifiable {
-    public init(id: Int, matchScore: UInt8, label: String, description: String, annotation: String, matchPositions: Set<Int>) {
+    public init(id: Int, itemID: String, matchScore: UInt8, label: String, description: String, annotation: String, matchPositions: Set<Int>) {
         self.id = id
+        self.itemID = itemID
         self.matchScore = matchScore
         self.label = label
         self.description = description
@@ -18,6 +19,7 @@ public struct MinibufferCandidate: Identifiable {
         self.matchPositions = matchPositions
     }
     public let id: Int
+    public let itemID: String
     public let matchScore: UInt8
     public let label: String
     public let description: String
@@ -29,7 +31,7 @@ public struct MinibufferCandidate: Identifiable {
 @MainActor
 @Observable
 public final class MinibufferState {
-    public init(visible: Bool = false, mode: MinibufferMode = .command, cursorPos: UInt16 = 0xFFFF, prompt: String = "", input: String = "", context: String = "", selectedIndex: UInt16 = 0, candidates: [MinibufferCandidate] = [], totalCandidates: UInt16 = 0, inputVersion: Int = 0) {
+    public init(visible: Bool = false, mode: MinibufferMode = .command, cursorPos: UInt16 = 0xFFFF, prompt: String = "", input: String = "", context: String = "", selectedIndex: UInt16 = 0, candidates: [MinibufferCandidate] = [], totalCandidates: UInt16 = 0, inputVersion: Int = 0, generation: UInt32 = 0) {
         self.visible = visible
         self.mode = mode
         self.cursorPos = cursorPos
@@ -40,8 +42,10 @@ public final class MinibufferState {
         self.candidates = candidates
         self.totalCandidates = totalCandidates
         self.inputVersion = inputVersion
+        self.generation = generation
     }
     public var visible: Bool = false
+    public var generation: UInt32 = 0
     public var mode: MinibufferMode = .command
     public var cursorPos: UInt16 = 0xFFFF
     public var prompt: String = ""
@@ -81,9 +85,10 @@ public final class MinibufferState {
 
     public func update(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String,
                 input: String, context: String, selectedIndex: UInt16,
-                totalCandidates: UInt16 = 0,
+                totalCandidates: UInt16 = 0, generation: UInt32,
                 rawCandidates: [Wire.MinibufferCandidate]) {
         self.visible = visible
+        self.generation = generation
         self.mode = mode
         self.cursorPos = cursorPos
         self.prompt = prompt
@@ -93,7 +98,7 @@ public final class MinibufferState {
         self.totalCandidates = totalCandidates
         self.candidates = rawCandidates.enumerated().map { i, c in
             MinibufferCandidate(
-                id: i, matchScore: c.matchScore,
+                id: i, itemID: c.id, matchScore: c.matchScore,
                 label: c.label, description: c.description,
                 annotation: c.annotation,
                 matchPositions: Set(c.matchPositions.map { Int($0) })

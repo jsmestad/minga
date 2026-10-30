@@ -9,11 +9,6 @@ defmodule MingaEditor.Frontend.GUIBottomPanelTest do
   # lives in ProtocolGUI.
 
   describe "decode_gui_action for panel actions" do
-    test "decodes panel_switch_tab" do
-      assert {:ok, {:panel_switch_tab, 2}} =
-               ProtocolGUI.decode_gui_action(0x09, <<2>>)
-    end
-
     test "decodes panel_dismiss" do
       assert {:ok, :panel_dismiss} =
                ProtocolGUI.decode_gui_action(0x0A, <<>>)

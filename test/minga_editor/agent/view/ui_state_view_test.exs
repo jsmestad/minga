@@ -435,7 +435,11 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
         |> UIState.replace_edit_timeline(timeline)
         |> UIState.reset_edit_timeline()
 
-      assert ui.view.edit_timeline == EditTimeline.new()
+      reset = ui.view.edit_timeline
+      assert reset.entries == %{}
+      assert reset.cumulative_hunks == %{}
+      assert reset.viewing == %{}
+      assert reset.generation != timeline.generation
     end
   end
 end

@@ -345,7 +345,7 @@ defmodule MingaEditor.FileTree.Freshness do
         state =
           state
           |> maybe_synchronize_watchers(effect)
-          |> sync_buffer(refreshed_tree)
+          |> sync_buffer(FileTreeState.tree(file_tree))
           |> MingaEditor.schedule_render(16)
 
         {state, outcome}

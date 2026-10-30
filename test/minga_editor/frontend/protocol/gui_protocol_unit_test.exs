@@ -12,10 +12,11 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
   describe "decode_gui_action for gutter fold actions" do
     test "decodes fold toggle at line" do
-      assert {:ok, {:fold_toggle_at_line, 7, 42}} ==
-               ProtocolGUI.decode_gui_action(0x41, <<7::16, 42::32>>)
+      assert {:ok, {:fold_toggle_at_line, 7, 91, 42}} ==
+               ProtocolGUI.decode_gui_action(0x41, <<7::16, 91::64, 42::32>>)
 
       assert :error == ProtocolGUI.decode_gui_action(0x41, <<42::32>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x41, <<7::16, 42::32>>)
     end
   end
 
@@ -27,6 +28,13 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert :error == ProtocolGUI.decode_gui_action(0x64, <<2>>)
       assert :error == ProtocolGUI.decode_gui_action(0x64, <<0::16, 1::64, 1>>)
     end
+  end
+
+  test "scroll targets the observed window generation rather than the active window" do
+    assert {:ok, {:scroll_to_line, 7, 91, 42}} ==
+             ProtocolGUI.decode_gui_action(0x2F, <<7::16, 91::64, 42::32>>)
+
+    assert :error == ProtocolGUI.decode_gui_action(0x2F, <<42::32>>)
   end
 
   describe "decode_gui_action for semantic item activation" do
@@ -41,6 +49,19 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       assert {:ok, {:semantic_item_activate, :file_tree, :rename, 9, "row-id"}} ==
                ProtocolGUI.decode_gui_action(opcode, <<3, 5, 9::32, 6::16, "row-id">>)
+
+      for {surface, intent, name, operation, id} <- [
+            {3, 7, :file_tree, :new_file, ""},
+            {3, 8, :file_tree, :new_folder, "parent-id"},
+            {4, 1, :command_completion, :accept, "write"},
+            {5, 1, :timeline, :navigate, "entry-id"}
+          ] do
+        assert {:ok, {:semantic_item_activate, name, operation, 10, id}} ==
+                 ProtocolGUI.decode_gui_action(
+                   opcode,
+                   <<surface, intent, 10::32, byte_size(id)::16, id::binary>>
+                 )
+      end
     end
 
     test "rejects unknown surface or intent and malformed identity payloads" do
@@ -49,6 +70,28 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<9, 1, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 9, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 1, 7::32, 4::16, "x">>)
+    end
+  end
+
+  test "retired index-targeted and unused actions reject their former payloads" do
+    for {opcode, payload} <- [
+          {0x03, <<2::16>>},
+          {0x04, <<2::16>>},
+          {0x05, <<6, "item-3">>},
+          {0x06, <<2>>},
+          {0x09, <<2>>},
+          {0x0D, <<2::16>>},
+          {0x0E, <<2::16>>},
+          {0x17, <<2::16>>},
+          {0x30, <<2::16>>},
+          {0x31, <<2::16>>},
+          {0x32, <<2::16>>},
+          {0x33, <<2::16, 3::16>>},
+          {0x3D, <<2::16>>},
+          {0x4F, <<2::16>>}
+        ] do
+      assert :error == ProtocolGUI.decode_gui_action(opcode, payload)
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<>>)
     end
   end
 
@@ -163,11 +206,6 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   end
 
   describe "decode_gui_action for context menu actions" do
-    test "decodes file tree open in split" do
-      assert {:ok, {:file_tree_open_in_split, 9}} ==
-               ProtocolGUI.decode_gui_action(0x3D, <<9::16>>)
-    end
-
     test "decodes tab copy path" do
       assert {:ok, {:tab_copy_path, 42}} == ProtocolGUI.decode_gui_action(0x3E, <<42::32>>)
     end

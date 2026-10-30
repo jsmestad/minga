@@ -46,7 +46,9 @@ defmodule MingaEditor.FilesystemFindFileTest do
     session = FindFileSession.new(project, tmp_dir, WorkspaceSnapshot.activate(root))
     state = project_picker_state(session)
 
-    switched = PickerUI.replace_query(state, 0, 1, outside <> "/")
+    switched =
+      PickerUI.replace_query(state, picker_state(state).query_generation, 1, outside <> "/")
+
     {:picker, %{picker_ui: filesystem}} = switched.shell_runtime.state.modal
 
     assert filesystem.source == DirectorySource
@@ -54,7 +56,7 @@ defmodule MingaEditor.FilesystemFindFileTest do
     assert filesystem.context.query.resolution == {:browse, outside, ""}
     assert filesystem.restore == 0
 
-    restored = PickerUI.replace_query(switched, 0, 2, "readme")
+    restored = PickerUI.replace_query(switched, filesystem.query_generation, 2, "readme")
     {:picker, %{picker_ui: project_picker}} = restored.shell_runtime.state.modal
 
     assert project_picker.source == FileSource
@@ -139,10 +141,11 @@ defmodule MingaEditor.FilesystemFindFileTest do
     {:ok, root} = Root.directory(project)
     session = FindFileSession.new(project, tmp_dir, WorkspaceSnapshot.activate(root))
     state = project_picker_state(session)
+    generation = picker_state(state).query_generation
 
     query_packet =
-      <<@op_gui_action, @gui_action_picker_query_changed, 0::32, 1::32, byte_size(path)::16,
-        path::binary>>
+      <<@op_gui_action, @gui_action_picker_query_changed, generation::32, 1::32,
+        byte_size(path)::16, path::binary>>
 
     assert {:ok, {:gui_action, query_action}} = Protocol.decode_event(query_packet)
     loading = GuiActionHandler.dispatch(state, query_action)
@@ -419,12 +422,14 @@ defmodule MingaEditor.FilesystemFindFileTest do
   defp project_picker_state(session) do
     picker = Picker.new([%Item{id: :project, label: "README.md"}], title: "Find file")
 
-    picker_state = %PickerState{
-      picker: picker,
-      source: FileSource,
-      restore: 0,
-      context: FindFileSession.project_context(session)
-    }
+    picker_state =
+      %PickerState{
+        picker: picker,
+        source: FileSource,
+        restore: 0,
+        context: FindFileSession.project_context(session)
+      }
+      |> PickerState.begin_query_session()
 
     TestHelpers.base_state(content: "initial")
     |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})

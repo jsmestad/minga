@@ -402,6 +402,7 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
         state.selectedIndex = 7
+        state.generation = 41
         let spy = SpyEncoder()
 
         let sut = FileTreeHeaderView(fileTreeState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, branchName: "main", leadingPadding: 10)
@@ -414,8 +415,8 @@ struct FileTreeViewTests {
         try buttons[3].tap()
 
         #expect(spy.actions == [
-            .fileTreeNewFile(parentIndex: 7),
-            .fileTreeNewFolder(parentIndex: 7),
+            .semanticItemActivate(surface: .fileTree, intent: 7, generation: 41, itemID: Data()),
+            .semanticItemActivate(surface: .fileTree, intent: 8, generation: 41, itemID: Data()),
             .fileTreeRefresh,
             .fileTreeCollapseAll,
         ])
@@ -481,11 +482,11 @@ struct FileTreeViewTests {
 
         let sut = FileTreeView(fileTreeState: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let expectedModifiers = currentModifierBitsForTest()
-        let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
+        let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry, generation: 23)
 
         #expect(handled)
         #expect(spy.actions == [
-            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetID: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDirectory: false, modifiers: expectedModifiers)
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetID: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDirectory: false, modifiers: expectedModifiers, generation: 23)
         ])
     }
 
@@ -498,7 +499,7 @@ struct FileTreeViewTests {
         state.entries = [entry]
 
         let sut = FileTreeView(fileTreeState: state, sendAction: nil)
-        let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
+        let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry, generation: 23)
 
         #expect(!handled)
     }

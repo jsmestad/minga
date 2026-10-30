@@ -23,6 +23,7 @@ defmodule MingaEditor.RenderModel.UI.MinibufferBuilderTest do
     test "builds visible minibuffer" do
       data = %MinibufferData{
         visible: true,
+        generation: 91,
         mode: 0,
         cursor_pos: 3,
         prompt: ":",
@@ -43,8 +44,8 @@ defmodule MingaEditor.RenderModel.UI.MinibufferBuilderTest do
 
       model = MinibufferBuilder.build(data)
 
-      assert %Minibuffer{visible?: true, prompt: ":", input: "wq"} = model
-      assert [%Candidate{label: "write", annotation: "cmd"}] = model.candidates
+      assert %Minibuffer{visible?: true, generation: 91, prompt: ":", input: "wq"} = model
+      assert [%Candidate{id: "write", label: "write", annotation: "cmd"}] = model.candidates
     end
 
     test "maps generic text prompt mode" do

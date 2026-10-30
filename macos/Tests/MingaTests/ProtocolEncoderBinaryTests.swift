@@ -490,19 +490,10 @@ struct EncoderGUIActionTests {
         }
     }
 
-    @Test("file_tree_click encodes index as UInt16")
-    func fileTreeClickLayout() {
-        let payload = captureFrame { $0.send(.fileTreeClick(index: 15)) }
-
-        #expect(payload.count == 4)
-        #expect(payload[1] == GUI_ACTION_FILE_TREE_CLICK)
-        #expect(readU16(payload, 2) == 15)
-    }
-
     @Test("file_tree_drop encodes stable target identity and sources")
     func fileTreeDropLayout() {
         let payload = captureFrame {
-            $0.send(.fileTreeDrop(sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"], targetIndex: 8, targetID: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0x02))
+            $0.send(.fileTreeDrop(sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"], targetIndex: 8, targetID: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0x02, generation: 0x0102_0304))
         }
 
         #expect(payload[0] == OP_GUI_ACTION)
@@ -523,7 +514,8 @@ struct EncoderGUIActionTests {
         #expect(sourceCount == 2)
         #expect(sourceA == "/tmp/a.txt")
         #expect(sourceB == "/tmp/b.txt")
-        #expect(afterSourceB == payload.count)
+        #expect(readU32(payload, afterSourceB) == 0x0102_0304)
+        #expect(afterSourceB + 4 == payload.count)
     }
 
     @Test("file_tree_drop rejects overlong paths instead of truncating")
@@ -531,7 +523,7 @@ struct EncoderGUIActionTests {
         let overlongPath = "/tmp/" + String(repeating: "a", count: Int(UInt16.max))
         var result: OutboundActionResult?
         let payload = captureFrame {
-            result = $0.send(.fileTreeDrop(sourcePaths: [overlongPath], targetIndex: 8, targetID: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0))
+            result = $0.send(.fileTreeDrop(sourcePaths: [overlongPath], targetIndex: 8, targetID: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDirectory: true, modifiers: 0, generation: 7))
         }
 
         guard case .rejected(.invalidPayload(let reason)) = result else {
@@ -548,13 +540,24 @@ struct EncoderGUIActionTests {
 
     @Test("fold_toggle_at_line encodes window ID and buffer line")
     func foldToggleAtLineLayout() {
-        let payload = captureFrame { $0.send(.foldToggleAtLine(windowID: 7, bufferLine: 42)) }
+        let payload = captureFrame { $0.send(.foldToggleAtLine(windowID: 7, generation: 0x0102_0304_0506_0708, bufferLine: 42)) }
 
-        #expect(payload.count == 8)
+        #expect(payload.count == 16)
         #expect(payload[0] == OP_GUI_ACTION)
         #expect(payload[1] == GUI_ACTION_FOLD_TOGGLE_AT_LINE)
         #expect(readU16(payload, 2) == 7)
-        #expect(readU32(payload, 4) == 42)
+        #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
+        #expect(readU32(payload, 12) == 42)
+    }
+
+    @Test("scroll_to_line encodes the offered pane identity and destination")
+    func scrollToLineLayout() {
+        let payload = captureFrame { $0.send(.scrollToLine(windowID: 7, generation: 0x0102_0304_0506_0708, line: 99)) }
+        #expect(payload.count == 16)
+        #expect(payload[1] == GUI_ACTION_SCROLL_TO_LINE)
+        #expect(readU16(payload, 2) == 7)
+        #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
+        #expect(readU32(payload, 12) == 99)
     }
 
     @Test("focus_window encodes the pane window ID and durable generation")
@@ -568,14 +571,20 @@ struct EncoderGUIActionTests {
         #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
     }
 
-    @Test("completion_select encodes stable item ID as string8")
-    func completionSelectLayout() {
-        let payload = captureFrame { $0.send(.completionSelect(itemID: "item-3")) }
-
-        #expect(payload.count == 9)
-        #expect(payload[1] == GUI_ACTION_COMPLETION_SELECT)
-        #expect(payload[2] == 6)
-        #expect(String(decoding: payload[3...], as: UTF8.self) == "item-3")
+    @Test("command completion and timeline activation use semantic surfaces")
+    func additionalSemanticSurfaces() {
+        for surface in [SemanticItemSurface.commandCompletion, .timeline] {
+            let payload = captureFrame {
+                $0.send(.semanticItemActivate(surface: surface, intent: 1, generation: 42, itemID: Data("stable-id".utf8)))
+            }
+            #expect(payload[1] == GUI_ACTION_SEMANTIC_ITEM_ACTIVATE)
+            #expect(payload[2] == surface.rawValue)
+            #expect(payload[3] == 1)
+            #expect(readU32(payload, 4) == 42)
+            let (id, end) = readString16(payload, 8)
+            #expect(id == "stable-id")
+            #expect(end == payload.count)
+        }
     }
 
     @Test("semantic item activation encodes surface intent generation and opaque item ID")
@@ -672,15 +681,6 @@ struct EncoderGUIActionTests {
         #expect(payload[1] == GUI_ACTION_OBSERVATORY_INSPECT)
         #expect(readU16(payload, 2) == UInt16(pid.utf8.count))
         #expect(String(data: payload[4..<payload.count], encoding: .utf8) == pid)
-    }
-
-    @Test("panel_switch_tab encodes tab index")
-    func panelSwitchTabLayout() {
-        let payload = captureFrame { $0.send(.panelSwitchTab(index: 2)) }
-
-        #expect(payload.count == 3)
-        #expect(payload[1] == GUI_ACTION_PANEL_SWITCH_TAB)
-        #expect(payload[2] == 2)
     }
 
     @Test("panel_resize encodes height percent")

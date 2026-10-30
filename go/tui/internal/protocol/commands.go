@@ -134,34 +134,36 @@ type ChromePayload struct {
 }
 
 type WindowContent struct {
-	ID             uint16
-	CursorRow      uint16
-	CursorCol      uint16
-	CursorShape    byte
-	CursorVisible  bool
-	ScrollLeft     uint16
-	ScrollLeftSet  bool
-	ContentEpoch   uint32
-	Cursorline     Cursorline
-	Selection      Selection
-	SearchMatches  []SearchMatch
-	Diagnostics    []DiagnosticRange
-	Highlights     []DocumentHighlight
-	Annotations    []LineAnnotation
-	Geometry       PaneGeometry
-	Scroll         ScrollPresentation
-	Rows           []WindowRow
-	BaseRowCount   uint32
-	ResultRowCount uint32
-	RowSplices     []WindowRowSplice
-	RowSplicesSet  bool
-	SelectionSet   bool
-	SearchSet      bool
-	DiagnosticsSet bool
-	HighlightsSet  bool
-	AnnotationsSet bool
-	GeometrySet    bool
-	ScrollSet      bool
+	ID                      uint16
+	CursorRow               uint16
+	CursorCol               uint16
+	CursorShape             byte
+	CursorVisible           bool
+	ScrollLeft              uint16
+	ScrollLeftSet           bool
+	ContentEpoch            uint32
+	AccessibilityGeneration uint64
+	AccessibilitySet        bool
+	Cursorline              Cursorline
+	Selection               Selection
+	SearchMatches           []SearchMatch
+	Diagnostics             []DiagnosticRange
+	Highlights              []DocumentHighlight
+	Annotations             []LineAnnotation
+	Geometry                PaneGeometry
+	Scroll                  ScrollPresentation
+	Rows                    []WindowRow
+	BaseRowCount            uint32
+	ResultRowCount          uint32
+	RowSplices              []WindowRowSplice
+	RowSplicesSet           bool
+	SelectionSet            bool
+	SearchSet               bool
+	DiagnosticsSet          bool
+	HighlightsSet           bool
+	AnnotationsSet          bool
+	GeometrySet             bool
+	ScrollSet               bool
 	// SequentialRows marks a complete non-wrapped row store whose current
 	// BufferLine is always its resident index. Structural deltas retain the mode.
 	SequentialRows bool
@@ -358,6 +360,12 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			decodeCursorline(section, &window)
 		case 0x0A:
 			decodeScrollPresentation(section, &window)
+		case 0x0C:
+			if len(section) < 18 {
+				return Command{}, fmt.Errorf("malformed semantic window accessibility")
+			}
+			window.AccessibilityGeneration = binary.BigEndian.Uint64(section[:8])
+			window.AccessibilitySet = true
 		}
 	}
 

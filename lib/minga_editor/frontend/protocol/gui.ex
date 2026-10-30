@@ -132,23 +132,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_select_tab Opcodes.gui_action_select_tab()
   @gui_action_close_tab Opcodes.gui_action_close_tab()
   @gui_action_empty_state_activate Opcodes.gui_action_empty_state_activate()
-  @gui_action_file_tree_click Opcodes.gui_action_file_tree_click()
-  @gui_action_file_tree_toggle Opcodes.gui_action_file_tree_toggle()
-  @gui_action_completion_select Opcodes.gui_action_completion_select()
-  @gui_action_breadcrumb_click Opcodes.gui_action_breadcrumb_click()
   @gui_action_toggle_panel Opcodes.gui_action_toggle_panel()
   @gui_action_new_tab Opcodes.gui_action_new_tab()
-  @gui_action_panel_switch_tab Opcodes.gui_action_panel_switch_tab()
   @gui_action_panel_dismiss Opcodes.gui_action_panel_dismiss()
   @gui_action_panel_resize Opcodes.gui_action_panel_resize()
   @gui_action_open_file Opcodes.gui_action_open_file()
-  @gui_action_file_tree_new_file Opcodes.gui_action_file_tree_new_file()
-  @gui_action_file_tree_new_folder Opcodes.gui_action_file_tree_new_folder()
   @gui_action_file_tree_collapse_all Opcodes.gui_action_file_tree_collapse_all()
   @gui_action_file_tree_refresh Opcodes.gui_action_file_tree_refresh()
   @gui_action_agent_tool_toggle Opcodes.gui_action_agent_tool_toggle()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
-  @gui_action_minibuffer_select Opcodes.gui_action_minibuffer_select()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
   @gui_action_git_discard_file Opcodes.gui_action_git_discard_file()
@@ -168,10 +160,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_edit_confirm Opcodes.gui_action_file_tree_edit_confirm()
   @gui_action_file_tree_edit_cancel Opcodes.gui_action_file_tree_edit_cancel()
   @gui_action_scroll_to_line Opcodes.gui_action_scroll_to_line()
-  @gui_action_file_tree_delete Opcodes.gui_action_file_tree_delete()
-  @gui_action_file_tree_rename Opcodes.gui_action_file_tree_rename()
-  @gui_action_file_tree_duplicate Opcodes.gui_action_file_tree_duplicate()
-  @gui_action_file_tree_move Opcodes.gui_action_file_tree_move()
   @gui_action_system_will_sleep Opcodes.gui_action_system_will_sleep()
   @gui_action_system_did_wake Opcodes.gui_action_system_did_wake()
   @gui_action_system_will_unmount Opcodes.gui_action_system_will_unmount()
@@ -183,7 +171,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_git_fetch Opcodes.gui_action_git_fetch()
   @gui_action_git_commit_amend Opcodes.gui_action_git_commit_amend()
   @gui_action_git_pull_and_retry Opcodes.gui_action_git_pull_and_retry()
-  @gui_action_file_tree_open_in_split Opcodes.gui_action_file_tree_open_in_split()
   @gui_action_tab_copy_path Opcodes.gui_action_tab_copy_path()
   @gui_action_hover_open_action Opcodes.gui_action_hover_open_action()
   @gui_action_tab_reorder Opcodes.gui_action_tab_reorder()
@@ -200,7 +187,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_notification_action Opcodes.gui_action_notification_action()
   @gui_action_observatory_inspect Opcodes.gui_action_observatory_inspect()
   @gui_action_font_size_adjust Opcodes.gui_action_font_size_adjust()
-  @gui_action_timeline_navigate Opcodes.gui_action_timeline_navigate()
   @gui_action_extension_panel_action Opcodes.gui_action_extension_panel_action()
   @gui_action_extension_action Opcodes.gui_action_extension_action()
   @gui_action_float_popup_dismiss Opcodes.gui_action_float_popup_dismiss()
@@ -260,25 +246,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           {:select_tab, id :: pos_integer()}
           | {:close_tab, id :: pos_integer()}
           | {:empty_state_activate, item_id :: String.t()}
-          | {:file_tree_click, index :: non_neg_integer()}
-          | {:file_tree_toggle, index :: non_neg_integer()}
-          | {:completion_select, item_id :: String.t()}
-          | {:breadcrumb_click, segment_index :: non_neg_integer()}
           | {:toggle_panel, panel :: non_neg_integer()}
           | :new_tab
-          | {:panel_switch_tab, tab_index :: non_neg_integer()}
           | :panel_dismiss
           | {:panel_resize, height_percent :: non_neg_integer()}
           | {:open_file, path :: String.t()}
-          | {:file_tree_new_file, index :: non_neg_integer()}
-          | {:file_tree_new_folder, index :: non_neg_integer()}
           | {:file_tree_edit_confirm, token :: non_neg_integer(), text :: String.t()}
           | :file_tree_edit_cancel
           | :file_tree_collapse_all
           | :file_tree_refresh
           | {:agent_tool_toggle, message_id :: non_neg_integer()}
           | {:execute_command, name :: String.t()}
-          | {:minibuffer_select, candidate_index :: non_neg_integer()}
           | {:git_stage_file, path :: String.t()}
           | {:git_unstage_file, path :: String.t()}
           | {:git_discard_file, path :: String.t()}
@@ -298,16 +276,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :agent_approve
           | :agent_request_changes
           | :agent_dismiss
-          | {:file_tree_delete, index :: non_neg_integer()}
-          | {:file_tree_rename, index :: non_neg_integer()}
-          | {:file_tree_duplicate, index :: non_neg_integer()}
-          | {:file_tree_move, source_index :: non_neg_integer(),
-             target_dir_index :: non_neg_integer()}
           | {:file_tree_drop, DropIntent.t()}
           | {:fold_toggle_at_line, window_id :: non_neg_integer(),
-             buffer_line :: non_neg_integer()}
+             generation :: non_neg_integer(), buffer_line :: non_neg_integer()}
           | {:focus_window, window_id :: non_neg_integer(), generation :: non_neg_integer()}
-          | {:file_tree_open_in_split, index :: non_neg_integer()}
+          | {:scroll_to_line, window_id :: non_neg_integer(), generation :: non_neg_integer(),
+             line :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
           | {:tab_reorder, id :: pos_integer(), new_index :: non_neg_integer()}
           | {:tab_pin, id :: pos_integer()}
@@ -691,15 +665,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_empty_state_activate, <<len::8, id::binary-size(len)>>),
     do: {:ok, {:empty_state_activate, id}}
 
-  def decode_gui_action(@gui_action_file_tree_click, <<index::16>>),
-    do: {:ok, {:file_tree_click, index}}
-
-  def decode_gui_action(@gui_action_file_tree_toggle, <<index::16>>),
-    do: {:ok, {:file_tree_toggle, index}}
-
-  def decode_gui_action(@gui_action_file_tree_open_in_split, <<index::16>>),
-    do: {:ok, {:file_tree_open_in_split, index}}
-
   def decode_gui_action(@gui_action_tab_copy_path, <<id::32>>), do: {:ok, {:tab_copy_path, id}}
 
   def decode_gui_action(@gui_action_tab_reorder, <<id::32, new_index::16>>),
@@ -712,22 +677,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
 
-  def decode_gui_action(
-        @gui_action_completion_select,
-        <<length::8, item_id::binary-size(length)>>
-      ),
-      do: {:ok, {:completion_select, item_id}}
-
-  def decode_gui_action(@gui_action_breadcrumb_click, <<index::8>>),
-    do: {:ok, {:breadcrumb_click, index}}
-
   def decode_gui_action(@gui_action_toggle_panel, <<panel::8>>),
     do: {:ok, {:toggle_panel, panel}}
 
   def decode_gui_action(@gui_action_new_tab, <<>>), do: {:ok, :new_tab}
-
-  def decode_gui_action(@gui_action_panel_switch_tab, <<tab_index::8>>),
-    do: {:ok, {:panel_switch_tab, tab_index}}
 
   def decode_gui_action(@gui_action_panel_dismiss, <<>>), do: {:ok, :panel_dismiss}
 
@@ -736,12 +689,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:open_file, path}}
-
-  def decode_gui_action(@gui_action_file_tree_new_file, <<parent_index::16>>),
-    do: {:ok, {:file_tree_new_file, parent_index}}
-
-  def decode_gui_action(@gui_action_file_tree_new_folder, <<parent_index::16>>),
-    do: {:ok, {:file_tree_new_folder, parent_index}}
 
   def decode_gui_action(
         @gui_action_file_tree_edit_confirm,
@@ -765,9 +712,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<name_len::16, name::binary-size(name_len)>>
       ),
       do: {:ok, {:execute_command, name}}
-
-  def decode_gui_action(@gui_action_minibuffer_select, <<index::16>>),
-    do: {:ok, {:minibuffer_select, index}}
 
   def decode_gui_action(
         @gui_action_git_stage_file,
@@ -873,28 +817,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_agent_dismiss, <<>>),
     do: {:ok, :agent_dismiss}
 
-  def decode_gui_action(@gui_action_scroll_to_line, <<line::32>>),
-    do: {:ok, {:scroll_to_line, line}}
-
-  def decode_gui_action(@gui_action_file_tree_delete, <<index::16>>),
-    do: {:ok, {:file_tree_delete, index}}
-
-  def decode_gui_action(@gui_action_file_tree_rename, <<index::16>>),
-    do: {:ok, {:file_tree_rename, index}}
-
-  def decode_gui_action(@gui_action_file_tree_duplicate, <<index::16>>),
-    do: {:ok, {:file_tree_duplicate, index}}
-
   def decode_gui_action(
-        @gui_action_file_tree_move,
-        <<source_index::16, target_dir_index::16>>
+        @gui_action_scroll_to_line,
+        <<window_id::16, generation::64, line::32>>
       ),
-      do: {:ok, {:file_tree_move, source_index, target_dir_index}}
+      do: {:ok, {:scroll_to_line, window_id, generation, line}}
 
   def decode_gui_action(@gui_action_file_tree_drop, payload), do: decode_file_tree_drop(payload)
 
-  def decode_gui_action(@gui_action_fold_toggle_at_line, <<window_id::16, buffer_line::32>>),
-    do: {:ok, {:fold_toggle_at_line, window_id, buffer_line}}
+  def decode_gui_action(
+        @gui_action_fold_toggle_at_line,
+        <<window_id::16, generation::64, buffer_line::32>>
+      ),
+      do: {:ok, {:fold_toggle_at_line, window_id, generation, buffer_line}}
 
   def decode_gui_action(@gui_action_focus_window, <<window_id::16, generation::64>>),
     do: {:ok, {:focus_window, window_id, generation}}
@@ -981,9 +916,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_font_size_adjust, <<0x02>>),
     do: {:ok, {:font_size_adjust, :reset}}
-
-  def decode_gui_action(@gui_action_timeline_navigate, <<index::16>>),
-    do: {:ok, {:timeline_navigate, index}}
 
   def decode_gui_action(
         @gui_action_extension_panel_action,
@@ -1072,6 +1004,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_surface(1), do: {:ok, :completion}
   defp decode_semantic_surface(2), do: {:ok, :picker}
   defp decode_semantic_surface(3), do: {:ok, :file_tree}
+  defp decode_semantic_surface(4), do: {:ok, :command_completion}
+  defp decode_semantic_surface(5), do: {:ok, :timeline}
   defp decode_semantic_surface(_surface), do: :error
 
   @spec decode_semantic_intent(atom(), non_neg_integer()) :: {:ok, atom()} | :error
@@ -1084,6 +1018,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_intent(:file_tree, 4), do: {:ok, :delete}
   defp decode_semantic_intent(:file_tree, 5), do: {:ok, :rename}
   defp decode_semantic_intent(:file_tree, 6), do: {:ok, :duplicate}
+  defp decode_semantic_intent(:file_tree, 7), do: {:ok, :new_file}
+  defp decode_semantic_intent(:file_tree, 8), do: {:ok, :new_folder}
+  defp decode_semantic_intent(:command_completion, 1), do: {:ok, :accept}
+  defp decode_semantic_intent(:timeline, 1), do: {:ok, :navigate}
   defp decode_semantic_intent(_surface, _intent), do: :error
 
   @spec decode_file_dialog_result(
@@ -1193,13 +1131,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
          {:ok, target_id, rest} <- decode_string16(rest),
          {:ok, target_path, rest} <- decode_string16(rest),
          <<source_count::16, sources_binary::binary>> <- rest,
-         {:ok, source_paths, <<>>} <- decode_string16_list(sources_binary, source_count) do
+         {:ok, source_paths, <<generation::32>>} <-
+           decode_string16_list(sources_binary, source_count) do
       {:ok,
        {:file_tree_drop,
         DropIntent.new(
           source_paths: source_paths,
           target_index: target_index,
           target_id: target_id,
+          generation: generation,
           target_path_hash: target_path_hash,
           target_path: target_path,
           target_dir?: target_dir?,

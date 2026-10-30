@@ -138,7 +138,12 @@ defmodule MingaEditor.MinibufferDataTest do
         shell_state: %{
           modal:
             {:command_completion,
-             CommandCompletion.new(filter_text: "wri", candidates: [candidate], total: 1)}
+             CommandCompletion.new(
+               filter_text: "wri",
+               candidates: [candidate],
+               total: 1,
+               generation: 79
+             )}
         },
         workspace: %{editing: %{mode: :command, mode_state: CommandState.new("wri")}}
       }
@@ -146,6 +151,22 @@ defmodule MingaEditor.MinibufferDataTest do
       result = MinibufferData.from_state(state)
       assert result.candidates == [candidate]
       assert result.total_candidates == 1
+      assert result.generation == 79
+    end
+
+    test "does not reuse a stale overlay generation after a programmatic input change" do
+      state = %{
+        shell_state: %{
+          modal:
+            {:command_completion,
+             CommandCompletion.new(filter_text: "write", candidates: [], generation: 81)}
+        },
+        workspace: %{editing: %{mode: :command, mode_state: CommandState.new("quit")}}
+      }
+
+      result = MinibufferData.from_state(state)
+      assert result.generation == 0
+      assert Enum.any?(result.candidates, &(&1.label == "quit"))
     end
 
     test "generates completion candidates for non-empty input" do

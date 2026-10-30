@@ -548,6 +548,20 @@ func decodeEditTimeline(payload []byte) (EditTimeline, string, int) {
 		timeline.Entries = append(timeline.Entries, entry)
 	}
 	timeline, offset = decodeTimelineFiles(timeline, body, offset)
+	if timeline.Visible {
+		if len(timeline.Entries) != count || len(body) < offset+4 {
+			return EditTimeline{}, "", size
+		}
+		timeline.Generation = u32(body, offset)
+		offset += 4
+		for i := range timeline.Entries {
+			var ok bool
+			timeline.Entries[i].EntryID, offset, ok = readString16(body, offset)
+			if !ok {
+				return EditTimeline{}, "", size
+			}
+		}
+	}
 	return timeline, fmt.Sprintf("%d edits", len(timeline.Entries)), size
 }
 

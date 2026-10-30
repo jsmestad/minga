@@ -15,12 +15,14 @@ struct MinibufferStateLifecycleTests {
             input: "abc",
             context: "",
             selectedIndex: 0,
+            generation: 17,
             rawCandidates: []
         )
 
         #expect(state.visible == true)
         #expect(state.mode == .textPrompt)
         #expect(state.cursorPos == 3)
+        #expect(state.generation == 17)
         #expect(state.isInputMode == true)
         #expect(state.isPromptMode == false)
         #expect(state.showCursor == true)

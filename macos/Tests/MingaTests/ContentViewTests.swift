@@ -1242,7 +1242,7 @@ struct ContentViewTests {
             windowNumber: window.windowNumber
         ))
         editorView.mouseDown(with: foldEvent)
-        #expect(spy.actions.last == .foldToggleAtLine(windowID: 1, bufferLine: 101))
+        #expect(spy.actions.last == .foldToggleAtLine(windowID: 1, generation: visibleSnapshot.content(for: 1)?.accessibilityGeneration ?? 0, bufferLine: 101))
 
         let committedSnapshot = try #require(dispatcher.committedEditorSnapshot)
         dispatcher.promoteVisibleEditorPresentation(snapshot: committedSnapshot, localTransform: nil)

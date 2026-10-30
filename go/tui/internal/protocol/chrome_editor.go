@@ -191,7 +191,49 @@ func decodeMinibuffer(payload []byte) (Minibuffer, string, int) {
 	mini.SelectedIndex = u16(payload, next)
 	mini.Candidates = u16(payload, next+2)
 	mini.Total = u16(payload, next+4)
-	return mini, strings.TrimSpace(prompt + input + " " + context), len(payload)
+	next += 6
+	mini.Items = make([]MinibufferCandidate, 0, mini.Candidates)
+	for range int(mini.Candidates) {
+		if len(payload) < next+1 {
+			return Minibuffer{}, "", len(payload)
+		}
+		candidate := MinibufferCandidate{MatchScore: payload[next]}
+		candidate.Label, next, ok = readString16(payload, next+1)
+		if !ok {
+			return Minibuffer{}, "", len(payload)
+		}
+		candidate.Description, next, ok = readString16(payload, next)
+		if !ok {
+			return Minibuffer{}, "", len(payload)
+		}
+		candidate.Annotation, next, ok = readString16(payload, next)
+		if !ok || len(payload) < next+1 {
+			return Minibuffer{}, "", len(payload)
+		}
+		matchCount := int(payload[next])
+		next++
+		if len(payload) < next+matchCount*2 {
+			return Minibuffer{}, "", len(payload)
+		}
+		candidate.MatchPositions = make([]uint16, matchCount)
+		for j := range candidate.MatchPositions {
+			candidate.MatchPositions[j] = u16(payload, next)
+			next += 2
+		}
+		mini.Items = append(mini.Items, candidate)
+	}
+	if len(payload) < next+4 {
+		return Minibuffer{}, "", len(payload)
+	}
+	mini.Generation = u32(payload, next)
+	next += 4
+	for i := range mini.Items {
+		mini.Items[i].ID, next, ok = readString16(payload, next)
+		if !ok {
+			return Minibuffer{}, "", len(payload)
+		}
+	}
+	return mini, strings.TrimSpace(prompt + input + " " + context), next
 }
 
 func decodeFileTree(payload []byte) (FileTree, string, int) {

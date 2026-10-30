@@ -1758,9 +1758,10 @@ struct MinibufferViewAccessibilityTests {
             visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "org", context: "", selectedIndex: 1,
             totalCandidates: 2,
+            generation: 41,
             rawCandidates: [
-                Wire.MinibufferCandidate(matchScore: 100, label: "org-mode", description: "Open Org mode", annotation: "", matchPositions: []),
-                Wire.MinibufferCandidate(matchScore: 90, label: "org-agenda", description: "Open agenda", annotation: "SPC o a", matchPositions: []),
+                Wire.MinibufferCandidate(id: "org-mode", matchScore: 100, label: "org-mode", description: "Open Org mode", annotation: "", matchPositions: []),
+                Wire.MinibufferCandidate(id: "org-agenda", matchScore: 90, label: "org-agenda", description: "Open agenda", annotation: "SPC o a", matchPositions: []),
             ]
         )
         let spy = SpyEncoder()
@@ -1773,7 +1774,7 @@ struct MinibufferViewAccessibilityTests {
 
         #expect(try selected.accessibilityValue().string() == "selected, Open agenda")
         try selected.tap()
-        #expect(spy.actions == [.minibufferSelect(index: 1)])
+        #expect(spy.actions == [.semanticItemActivate(surface: .commandCompletion, intent: 1, generation: 41, itemID: Data("org-agenda".utf8))])
     }
 
     @Test("Retained minibuffer choice cannot activate after query replacement")
@@ -1783,8 +1784,9 @@ struct MinibufferViewAccessibilityTests {
             visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "old", context: "", selectedIndex: 0,
             totalCandidates: 1,
+            generation: 42,
             rawCandidates: [
-                Wire.MinibufferCandidate(matchScore: 100, label: "old-command", description: "", annotation: "", matchPositions: []),
+                Wire.MinibufferCandidate(id: "old-command", matchScore: 100, label: "old-command", description: "", annotation: "", matchPositions: []),
             ]
         )
         let spy = SpyEncoder()
@@ -1796,8 +1798,9 @@ struct MinibufferViewAccessibilityTests {
             visible: true, mode: .command, cursorPos: 0,
             prompt: "M-x ", input: "new", context: "", selectedIndex: 0,
             totalCandidates: 1,
+            generation: 43,
             rawCandidates: [
-                Wire.MinibufferCandidate(matchScore: 100, label: "new-command", description: "", annotation: "", matchPositions: []),
+                Wire.MinibufferCandidate(id: "old-command", matchScore: 100, label: "old-command", description: "", annotation: "", matchPositions: []),
             ]
         )
         try retained.tap()

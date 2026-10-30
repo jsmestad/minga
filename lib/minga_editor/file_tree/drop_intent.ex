@@ -20,7 +20,8 @@ defmodule MingaEditor.FileTree.DropIntent do
             target_path_hash: 0,
             target_path: "",
             target_dir?: false,
-            modifiers: 0
+            modifiers: 0,
+            generation: 0
 
   @type t :: %__MODULE__{
           source_paths: [String.t()],
@@ -29,7 +30,8 @@ defmodule MingaEditor.FileTree.DropIntent do
           target_path_hash: non_neg_integer(),
           target_path: String.t(),
           target_dir?: boolean(),
-          modifiers: non_neg_integer()
+          modifiers: non_neg_integer(),
+          generation: non_neg_integer()
         }
 
   @doc "Constructs a drop intent from decoded GUI protocol fields."
