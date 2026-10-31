@@ -103,7 +103,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         opts
       )
 
-    start_supervised!(Supervisor.child_spec({Session, session_opts}, id: {Session, make_ref()}))
+    Minga.Test.SessionCase.start_test_session(session_opts)
   end
 
   defp model_candidate(model_id, display_name \\ nil) do
