@@ -123,6 +123,21 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
   @spec force_keyframe(t()) :: t()
   def force_keyframe(%__MODULE__{} = frame), do: %{frame | force_keyframe?: true}
 
+  @doc "Projects an editor intent onto an independently owned frontend connection."
+  @spec for_frontend(t(), GenServer.server(), keyword()) :: t()
+  def for_frontend(%__MODULE__{} = frame, manager, opts) do
+    %{
+      frame
+      | port_manager: manager,
+        backend: :gui,
+        layout: nil,
+        focus_tree: nil,
+        capabilities: Keyword.get(opts, :capabilities, frame.capabilities),
+        theme: Keyword.get(opts, :theme, frame.theme),
+        line_spacing: Keyword.get(opts, :line_spacing, frame.line_spacing)
+    }
+  end
+
   @spec safe_status_bar_data(EditorState.t()) :: StatusBarData.t() | nil
   defp safe_status_bar_data(%EditorState{} = state) do
     StatusBarData.from_state(state)

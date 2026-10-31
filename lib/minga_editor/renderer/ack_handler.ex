@@ -27,71 +27,36 @@ defmodule MingaEditor.Renderer.AckHandler do
 
   def handle(
         %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
-        {:frame_rejected, generation, seq, last_applied, reason, :retryable_recovery}
-      )
-      when reason != :resource_policy do
-    if matching_base?(state, lease, generation, seq, last_applied) do
-      Minga.Log.warning(:render, "Frontend rejected frame #{seq}: #{reason}")
-      RecoveryHandler.transaction(state, lease.attempt)
-    else
-      {:noreply, state}
-    end
-  end
-
-  def handle(
-        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
-        {:frame_rejected, generation, seq, last_applied, reason, :adapted_retry}
+        {:frame_rejected, generation, seq, last_applied, reason, :adapted_retry} = status
       ) do
     if matching_base?(state, lease, generation, seq, last_applied) do
-      Minga.Log.warning(:render, "Frontend requested adapted retry for frame #{seq}: #{reason}")
       RecoveryHandler.adapted(state, last_applied, reason)
     else
-      {:noreply, state}
+      RecoveryHandler.status(state, status)
     end
   end
 
-  def handle(
-        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
-        {:frame_rejected, generation, seq, last_applied, reason, disposition}
-      )
-      when disposition in [
-             :retryable_recovery,
-             :targeted_replacement,
-             :terminal_frontend_failure
-           ] do
-    if matching_base?(state, lease, generation, seq, last_applied) do
-      terminal(state, last_applied, reason, disposition)
-    else
-      {:noreply, state}
-    end
-  end
+  def handle(state, {:frame_rejected, _, _, _, _, _} = status),
+    do: RecoveryHandler.status(state, status)
 
   def handle(
         %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
         {:window_ref_miss, generation, seq, last_applied, window_id}
       ) do
-    if matching_base?(state, lease, generation, seq, last_applied) do
-      Minga.Log.warning(:render, "Frontend missed window #{window_id} in frame #{seq}")
-      RecoveryHandler.window(state, lease.attempt, window_id)
-    else
-      {:noreply, state}
-    end
+    if matching_base?(state, lease, generation, seq, last_applied),
+      do: RecoveryHandler.window(state, lease.attempt, window_id),
+      else: {:noreply, state}
   end
 
   def handle(state, _status), do: {:noreply, state}
 
   @spec timeout(State.t(), non_neg_integer(), non_neg_integer()) :: {:noreply, State.t()}
   def timeout(
-        %State{frame_credit: {:awaiting_ack, %AckLease{} = lease, _successor}} = state,
+        %State{frame_credit: {:awaiting_ack, %AckLease{}, _successor}} = state,
         generation,
         seq
       ) do
-    if AckLease.matches?(lease, generation, seq) do
-      Minga.Log.warning(:render, "Frontend acknowledgement timed out for frame #{seq}")
-      RecoveryHandler.transaction(state, lease.attempt)
-    else
-      {:noreply, state}
-    end
+    RecoveryHandler.status(state, {:timeout, generation, seq})
   end
 
   def timeout(state, _generation, _seq), do: {:noreply, state}
@@ -104,17 +69,5 @@ defmodule MingaEditor.Renderer.AckHandler do
       last_applied,
       state.caches.last_acknowledged_frame_seq
     )
-  end
-
-  defp terminal(state, last_applied, reason, disposition) do
-    lease = State.awaiting_lease(state)
-    AckLease.cancel_timer(lease)
-
-    Minga.Log.warning(
-      :render,
-      "Frontend terminally rejected frame #{lease.attempt.seq}: #{reason} (#{disposition})"
-    )
-
-    {:noreply, State.terminal_failure(state, last_applied, reason)}
   end
 end

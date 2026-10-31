@@ -11,12 +11,20 @@ defmodule MingaEditor.Renderer.ContentEpoch do
   @key {__MODULE__, :counter}
   @max_epoch 0xFFFF_FFFF
 
+  @doc "Binds an allocator to this renderer owner; production defaults to the VM-wide counter."
+  @spec bind_allocator((-> pos_integer())) :: :ok
+  def bind_allocator(allocator) when is_function(allocator, 0) do
+    Process.put({__MODULE__, :allocator}, allocator)
+    :ok
+  end
+
   @doc "Allocates the next positive, wire-safe epoch for this VM."
   @spec next() :: pos_integer()
   def next do
-    counter = counter()
-    epoch = :atomics.add_get(counter, 1, 1)
-    validate(epoch)
+    case Process.get({__MODULE__, :allocator}) do
+      nil -> counter() |> :atomics.add_get(1, 1) |> validate()
+      allocator -> allocator.() |> validate()
+    end
   end
 
   @spec counter() :: :atomics.atomics_ref()

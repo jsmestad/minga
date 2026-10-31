@@ -88,6 +88,10 @@ defmodule MingaEditor.Startup do
   """
   @spec build_initial_state(keyword()) :: EditorState.t()
   def build_initial_state(opts) do
+    if allocator = Keyword.get(opts, :pane_generation_allocator) do
+      Window.bind_generation_allocator(allocator)
+    end
+
     backend = Keyword.get(opts, :backend, :headless)
     rendering = rendering_policy(opts)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)

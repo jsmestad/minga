@@ -66,6 +66,7 @@ defmodule Minga.Keymap.Active do
   @filetype_mode_tries_key :filetype_mode_tries
   @mode_tries_key :mode_tries
   @source_bindings_key :source_bindings
+  @scope_modules_key :scope_modules
 
   @typedoc "Source that contributed registry entries."
   @type contribution_source :: :builtin | :config | {:extension, atom()}
@@ -81,6 +82,10 @@ defmodule Minga.Keymap.Active do
 
   @type source_binding :: {contribution_source(), binding_identity()}
 
+  @type start_opt ::
+          {:name, atom() | nil}
+          | {:scope_modules, :registered | [module()]}
+
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
   @doc """
@@ -89,26 +94,33 @@ defmodule Minga.Keymap.Active do
   Pass `name: nil` to start anonymously (no registered name, unnamed ETS
   table). Useful for isolated test fixtures: pass the returned pid to
   server-aware functions instead of generating per-test atoms.
+
+  `scope_modules: []` projects no scope declarations. A fixed module list uses
+  those declarations only; `:registered` (the default) follows the live scope
+  registry, including registered names that differ from their module's name.
+  Reset removes binding overrides without changing this scope source.
   """
-  @spec start_link(keyword()) :: GenServer.on_start()
+  @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    case Keyword.fetch(opts, :name) do
-      {:ok, nil} -> GenServer.start_link(__MODULE__, :anonymous, [])
-      {:ok, name} -> GenServer.start_link(__MODULE__, name, name: name)
-      :error -> GenServer.start_link(__MODULE__, __MODULE__, name: __MODULE__)
-    end
+    name = Keyword.get(opts, :name, __MODULE__)
+    scopes = Keyword.get(opts, :scope_modules, :registered)
+    source = if is_nil(name), do: :anonymous, else: name
+    gen_opts = if is_nil(name), do: [], else: [name: name]
+    GenServer.start_link(__MODULE__, {source, scopes}, gen_opts)
   end
 
   @impl GenServer
-  def init(:anonymous) do
+  def init({:anonymous, scopes}) do
     table = :ets.new(:keymap_active, [:set, :public, read_concurrency: true])
     seed_defaults(table)
+    :ets.insert(table, {@scope_modules_key, scopes})
     {:ok, %{table: table}}
   end
 
-  def init(name) do
+  def init({name, scopes}) do
     table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
     seed_defaults(table)
+    :ets.insert(table, {@scope_modules_key, scopes})
     {:ok, %{table: table}}
   end
 
@@ -128,6 +140,17 @@ defmodule Minga.Keymap.Active do
 
   def leader_trie(server) do
     ets_get(server, @leader_trie_key, Defaults.leader_trie())
+  end
+
+  @doc "Returns this owner's named scope declarations from its required source selector."
+  @spec scope_declarations(GenServer.server()) :: %{Scope.scope_name() => module()}
+  def scope_declarations(server) do
+    [{@scope_modules_key, source}] = :ets.lookup(table_name(server), @scope_modules_key)
+
+    case source do
+      :registered -> Scope.registered_declarations()
+      modules when is_list(modules) -> Map.new(modules, &{&1.name(), &1})
+    end
   end
 
   @doc """
@@ -397,14 +420,13 @@ defmodule Minga.Keymap.Active do
 
   def reset(server) do
     table = table_name(server)
-    :ets.delete_all_objects(table)
     seed_defaults(table)
     :ok
   end
 
   # ── Private: ETS helpers ────────────────────────────────────────────────────
 
-  @spec table_name(GenServer.server()) :: atom()
+  @spec table_name(GenServer.server()) :: :ets.table()
   defp table_name(name) when is_atom(name), do: :"#{name}_ets"
   defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
 

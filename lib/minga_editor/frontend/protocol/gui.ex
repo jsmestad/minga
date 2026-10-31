@@ -403,7 +403,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           required(:keybindings) => [keybinding_entry()]
         }
 
-  @doc "Builds a full settings state payload from the current config and keymap servers."
+  @doc """
+  Builds settings from the supplied option and keymap owners.
+
+  If the keymap owner is unavailable, compatibility fallback uses default bindings
+  and the global registered scope declarations. It does not preserve a fixed scope
+  authority after that authority's owner has become unavailable.
+  """
   @spec config_state(Options.server(), Minga.Keymap.server()) :: config_state()
   def config_state(
         options_server \\ Options.default_server(),
@@ -501,22 +507,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec scope_keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
   defp scope_keybinding_entries(keymap_server) do
-    Minga.Keymap.Scope.all_scopes()
-    |> Enum.flat_map(&scope_keybinding_entries(keymap_server, &1))
+    keymap_server
+    |> safe_scope_declarations()
+    |> Enum.flat_map(fn {scope, module} ->
+      scope_keybinding_entries(keymap_server, scope, module)
+    end)
   end
 
-  @spec scope_keybinding_entries(Minga.Keymap.server(), Minga.Keymap.Scope.scope_name()) ::
+  @spec scope_keybinding_entries(Minga.Keymap.server(), Minga.Keymap.Scope.scope_name(), module()) ::
           [keybinding_entry()]
-  defp scope_keybinding_entries(keymap_server, scope) do
-    case Minga.Keymap.Scope.module_for(scope) do
-      nil ->
-        []
-
-      mod ->
-        Enum.flat_map([:normal, :insert, :input_normal, :cua], fn vim_state ->
-          scope_vim_keybinding_entries(keymap_server, scope, mod, vim_state)
-        end)
-    end
+  defp scope_keybinding_entries(keymap_server, scope, mod) do
+    Enum.flat_map([:normal, :insert, :input_normal, :cua], fn vim_state ->
+      scope_vim_keybinding_entries(keymap_server, scope, mod, vim_state)
+    end)
   end
 
   @spec scope_vim_keybinding_entries(
@@ -534,6 +537,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       safe_scope_trie(keymap_server, scope, vim_state)
     ]
     |> Enum.flat_map(&trie_keybinding_entries(&1, mode, []))
+  end
+
+  # Compatibility for an unavailable keymap owner uses global/default declarations.
+  # It cannot preserve a fixed authority whose owner no longer exists.
+  @spec safe_scope_declarations(Minga.Keymap.server()) ::
+          %{Minga.Keymap.Scope.scope_name() => module()}
+  defp safe_scope_declarations(keymap_server) do
+    KeymapActive.scope_declarations(keymap_server)
+  rescue
+    ArgumentError -> Minga.Keymap.Scope.registered_declarations()
+  catch
+    :exit, _ -> Minga.Keymap.Scope.registered_declarations()
   end
 
   @spec safe_normal_bindings(Minga.Keymap.server()) :: %{Bindings.key() => {atom(), String.t()}}

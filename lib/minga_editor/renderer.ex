@@ -231,7 +231,7 @@ defmodule MingaEditor.Renderer do
   defp log_synchronous_error(state, seq, error) do
     Minga.Log.warning(
       :render,
-      "Synchronous renderer frame #{seq} dropped: #{Exception.message(error)}"
+      "Synchronous renderer submission requested sequence #{seq} dropped: #{Exception.message(error)}"
     )
 
     state

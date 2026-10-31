@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+"""Prove the approved recovery-generation inverse with real producer/native evidence.
+
+Run after the ordinary macOS unit build.
+Mutants live only in a disposable committed-HEAD worktree with private Elixir caches.
+--producer-only is available on Linux; --help never requires native tools.
+No failure is a kill without the named behavioral assertion, actual replay receipts, and passing controls.
+"""
+import argparse
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import plistlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+SOURCE = "lib/minga_editor/renderer/recovery_decision.ex"
+OLD = "generation: lease.generation + 1,"
+NEW = "generation: lease.generation + 2,"
+TARGET = "retryable_base_sequence"
+CAPTURE_MARKER = "MINGA_RECOVERY_CAPTURE="
+GENERATION_ASSERTION = TARGET + " step 2: last_committed.generation"
+WIRE_FIELDS = ("payload_base64", "after_commands_base64", "command_sizes")
+PURE_TEST = "test/minga_editor/renderer/recovery_decision_test.exs"
+PURE_CASE = "every recovery source against absent, matching, wrong-generation and wrong-sequence leases"
+
+
+def sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def inverse(source):
+    if source.count(OLD) != 1:
+        raise RuntimeError("RecoveryDecision generation boundary is not unique: " + OLD)
+    return source.replace(OLD, NEW, 1)
+
+
+def overlay_transcripts(baseline, mutant):
+    """Copy only actual wire deliveries; consumer expectations/status steps stay baseline."""
+    if baseline["name"] != mutant["name"] or len(baseline["steps"]) != len(mutant["steps"]):
+        raise RuntimeError("Mutant changed transcript identity or step count")
+    replay = copy.deepcopy(baseline)
+    for old, new, delivery in zip(baseline["steps"], mutant["steps"], replay["steps"]):
+        if old["kind"] != new["kind"]:
+            raise RuntimeError("Mutant changed step kind")
+        if old["kind"] == "framed":
+            for field in WIRE_FIELDS:
+                delivery[field] = copy.deepcopy(new[field])
+    return replay
+
+
+def test_named(node, needle, result):
+    if isinstance(node, dict):
+        identity = " ".join(str(node.get(key, "")) for key in ("nodeIdentifier", "name", "nodeIdentifierURL"))
+        if str(node.get("result", "")).lower() == result and needle in identity:
+            return True
+        return any(test_named(value, needle, result) for value in node.values())
+    if isinstance(node, list):
+        return any(test_named(value, needle, result) for value in node)
+    return False
+
+
+def native_control_passes(run, named_case=TARGET):
+    summary = run.get("summary") or {}
+    return (run.get("bundle_exists") is True and run.get("exit_code") == 0
+            and summary.get("passedTests", 0) > 0 and summary.get("failedTests", 0) == 0
+            and run.get("tests") is not None
+            and (named_case is None or test_named(run.get("tests"), named_case, "passed")))
+
+
+def paired_passed_runs(before, after):
+    """Count actual parameter executions, not xcresult's logical test functions."""
+    def counter(run):
+        rows = (run.get("summary") or {}).get("devicesAndConfigurations")
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            raise RuntimeError("Expected one native device/configuration execution count")
+        row = rows[0]
+        device = (row.get("device") or {}).get("deviceId")
+        configuration = (row.get("testPlanConfiguration") or {}).get("configurationId")
+        passed = row.get("passedTests")
+        if (not isinstance(device, str) or not device or not isinstance(configuration, str)
+                or not configuration or type(passed) is not int or passed < 1):
+            raise RuntimeError("Missing actual native parameter-run count or destination identity")
+        return (device, configuration), passed
+
+    before_identity, before_count = counter(before)
+    after_identity, after_count = counter(after)
+    if before_identity != after_identity:
+        raise RuntimeError("Paired native runs changed device or test configuration")
+    return after_count - before_count
+
+
+def selected_test_records(run):
+    """Retain the complete native issue tree; summary failures can omit later assertions."""
+    if run.get("extraction_errors") or not isinstance(run.get("tests"), dict):
+        return None
+    roots = run["tests"].get("testNodes")
+    if not isinstance(roots, list) or not roots:
+        return None
+    records = []
+    def visit(node, ancestors):
+        if not isinstance(node, dict) or node.get("nodeType") not in (
+                "Test Plan", "Unit test bundle", "Test Suite", "Test Case", "Arguments",
+                "Failure Message", "Runtime Warning"):
+            return False
+        identities = [node.get(key) for key in ("nodeIdentifier", "name", "nodeIdentifierURL")]
+        if not any(isinstance(identity, str) and identity.strip() for identity in identities):
+            return False
+        lineage = (*ancestors, node)
+        records.append((node, lineage))
+        children = node.get("children", [])
+        return isinstance(children, list) and all(visit(child, lineage) for child in children)
+    return records if all(visit(root, ()) for root in roots) else None
+
+
+def native_generation_failure(run):
+    """Require the named generation failure in its actual argument, not a truncated summary."""
+    summary = run.get("summary") or {}
+    failures = summary.get("testFailures")
+    records = selected_test_records(run)
+    if not (run.get("bundle_exists") is True and run.get("exit_code") == 65
+            and summary.get("failedTests") == 1 and isinstance(failures, list) and failures and records):
+        return False
+    identifier = "ConformanceTranscriptTests/runsTranscript(_:)"
+    enumerator = "ConformanceTranscriptTests/corpusIsPopulated()"
+    cases = [node for node, _ in records if node["nodeType"] == "Test Case"]
+    owners = [node for node in cases if node.get("nodeIdentifier") == identifier]
+    enumerators = [node for node in cases if node.get("nodeIdentifier") == enumerator]
+    if (len(cases) != 2 or len(owners) != 1 or owners[0].get("result") != "Failed"
+            or len(enumerators) != 1 or enumerators[0].get("result") != "Passed"):
+        return False
+    owner = owners[0]
+    url = owner.get("nodeIdentifierURL")
+    if not isinstance(url, str) or not url.startswith("test://") or not url.endswith("/" + identifier):
+        return False
+    arguments = [(node, ancestors) for node, ancestors in records if node["nodeType"] == "Arguments"]
+    if (len(arguments) != 1 or arguments[0][0].get("name") != TARGET
+            or arguments[0][0].get("result") != "Failed"
+            or next((node for node in reversed(arguments[0][1][:-1]) if node["nodeType"] == "Test Case"), None) is not owner):
+        return False
+    argument = arguments[0][0]
+    related = (GENERATION_ASSERTION, TARGET + " step 2: transaction_result", TARGET + " step 3: frame_status")
+    def promised_failure(message):
+        if not isinstance(message, str):
+            return False
+        message = re.sub(r"^[^\n]+\.swift:\d+(?::\d+)?: ", "", message, count=1)
+        return (message.startswith("Expectation failed:")
+                and not any(word in message.casefold() for word in ("crash", "fatal error", "signal", "requirement failed"))
+                and sum(marker in message for marker in related) == 1)
+    messages = []
+    for failure in failures:
+        if (not isinstance(failure, dict) or failure.get("testIdentifierString") != identifier
+                or failure.get("testIdentifierURL") != url or not promised_failure(failure.get("failureText"))):
+            return False
+    for node, ancestors in records:
+        if node.get("result") == "Skipped" or node["nodeType"] == "Runtime Warning":
+            return False
+        if node["nodeType"] == "Failure Message":
+            execution = next((parent for parent in reversed(ancestors[:-1])
+                              if parent["nodeType"] in ("Test Case", "Arguments")), None)
+            if execution is not argument or not promised_failure(node.get("name")):
+                return False
+            messages.append(node["name"])
+    return any(GENERATION_ASSERTION in message and "lastCommittedGeneration" in message and "→" in message
+               for message in messages)
+
+
+def exunit_generation_failure(run, text):
+    summary = re.search(r"(\d+) tests?, (\d+) failures?", text)
+    return (run.get("exit_code") not in (None, 0) and summary is not None
+            and int(summary[1]) > 0 and int(summary[2]) > 0
+            and "MingaEditor.Renderer.RecoveryDecisionTest" in text and PURE_CASE in text
+            and re.search(r"generation:\s*3\b", text) is not None
+            and re.search(r"generation:\s*2\b", text) is not None
+            and "Assertion with == failed" in text and "Compilation error" not in text)
+
+
+def corpus_generation_failure(run, text):
+    return (run.get("exit_code") not in (None, 0)
+            and ("conformance corpus differs: test/conformance/corpus/recovery/" + TARGET
+                 + ".json at steps[2].expect.last_committed.generation;") in text)
+
+
+def run_command(command, root, output, label, commands, environment=None):
+    record = {"command": list(map(str, command)), "cwd": str(root), "log": label + ".log"}
+    if environment is not None:
+        record["environment"] = {key: environment[key] for key in
+                                 ("MIX_ENV", "MIX_DEPS_PATH", "MIX_BUILD_PATH") if key in environment}
+    commands.append(record)
+    start = time.monotonic()
+    with (output / record["log"]).open("w") as log:
+        result = subprocess.run(record["command"], cwd=root, env=environment,
+                                stdout=log, stderr=subprocess.STDOUT)
+    record.update(exit_code=result.returncode, seconds=time.monotonic() - start)
+    return record
+
+
+def log_text(output, run):
+    return (output / run["log"]).read_text()
+
+
+def producer_capture(root, output, label, commands, environment):
+    expression = ('IO.puts("' + CAPTURE_MARKER
+                  + '" <> JSON.encode!(Mix.Tasks.Conformance.RecoveryScenarios.build_all()))')
+    run = run_command(["mix", "run", "-e", expression], root, output, label, commands, environment)
+    lines = [line[len(CAPTURE_MARKER):] for line in log_text(output, run).splitlines()
+             if line.startswith(CAPTURE_MARKER)]
+    if run["exit_code"] != 0 or len(lines) != 1:
+        raise RuntimeError(label + " did not capture one successful real-renderer JSON marker")
+    transcripts = json.loads(lines[0])
+    if (not isinstance(transcripts, list) or len(transcripts) != 6
+            or len({item["name"] for item in transcripts}) != 6
+            or any(item["category"] != "recovery" for item in transcripts)):
+        raise RuntimeError(label + " did not capture all six distinct recovery scenarios")
+    (output / (label + ".json")).write_text(json.dumps(transcripts, indent=2) + "\n")
+    return {transcript["name"]: transcript for transcript in transcripts}
+
+
+def test_targets(value):
+    if isinstance(value, dict):
+        if value.get("BlueprintName") == "MingaTests" and "TestBundlePath" in value:
+            yield value
+        for key, child in value.items():
+            if key == "MingaTests" and isinstance(child, dict) and "TestBundlePath" in child:
+                yield child
+            else:
+                yield from test_targets(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from test_targets(child)
+
+
+def current_host_plan(value):
+    """Exclude cached bare-xctest plans from the dedicated hosted unit build."""
+    targets = list(test_targets(value))
+    return (len(targets) == 1 and str(targets[0].get("TestHostPath", "")).endswith(
+        "/MingaTestHost.app"))
+
+
+def absolute_testroot(value, root):
+    if isinstance(value, str):
+        return value.replace("__TESTROOT__", str(root))
+    if isinstance(value, dict):
+        return {key: absolute_testroot(child, root) for key, child in value.items()}
+    if isinstance(value, list):
+        return [absolute_testroot(child, root) for child in value]
+    return value
+
+
+def replay_plan(original, corpus, receipts, destination):
+    # Relocating a .xctestrun otherwise changes __TESTROOT__ and can launch no tests.
+    # Keep all binary paths tied to the ordinary unit invocation's build.
+    plan = absolute_testroot(plistlib.loads(original.read_bytes()), original.parent)
+    targets = list(test_targets(plan))
+    if len(targets) != 1:
+        raise RuntimeError("Expected exactly one MingaTests target in " + str(original))
+    environment = targets[0].setdefault("EnvironmentVariables", {})
+    environment["MINGA_CONFORMANCE_CORPUS_DIR"] = str(corpus)
+    environment["MINGA_CONFORMANCE_REPLAY_RECEIPTS"] = str(receipts)
+    receipts.mkdir()
+    destination.write_bytes(plistlib.dumps(plan))
+
+
+def native_run(output, label, original, corpus, commands):
+    plan = output / (label + ".xctestrun")
+    receipts = output / (label + "-receipts")
+    replay_plan(original, corpus, receipts, plan)
+    bundle = output / (label + "-" + str(time.time_ns()) + ".xcresult")
+    run = run_command(["xcodebuild", "test-without-building", "-xctestrun", plan,
+                       "-destination", "platform=macOS", "-resultBundlePath", bundle,
+                       "-only-testing:MingaTests/ConformanceTranscriptTests", "CODE_SIGNING_ALLOWED=NO"],
+                      ROOT / "macos", output, label, commands)
+    run.update(result_bundle=bundle.name, bundle_exists=bundle.exists(), receipts=receipts.name,
+               replay_corpus=str(corpus), replay_plan=plan.name, summary=None, tests=None)
+    if bundle.exists():
+        for kind in ("summary", "tests"):
+            result = run_command(["xcrun", "xcresulttool", "get", "test-results", kind,
+                                  "--path", bundle], ROOT, output, label + "-" + kind, commands)
+            if result["exit_code"] == 0:
+                try:
+                    run[kind] = json.loads(log_text(output, result))
+                except json.JSONDecodeError as error:
+                    run[kind + "_error"] = str(error)
+    return run
+
+
+def verify_receipts(output, run, corpus, entries):
+    expected = {Path(entry["file"]).name for entry in entries}
+    actual = {path.name for path in (output / run["receipts"]).glob("*.json")}
+    if len(expected) != len(entries) or actual != expected:
+        raise RuntimeError(run["log"] + ": actual consumed-case set does not match the selected index")
+    hashes = {}
+    for entry in entries:
+        source = corpus / entry["file"]
+        receipt = output / run["receipts"] / Path(entry["file"]).name
+        if not receipt.is_file() or receipt.read_bytes() != source.read_bytes():
+            raise RuntimeError(run["log"] + ": missing or wrong actual loadSteps receipt for " + entry["name"])
+        hashes[entry["name"]] = sha256(receipt)
+    run["consumed_transcript_sha256"] = hashes
+    run["consumed_transcript_count"] = len(hashes)
+
+
+def suite_seconds(text):
+    match = re.search(r'Suite ["“]Frontend conformance transcripts["”] passed after ([0-9.]+) seconds', text)
+    if match is None:
+        raise RuntimeError("Missing actual completed generic-corpus suite timing")
+    return float(match[1])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--producer-only", action="store_true", help="collect pure-test/generator proof without native claims")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "conformance-recovery-evidence")
+    parser.add_argument("--derived-data", type=Path, default=ROOT / "macos/DerivedData")
+    args = parser.parse_args()
+    output = args.output_dir.resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    evidence = {"status": "inconclusive", "commands": [], "runs": {}, "source": {},
+                "collector_sha256": sha256(Path(__file__)),
+                "literal_force_effect_inverse": "wire-equivalent survivor; no native kill claimed"}
+    manifest = output / "evidence.json"
+
+    def save():
+        manifest.write_text(json.dumps(evidence, indent=2) + "\n")
+
+    def command(argv, root, label, environment=None):
+        result = run_command(argv, root, output, label, evidence["commands"], environment)
+        save()
+        return result
+
+    try:
+        if not args.producer_only and sys.platform != "darwin":
+            raise RuntimeError("Native proof requires macOS; use --producer-only or --help on Linux")
+        revision = command(["git", "rev-parse", "HEAD"], ROOT, "revision")
+        if revision["exit_code"] != 0:
+            raise RuntimeError("Cannot identify committed HEAD")
+        evidence["revision"] = log_text(output, revision).strip()
+        for argv, label in [(["git", "diff", "--name-only", "HEAD", "--", "lib", "macos/Sources",
+                              "macos/Tests", "test/conformance/corpus", "scripts/check_conformance_recovery"], "source-diff"),
+                            (["git", "ls-files", "--others", "--exclude-standard", "--", "lib",
+                              "macos/Sources", "macos/Tests", "test/conformance/corpus",
+                              "scripts/check_conformance_recovery"], "untracked-source")]:
+            result = command(argv, ROOT, label)
+            if result["exit_code"] != 0 or log_text(output, result).strip():
+                raise RuntimeError("Evidence requires committed producer, consumer and corpus sources: " + label)
+        baseline_dir = output / "baseline-corpus"
+        shutil.copytree(ROOT / "test/conformance/corpus", baseline_dir)
+        index = json.loads((baseline_dir / "index.json").read_text())
+        recovery_entries = [entry for entry in index["transcripts"] if entry["category"] == "recovery"]
+        if len(recovery_entries) != 6:
+            raise RuntimeError("Expected all six real recovery scenarios")
+        baseline = {entry["name"]: json.loads((baseline_dir / entry["file"]).read_text())
+                    for entry in recovery_entries}
+        target_entry = next(entry for entry in recovery_entries if entry["name"] == TARGET)
+        without_recovery = [entry for entry in index["transcripts"] if entry["category"] != "recovery"]
+        before_dir = output / "without-recovery-corpus"
+        shutil.copytree(baseline_dir, before_dir)
+        (before_dir / "index.json").write_text(json.dumps({**index, "transcripts": without_recovery}) + "\n")
+        with tempfile.TemporaryDirectory(prefix="minga-recovery-mutation-") as directory:
+            worktree = Path(directory) / "source"
+            added = command(["git", "worktree", "add", "--detach", worktree, evidence["revision"]], ROOT, "worktree-add")
+            if added["exit_code"] != 0:
+                raise RuntimeError("Cannot create disposable committed-HEAD worktree")
+            try:
+                # Dereference caches into private files: no shared mutable build/deps.
+                for source, destination in [(ROOT / "deps", worktree / "deps"),
+                                            (ROOT / "_build/test", worktree / "_build/test")]:
+                    if source.exists():
+                        shutil.copytree(source, destination, symlinks=False, dirs_exist_ok=True)
+                environment = dict(os.environ, MIX_ENV="test", MIX_DEPS_PATH=str(worktree / "deps"),
+                                   MIX_BUILD_PATH=str(worktree / "_build/test"), NO_COLOR="1")
+                pure_command = ["mix", "test.llm", PURE_TEST, "--seed", "0"]
+                pure = command(pure_command, worktree, "pure-control", environment)
+                evidence["runs"]["pure-control"] = pure
+                pure_summary = re.search(r"(\d+) tests?, 0 failures?", log_text(output, pure))
+                if pure["exit_code"] != 0 or pure_summary is None or int(pure_summary[1]) == 0:
+                    raise RuntimeError("Focused no-process control failed or ran zero tests")
+                generation = command(["mix", "conformance.gen", "--check"], worktree, "generator-control", environment)
+                evidence["runs"]["generator-control"] = generation
+                if generation["exit_code"] != 0 or "conformance.gen: wrote " not in log_text(output, generation):
+                    raise RuntimeError("Unmutated deterministic generation control failed")
+                captured = producer_capture(worktree, output, "baseline-producer", evidence["commands"], environment)
+                if captured != baseline:
+                    raise RuntimeError("Actual baseline producer differs from committed consumer fixtures")
+                source = worktree / SOURCE
+                before = source.read_text()
+                after = inverse(before)
+                evidence["source"] = {"path": SOURCE, "before": OLD, "after": NEW,
+                                      "before_sha256": sha256(source), "scope": "pure keyframe generation policy"}
+                (output / "recovery_decision.baseline.ex").write_text(before)
+                source.write_text(after)
+                evidence["source"]["after_sha256"] = sha256(source)
+                (output / "recovery_decision.mutant.ex").write_text(after)
+                pure = command(pure_command, worktree, "pure-mutant", environment)
+                evidence["runs"]["pure-mutant"] = pure
+                if not exunit_generation_failure(pure, log_text(output, pure)):
+                    raise RuntimeError("Pure mutant did not fail the named generation-policy assertion")
+                generation = command(["mix", "conformance.gen", "--check"], worktree, "generator-mutant", environment)
+                evidence["runs"]["generator-mutant"] = generation
+                if not corpus_generation_failure(generation, log_text(output, generation)):
+                    raise RuntimeError("Mutant generation check did not fail on baseline committed generation")
+                mutant = producer_capture(worktree, output, "mutant-producer", evidence["commands"], environment)
+                if set(mutant) != set(baseline):
+                    raise RuntimeError("Mutant capture omitted or added recovery scenarios")
+                evidence["generation_contract"] = {
+                    "baseline": baseline[TARGET]["steps"][2]["expect"]["last_committed"]["generation"],
+                    "mutant_producer": mutant[TARGET]["steps"][2]["expect"]["last_committed"]["generation"]}
+                if evidence["generation_contract"]["mutant_producer"] != evidence["generation_contract"]["baseline"] + 1:
+                    raise RuntimeError("Actual producer generation did not reflect the approved +1 to +2 inverse")
+                if mutant[TARGET]["steps"][2]["payload_base64"] == baseline[TARGET]["steps"][2]["payload_base64"]:
+                    raise RuntimeError("The approved inverse did not change actual recovery wire bytes")
+                control_dir, mutant_dir = output / "named-control-corpus", output / "mutant-replay-corpus"
+                for replay_dir in (control_dir, mutant_dir):
+                    (replay_dir / "recovery").mkdir(parents=True)
+                    (replay_dir / "index.json").write_text(json.dumps({**index, "transcripts": [target_entry]}) + "\n")
+                for entry in recovery_entries:
+                    name = entry["name"]
+                    (control_dir / entry["file"]).write_bytes((baseline_dir / entry["file"]).read_bytes())
+                    replay = overlay_transcripts(baseline[name], mutant[name])
+                    (mutant_dir / entry["file"]).write_text(json.dumps(replay, indent=2) + "\n")
+                evidence["overlay"] = {"fields": list(WIRE_FIELDS), "captured_scenarios": sorted(mutant),
+                                       "native_selected_case": TARGET, "consumer_expectations": "unchanged baseline"}
+                save()
+            finally:
+                removed = command(["git", "worktree", "remove", "--force", worktree], ROOT, "worktree-remove")
+                if removed["exit_code"] != 0:
+                    raise RuntimeError("Cannot remove disposable mutant worktree")
+        evidence["producer_status"] = "killed_by_focused_generation_policy_and_corpus_check"
+        if args.producer_only:
+            evidence["status"] = "producer_proof_only_native_not_run"
+            return
+        candidates = []
+        for plan in (args.derived_data.resolve() / "Build/Products").glob("*.xctestrun"):
+            if current_host_plan(plistlib.loads(plan.read_bytes())):
+                candidates.append(plan)
+        if len(candidates) != 1:
+            raise RuntimeError("Expected one hosted MingaUnitTests .xctestrun; found " + str(candidates))
+        original = candidates[0]
+        evidence["native_build"] = {"xctestrun": str(original), "sha256": sha256(original),
+                                    "developer_dir": os.environ.get("DEVELOPER_DIR")}
+        for label, corpus, entries, named_case in [
+                ("native-control-without-recovery", before_dir, without_recovery, None),
+                ("native-control-all", baseline_dir, index["transcripts"], TARGET),
+                ("native-control-named", control_dir, [target_entry], TARGET)]:
+            control = native_run(output, label, original, corpus, evidence["commands"])
+            evidence["runs"][label] = control
+            save()
+            if not native_control_passes(control, named_case):
+                raise RuntimeError(label + " failed, ran zero tests, or omitted the named passing control")
+            verify_receipts(output, control, corpus, entries)
+        before = evidence["runs"]["native-control-without-recovery"]
+        after = evidence["runs"]["native-control-all"]
+        before_seconds = suite_seconds(log_text(output, before))
+        after_seconds = suite_seconds(log_text(output, after))
+        added_cases = after["consumed_transcript_count"] - before["consumed_transcript_count"]
+        reported_delta = paired_passed_runs(before, after)
+        evidence["native_timing"] = {
+            "baseline_transcripts": before["consumed_transcript_count"],
+            "candidate_transcripts": after["consumed_transcript_count"],
+            "actual_added_cases": added_cases, "xcresult_passed_runs_delta": reported_delta,
+            "xcresult_logical_tests_delta": after["summary"]["passedTests"] - before["summary"]["passedTests"],
+            "baseline_generic_suite_seconds": before_seconds,
+            "candidate_generic_suite_seconds": after_seconds,
+            "generic_suite_increment_seconds": after_seconds - before_seconds,
+            "baseline_xcode_elapsed_seconds": before["seconds"],
+            "candidate_xcode_elapsed_seconds": after["seconds"],
+            "xcode_elapsed_increment_seconds": after["seconds"] - before["seconds"],
+            "increment_budget_seconds": 30,
+            "comparison": "same runner, same compiled suite, index selection excludes/includes recovery"}
+        save()
+        if added_cases != 6 or reported_delta != 6:
+            raise RuntimeError("Native paired controls did not execute exactly six additional recovery cases")
+        if after_seconds - before_seconds >= 30:
+            raise RuntimeError("Generic-corpus increment exceeds the 30-second acceptance budget")
+        native = native_run(output, "native-mutant", original, mutant_dir, evidence["commands"])
+        evidence["runs"]["native-mutant"] = native
+        save()
+        verify_receipts(output, native, mutant_dir, [target_entry])
+        if not native_generation_failure(native):
+            evidence["status"] = "survived" if native_control_passes(native) else "inconclusive"
+            raise RuntimeError("Native mutant did not fail only the named recovery generation contract")
+        evidence["status"] = "killed_by_named_native_last_committed_generation_assertion"
+    except Exception as error:
+        evidence["error"] = str(error)
+        raise
+    finally:
+        save()
+        print(manifest)
+
+
+if __name__ == "__main__":
+    main()

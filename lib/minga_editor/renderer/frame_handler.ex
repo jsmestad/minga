@@ -77,9 +77,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
     case execute_pipeline(prepared, input, intent, seq, pushed_at) do
       {:ok, committed, output} ->
-        committed = commit_output(committed, output)
-        receipt = receipt(output, seq, intent)
-        {:reply, {:ok, receipt}, committed}
+        finish_sync(committed, output, FrameAttempt.new(intent, seq, pushed_at))
 
       {:stale, _error, retained} when retry_count < @max_stale_retries ->
         do_render_sync(retained, intent, seq, pushed_at, retry_count + 1)
@@ -93,6 +91,18 @@ defmodule MingaEditor.Renderer.FrameHandler do
       {:error, error, retained} ->
         {:reply, {:error, error}, retained}
     end
+  end
+
+  @spec finish_sync(State.t(), Input.t(), FrameAttempt.t()) ::
+          {:reply, {:ok, RenderReceipt.t()}, State.t()}
+  defp finish_sync(%State{require_ack?: true} = state, output, attempt) do
+    scheduled = State.schedule_frame(state, attempt, make_ref())
+    {:noreply, awaiting} = await_or_commit(scheduled, output, attempt)
+    {:reply, {:ok, receipt(output, attempt.seq, attempt.intent)}, awaiting}
+  end
+
+  defp finish_sync(state, output, attempt) do
+    {:reply, {:ok, receipt(output, attempt.seq, attempt.intent)}, commit_output(state, output)}
   end
 
   @doc "Executes the currently scheduled asynchronous frame."

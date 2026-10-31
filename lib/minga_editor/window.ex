@@ -157,9 +157,20 @@ defmodule MingaEditor.Window do
   @spec accessibility_generation(t()) :: pos_integer()
   def accessibility_generation(%__MODULE__{accessibility_generation: generation}), do: generation
 
+  @doc "Binds the pane-generation source to this editor owner."
+  @spec bind_generation_allocator((-> pos_integer())) :: :ok
+  def bind_generation_allocator(allocator) when is_function(allocator, 0) do
+    Process.put({__MODULE__, :generation_allocator}, allocator)
+    :ok
+  end
+
   @spec new_accessibility_generation() :: pos_integer()
-  defp new_accessibility_generation,
-    do: :erlang.unique_integer([:positive, :monotonic])
+  defp new_accessibility_generation do
+    case Process.get({__MODULE__, :generation_allocator}) do
+      nil -> :erlang.unique_integer([:positive, :monotonic])
+      allocator -> allocator.()
+    end
+  end
 
   @doc "Remembers the buffer cursor last observed while this window was active."
   @spec remember_cursor(t(), Buffer.position()) :: t()

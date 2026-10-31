@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.State do
   """
 
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.Manager, as: FrontendManager
   alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Intent
@@ -29,7 +30,7 @@ defmodule MingaEditor.Renderer.State do
 
   @type editor_ref :: pid() | atom() | nil
   @type pipeline :: (Input.t() -> Input.t())
-  @type generation_reserver :: (-> pos_integer())
+  @type recovery_reserver :: (-> FrontendManager.recovery_context())
 
   @type frame_successor :: FrameAttempt.t()
   @type frame_credit ::
@@ -44,6 +45,7 @@ defmodule MingaEditor.Renderer.State do
           semantic_tokens: Submission.semantic_tokens(),
           highlight_cache: HighlightCache.t(),
           frame_credit: frame_credit(),
+          next_frame_seq: non_neg_integer(),
           ack_timeout_ms: pos_integer(),
           font_registry: FontRegistry.t(),
           caches: Caches.t(),
@@ -53,7 +55,7 @@ defmodule MingaEditor.Renderer.State do
           observed_buffers: ObservedBuffers.t(),
           pipeline: pipeline(),
           require_ack?: boolean(),
-          generation_reserver: generation_reserver() | nil,
+          recovery_reserver: recovery_reserver() | nil,
           rejection_state: RejectionState.t()
         }
 
@@ -62,6 +64,7 @@ defmodule MingaEditor.Renderer.State do
             semantic_tokens: %{},
             highlight_cache: HighlightCache.new(),
             frame_credit: :idle,
+            next_frame_seq: 1,
             ack_timeout_ms: 2_000,
             font_registry: FontRegistry.new(),
             caches: Caches.new(),
@@ -71,7 +74,7 @@ defmodule MingaEditor.Renderer.State do
             observed_buffers: ObservedBuffers.new(),
             pipeline: &RenderPipeline.run/1,
             require_ack?: true,
-            generation_reserver: nil,
+            recovery_reserver: nil,
             rejection_state: RejectionState.new()
 
   @spec new(keyword()) :: t()
@@ -81,22 +84,49 @@ defmodule MingaEditor.Renderer.State do
       pipeline: Keyword.get(opts, :pipeline, &RenderPipeline.run/1),
       require_ack?: Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline)),
       ack_timeout_ms: Keyword.get(opts, :ack_timeout_ms, 2_000),
+      next_frame_seq: Keyword.get(opts, :next_frame_seq, 1),
       caches: Caches.new(Keyword.get(opts, :recovery_generation, 0)),
       text_presentations: TextPresentations.new(),
-      generation_reserver: Keyword.get(opts, :generation_reserver)
+      recovery_reserver: Keyword.get(opts, :recovery_reserver)
     }
   end
+
+  @doc "Reserves a wire sequence at admission; caller sequences are lower bounds."
+  @spec reserve_submission_sequence(t(), non_neg_integer()) :: {t(), non_neg_integer()}
+  def reserve_submission_sequence(%__MODULE__{} = state, requested) do
+    seq = max(requested, state.next_frame_seq)
+    {%{state | next_frame_seq: seq + 1}, seq}
+  end
+
+  @doc "Reserves a retry, reusing the unissued queued successor's identity if present."
+  @spec reserve_retry_sequence(t(), FrameAttempt.t()) :: {t(), non_neg_integer()}
+  def reserve_retry_sequence(%__MODULE__{} = state, rejected) do
+    seq = recovery_sequence(state.frame_credit, rejected.seq, state.next_frame_seq)
+    {%{state | next_frame_seq: max(state.next_frame_seq, seq + 1)}, seq}
+  end
+
+  @spec recovery_sequence(frame_credit(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp recovery_sequence({:awaiting_ack, _, %FrameAttempt{seq: seq}}, rejected, _next)
+       when seq > rejected, do: seq
+
+  defp recovery_sequence({:scheduled, _, _, _, %FrameAttempt{seq: seq}}, rejected, _next)
+       when seq > rejected, do: seq
+
+  defp recovery_sequence(_credit, rejected, next), do: max(rejected + 1, next)
 
   @doc "Returns the protected read capability owned by this renderer generation."
   @spec text_interaction_reader(t()) :: Reader.t()
   def text_interaction_reader(%__MODULE__{text_presentations: presentations}),
     do: TextPresentations.reader(presentations)
 
-  @doc "Reserves a fresh generation from the live frontend connection owner."
-  @spec reserve_recovery_generation(t()) :: pos_integer()
-  def reserve_recovery_generation(%__MODULE__{generation_reserver: reserver})
-      when is_function(reserver, 0),
-      do: reserver.()
+  @doc "Reserves fresh connection context without rewinding local or pending wire identities."
+  @spec reserve_recovery_context(t()) :: {t(), FrontendManager.recovery_context()}
+  def reserve_recovery_context(%__MODULE__{recovery_reserver: reserver} = state)
+      when is_function(reserver, 0) do
+    {_generation, next_frame_seq} = context = reserver.()
+    {%{state | next_frame_seq: max(state.next_frame_seq, next_frame_seq)}, context}
+  end
 
   @doc "Installs presentation updates before any submission can be rejected or coalesced."
   @spec receive_submission(t(), Submission.t()) :: {t(), Intent.t()}

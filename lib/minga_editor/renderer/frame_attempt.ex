@@ -26,6 +26,5 @@ defmodule MingaEditor.Renderer.FrameAttempt do
       when pending_seq > fallback_seq,
       do: pending
 
-  def latest(_pending, %__MODULE__{} = fallback),
-    do: %{fallback | seq: max(System.unique_integer([:positive, :monotonic]), fallback.seq + 1)}
+  def latest(_pending, %__MODULE__{} = fallback), do: fallback
 end

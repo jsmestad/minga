@@ -60,6 +60,21 @@ enum FrameTransactionResult: Sendable, Equatable {
     case applied(generation: UInt32, frameSeq: UInt32)
     case rejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: PreparedFrameRejection)
     case windowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16)
+
+    /// The production return edge, shared by the app and transcript replay.
+    var outboundAction: OutboundAction {
+        switch self {
+        case .applied(let generation, let seq):
+            return .frameApplied(generation: generation, frameSequence: seq)
+        case .rejected(let generation, let seq, let last, let reason):
+            return .frameRejected(generation: generation, frameSequence: seq,
+                                  lastAppliedFrameSequence: last, reason: reason.wireCode,
+                                  disposition: reason.disposition.rawValue)
+        case .windowRefMiss(let generation, let seq, let last, let window):
+            return .windowReferenceMiss(generation: generation, frameSequence: seq,
+                                        lastAppliedFrameSequence: last, windowID: window)
+        }
+    }
 }
 
 /// A rejection is complete and stable before any observable state is changed.

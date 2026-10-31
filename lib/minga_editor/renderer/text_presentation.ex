@@ -21,13 +21,13 @@ defmodule MingaEditor.Renderer.TextPresentation do
           rows: rows()
         }
 
-  @spec new(Window.id(), pid(), non_neg_integer(), term(), rows()) :: t()
-  def new(window_id, buffer, source_version, identity, rows)
+  @spec new(Window.id(), pid(), non_neg_integer(), term(), rows(), pos_integer()) :: t()
+  def new(window_id, buffer, source_version, identity, rows, presentation_id)
       when is_integer(window_id) and window_id > 0 and is_pid(buffer) and
              is_integer(source_version) and source_version >= 0 do
     %__MODULE__{
       window_id: window_id,
-      presentation_id: System.unique_integer([:positive, :monotonic]),
+      presentation_id: presentation_id,
       buffer: buffer,
       source_version: source_version,
       identity: identity,
@@ -36,7 +36,8 @@ defmodule MingaEditor.Renderer.TextPresentation do
   end
 
   @doc "Reuses the prior presentation only when its immutable interaction identity matches."
-  @spec retain(t() | nil, Window.id(), pid(), non_neg_integer(), term(), rows()) :: t()
+  @spec retain(t() | nil, Window.id(), pid(), non_neg_integer(), term(), rows(), pos_integer()) ::
+          t()
   def retain(
         %__MODULE__{
           window_id: window_id,
@@ -49,12 +50,13 @@ defmodule MingaEditor.Renderer.TextPresentation do
         buffer,
         version,
         identity,
-        _rows
+        _rows,
+        _presentation_id
       ),
       do: presentation
 
-  def retain(_previous, window_id, buffer, source_version, identity, rows),
-    do: new(window_id, buffer, source_version, identity, rows)
+  def retain(_previous, window_id, buffer, source_version, identity, rows, presentation_id),
+    do: new(window_id, buffer, source_version, identity, rows, presentation_id)
 
   @doc "Resolves one rank-addressed row after verifying its durable row id."
   @spec resolve(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::

@@ -403,6 +403,17 @@ jobs:
           path: macos-unit-evidence/
           if-no-files-found: error
 
+      - name: Prove recovery generation policy reaches native commits
+        run: scripts/check_conformance_recovery
+
+      - name: Upload recovery generation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-recovery-evidence
+          path: conformance-recovery-evidence/
+          if-no-files-found: warn
+
   swift-integration:
     name: Swift Protocol Integration
     runs-on: macos-15

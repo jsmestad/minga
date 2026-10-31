@@ -61,11 +61,13 @@ defmodule Mix.Tasks.Conformance.Gen do
 
   @doc "Builds and writes the full conformance corpus."
   @spec run([String.t()]) :: :ok
-  def run(_args) do
+  def run(args) do
+    Mix.Task.run("app.start")
     File.mkdir_p!(Path.join(@corpus_dir, "store"))
     File.mkdir_p!(Path.join(@corpus_dir, "input"))
     File.mkdir_p!(Path.join(@corpus_dir, "chat"))
     File.mkdir_p!(Path.join(@corpus_dir, "focus"))
+    File.mkdir_p!(Path.join(@corpus_dir, "recovery"))
 
     # The chat family uses the semantic transcript selector. It reads the
     # resident byte-cap option from Config, so start its ETS-backed server for
@@ -74,8 +76,15 @@ defmodule Mix.Tasks.Conformance.Gen do
 
     try do
       transcripts = build_all()
-      Enum.each(transcripts, &write_transcript/1)
-      write_index(transcripts)
+
+      if "--check" in args do
+        check_deterministic!(transcripts, build_all())
+        Enum.each(transcripts, &check_transcript!/1)
+        check_index!(transcripts)
+      else
+        Enum.each(transcripts, &write_transcript/1)
+        write_index(transcripts)
+      end
 
       Mix.shell().info(
         "conformance.gen: wrote #{length(transcripts)} transcripts to #{@corpus_dir}"
@@ -86,6 +95,56 @@ defmodule Mix.Tasks.Conformance.Gen do
 
     :ok
   end
+
+  @spec check_deterministic!([transcript()], [transcript()]) :: :ok
+  defp check_deterministic!(first, second) do
+    unless length(first) == length(second) do
+      Mix.raise(
+        "conformance generation is nondeterministic: transcript count #{length(first)} != #{length(second)}"
+      )
+    end
+
+    Enum.each(Enum.zip(first, second), fn {left, right} ->
+      if left != right do
+        key = first_difference(left, right, "")
+
+        Mix.raise(
+          "conformance generation is nondeterministic: #{left["category"]}/#{left["name"]} at #{key}"
+        )
+      end
+    end)
+  end
+
+  @spec first_difference(term(), term(), String.t()) :: String.t() | nil
+  defp first_difference(value, value, _path), do: nil
+
+  defp first_difference(left, right, path) when is_map(left) and is_map(right) do
+    keys = Enum.sort(Enum.uniq(Map.keys(left) ++ Map.keys(right)))
+
+    Enum.find_value(keys, fn key ->
+      next = if path == "", do: to_string(key), else: path <> "." <> to_string(key)
+
+      case {Map.fetch(left, key), Map.fetch(right, key)} do
+        {{:ok, left}, {:ok, right}} -> first_difference(left, right, next)
+        _missing -> next
+      end
+    end)
+  end
+
+  defp first_difference(left, right, path) when is_list(left) and is_list(right) do
+    if length(left) != length(right) do
+      path <> ".length"
+    else
+      left
+      |> Enum.zip(right)
+      |> Enum.with_index()
+      |> Enum.find_value(fn {{left, right}, index} ->
+        first_difference(left, right, path <> "[#{index}]")
+      end)
+    end
+  end
+
+  defp first_difference(_left, _right, path), do: path
 
   # Starts the default Config.Options server if one is not already running.
   # Returns true when this task started it (so the caller stops it).
@@ -130,7 +189,9 @@ defmodule Mix.Tasks.Conformance.Gen do
       owner_applied_when_responder_registers_late(),
       keyframe_reasserts_owner(),
       native_text_editing_returns_to_latest_owner()
-    ] ++ Mix.Tasks.Conformance.FocusScenarios.build_all()
+    ] ++
+      Mix.Tasks.Conformance.FocusScenarios.build_all() ++
+      Mix.Tasks.Conformance.RecoveryScenarios.build_all()
   end
 
   # ── Store lifecycle transcripts (AC1) ─────────────────────────────────────
@@ -1635,8 +1696,52 @@ defmodule Mix.Tasks.Conformance.Gen do
     :ok
   end
 
+  @spec check_transcript!(transcript()) :: :ok
+  defp check_transcript!(%{"name" => name, "category" => category} = transcript) do
+    check_bytes!(
+      Path.join([@corpus_dir, category, name <> ".json"]),
+      JSON.encode!(transcript) <> "\n"
+    )
+  end
+
+  @spec check_bytes!(String.t(), binary()) :: :ok
+  defp check_bytes!(path, expected) do
+    case File.read(path) do
+      {:ok, ^expected} ->
+        :ok
+
+      {:ok, actual} ->
+        key =
+          case JSON.decode(actual) do
+            {:ok, recorded} ->
+              first_difference(recorded, JSON.decode!(expected), "") || "JSON encoding"
+
+            {:error, _reason} ->
+              "invalid JSON"
+          end
+
+        Mix.raise("conformance corpus differs: #{path} at #{key}; run mix conformance.gen")
+
+      {:error, reason} ->
+        Mix.raise(
+          "cannot read conformance corpus #{path}: #{inspect(reason)}; run mix conformance.gen"
+        )
+    end
+  end
+
+  @spec check_index!([transcript()]) :: :ok
+  defp check_index!(transcripts) do
+    check_bytes!(Path.join(@corpus_dir, "index.json"), JSON.encode!(index(transcripts)) <> "\n")
+  end
+
   @spec write_index([transcript()]) :: :ok
   defp write_index(transcripts) do
+    File.write!(Path.join(@corpus_dir, "index.json"), JSON.encode!(index(transcripts)) <> "\n")
+    :ok
+  end
+
+  @spec index([transcript()]) :: map()
+  defp index(transcripts) do
     entries =
       Enum.map(transcripts, fn t ->
         %{
@@ -1649,8 +1754,6 @@ defmodule Mix.Tasks.Conformance.Gen do
         }
       end)
 
-    index = %{"version" => 1, "transcripts" => entries}
-    File.write!(Path.join(@corpus_dir, "index.json"), JSON.encode!(index) <> "\n")
-    :ok
+    %{"version" => 1, "transcripts" => entries}
   end
 end

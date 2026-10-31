@@ -279,8 +279,13 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     renderer = start_renderer()
     {generation, 0} = Server.acknowledgement_state(renderer)
     {render, first} = submit(render, editor)
-    Server.cast_snapshot(renderer, first, 1)
-    assert_receive {:presented, 1, ^generation, false, ["keyword"]}, 1_000
+    # Establish the ack lease before testing asynchronous rejection/coalescing;
+    # cold module loading is not part of this fixture's timing contract.
+    assert {:ok, %RenderReceipt{frame_seq: 1}} = Server.render_sync(renderer, first, 1)
+    assert_received {:presented, 1, ^generation, false, ["keyword"]}
+
+    assert {:awaiting_ack, %{generation: ^generation, attempt: %FrameAttempt{seq: 1}}, nil} =
+             :sys.get_state(renderer).frame_credit
 
     updated = put_highlight(editor, buffer, Highlight.put_names(highlight, ["function"]))
     {render, change} = submit(render, updated)
@@ -454,7 +459,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
            pipeline: pipeline,
            require_ack?: true,
            ack_timeout_ms: 60_000,
-           generation_reserver: fn -> System.unique_integer([:positive, :monotonic]) end
+           recovery_reserver: fn -> {System.unique_integer([:positive, :monotonic]), 1} end
          ],
          opts
        )}

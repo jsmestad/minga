@@ -77,7 +77,8 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
         first.buffer,
         first.source_version,
         first.identity,
-        first.rows
+        first.rows,
+        first.presentation_id + 1
       )
 
     changed =
@@ -87,7 +88,8 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
         first.buffer,
         first.source_version + 1,
         {:changed_source, first.identity},
-        first.rows
+        first.rows,
+        first.presentation_id + 1
       )
 
     assert reused.presentation_id == first.presentation_id
@@ -309,7 +311,14 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
         0
       )
 
-    TextPresentation.new(window_id, buffer, 7, {:identity, row_id}, {:windowed, {visual}})
+    TextPresentation.new(
+      window_id,
+      buffer,
+      7,
+      {:identity, row_id},
+      {:windowed, {visual}},
+      System.unique_integer([:positive, :monotonic])
+    )
   end
 
   defp wrapped_unicode_presentation do
@@ -331,7 +340,7 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
       |> SourceOffsetMap.slice(1, byte_size(source), 1, 5)
 
     visual = VisualRow.new(row, map, 1, 5, 2)
-    TextPresentation.new(7, self(), 9, {:wrapped_unicode, 701}, {:windowed, {visual}})
+    TextPresentation.new(7, self(), 9, {:wrapped_unicode, 701}, {:windowed, {visual}}, 701)
   end
 
   defp resident_store(size, target_index) do
@@ -345,7 +354,14 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
   end
 
   defp resident_presentation(store, identity) do
-    TextPresentation.new(1, self(), 7, identity, {:resident, store})
+    TextPresentation.new(
+      1,
+      self(),
+      7,
+      identity,
+      {:resident, store},
+      System.unique_integer([:positive, :monotonic])
+    )
   end
 
   defp resident_event(presentation, row_index, row_id) do

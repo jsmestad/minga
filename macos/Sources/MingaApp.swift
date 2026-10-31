@@ -597,25 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the old replay loop and never delayed until Metal presentation.
         disp.onTransactionResult = { [weak self] result in
             guard let encoder = self?.encoder else { return }
-            switch result {
-            case .applied(let generation, let frameSeq):
-                encoder.send(.frameApplied(generation: generation, frameSequence: frameSeq))
-            case .rejected(let generation, let frameSeq, let lastApplied, let reason):
-                encoder.send(.frameRejected(
-                    generation: generation,
-                    frameSequence: frameSeq,
-                    lastAppliedFrameSequence: lastApplied,
-                    reason: reason.wireCode,
-                    disposition: reason.disposition.rawValue
-                ))
-            case .windowRefMiss(let generation, let frameSeq, let lastApplied, let windowId):
-                encoder.send(.windowReferenceMiss(
-                    generation: generation,
-                    frameSequence: frameSeq,
-                    lastAppliedFrameSequence: lastApplied,
-                    windowID: windowId
-                ))
-            }
+            encoder.send(result.outboundAction)
         }
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()

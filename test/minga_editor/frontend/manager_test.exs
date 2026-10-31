@@ -654,19 +654,19 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert_receive {:minga_input, {:frame_applied, 1, 11}}
     end
 
-    test "recovery generation reservations stay above applied connection watermarks" do
+    test "recovery context reservations stay above applied connection watermarks" do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
       :ok = Manager.subscribe(name)
       mark_ready(name, pid, fake_port)
 
-      assert Manager.reserve_recovery_generation(name) == 1
-      assert Manager.reserve_recovery_generation(name) == 2
+      assert Manager.reserve_recovery_context(name) == {1, 1}
+      assert Manager.reserve_recovery_context(name) == {2, 1}
       assert :accepted = Manager.send_render_commands(name, frame_commands(50, 0, 5))
       send_port_data(pid, fake_port, <<0x0A, 5::32, 50::32>>)
       assert_receive {:minga_input, {:frame_applied, 5, 50}}
 
-      assert Manager.reserve_recovery_generation(name) == 6
+      assert Manager.reserve_recovery_context(name) == {6, 51}
       send_port_data(pid, fake_port, <<0x0A, 5::32, 50::32>>)
       refute_receive {:minga_input, {:frame_applied, 5, 50}}, 30
 
@@ -674,6 +674,71 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert pressure.minimum_ack_generation == 6
       assert pressure.last_admitted_generation == 5
       assert pressure.last_applied_generation == 5
+    end
+
+    test "reservation fences writes in both mailbox orderings and revokes unwritable old frames" do
+      name = unique_name()
+      parent = self()
+      writable = start_supervised!({Agent, fn -> true end}, id: make_ref())
+
+      commander = fn _port, batch, [:nosuspend] ->
+        admitted? = Agent.get(writable, & &1)
+        send(parent, {:context_write, admitted?, batch})
+        admitted?
+      end
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 60_000,
+          output_failure_ms: 60_000
+        )
+
+      :ok = Manager.subscribe(name)
+      mark_ready(name, pid, fake_port)
+      assert Manager.reserve_recovery_context(name) == {1, 1}
+      old_commands = frame_commands(80, 0, 1)
+      old_batch = IO.iodata_to_binary(old_commands)
+      assert :accepted = Manager.send_render_commands(name, old_commands)
+      assert_receive {:context_write, true, ^old_batch}
+
+      Agent.update(writable, fn _ -> false end)
+      retained_commands = frame_commands(81, 80, 1)
+      retained_batch = IO.iodata_to_binary(retained_commands)
+      assert :unwritable = Manager.send_render_commands(name, retained_commands)
+      assert_receive {:context_write, false, ^retained_batch}
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(82, 81, 1))
+      retry_token = :sys.get_state(pid).output_pressure.retry_token
+
+      # The admitted frame has not acknowledged: its sequence still fences the
+      # replacement. Retained frames never crossed the wire and are revoked.
+      assert Manager.reserve_recovery_context(name) == {2, 81}
+      reserved = :sys.get_state(pid).output_pressure
+      assert reserved.current == nil
+      assert reserved.replacement == nil
+      assert reserved.last_admitted_frame_seq == 80
+      assert reserved.last_applied_frame_seq == 0
+
+      # An old-generation write ordered after reservation must not touch either
+      # the commander or the pressure/retention/admission watermarks.
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(999, 0, 1))
+      send_port_data(pid, fake_port, <<0x0A, 1::32, 80::32>>)
+      assert :sys.get_state(pid).output_pressure == reserved
+      refute_receive {:context_write, _, _}, 30
+      refute_receive {:minga_input, {:frame_applied, 1, 80}}, 30
+
+      Agent.update(writable, fn _ -> true end)
+      send(pid, {:retry_frontend_output, retry_token})
+      _state = :sys.get_state(pid)
+      refute_receive {:context_write, _, _}, 30
+
+      replacement_commands = frame_commands(81, 0, 2)
+      replacement_batch = IO.iodata_to_binary(replacement_commands)
+      assert :accepted = Manager.send_render_commands(name, replacement_commands)
+      assert_receive {:context_write, true, ^replacement_batch}
+      send_port_data(pid, fake_port, <<0x0A, 2::32, 81::32>>)
+      assert_receive {:minga_input, {:frame_applied, 2, 81}}
+      assert Manager.reserve_recovery_context(name) == {3, 82}
     end
 
     test "an unwritable font configuration is retained and retried before later frames" do
