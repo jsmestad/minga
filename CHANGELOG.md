@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- macOS keeps workspace controls and open tabs in one fixed-height header row, including when no tabs are open. The default footer no longer repeats the workspace label. Tab reordering uses a declared native JSON drag type without competing workspace-swipe gestures.
 - CI now reports fail-closed aggregate gates for all ten substantive jobs and Chrome preview evidence. Preview path detection runs on every pull request, skips captures only for unrelated changes, and always requires real captures for manual dispatches.
 - Repeated release builds no longer accumulate obsolete Erlang runtimes and dependency versions. macOS and standalone TUI packages include only Minga's runtime resources, excluding test harnesses, retired renderers, and other development leftovers. Production Go renderers omit debug metadata and local build paths without removing language support or runtime extension compilation.
 - Release cleanup refuses output paths outside the active Mix build directory, protecting shared installation prefixes from deletion. Custom `mix release --path` destinations must be below that build directory.

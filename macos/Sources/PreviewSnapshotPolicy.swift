@@ -4,13 +4,15 @@ import Foundation
 
 /// Shared policy for preview screenshots and snapshot-fixture layout.
 enum PreviewSnapshotPolicy {
-    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
+    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "WorkspaceChromeView", "WorkspaceEmptyChromeView", "WorkspaceLongNameChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
     private static let renderedWindowViews = fullShellViews
     private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename", "MessagesContentView"]
 
     static func size(named name: String) -> CGSize {
         switch name {
         case "EditorChromeView", "AgentChromeView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView": CGSize(width: 1200, height: 704)
+        case "WorkspaceChromeView", "WorkspaceEmptyChromeView": CGSize(width: 1280, height: 800)
+        case "WorkspaceLongNameChromeView": CGSize(width: 800, height: 600)
         case "GitStatusView", "FileTreeView",
              "FileTreeEmpty", "FileTreeError", "FileTreeDeep",
              "GitStatusClean", "GitStatusConflict", "GitStatusDense": CGSize(width: 280, height: 600)

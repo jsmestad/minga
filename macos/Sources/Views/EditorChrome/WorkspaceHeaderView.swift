@@ -1,7 +1,7 @@
 import SwiftUI
 import MingaProtocol
 
-/// Workspace header row rendered above active-workspace file tabs.
+/// Workspace controls rendered beside active-workspace file tabs.
 public struct WorkspaceHeaderView: View {
     public enum Action: Equatable, Sendable {
         case executeCommand(name: String)

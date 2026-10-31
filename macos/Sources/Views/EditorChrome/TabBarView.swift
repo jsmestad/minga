@@ -60,15 +60,8 @@ public struct TabBarView: View {
 
     @State private var hoverTabId: UInt32?
     @State private var dropTargetTabId: UInt32?
-    @State private var tabDragInProgress: Bool = false
-    /// Accumulated horizontal swipe delta for agent workspace switching.
-    @State private var swipeDelta: CGFloat = 0
-    /// Whether a swipe gesture is in progress.
-    @State private var swiping: Bool = false
 
     private let barHeight: CGFloat = 34
-    /// Minimum horizontal swipe distance to trigger a workspace switch.
-    private let swipeThreshold: CGFloat = 80
 
     public var body: some View {
         // Collapse the whole strip when there are no tabs (e.g. the launchpad
@@ -166,34 +159,6 @@ public struct TabBarView: View {
         }
         .focusable(false)
         .focusEffectDisabled()
-        .gesture(
-            DragGesture(minimumDistance: 20)
-                .onChanged { value in
-                    // Only act on primarily horizontal drags (trackpad swipe)
-                    guard tabBarState.hasWorkspaces && !tabDragInProgress else { return }
-                    let horizontal = abs(value.translation.width)
-                    let vertical = abs(value.translation.height)
-                    guard horizontal > vertical * 1.5 else { return }
-                    swiping = true
-                    swipeDelta = value.translation.width
-                }
-                .onEnded { value in
-                    guard swiping, tabBarState.hasWorkspaces else {
-                        swiping = false
-                        swipeDelta = 0
-                        return
-                    }
-                    if value.translation.width < -swipeThreshold {
-                        // Swipe left: next workspace
-                        sendAction?(.executeCommand(name: "workspace_next"))
-                    } else if value.translation.width > swipeThreshold {
-                        // Swipe right: previous workspace
-                        sendAction?(.executeCommand(name: "workspace_prev"))
-                    }
-                    swiping = false
-                    swipeDelta = 0
-                }
-        )
     }
 
     public func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
@@ -432,15 +397,6 @@ public struct TabBarView: View {
                 hoverTabId = hovering ? tab.id : nil
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 3)
-                .onChanged { _ in
-                    tabDragInProgress = true
-                }
-                .onEnded { _ in
-                    tabDragInProgress = false
-                }
-        )
         .draggable(TabDragPayload(id: tab.id)) {
             tabDragPreview(tab)
         }
@@ -708,7 +664,7 @@ public struct TabDragPayload: Codable, Hashable, Sendable, Transferable {
     public init(id: UInt32) {
         self.id = id
     }
-    public static let contentType = UTType(exportedAs: "com.minga.tab-id")
+    public static let contentType = UTType(exportedAs: "com.minga.tab-id", conformingTo: .json)
 
     public let id: UInt32
 
