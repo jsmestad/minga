@@ -30,6 +30,19 @@
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.minga.tab-id</string>
+			<key>UTTypeDescription</key>
+			<string>Minga Tab</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+		</dict>
+	</array>
 
 	<!-- TCC usage descriptions: macOS shows these when the app first
 	     accesses a protected directory (Desktop, Documents, etc.).

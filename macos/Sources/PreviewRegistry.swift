@@ -43,6 +43,12 @@ enum PreviewRegistry {
             editorChromePreview()
         case "AgentChromeView":
             agentChromePreview()
+        case "WorkspaceChromeView":
+            workspaceChromePreview(empty: false)
+        case "WorkspaceEmptyChromeView":
+            workspaceChromePreview(empty: true)
+        case "WorkspaceLongNameChromeView":
+            workspaceChromePreview(empty: false, longName: true)
         case "GitStatusView":
             gitStatusPreview()
         case "GitStatusClean":
@@ -252,6 +258,35 @@ enum PreviewRegistry {
                 .frame(width: size.width, height: size.height)
         }
     }
+    @ViewBuilder
+    private static func workspaceChromePreview(empty: Bool, longName: Bool = false) -> some View {
+        if let appState = productionPreviewAppState(agentVisible: false) {
+            let tabs: [Wire.WorkspaceTabEntry] = empty ? [] : [
+                Wire.WorkspaceTabEntry(id: 41, workspaceId: 7, kind: 0, flags: 1, pathHash: 41, tintColorRGB: 0, icon: "", label: "editor.ex", path: "/tmp/editor.ex"),
+                Wire.WorkspaceTabEntry(id: 42, workspaceId: 7, kind: 0, flags: 0, pathHash: 42, tintColorRGB: 0, icon: "", label: "buffer.ex", path: "/tmp/buffer.ex")
+            ]
+            let snapshot = WorkspacePresentationSnapshot(
+                version: 1, activeWorkspaceId: 7, mode: .editor, flags: [],
+                workspaces: [
+                    Wire.WorkspaceEntry(id: 7, kind: 0, status: 0, flags: 2,
+                        colorR: 0x51, colorG: 0xAF, colorB: 0xEF,
+                        tabCount: UInt16(tabs.count), draftCount: 0, conflictCount: 0,
+                        runningBackgroundCount: 0,
+                        label: longName ? "workspace-with-a-very-long-name-that-must-not-hide-open-tabs" : "minga",
+                        icon: "folder")
+                ],
+                visibleTabs: tabs
+            )
+            let _ = appState.gui.workspaceState.install(snapshot)
+            let _ = appState.gui.tabBarState.install(snapshot)
+            let _ = appState.gui.replaceTheme(slots: [])
+            productionContentView(appState)
+                .frame(width: longName ? 800 : 1280, height: longName ? 600 : 800)
+        } else {
+            previewFailureView(message: "Workspace shell could not initialize the production editor renderer.")
+        }
+    }
+
 
     private static func previewFailureView(message: String) -> some View {
         ZStack {

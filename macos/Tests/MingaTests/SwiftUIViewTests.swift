@@ -1092,6 +1092,15 @@ struct TabBarViewViewTests {
 
         #expect(spy.actions.isEmpty)
     }
+    @Test("Native tab transfer preserves stable identity")
+    @available(macOS 15.2, *)
+    func tabDragPayloadSupportsNativeDataTransfer() async throws {
+        let original = TabDragPayload(id: 42)
+        let bytes = try await original.exported(as: TabDragPayload.contentType)
+        let decoded = try await TabDragPayload(importing: bytes, contentType: TabDragPayload.contentType)
+        #expect(decoded == original)
+    }
+
 
     @Test("Inactive tab context menu actions use id-scoped events")
     @MainActor func inactiveTabContextMenuActionsUseIdScopedEvents() throws {

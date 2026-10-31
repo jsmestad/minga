@@ -665,14 +665,7 @@ public struct ContentView<EditorSurface: View>: View {
 
     /// Single toolbar row spanning the full window width. Contains the
     /// sidebar header (when visible) and the tab bar, sharing one background.
-    private let contentHeight: CGFloat = 28
-    private let workspaceHeaderHeight: CGFloat = 30
-
-    private func toolbarContentHeight(_ input: ShellHostInput) -> CGFloat {
-        input.workspaceState.shouldShowHeader
-            ? contentHeight + workspaceHeaderHeight
-            : contentHeight
-    }
+    private let contentHeight: CGFloat = 34
 
     private var toolbarTopPadding: CGFloat {
         max(chrome.trafficLightMidY - contentHeight / 2, 0)
@@ -681,7 +674,7 @@ public struct ContentView<EditorSurface: View>: View {
     @ViewBuilder
     private func unifiedToolbar(_ input: ShellHostInput) -> some View {
         let theme = input.currentTheme
-        let toolbarHeight = toolbarContentHeight(input)
+        let toolbarHeight = contentHeight
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 if input.sidebarHostState.hasVisibleSidebar {
@@ -696,16 +689,20 @@ public struct ContentView<EditorSurface: View>: View {
                     Rectangle()
                         .fill(theme.tabSeparatorFg.opacity(0.4))
                         .frame(width: 1, height: 16)
-                } else {
+                } else if !input.workspaceState.shouldShowHeader {
                     compactProjectBranchHeader(input)
+                } else {
+                    Color.clear.frame(width: titleBarLeadingPadding)
                 }
 
-                VStack(spacing: 0) {
+                HStack(spacing: 0) {
                     if input.workspaceState.shouldShowHeader {
                         WorkspaceHeaderView(
                             workspaceState: input.workspaceState,
                             sendAction: translatedAction(FrontendActionComposition.outbound)
                         )
+                        .frame(maxWidth: 280)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
 
                     if !input.tabBarState.displayTabs.isEmpty {
