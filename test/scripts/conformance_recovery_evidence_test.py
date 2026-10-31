@@ -59,7 +59,7 @@ class RecoveryEvidenceTest(unittest.TestCase):
 
     def test_native_kill_rejects_unrelated_failures_zero_tests_and_wrong_assertions(self):
         for change in ("unrelated-summary", "unrelated-tree", "zero", "wrong-test", "wrong-summary-owner",
-                       "wrong-assertion", "marker-without-expression", "wrong-tree-owner", "missing-tree-issues"):
+                       "wrong-assertion", "marker-without-expression", "wrong-tree-owner", "missing-tree-issues", "skipped-sibling"):
             with self.subTest(change=change):
                 result = native_result()
                 argument = result["tests"]["testNodes"][1]["children"][0]
@@ -79,6 +79,14 @@ class RecoveryEvidenceTest(unittest.TestCase):
                     argument["children"][1]["name"] = "Expectation failed: " + evidence.GENERATION_ASSERTION
                 elif change == "wrong-tree-owner":
                     result["tests"]["testNodes"][0]["children"] = [argument["children"].pop(1)]
+                elif change == "skipped-sibling":
+                    result["summary"]["skippedTests"] = 1
+                    result["tests"]["testNodes"].append({
+                        "nodeType": "Test Case", "nodeIdentifier": "ConformanceTranscriptTests/Pixels/runsPixelTranscript(_:)",
+                        "name": "pixel transcript conforms", "result": "Skipped", "children": [{
+                            "nodeType": "Failure Message", "name": "Test 'pixel transcript conforms' skipped: No test cases found.",
+                        }],
+                    })
                 else:
                     argument["children"] = []
                 self.assertFalse(evidence.native_generation_failure(result))

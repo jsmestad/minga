@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""Collect real macOS timing and original-fix-equivalent mutation evidence (#3520).
+
+No mutation is reported killed on a build failure, missing test or missing result bundle.
+Mutations run in disposable worktrees; the caller's checkout is untouched.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "conformance-pixel-evidence"
+FIXES = {
+    "background": "6ab625b2c797a170f44e3ba82e535095846c94ce",
+    "spacing": "966352a7c25abd239a3de80047fa29a1be22a626",
+    "scroll": "5597925514fb4f6885ca0db5deb50caaf6fe1985",
+}
+
+# CI evidence contract: a selected test failing during Metal setup is not a behavioral kill.
+# Each accepted diagnostic must identify an actual marked production-geometry/publication assertion and its evaluated expression.
+BEHAVIORAL_FAILURES = {
+    "spacing": ("conformanceSpacedInputGeometry", {
+        "[pixels3520.spacing.ime-row]": ("rect.minY", "spacedHeight", "<", "0.001"),
+        "[pixels3520.spacing.ime-height]": ("rect.height", "spacedHeight", "<", "0.001"),
+        "[pixels3520.spacing.hit-test]": ("characterIndex", "screenPoint", "==", "323"),
+    }),
+    "scroll": ("conformanceScrollPublicationUsesCapturedCommit", {
+        "[pixels3520.scroll.unpresented]": ("visibleEditorSnapshot", "initial.frameSeq", "=="),
+        "[pixels3520.scroll.acknowledged-lines]": ("draw.unconfirmedLines", "==", "1"),
+        "[pixels3520.scroll.confirmed-anchor]": ("draw.lastConfirmedAnchorTop", "==", "11"),
+        "[pixels3520.scroll.draw-offset]": ("draw.presentation", "offset", "draw.cellHeight", "=="),
+        "[pixels3520.scroll.published-echo]": ("visibleEditorSnapshot", "echo.frameSeq", "=="),
+        "[pixels3520.scroll.repeated-lines]": ("repeated.unconfirmedLines", "==", "1"),
+        "[pixels3520.scroll.repeated-offset]": ("repeated.presentation", "offset", "draw.cellHeight", "=="),
+    }),
+}
+
+PIXEL_CASES = {
+    "pixels_background_fill", "pixels_spaced_rows", "pixels_no_stale_glyphs_after_local_scroll",
+}
+SOURCE_PREFIXES = ("lib/", "mix/", "config/", "macos/", "test/", "scripts/",
+                   ".github/workflows/", "priv/")
+SOURCE_FILES = {"mix.exs", "mix.lock", ".tool-versions", ".xcodegen-version", ".gitignore",
+                "docs/protocol_schema.toml"}
+OUTPUT_PREFIXES = ("deps/", "_build/", ".generated/", "macos/DerivedData/", "macos/.generated/",
+                   "macos/.build/", "macos/build/", "test/tmp/", "conformance-pixel-evidence/",
+                   "conformance-recovery-evidence/", "macos-unit-evidence/")
+
+
+def source_guard_changes(tracked, untracked):
+    """Classify source status without modifying the checkout or counting build products."""
+    def relevant(path):
+        return (not path.startswith(OUTPUT_PREFIXES) and not path.endswith(".pyc")
+                and (path in SOURCE_FILES or path.startswith(SOURCE_PREFIXES)))
+    return {"tracked": sorted(path for path in tracked if relevant(path)),
+            "untracked": sorted(path for path in untracked if relevant(path))}
+
+
+def capture(*command):
+    return subprocess.check_output(command, cwd=ROOT, text=True).strip()
+
+
+def run_test(root, label, selectors=(), action="test-without-building", derived=None):
+    bundle = OUT / (label + "-" + str(time.time_ns()) + ".xcresult")
+    command = ["xcodebuild", action, "-scheme", "MingaUnitTests", "-configuration", "Debug",
+               "-derivedDataPath", str(derived or root / "macos/DerivedData"),
+               "-resultBundlePath", str(bundle), "CODE_SIGNING_ALLOWED=NO", *selectors]
+    environment = dict(os.environ, MIX_DEPS_PATH=str(ROOT / "deps"),
+                       MIX_BUILD_PATH=str(root / "_build" / os.environ.get("MIX_ENV", "dev")))
+    start = time.monotonic()
+    with (OUT / (label + ".log")).open("w") as log:
+        result = subprocess.run(command, cwd=root / "macos", env=environment,
+                                stdout=log, stderr=subprocess.STDOUT)
+    seconds = time.monotonic() - start
+    summary = None
+    tests = None
+    extraction_errors = []
+    if not bundle.exists():
+        extraction_errors.append("No xcresult bundle was produced")
+    else:
+        for kind in ("summary", "tests"):
+            try:
+                value = json.loads(capture("xcrun", "xcresulttool", "get", "test-results", kind, "--path", str(bundle)))
+                if not isinstance(value, dict):
+                    raise ValueError("Expected a JSON object")
+                if kind == "summary":
+                    summary = value
+                else:
+                    tests = value
+            except (subprocess.CalledProcessError, OSError, ValueError) as error:
+                extraction_errors.append(f"{kind}: {error}")
+    return {"command": command, "seconds": seconds,
+            "exit_code": result.returncode, "summary": summary, "tests": tests,
+            "extraction_errors": extraction_errors,
+            "log": label + ".log", "result_bundle": bundle.name}
+
+
+def replace_once(source, old, new):
+    if source.count(old) != 1:
+        raise ValueError("Mutation source boundary changed; expected exactly one occurrence: " + old)
+    return source.replace(old, new, 1)
+
+
+def mutate(root, kind):
+    if kind == "background":
+        path = root / "macos/Sources/Renderer/CoreTextMetalRenderer.swift"
+        source = path.read_text()
+        start = source.index("                if windowBounds.width > 0,\n                   let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(")
+        end = source.index("\n\n                let residentCursorline", start)
+        path.write_text(source[:start] + source[end:])
+        return
+    path = root / "macos/Sources/Views/Editor/EditorNSView.swift"
+    source = path.read_text()
+    if kind == "spacing":
+        # #2674's inverse in today's refactored production cursor-rect owner.
+        source = replace_once(source,
+            "let y = CGFloat(surface.paneGeometry.textRect.row) * effectiveCellHeight + CGFloat(cursorRow) * effectiveCellHeight - localOffset.y",
+            "let y = CGFloat(surface.paneGeometry.textRect.row) * cellHeight + CGFloat(cursorRow) * cellHeight - localOffset.y")
+        source = replace_once(source,
+            "return NSRect(x: x, y: y, width: cellWidth, height: effectiveCellHeight)",
+            "return NSRect(x: x, y: y, width: cellWidth, height: cellHeight)")
+        source = replace_once(source, "let row = max(0, Int(point.y / effectiveCellHeight))",
+                              "let row = max(0, Int(point.y / cellHeight))")
+    else:
+        # #3397's inverse consumes the visible snapshot instead of this draw's captured committed echo.
+        # This is not a fabricated Metal state.
+        source = replace_once(source,
+            "        advancePresentationScrollAnimation(snapshot: committedSnapshot)",
+            "        if let visible = editorPresentationSnapshot {\n            advancePresentationScrollAnimation(snapshot: visible)\n        }")
+    path.write_text(source)
+
+
+def selected_behavioral_case(node, function):
+    """Match the execution's own native identifier, never a display-name ancestor."""
+    identifier = node.get("nodeIdentifier")
+    if (node.get("nodeType") != "Test Case" or not isinstance(identifier, str)
+            or re.fullmatch(r"ContentViewTests/" + re.escape(function) + r"\([^/()]*\)", identifier) is None):
+        return False
+    url = node.get("nodeIdentifierURL")
+    return url is None or isinstance(url, str) and url.startswith("test://") and url.endswith("/" + identifier)
+
+
+def selected_test_records(run):
+    """Reject partial/malformed extraction while retaining native suite ancestry."""
+    if run.get("extraction_errors") or not isinstance(run.get("tests"), dict):
+        return None
+    roots = run["tests"].get("testNodes")
+    if not isinstance(roots, list) or not roots:
+        return None
+    records = []
+    def visit(node, ancestors):
+        if not isinstance(node, dict) or node.get("nodeType") not in (
+                "Test Plan", "Unit test bundle", "Test Suite", "Test Case", "Arguments",
+                "Failure Message", "Runtime Warning"):
+            return False
+        identities = [node.get(key) for key in ("nodeIdentifier", "name", "nodeIdentifierURL")]
+        if not any(isinstance(identity, str) and identity.strip() for identity in identities):
+            return False
+        lineage = (*ancestors, node)
+        records.append((node, lineage))
+        children = node.get("children", [])
+        return isinstance(children, list) and all(visit(child, lineage) for child in children)
+    return records if all(visit(root, ()) for root in roots) else None
+
+
+def clean_selected_run(run, selection):
+    """Require actual clean executions in the selected scope, including named pixel arguments."""
+    summary = run.get("summary")
+    records = selected_test_records(run)
+    if not (run.get("exit_code") == 0 and isinstance(summary, dict) and records
+            and type(summary.get("passedTests")) is int and summary["passedTests"] > 0
+            and type(summary.get("totalTestCount")) is int and summary["totalTestCount"] >= summary["passedTests"]
+            and summary.get("result") == "Passed"
+            and summary.get("failedTests") == 0 and not summary.get("testFailures")):
+        return False
+    named = BEHAVIORAL_FAILURES.get(selection)
+    if named is None and selection not in ("with_pixels", "without_pixels"):
+        return False
+    observed_pixels = []
+    ordinary_passed = False
+    enumerated = False
+    selected_passed = False
+    for node, ancestors in records:
+        identity = " ".join(str(node.get(key, "")) for key in ("nodeIdentifier", "name", "nodeIdentifierURL"))
+        lineage = " ".join(" ".join(str(parent.get(key, "")) for key in ("nodeIdentifier", "name", "nodeIdentifierURL"))
+                           for parent in ancestors)
+        pixels = ("Metal pixel transcripts" in lineage
+                  or re.search(r"(?:^|[./ ])Pixels(?:[./ (]|$)", lineage) is not None)
+        if node["nodeType"] == "Failure Message":
+            return False
+        if node.get("result") not in (None, "Passed") and not (
+                selection == "without_pixels" and pixels and node.get("result") == "Skipped"):
+            return False
+        if node["nodeType"] not in ("Test Case", "Arguments"):
+            continue
+        if named:
+            owner = next((parent for parent in reversed(ancestors) if parent["nodeType"] == "Test Case"), None)
+            if owner is None or not selected_behavioral_case(owner, named[0]) or node.get("result") != "Passed":
+                return False
+            if node["nodeType"] == "Test Case":
+                selected_passed = True
+            continue
+        if "ConformanceTranscriptTests" not in lineage and "Frontend conformance transcripts" not in lineage:
+            return False
+        if selection == "without_pixels" and pixels:
+            if node.get("result") == "Passed":
+                return False
+            continue
+        if node.get("result") != "Passed":
+            return False
+        if not pixels:
+            ordinary_passed |= node["nodeType"] == "Arguments" and any(
+                parent["nodeType"] == "Test Case" and re.fullmatch(
+                    r"ConformanceTranscriptTests/runsTranscript\([^/()]*\)", parent.get("nodeIdentifier", "")) is not None
+                for parent in ancestors)
+            enumerated |= "corpusIsPopulated(" in identity or "corpus enumerates transcripts" in identity
+            continue
+        # Parameter names are required: global counts or a passing replay function
+        # cannot substitute for the three actual transcript executions.
+        if not any(marker in lineage for marker in ("runsPixelTranscript(", "replay(", "pixel transcript conforms")):
+            return False
+        if node.get("children"):
+            continue
+        if node["nodeType"] != "Arguments":
+            return False
+        cases = [case for case in PIXEL_CASES if re.search(r"(?<![A-Za-z0-9_])" + case + r"(?![A-Za-z0-9_])", identity)]
+        if len(cases) != 1:
+            return False
+        observed_pixels.extend(cases)
+    if named:
+        return selected_passed
+    return ordinary_passed and enumerated and (selection == "without_pixels"
+                                              or len(observed_pixels) == 3 and set(observed_pixels) == PIXEL_CASES)
+
+
+def native_behavioral_failure(control, run, kind):
+    """Require a clean named control and only the promised behavioral failures."""
+    contract = BEHAVIORAL_FAILURES.get(kind)
+    if contract is None:
+        return False
+    named_case, assertions = contract
+    summary = run.get("summary") or {}
+    failures = summary.get("testFailures")
+    records = selected_test_records(run)
+    if not (clean_selected_run(control, kind) and records
+            and run.get("exit_code") == 65 and summary.get("failedTests") == 1
+            and isinstance(failures, list) and failures):
+        return False
+    selected = [node for node, _ in records if selected_behavioral_case(node, named_case)]
+    if len(selected) != 1 or selected[0].get("result") != "Failed":
+        return False
+    owner = selected[0]
+    identifier, url = owner["nodeIdentifier"], owner.get("nodeIdentifierURL")
+    if not isinstance(url, str) or not url.startswith("test://") or not url.endswith("/" + identifier):
+        return False
+
+    def promised_failure(message):
+        if not isinstance(message, str):
+            return False
+        # Native tree diagnostics prepend the observed Swift source location;
+        # summary failureText contains the assertion itself.
+        message = re.sub(r"^[^\n]+\.swift:\d+(?::\d+)?: ", "", message, count=1)
+        if not message.strip().startswith("Expectation failed:"):
+            return False
+        if any(word in message.casefold() for word in ("crash", "fatal error", "signal", "requirement failed")):
+            return False
+        return sum(marker in message and "→" in message and all(fragment in message for fragment in expression)
+                   for marker, expression in assertions.items()) == 1
+
+    for failure in failures:
+        if (not isinstance(failure, dict) or failure.get("testIdentifierString") != identifier
+                or failure.get("testIdentifierURL") != url or not promised_failure(failure.get("failureText"))):
+            return False
+    diagnostics = 0
+    for node, ancestors in records:
+        if node["nodeType"] == "Test Case" and node is not owner:
+            return False
+        if node["nodeType"] == "Arguments":
+            case = next((parent for parent in reversed(ancestors) if parent["nodeType"] == "Test Case"), None)
+            if case is not owner or node.get("result") not in ("Passed", "Failed"):
+                return False
+        if node["nodeType"] == "Failure Message":
+            execution = next((parent for parent in reversed(ancestors[:-1])
+                              if parent["nodeType"] in ("Test Case", "Arguments")), None)
+            if (owner not in ancestors or execution is None or execution.get("result") != "Failed"
+                    or not promised_failure(node.get("name"))):
+                return False
+            diagnostics += 1
+    return diagnostics > 0
+
+
+def paired_passed_runs(before, after):
+    """Count actual parameter executions, not xcresult's logical test functions."""
+    def counter(run):
+        rows = (run.get("summary") or {}).get("devicesAndConfigurations")
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            raise RuntimeError("Expected one native device/configuration execution count")
+        row = rows[0]
+        device = (row.get("device") or {}).get("deviceId")
+        configuration = (row.get("testPlanConfiguration") or {}).get("configurationId")
+        passed = row.get("passedTests")
+        if (not isinstance(device, str) or not device or not isinstance(configuration, str)
+                or not configuration or type(passed) is not int or passed < 1):
+            raise RuntimeError("Missing actual native parameter-run count or destination identity")
+        return (device, configuration), passed
+
+    before_identity, before_count = counter(before)
+    after_identity, after_count = counter(after)
+    if before_identity != after_identity:
+        raise RuntimeError("Paired native runs changed device or test configuration")
+    return after_count - before_count
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mutations", action="store_true")
+    args = parser.parse_args()
+    OUT.mkdir(exist_ok=True)
+    os.environ["MINGA_REQUIRE_METAL"] = "1"
+    evidence = {"historical_unit_bundle_baseline": {"date": "2026-10-29", "seconds": 136, "tests": 1555},
+                "original_fixes": FIXES, "runs": {}, "mutations": {}}
+    output = OUT / "evidence.json"
+    def save():
+        output.write_text(json.dumps(evidence, indent=2) + "\n")
+    try:
+        evidence["revision"] = capture("git", "rev-parse", "HEAD")
+        tracked = capture("git", "diff", "--name-only", "-z", "--no-renames", "HEAD", "--").split("\0")
+        untracked = capture("git", "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+        evidence["source_guard"] = source_guard_changes(tracked, untracked)
+        if any(evidence["source_guard"].values()):
+            raise RuntimeError("Evidence requires committed control/mutant sources: "
+                               + json.dumps(evidence["source_guard"], sort_keys=True))
+        evidence["macos_build"] = capture("sw_vers", "-buildVersion")
+        evidence["hardware"] = capture("system_profiler", "SPDisplaysDataType", "-json")
+        focused = ["-only-testing:MingaTests/ConformanceTranscriptTests"]
+        without_pixels = focused + ["-skip-testing:MingaTests/ConformanceTranscriptTests/Pixels"]
+        # The shared entry point runs every unit test and gives each presentation suite its own process.
+        unit_directory = OUT / "unit-bundle"
+        unit_result = subprocess.run(
+            [str(ROOT / "scripts/test_macos_unit"), "--output-dir", str(unit_directory)], cwd=ROOT)
+        unit_manifest = json.loads((unit_directory / "results.json").read_text())
+        evidence["runs"]["unit-bundle"] = unit_manifest
+        save()
+        if unit_result.returncode != 0 or not unit_manifest["success"]:
+            raise RuntimeError("Native unit actions failed; inspect unit-bundle/results.json")
+        # Reuse the verified hosted products left by the canonical unit lifecycle for focused timing.
+        for label, selectors, action in [
+            ("focused-warmup", without_pixels, "test-without-building"),
+            ("focused-without-pixels", without_pixels, "test-without-building"),
+            ("focused-with-pixels", focused, "test-without-building"),
+        ]:
+            result = run_test(ROOT, label, selectors, action)
+            evidence["runs"][label] = result
+            save()
+            selection = "with_pixels" if label == "focused-with-pixels" else "without_pixels"
+            if not clean_selected_run(result, selection):
+                raise RuntimeError(label + " lacks complete clean selected test evidence; see " + result["log"])
+        before = evidence["runs"]["focused-without-pixels"]
+        after = evidence["runs"]["focused-with-pixels"]
+        evidence["added_pixel_run_count"] = paired_passed_runs(before, after)
+        evidence["logical_pixel_test_delta"] = after["summary"]["passedTests"] - before["summary"]["passedTests"]
+        if evidence["added_pixel_run_count"] != 3:
+            raise RuntimeError("Focused selectors did not execute exactly three additional pixel transcripts")
+        evidence["pixel_increment_seconds"] = (evidence["runs"]["focused-with-pixels"]["seconds"]
+                                                - evidence["runs"]["focused-without-pixels"]["seconds"])
+        evidence["pixel_budget_seconds"] = 10
+        save()
+        if evidence["pixel_increment_seconds"] > 10:
+            raise RuntimeError("Focused pixel increment exceeds the 10-second budget")
+        if args.mutations:
+            cases = {
+                "background": (focused, None),
+                "spacing": (["-only-testing:MingaTests/ContentViewTests/conformanceSpacedInputGeometry(spacing:)"], "conformanceSpacedInputGeometry"),
+                "scroll": (["-only-testing:MingaTests/ContentViewTests/conformanceScrollPublicationUsesCapturedCommit()"], "conformanceScrollPublicationUsesCapturedCommit"),
+            }
+            # Controls must pass on precisely the revision whose mutants run.
+            for kind, (selectors, needle) in cases.items():
+                control = run_test(ROOT, kind + "-control", selectors)
+                evidence["mutations"][kind] = {"control": control, "historical_fix": FIXES[kind],
+                    "scope": "production-equivalent inverse after intervening refactors; not a git revert",
+                    "status": "inconclusive"}
+                save()
+                selection = "with_pixels" if kind == "background" else kind
+                if not clean_selected_run(control, selection):
+                    raise RuntimeError(kind + " control lacks complete clean selected test evidence")
+                with tempfile.TemporaryDirectory(prefix="minga-pixel-mutation-") as directory:
+                    worktree = Path(directory) / "source"
+                    subprocess.run(["git", "worktree", "add", "--detach", str(worktree), evidence["revision"]], cwd=ROOT, check=True)
+                    try:
+                        generated = ROOT / "macos/.generated"
+                        if generated.exists():
+                            shutil.copytree(generated, worktree / "macos/.generated", dirs_exist_ok=True)
+                        build = ROOT / "_build"
+                        if build.exists():
+                            shutil.copytree(build, worktree / "_build", dirs_exist_ok=True)
+                        mutate(worktree, kind)
+                        subprocess.run(["xcodegen", "generate"], cwd=worktree / "macos", check=True)
+                        result = run_test(worktree, kind + "-mutant", selectors, "test", Path(directory) / "DerivedData")
+                        record = evidence["mutations"][kind]
+                        record["mutant"] = result
+                        if clean_selected_run(result, selection):
+                            record["status"] = "survived"
+                        elif native_behavioral_failure(control, result, kind):
+                            record["status"] = "killed_by_named_behavioral_test"
+                        save()
+                        expected = "survived" if kind == "background" else "killed_by_named_behavioral_test"
+                        if record["status"] != expected:
+                            raise RuntimeError(kind + " mutation is " + record["status"] + "; expected " + expected)
+                    finally:
+                        subprocess.run(["git", "worktree", "remove", "--force", str(worktree)], cwd=ROOT, check=True)
+    except Exception as error:
+        evidence["error"] = str(error)
+        raise
+    finally:
+        save()
+    print(output)
+
+
+if __name__ == "__main__":
+    main()

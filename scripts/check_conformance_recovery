@@ -268,14 +268,19 @@ def replay_plan(original, corpus, receipts, destination):
     destination.write_bytes(plistlib.dumps(plan))
 
 
-def native_run(output, label, original, corpus, commands):
+def native_run(output, label, original, corpus, commands, *, named_only=False):
+    """Scope a named generation replay to its method and enumerator, not empty sibling suites."""
     plan = output / (label + ".xctestrun")
     receipts = output / (label + "-receipts")
     replay_plan(original, corpus, receipts, plan)
     bundle = output / (label + "-" + str(time.time_ns()) + ".xcresult")
+    selectors = ["-only-testing:MingaTests/ConformanceTranscriptTests"]
+    if named_only:
+        selectors = ["-only-testing:MingaTests/ConformanceTranscriptTests/runsTranscript(_:)",
+                     "-only-testing:MingaTests/ConformanceTranscriptTests/corpusIsPopulated()"]
     run = run_command(["xcodebuild", "test-without-building", "-xctestrun", plan,
                        "-destination", "platform=macOS", "-resultBundlePath", bundle,
-                       "-only-testing:MingaTests/ConformanceTranscriptTests", "CODE_SIGNING_ALLOWED=NO"],
+                       *selectors, "CODE_SIGNING_ALLOWED=NO"],
                       ROOT / "macos", output, label, commands)
     run.update(result_bundle=bundle.name, bundle_exists=bundle.exists(), receipts=receipts.name,
                replay_corpus=str(corpus), replay_plan=plan.name, summary=None, tests=None)
@@ -445,11 +450,11 @@ def main():
         original = candidates[0]
         evidence["native_build"] = {"xctestrun": str(original), "sha256": sha256(original),
                                     "developer_dir": os.environ.get("DEVELOPER_DIR")}
-        for label, corpus, entries, named_case in [
-                ("native-control-without-recovery", before_dir, without_recovery, None),
-                ("native-control-all", baseline_dir, index["transcripts"], TARGET),
-                ("native-control-named", control_dir, [target_entry], TARGET)]:
-            control = native_run(output, label, original, corpus, evidence["commands"])
+        for label, corpus, entries, named_case, named_only in [
+                ("native-control-without-recovery", before_dir, without_recovery, None, False),
+                ("native-control-all", baseline_dir, index["transcripts"], TARGET, False),
+                ("native-control-named", control_dir, [target_entry], TARGET, True)]:
+            control = native_run(output, label, original, corpus, evidence["commands"], named_only=named_only)
             evidence["runs"][label] = control
             save()
             if not native_control_passes(control, named_case):
@@ -479,7 +484,7 @@ def main():
             raise RuntimeError("Native paired controls did not execute exactly six additional recovery cases")
         if after_seconds - before_seconds >= 30:
             raise RuntimeError("Generic-corpus increment exceeds the 30-second acceptance budget")
-        native = native_run(output, "native-mutant", original, mutant_dir, evidence["commands"])
+        native = native_run(output, "native-mutant", original, mutant_dir, evidence["commands"], named_only=True)
         evidence["runs"]["native-mutant"] = native
         save()
         verify_receipts(output, native, mutant_dir, [target_entry])

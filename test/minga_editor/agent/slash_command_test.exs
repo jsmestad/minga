@@ -82,6 +82,14 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     on_exit(fn -> File.rm_rf!(dir) end)
 
+    event_log =
+      start_supervised!(
+        Supervisor.child_spec(
+          {MingaAgent.EventLog, name: nil, db_dir: dir},
+          id: {MingaAgent.EventLog, make_ref()}
+        )
+      )
+
     session_opts =
       Keyword.merge(
         [
@@ -89,12 +97,13 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           provider_opts: [],
           persist?: false,
           hooks_enabled?: false,
-          session_store_dir: dir
+          session_store_dir: dir,
+          event_log_server: event_log
         ],
         opts
       )
 
-    start_supervised!(Supervisor.child_spec({Session, session_opts}, id: {Session, make_ref()}))
+    Minga.Test.SessionCase.start_test_session(session_opts)
   end
 
   defp model_candidate(model_id, display_name \\ nil) do

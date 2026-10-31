@@ -266,12 +266,28 @@ Query settings with `build-for-testing -showBuildSettings -json`, not the defaul
 For this scheme, require the observed format-1 top-level `MingaTests` plan and application-bundle `TestHostPath`; do not infer the plan host path from the executable-valued build setting.
 Require resolved product/loader settings and actual runtime identity, not merely requested flags.
 Keep the hosted build receipt and raw pre/post plan receipts; failed builds and missing, ambiguous, stale, or wrong-mode plans leave dependent runners explicitly unexecuted.
-CI repeats the canonical unit lifecycle without clearing DerivedData and retains `macos-unit-evidence/warm/results.json` to prove hosted-to-bare reuse.
+CI repeats the canonical unit lifecycle without clearing DerivedData and retains `conformance-pixel-evidence/unit-bundle/warm/results.json` to prove hosted-to-bare reuse.
 Preserve aggregate failure when ordinary tests fail, even if later focused diagnostics pass.
 Keep production `Minga.app` out of `TEST_HOST` and preserve its deep-codesigning safeguard.
 Native-field AX replay requires application focus to equal the exact `field.cell` and `cell.controlView` to equal that production field; the shared field editor remains the separate responder assertion.
 Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
 Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
+
+The shared conformance corpus can also assert editor-surface pixels.
+`ConformanceTranscriptTests.Pixels` is serialized and renders the dispatcher's newly committed snapshot through the production Metal renderer, using the same offscreen factories/readback as the temporal suite.
+Fixtures use Menlo 13, scale 1; cell Y coordinates include committed line spacing.
+Region color and glyph-occupancy samples are composition evidence, never model-state gates or golden-image comparisons.
+Rejected frames and accepted transactions that retain an older editor snapshot must not reuse that snapshot for pixels.
+
+```bash
+# From repository root, after generating the corpus/project:
+MINGA_REQUIRE_METAL=1 python3 scripts/check_conformance_pixels --mutations
+```
+
+This is also the existing macOS Swift CI job's test command.
+It runs the unit bundle, records warm focused conformance timings before/after the pixel suite, and checks isolated production-equivalent historical mutations.
+See `test/conformance/corpus/README.md` for the schema, 0.02 squared-RGB tolerance, device-unavailable behavior, the 10-second increment budget, and the distinction between direct Metal evidence and production EditorNSView geometry/scroll regressions.
+Background fill removal can legitimately survive because the production clear already has the same color; never fake a contrasting clear or report a build failure as a mutation kill.
 
 ### Swift 6 Concurrency Patterns
 

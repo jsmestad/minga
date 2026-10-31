@@ -341,9 +341,10 @@ final class CoreTextMetalRenderer {
     /// colors without threading the parameter through every call.
     private var currentThemeColors: ThemeColors?
 
-    init?(resourcePolicy: FrameResourcePolicy.NativeRendererLimits = .default,
+    init?(device: MTLDevice? = MTLCreateSystemDefaultDevice(),
+          resourcePolicy: FrameResourcePolicy.NativeRendererLimits = .default,
           factories: NativeRenderFactories = .production) {
-        guard let device = MTLCreateSystemDefaultDevice() else { return nil }
+        guard let device else { return nil }
         self.device = device
         self.resourcePolicy = resourcePolicy
         self.factories = factories
