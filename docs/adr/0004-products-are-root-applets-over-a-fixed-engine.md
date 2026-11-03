@@ -1,6 +1,6 @@
 # ADR-0004: Products are root applets over a fixed engine; scripted code runs in host workers as new module generations
 
-**Status:** Proposed (2026-11-03). Refines ADR-0003's exit clause. Implementation epic: filed after acceptance. Design record: two adversarial review rounds over three proposal drafts, summarized under "Alternatives rejected".
+**Status:** Accepted (2026-11-03). Refines ADR-0003's exit clause. Implementation epic: #3542. Design record: two adversarial review rounds over three proposal drafts, summarized under "Alternatives rejected".
 
 ## Decision
 
