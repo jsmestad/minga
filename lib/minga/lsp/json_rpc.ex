@@ -12,7 +12,7 @@ defmodule Minga.LSP.JsonRpc do
   into this format and decoding them from a binary buffer (handling
   partial reads and multiple messages in a single chunk).
 
-  Uses Elixir 1.19's built-in `JSON` module (backed by OTP's `:json` NIF)
+  Uses Elixir 1.20's built-in `JSON` module (backed by OTP's `:json` NIF)
   for maximum encode/decode performance with zero external dependencies.
 
   ## Message Types

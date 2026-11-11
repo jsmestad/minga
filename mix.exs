@@ -39,7 +39,7 @@ defmodule Minga.MixProject do
     [
       app: :minga,
       version: @version,
-      elixir: "~> 1.19",
+      elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       test_paths: test_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,

@@ -58,7 +58,7 @@ Both gates run every independent check even when one fails (Dialyzer and Reach a
 
 See `AGENTS.md` (in the repo root) for the full project structure, coding standards, and conventions. The highlights:
 
-- **`@spec` on every public function**: Elixir 1.19's type system is strict
+- **`@spec` on every public function**: Elixir 1.20's type system is strict
 - **Pattern matching over `if`/`cond`**: multi-clause functions preferred
 - **Test files mirror `lib/`**: `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
 - **Property-based tests** with StreamData for data structures
