@@ -8,7 +8,7 @@ defmodule MingaGitPorcelain.MixProject do
     [
       app: :minga_git_porcelain,
       version: @version,
-      elixir: "~> 1.19",
+      elixir: "~> 1.20",
       start_permanent: false,
       deps: deps(),
       description: "Bundled Git porcelain UI extension for Minga",
