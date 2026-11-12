@@ -37,6 +37,7 @@ defmodule MingaAgent.Providers.Native do
 
   alias Minga.Buffer
   alias Minga.Git
+  alias MingaAgent.ArtifactStore
   alias MingaAgent.Compaction
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.CostCalculator
@@ -1749,31 +1750,54 @@ defmodule MingaAgent.Providers.Native do
   @spec outbound_messages(loop_ctx(), [ReqLLM.Message.t()]) ::
           {:ok, [ReqLLM.Message.t()]} | {:error, OutputHydration.error_reason()}
   defp outbound_messages(lctx, messages) do
-    if OutputHydration.required?(messages) do
-      hydrate_outbound_messages(
-        lctx,
-        messages,
-        ModelSelection.image_tool_result_delivery(lctx.selection)
-      )
-    else
-      {:ok, messages}
+    delivery = ModelSelection.image_tool_result_delivery(lctx.selection)
+
+    case project_outbound_messages(lctx, messages, delivery, nil) do
+      :unchanged -> {:ok, messages}
+      result -> result
     end
   end
 
-  @spec hydrate_outbound_messages(
+  @spec project_outbound_messages(
           loop_ctx(),
           [ReqLLM.Message.t()],
-          ModelSelection.image_tool_result_delivery()
-        ) :: {:ok, [ReqLLM.Message.t()]} | {:error, OutputHydration.error_reason()}
-  defp hydrate_outbound_messages(_lctx, messages, {:unsupported, _reason} = delivery),
-    do: OutputHydration.hydrate(messages, nil, delivery)
+          ModelSelection.image_tool_result_delivery(),
+          ArtifactStore.server() | nil
+        ) :: :unchanged | {:ok, [ReqLLM.Message.t()]} | {:error, OutputHydration.error_reason()}
+  defp project_outbound_messages(_lctx, [], _delivery, _store), do: :unchanged
 
-  defp hydrate_outbound_messages(lctx, messages, :supported) do
-    case Session.artifact_store(lctx.session_pid) do
-      {:ok, store} -> OutputHydration.hydrate(messages, store, :supported)
-      {:error, reason} -> {:error, {:artifact_integrity_error, reason}}
+  defp project_outbound_messages(lctx, [message | rest], delivery, store) do
+    with {:ok, store} <- outbound_artifact_store(lctx, message, delivery, store),
+         {:ok, hydrated} <- OutputHydration.hydrate(message, store, delivery) do
+      projected = ReqLLMAdapter.request_message(hydrated)
+
+      case project_outbound_messages(lctx, rest, delivery, store) do
+        :unchanged when projected === message -> :unchanged
+        :unchanged -> {:ok, [projected | rest]}
+        {:ok, projected_rest} -> {:ok, [projected | projected_rest]}
+        {:error, _reason} = error -> error
+      end
     end
   end
+
+  @spec outbound_artifact_store(
+          loop_ctx(),
+          ReqLLM.Message.t(),
+          ModelSelection.image_tool_result_delivery(),
+          ArtifactStore.server() | nil
+        ) :: {:ok, ArtifactStore.server() | nil} | {:error, OutputHydration.error_reason()}
+  defp outbound_artifact_store(lctx, message, :supported, nil) do
+    if OutputHydration.required?(message) do
+      case Session.artifact_store(lctx.session_pid) do
+        {:ok, store} -> {:ok, store}
+        {:error, reason} -> {:error, {:artifact_integrity_error, reason}}
+      end
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp outbound_artifact_store(_lctx, _message, _delivery, store), do: {:ok, store}
 
   # Processes a stream response and decides whether to continue (tool calls) or finish.
   @spec process_and_continue(loop_ctx(), Context.t(), ReqLLM.StreamResponse.t()) ::

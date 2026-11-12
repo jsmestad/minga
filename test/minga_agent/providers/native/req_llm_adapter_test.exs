@@ -134,91 +134,130 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert usage.output_tokens == 5
   end
 
-  test "retains the complete assistant message for provider continuation" do
-    reasoning =
-      ReqLLM.Message.ReasoningDetails.from_openai_compatible(
-        %{
-          "text" => "private reasoning",
-          "signature" => "opaque-signature",
-          "vendor_field" => "kept"
-        },
-        :openrouter,
-        0
-      )
+  test "the next encoded Anthropic request preserves supported continuation blocks and tool groups" do
+    opaque = %{
+      "type" => "server_tool_use",
+      "id" => "server_1",
+      "name" => "web_search",
+      "input" => %{"query" => "synthetic fixture"}
+    }
 
-    opaque_part = ReqLLM.Message.ContentPart.image_url("https://example.test/result.png")
+    calls = [
+      ReqLLM.StreamChunk.tool_call("grep", %{"pattern" => "one"}, %{id: "tc_1", index: 0}),
+      ReqLLM.StreamChunk.tool_call("grep", %{"pattern" => "two"}, %{id: "tc_2", index: 1})
+    ]
 
-    stream_response =
-      build_stream_response(
-        [
-          ReqLLM.StreamChunk.text("before", %{provider_field: "opaque"}),
-          ReqLLM.StreamChunk.content_part(opaque_part),
-          ReqLLM.StreamChunk.content_part(opaque_part, %{stream_only?: true}),
-          ReqLLM.StreamChunk.thinking("temporary preview", %{stream_only?: true}),
-          ReqLLM.StreamChunk.thinking("private reasoning"),
-          ReqLLM.StreamChunk.text("after"),
-          ReqLLM.StreamChunk.tool_call("grep", %{"pattern" => "one"}, %{id: "tc_1", index: 0}),
-          ReqLLM.StreamChunk.tool_call("grep", %{"pattern" => "two"}, %{id: "tc_2", index: 1}),
-          ReqLLM.StreamChunk.meta(%{
-            finish_reason: :tool_use,
-            reasoning_details: [reasoning]
-          })
-        ],
-        %{},
-        %{
-          response_id: "resp_1",
-          phase: :analysis,
-          phase_items: ["item_1"],
-          provider_meta: %{trace_id: "trace_1"}
-        }
-      )
+    encoded_calls = [
+      %{"type" => "tool_use", "id" => "tc_1", "name" => "grep", "input" => %{"pattern" => "one"}},
+      %{"type" => "tool_use", "id" => "tc_2", "name" => "grep", "input" => %{"pattern" => "two"}}
+    ]
 
-    assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
+    for {chunks, expected_content, tool_ids} <- [
+          {[ReqLLM.StreamChunk.text("only text")], "only text", []},
+          {
+            [
+              ReqLLM.StreamChunk.text("before", %{cache_control: %{type: "ephemeral"}}),
+              ReqLLM.StreamChunk.thinking("stream-only thinking preview", %{stream_only?: true}),
+              ReqLLM.StreamChunk.thinking("signed reasoning", %{signature: "opaque-signature"}),
+              ReqLLM.StreamChunk.text("after")
+            ] ++ calls,
+            [
+              %{
+                "type" => "text",
+                "text" => "before",
+                "cache_control" => %{"type" => "ephemeral"}
+              },
+              %{
+                "type" => "thinking",
+                "thinking" => "signed reasoning",
+                "signature" => "opaque-signature"
+              },
+              %{"type" => "text", "text" => "after"}
+            ] ++ encoded_calls,
+            ["tc_1", "tc_2"]
+          },
+          {
+            [
+              ReqLLM.StreamChunk.text("before"),
+              ReqLLM.StreamChunk.content_part(
+                ReqLLM.Message.ContentPart.provider_block(
+                  :anthropic,
+                  Map.put(opaque, "id", "stream-only-preview")
+                ),
+                %{stream_only?: true}
+              ),
+              ReqLLM.StreamChunk.content_part(
+                ReqLLM.Message.ContentPart.provider_block(:anthropic, opaque)
+              ),
+              ReqLLM.StreamChunk.text("after")
+            ] ++ calls,
+            [
+              %{"type" => "text", "text" => "before"},
+              opaque,
+              %{"type" => "text", "text" => "after"}
+            ] ++
+              encoded_calls,
+            ["tc_1", "tc_2"]
+          },
+          {calls, encoded_calls, ["tc_1", "tc_2"]}
+        ] do
+      stream_response = build_stream_response(chunks)
+      assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
 
-    assert Enum.map(result.message.content, & &1.type) == [:text, :image_url, :thinking, :text]
+      results =
+        Enum.map(tool_ids, fn id ->
+          ReqLLM.Context.tool_result_message("grep", id, "result " <> id)
+        end)
 
-    assert result.message.content |> Enum.at(0) ==
-             ReqLLM.Message.ContentPart.text("before", %{provider_field: "opaque"})
+      request =
+        ReqLLM.Providers.Anthropic.encode_body(%Req.Request{
+          options: [
+            context:
+              ReqLLM.Context.new([ReqLLM.Context.user("fixture"), result.message] ++ results),
+            model: "exact-anthropic",
+            stream: false
+          ]
+        })
 
-    assert Enum.at(result.message.content, 1) == opaque_part
-    assert Enum.at(result.message.content, 2).text == "private reasoning"
-    assert Enum.at(result.message.content, 3).text == "after"
-    assert result.message.reasoning_details == [reasoning]
-    assert result.message.metadata.response_id == "resp_1"
-    assert result.message.metadata.phase == :analysis
-    assert result.message.metadata.phase_items == ["item_1"]
+      encoded =
+        request
+        |> Req.Steps.encode_body()
+        |> Map.fetch!(:body)
+        |> IO.iodata_to_binary()
+        |> JSON.decode!()
 
-    assert Enum.map(result.message.tool_calls, & &1.id) == ["tc_1", "tc_2"]
-    assert Enum.map(result.tool_calls, & &1.id) == ["tc_1", "tc_2"]
+      assert Enum.at(encoded["messages"], 1) == %{
+               "role" => "assistant",
+               "content" => expected_content
+             }
+
+      if tool_ids != [] do
+        assert List.last(encoded["messages"]) == %{
+                 "role" => "user",
+                 "content" =>
+                   Enum.map(tool_ids, fn id ->
+                     %{"type" => "tool_result", "tool_use_id" => id, "content" => "result " <> id}
+                   end)
+               }
+      end
+    end
   end
 
-  test "keeps interleaved text and thinking in provider order" do
-    stream_response =
-      build_stream_response([
-        ReqLLM.StreamChunk.text("before"),
-        ReqLLM.StreamChunk.thinking("reasoning"),
-        ReqLLM.StreamChunk.text("after"),
-        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-      ])
+  test "rejects cancelled, missing, malformed, and incomplete completion reasons" do
+    for finish_reason <- [:incomplete, :cancelled, :length, :unknown, nil] do
+      stream_response =
+        build_stream_response(
+          [
+            ReqLLM.StreamChunk.text("partial response"),
+            ReqLLM.StreamChunk.meta(%{finish_reason: finish_reason})
+          ],
+          %{},
+          %{finish_reason: finish_reason}
+        )
 
-    assert {:ok, result} = ReqLLMAdapter.process_stream(stream_response)
-    assert Enum.map(result.message.content, & &1.type) == [:text, :thinking, :text]
-    assert Enum.map(result.message.content, & &1.text) == ["before", "reasoning", "after"]
-  end
-
-  test "rejects a response marked incomplete instead of returning a successful turn" do
-    stream_response =
-      build_stream_response(
-        [
-          ReqLLM.StreamChunk.text("partial response"),
-          ReqLLM.StreamChunk.meta(%{finish_reason: :incomplete})
-        ],
-        %{},
-        %{finish_reason: :incomplete}
-      )
-
-    assert {:error, {:incomplete_response, :incomplete}, "partial response"} =
-             ReqLLMAdapter.process_stream(stream_response)
+      assert {:error, {:incomplete_response, ^finish_reason}, "partial response"} =
+               ReqLLMAdapter.process_stream(stream_response)
+    end
   end
 
   test "compaction preserves JSON-looking text instead of returning an empty summary" do

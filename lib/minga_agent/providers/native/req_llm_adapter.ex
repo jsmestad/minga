@@ -12,6 +12,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.Providers.Native.ReqLLMAdapter.TurnResult
   alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias MingaAgent.Tool.Output
   alias ReqLLM.Message
   alias ReqLLM.Response
   alias ReqLLM.StreamResponse
@@ -132,6 +133,29 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
       when is_function(llm_client, 3) do
     llm_client.(model, messages, opts)
   end
+
+  @doc "Projects host-private tool metadata out of one transient SDK message."
+  @spec request_message(Message.t()) :: Message.t()
+  def request_message(%Message{role: :tool, metadata: metadata} = message) do
+    private_keys =
+      case metadata do
+        %{output: output} when is_struct(output, Output) or is_nil(output) ->
+          [:output, :minga_effect_status, :image_tool_result_delivery]
+
+        _provider_output ->
+          [:minga_effect_status, :image_tool_result_delivery]
+      end
+
+    projected = Map.drop(metadata, private_keys)
+
+    if projected === metadata do
+      message
+    else
+      %{message | metadata: projected}
+    end
+  end
+
+  def request_message(%Message{} = message), do: message
 
   @doc "Processes a ReqLLM stream response into a neutral turn result."
   @spec process_stream(StreamResponse.t(), stream_callbacks()) ::
