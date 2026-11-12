@@ -33,7 +33,7 @@ defmodule MingaAgent.Providers.NativeTest do
   # the given chunks. This lets us test the full agent loop without hitting
   # any real LLM API.
   # Non-billing scenarios must not trigger cold catalog pricing.
-  defp fake_llm_client(chunks, usage \\ %{total_cost: 0.001}) do
+  defp fake_llm_client(chunks, usage) do
     fn _model, _messages, _opts ->
       build_stream_response(chunks, usage)
     end
@@ -224,6 +224,7 @@ defmodule MingaAgent.Providers.NativeTest do
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, :artifact_store} ->
+        send(owner, :artifact_store_requested)
         GenServer.reply(from, {:ok, store})
         provider_subscriber_loop(owner, owner_ref, store)
 
@@ -1401,16 +1402,13 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :counters.get(call_count, 1) == 2
     end
 
-    test "supported retained images hydrate once for outbound delivery and stay byte-free durably",
-         %{
-           tmp_dir: dir
-         } do
-      image =
-        <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy("retained-image", 8_000)
-
+    test "multiple retained images hydrate with one store lookup and keep durable references", %{
+      tmp_dir: dir
+    } do
+      image = <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy("retained-image", 8_000)
       assert byte_size(image) > 64 * 1_024
       File.write!(Path.join(dir, "exact.png"), image)
-      test_pid = self()
+      parent = self()
       call_count = :counters.new(1, [:atomics])
 
       selection =
@@ -1424,23 +1422,33 @@ defmodule MingaAgent.Providers.NativeTest do
           }
         )
 
-      client = fn _model, messages, _opts ->
+      client = fn model, messages, _opts ->
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
 
         if count == 0 do
           build_stream_response([
             ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "exact.png"}, %{
-              id: "tc_supported_image",
+              id: "tc_image_first",
               index: 0
+            }),
+            ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "exact.png"}, %{
+              id: "tc_image_second",
+              index: 1
             }),
             ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
           ])
         else
-          send(test_pid, {:supported_image_outbound, messages})
+          request =
+            ReqLLM.Providers.Anthropic.encode_body(%Req.Request{
+              options: [context: Context.new(messages), model: model.id, stream: false]
+            })
+
+          wire = request |> Req.Steps.encode_body() |> Map.fetch!(:body) |> IO.iodata_to_binary()
+          send(parent, {:supported_image_wire, wire})
 
           build_stream_response([
-            ReqLLM.StreamChunk.text("The image arrived."),
+            ReqLLM.StreamChunk.text("The images arrived."),
             ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
           ])
         end
@@ -1454,33 +1462,150 @@ defmodule MingaAgent.Providers.NativeTest do
           tools: Tools.all(project_root: dir)
         )
 
-      assert :ok = send_prompt(pid, "Read exact.png")
+      assert :ok = send_prompt(pid, "Read exact.png twice")
       events = collect_run_events()
+      assert_received :artifact_store_requested
+      refute_received :artifact_store_requested
+      assert_received {:supported_image_wire, wire}
+      results = List.last(JSON.decode!(wire)["messages"])["content"]
+      assert Enum.map(results, & &1["tool_use_id"]) == ["tc_image_first", "tc_image_second"]
 
-      assert_receive {:supported_image_outbound, outbound}, 1_000
-      outbound_tool = Enum.find(outbound, &(&1.role == :tool))
+      for result <- results do
+        assert [%{"source" => %{"data" => data}}] =
+                 Enum.filter(result["content"], &(&1["type"] == "image"))
 
-      assert Enum.any?(outbound_tool.content, fn
-               %ContentPart{type: :image, data: data} -> data == image
-               _part -> false
-             end)
+        assert Base.decode64!(data) == image
+      end
 
-      agent_end =
-        Enum.find(
-          events,
-          &match?(%Event.AgentEnd{outcome: %MingaAgent.Session.Outcome{}}, &1)
-        )
+      completed = Enum.find(events, &match?(%Event.AgentEnd{outcome: %{}}, &1))
+      durable_results = Enum.filter(completed.outcome.messages, &(&1.role == :tool))
+      assert length(durable_results) == 2
 
-      durable_tool = Enum.find(agent_end.outcome.messages, &(&1.role == :tool))
-      refute Enum.any?(durable_tool.content, &(&1.type == :image))
+      for message <- durable_results do
+        refute Enum.any?(message.content, &(&1.type == :image))
 
-      assert [%MingaAgent.Tool.Output.Attachment{media_type: "image/png"}] =
-               durable_tool.metadata.output.attachments
+        assert [%MingaAgent.Tool.Output.Attachment{media_type: "image/png"}] =
+                 message.metadata.output.attachments
+
+        refute String.contains?(wire, message.metadata.output.reference.token)
+        refute String.contains?(wire, message.metadata.output.revision.source_id)
+      end
 
       assert :counters.get(call_count, 1) == 2
     end
 
-    test "replays the complete assistant response before appending grouped tool results", %{
+    test "supported attachment failures block transport without fabricating a continuation", %{
+      tmp_dir: dir
+    } do
+      parent = self()
+
+      for failure <- [:missing_store, :unauthorized, :missing_blob, :corrupt_blob] do
+        root = Path.join(dir, Atom.to_string(failure))
+
+        quota =
+          start_supervised!(
+            Supervisor.child_spec({ArtifactQuota, root: root}, id: {:image_quota, failure})
+          )
+
+        store =
+          start_supervised!(
+            Supervisor.child_spec(
+              {ArtifactStore, root: root, quota: quota, session_id: "image-failure"},
+              id: {:image_store, failure}
+            )
+          )
+
+        assert {:ok, captured} =
+                 MingaAgent.Tools.OutputCapture.bytes(
+                   store,
+                   {:delivery, "checkpoint", "image"},
+                   <<137, 80, 78, 71, 13, 10, 26, 10, 1>>,
+                   media_type: "image/png"
+                 )
+
+        assert {:ok, attachment} =
+                 MingaAgent.Tool.Output.Attachment.image(captured.reference, "fixture.png")
+
+        assert {:ok, output} =
+                 MingaAgent.Tool.Output.new("[image retained]", :complete, captured.selection,
+                   reference: captured.reference,
+                   attachments: [attachment]
+                 )
+
+        {:ok, namespace, artifact_id} =
+          MingaAgent.Tool.Output.Reference.parse(captured.reference.token)
+
+        {:ok, paths} =
+          MingaAgent.ArtifactStore.Paths.new(
+            Path.join([root, "namespaces", namespace]),
+            artifact_id
+          )
+
+        {delivery_store, expected_error} =
+          case failure do
+            :missing_store ->
+              {nil, :retention_unavailable}
+
+            :unauthorized ->
+              {start_retention_store(Path.join(root, "other")), :unauthorized}
+
+            :missing_blob ->
+              File.rm!(paths.blob)
+              {store, :artifact_corrupt}
+
+            :corrupt_blob ->
+              {:ok, io} =
+                :file.open(String.to_charlist(paths.blob), [:read, :write, :binary, :raw])
+
+              :ok = :file.pwrite(io, MingaAgent.ArtifactStore.Limits.blob_header_bytes(), <<255>>)
+              :ok = :file.close(io)
+              {store, :artifact_corrupt}
+          end
+
+        selection =
+          ModelSelectionFixture.selection(
+            request_provider: :anthropic,
+            capabilities: %{tools: true, images: true, tool_result_images: true, streaming: true}
+          )
+
+        client = fn _model, _messages, _opts ->
+          send(parent, {:unexpected_image_request, failure})
+          build_stream_response([ReqLLM.StreamChunk.text("must not run")])
+        end
+
+        {:ok, pid} =
+          start_provider(
+            tmp_dir: root,
+            model_selection: selection,
+            subscriber: start_provider_subscriber(self(), delivery_store),
+            llm_client: client
+          )
+
+        messages = [
+          Context.user("Read fixture.png"),
+          Context.assistant("",
+            tool_calls: [ReqLLM.ToolCall.new("image", "read_file", ~s({"path":"fixture.png"}))]
+          ),
+          Context.tool_result_message("read_file", "image", "[image retained]", %{output: output}),
+          Context.user("Continue")
+        ]
+
+        {events, log} =
+          with_log(fn ->
+            assert :ok = Native.continue(pid, Request.new("image-failure", 1, 0, messages))
+            collect_run_events()
+          end)
+
+        assert log =~ inspect(expected_error)
+        assert Enum.any?(events, &match?(%Event.Error{}, &1))
+        refute Enum.any?(events, &match?(%Event.AgentEnd{outcome: %{}}, &1))
+        refute_received {:unexpected_image_request, ^failure}
+        assert Enum.at(messages, 2).metadata.output == output
+        GenServer.stop(pid)
+      end
+    end
+
+    test "encodes the complete assistant response before grouped tool results", %{
       tmp_dir: dir
     } do
       File.write!(Path.join(dir, "test.txt"), "file contents")
@@ -1489,12 +1614,16 @@ defmodule MingaAgent.Providers.NativeTest do
 
       reasoning =
         ReqLLM.Message.ReasoningDetails.from_openai_compatible(
-          %{"text" => "checking the file", "signature" => "opaque-signature"},
+          %{
+            "text" => "checking the file",
+            "signature" => "opaque-signature",
+            "vendor_field" => %{"opaque" => ["keep", 7]}
+          },
           :openrouter,
           0
         )
 
-      client = fn _model, messages, _opts ->
+      client = fn model, messages, _opts ->
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
 
@@ -1523,7 +1652,19 @@ defmodule MingaAgent.Providers.NativeTest do
             )
 
           1 ->
-            send(parent, {:continuation_messages, messages})
+            request =
+              ReqLLM.Providers.OpenRouter.encode_body(%Req.Request{
+                options: [context: Context.new(messages), model: model.id, stream: false]
+              })
+
+            encoded =
+              request
+              |> Req.Steps.encode_body()
+              |> Map.fetch!(:body)
+              |> IO.iodata_to_binary()
+              |> JSON.decode!()
+
+            send(parent, {:encoded_continuation, encoded})
 
             build_stream_response([
               ReqLLM.StreamChunk.text("The file contents are confirmed."),
@@ -1535,38 +1676,68 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(
           tmp_dir: dir,
+          model_selection: ModelSelectionFixture.selection(request_provider: :openrouter),
           llm_client: client,
           tools: Tools.all(project_root: dir)
         )
 
       assert :ok = send_prompt(pid, "Read test.txt twice")
-      _events = collect_run_events()
+      events = collect_run_events()
 
-      assert_received {:continuation_messages, messages}
+      assert_received {:encoded_continuation, %{"messages" => messages}}
+      [assistant, first_result, second_result] = Enum.take(messages, -3)
 
-      assistant_message =
-        Enum.find(messages, &(&1.role == :assistant and is_list(&1.tool_calls)))
+      assert assistant["role"] == "assistant"
 
-      assert Enum.map(assistant_message.content, & &1.type) == [:text, :thinking, :text]
-
-      assert Enum.map(assistant_message.content, & &1.text) == [
-               "I will inspect it.",
-               "checking the file",
-               " Then I will verify the results."
+      assert assistant["content"] == [
+               %{"type" => "text", "text" => "I will inspect it."},
+               %{"type" => "text", "text" => " Then I will verify the results."}
              ]
 
-      assert assistant_message.reasoning_details == [reasoning]
-      assert assistant_message.metadata.response_id == "resp_native_1"
-      assert Enum.map(assistant_message.tool_calls, & &1.id) == ["tc_first", "tc_second"]
+      assert assistant["reasoning_content"] == "checking the file"
 
-      tool_results =
-        Enum.filter(
-          messages,
-          &(&1.role == :tool and &1.tool_call_id in ["tc_first", "tc_second"])
-        )
+      assert [
+               %{
+                 "signature" => "opaque-signature",
+                 "text" => "checking the file",
+                 "vendor_field" => %{"opaque" => ["keep", 7]}
+               }
+             ] = assistant["reasoning_details"]
 
-      assert Enum.map(tool_results, & &1.tool_call_id) == ["tc_first", "tc_second"]
-      assert Enum.all?(tool_results, &(text_content(&1) == "file contents"))
+      assert assistant["metadata"]["response_id"] == "resp_native_1"
+
+      assert Enum.map(assistant["tool_calls"], fn call ->
+               {call["id"], call["function"]["name"], JSON.decode!(call["function"]["arguments"])}
+             end) == [
+               {"tc_first", "read_file", %{"path" => "test.txt"}},
+               {"tc_second", "read_file", %{"path" => "test.txt"}}
+             ]
+
+      assert Enum.map([first_result, second_result], fn result ->
+               {result["role"], result["tool_call_id"], result["content"]}
+             end) == [
+               {"tool", "tc_first", "file contents"},
+               {"tool", "tc_second", "file contents"}
+             ]
+
+      for result <- [first_result, second_result] do
+        refute Map.has_key?(result["metadata"] || %{}, "output")
+      end
+
+      completed = Enum.find(events, &match?(%Event.AgentEnd{outcome: %{}}, &1))
+      durable_results = Enum.filter(completed.outcome.messages, &(&1.role == :tool))
+
+      assert Enum.all?(durable_results, fn message ->
+               match?(%MingaAgent.Tool.Output{reference: %{}}, message.metadata.output)
+             end)
+
+      assert Enum.any?(events, &match?(%Event.ThinkingDelta{delta: "checking the file"}, &1))
+      assert Enum.count(events, &match?(%Event.ToolEnd{is_error: false}, &1)) == 2
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.TextDelta{delta: "The file contents are confirmed."}, &1)
+             )
     end
 
     test "executes the supplied custom spec with refreshed project context", %{tmp_dir: dir} do
@@ -1720,7 +1891,6 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_slow", "tc_fail"]
       assert Enum.map(tool_messages, &tool_message_text/1) == ["slow result", "boom"]
       assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [false, true]
-      assert Enum.all?(tool_messages, &match?(%MingaAgent.Tool.Output{}, &1.metadata[:output]))
     end
 
     test "abnormal concurrent tool exit stops model continuation with an unknown effect", %{
@@ -3039,22 +3209,113 @@ defmodule MingaAgent.Providers.NativeTest do
       refute_received :side_effect_executed
     end
 
-    test "accepts Session-provided continuation without provider-local interruption history", %{
+    test "encodes recovered continuation without exposing private metadata or replaying tools", %{
       tmp_dir: dir
     } do
-      chunks = [
-        ReqLLM.StreamChunk.text("Complete response"),
-        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+      parent = self()
+
+      client = fn model, messages, _opts ->
+        request =
+          ReqLLM.Providers.OpenRouter.encode_body(%Req.Request{
+            options: [context: Context.new(messages), model: model.id, stream: false]
+          })
+
+        encoded =
+          request
+          |> Req.Steps.encode_body()
+          |> Map.fetch!(:body)
+          |> IO.iodata_to_binary()
+          |> JSON.decode!()
+
+        send(parent, {:encoded_recovery, encoded})
+
+        build_stream_response([
+          ReqLLM.StreamChunk.text("Continued safely."),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+        ])
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          model_selection: ModelSelectionFixture.selection(request_provider: :openrouter),
+          llm_client: client
+        )
+
+      assistant =
+        Context.assistant("Original group",
+          tool_calls:
+            Enum.map(["completed", "pending", "admitted", "provider"], fn id ->
+              ReqLLM.ToolCall.new(id, "read_file", ~s({"path":"fixture.txt"}))
+            end),
+          metadata: %{
+            response_id: "restored-response",
+            output: %{"provider" => "assistant-kept"},
+            minga_effect_status: "provider-owned",
+            image_tool_result_delivery: "provider-owned"
+          }
+        )
+
+      results = [
+        Context.tool_result_message("read_file", "completed", "completed result", %{
+          is_error: false,
+          output: nil
+        }),
+        Context.tool_result_message("read_file", "pending", "not executed", %{
+          is_error: true,
+          minga_effect_status: :not_executed,
+          image_tool_result_delivery: {:unsupported, :tool_result_transport}
+        }),
+        Context.tool_result_message("read_file", "admitted", "indeterminate effect", %{
+          is_error: true,
+          minga_effect_status: :indeterminate
+        }),
+        Context.tool_result_message("read_file", "provider", "provider result", %{
+          is_error: false,
+          output: %{"provider_field" => ["kept", 7]},
+          tool_output: %{"sdk_field" => "kept"},
+          provider_metadata: %{"opaque" => "kept"}
+        })
       ]
 
-      client = fake_llm_client(chunks)
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+      messages =
+        [Context.user("Inspect fixture.txt"), assistant] ++ results ++ [Context.user("Continue")]
 
-      assert :ok = send_prompt(pid, "Hello")
-      collect_run_events()
+      request = Request.new("restored-request", 1, 0, messages)
+      assert :ok = Native.continue(pid, request)
+      events = collect_run_events()
 
-      assert :ok = continue(pid)
-      assert Enum.any?(collect_run_events(), &match?(%Event.AgentEnd{outcome: %{}}, &1))
+      assert_received {:encoded_recovery, %{"messages" => encoded}}
+
+      assert Enum.at(encoded, 1)["metadata"] == %{
+               "response_id" => "restored-response",
+               "output" => %{"provider" => "assistant-kept"},
+               "minga_effect_status" => "provider-owned",
+               "image_tool_result_delivery" => "provider-owned"
+             }
+
+      assert Enum.map(Enum.slice(encoded, 2, 4), & &1["tool_call_id"]) == [
+               "completed",
+               "pending",
+               "admitted",
+               "provider"
+             ]
+
+      assert Enum.at(encoded, 2)["metadata"] == %{"is_error" => false}
+      assert Enum.at(encoded, 3)["metadata"] == %{"is_error" => true}
+      assert Enum.at(encoded, 4)["metadata"] == %{"is_error" => true}
+
+      assert Enum.at(encoded, 5)["metadata"] == %{
+               "is_error" => false,
+               "output" => %{"provider_field" => ["kept", 7]},
+               "tool_output" => %{"sdk_field" => "kept"},
+               "provider_metadata" => %{"opaque" => "kept"}
+             }
+
+      completed = Enum.find(events, &match?(%Event.AgentEnd{outcome: %{}}, &1))
+      assert Enum.take(completed.outcome.messages, length(messages)) == messages
+      refute Enum.any?(events, &match?(%Event.ToolStart{}, &1))
+      refute_received {:effect_admitted, _tool_call_id}
     end
 
     test "continue fails while already streaming", %{tmp_dir: dir} do

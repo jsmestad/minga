@@ -4,6 +4,7 @@ defmodule MingaAgent.Providers.Native.OutputHydrationTest do
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
   alias MingaAgent.Providers.Native.OutputHydration
+  alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Attachment
   alias MingaAgent.Tools.OutputCapture
@@ -13,92 +14,90 @@ defmodule MingaAgent.Providers.Native.OutputHydrationTest do
 
   @moduletag :tmp_dir
 
-  test "hydrates a larger-than-page image exactly and the pinned Anthropic encoder consumes it",
-       %{
-         tmp_dir: root
-       } do
+  test "multiple retained images reach the pinned wire encoder without exposing private references",
+       %{tmp_dir: root} do
     store = start_store(Path.join(root, "supported"), "supported")
     bytes = <<137, 80, 78, 71, 13, 10, 26, 10>> <> :binary.copy("image-page", 20_000)
-    durable = retained_message(store, bytes, "call-image", "result.png", %{marker: "kept"})
 
-    messages = [
-      Context.user("Read the image"),
+    durable = [
+      retained_message(store, bytes, "call-first", "first.png", %{marker: "kept"}),
+      retained_message(store, bytes, "call-second", "second.png", %{})
+    ]
+
+    assistant =
       Context.assistant("",
         tool_calls: [
-          %ReqLLM.ToolCall{
-            id: "call-image",
-            type: "function",
-            function: %{name: "read_file", arguments: ~s({\"path\":\"result.png\"})}
-          }
+          ReqLLM.ToolCall.new("call-first", "read_file", ~s({"path":"first.png"})),
+          ReqLLM.ToolCall.new("call-second", "read_file", ~s({"path":"second.png"}))
         ]
-      ),
-      durable
-    ]
+      )
 
     assert byte_size(bytes) > 64 * 1_024
 
-    assert {:ok, hydrated_messages} = OutputHydration.hydrate(messages, store, :supported)
-    hydrated = Enum.find(hydrated_messages, &(&1.tool_call_id == "call-image"))
-
-    assert hydrated.name == "read_file"
-    assert hydrated.tool_call_id == "call-image"
-    assert hydrated.metadata.marker == "kept"
-    assert Enum.any?(hydrated.content, &(&1.type == :text and &1.text == "[image retained]"))
-    assert Enum.any?(hydrated.content, &(&1.type == :image and &1.data == bytes))
-    refute Enum.any?(durable.content, &(&1.type == :image))
+    messages =
+      for message <- [Context.user("Read the images"), assistant] ++ durable do
+        assert {:ok, hydrated} = OutputHydration.hydrate(message, store, :supported)
+        ReqLLMAdapter.request_message(hydrated)
+      end
 
     request =
       Anthropic.encode_body(%Req.Request{
-        options: [
-          context: Context.new(hydrated_messages),
-          model: "exact-anthropic",
-          stream: false
-        ]
+        options: [context: Context.new(messages), model: "exact-anthropic", stream: false]
       })
 
-    encoded_tool_result =
-      request.options[:json][:messages]
-      |> List.last()
-      |> Map.fetch!(:content)
-      |> List.first()
+    wire = request |> Req.Steps.encode_body() |> Map.fetch!(:body) |> IO.iodata_to_binary()
+    encoded = JSON.decode!(wire)
+    results = List.last(encoded["messages"])["content"]
 
-    assert encoded_tool_result[:type] == "tool_result"
-    assert encoded_tool_result[:tool_use_id] == "call-image"
+    assert Enum.map(results, & &1["tool_use_id"]) == ["call-first", "call-second"]
 
-    assert Enum.any?(encoded_tool_result[:content], fn
-             %{type: "image", source: %{type: "base64", media_type: "image/png", data: data}} ->
-               Base.decode64!(data) == bytes
+    for result <- results do
+      assert result["type"] == "tool_result"
 
-             _block ->
-               false
-           end)
+      assert Enum.any?(
+               result["content"],
+               &(&1["type"] == "text" and &1["text"] == "[image retained]")
+             )
+
+      assert [%{"source" => %{"type" => "base64", "media_type" => "image/png", "data" => data}}] =
+               Enum.filter(result["content"], &(&1["type"] == "image"))
+
+      assert Base.decode64!(data) == bytes
+    end
+
+    for message <- durable do
+      assert [%Attachment{}] = message.metadata.output.attachments
+      refute Enum.any?(message.content, &(&1.type == :image))
+      refute String.contains?(wire, message.metadata.output.reference.token)
+    end
   end
 
-  test "unsupported restored history becomes an explicit tool error without fetching", %{
+  test "both unsupported delivery reasons encode an explicit tool error without a store", %{
     tmp_dir: root
   } do
     store = start_store(Path.join(root, "unsupported"), "unsupported")
     durable = retained_message(store, png_bytes(), "call-refusal", "result.png", %{})
 
-    assert {:ok, [projected]} =
-             OutputHydration.hydrate(
-               [durable],
-               nil,
-               {:unsupported, :tool_result_transport}
-             )
+    for reason <- [:model_image_input, :tool_result_transport] do
+      assert {:ok, hydrated} = OutputHydration.hydrate(durable, nil, {:unsupported, reason})
+      assert hydrated.metadata.output == durable.metadata.output
+      assert hydrated.metadata.image_tool_result_delivery == {:unsupported, reason}
+      projected = ReqLLMAdapter.request_message(hydrated)
 
-    assert projected.name == durable.name
-    assert projected.tool_call_id == durable.tool_call_id
-    assert projected.metadata.is_error == true
-    assert projected.metadata.output == durable.metadata.output
+      request =
+        Anthropic.encode_body(%Req.Request{
+          options: [context: Context.new([projected]), model: "exact-anthropic", stream: false]
+        })
 
-    assert projected.metadata.image_tool_result_delivery ==
-             {:unsupported, :tool_result_transport}
-
-    text = projected.content |> Enum.map_join("", &(&1.text || ""))
-    assert text =~ "[image retained]"
-    assert text =~ "selected protocol does not support images in tool results"
-    refute Enum.any?(projected.content, &(&1.type == :image))
+      wire = request |> Req.Steps.encode_body() |> Map.fetch!(:body) |> IO.iodata_to_binary()
+      assert [%{"role" => "user", "content" => [result]}] = JSON.decode!(wire)["messages"]
+      assert result["tool_use_id"] == "call-refusal"
+      assert result["is_error"] == true
+      refute Enum.any?(result["content"], &(&1["type"] == "image"))
+      assert Enum.map_join(result["content"], & &1["text"]) =~ "[image retained]"
+      refute String.contains?(wire, durable.metadata.output.reference.token)
+      refute Map.has_key?(projected.metadata, :image_tool_result_delivery)
+    end
   end
 
   test "an unauthorized attachment remains a visible integrity failure", %{tmp_dir: root} do
@@ -107,7 +106,7 @@ defmodule MingaAgent.Providers.Native.OutputHydrationTest do
     durable = retained_message(owner_store, png_bytes(), "call-integrity", "result.png", %{})
 
     assert {:error, {:artifact_integrity_error, :unauthorized}} =
-             OutputHydration.hydrate([durable], other_store, :supported)
+             OutputHydration.hydrate(durable, other_store, :supported)
   end
 
   defp retained_message(store, bytes, call_id, filename, metadata) do
