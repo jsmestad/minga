@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Reconciled ADR-0004 and terminal guidance with the approved full programmable v0.1.0 direction: shared definitions, independent instance upgrades and maintained Swift/Go clients. This is documentation reconciliation, not shipped live authoring.
 - Native tool continuations keep retained-output references and recovery bookkeeping out of transient provider metadata while preserving durable history and provider-owned continuation data. Contract tests inspect actual encoded next requests, signed thinking, supported opaque blocks, and grouped tool-call IDs.
 - Stale-intent investigation tooling can capture real native editor sessions with build provenance, dedicated debug logs, canonical-log correlation, and per-surface rejection counts. Synthetic smoke captures and incomplete evidence do not count toward the real-session cohort.
 - Semantic GUI activations now retain a typed target through decoding, resolution, and application. EX9015 rejects active-subject reads in targeted clauses and index-only GUI decoders, with reasoned exemptions for existing narrow workspace and window identities.

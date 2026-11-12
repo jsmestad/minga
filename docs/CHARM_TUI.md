@@ -1,6 +1,6 @@
 # Charm TUI Renderer
 
-The Charm renderer is the Go/Bubble Tea frontend for Minga's Semantic UI protocol and the only terminal frontend. It is the working semantic terminal reference while Rust is rebuilt as the desired long-term terminal frontend. Zig is parser/tree-sitter infrastructure only; the legacy Zig terminal renderer was removed in #2223.
+The Charm renderer is the maintained Go/Bubble Tea frontend for Minga's Semantic UI protocol and the only production terminal frontend. Rust remains research, not a promised successor. A replacement requires a separately authorized complete-cutover decision with demonstrated benefit, BEAM protocol/input/presentation conformance, all required surfaces, terminal lifecycle evidence and deletion of the Go implementation. Zig provides parser/tree-sitter infrastructure and the agent-hook process-group helper; its legacy terminal renderer was removed in #2223.
 
 ## Build
 
