@@ -1,0 +1,60 @@
+PIN_ELIXIR %{assertion: :pass, observed: "1.20.5"}
+PIN_OTP %{assertion: :pass, observed: ~c"29"}
+PIN_ERLANG %{assertion: :pass, observed: "29.1.2"}
+EXECUTING_VM_STARTED_UNLOADED %{assertion: :pass, observed: [false, false, false]}
+DECLARED_BEFORE_EXECUTION %{pid: "38549", mode: "coherent", provenance: :vm_local_only, no_on_load: true, no_runtime_modules: true, no_escaped_callbacks_or_processes: true, no_dependency_replacement: true, no_validation_external_effects: true, no_force_purge: true, trust: :full_os_user_not_sandbox}
+OTP_BATCH_v1 %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+FRESH_v1_Elixir.R0Definition.Left_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 1, n: 7}, {:v1, :v1, 120}}}}
+FRESH_v1_Elixir.R0Definition.Right_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 1, n: 7}, {:v1, :v1, 1020}}}}
+DRAIN_WAIT %{assertion: :pass, observed: :draining}
+DRAIN_EXECUTABLE_UNCHANGED %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+ADMISSION_CLOSED %{assertion: :pass, observed: {:error, :draining}}
+SECOND_INSTALL_REJECTED %{assertion: :pass, observed: {:error, :draining}}
+DRAIN_COHERENT_Elixir.R0Definition.Left %{assertion: :pass, observed: {:ok, %{kind: :modern, schema: 1, n: 7}, {:v1, :v1, 120}}}
+DRAIN_COHERENT_Elixir.R0Definition.Right %{assertion: :pass, observed: {:ok, %{kind: :modern, schema: 1, n: 7}, {:v1, :v1, 1020}}}
+PHASE %{token: #Reference<0.3130264326.1313603585.66794>, phase: :before_install, installer: #PID<0.127.0>, executable: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+INSTALL_ONLY_AFTER_DRAIN %{assertion: :pass, observed: 0}
+OTP_BATCH_v2 %{assertion: :pass, observed: [{R0Definition.Helper, "4d8b3caf94f063ecf9500a99ede3904e"}, {R0Definition.Left, "c56b67863bcd560d1fa33a95b15b1741"}, {R0Definition.Right, "c46a5be8a2b836410f0b3cbd63f5e320"}]}
+PHASE %{token: #Reference<0.3130264326.1313603585.66794>, phase: :after_install, installer: #PID<0.127.0>, executable: [{R0Definition.Helper, "4d8b3caf94f063ecf9500a99ede3904e"}, {R0Definition.Left, "c56b67863bcd560d1fa33a95b15b1741"}, {R0Definition.Right, "c46a5be8a2b836410f0b3cbd63f5e320"}]}
+GLOBAL_DEFINITION_VALIDATION %{revision: :v2, valid: true}
+PHASE %{token: #Reference<0.3130264326.1313603585.66794>, phase: :after_accept, installer: #PID<0.127.0>, executable: [{R0Definition.Helper, "4d8b3caf94f063ecf9500a99ede3904e"}, {R0Definition.Left, "c56b67863bcd560d1fa33a95b15b1741"}, {R0Definition.Right, "c46a5be8a2b836410f0b3cbd63f5e320"}]}
+FRESH_v2_Elixir.R0Definition.Left_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 230}}}}
+FRESH_v2_Elixir.R0Definition.Right_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 2030}}}}
+STALE_QUEUED_RESULT %{assertion: :pass, observed: {:error, :stale_or_uncorrelated}}
+STALE_QUEUED_REQUEST %{assertion: :pass, observed: {:error, :stale_request}}
+WRONG_INPUT_CORRELATION %{assertion: :pass, observed: {:error, :stale_or_uncorrelated}}
+VALID_INPUT_CORRELATION %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 230}}}}
+INSTANCE_UPGRADE_FAILED %{assertion: :pass, observed: {:published, {:error, :legacy_schema}}}
+INSTANCE_ORIGINAL_RETAINED %{assertion: :pass, observed: %{kind: :legacy, schema: 1, n: 11}}
+INSTANCE_UNAVAILABLE %{assertion: :pass, observed: {:error, :instance_unavailable}}
+FRESH_v2_Elixir.R0Definition.Left_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 230}}}}
+FRESH_v2_Elixir.R0Definition.Right_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 2030}}}}
+PHASE %{token: #Reference<0.3130264326.1313603585.66951>, phase: :before_install, installer: #PID<0.138.0>, executable: [{R0Definition.Helper, "4d8b3caf94f063ecf9500a99ede3904e"}, {R0Definition.Left, "c56b67863bcd560d1fa33a95b15b1741"}, {R0Definition.Right, "c46a5be8a2b836410f0b3cbd63f5e320"}]}
+OTP_BATCH_rejected %{assertion: :pass, observed: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+PHASE %{token: #Reference<0.3130264326.1313603585.66951>, phase: :after_install, installer: #PID<0.138.0>, executable: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+GLOBAL_DEFINITION_VALIDATION %{revision: :rejected, valid: false}
+PHASE %{token: #Reference<0.3130264326.1313603585.66951>, phase: :during_restoration, installer: #PID<0.138.0>, executable: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+REJECTION_CANDIDATE_ACTUALLY_CURRENT %{assertion: :pass, observed: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+RESTORATION_ADMISSION_CLOSED %{assertion: :pass, observed: {:error, :installing}}
+OTP_BATCH_v2 %{assertion: :pass, observed: [{R0Definition.Helper, "4d8b3caf94f063ecf9500a99ede3904e"}, {R0Definition.Left, "c56b67863bcd560d1fa33a95b15b1741"}, {R0Definition.Right, "c46a5be8a2b836410f0b3cbd63f5e320"}]}
+FRESH_v2_Elixir.R0Definition.Left_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 230}}}}
+FRESH_v2_Elixir.R0Definition.Right_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 2, n: 7}, {:v2, :v2, 2030}}}}
+RESTORATION_PRESERVES_FAILED_INSTANCE %{assertion: :pass, observed: %{kind: :legacy, schema: 1, n: 11}}
+PHASE %{token: #Reference<0.3130264326.1313603585.67002>, phase: :before_install, installer: #PID<0.149.0>, executable: [{R0Definition.Helper, "4d8b3caf94f063ecf9500a99ede3904e"}, {R0Definition.Left, "c56b67863bcd560d1fa33a95b15b1741"}, {R0Definition.Right, "c46a5be8a2b836410f0b3cbd63f5e320"}]}
+OTP_BATCH_v3 %{assertion: :pass, observed: [{R0Definition.Helper, "c33e1fccda7c7a7d8dd3afd5be8dd402"}, {R0Definition.Left, "807d1c147e163c1f48dedf686f1c1711"}, {R0Definition.Right, "a44bffc2ad3b230a263548e40398b2fd"}]}
+PHASE %{token: #Reference<0.3130264326.1313603585.67002>, phase: :after_install, installer: #PID<0.149.0>, executable: [{R0Definition.Helper, "c33e1fccda7c7a7d8dd3afd5be8dd402"}, {R0Definition.Left, "807d1c147e163c1f48dedf686f1c1711"}, {R0Definition.Right, "a44bffc2ad3b230a263548e40398b2fd"}]}
+GLOBAL_DEFINITION_VALIDATION %{revision: :v3, valid: true}
+PHASE %{token: #Reference<0.3130264326.1313603585.67002>, phase: :after_accept, installer: #PID<0.149.0>, executable: [{R0Definition.Helper, "c33e1fccda7c7a7d8dd3afd5be8dd402"}, {R0Definition.Left, "807d1c147e163c1f48dedf686f1c1711"}, {R0Definition.Right, "a44bffc2ad3b230a263548e40398b2fd"}]}
+FRESH_v3_Elixir.R0Definition.Left_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 3, n: 7}, {:v3, :v3, 340}}}}
+FRESH_v3_Elixir.R0Definition.Right_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 3, n: 7}, {:v3, :v3, 3040}}}}
+FRESH_v3_Elixir.R0Definition.Left_legacy %{assertion: :pass, observed: {:published, {:ok, %{kind: :legacy, schema: 3, n: 11}, {:v3, :v3, 344}}}}
+FRESH_v3_Elixir.R0Definition.Right_legacy %{assertion: :pass, observed: {:published, {:ok, %{kind: :legacy, schema: 3, n: 11}, {:v3, :v3, 3044}}}}
+RECOVERED_ORIGINAL_DATA %{assertion: :pass, observed: 11}
+DRAIN_BOUND_NO_INSTALL %{assertion: :pass, observed: [{R0Definition.Helper, "c33e1fccda7c7a7d8dd3afd5be8dd402"}, {R0Definition.Left, "807d1c147e163c1f48dedf686f1c1711"}, {R0Definition.Right, "a44bffc2ad3b230a263548e40398b2fd"}]}
+DRAIN_BOUND_CALLBACK_SURVIVED %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 3, n: 7}, {:v3, :v3, 340}}}}
+SOURCE_MODULE_COLLISION %{assertion: :pass, observed: {:error, :source_module_collision}}
+MODULE_INVENTORY_COLLISION %{assertion: :pass, observed: {:error, :source_module_collision}}
+FRESH_v3_Elixir.R0Definition.Left_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 3, n: 7}, {:v3, :v3, 340}}}}
+FRESH_v3_Elixir.R0Definition.Right_modern %{assertion: :pass, observed: {:published, {:ok, %{kind: :modern, schema: 3, n: 7}, {:v3, :v3, 3040}}}}
+STABLE_MODULE_INVENTORY %{assertion: :pass, observed: [R0Definition.Helper, R0Definition.Left, R0Definition.Right]}
+FIXTURE_COMPLETE %{mode: "coherent", result: :pass}

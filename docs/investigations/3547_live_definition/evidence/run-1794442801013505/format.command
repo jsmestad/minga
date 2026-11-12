@@ -1,0 +1,2 @@
+# Portable spelling; executed in the private experiment directory before freezing inputs.
+env PATH="$HOME/.asdf/installs/erlang/29.1.2/bin:/usr/bin:/bin" ELIXIR_ERL_OPTIONS='+S 2:2' "$HOME/.asdf/installs/elixir/1.20.5-otp-29/bin/elixir" -e 'Enum.each(System.argv(), fn path -> File.write!(path, [Code.format_string!(File.read!(path)), "\n"]) end)' run.exs prepare.exs fixture.exs snapshots/v1.exs snapshots/v2.exs snapshots/rejected.exs snapshots/v3.exs

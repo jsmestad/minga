@@ -1,0 +1,26 @@
+PIN_ELIXIR %{assertion: :pass, observed: "1.20.5"}
+PIN_OTP %{assertion: :pass, observed: ~c"29"}
+PIN_ERLANG %{assertion: :pass, observed: "29.1.2"}
+EXECUTING_VM_STARTED_UNLOADED %{assertion: :pass, observed: [false, false, false]}
+DECLARED_BEFORE_EXECUTION %{pid: "38604", mode: "during_restoration", provenance: :vm_local_only, no_on_load: true, no_runtime_modules: true, no_escaped_callbacks_or_processes: true, no_dependency_replacement: true, no_validation_external_effects: true, no_force_purge: true, trust: :full_os_user_not_sandbox}
+OTP_BATCH_v1 %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+PHASE %{token: #Reference<0.3755137104.2118385665.217187>, phase: :before_install, installer: #PID<0.122.0>, executable: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+OTP_BATCH_rejected %{assertion: :pass, observed: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+PHASE %{token: #Reference<0.3755137104.2118385665.217187>, phase: :after_install, installer: #PID<0.122.0>, executable: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+GLOBAL_DEFINITION_VALIDATION %{revision: :rejected, valid: false}
+PHASE %{token: #Reference<0.3755137104.2118385665.217187>, phase: :during_restoration, installer: #PID<0.122.0>, executable: [{R0Definition.Helper, "23c39701973f610b919a04f5ba40e295"}, {R0Definition.Left, "2e9a7334962539ed6bffc476342d093f"}, {R0Definition.Right, "1f1835b9aef26a4f94731fec9c84dd5e"}]}
+DEATH_during_restoration_SURVIVING_INSTALLER %{assertion: :pass, observed: true}
+DEATH_during_restoration_REPLACEMENT_CLOSED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_during_restoration_OLD_AUTHORITY_REJECTED %{assertion: :pass, observed: {:error, :obsolete_attempt}}
+DEATH_during_restoration_RACING_INSTALL_REJECTED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_during_restoration_LIVE_INSTALLER_FLAG_INSUFFICIENT %{assertion: :pass, observed: {:error, :unavailable}}
+OTP_BATCH_v1 %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+DEATH_during_restoration_EXECUTABLE %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+DEATH_during_restoration_ACCEPTED_PROVENANCE %{assertion: :pass, observed: :v1}
+DEATH_during_restoration_NO_ACK_INVENTED %{assertion: :pass, observed: false}
+DEATH_during_restoration_STILL_UNAVAILABLE %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_during_restoration_RESTART_NOT_EMPTY %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_during_restoration_EMPTY_PROVENANCE_CLOSED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_during_restoration_ARTIFACT_MISMATCH_CLOSED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_SUMMARY %{current: :v1, phase: :during_restoration, outcome: :owner_dead_during_restoration, accepted: :v1, installer: :terminated, attempt: #Reference<0.3755137104.2118385665.217187>, acknowledged: false, replacement: :unavailable, artifact_fingerprint: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+FIXTURE_COMPLETE %{mode: "during_restoration", result: :pass}

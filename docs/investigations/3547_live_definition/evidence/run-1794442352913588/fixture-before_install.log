@@ -1,0 +1,21 @@
+PIN_ELIXIR %{assertion: :pass, observed: "1.20.5"}
+PIN_OTP %{assertion: :pass, observed: ~c"29"}
+PIN_ERLANG %{assertion: :pass, observed: "29.1.2"}
+EXECUTING_VM_STARTED_UNLOADED %{assertion: :pass, observed: [false, false, false]}
+DECLARED_BEFORE_EXECUTION %{pid: "37883", mode: "before_install", provenance: :vm_local_only, no_on_load: true, no_runtime_modules: true, no_escaped_callbacks_or_processes: true, no_dependency_replacement: true, no_validation_external_effects: true, no_force_purge: true, trust: :full_os_user_not_sandbox}
+OTP_BATCH_v1 %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+PHASE %{token: #Reference<0.2389857209.1043595266.25379>, phase: :before_install, installer: #PID<0.122.0>, executable: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+DEATH_before_install_SURVIVING_INSTALLER %{assertion: :pass, observed: true}
+DEATH_before_install_REPLACEMENT_CLOSED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_before_install_OLD_AUTHORITY_REJECTED %{assertion: :pass, observed: {:error, :obsolete_attempt}}
+DEATH_before_install_RACING_INSTALL_REJECTED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_before_install_LIVE_INSTALLER_FLAG_INSUFFICIENT %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_before_install_EXECUTABLE %{assertion: :pass, observed: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+DEATH_before_install_ACCEPTED_PROVENANCE %{assertion: :pass, observed: :v1}
+DEATH_before_install_NO_ACK_INVENTED %{assertion: :pass, observed: false}
+DEATH_before_install_STILL_UNAVAILABLE %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_before_install_RESTART_NOT_EMPTY %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_before_install_EMPTY_PROVENANCE_CLOSED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_before_install_ARTIFACT_MISMATCH_CLOSED %{assertion: :pass, observed: {:error, :unavailable}}
+DEATH_SUMMARY %{current: :v1, accepted: :v1, outcome: :owner_dead_before_install, phase: :before_install, installer: :terminated, acknowledged: false, attempt: #Reference<0.2389857209.1043595266.25379>, replacement: :unavailable, artifact_fingerprint: [{R0Definition.Helper, "545b4f4714bac75cf128156284472f53"}, {R0Definition.Left, "2a4f328a2e92c691b94a9e246f5d47b0"}, {R0Definition.Right, "5b43232cbc355c0035c4f02ea9ccbb3b"}]}
+FIXTURE_COMPLETE %{mode: "before_install", result: :pass}
