@@ -82,6 +82,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Keymap.KeyParser",
     "Minga.Keymap.NormalPrefixes",
     "Minga.Keymap.Sigil",
+    "MingaAgent.Session.Prefix",
+    "MingaAgent.Session.PrefixStore",
     # Pure data struct under the UI.Picker blanket; must be accessible from Layer 1.
     "MingaEditor.UI.Picker.Item"
   ]
@@ -217,12 +219,15 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.OAuth.PendingFlow.Entry",
     "MingaAgent.Provider",
     "MingaAgent.Session.Outcome",
+    "MingaAgent.Session.Prefix",
+    "MingaAgent.Session.PrefixStore",
     "MingaAgent.Session.Request",
     "MingaAgent.Redaction",
     "MingaAgent.RuntimeState",
     "MingaAgent.Subagent.Handle",
     "MingaAgent.TodoItem",
     "MingaAgent.TokenEstimator",
+    "MingaAgent.Tool.Invocation",
     "MingaAgent.Tool.Output",
     "MingaAgent.Tool.Spec",
     "MingaAgent.ToolApproval.Preview",

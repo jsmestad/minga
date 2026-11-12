@@ -59,7 +59,8 @@ defmodule MingaAgent.Session.ContinuationTest do
              continuation |> ContinuationCodec.encode() |> ContinuationCodec.decode()
 
     assert restored.messages == messages
-    assert restored.branch_messages == %{"branch" => branch}
+    assert restored.branch_messages["branch"].messages == branch.messages
+    assert restored.branch_messages["branch"].boundaries == branch.boundaries
   end
 
   test "codec restores the exact active request after a process interruption" do
@@ -240,7 +241,7 @@ defmodule MingaAgent.Session.ContinuationTest do
     assert continuation.messages == [Context.user("hello"), Context.assistant("answer")]
   end
 
-  test "checkpoint accepts the Native provider system prompt before the durable request" do
+  test "a provider cannot add a system prefix after request admission" do
     {:ok, request, continuation} =
       Continuation.begin_request(Continuation.new(), "request-system-prefix", 3, [
         Context.user("inspect")
@@ -254,7 +255,7 @@ defmodule MingaAgent.Session.ContinuationTest do
     messages =
       Enum.concat([Context.system("native system prompt") | request.messages], [assistant])
 
-    assert {:ok, _checkpoint_id, _checkpointed} =
+    assert {:error, :invalid_checkpoint_progression} =
              Continuation.checkpoint_tool_group(
                continuation,
                request.request_id,

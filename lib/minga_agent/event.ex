@@ -239,6 +239,7 @@ defmodule MingaAgent.Event do
             | :rate_limited
             | :unreachable
             | :invalid_model
+            | :context_transition_required
             | :provider_error
             | :tool_error
             | :internal_error
@@ -252,5 +253,11 @@ defmodule MingaAgent.Event do
             kind: kind(),
             provider: String.t() | nil
           }
+
+    @doc "Returns safe next actions when retained native context cannot continue."
+    @spec context_transition_message() :: String.t()
+    def context_transition_message do
+      "This retained conversation cannot continue with these context or authentication inputs. Retain this saved record, or use /new for a fresh conversation."
+    end
   end
 end

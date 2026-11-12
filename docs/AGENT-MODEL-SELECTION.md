@@ -42,9 +42,21 @@ A choice becomes active only after the current session validates the exact catal
 
 Credential values are never stored in the selection. API-key selections store only the provider and source (`env` or `file`). OpenAI Codex selections store the OAuth account identity and a hash of the source identity; the OAuth filesystem path remains request-local.
 
-Saved sessions persist the complete secret-free route snapshot. Restore validates the recorded backend, catalog route, credential owner and source, execution contract, and capabilities against the current hosted catalog. Changed catalog data or a revoked credential requires a new selection through `/model`.
+Saved sessions persist the complete secret-free route snapshot. Restore validates the recorded backend, catalog route, credential owner and source, execution contract, and capabilities against the current hosted catalog. A valid selection is not permission to replay retained native context with different inputs.
 
 Favorites should use the opaque ID shown by completion or the picker. These IDs hash the executable route identity. Do not derive them from display labels.
+
+## Native replay identity
+
+The `ms2` selection ID still identifies the configured route, not an API-key principal. An API-key source can contain a different key without changing that ID. Credentials therefore resolves the actual authentication material once per dispatch and passes that same material to transport. A private runtime binding detects replacement before later model calls and retries. No key, token, credential hash, or private source path is stored in a prefix.
+
+API-key continuity cannot be established across a runtime restart from the provider and source alone. Its saved opaque binding is not a durable credential proof. OAuth continuity uses the selected account and source identity and still validates the current credential through its owner.
+
+Native replay also requires an exact qualified transport contract; equal identities do not establish vendor compatibility. The current contract is restricted to `gpt-6.1-sol` through `openai_codex_responses` at the hosted Codex `/codex/responses` endpoint. Other routes retain explicit unknown replay support rather than inheriting compatibility from a provider name.
+
+Changing instructions, advertised schemas, route, or authentication identity while native history is retained returns `portable_context_transition_required` before transport. Unknown historical evidence has the same safe outcome. Cancel to keep the current record, or use `/new` to start a fresh conversation while preserving the saved record, then choose the desired inputs. This does not convert history or perform a portable handoff.
+
+Default editor model cycling has been removed. Use `/model` or the model picker to select an exact route; a retained conversation still requires the transition described above.
 
 ## Capability policy
 

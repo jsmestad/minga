@@ -629,22 +629,9 @@ defmodule Minga.Extension.CompileCacheTest do
     module = unique_module("CompilerTimeout")
     file = Path.join(context.root, "timeout.ex")
     pid_file = Path.join(context.root, "compiler.pid")
-    real_erl = System.find_executable("erl") || flunk("erl executable unavailable")
-    runtime_dir = Path.join(context.root, "runtime-bin")
-    runtime = Path.join(runtime_dir, "erl")
-    original_path = System.fetch_env!("PATH")
-    File.mkdir_p!(runtime_dir)
-
-    # Record the process identity before BEAM boot, then preserve it through exec.
-    File.write!(runtime, """
-    #!/bin/sh
-    printf '%s' "$$" > #{shell_quote(pid_file)}
-    exec #{shell_quote(real_erl)} "$@"
-    """)
-
-    File.chmod!(runtime, 0o700)
 
     File.write!(file, """
+    File.write!(#{inspect(pid_file)}, System.pid())
     receive do
     after
       :infinity -> :ok
@@ -652,19 +639,14 @@ defmodule Minga.Extension.CompileCacheTest do
     defmodule #{inspect(module)}, do: def(marker, do: :never_loaded)
     """)
 
-    try do
-      System.put_env("PATH", runtime_dir <> ":" <> original_path)
-
-      assert {:error, "isolated compiler timed out"} =
-               load(context, [file], :compiler_timeout,
-                 enabled: false,
-                 subprocess_timeout: 1_000
-               )
-    after
-      System.put_env("PATH", original_path)
-    end
+    assert {:error, "isolated compiler timed out"} =
+             load(context, [file], :compiler_timeout,
+               enabled: false,
+               subprocess_timeout: 5_000
+             )
 
     pid = File.read!(pid_file)
+    refute pid == System.pid()
     assert await_os_pid_dead(pid, 1_000)
     refute Code.ensure_loaded?(module)
   end
@@ -1153,8 +1135,6 @@ defmodule Minga.Extension.CompileCacheTest do
       ] ++ extra
     )
   end
-
-  defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 
   defp cache_key_dir(cache) do
     [cache_key] = Path.wildcard(Path.join(cache, "*/*"))

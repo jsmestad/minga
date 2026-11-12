@@ -134,6 +134,31 @@ defmodule MingaAgent.ModelSelection do
     "ms2_" <> Base.url_encode64(digest, padding: false)
   end
 
+  @doc "Returns replay identity bound to the authentication actually acquired for dispatch."
+  @spec replay_identity(t(), map()) :: map()
+  def replay_identity(%__MODULE__{} = selection, authentication_identity) do
+    %{
+      selection_id: id(selection),
+      authentication: authentication_identity,
+      native_contract: native_contract(selection.route)
+    }
+  end
+
+  @spec native_contract(Route.t()) :: atom()
+  defp native_contract(%Route{
+         request_provider: :openai_codex,
+         model_id: "gpt-6.1-sol",
+         execution: %{
+           wire_protocol: "openai_codex_responses",
+           path: "/codex/responses",
+           base_url: "https://chatgpt.com/backend-api",
+           provider_model_id: "gpt-6.1-sol"
+         }
+       }),
+       do: :codex_responses_exact_prefix_v1
+
+  defp native_contract(%Route{}), do: :unknown
+
   @doc "Returns a human-readable, secret-free credential identity."
   @spec credential_id(credential_ref()) :: String.t()
   def credential_id(%ApiKey{provider: provider, source: source}), do: "#{provider}:#{source}"

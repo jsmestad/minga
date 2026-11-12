@@ -37,9 +37,7 @@ defmodule Minga.Test.SessionPlanToolProvider do
   def init(opts) do
     subscriber = Keyword.fetch!(opts, :subscriber)
     parent = Keyword.fetch!(opts, :parent)
-    registry = :"plan_tool_provider_#{System.unique_integer([:positive])}"
-
-    :ets.new(registry, [:named_table, :set, :public, read_concurrency: true])
+    registry = Keyword.fetch!(opts, :registry)
 
     spec =
       Spec.new!(

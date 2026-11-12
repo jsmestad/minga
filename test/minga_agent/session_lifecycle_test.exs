@@ -380,10 +380,13 @@ defmodule MingaAgent.SessionLifecycleTest do
     end
 
     test "provider write tool is refused through a real plan-mode session" do
+      registry = :"plan_tool_provider_#{System.unique_integer([:positive])}"
+      start_supervised!({MingaAgent.Tool.Registry, name: registry})
+
       session =
         start_test_session(
           provider: Minga.Test.SessionPlanToolProvider,
-          provider_opts: [parent: self()]
+          provider_opts: [parent: self(), registry: registry]
         )
 
       Session.subscribe(session)

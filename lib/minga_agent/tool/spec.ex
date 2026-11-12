@@ -11,6 +11,8 @@ defmodule MingaAgent.Tool.Spec do
           | :config
           | {:bundle, :read_only_tools}
           | {:bundle, :lsp_tools}
+          | {:bundle, :memory_tools}
+          | {:bundle, :introspection_tools}
           | {:extension, atom()}
 
   @typedoc "Approval level for tool execution."
@@ -145,6 +147,13 @@ defmodule MingaAgent.Tool.Spec do
     callback
   end
 
+  @doc "Validates current SDK declarations without invoking their executable callback."
+  @spec validate_arguments(t(), map()) :: {:ok, map()} | {:error, term()}
+  def validate_arguments(%__MODULE__{metadata: %{sdk_input: tool}}, args),
+    do: ReqLLM.Tool.validate_input(tool, args)
+
+  def validate_arguments(%__MODULE__{}, args) when is_map(args), do: {:ok, args}
+
   @spec resolve_build(term(), term()) :: build_fun() | nil
   defp resolve_build(nil, callback) when is_function(callback, 1), do: fn _context -> callback end
   defp resolve_build(build, _callback), do: build
@@ -161,6 +170,8 @@ defmodule MingaAgent.Tool.Spec do
   defp validate_source(:config), do: :ok
   defp validate_source({:bundle, :read_only_tools}), do: :ok
   defp validate_source({:bundle, :lsp_tools}), do: :ok
+  defp validate_source({:bundle, :memory_tools}), do: :ok
+  defp validate_source({:bundle, :introspection_tools}), do: :ok
   defp validate_source({:bundle, _name} = source), do: {:error, {:invalid_source, source}}
   defp validate_source({:extension, name}) when is_atom(name), do: :ok
   defp validate_source(source), do: {:error, {:invalid_source, source}}

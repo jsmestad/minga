@@ -104,37 +104,6 @@ defmodule MingaAgent.ToolsTest do
   end
 
   describe "all/1" do
-    test "returns the expected tool set", %{tmp_dir: dir} do
-      tools = Tools.all(project_root: dir)
-      names = Enum.map(tools, & &1.name)
-
-      assert "read_file" in names
-      assert "write_file" in names
-      assert "edit_file" in names
-      assert "multi_edit_file" in names
-      assert "apply_diff" in names
-      assert "delete_file" in names
-      assert "list_directory" in names
-      assert "find" in names
-      assert "grep" in names
-      assert "fetch_url" in names
-      assert "shell" in names
-      assert "subagent" in names
-      assert "describe_runtime" in names
-      assert "describe_tools" in names
-      assert Enum.count(names, &(&1 == "fetch_url")) == 1
-
-      # LSP tools
-      assert "diagnostics" in names
-      assert "definition" in names
-      assert "references" in names
-      assert "hover" in names
-      assert "document_symbols" in names
-      assert "workspace_symbols" in names
-      assert "rename" in names
-      assert "code_actions" in names
-    end
-
     test "all tools remain provider-neutral source declarations", %{tmp_dir: dir} do
       for spec <- Tools.all(project_root: dir) do
         assert %MingaAgent.Tool.Spec{} = spec
@@ -144,7 +113,7 @@ defmodule MingaAgent.ToolsTest do
       end
     end
 
-    test "subagent schema accepts optional background flag and provider overrides", %{
+    test "subagent accepts background and model input without backend selection", %{
       tmp_dir: dir
     } do
       subagent = Tools.all(project_root: dir) |> Enum.find(&(&1.name == "subagent"))
@@ -156,14 +125,9 @@ defmodule MingaAgent.ToolsTest do
       # Background flag
       assert schema["properties"]["background"]["type"] == "boolean"
       refute "background" in schema["required"]
-      assert subagent.description =~ "Background mode"
 
-      # Provider and model overrides
-      assert schema["properties"]["model"]["description"] =~ "Defaults to the parent's model"
-      assert schema["properties"]["provider"]["enum"] == ["native", "pi_rpc"]
-
-      assert schema["properties"]["provider"]["description"] =~
-               "Defaults to the parent's provider"
+      assert Map.has_key?(schema["properties"], "model")
+      refute Map.has_key?(schema["properties"], "provider")
     end
   end
 

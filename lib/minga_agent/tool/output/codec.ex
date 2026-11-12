@@ -9,6 +9,38 @@ defmodule MingaAgent.Tool.Output.Codec do
 
   @type decode_error :: :invalid_output | :unsupported_output_version
 
+  # Decode the wire vocabulary without depending on constructor load order.
+  # Constructors below remain the authority for valid combinations and bounds.
+  @tags Map.new(
+          [
+            :full,
+            :requested,
+            :page,
+            :captured_prefix,
+            :bytes,
+            :lines,
+            :items,
+            :disk,
+            :buffer,
+            :fork,
+            :changeset,
+            :project_view,
+            :query_snapshot,
+            :capture_byte_limit,
+            :session_disk_quota,
+            :root_disk_quota,
+            :session_item_quota,
+            :root_item_quota,
+            :disk_full,
+            :interrupted,
+            :source_changed,
+            :legacy_unclassified,
+            :timeout,
+            :capture_failed
+          ],
+          &{Atom.to_string(&1), &1}
+        )
+
   @doc "Encodes the public output contract without provider objects or artifact filesystem paths."
   @spec encode(Output.t()) :: map()
   def encode(%Output{} = output) do
@@ -118,7 +150,7 @@ defmodule MingaAgent.Tool.Output.Codec do
   defp decode_capture(%{"status" => "complete"}), do: {:ok, :complete}
 
   defp decode_capture(%{"status" => "incomplete", "reason" => reason}) do
-    with {:ok, reason} <- existing_tag(reason), do: {:ok, {:incomplete, reason}}
+    with {:ok, reason} <- decode_tag(reason), do: {:ok, {:incomplete, reason}}
   end
 
   defp decode_capture(_), do: {:error, :invalid_output}
@@ -144,7 +176,7 @@ defmodule MingaAgent.Tool.Output.Codec do
          "count" => count,
          "total" => total
        }) do
-    with {:ok, kind} <- existing_tag(kind), {:ok, unit} <- existing_tag(unit) do
+    with {:ok, kind} <- decode_tag(kind), {:ok, unit} <- decode_tag(unit) do
       Range.new(kind, unit, start, count, decode_total(total))
     end
   end
@@ -176,7 +208,7 @@ defmodule MingaAgent.Tool.Output.Codec do
          %{"source_kind" => kind, "source_id" => id, "scope" => scope, "sha256" => digest} =
            encoded
        ) do
-    with {:ok, kind} <- existing_tag(kind), {:ok, scope} <- decode_range(scope) do
+    with {:ok, kind} <- decode_tag(kind), {:ok, scope} <- decode_range(scope) do
       Revision.new(
         source_kind: kind,
         source_id: id,
@@ -225,12 +257,13 @@ defmodule MingaAgent.Tool.Output.Codec do
 
   defp decode_attachment(_), do: {:error, :invalid_output}
 
-  @spec existing_tag(term()) :: {:ok, atom()} | {:error, :invalid_output}
-  defp existing_tag(value) when is_binary(value) do
-    {:ok, String.to_existing_atom(value)}
-  rescue
-    ArgumentError -> {:error, :invalid_output}
+  @spec decode_tag(term()) :: {:ok, atom()} | {:error, :invalid_output}
+  defp decode_tag(value) when is_binary(value) do
+    case Map.fetch(@tags, value) do
+      {:ok, tag} -> {:ok, tag}
+      :error -> {:error, :invalid_output}
+    end
   end
 
-  defp existing_tag(_), do: {:error, :invalid_output}
+  defp decode_tag(_value), do: {:error, :invalid_output}
 end

@@ -45,9 +45,6 @@ defmodule Minga.Test.StubServer do
   def handle_call(:model_selection, _from, state),
     do: {:reply, Map.get(state, :model_selection), state}
 
-  def handle_call(:cycle_model, _from, state),
-    do: {:reply, Map.get(state, :cycle_model, {:error, :not_configured}), state}
-
   def handle_call({:subscribe, _pid}, _from, state), do: {:reply, :ok, state}
   def handle_call({:unsubscribe, _pid}, _from, state), do: {:reply, :ok, state}
 

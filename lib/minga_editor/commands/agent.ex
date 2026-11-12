@@ -1332,33 +1332,6 @@ defmodule MingaEditor.Commands.Agent do
     NoticeWorkflow.publish(state, "Thinking: #{level}")
   end
 
-  @doc "Cycles to the next model in the configured rotation."
-  @spec cycle_model(state()) :: state()
-  def cycle_model(state) do
-    if Runtime.active_session(state.shell_runtime) == nil do
-      NoticeWorkflow.publish(state, "No agent session")
-    else
-      case Session.cycle_model(Runtime.active_session(state.shell_runtime)) do
-        {:ok, %{"model" => model} = result} ->
-          provider = Map.get(result, "provider", AgentConfig.extract_provider_prefix(model))
-          state = apply_model_and_provider(state, model, provider)
-          state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
-          route = Map.get(result, "route")
-          message = Enum.reject(["Model: #{model}", route], &is_nil/1) |> Enum.join(" via ")
-
-          Session.add_system_message(Runtime.active_session(state.shell_runtime), message)
-          NoticeWorkflow.publish(state, message)
-
-        {:error, reason} when is_binary(reason) ->
-          NoticeWorkflow.publish(state, reason)
-
-        {:error, reason} ->
-          NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
-      end
-    end
-  end
-
-  @spec maybe_update_thinking_level(state(), term()) :: state()
   @spec apply_model_and_provider(state(), String.t(), String.t() | nil) :: state()
   defp apply_model_and_provider(state, model, provider \\ nil) do
     provider = provider || AgentConfig.extract_provider_prefix(model)
@@ -1367,12 +1340,6 @@ defmodule MingaEditor.Commands.Agent do
     |> update_agent_ui(&UIState.set_model_name(&1, model))
     |> update_agent_ui(&UIState.set_provider_name(&1, provider))
   end
-
-  defp maybe_update_thinking_level(state, level) when is_binary(level) do
-    update_agent_ui(state, &UIState.set_thinking_level(&1, level))
-  end
-
-  defp maybe_update_thinking_level(state, _level), do: state
 
   @doc "Sets an exact agent model route without resetting conversation context."
   @spec set_model(state(), String.t() | ModelSelection.t()) :: state()
@@ -2295,7 +2262,6 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_stop_session, "Stop AI agent session", :stop_current_session},
     {:agent_new_session, "New local agent workspace", :new_agent_session},
     {:agent_start_session_picker, "Pick agent session location", :start_session_picker},
-    {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
     {:agent_thinking_off, "Set AI thinking level to off", :set_thinking_off},
     {:agent_thinking_low, "Set AI thinking level to low", :set_thinking_low},

@@ -10,6 +10,8 @@ defmodule MingaAgent.Session.Continuation do
   alias MingaAgent.Message, as: DisplayMessage
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Request
+  alias MingaAgent.Session.Prefix
+  alias MingaAgent.Session.PrefixStore
   alias ReqLLM.Context
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
@@ -35,18 +37,24 @@ defmodule MingaAgent.Session.Continuation do
           checkpoint_id: String.t(),
           request_id: String.t(),
           messages: [Message.t()],
-          calls: [checkpoint_call()]
+          calls: [checkpoint_call()],
+          epoch_id: PrefixStore.epoch_ref()
         }
 
   @typedoc "Completed model boundary correlated to the last display entry it produced."
   @type boundary :: %{
           transcript_id: pos_integer(),
           message_count: non_neg_integer(),
-          revision: non_neg_integer()
+          revision: non_neg_integer(),
+          epoch_id: PrefixStore.epoch_ref()
         }
 
   @typedoc "Lossless model history and boundary identities for one saved display branch."
-  @type branch_snapshot :: %{messages: [Message.t()], boundaries: [boundary()]}
+  @type branch_snapshot :: %{
+          messages: [Message.t()],
+          boundaries: [boundary()],
+          epoch_id: PrefixStore.epoch_ref()
+        }
 
   @typedoc "Session-owned continuation state."
   @type t :: %__MODULE__{
@@ -57,7 +65,8 @@ defmodule MingaAgent.Session.Continuation do
           tool_checkpoint: tool_checkpoint() | nil,
           boundaries: [boundary()],
           branch_messages: %{String.t() => branch_snapshot()},
-          provenance: provenance()
+          provenance: provenance(),
+          prefixes: PrefixStore.t()
         }
 
   @enforce_keys [
@@ -70,7 +79,7 @@ defmodule MingaAgent.Session.Continuation do
     :branch_messages,
     :provenance
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [prefixes: %PrefixStore{}]
 
   @doc "Creates an empty lossless continuation before the first provider request."
   @spec new() :: t()
@@ -85,6 +94,116 @@ defmodule MingaAgent.Session.Continuation do
       branch_messages: %{},
       provenance: :lossless
     }
+  end
+
+  @doc "Admits prefix changes only at a whole-request idle boundary."
+  @spec change_prefix(t(), Prefix.t()) ::
+          {:ok, :unchanged | :applied, t()} | {:error, term()}
+  def change_prefix(%__MODULE__{active_request: %Request{}}, %Prefix{}),
+    do: {:error, :request_active}
+
+  def change_prefix(%__MODULE__{tool_checkpoint: %{}}, %Prefix{}),
+    do: {:error, :effect_reconciliation_required}
+
+  def change_prefix(
+        %__MODULE__{prefixes: %{selected: id}, boundaries: boundaries} = continuation,
+        %Prefix{epoch_id: id, identity: %{native_contract: contract}}
+      )
+      when contract != :unknown or boundaries == [],
+      do: {:ok, :unchanged, continuation}
+
+  def change_prefix(
+        %__MODULE__{messages: [], boundaries: []} = continuation,
+        %Prefix{} = candidate
+      ) do
+    prefixes = select_prefix(continuation, candidate)
+
+    {:ok, :applied,
+     %{
+       continuation
+       | prefixes: prefixes,
+         messages: [Context.system(candidate.instructions)],
+         revision: continuation.revision + 1
+     }}
+  end
+
+  def change_prefix(
+        %__MODULE__{
+          messages: [%Message{role: :system}],
+          boundaries: [],
+          prefixes: %{selected: selected}
+        } = continuation,
+        %Prefix{} = candidate
+      )
+      when is_binary(selected) do
+    prefixes = select_prefix(continuation, candidate)
+
+    {:ok, :applied,
+     %{
+       continuation
+       | prefixes: prefixes,
+         messages: [Context.system(candidate.instructions)],
+         revision: continuation.revision + 1
+     }}
+  end
+
+  def change_prefix(%__MODULE__{} = continuation, %Prefix{} = candidate) do
+    {:error,
+     {:portable_context_transition_required,
+      %{
+        epoch_id: continuation.prefixes.selected,
+        candidate_epoch_id: candidate.epoch_id,
+        reason: transition_reason(continuation.prefixes.selected, candidate),
+        actions: [:cancel_retain, :new_session],
+        message:
+          "Retained context cannot use these instruction, schema, route or authentication inputs. Cancel to retain it, or use /new for a fresh conversation; the saved conversation is preserved."
+      }}}
+  end
+
+  @spec transition_reason(PrefixStore.epoch_ref(), Prefix.t()) :: atom()
+  defp transition_reason(:unknown, _candidate), do: :historical_identity_unknown
+
+  defp transition_reason(_epoch_id, %Prefix{identity: %{native_contract: :unknown}}),
+    do: :native_contract_unknown
+
+  defp transition_reason(_epoch_id, _candidate), do: :native_identity_changed
+
+  @doc "Checks a requested route selection before changing the effective provider selection."
+  @spec check_model_change(t(), String.t()) :: :ok | {:error, term()}
+  def check_model_change(%__MODULE__{active_request: %Request{}}, _selection_id),
+    do: {:error, :request_active}
+
+  def check_model_change(%__MODULE__{tool_checkpoint: %{}}, _selection_id),
+    do: {:error, :effect_reconciliation_required}
+
+  def check_model_change(%__MODULE__{messages: []}, _selection_id), do: :ok
+
+  def check_model_change(
+        %__MODULE__{
+          messages: [%Message{role: :system}],
+          boundaries: [],
+          prefixes: %{selected: selected}
+        },
+        _selection_id
+      )
+      when is_binary(selected), do: :ok
+
+  def check_model_change(%__MODULE__{} = continuation, selection_id) do
+    case PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected) do
+      %Prefix{identity: %{selection_id: ^selection_id}} ->
+        :ok
+
+      _changed_or_unknown ->
+        {:error,
+         {:portable_context_transition_required,
+          %{
+            epoch_id: continuation.prefixes.selected,
+            reason: :model_identity_changed_or_unknown,
+            actions: [:cancel_retain, :new_session],
+            message:
+              "Retain the current model and saved conversation, or use /new for a fresh conversation before selecting this model."
+          }}}
+    end
   end
 
   @doc "Begins one request by appending the exact user content to the last completed boundary."
@@ -106,7 +225,8 @@ defmodule MingaAgent.Session.Continuation do
     messages = Enum.concat(continuation.messages, [user_message])
 
     with :ok <- validate_messages(messages) do
-      request = Request.new(request_id, turn_id, continuation.revision, messages)
+      prefix = PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected)
+      request = Request.new(request_id, turn_id, continuation.revision, messages, prefix)
       {:ok, request, %{continuation | active_request: request}}
     end
   end
@@ -146,7 +266,8 @@ defmodule MingaAgent.Session.Continuation do
         boundary = %{
           transcript_id: transcript_id,
           message_count: Enum.count(outcome.messages),
-          revision: revision
+          revision: revision,
+          epoch_id: request.epoch_id
         }
 
         {:ok,
@@ -179,7 +300,8 @@ defmodule MingaAgent.Session.Continuation do
     boundary = %{
       transcript_id: turn_id,
       message_count: length(messages),
-      revision: revision
+      revision: revision,
+      epoch_id: continuation.active_request.epoch_id
     }
 
     %{
@@ -215,7 +337,8 @@ defmodule MingaAgent.Session.Continuation do
       when is_binary(branch_name) and is_integer(transcript_id) and transcript_id > 0 do
     branch_snapshot = %{
       messages: continuation.messages,
-      boundaries: continuation.boundaries
+      boundaries: continuation.boundaries,
+      epoch_id: continuation.prefixes.selected
     }
 
     branch_messages = Map.put(continuation.branch_messages, branch_name, branch_snapshot)
@@ -226,17 +349,24 @@ defmodule MingaAgent.Session.Continuation do
         {:error, :branch_not_resumable}
 
       boundary ->
-        {:ok,
-         %{
-           continuation
-           | messages: Enum.take(continuation.messages, boundary.message_count),
-             revision: revision,
-             active_request: nil,
-             tool_checkpoint: nil,
-             boundaries:
-               Enum.filter(continuation.boundaries, &(&1.revision <= boundary.revision)),
-             branch_messages: branch_messages
-         }}
+        updated =
+          %{
+            continuation
+            | messages: Enum.take(continuation.messages, boundary.message_count),
+              revision: revision,
+              active_request: nil,
+              tool_checkpoint: nil,
+              boundaries:
+                Enum.filter(continuation.boundaries, &(&1.revision <= boundary.revision)),
+              branch_messages: branch_messages,
+              prefixes:
+                PrefixStore.select_epoch(
+                  continuation.prefixes,
+                  Map.get(boundary, :epoch_id, :unknown)
+                )
+          }
+
+        {:ok, prune_prefixes(updated)}
     end
   end
 
@@ -244,43 +374,29 @@ defmodule MingaAgent.Session.Continuation do
   @spec switch_branch(t(), String.t()) :: {:ok, t()} | {:error, :branch_not_resumable}
   def switch_branch(%__MODULE__{} = continuation, branch_name) when is_binary(branch_name) do
     case Map.fetch(continuation.branch_messages, branch_name) do
-      {:ok, %{messages: messages, boundaries: boundaries}} ->
+      {:ok, %{messages: messages, boundaries: boundaries} = snapshot} ->
         revision = continuation.revision + 1
 
-        {:ok,
-         %{
-           continuation
-           | messages: messages,
-             revision: revision,
-             active_request: nil,
-             tool_checkpoint: nil,
-             boundaries: boundaries
-         }}
+        updated =
+          %{
+            continuation
+            | messages: messages,
+              revision: revision,
+              active_request: nil,
+              tool_checkpoint: nil,
+              boundaries: boundaries,
+              prefixes:
+                PrefixStore.select_epoch(
+                  continuation.prefixes,
+                  Map.get(snapshot, :epoch_id, :unknown)
+                )
+          }
+
+        {:ok, prune_prefixes(updated)}
 
       :error ->
         {:error, :branch_not_resumable}
     end
-  end
-
-  @doc "Replaces the system prompt through the Session-owned conversation transition."
-  @spec replace_system(t(), Message.t()) :: {:ok, t()} | {:error, :request_active}
-  def replace_system(%__MODULE__{active_request: %Request{}}, _system_message),
-    do: {:error, :request_active}
-
-  def replace_system(
-        %__MODULE__{messages: [%Message{role: :system} = system_message | _rest]} = continuation,
-        system_message
-      ),
-      do: {:ok, continuation}
-
-  def replace_system(%__MODULE__{} = continuation, %Message{role: :system} = system_message) do
-    messages =
-      case continuation.messages do
-        [%Message{role: :system} | rest] -> [system_message | rest]
-        messages -> [system_message | messages]
-      end
-
-    {:ok, %{continuation | messages: messages, revision: continuation.revision + 1}}
   end
 
   @doc "Installs provider-produced compacted messages as a new Session-owned boundary."
@@ -296,13 +412,21 @@ defmodule MingaAgent.Session.Continuation do
       boundaries =
         case Enum.reverse(continuation.boundaries) do
           [%{transcript_id: transcript_id} | _rest] ->
-            [%{transcript_id: transcript_id, message_count: length(messages), revision: revision}]
+            [
+              %{
+                transcript_id: transcript_id,
+                message_count: length(messages),
+                revision: revision,
+                epoch_id: continuation.prefixes.selected
+              }
+            ]
 
           [] ->
             []
         end
 
-      {:ok, %{continuation | messages: messages, revision: revision, boundaries: boundaries}}
+      updated = %{continuation | messages: messages, revision: revision, boundaries: boundaries}
+      {:ok, prune_prefixes(updated)}
     end
   end
 
@@ -333,7 +457,8 @@ defmodule MingaAgent.Session.Continuation do
       boundary = %{
         transcript_id: transcript_id,
         message_count: length(messages),
-        revision: revision
+        revision: revision,
+        epoch_id: continuation.prefixes.selected
       }
 
       {:ok,
@@ -345,6 +470,9 @@ defmodule MingaAgent.Session.Continuation do
        }}
     end
   end
+
+  @typedoc "Optional in-flight request and interned prefixes restored with a continuation."
+  @type restore_option :: {:active_request, Request.t() | nil} | {:prefixes, PrefixStore.t()}
 
   @doc "Restores a persisted continuation without changing its recorded provenance."
   @spec restore(
@@ -363,7 +491,7 @@ defmodule MingaAgent.Session.Continuation do
           %{String.t() => branch_snapshot()},
           provenance(),
           tool_checkpoint() | nil,
-          Request.t() | nil
+          [restore_option()]
         ) :: {:ok, t()} | {:error, term()}
   def restore(
         messages,
@@ -373,17 +501,31 @@ defmodule MingaAgent.Session.Continuation do
         branch_messages,
         provenance,
         tool_checkpoint \\ nil,
-        active_request \\ nil
+        opts \\ []
       )
       when is_list(messages) and is_integer(revision) and revision >= 0 and
              is_integer(durable_revision) and durable_revision >= 0 and is_list(boundaries) and
-             is_map(branch_messages) and provenance in [:lossless, :legacy_reconstructed] do
+             is_map(branch_messages) and provenance in [:lossless, :legacy_reconstructed] and
+             is_list(opts) do
+    active_request = Keyword.get(opts, :active_request)
+    prefixes = Keyword.get(opts, :prefixes, %PrefixStore{})
+
     with :ok <- validate_messages(messages),
          :ok <- validate_boundaries(boundaries, length(messages), revision),
          true <- durable_revision <= revision or {:error, :invalid_durable_revision},
          :ok <- validate_branches(branch_messages),
          :ok <- validate_tool_checkpoint(tool_checkpoint),
-         :ok <- validate_active_request(active_request, revision, messages, tool_checkpoint) do
+         :ok <- validate_active_request(active_request, revision, messages, tool_checkpoint),
+         {:ok, prefixes} <-
+           validate_epoch_references(
+             prefixes,
+             boundaries,
+             branch_messages,
+             tool_checkpoint,
+             active_request
+           ) do
+      active_request = resolve_request_prefix(active_request, prefixes)
+
       {:ok,
        %__MODULE__{
          messages: messages,
@@ -393,12 +535,91 @@ defmodule MingaAgent.Session.Continuation do
          tool_checkpoint: tool_checkpoint,
          boundaries: boundaries,
          branch_messages: branch_messages,
-         provenance: provenance
+         provenance: provenance,
+         prefixes: prefixes
        }}
     else
       {:error, _reason} = error -> error
     end
   end
+
+  @spec resolve_request_prefix(Request.t() | nil, PrefixStore.t()) :: Request.t() | nil
+  defp resolve_request_prefix(nil, _prefixes), do: nil
+
+  defp resolve_request_prefix(request, prefixes),
+    do: Request.resolve_prefix(request, prefixes, request.epoch_id)
+
+  @spec validate_epoch_references(
+          PrefixStore.t(),
+          [boundary()],
+          map(),
+          map() | nil,
+          Request.t() | nil
+        ) ::
+          {:ok, PrefixStore.t()} | {:error, :dangling_prefix_epoch | :inconsistent_prefix_epoch}
+  defp validate_epoch_references(prefixes, boundaries, branches, checkpoint, request) do
+    roots = [prefixes.selected | prefix_roots(boundaries, branches, checkpoint, request)]
+
+    with true <-
+           Enum.all?(roots, &PrefixStore.known?(prefixes, &1)) or {:error, :dangling_prefix_epoch},
+         true <-
+           (epoch_matches?(prefixes.selected, checkpoint) and
+              epoch_matches?(prefixes.selected, request) and
+              epoch_matches?(prefixes.selected, List.last(boundaries))) or
+             {:error, :inconsistent_prefix_epoch},
+         true <-
+           Enum.all?(branches, fn {_name, snapshot} ->
+             epoch_matches?(epoch_reference(snapshot), List.last(snapshot.boundaries))
+           end) or {:error, :inconsistent_prefix_epoch} do
+      {:ok, PrefixStore.retain(prefixes, roots)}
+    end
+  end
+
+  @spec epoch_matches?(PrefixStore.epoch_ref(), map() | nil) :: boolean()
+  defp epoch_matches?(_selected, nil), do: true
+  defp epoch_matches?(selected, value), do: epoch_reference(value) == selected
+
+  @spec select_prefix(t(), Prefix.t()) :: PrefixStore.t()
+  defp select_prefix(continuation, candidate) do
+    prefixes = PrefixStore.select(continuation.prefixes, candidate)
+
+    roots =
+      prefix_roots(
+        continuation.boundaries,
+        continuation.branch_messages,
+        continuation.tool_checkpoint,
+        continuation.active_request
+      )
+
+    PrefixStore.retain(prefixes, roots)
+  end
+
+  @spec prune_prefixes(t()) :: t()
+  defp prune_prefixes(continuation) do
+    roots =
+      prefix_roots(
+        continuation.boundaries,
+        continuation.branch_messages,
+        continuation.tool_checkpoint,
+        continuation.active_request
+      )
+
+    %{continuation | prefixes: PrefixStore.retain(continuation.prefixes, roots)}
+  end
+
+  @spec prefix_roots([boundary()], map(), map() | nil, Request.t() | nil) ::
+          [PrefixStore.epoch_ref()]
+  defp prefix_roots(boundaries, branches, checkpoint, request) do
+    [epoch_reference(checkpoint), epoch_reference(request)] ++
+      Enum.map(boundaries, &epoch_reference/1) ++
+      Enum.flat_map(branches, fn {_name, snapshot} ->
+        [epoch_reference(snapshot) | Enum.map(snapshot.boundaries, &epoch_reference/1)]
+      end)
+  end
+
+  @spec epoch_reference(map() | nil) :: PrefixStore.epoch_ref()
+  defp epoch_reference(nil), do: :unknown
+  defp epoch_reference(value), do: Map.get(value, :epoch_id, :unknown)
 
   @spec validate_active_request(
           Request.t() | nil,
@@ -478,6 +699,7 @@ defmodule MingaAgent.Session.Continuation do
         checkpoint_id: checkpoint_id,
         request_id: request_id,
         messages: messages,
+        epoch_id: continuation.active_request.epoch_id,
         calls:
           Enum.map(calls, fn call ->
             %{
@@ -645,7 +867,8 @@ defmodule MingaAgent.Session.Continuation do
     boundary = %{
       transcript_id: transcript_id,
       message_count: length(checkpoint.messages) + length(result_messages),
-      revision: revision
+      revision: revision,
+      epoch_id: Map.get(checkpoint, :epoch_id, :unknown)
     }
 
     reconciled = %{
@@ -707,7 +930,8 @@ defmodule MingaAgent.Session.Continuation do
   @spec matching_outcome?(Request.t(), Outcome.t()) :: boolean()
   defp matching_outcome?(request, outcome) do
     request.request_id == outcome.request_id and request.turn_id == outcome.turn_id and
-      request.conversation_revision == outcome.conversation_revision and outcome.version == 1
+      request.conversation_revision == outcome.conversation_revision and outcome.version == 1 and
+      request.epoch_id == outcome.epoch_id
   end
 
   @spec matching_boundary([boundary()], pos_integer()) :: boundary() | nil
@@ -883,14 +1107,6 @@ defmodule MingaAgent.Session.Continuation do
   end
 
   @spec validate_initial_request_prefix([Message.t()], [Message.t()]) :: :ok | {:error, term()}
-
-  defp validate_initial_request_prefix(
-         [%Message{role: :system} | messages],
-         [%Message{role: role} | _] = request_messages
-       )
-       when role != :system do
-    validate_message_prefix(messages, request_messages)
-  end
 
   defp validate_initial_request_prefix(messages, request_messages) do
     validate_message_prefix(messages, request_messages)
