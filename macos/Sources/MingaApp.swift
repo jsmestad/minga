@@ -63,8 +63,12 @@ struct MingaApp: App {
                 .focusable(false)
                 .focusEffectDisabled()
                 .background(EditorWindowIdentifierSetter())
+                // Scene-owned URL delivery preserves the window and its Metal view's redraw lifecycle.
+                .onOpenURL { url in
+                    appDelegate.openFileURL(url)
+                }
                 .overlay(
-                    SingletonEditorWindowProbe {
+                    SingletonEditorWindowProbe(receivedFileURLs: { appDelegate.pendingFileURLs }) {
                         appDelegate.finishSingletonEditorWindowProbe()
                     }
                 )
@@ -107,6 +111,9 @@ private struct SingletonEditorWindowProbeSnapshot: Codable {
     let editorWindowCount: Int
     let reusedExistingWindow: Bool
     let editorWindowIsVisible: Bool
+    let reusedWindowForFileURLs: Bool
+    let receivedFilePaths: [String]
+    let fileURLError: String?
 }
 
 /// Deterministic launch probe for the singleton editor scene contract.
@@ -116,6 +123,7 @@ private struct SingletonEditorWindowProbe: View {
 
     @Environment(\.openWindow) private var openWindow
 
+    let receivedFileURLs: @MainActor () -> [URL]
     let onComplete: @MainActor () -> Void
 
     static var isRequested: Bool {
@@ -140,7 +148,10 @@ private struct SingletonEditorWindowProbe: View {
                 SingletonEditorWindowProbeSnapshot(
                     editorWindowCount: editorWindows.count,
                     reusedExistingWindow: false,
-                    editorWindowIsVisible: false
+                    editorWindowIsVisible: false,
+                    reusedWindowForFileURLs: false,
+                    receivedFilePaths: [],
+                    fileURLError: "Initial editor window was unavailable"
                 ),
                 to: outputPath
             )
@@ -153,11 +164,43 @@ private struct SingletonEditorWindowProbe: View {
         try? await Task.sleep(for: .milliseconds(100))
 
         let reopenedWindow = editorWindows.first(where: \.isVisible)
+        let originalWindowNumber = originalWindow.windowNumber
+        let directory = URL(fileURLWithPath: outputPath).deletingLastPathComponent()
+        var reusedWindowForFileURLs = true
+        var fileURLError: String?
+        do {
+            try Data("0".utf8).write(to: URL(fileURLWithPath: outputPath + ".ready"), options: .atomic)
+        } catch {
+            fileURLError = String(describing: error)
+        }
+        for (index, name) in ["first.txt", "second.txt"].enumerated() where fileURLError == nil {
+            let url = directory.appendingPathComponent(name).standardizedFileURL
+            do {
+                for _ in 0..<500 where !receivedFileURLs().contains(url) {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                guard receivedFileURLs().contains(url) else {
+                    fileURLError = "File-open event was not delivered: \(url.path)"
+                    break
+                }
+                reusedWindowForFileURLs = reusedWindowForFileURLs
+                    && editorWindows.count == 1
+                    && editorWindows.first === originalWindow
+                    && originalWindow.windowNumber == originalWindowNumber
+                try Data(String(index + 1).utf8).write(to: URL(fileURLWithPath: outputPath + ".ready"), options: .atomic)
+            } catch {
+                fileURLError = String(describing: error)
+                break
+            }
+        }
         write(
             SingletonEditorWindowProbeSnapshot(
                 editorWindowCount: editorWindows.count,
                 reusedExistingWindow: reopenedWindow === originalWindow,
-                editorWindowIsVisible: reopenedWindow?.isVisible == true
+                editorWindowIsVisible: editorWindows.first?.isVisible == true,
+                reusedWindowForFileURLs: reusedWindowForFileURLs,
+                receivedFilePaths: receivedFileURLs().map(\.path),
+                fileURLError: fileURLError
             ),
             to: outputPath
         )
@@ -358,7 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
     private var outboundConnectionState = OutboundConnectionState()
     private var coreLifecycle: EditorCoreLifecycle?
-    private var pendingFileURLs: [URL] = []
+    fileprivate private(set) var pendingFileURLs: [URL] = []
     private var acceptsOpenRequests = false
     private let frameResourcePolicy = FrameResourcePolicy.default
 
@@ -884,15 +927,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         beamManager?.abortStartup()
     }
 
-    /// Handles Finder/Open With and `open -a Minga file.ex` file URLs.
-    func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.isFileURL {
-            let fileURL = url.standardizedFileURL
-            if acceptsOpenRequests, let encoder {
-                encoder.send(.openFile(path: fileURL.path))
-            } else {
-                pendingFileURLs.append(fileURL)
-            }
+    /// Handles file URLs in the existing SwiftUI scene without replacing its native window.
+    func openFileURL(_ url: URL) {
+        guard url.isFileURL else { return }
+        let fileURL = url.standardizedFileURL
+        if acceptsOpenRequests, let encoder {
+            encoder.send(.openFile(path: fileURL.path))
+        } else {
+            pendingFileURLs.append(fileURL)
         }
     }
 
