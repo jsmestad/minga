@@ -71,20 +71,20 @@ func TestResidentSemanticsDriveLocallyScrolledPresentation(t *testing.T) {
 	if visible, bg := model.cursorlineForRow(window, 4, 1); !visible || bg != 0x223344 {
 		t.Fatalf("resident cursorline missing after local scroll: visible=%v bg=%06x", visible, bg)
 	}
-	cursor, authority := model.residentCursor()
-	if !authority || cursor == nil || cursor.X != 3 || cursor.Y != 1 {
-		t.Fatalf("resident cursor was not rebased into the local slice: authority=%v cursor=%+v", authority, cursor)
+	cursor := model.View().Cursor
+	if cursor == nil || cursor.X != 3 || cursor.Y != 1 {
+		t.Fatalf("resident cursor was not rebased into the local slice: %+v", cursor)
 	}
 }
 
 func TestResidentCursorClipsOffscreenAndReturnsWithoutBackendFrame(t *testing.T) {
 	model, _ := residentSemanticFixture(t)
-	if cursor, authority := model.residentCursor(); !authority || cursor != nil {
-		t.Fatalf("offscreen resident cursor must be hidden while retaining authority: authority=%v cursor=%+v", authority, cursor)
+	if cursor := model.View().Cursor; cursor != nil {
+		t.Fatalf("offscreen resident cursor must be hidden: %+v", cursor)
 	}
 	model.localPresentation.scrolls[7] = presentationScroll{contentEpoch: 9, layoutGeneration: 1, rowOffset: 3}
-	if cursor, authority := model.residentCursor(); !authority || cursor == nil {
-		t.Fatalf("resident cursor must return from the same committed semantics after local scroll: authority=%v cursor=%+v", authority, cursor)
+	if cursor := model.View().Cursor; cursor == nil {
+		t.Fatal("resident cursor must return from the same committed semantics after local scroll")
 	}
 }
 

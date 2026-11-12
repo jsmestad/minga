@@ -286,9 +286,9 @@ jobs:
       # Build the production Go renderer binary into priv/.
       - run: mix native.build.go_tui
 
-      # Boot the default Go frontend under a real PTY (via MINGA_TTY) and assert
-      # it emits a rendered first frame. Headless, no controlling terminal needed.
-      - name: Boot Go frontend and verify first frame
+      # Boot the default Go frontend under a real PTY (via MINGA_TTY) and assert its ready protocol packet.
+      # This proves startup and sizing, not rendered output; scripts/go_tui_capture.py supplies terminal-output evidence.
+      - name: Boot Go frontend and verify ready protocol packet
         run: python3 scripts/go_tui_boot_smoke.py
 
   swift:

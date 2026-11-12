@@ -1,174 +1,202 @@
 #!/usr/bin/env python3
-"""Boot smoke test for the default Go/Bubble Tea terminal renderer.
+"""Check production Go renderer protocol startup, not rendered output.
 
-Boots the production `minga-renderer-go` binary the way the BEAM launch path
-does: it allocates a real PTY, points `MINGA_TTY` at it (so the renderer can
-drive a terminal), and keeps stdin/stdout as the packet protocol channel. The
-renderer emits a `{:packet, 4}`-framed "ready" frame as its first action; this
-script reads that frame and verifies it is a well-formed first frame with a
-sane terminal size.
+The ready packet precedes Bubble Tea rendering.
+It proves only startup and terminal sizing.
+Real terminal-output evidence is scripts/go_tui_capture.py; model-only coverage (#2101) and legacy Zig snapshots prove different contracts.
 
-This is the headless first-frame check for ticket #2222 (AC4 + AC5): the
-renderer consumes `MINGA_TTY` and produces a rendered first frame, with no
-real controlling terminal required (CI runs have none).
-
-Usage:
-    python3 scripts/go_tui_boot_smoke.py [path/to/minga-renderer-go]
-
-Exit codes:
-    0  ready frame received and valid
-    1  smoke test failed (no frame, malformed frame, or renderer error)
+Usage: python3 scripts/go_tui_boot_smoke.py [path/to/minga-renderer-go]
 """
 
+import errno
+import fcntl
 import os
 import pty
 import select
 import struct
 import subprocess
 import sys
+import termios
 import time
+import tty
 
 OP_READY = 0x03
-# 4-byte big-endian length prefix + at least opcode + width(2) + height(2).
 MIN_READY_PAYLOAD = 5
 READ_TIMEOUT_SECONDS = 10.0
+MAX_STREAM_BYTES = 32 * 1024 * 1024
 
 
 def default_binary_path() -> str:
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(repo_root, "priv", "minga-renderer-go")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, "priv", "minga-renderer-go")
 
 
-def read_exact(fd: int, count: int, deadline: float) -> bytes:
-    """Read exactly count bytes from fd, honoring an absolute deadline."""
-    buffer = b""
-    while len(buffer) < count:
+class RendererProcess:
+    """One real PTY plus separate protocol pipes, drained together with stderr.
+
+    All I/O is nonblocking.
+    Callers supply absolute deadlines and may retain stream chunks through on_data(kind, bytes).
+    close() always reaps the child, including after startup, callback, protocol, or byte-limit failures.
+    """
+
+    def __init__(self, binary, columns=80, rows=24, on_data=None):
+        self.proc = None
+        self.master = self.slave = None
+        self.close_error = None
+        self.shutdown_action = None
+        self.readers = {}
+        self.on_data = on_data
+        self.stderr = bytearray()
+        self.protocol = bytearray()
+        self.reading_ready = True
+        self.stream_bytes = 0
+        self.tty_pending = bytearray()
+        try:
+            self.master, self.slave = pty.openpty()
+            tty.setraw(self.slave)
+            fcntl.ioctl(self.slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", rows, columns, 0, 0))
+            self.tty_path = os.ttyname(self.slave)
+            env = dict(os.environ, MINGA_TTY=self.tty_path,
+                       COLUMNS=str(columns), LINES=str(rows), TERM="xterm-256color",
+                       COLORTERM="truecolor")
+            self.proc = subprocess.Popen(
+                [os.fspath(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=env, close_fds=True, bufsize=0,
+            )
+            self.readers = {self.master: "terminal", self.proc.stdout.fileno(): "protocol",
+                            self.proc.stderr.fileno(): "stderr"}
+            for fd in (*self.readers, self.proc.stdin.fileno()):
+                os.set_blocking(fd, False)
+        except BaseException:
+            self.close()
+            raise
+
+    def pump(self, deadline, write_fd=None, pending=None):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError(
-                f"timed out reading {count} bytes (got {len(buffer)})"
-            )
-        ready, _, _ = select.select([fd], [], [], remaining)
-        if not ready:
-            continue
-        chunk = os.read(fd, count - len(buffer))
-        if not chunk:
-            raise EOFError(
-                f"renderer closed the protocol channel after {len(buffer)} bytes"
-            )
-        buffer += chunk
-    return buffer
+            raise TimeoutError("renderer read/wall deadline exceeded")
+        writers = []
+        if pending:
+            writers.append(write_fd)
+        if self.tty_pending:
+            writers.append(self.master)
+        readable, writable, _ = select.select(list(self.readers), writers, [], min(remaining, 0.05))
+        for fd in readable:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO and fd == self.master:
+                    chunk = b""
+                else:
+                    raise
+            kind = self.readers[fd]
+            if not chunk:
+                del self.readers[fd]
+                continue
+            self.stream_bytes += len(chunk)
+            if kind == "stderr":
+                self.stderr.extend(chunk[:max(0, 65536 - len(self.stderr))])
+            if self.on_data:
+                self.on_data(kind, chunk)
+            if self.stream_bytes > MAX_STREAM_BYTES:
+                raise RuntimeError("renderer stream byte limit exceeded")
+            if kind == "protocol" and self.reading_ready:
+                self.protocol.extend(chunk)
+        for fd in writable:
+            data = self.tty_pending if fd == self.master else pending
+            try:
+                count = os.write(fd, data)
+            except BlockingIOError:
+                continue
+            del data[:count]
+
+    def check_alive(self):
+        code = self.proc.poll()
+        if code is not None:
+            raise RuntimeError(f"renderer exited unexpectedly (status {code})")
+
+    def ready(self, columns, rows, deadline):
+        while len(self.protocol) < 4:
+            self.pump(deadline)
+            self.check_alive()
+            if self.proc.stdout.fileno() not in self.readers:
+                raise EOFError("renderer closed protocol before ready")
+        length = struct.unpack(">I", self.protocol[:4])[0]
+        if not MIN_READY_PAYLOAD <= length <= 65536:
+            raise ValueError(f"invalid ready payload length: {length}")
+        while len(self.protocol) < length + 4:
+            self.pump(deadline)
+            self.check_alive()
+        payload = bytes(self.protocol[4:length + 4])
+        self.protocol.clear()
+        self.reading_ready = False
+        if payload[0] != OP_READY:
+            raise ValueError(f"first protocol opcode is 0x{payload[0]:02x}, not ready")
+        width, height = struct.unpack(">HH", payload[1:5])
+        if (width, height) != (columns, rows):
+            raise ValueError(f"ready size {width}x{height}, expected {columns}x{rows}")
+        return payload
+
+    def send_packet(self, payload, deadline):
+        pending = bytearray(struct.pack(">I", len(payload)) + payload)
+        if self.on_data:
+            self.on_data("input", bytes(pending))
+        while pending:
+            self.check_alive()
+            self.pump(deadline, self.proc.stdin.fileno(), pending)
+
+    def close(self):
+        if self.proc is not None:
+            if self.proc.stdin is not None:
+                self.proc.stdin.close()
+            # EOF is the production shutdown path.
+            # Keep both output channels moving while it exits; never read stderr synchronously to EOF.
+            for action in (None, "terminate", "kill"):
+                if action and self.proc.poll() is None:
+                    self.shutdown_action = action
+                    getattr(self.proc, action)()
+                deadline = time.monotonic() + 0.2
+                while time.monotonic() < deadline:
+                    try:
+                        self.pump(deadline)
+                    except (OSError, ValueError, RuntimeError, TimeoutError) as error:
+                        self.close_error = self.close_error or str(error)
+                        self.on_data = None
+                    if self.proc.poll() is not None and not select.select(list(self.readers), [], [], 0)[0]:
+                        break
+                if self.proc.poll() is not None:
+                    break
+            if self.proc.poll() is None:
+                self.shutdown_action = "kill"
+                self.proc.kill()
+            self.proc.wait()
+            for stream in (self.proc.stdout, self.proc.stderr):
+                if stream is not None:
+                    stream.close()
+        for fd in (self.master, self.slave):
+            if fd is not None:
+                os.close(fd)
+        self.master = self.slave = None
+        self.readers.clear()
 
 
 def main() -> int:
     binary = sys.argv[1] if len(sys.argv) > 1 else default_binary_path()
-
-    if not os.path.exists(binary):
-        print(
-            f"[go-tui-boot-smoke] FAIL: renderer binary not found at {binary}\n"
-            "Build it first: mix native.build.go_tui",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Allocate a PTY. The slave becomes the renderer's MINGA_TTY so it can drive
-    # a "terminal" without inheriting CI's (absent) controlling terminal.
-    pty_master, pty_slave = pty.openpty()
-    tty_path = os.ttyname(pty_slave)
-
-    # The protocol channel is a plain pipe on the renderer's stdin/stdout, kept
-    # separate from the PTY exactly like the BEAM Port boundary.
-    proto_read, proto_write = os.pipe()  # renderer stdout -> us
-    stdin_read, stdin_write = os.pipe()  # us -> renderer stdin (unused input)
-
-    env = dict(os.environ)
-    env["MINGA_TTY"] = tty_path
-    env.setdefault("COLUMNS", "80")
-    env.setdefault("LINES", "24")
-
-    proc = subprocess.Popen(
-        [binary],
-        stdin=stdin_read,
-        stdout=proto_write,
-        stderr=subprocess.PIPE,
-        env=env,
-        close_fds=True,
-    )
-
-    # Close our copies of the child's ends so EOF propagates correctly.
-    os.close(proto_write)
-    os.close(stdin_read)
-
-    deadline = time.monotonic() + READ_TIMEOUT_SECONDS
+    child = None
     try:
-        length_bytes = read_exact(proto_read, 4, deadline)
-        (length,) = struct.unpack(">I", length_bytes)
-
-        if length < MIN_READY_PAYLOAD:
-            print(
-                f"[go-tui-boot-smoke] FAIL: first frame too short ({length} bytes)",
-                file=sys.stderr,
-            )
-            return 1
-
-        payload = read_exact(proto_read, length, deadline)
-    except (TimeoutError, EOFError) as error:
-        stderr = drain_stderr(proc)
-        print(
-            f"[go-tui-boot-smoke] FAIL: {error}\nrenderer stderr:\n{stderr}",
-            file=sys.stderr,
-        )
+        child = RendererProcess(binary)
+        child.ready(80, 24, time.monotonic() + READ_TIMEOUT_SECONDS)
+    except (OSError, ValueError, RuntimeError, EOFError, TimeoutError) as error:
+        if child:
+            child.close()
+        stderr = child.stderr.decode(errors="replace") if child else ""
+        print(f"[go-tui-boot-smoke] FAIL: {error}\nrenderer stderr:\n{stderr}", file=sys.stderr)
         return 1
-    finally:
-        terminate(proc)
-        for fd in (pty_master, pty_slave, proto_read, stdin_write):
-            close_quietly(fd)
-
-    opcode = payload[0]
-    if opcode != OP_READY:
-        print(
-            f"[go-tui-boot-smoke] FAIL: first frame opcode 0x{opcode:02x}, "
-            f"expected ready (0x{OP_READY:02x})",
-            file=sys.stderr,
-        )
-        return 1
-
-    width, height = struct.unpack(">HH", payload[1:5])
-    if width == 0 or height == 0:
-        print(
-            f"[go-tui-boot-smoke] FAIL: ready frame has zero size ({width}x{height})",
-            file=sys.stderr,
-        )
-        return 1
-
-    print(
-        f"[go-tui-boot-smoke] PASS: Go renderer booted and emitted a "
-        f"{width}x{height} ready frame via MINGA_TTY={tty_path}"
-    )
+    else:
+        child.close()
+    print("[go-tui-boot-smoke] PASS: Go renderer emitted an 80x24 ready packet (protocol startup only)")
     return 0
-
-
-def drain_stderr(proc: subprocess.Popen) -> str:
-    try:
-        return (proc.stderr.read() or b"").decode(errors="replace")
-    except Exception:  # noqa: BLE001 - best-effort diagnostics only
-        return "<unavailable>"
-
-
-def terminate(proc: subprocess.Popen) -> None:
-    if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-
-
-def close_quietly(fd: int) -> None:
-    try:
-        os.close(fd)
-    except OSError:
-        pass
 
 
 if __name__ == "__main__":

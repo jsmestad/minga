@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Release preparation produces the complete five-build candidate as immutable GitHub Actions artifacts, with final-byte checksums, provenance and a separate read-only verification rehearsal. It does not create a tag or GitHub Release, update the Homebrew tap, or push changelog changes to main.
+- Go renderer changes can now be checked against actual emitted PTY bytes at narrow, default and wide terminal sizes, using canonical committed agent-workspace frames, bounded raw streams, cell grids and build metadata. This is separate from model-only tests and legacy Zig snapshots.
 - Native conversations now freeze interned instruction/schema epochs and require an explicit fresh-conversation transition when retained replay identity changes or is unknown. Legacy continuation values remain exact, and authentication material is bound once per dispatch without persisting secrets.
 - Tool effects now cross current Session policy and serialized Registry registration gates after approval and hooks, with one-shot starts, versioned option fences, durable refusals, and distinct storage failures. Removed automatic memory injection, default memory-write/introspection tools and model-cycling commands, and child backend selection; existing files, optional read/discovery packs, and registered provider owners remain intact.
 - Reconciled ADR-0004 and terminal guidance with the approved full programmable v0.1.0 direction: shared definitions, independent instance upgrades and maintained Swift/Go clients. This is documentation reconciliation, not shipped live authoring.
@@ -44,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Go terminal updates no longer erase the workspace header or retain trailing status text after a shorter replacement. Cursor presentation uses Bubble Tea's typed cursor metadata instead of embedding cursor-position controls in rendered cells.
+- The Go protocol reader skips valid length-framed unknown UI opcodes without losing later commands in the same committed frame, while still rejecting truncated payloads and unsupported required commands.
 - The native streaming contract fixture supplies explicit synthetic SDK cost and checks completed usage and continuation, so its terminal-event deadline does not depend on cold pricing-catalog initialization.
 - Test configuration roots are allocated exclusively across BEAM processes, so a new run cannot adopt stale artifact namespaces without their quota ledger. Missing-ledger recovery remains fail-closed.
 - Opening file URLs from iTerm2, Finder, or `open -a Minga` now preserves the native editor window, preventing tabs from showing stale contents after a second file opens.

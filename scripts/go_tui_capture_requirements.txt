@@ -1,0 +1,3 @@
+# Developer-only production terminal capture decoder; not an application dependency.
+pyte==0.8.2
+wcwidth==0.2.13
