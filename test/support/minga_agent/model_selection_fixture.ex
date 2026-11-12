@@ -175,6 +175,16 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
     }
   end
 
+  defp execution_defaults(:openrouter) do
+    %{
+      family: "openai_chat_compatible",
+      wire_protocol: "openai_chat",
+      transport: "http",
+      base_url: "https://openrouter.example/api/v1",
+      path: "/chat/completions"
+    }
+  end
+
   defp execution_defaults(:openai) do
     %{
       family: "openai_chat_compatible",

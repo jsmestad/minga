@@ -8,6 +8,10 @@ A saved session must resume from the model conversation that actually completed,
 
 After a turn completes, Session persists the continuation boundary, transcript, branch boundaries, pins, provider selection, usage, and memory snapshot together. Reopening the saved session restores that boundary. Collapsing tool output or thinking changes only the display transcript; it does not rewrite the next model request.
 
+Adjacent native tool turns use the completed assistant ReqLLM message, not reconstructed display text. Ordered content, supported provider blocks and reasoning signatures, and the original tool-call group and IDs reach the next request through the selected transport's encoder. Text, thinking, tool progress, and usage are separate projections. A cancelled or malformed response is incomplete and never becomes a successful assistant turn.
+
+Retained-output references and recovery bookkeeping stay in the durable history. The transient SDK request omits those host-only tool metadata fields after image hydration or unsupported-image projection, without removing provider-owned metadata. Tool arguments, result text, and filenames remain model-visible.
+
 A branch can resume only from a recorded boundary. Branching from a display entry without a matching model boundary returns an error rather than guessing which provider messages belonged there. Switching branches restores the branch's messages and boundary identities together.
 
 ## Interrupted requests and tools

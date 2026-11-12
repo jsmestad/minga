@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Native tool continuations keep retained-output references and recovery bookkeeping out of transient provider metadata while preserving durable history and provider-owned continuation data. Contract tests inspect actual encoded next requests, signed thinking, supported opaque blocks, and grouped tool-call IDs.
 - Stale-intent investigation tooling can capture real native editor sessions with build provenance, dedicated debug logs, canonical-log correlation, and per-surface rejection counts. Synthetic smoke captures and incomplete evidence do not count toward the real-session cohort.
 - Semantic GUI activations now retain a typed target through decoding, resolution, and application. EX9015 rejects active-subject reads in targeted clauses and index-only GUI decoders, with reasoned exemptions for existing narrow workspace and window identities.
 - macOS chrome now uses shared spacing, typography, and radius scales, including a 6pt compact step and one monospaced small candidate/key style. A balanced-argument source guard rejects new literal decisions outside editor geometry. The preview command can capture every registered view, and CI attaches real before/after contact sheets with an exact pixel-change manifest for review.
@@ -39,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Test configuration roots are allocated exclusively across BEAM processes, so a new run cannot adopt stale artifact namespaces without their quota ledger. Missing-ledger recovery remains fail-closed.
 - Opening file URLs from iTerm2, Finder, or `open -a Minga` now preserves the native editor window, preventing tabs from showing stale contents after a second file opens.
 - macOS keeps workspace controls and open tabs in one fixed-height header row, including when no tabs are open. The default footer no longer repeats the workspace label. Tab reordering uses a declared native JSON drag type without competing workspace-swipe gestures.
 - CI now reports fail-closed aggregate gates for all ten substantive jobs and Chrome preview evidence. Preview path detection runs on every pull request, skips captures only for unrelated changes, and always requires real captures for manual dispatches.

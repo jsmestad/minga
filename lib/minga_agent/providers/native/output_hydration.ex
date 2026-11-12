@@ -12,7 +12,6 @@ defmodule MingaAgent.Providers.Native.OutputHydration do
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Attachment
   alias MingaAgent.Tool.Output.Range
-  alias ReqLLM.Context
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
 
@@ -21,38 +20,38 @@ defmodule MingaAgent.Providers.Native.OutputHydration do
   @type delivery :: MingaAgent.ModelSelection.image_tool_result_delivery()
   @type error_reason :: {:artifact_integrity_error, term()}
 
-  @doc "Reports whether durable messages contain retained tool-result image attachments."
-  @spec required?([Message.t()]) :: boolean()
-  def required?(messages) when is_list(messages), do: attachments?(messages)
+  @doc "Reports whether one durable message contains retained tool-result image attachments."
+  @spec required?(Message.t()) :: boolean()
+  def required?(%Message{role: :tool, metadata: %{output: %Output{attachments: [_ | _]}}}),
+    do: true
 
-  @doc "Builds the transient outbound message list for one exact delivery decision."
-  @spec hydrate([Message.t()], ArtifactStore.server() | nil, delivery()) ::
-          {:ok, [Message.t()]} | {:error, error_reason()}
-  def hydrate(messages, store, delivery) when is_list(messages) do
-    hydrate_required(required?(messages), messages, store, delivery)
-  end
+  def required?(%Message{}), do: false
 
-  @spec hydrate_required(boolean(), [Message.t()], ArtifactStore.server() | nil, delivery()) ::
-          {:ok, [Message.t()]} | {:error, error_reason()}
-  defp hydrate_required(false, messages, _store, _delivery), do: {:ok, messages}
+  @doc "Hydrates one transient message for the exact route without changing its durable value."
+  @spec hydrate(Message.t(), ArtifactStore.server() | nil, delivery()) ::
+          {:ok, Message.t()} | {:error, error_reason()}
+  def hydrate(
+        %Message{role: :tool, metadata: %{output: %Output{attachments: [_ | _]}}} = message,
+        _store,
+        {:unsupported, reason}
+      ),
+      do: {:ok, project_unsupported_message(message, reason)}
 
-  defp hydrate_required(true, messages, _store, {:unsupported, reason}) do
-    {:ok, Enum.map(messages, &project_unsupported_message(&1, reason))}
-  end
+  def hydrate(
+        %Message{role: :tool, metadata: %{output: %Output{attachments: [_ | _]}}},
+        nil,
+        :supported
+      ),
+      do: {:error, {:artifact_integrity_error, :retention_unavailable}}
 
-  defp hydrate_required(true, _messages, nil, :supported),
-    do: {:error, {:artifact_integrity_error, :retention_unavailable}}
+  def hydrate(
+        %Message{role: :tool, metadata: %{output: %Output{attachments: [_ | _]}}} = message,
+        store,
+        :supported
+      ),
+      do: hydrate_message(message, store)
 
-  defp hydrate_required(true, messages, store, :supported),
-    do: hydrate_messages(messages, store, [])
-
-  @spec attachments?([Message.t()]) :: boolean()
-  defp attachments?(messages) do
-    Enum.any?(messages, fn
-      %Message{role: :tool, metadata: %{output: %Output{attachments: [_ | _]}}} -> true
-      _message -> false
-    end)
-  end
+  def hydrate(%Message{} = message, _store, _delivery), do: {:ok, message}
 
   @spec project_unsupported_message(
           Message.t(),
@@ -79,25 +78,12 @@ defmodule MingaAgent.Providers.Native.OutputHydration do
       |> Map.put(:is_error, true)
       |> Map.put(:image_tool_result_delivery, {:unsupported, reason})
 
-    Context.tool_result_message(message.name, message.tool_call_id, content, metadata)
+    %{message | content: content, metadata: metadata}
   end
-
-  defp project_unsupported_message(%Message{} = message, _reason), do: message
 
   @spec limitation(Attachment.t(), :model_image_input | :tool_result_transport) :: Limitation.t()
   defp limitation(%Attachment{} = attachment, reason) do
     Limitation.image_delivery(reason, attachment.filename, attachment.media_type)
-  end
-
-  @spec hydrate_messages([Message.t()], ArtifactStore.server(), [Message.t()]) ::
-          {:ok, [Message.t()]} | {:error, error_reason()}
-  defp hydrate_messages([], _store, hydrated), do: {:ok, Enum.reverse(hydrated)}
-
-  defp hydrate_messages([message | rest], store, hydrated) do
-    case hydrate_message(message, store) do
-      {:ok, hydrated_message} -> hydrate_messages(rest, store, [hydrated_message | hydrated])
-      {:error, reason} -> {:error, reason}
-    end
   end
 
   @spec hydrate_message(Message.t(), ArtifactStore.server()) ::
@@ -109,17 +95,9 @@ defmodule MingaAgent.Providers.Native.OutputHydration do
     with {:ok, parts} <- hydrate_attachments(attachments, store, []) do
       content = normalize_content(message.content) ++ parts
 
-      {:ok,
-       Context.tool_result_message(
-         message.name,
-         message.tool_call_id,
-         content,
-         message.metadata
-       )}
+      {:ok, %{message | content: content}}
     end
   end
-
-  defp hydrate_message(%Message{} = message, _store), do: {:ok, message}
 
   @spec hydrate_attachments([Attachment.t()], ArtifactStore.server(), [ContentPart.t()]) ::
           {:ok, [ContentPart.t()]} | {:error, error_reason()}

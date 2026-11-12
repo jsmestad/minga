@@ -1,10 +1,15 @@
 import Config
 
 # Keep tests hermetic by preventing application startup from loading the developer's real ~/.config/minga/config.exs.
+# VM-local counters repeat across Mix invocations, so exclusively allocate a fresh root instead of adopting old namespaces whose quota ledger may be absent.
 test_config_home =
-  Path.join(System.tmp_dir!(), "minga-test-config-#{System.unique_integer([:positive])}")
+  Path.join(
+    System.tmp_dir!(),
+    "minga-test-config-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+  )
 
-File.mkdir_p!(Path.join(test_config_home, "minga"))
+File.mkdir!(test_config_home)
+File.mkdir!(Path.join(test_config_home, "minga"))
 System.put_env("XDG_CONFIG_HOME", test_config_home)
 
 # Only show warnings and errors during test runs. Info-level messages
