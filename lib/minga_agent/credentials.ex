@@ -23,6 +23,7 @@ defmodule MingaAgent.Credentials do
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth}
+  alias MingaAgent.Credentials.Binding
 
   @typedoc "Owner-visible credential readiness."
   @type readiness :: :checking | :configured | :unconfigured
@@ -121,6 +122,19 @@ defmodule MingaAgent.Credentials do
     else
       _unavailable -> credential_error(credential)
     end
+  end
+
+  @doc "Acquires dispatch material and its secret-free replay binding in one resolution."
+  @spec bind_request(ModelSelection.credential_ref(), Binding.t() | nil, keyword()) ::
+          {:ok, Binding.t()} | {:error, term()}
+  def bind_request(%ApiKey{} = credential, previous, opts) do
+    with {:ok, material} <- request_options(credential, opts),
+         do: {:ok, Binding.api_key(material, previous)}
+  end
+
+  def bind_request(%OAuth{} = credential, _previous, opts) do
+    with {:ok, material} <- request_options(credential, opts),
+         do: {:ok, Binding.oauth(material, credential.account_id, credential.source_id)}
   end
 
   @doc """

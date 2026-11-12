@@ -10,7 +10,7 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
 
   setup do
     table = :"read_only_pack_test_#{System.unique_integer([:positive])}"
-    :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
+    start_supervised!({Registry, name: table})
 
     %{table: table}
   end
@@ -182,7 +182,10 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
         callback: fn _args -> {:ok, "existing"} end
       )
 
-    :ets.insert(table, {"grep", grep_owner})
+    :sys.replace_state(table, fn ^table ->
+      :ets.insert(table, {"grep", grep_owner})
+      table
+    end)
 
     assert {:error, {:reserved_tool_name, "grep", :builtin, {:bundle, :read_only_tools}}} =
              ReadOnly.register(table)

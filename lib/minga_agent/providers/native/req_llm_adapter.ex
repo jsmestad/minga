@@ -6,7 +6,6 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   """
 
   alias MingaAgent.Config, as: AgentConfig
-  alias MingaAgent.Credentials
   alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.OAuth
@@ -88,42 +87,129 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   end
 
   @doc "Builds the provider-specific tool value for a canonical tool declaration."
-  @spec tool(ToolSpec.t(), ToolSpec.callback(), map()) :: Tool.t()
+  @spec tool(ToolSpec.t(), ToolSpec.callback() | nil, map()) :: Tool.t()
   def tool(%ToolSpec{} = spec, callback, provider_options \\ %{})
-      when is_function(callback, 1) and is_map(provider_options) do
-    Tool.new!(
+      when (is_function(callback, 1) or is_nil(callback)) and is_map(provider_options) do
+    {strict, provider_options} = spec_wire_options(spec, provider_options)
+
+    %Tool{
       name: spec.name,
       description: spec.description,
       parameter_schema: spec.parameter_schema,
       provider_options: provider_options,
-      callback: callback
-    )
+      callback: callback,
+      compiled: nil,
+      strict: strict
+    }
   end
+
+  @spec spec_wire_options(ToolSpec.t(), map()) :: {boolean(), map()}
+  defp spec_wire_options(%ToolSpec{metadata: %{sdk_input: tool}}, options),
+    do: {tool.strict, Map.put(options, :minga_schema_options, tool.provider_options)}
+
+  defp spec_wire_options(%ToolSpec{}, options), do: {false, options}
+
+  @doc "Projects canonical and legitimate local tools to callback-free advertised declarations."
+  @spec declarations([Tool.t()]) :: [map()]
+  def declarations(tools) do
+    tools |> Enum.map(&declaration/1) |> Enum.sort_by(& &1.name)
+  end
+
+  @doc "Projects a single declaration, retaining all adapter-visible options."
+  @spec declaration(Tool.t()) :: map()
+  def declaration(%Tool{} = tool) do
+    schema = Tool.to_json_schema(tool)
+    {source, options} = declaration_source(tool)
+
+    %{
+      name: tool.name,
+      description: tool.description,
+      parameter_schema: get_in(schema, ["function", "parameters"]),
+      strict: tool.strict,
+      provider_options: options,
+      source: source
+    }
+  end
+
+  @doc "Builds SDK advertisement values without executable callbacks or captured validators."
+  @spec advertised_tools(MingaAgent.Session.Prefix.t()) :: [Tool.t()]
+  def advertised_tools(%MingaAgent.Session.Prefix{schemas: schemas}) do
+    Enum.map(schemas, fn schema ->
+      %Tool{
+        name: schema.name,
+        description: schema.description,
+        parameter_schema: schema.parameter_schema,
+        strict: schema.strict,
+        provider_options: schema.provider_options,
+        callback: nil,
+        compiled: nil
+      }
+    end)
+  end
+
+  @doc "Marks explicit session-local Spec declarations without registering PID closures globally."
+  @spec local_declarations([Tool.t()]) :: [Tool.t()]
+  def local_declarations(tools) do
+    Enum.map(tools, fn
+      %Tool{provider_options: %{minga_tool_spec: _spec} = options} = tool ->
+        %{tool | provider_options: Map.put(options, :minga_local_tool, true)}
+
+      tool ->
+        tool
+    end)
+  end
+
+  @spec declaration_source(Tool.t()) :: {term(), map() | keyword()}
+  defp declaration_source(%Tool{
+         name: name,
+         provider_options: %{minga_local_tool: true} = options
+       }),
+       do: {{:local, name}, schema_options(options)}
+
+  defp declaration_source(%Tool{
+         provider_options: %{minga_tool_spec: %ToolSpec{} = spec} = options
+       }),
+       do: {durable_source(spec.source), schema_options(options)}
+
+  defp declaration_source(%Tool{} = tool), do: {{:local, tool.name}, tool.provider_options}
+
+  @spec durable_source(ToolSpec.source()) :: atom() | {atom(), String.t()}
+  defp durable_source({tag, owner}) when is_atom(owner), do: {tag, Atom.to_string(owner)}
+  defp durable_source(source), do: source
+
+  @spec schema_options(map()) :: map() | keyword()
+  defp schema_options(%{minga_schema_options: options}), do: options
+
+  defp schema_options(options),
+    do:
+      Map.drop(
+        options,
+        [:minga_local_tool, :minga_registry_tool, :minga_tool_spec, :source]
+      )
 
   @doc "Builds request-local options from one immutable resolved selection."
   @spec stream_opts(ModelSelection.t(), [Tool.t()], AgentConfig.t(), keyword()) ::
-          {:ok, keyword()} | {:error, {:credential_unavailable, String.t()}}
+          {:ok, keyword()}
   def stream_opts(
         %ModelSelection{} = selection,
         tools,
         %AgentConfig{} = config,
-        credential_opts \\ []
+        auth_opts
       ) do
-    with {:ok, auth_opts} <- Credentials.request_options(selection.credential, credential_opts) do
-      opts = [
-        tools: tools,
-        max_tokens: selection.policy.limits.request_output
-      ]
+    opts = [
+      tools: tools,
+      max_tokens: selection.policy.limits.request_output,
+      max_retries: 0
+    ]
 
-      opts =
-        opts
-        |> Keyword.merge(auth_opts)
-        |> maybe_add_prompt_cache(selection.route.request_provider, config)
-        |> maybe_add_codex_originator(selection)
-        |> maybe_add_reasoning_effort(selection.policy.reasoning.effort)
+    opts =
+      opts
+      |> Keyword.merge(auth_opts)
+      |> maybe_add_prompt_cache(selection.route.request_provider, config)
+      |> maybe_add_codex_originator(selection)
+      |> maybe_add_reasoning_effort(selection.policy.reasoning.effort)
 
-      {:ok, opts}
-    end
+    {:ok, opts}
   end
 
   @doc "Runs one ReqLLM streaming request attempt. Retry ownership stays in Native."
@@ -331,21 +417,23 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   defp content_event_to_part({:content_part, part}), do: part
 
   @doc "Builds the summary callback expected by the compaction subsystem."
-  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t(), keyword()) ::
+  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t(), (-> {:ok, keyword()}
+                                                                              | {:error, term()})) ::
           MingaAgent.Compaction.summary_fn()
   def summary_client(
         llm_client,
         %ModelSelection{} = selection,
         %AgentConfig{} = config,
-        credential_opts \\ []
+        authentication
       ) do
     fn _model, messages, opts ->
-      with {:ok, auth_opts} <- Credentials.request_options(selection.credential, credential_opts),
+      with {:ok, auth_opts} <- authentication.(),
            request_opts <-
              opts
              |> Keyword.take([:max_tokens])
              |> limit_summary_tokens(selection.policy.limits.request_output)
              |> Keyword.merge(auth_opts)
+             |> Keyword.put(:max_retries, 0)
              |> maybe_add_prompt_cache(selection.route.request_provider, config)
              |> maybe_add_codex_originator(selection),
            {:ok, stream_response} <-

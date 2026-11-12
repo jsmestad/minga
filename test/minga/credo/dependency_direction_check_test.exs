@@ -473,6 +473,17 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       |> check("lib/minga_agent/event.ex")
       |> refute_issues()
     end
+
+    test "native prefix values remain pure dependencies of request and outcome contracts" do
+      for path <- [
+            "lib/minga_agent/session/prefix.ex",
+            "lib/minga_agent/session/prefix_store.ex",
+            "lib/minga_agent/session/request.ex",
+            "lib/minga_agent/session/outcome.ex"
+          ] do
+        path |> File.read!() |> check(path) |> refute_issues()
+      end
+    end
   end
 
   describe "valid downward dependencies" do

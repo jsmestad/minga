@@ -49,6 +49,8 @@ defmodule MingaAgent.Session do
   alias MingaAgent.SessionMetadata
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Outcome
+  alias MingaAgent.Session.Prefix
+  alias MingaAgent.Session.PrefixStore
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.ProviderLifecycle
   alias MingaAgent.Session.Persistence
@@ -65,6 +67,10 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.Tool.Invocation
+  alias MingaAgent.Tool.Registry, as: ToolRegistry
+  alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias ReqLLM.Context
 
   @typedoc "Agent session status."
@@ -111,6 +117,7 @@ defmodule MingaAgent.Session do
           continuation: Continuation.t(),
           subscriber_lifecycle: SubscriberLifecycle.t(),
           tool_approval_policy: tool_approval_policy(),
+          tool_authority: map(),
           idle_gc_timeout_ms: non_neg_integer(),
           persistence: Persistence.t(),
           model_selection: ModelSelection.t() | nil,
@@ -829,6 +836,13 @@ defmodule MingaAgent.Session do
       continuation: Continuation.new(),
       subscriber_lifecycle: SubscriberLifecycle.new(),
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
+      tool_authority: %{
+        options: Keyword.get(opts, :options_server, Options),
+        registry: Keyword.get(provider_opts, :tool_registry, ToolRegistry),
+        read_only?: Keyword.get(provider_opts, :read_only?, false),
+        revision: make_ref(),
+        invocations: %{}
+      },
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
       model_selection: model_selection,
@@ -950,19 +964,19 @@ defmodule MingaAgent.Session do
 
   def handle_call({:set_boundary, path, start_line, end_line}, _from, state) do
     case TurnExecution.set_boundary(state.turn_execution, path, start_line, end_line) do
-      {:ok, execution} -> {:reply, :ok, %{state | turn_execution: execution}}
+      {:ok, execution} -> {:reply, :ok, revise_tool_policy(state, execution)}
       {:error, _message} = error -> {:reply, error, state}
     end
   end
 
   def handle_call({:clear_boundary, path}, _from, state) do
     execution = TurnExecution.clear_boundary(state.turn_execution, path)
-    {:reply, :ok, %{state | turn_execution: execution}}
+    {:reply, :ok, revise_tool_policy(state, execution)}
   end
 
   def handle_call(:clear_all_boundaries, _from, state) do
     execution = TurnExecution.clear_boundaries(state.turn_execution)
-    {:reply, :ok, %{state | turn_execution: execution}}
+    {:reply, :ok, revise_tool_policy(state, execution)}
   end
 
   def handle_call({:boundary_for, path}, _from, state) do
@@ -1127,7 +1141,7 @@ defmodule MingaAgent.Session do
 
   def handle_call({:set_tool_trust, name, scope}, _from, state) do
     execution = TurnExecution.put_trust(state.turn_execution, name, scope)
-    {:reply, :ok, %{state | turn_execution: execution}}
+    {:reply, :ok, revise_tool_policy(state, execution)}
   end
 
   def handle_call(:restart_provider, _from, state) do
@@ -1154,12 +1168,12 @@ defmodule MingaAgent.Session do
 
   def handle_call({:revoke_tool_trust, :all}, _from, state) do
     execution = TurnExecution.revoke_trust(state.turn_execution, :all)
-    {:reply, :ok, %{state | turn_execution: execution}}
+    {:reply, :ok, revise_tool_policy(state, execution)}
   end
 
   def handle_call({:revoke_tool_trust, name}, _from, state) do
     execution = TurnExecution.revoke_trust(state.turn_execution, name)
-    {:reply, :ok, %{state | turn_execution: execution}}
+    {:reply, :ok, revise_tool_policy(state, execution)}
   end
 
   def handle_call(:list_tool_trust, _from, state) do
@@ -1236,9 +1250,10 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:activate_skill, name}, _from, state) do
-    result = GenServer.call(ProviderLifecycle.pid(state.provider), {:activate_skill, name})
-    state = maybe_refresh_continuation_system(state, result)
-    {:reply, result, state}
+    case refresh_continuation_prefix(state, {:activate, name}) do
+      {:ok, updated, result} -> {:reply, result, updated}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(
@@ -1251,9 +1266,10 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:deactivate_skill, name}, _from, state) do
-    result = GenServer.call(ProviderLifecycle.pid(state.provider), {:deactivate_skill, name})
-    state = maybe_refresh_continuation_system(state, result)
-    {:reply, result, state}
+    case refresh_continuation_prefix(state, {:deactivate, name}) do
+      {:ok, updated, result} -> {:reply, result, updated}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(
@@ -1267,6 +1283,13 @@ defmodule MingaAgent.Session do
 
   def handle_call(:list_skills, _from, state) do
     result = GenServer.call(ProviderLifecycle.pid(state.provider), :list_skills)
+
+    result =
+      case result do
+        {:ok, available, active} -> {:ok, available, selected_skill_names(state, active)}
+        error -> error
+      end
+
     {:reply, result, state}
   end
 
@@ -1316,8 +1339,8 @@ defmodule MingaAgent.Session do
         %{model_selection: %ModelSelection{}} = state
       ) do
     with {:ok, selection} <- ModelSelection.with_reasoning(state.model_selection, level),
-         :ok <- apply_selection_to_attached_provider(state, selection) do
-      {:reply, :ok, install_model_selection(state, selection)}
+         {:ok, updated} <- do_apply_resolved_model_selection(state, selection) do
+      {:reply, :ok, updated}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -1349,8 +1372,8 @@ defmodule MingaAgent.Session do
     level = Enum.at(options, rem(current + 1, length(options)))
 
     with {:ok, selection} <- ModelSelection.with_reasoning(state.model_selection, level),
-         :ok <- apply_selection_to_attached_provider(state, selection) do
-      {:reply, {:ok, %{"level" => level}}, install_model_selection(state, selection)}
+         {:ok, updated} <- do_apply_resolved_model_selection(state, selection) do
+      {:reply, {:ok, %{"level" => level}}, updated}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -1568,6 +1591,18 @@ defmodule MingaAgent.Session do
     end
   end
 
+  def handle_call({:prepare_tool_invocation, %Invocation{} = invocation}, {worker, _}, state) do
+    prepare_tool_invocation(state, invocation, worker)
+  end
+
+  def handle_call({:start_tool_invocation, %Invocation{} = invocation}, {worker, _}, state) do
+    start_tool_invocation(state, invocation, worker)
+  end
+
+  def handle_call({:tool_storage_failed, %Invocation{} = invocation, reason}, {worker, _}, state) do
+    record_tool_storage_failure(state, invocation, worker, reason)
+  end
+
   def handle_call(
         {:admit_tool_effect, request_id, checkpoint_id, tool_call_id, name, args},
         _from,
@@ -1604,7 +1639,8 @@ defmodule MingaAgent.Session do
         state
       )
       when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) do
-    with {:ok, continuation} <-
+    with :ok <- invocation_storage_outcome(state, {request_id, checkpoint_id, tool_call_id}),
+         {:ok, continuation} <-
            Continuation.complete_tool_effect(
              state.continuation,
              request_id,
@@ -1614,10 +1650,41 @@ defmodule MingaAgent.Session do
            ),
          {:ok, committed} <-
            commit_effect_snapshot(state, %{state | continuation: continuation}) do
-      {:reply, :ok, committed}
+      entries =
+        Map.delete(
+          committed.tool_authority.invocations,
+          {request_id, checkpoint_id, tool_call_id}
+        )
+
+      authority = %{committed.tool_authority | invocations: entries}
+      {:reply, :ok, %{committed | tool_authority: authority}}
     else
       {:error, reason} ->
         {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, state}
+    end
+  end
+
+  @spec invocation_storage_outcome(state(), tuple()) :: :ok | {:error, term()}
+  defp invocation_storage_outcome(state, key) do
+    case Map.get(state.tool_authority.invocations, key) do
+      %{failure: nil} -> :ok
+      %{failure: reason} -> {:error, {:effect_admission_failed, reason}}
+      _ordinary_result -> :ok
+    end
+  end
+
+  @spec record_tool_storage_failure(state(), Invocation.t(), pid(), term()) ::
+          {:reply, term(), state()}
+  defp record_tool_storage_failure(state, invocation, worker, reason) do
+    key = Invocation.key(invocation)
+
+    case Map.get(state.tool_authority.invocations, key) do
+      %{invocation: ^invocation, worker: ^worker, started: true} = entry ->
+        entries = Map.put(state.tool_authority.invocations, key, %{entry | failure: reason})
+        {:reply, :ok, %{state | tool_authority: %{state.tool_authority | invocations: entries}}}
+
+      _not_started ->
+        {:reply, {:error, :invocation_not_started}, state}
     end
   end
 
@@ -1693,6 +1760,275 @@ defmodule MingaAgent.Session do
 
         {:reply, {:ok, store}, warned}
     end
+  end
+
+  @authorization_options [:agent_tool_permissions, :agent_tool_approval, :agent_destructive_tools]
+
+  @spec prepare_tool_invocation(state(), Invocation.t(), pid()) :: {:reply, term(), state()}
+  defp prepare_tool_invocation(state, invocation, worker) do
+    key = Invocation.key(invocation)
+
+    with {:ok, declaration} <- invocation_declaration(state, invocation),
+         false <- Map.has_key?(state.tool_authority.invocations, key),
+         {:ok, values, stamp} <-
+           Options.read_versioned(state.tool_authority.options, @authorization_options),
+         {:ok, spec, registration, current} <-
+           resolve_invocation(state, declaration, invocation.name),
+         true <- current == declaration,
+         {:ok, requirement} <- authorize_invocation(state, spec, invocation.arguments, values),
+         :ok <- Options.validate_version(state.tool_authority.options, stamp) do
+      entry = %{
+        invocation: invocation,
+        worker: worker,
+        registration: registration,
+        stamp: stamp,
+        requirement: requirement,
+        approved: false,
+        started: false,
+        revision: state.tool_authority.revision,
+        failure: nil
+      }
+
+      entries = Map.put(state.tool_authority.invocations, key, entry)
+      authority = %{state.tool_authority | invocations: entries}
+      {:reply, {:ok, requirement}, %{state | tool_authority: authority}}
+    else
+      true -> {:reply, {:refused, :duplicate_invocation}, state}
+      false -> {:reply, {:refused, :tool_declaration_changed}, state}
+      {:error, reason} -> {:reply, {:refused, reason}, state}
+    end
+  end
+
+  @spec start_tool_invocation(state(), Invocation.t(), pid()) :: {:reply, term(), state()}
+  defp start_tool_invocation(state, invocation, worker) do
+    key = Invocation.key(invocation)
+
+    with {:ok, declaration} <- invocation_declaration(state, invocation),
+         {:ok, entry} <- fetch_prepared_invocation(state, invocation, worker),
+         {:ok, _spec, registration, current} <-
+           resolve_invocation(state, declaration, invocation.name),
+         true <- current == declaration and registration == entry.registration,
+         {:ok, continuation} <-
+           Continuation.admit_tool_effect(
+             state.continuation,
+             invocation.request_id,
+             invocation.checkpoint_id,
+             invocation.call_id,
+             invocation.name,
+             invocation.arguments
+           ) do
+      case admit_tool_effect_capture(
+             state,
+             %{state | continuation: continuation},
+             invocation.checkpoint_id,
+             invocation.call_id,
+             invocation.name,
+             invocation.arguments
+           ) do
+        {:reply, {:ok, store}, committed} ->
+          final_start_invocation(committed, invocation, key, entry, declaration, store)
+
+        {:reply, {:error, reason}, committed} ->
+          entries = Map.put(committed.tool_authority.invocations, key, %{entry | failure: reason})
+          authority = %{committed.tool_authority | invocations: entries}
+          {:reply, {:error, reason}, %{committed | tool_authority: authority}}
+      end
+    else
+      false -> {:reply, {:refused, :tool_declaration_changed}, state}
+      {:error, reason} -> {:reply, {:refused, reason}, state}
+    end
+  end
+
+  @spec final_start_invocation(state(), Invocation.t(), tuple(), map(), map(), GenServer.server()) ::
+          {:reply, term(), state()}
+  defp final_start_invocation(state, invocation, key, entry, declaration, store) do
+    policy_revision = state.tool_authority.revision
+
+    with {:ok, values, stamp} <-
+           Options.read_versioned(state.tool_authority.options, @authorization_options),
+         true <- entry.revision == policy_revision,
+         {:ok, provisional, registration, current} <-
+           resolve_invocation(state, declaration, invocation.name),
+         true <- registration == entry.registration and current == declaration,
+         {:ok, requirement} <-
+           authorize_invocation(state, provisional, invocation.arguments, values),
+         :ok <- validate_invocation_approval(entry, requirement, stamp),
+         {:ok, selected, ^registration, ^declaration} <-
+           resolve_invocation(state, declaration, invocation.name),
+         :ok <- Options.validate_version(state.tool_authority.options, stamp) do
+      entries = Map.put(state.tool_authority.invocations, key, %{entry | started: true})
+      authority = %{state.tool_authority | invocations: entries}
+      {:reply, {:ok, selected, store}, %{state | tool_authority: authority}}
+    else
+      false ->
+        {:reply, {:refused, :tool_declaration_changed}, state}
+
+      {:ok, _spec, _registration, _declaration} ->
+        {:reply, {:refused, :tool_declaration_changed}, state}
+
+      {:error, reason} ->
+        {:reply, {:refused, reason}, state}
+    end
+  end
+
+  @spec invocation_declaration(state(), Invocation.t()) :: {:ok, map()} | {:error, term()}
+  defp invocation_declaration(
+         %{
+           continuation: %Continuation{
+             active_request: %Request{} = request,
+             tool_checkpoint: %{} = checkpoint
+           }
+         },
+         invocation
+       ) do
+    with true <-
+           request.request_id == invocation.request_id and
+             checkpoint.request_id == invocation.request_id and
+             checkpoint.checkpoint_id == invocation.checkpoint_id and
+             checkpoint.epoch_id == request.epoch_id,
+         %{name: name, arguments: arguments, status: status} <-
+           Enum.find(checkpoint.calls, &(&1.tool_call_id == invocation.call_id)),
+         true <-
+           name == invocation.name and arguments == invocation.arguments and status == :pending,
+         %MingaAgent.Session.Prefix{schemas: schemas} <- request.prefix,
+         %{} = declaration <- Enum.find(schemas, &(&1.name == name)) do
+      {:ok, declaration}
+    else
+      _mismatch -> {:error, :tool_call_identity_mismatch}
+    end
+  end
+
+  defp invocation_declaration(_state, _invocation), do: {:error, :stale_request}
+
+  @spec fetch_prepared_invocation(state(), Invocation.t(), pid()) ::
+          {:ok, map()} | {:error, term()}
+  defp fetch_prepared_invocation(state, invocation, worker) do
+    case Map.get(state.tool_authority.invocations, Invocation.key(invocation)) do
+      %{invocation: ^invocation, worker: ^worker, started: false} = entry -> {:ok, entry}
+      _missing_or_started -> {:error, :invocation_not_eligible}
+    end
+  end
+
+  @spec resolve_invocation(state(), map(), String.t()) ::
+          {:ok, ToolSpec.t(), term(), map()} | {:error, term()}
+  defp resolve_invocation(state, %{source: {:local, name}}, name) do
+    GenServer.call(ProviderLifecycle.pid(state.provider), {:resolve_local_tool, name})
+  end
+
+  defp resolve_invocation(state, _declaration, name) do
+    with {:ok, spec, registration} <-
+           ToolRegistry.resolve_execution(state.tool_authority.registry, name) do
+      tool = ReqLLMAdapter.tool(spec, nil, %{minga_tool_spec: spec})
+      {:ok, spec, registration, ReqLLMAdapter.declaration(tool)}
+    end
+  end
+
+  @spec authorize_invocation(state(), ToolSpec.t(), map(), map()) ::
+          {:ok, :ready | :approval_required} | {:error, term()}
+  defp authorize_invocation(state, spec, args, %{
+         agent_tool_permissions: permissions,
+         agent_tool_approval: approval,
+         agent_destructive_tools: destructive
+       })
+       when (is_map(permissions) or is_nil(permissions)) and
+              approval in [:none, :all, :destructive] and is_list(destructive) do
+    case {state.tool_authority.read_only?, TurnExecution.mode(state.turn_execution)} do
+      {true, _mode} ->
+        if MingaAgent.Tools.read_only_name?(spec.name),
+          do: tool_policy(spec, args, permissions, approval, destructive),
+          else: {:error, :read_only_session}
+
+      {false, :plan} ->
+        if MingaAgent.Tool.PlanMode.blocked?(spec.name, args),
+          do: {:error, :plan_mode},
+          else: tool_policy(spec, args, permissions, approval, destructive)
+
+      {false, :exec} ->
+        tool_policy(spec, args, permissions, approval, destructive)
+    end
+  end
+
+  defp authorize_invocation(_state, _spec, _args, _invalid), do: {:error, :options_unavailable}
+
+  @spec tool_policy(ToolSpec.t(), map(), map() | nil, atom(), list()) ::
+          {:ok, :ready | :approval_required} | {:error, term()}
+  defp tool_policy(spec, args, permissions, approval, destructive) do
+    case Map.get(permissions || %{}, spec.name) do
+      permission when permission in [:deny, "deny"] -> {:error, :permission_denied}
+      permission when permission in [:allow, "allow"] -> {:ok, :ready}
+      permission when permission in [:ask, "ask"] -> {:ok, :approval_required}
+      nil -> default_tool_policy(spec, args, approval, destructive)
+      _invalid -> {:error, :invalid_tool_permission}
+    end
+  end
+
+  @spec default_tool_policy(ToolSpec.t(), map(), atom(), list()) ::
+          {:ok, :ready | :approval_required} | {:error, term()}
+  defp default_tool_policy(spec, args, approval, destructive) do
+    case registry_approval(spec) do
+      :deny ->
+        {:error, :tool_denied}
+
+      level ->
+        default_policy_requirement(
+          approval,
+          level == :ask or MingaAgent.Tools.destructive?(spec.name, args, destructive)
+        )
+    end
+  end
+
+  @spec registry_approval(ToolSpec.t()) :: ToolSpec.approval_level() | nil
+  defp registry_approval(%ToolSpec{source: :builtin}), do: nil
+  defp registry_approval(%ToolSpec{source: {:bundle, _}}), do: nil
+  defp registry_approval(%ToolSpec{approval_level: level}), do: level
+
+  @spec default_policy_requirement(atom(), boolean()) :: {:ok, :ready | :approval_required}
+  defp default_policy_requirement(:none, _destructive?), do: {:ok, :ready}
+  defp default_policy_requirement(:all, _destructive?), do: {:ok, :approval_required}
+  defp default_policy_requirement(:destructive, true), do: {:ok, :approval_required}
+  defp default_policy_requirement(:destructive, false), do: {:ok, :ready}
+
+  @spec validate_invocation_approval(map(), atom(), Options.version_stamp()) ::
+          :ok | {:error, term()}
+  defp validate_invocation_approval(
+         %{requirement: :approval_required, approved: true, stamp: stamp},
+         _requirement,
+         stamp
+       ),
+       do: :ok
+
+  defp validate_invocation_approval(%{requirement: :ready}, :ready, _stamp), do: :ok
+  defp validate_invocation_approval(_entry, _requirement, _stamp), do: {:error, :approval_changed}
+
+  @spec approve_prepared_invocation(state(), ToolApproval.t(), approval_decision()) :: state()
+  defp approve_prepared_invocation(state, approval, decision) do
+    entries =
+      Map.new(state.tool_authority.invocations, fn {key, entry} ->
+        case entry do
+          %{
+            worker: worker,
+            invocation: %{call_id: call_id, name: name, arguments: args},
+            started: false
+          }
+          when worker == approval.reply_to and call_id == approval.tool_call_id and
+                 name == approval.name and args == approval.args ->
+            {key, %{entry | approved: decision != :reject}}
+
+          _other ->
+            {key, entry}
+        end
+      end)
+
+    %{state | tool_authority: %{state.tool_authority | invocations: entries}}
+  end
+
+  @spec revise_tool_policy(state(), TurnExecution.t()) :: state()
+  defp revise_tool_policy(state, execution) do
+    %{
+      state
+      | turn_execution: execution,
+        tool_authority: %{state.tool_authority | revision: make_ref()}
+    }
   end
 
   @spec ensure_artifact_store(state()) :: {:ok, GenServer.server()} | {:error, term()}
@@ -1870,7 +2206,8 @@ defmodule MingaAgent.Session do
     state = %{
       state
       | transcript: transcript,
-        continuation: Continuation.reset(state.continuation)
+        continuation: Continuation.reset(state.continuation),
+        tool_authority: %{state.tool_authority | revision: make_ref(), invocations: %{}}
     }
 
     record_critical_event(state, :session_started, %{
@@ -2168,7 +2505,7 @@ defmodule MingaAgent.Session do
       |> broadcast({:status_changed, :plan})
       |> maybe_schedule_idle_gc(execution)
 
-    %{state | turn_execution: execution}
+    revise_tool_policy(state, execution)
   end
 
   @spec enter_exec_mode(state(), TurnExecution.t()) :: state()
@@ -2179,7 +2516,7 @@ defmodule MingaAgent.Session do
       |> notify_messages_changed()
       |> announce_turn_status(execution)
 
-    %{state | turn_execution: execution}
+    revise_tool_policy(state, execution)
   end
 
   @spec queued_send_failed(state(), TurnExecution.t()) :: state()
@@ -2249,7 +2586,11 @@ defmodule MingaAgent.Session do
     continuation = Continuation.interrupt_request(state.continuation)
     state = %{state | continuation: continuation} |> reconcile_interrupted_checkpoint()
 
-    {state, {:interrupted, "Agent response ended before a continuation was returned."}}
+    message =
+      TurnExecution.error(state.turn_execution) ||
+        "Agent response ended before a continuation was returned."
+
+    {state, {:interrupted, message}}
   end
 
   defp apply_provider_outcome(state, %Outcome{} = outcome) do
@@ -2294,16 +2635,22 @@ defmodule MingaAgent.Session do
        do: state
 
   defp reconcile_interrupted_checkpoint(state) do
-    case reconciliation_outputs(state) do
-      {:ok, outputs} ->
-        finish_interrupted_checkpoint_reconciliation(state, outputs)
+    if Enum.any?(state.tool_authority.invocations, fn {_key, entry} ->
+         not is_nil(entry.failure)
+       end) do
+      state
+    else
+      case reconciliation_outputs(state) do
+        {:ok, outputs} ->
+          finish_interrupted_checkpoint_reconciliation(state, outputs)
 
-      {:error, reason} ->
-        state
-        |> append_error_message_once(
-          "Interrupted effect reconciliation could not inspect retained delivery state. The durable checkpoint was preserved; reload the session to retry safely."
-        )
-        |> broadcast({:error, "Effect reconciliation failed: #{inspect(reason)}"})
+        {:error, reason} ->
+          state
+          |> append_error_message_once(
+            "Interrupted effect reconciliation could not inspect retained delivery state. The durable checkpoint was preserved; reload the session to retry safely."
+          )
+          |> broadcast({:error, "Effect reconciliation failed: #{inspect(reason)}"})
+      end
     end
   end
 
@@ -2641,9 +2988,10 @@ defmodule MingaAgent.Session do
   end
 
   @spec send_approval_response(approval_resolution()) :: approval_resolution()
-  defp send_approval_response({_state, approval, decision} = resolution) do
+  defp send_approval_response({state, approval, decision}) do
+    state = approve_prepared_invocation(state, approval, decision)
     send_approval_response(approval, decision)
-    resolution
+    {state, approval, decision}
   end
 
   @spec send_approval_response(ToolApproval.t(), approval_decision()) :: :ok
@@ -3150,6 +3498,7 @@ defmodule MingaAgent.Session do
   defp auto_approve_tool(event, state, scope) do
     case TurnExecution.auto_approve(state.turn_execution, event, scope) do
       {:approved, approval, execution} ->
+        state = approve_prepared_invocation(state, approval, :approve)
         send_approval_response(approval, :approve)
         state = mark_tool_auto_approved(state, event, scope)
         %{state | turn_execution: execution}
@@ -3844,9 +4193,8 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()]
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
   defp begin_provider_request(state, content) do
-    state = refresh_continuation_system(state)
-
-    with {:ok, state} <- compact_request_continuation(state),
+    with {:ok, state, _result} <- refresh_continuation_prefix(state, :current),
+         {:ok, state} <- compact_request_continuation(state),
          {:ok, turn_id} <- request_turn_id(state),
          request_id = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
          {:ok, request, continuation} <-
@@ -4127,10 +4475,21 @@ defmodule MingaAgent.Session do
       provider_source: state.provider.source,
       model: provider_model(provider_state, state),
       thinking_level: provider_thinking_level(provider_state),
-      active_skill_names: provider_active_skill_names(provider_state),
+      active_skill_names:
+        selected_skill_names(state, provider_active_skill_names(provider_state)),
       project_root: provider_project_root(provider_state, state)
     )
   end
+
+  @spec selected_skill_names(state(), [String.t()]) :: [String.t()]
+  defp selected_skill_names(%{provider: %{module: MingaAgent.Providers.Native}} = state, fallback) do
+    case PrefixStore.resolve(state.continuation.prefixes, state.continuation.prefixes.selected) do
+      %Prefix{skills: skills} -> skills
+      :unknown -> fallback
+    end
+  end
+
+  defp selected_skill_names(_state, fallback), do: fallback
 
   @spec provider_state(state()) :: map()
   defp provider_state(%{provider: provider}) when ProviderLifecycle.is_detached(provider),
@@ -4426,7 +4785,23 @@ defmodule MingaAgent.Session do
 
   @spec do_apply_resolved_model_selection(state(), ModelSelection.t()) ::
           {:ok, state()} | {:error, term()}
+  defp do_apply_resolved_model_selection(%{provider: provider} = state, selection)
+       when ProviderLifecycle.is_detached(provider) do
+    with :ok <- Continuation.check_model_change(state.continuation, ModelSelection.id(selection)) do
+      apply_compatible_model_selection(state, selection)
+    end
+  end
+
   defp do_apply_resolved_model_selection(state, selection) do
+    with {:ok, committed, :ok} <- refresh_continuation_prefix(state, {:model, selection}) do
+      {:ok,
+       committed |> install_credential_readiness(:configured) |> broadcast_credential_readiness()}
+    end
+  end
+
+  @spec apply_compatible_model_selection(state(), ModelSelection.t()) ::
+          {:ok, state()} | {:error, term()}
+  defp apply_compatible_model_selection(state, selection) do
     case apply_selection_to_attached_provider(state, selection) do
       :ok ->
         state =
@@ -4860,6 +5235,9 @@ defmodule MingaAgent.Session do
 
   defp humanize_error_kind(:invalid_model, message, _provider), do: message
 
+  defp humanize_error_kind(:context_transition_required, _message, _provider),
+    do: Event.Error.context_transition_message()
+
   defp humanize_error_kind(:provider_error, _message, _provider) do
     "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
   end
@@ -5097,34 +5475,113 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec maybe_refresh_continuation_system(state(), term()) :: state()
-  defp maybe_refresh_continuation_system(state, {:ok, _skill}),
-    do: refresh_continuation_system(state)
-
-  defp maybe_refresh_continuation_system(state, :ok), do: refresh_continuation_system(state)
-  defp maybe_refresh_continuation_system(state, _error), do: state
-
-  @spec refresh_continuation_system(state()) :: state()
-  defp refresh_continuation_system(
-         %{continuation: %Continuation{messages: [%ReqLLM.Message{role: :system} | _rest]}} =
-           state
+  @spec refresh_continuation_prefix(state(), term()) ::
+          {:ok, state(), term()} | {:error, term()}
+  defp refresh_continuation_prefix(
+         %{continuation: %Continuation{active_request: %Request{}}},
+         _operation
        ),
-       do: state
+       do: {:error, :request_active}
 
-  defp refresh_continuation_system(state) do
+  defp refresh_continuation_prefix(
+         %{continuation: %Continuation{tool_checkpoint: %{}}},
+         _operation
+       ),
+       do: {:error, :effect_reconciliation_required}
+
+  defp refresh_continuation_prefix(
+         %{provider: %{module: MingaAgent.Providers.Native}} = state,
+         operation
+       ) do
     provider_pid = ProviderLifecycle.pid(state.provider)
 
-    with true <- function_exported?(state.provider.module, :get_state, 1),
-         {:ok, %{system_prompt: system_prompt}} <-
-           state.provider.module.get_state(provider_pid),
-         true <- is_binary(system_prompt),
-         {:ok, continuation} <-
-           Continuation.replace_system(state.continuation, Context.system(system_prompt)) do
-      state = %{state | continuation: continuation}
-      {state, _save_result} = persist_completed_boundary(state)
-      state
+    preview_operation =
+      case PrefixStore.resolve(state.continuation.prefixes, state.continuation.prefixes.selected) do
+        %Prefix{skills: skills} -> {:selected, operation, skills}
+        :unknown -> operation
+      end
+
+    case GenServer.call(provider_pid, {:preview_prefix, preview_operation}) do
+      {:ok, candidate, token, result} ->
+        commit_native_prefix_preview(state, operation, candidate, token, result)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp refresh_continuation_prefix(state, :current) do
+    case state.provider.module.get_state(ProviderLifecycle.pid(state.provider)) do
+      {:ok, %{system_prompt: prompt}} when is_binary(prompt) ->
+        identity = %{native_contract: :provider_owned, provider: state.provider.module}
+
+        with {:ok, candidate} <- PrefixStore.candidate(prompt, [], identity),
+             {:ok, status, continuation} <-
+               Continuation.change_prefix(state.continuation, candidate),
+             {:ok, committed} <-
+               commit_prefix_transition(state, %{state | continuation: continuation}, status) do
+          {:ok, announce_prefix_transition(committed, status), :ok}
+        end
+
+      _provider_owned ->
+        {:ok, state, :ok}
+    end
+  end
+
+  defp refresh_continuation_prefix(_state, _operation),
+    do: {:error, :provider_prefix_transition_unavailable}
+
+  @spec commit_native_prefix_preview(
+          state(),
+          term(),
+          MingaAgent.Session.Prefix.t(),
+          reference(),
+          term()
+        ) ::
+          {:ok, state(), term()} | {:error, term()}
+  defp commit_native_prefix_preview(state, operation, prefix, token, result) do
+    provider = ProviderLifecycle.pid(state.provider)
+
+    with {:ok, status, continuation} <- Continuation.change_prefix(state.continuation, prefix),
+         candidate = prefix_transition_candidate(state, operation, continuation),
+         {:ok, committed} <- commit_prefix_transition(state, candidate, status),
+         :ok <- GenServer.call(provider, {:commit_prefix_preview, token}) do
+      {:ok, announce_prefix_transition(committed, status), result}
     else
-      _unsupported_or_active -> state
+      {:error, _reason} = error ->
+        GenServer.call(provider, {:discard_prefix_preview, token})
+        error
+    end
+  end
+
+  @spec prefix_transition_candidate(state(), term(), Continuation.t()) :: state()
+  defp prefix_transition_candidate(state, {:model, selection}, continuation) do
+    candidate = install_model_selection(state, selection)
+    %{candidate | continuation: continuation}
+  end
+
+  defp prefix_transition_candidate(state, _operation, continuation),
+    do: %{state | continuation: continuation}
+
+  @spec announce_prefix_transition(state(), :applied | :unchanged) :: state()
+  defp announce_prefix_transition(state, :unchanged), do: state
+
+  defp announce_prefix_transition(state, :applied),
+    do:
+      broadcast(
+        state,
+        {:prefix_changed, %{epoch_id: state.continuation.prefixes.selected, status: :applied}}
+      )
+
+  @spec commit_prefix_transition(state(), state(), :unchanged | :applied) ::
+          {:ok, state()} | {:error, term()}
+  defp commit_prefix_transition(state, candidate, :unchanged)
+       when state.model_selection == candidate.model_selection, do: {:ok, state}
+
+  defp commit_prefix_transition(state, candidate, _status) do
+    case commit_effect_snapshot(state, candidate) do
+      {:ok, committed} -> {:ok, committed}
+      {:error, reason} -> {:error, {:prefix_persistence_failed, reason}}
     end
   end
 
@@ -5603,6 +6060,7 @@ defmodule MingaAgent.Session do
         model_selection: staged.model_selection,
         selection_error: staged.selection_error,
         turn_execution: execution,
+        tool_authority: %{current.tool_authority | revision: make_ref(), invocations: %{}},
         pending_model_change: nil,
         created_at: loaded_at
     }

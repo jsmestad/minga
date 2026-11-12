@@ -14,6 +14,28 @@ Retained-output references and recovery bookkeeping stay in the durable history.
 
 A branch can resume only from a recorded boundary. Branching from a display entry without a matching model boundary returns an error rather than guessing which provider messages belonged there. Switching branches restores the branch's messages and boundary identities together.
 
+## Immutable request prefixes
+
+Session's continuation owns an interned prefix store. Instructions and callback-free tool declarations are separate immutable components; an epoch joins their identities with the selected route and authentication evidence. The selected prefix also retains skill names, so a provider or runtime restart restores the selection without parsing historical prompt text or rewriting its immutable instructions. Requests, outcomes, tool checkpoints, boundaries, and branch snapshots reference that epoch. Display events report identity and status, not copies of the schema set.
+
+Continuation codec version 4 stores each reachable component once. Dynamic declaration source owners are captured as durable binary identities before hashing, so an unloaded or removed extension cannot make its saved history undecodable; the changed live registry still requires an explicit transition. Versions 2 and 3 preserve their exact ReqLLM values, but missing historical prefix evidence remains unknown: today's prompt and registry cannot reconstruct it. Corrupt identities, digests, and dangling references are rejected. Branches retain their own references, and compaction keeps the provider's exact native window without prepending stored instructions.
+
+Prefix changes require an idle request boundary with no unsettled tool group. Skill updates are previewed before effective mutation; a rejected transition or failed save leaves the last-good prefix and active skills unchanged. Unchanged turns and identical declarations reuse the same components and epoch. See [native replay identity](AGENT-MODEL-SELECTION.md#native-replay-identity) for restart and fresh-conversation requirements.
+
+Native loop refusals retain their structured context-transition identity through Session presentation. Their public error directs the user to retain the saved record or use `/new`; it is not reported as a provider outage or model-picker failure, and does not expose arbitrary diagnostic text.
+
+## Live tool authority
+
+An advertised declaration is not an execution grant. Session authorizes each correlated call using current mode, restrictions, permissions, and approval policy. After approval and hook/advice delays, Registry resolves the current registration and Executor validates arguments, builds its callback, and starts it once.
+
+The final gate reads versioned policy before Registry resolution and validates the same ETS incarnation and option revisions afterward. Equal-value writes, allow–deny–allow changes, resets, source removal, and registration replacement cannot reuse an old grant. Refusal is an ordinary saved tool result; storage failure instead blocks continuation. Work that already crossed the start gate may settle after revocation. Revocation does not interrupt an instruction or undo an external effect.
+
+## Default context and optional packs
+
+Automatic memory injection, the built-in memory-write tool, default introspection tools, model-cycling commands, and backend choice in the default child-agent tool have been removed. Legacy `pi_rpc` configuration is rejected rather than resolved to an executable provider. Project/global instructions, selected skills, existing memory files, saved history, registered providers, and Runtime/Gateway introspection remain owned by their existing sources.
+
+After the runtime starts, opt in to read-only memory discovery with `MingaAgent.ToolPacks.Memory.register()` or introspection with `MingaAgent.ToolPacks.Introspection.register()`. These packs are not registered automatically. Notebook and todo tools/state remain available; only notebook-specific prompt instructions were removed here.
+
 ## Interrupted requests and tools
 
 An interrupted provider request keeps its exact submitted prompt. The next continuation includes that prompt once; it does not replay a partial provider response.
@@ -59,11 +81,7 @@ MIX_ENV=prod mix run scripts/retained_output_smoke.exs capture "$root"
 MIX_ENV=prod mix run scripts/retained_output_smoke.exs restore "$root"
 ```
 
-The loopback image smoke sends a valid PNG larger than one fetch page through the actual Native/ReqLLM Anthropic encoder and checks exact decoded wire bytes. Its second route refuses image tool-result transport and must send an explicit error with no wire image. It uses a temporary loopback-only API key, not a vendor account:
-
-```sh
-mix run scripts/smoke_native_retained_image.exs
-```
+Retained-image projection and exact SDK encoding are covered by the Native adapter/output-hydration tests. A loopback encoder fixture does not qualify a vendor route for retained native replay; that requires the exact-route prefix/restart conformance proof.
 
 ## Older display-only records
 

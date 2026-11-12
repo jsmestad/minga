@@ -1,4 +1,5 @@
 defmodule MingaAgent.Tool.ExecutorTest do
+  # Advice is a shared process-wide table; these existing advice cases reset it.
   use ExUnit.Case, async: false
 
   alias Minga.Config.Advice
@@ -17,12 +18,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
     table = :"executor_test_#{:erlang.unique_integer([:positive])}"
 
-    :ets.new(table, [
-      :named_table,
-      :set,
-      :public,
-      read_concurrency: true
-    ])
+    start_supervised!({Registry, name: table})
 
     {:ok, table: table}
   end
@@ -164,8 +160,10 @@ defmodule MingaAgent.Tool.ExecutorTest do
   end
 
   describe "context-bound execution" do
-    test "context-free built-in specs execute without ToolContext", %{table: table} do
-      spec = Enum.find(MingaAgent.Tools.builtin_specs(), &(&1.name == "describe_runtime"))
+    test "opt-in context-free tools execute without ToolContext", %{table: table} do
+      spec =
+        Enum.find(MingaAgent.ToolPacks.Introspection.specs(), &(&1.name == "describe_runtime"))
+
       assert spec.context_requirements == []
       assert :ok = Registry.register(table, spec)
 
@@ -200,26 +198,6 @@ defmodule MingaAgent.Tool.ExecutorTest do
                Executor.execute("context_write", %{}, table)
 
       refute_receive {:built, _}
-    end
-
-    test "approved mutating tools still require ToolContext", %{table: table} do
-      spec =
-        Spec.new!(
-          source: :config,
-          name: "approved_context_write",
-          description: "Context write",
-          parameter_schema: %{},
-          category: :filesystem,
-          approval_level: :ask,
-          capabilities: [:mutate_project],
-          context_requirements: [:tool_context],
-          build: fn _context -> fn _args -> {:ok, "wrote"} end end
-        )
-
-      assert :ok = Registry.register(table, spec)
-
-      assert {:error, {:missing_tool_context, "approved_context_write", [:tool_context]}} =
-               Executor.execute_approved(spec, %{})
     end
 
     test "context-bound build receives ToolContext and executes with args", %{table: table} do
@@ -321,25 +299,6 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
       assert message =~ "Plan mode"
       refute_receive {:called, %{"apply" => "Organize imports"}}, 20
-    end
-
-    test "refuses already-approved destructive tools before callback runs", %{table: table} do
-      parent = self()
-
-      spec =
-        register_tool(table, "git_commit",
-          approval_level: :ask,
-          callback: fn _args ->
-            send(parent, :called)
-            {:ok, "committed"}
-          end
-        )
-
-      assert {:error, {:plan_mode_refused, message}} =
-               Executor.execute_approved(spec, %{"message" => "test"}, :plan)
-
-      assert message =~ "git_commit"
-      refute_receive :called, 20
     end
   end
 
@@ -469,28 +428,6 @@ defmodule MingaAgent.Tool.ExecutorTest do
       assert {:error, {:raised, "boom"}} = Executor.execute("advised_flaky", %{}, table)
       assert {:ok, "recovered"} = Executor.execute("advised_flaky", %{}, table)
       assert {:error, {:crashed, {:exit, :boom}}} = Executor.execute("advised_exit", %{}, table)
-    end
-  end
-
-  describe "execute_approved/2" do
-    test "skips approval check and runs callback directly", %{table: table} do
-      spec =
-        register_tool(table, "approved_tool",
-          approval_level: :ask,
-          callback: fn _args -> {:ok, "ran"} end
-        )
-
-      assert {:ok, "ran"} = Executor.execute_approved(spec, %{})
-    end
-
-    test "works even for :deny tools when explicitly approved", %{table: table} do
-      spec =
-        register_tool(table, "deny_override",
-          approval_level: :deny,
-          callback: fn _args -> {:ok, "forced"} end
-        )
-
-      assert {:ok, "forced"} = Executor.execute_approved(spec, %{})
     end
   end
 end

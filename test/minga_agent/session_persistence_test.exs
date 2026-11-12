@@ -531,7 +531,8 @@ defmodule MingaAgent.SessionPersistenceTest do
   end
 
   @tag :tmp_dir
-  test "a restarted Session sends the saved provider continuation unchanged", %{tmp_dir: dir} do
+  test "a restarted Session rejects changed instructions without rewriting its saved continuation",
+       %{tmp_dir: dir} do
     session =
       start_test_session(
         provider: Minga.Test.SessionContinuationProvider,
@@ -575,14 +576,18 @@ defmodule MingaAgent.SessionPersistenceTest do
 
     assert :ok = Session.subscribe(restarted)
     assert :ok = Session.load_session(restarted, session_id)
-    assert :ok = Session.send_prompt(restarted, "follow-up")
-    assert_receive {:continuation_request, resumed_request}, @event_timeout
 
-    assert hd(resumed_request.messages) == ReqLLM.Context.system("saved skill prompt")
+    assert {:error, {:portable_context_transition_required, _}} =
+             Session.send_prompt(restarted, "follow-up")
 
-    assert resumed_request.messages ==
-             Enum.concat(completed_messages, [ReqLLM.Context.user("follow-up")])
-
+    refute_receive {:continuation_request, _request}, 0
+    assert {:ok, preserved} = SessionStore.load(session_id, dir)
+    assert preserved.continuation == saved.continuation
+    assert :ok = Session.new_session(restarted)
+    refute Session.session_id(restarted) == session_id
+    assert :ok = Session.send_prompt(restarted, "fresh prompt")
+    assert_receive {:continuation_request, fresh_request}, @event_timeout
+    assert hd(fresh_request.messages) == ReqLLM.Context.system("changed skill prompt")
     assert :ok = Session.abort(restarted)
   end
 

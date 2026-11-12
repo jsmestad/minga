@@ -145,7 +145,6 @@ defmodule Minga.Keymap.Defaults do
     {~k(a e), :inline_edit, "Rewrite selection inline"},
     {~k(a m), :agent_pick_model, "Pick agent model"},
     {~k(a c), :workspace_copy_file, "Copy file to workspace…"},
-    {~k(a M), :agent_cycle_model, "Cycle agent model"},
     {~k(a h), :agent_session_history, "Resume session"},
     {~k(a r), :workspace_pending_reviews, "Pending reviews"},
     {~k(a o), :remote_find_file, "Open remote file"},

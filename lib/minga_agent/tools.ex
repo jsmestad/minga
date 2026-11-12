@@ -27,7 +27,6 @@ defmodule MingaAgent.Tools do
   | `git_log`         | Show recent commits with structured output (read-only)|
   | `git_stage`       | Stage files for commit (destructive)                 |
   | `git_commit`      | Create a commit with a message (destructive)         |
-  | `memory_write`    | Save a learning or preference to persistent memory   |
   | `diagnostics`     | Get current LSP diagnostics for a file (read-only)   |
   | `definition`      | Find where a symbol is defined via LSP (read-only)   |
   | `references`      | Find all usages of a symbol via LSP (read-only)      |
@@ -65,7 +64,6 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.LspReferences
   alias MingaAgent.Tools.LspRename
   alias MingaAgent.Tools.LspWorkspaceSymbols
-  alias MingaAgent.Tools.MemoryWrite
   alias MingaAgent.Tools.MultiEditFile
   alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.ReadFile
@@ -90,7 +88,7 @@ defmodule MingaAgent.Tools do
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
-  @read_only_tools ~w(read_file fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
+  @read_only_tools ~w(read_file memory_read fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
   @max_symlink_depth 40
 
   @doc """
@@ -155,7 +153,7 @@ defmodule MingaAgent.Tools do
       git_log(),
       git_stage(),
       git_commit(),
-      memory_write(),
+      memory_read(),
       lsp_diagnostics(),
       lsp_definition(),
       lsp_references(),
@@ -892,12 +890,6 @@ defmodule MingaAgent.Tools do
             "description" =>
               "Model to use for the subagent (e.g., \"anthropic:claude-sonnet-4-20250514\"). Defaults to the parent's model."
           },
-          "provider" => %{
-            "type" => "string",
-            "enum" => ["native", "pi_rpc"],
-            "description" =>
-              "Provider to use for the subagent. Defaults to the parent's provider; explicit overrides are shown in the subagent's first system message."
-          },
           "background" => %{
             "type" => "boolean",
             "description" =>
@@ -925,7 +917,6 @@ defmodule MingaAgent.Tools do
           Subagent.execute(args["task"],
             project_root: root,
             model: args["model"],
-            provider: args["provider"],
             background: args["background"] == true,
             isolation: args["isolation"],
             parent_session: parent_session
@@ -1107,36 +1098,19 @@ defmodule MingaAgent.Tools do
 
   # ── Memory tools ──────────────────────────────────────────────────────────────
 
-  @spec memory_write() :: Spec.t()
-  defp memory_write do
+  @spec memory_read() :: Spec.t()
+  defp memory_read do
     Spec.new!(
-      name: "memory_write",
-      description: """
-      Save a learning, preference, or project convention to persistent memory.
-      Saved entries carry forward to future sessions automatically. Use this
-      sparingly for information that would be valuable across sessions:
-      coding conventions, user preferences, recurring patterns, project-specific
-      rules. Do not log routine observations or per-task notes.
-      """,
-      parameter_schema: %{
-        "type" => "object",
-        "properties" => %{
-          "text" => %{
-            "type" => "string",
-            "description" => "The learning or preference to remember"
-          }
-        },
-        "required" => ["text"]
-      },
-      source: :builtin,
+      name: "memory_read",
+      description: "Read the existing user memory file when explicitly requested.",
+      parameter_schema: %{"type" => "object", "properties" => %{}},
+      source: {:bundle, :memory_tools},
       category: :memory,
       approval_level: :auto,
-      capabilities: [:memory_write],
-      context_requirements: [:tool_context],
+      capabilities: [],
+      context_requirements: [],
       build: fn _context ->
-        fn args ->
-          MemoryWrite.execute(args["text"] || "")
-        end
+        fn _args -> {:ok, MingaAgent.Memory.read() || "No saved memory."} end
       end
     )
   end
@@ -1506,7 +1480,7 @@ defmodule MingaAgent.Tools do
         "type" => "object",
         "properties" => %{}
       },
-      source: :builtin,
+      source: {:bundle, :introspection_tools},
       category: :agent,
       approval_level: :auto,
       capabilities: [],
@@ -1529,7 +1503,7 @@ defmodule MingaAgent.Tools do
         "type" => "object",
         "properties" => %{}
       },
-      source: :builtin,
+      source: {:bundle, :introspection_tools},
       category: :agent,
       approval_level: :auto,
       capabilities: [],

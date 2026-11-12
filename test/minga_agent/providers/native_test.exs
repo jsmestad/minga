@@ -13,6 +13,8 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias MingaAgent.Session.Continuation
+  alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
   alias MingaAgent.Test.RecordingProcessBackend
@@ -83,43 +85,57 @@ defmodule MingaAgent.Providers.NativeTest do
     assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
   end
 
-  defp send_prompt(pid, content) do
-    messages = Process.get({__MODULE__, pid, :messages}, [])
-    revision = Process.get({__MODULE__, pid, :revision}, 0)
-    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
-
-    request =
-      Request.new(
-        "request-" <> identity,
-        String.to_integer(identity),
-        revision,
-        Enum.concat(messages, [Context.user(content)])
-      )
-
-    Process.put({__MODULE__, pid, :active_request}, request)
-    Process.put({__MODULE__, :provider_for_request, request.request_id}, pid)
-    Native.send_prompt(pid, request)
-  end
+  # Standalone worker tests use the real pure continuation owner. Their subscriber
+  # simulates persistence replies, not Session authorization; live policy proofs
+  # are in Session.PrefixAuthorizationTest.
+  defp send_prompt(pid, content), do: dispatch_request(pid, content, &Native.send_prompt/2)
 
   defp continue(pid) do
-    content =
-      "Your previous response was interrupted mid-stream. Please continue from where you left off. Do not repeat what you already said."
+    dispatch_request(
+      pid,
+      "Your previous response was interrupted mid-stream. Please continue from where you left off. Do not repeat what you already said.",
+      &Native.continue/2
+    )
+  end
 
-    messages = Process.get({__MODULE__, pid, :messages}, [])
-    revision = Process.get({__MODULE__, pid, :revision}, 0)
-    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+  defp dispatch_request(pid, content, dispatch) do
+    with {:ok, _prefix} <- admitted_prefix(pid),
+         continuation = Process.get({__MODULE__, pid, :continuation}),
+         turn_id = System.unique_integer([:positive, :monotonic]),
+         request_id = "request-" <> Integer.to_string(turn_id),
+         {:ok, request, admitted} <-
+           Continuation.begin_request(continuation, request_id, turn_id, content) do
+      Process.put({__MODULE__, pid, :active_request}, request)
+      Process.put({__MODULE__, :provider_for_request, request_id}, pid)
 
-    request =
-      Request.new(
-        "request-" <> identity,
-        String.to_integer(identity),
-        revision,
-        Enum.concat(messages, [Context.user(content)])
-      )
+      case dispatch.(pid, request) do
+        :ok ->
+          Process.put({__MODULE__, pid, :continuation}, admitted)
+          :ok
 
-    Process.put({__MODULE__, pid, :active_request}, request)
-    Process.put({__MODULE__, :provider_for_request, request.request_id}, pid)
-    Native.continue(pid, request)
+        {:error, _reason} = error ->
+          error
+      end
+    end
+  end
+
+  defp admitted_prefix(pid) do
+    subscriber = Process.get({__MODULE__, pid, :subscriber})
+    continuation = Process.get({__MODULE__, pid, :continuation}, Continuation.new())
+
+    with {:ok, prefix, token, _result} <-
+           GenServer.call(subscriber, {:prefix_preview, pid}) do
+      case Continuation.change_prefix(continuation, prefix) do
+        {:ok, _status, selected} ->
+          :ok = GenServer.call(subscriber, {:commit_prefix_preview, pid, token})
+          Process.put({__MODULE__, pid, :continuation}, selected)
+          {:ok, prefix}
+
+        {:error, _reason} = error ->
+          :ok = GenServer.call(subscriber, {:discard_prefix_preview, pid, token})
+          error
+      end
+    end
   end
 
   defp fake_error_client(error_reason) do
@@ -135,7 +151,11 @@ defmodule MingaAgent.Providers.NativeTest do
     defaults = [
       subscriber: subscriber,
       model: "anthropic:claude-sonnet-4-20250514",
-      model_selection: ModelSelectionFixture.selection(),
+      model_selection:
+        ModelSelectionFixture.selection(
+          request_provider: :openai_codex,
+          model_id: "gpt-6.1-sol"
+        ),
       config: %AgentConfig{},
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [],
@@ -160,7 +180,14 @@ defmodule MingaAgent.Providers.NativeTest do
           Keyword.put(merged, :model_selection, selection)
       end
 
-    Native.start_link(merged)
+    case Native.start_link(merged) do
+      {:ok, pid} ->
+        Process.put({__MODULE__, pid, :subscriber}, merged[:subscriber])
+        {:ok, pid}
+
+      error ->
+        error
+    end
   end
 
   defp test_credential_opts do
@@ -195,8 +222,8 @@ defmodule MingaAgent.Providers.NativeTest do
 
   defp provider_subscriber_loop(owner, owner_ref, store) do
     receive do
-      {:agent_provider_event, _request_id, %Event.AgentEnd{outcome: outcome} = event} ->
-        send(owner, {:native_test_outcome, outcome})
+      {:agent_provider_event, request_id, %Event.AgentEnd{outcome: outcome} = event} ->
+        send(owner, {:native_test_outcome, request_id, outcome})
         send(owner, {:agent_provider_event, event})
         provider_subscriber_loop(owner, owner_ref, store)
 
@@ -208,14 +235,31 @@ defmodule MingaAgent.Providers.NativeTest do
         send(owner, {:agent_provider_event, event})
         provider_subscriber_loop(owner, owner_ref, store)
 
+      {:"$gen_call", from, {:prefix_preview, provider}} ->
+        Process.put(:native_provider, provider)
+        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, :current}))
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {action, provider, token}}
+      when action in [:commit_prefix_preview, :discard_prefix_preview] ->
+        GenServer.reply(from, GenServer.call(provider, {action, token}))
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:prepare_tool_invocation, _invocation}} ->
+        GenServer.reply(from, {:ok, :ready})
+        provider_subscriber_loop(owner, owner_ref, store)
+
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
         GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from,
-       {:admit_tool_effect, _request_id, _checkpoint_id, tool_call_id, _name, _args}} ->
-        send(owner, {:effect_admitted, tool_call_id})
-        GenServer.reply(from, {:ok, store})
+      {:"$gen_call", from, {:start_tool_invocation, invocation}} ->
+        send(owner, {:effect_admitted, invocation.call_id})
+        GenServer.reply(from, current_test_tool(invocation.name, store))
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:tool_storage_failed, _invocation, _reason}} ->
+        GenServer.reply(from, :ok)
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
@@ -260,16 +304,16 @@ defmodule MingaAgent.Providers.NativeTest do
     )
   end
 
-  defp start_effect_registration_manager(owner) do
-    spawn_link(fn -> effect_registration_manager_loop(owner, Process.monitor(owner)) end)
+  defp start_effect_registration_manager(owner, reply \\ :ok) do
+    spawn_link(fn -> effect_registration_manager_loop(owner, Process.monitor(owner), reply) end)
   end
 
-  defp effect_registration_manager_loop(owner, owner_ref) do
+  defp effect_registration_manager_loop(owner, owner_ref, reply) do
     receive do
       {:"$gen_call", from, {:register_effect_workers, session_pid, provider_pid, worker_pids}} ->
         send(owner, {:session_effect_workers_registered, session_pid, provider_pid, worker_pids})
-        GenServer.reply(from, :ok)
-        effect_registration_manager_loop(owner, owner_ref)
+        GenServer.reply(from, reply)
+        effect_registration_manager_loop(owner, owner_ref, reply)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
         :ok
@@ -301,8 +345,8 @@ defmodule MingaAgent.Providers.NativeTest do
          terminal_replies
        ) do
     receive do
-      {:agent_provider_event, _request_id, %Event.AgentEnd{outcome: outcome} = event} ->
-        send(owner, {:native_test_outcome, outcome})
+      {:agent_provider_event, request_id, %Event.AgentEnd{outcome: outcome} = event} ->
+        send(owner, {:native_test_outcome, request_id, outcome})
         send(owner, {:agent_provider_event, event})
 
         effect_barrier_subscriber_loop(
@@ -335,6 +379,41 @@ defmodule MingaAgent.Providers.NativeTest do
           terminal_replies
         )
 
+      {:"$gen_call", from, {:prefix_preview, provider}} ->
+        Process.put(:native_provider, provider)
+        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, :current}))
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from, {action, provider, token}}
+      when action in [:commit_prefix_preview, :discard_prefix_preview] ->
+        GenServer.reply(from, GenServer.call(provider, {action, token}))
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from, {:prepare_tool_invocation, _invocation}} ->
+        GenServer.reply(from, {:ok, :ready})
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, messages, calls}} ->
         send(owner, {:checkpoint_attempt, request_id, messages, calls})
         GenServer.reply(from, checkpoint_reply)
@@ -347,10 +426,20 @@ defmodule MingaAgent.Providers.NativeTest do
           terminal_replies
         )
 
-      {:"$gen_call", from,
-       {:admit_tool_effect, request_id, checkpoint_id, tool_call_id, name, args}} ->
-        send(owner, {:admission_attempt, request_id, checkpoint_id, tool_call_id, name, args})
-        GenServer.reply(from, admission_reply)
+      {:"$gen_call", from, {:start_tool_invocation, invocation}} ->
+        send(
+          owner,
+          {:admission_attempt, invocation.request_id, invocation.checkpoint_id,
+           invocation.call_id, invocation.name, invocation.arguments}
+        )
+
+        response =
+          case admission_reply do
+            {:ok, store} -> current_test_tool(invocation.name, store)
+            error -> error
+          end
+
+        GenServer.reply(from, response)
 
         effect_barrier_subscriber_loop(
           owner,
@@ -394,6 +483,22 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
+  defp current_test_tool(name, store) do
+    case GenServer.call(Process.get(:native_provider), {:resolve_local_tool, name}) do
+      {:ok, spec, _registration, _declaration} ->
+        {:ok, spec, store}
+
+      {:error, {:tool_not_local, ^name}} ->
+        case ToolRegistry.resolve_execution(name) do
+          {:ok, spec, _registration} -> {:ok, spec, store}
+          error -> error
+        end
+
+      error ->
+        error
+    end
+  end
+
   defp agent_config(fields) do
     struct!(AgentConfig, fields)
   end
@@ -433,19 +538,29 @@ defmodule MingaAgent.Providers.NativeTest do
     timeout = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
-      {:native_test_outcome, nil} ->
-        collect_run_events_acc(acc, deadline, deadline_ms)
+      {:native_test_outcome, request_id, outcome} ->
+        Process.put({__MODULE__, request_id, :outcome}, outcome)
 
-      {:native_test_outcome, outcome} ->
-        Process.put({__MODULE__, outcome.request_id, :outcome}, outcome)
-
-        case Process.get({__MODULE__, :provider_for_request, outcome.request_id}) do
+        case Process.get({__MODULE__, :provider_for_request, request_id}) do
           nil ->
             :ok
 
           pid ->
-            Process.put({__MODULE__, pid, :messages}, outcome.messages)
-            Process.put({__MODULE__, pid, :revision}, outcome.conversation_revision + 1)
+            continuation = Process.get({__MODULE__, pid, :continuation})
+
+            updated =
+              case outcome do
+                nil ->
+                  Continuation.interrupt_request(continuation)
+
+                completed ->
+                  {:ok, next} = Continuation.complete(continuation, completed, completed.turn_id)
+                  next
+              end
+
+            Process.put({__MODULE__, pid, :continuation}, updated)
+            Process.put({__MODULE__, pid, :messages}, updated.messages)
+            Process.put({__MODULE__, pid, :revision}, updated.revision)
         end
 
         collect_run_events_acc(acc, deadline, deadline_ms)
@@ -470,22 +585,6 @@ defmodule MingaAgent.Providers.NativeTest do
 
   defp text_content(message) do
     Enum.map_join(message.content, "", &(&1.text || ""))
-  end
-
-  defp collect_spawned_processes(parent, count) do
-    collect_spawned_processes(parent, count, [])
-  end
-
-  defp collect_spawned_processes(_parent, 0, acc), do: Enum.reverse(acc)
-
-  defp collect_spawned_processes(parent, count, acc) do
-    receive do
-      {:trace, ^parent, :spawn, pid, _mfa} ->
-        collect_spawned_processes(parent, count - 1, [pid | acc])
-    after
-      1_000 ->
-        flunk("expected #{count} more spawned process(es) from #{inspect(parent)}")
-    end
   end
 
   # ── Lifecycle tests ─────────────────────────────────────────────────────────
@@ -598,76 +697,6 @@ defmodule MingaAgent.Providers.NativeTest do
       assert result =~ "path=#{File.cwd!()}"
     end
 
-    test "an approved shell command completes from the working directory without an active project",
-         %{tmp_dir: dir} do
-      call_count = :counters.new(1, [:atomics])
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          if count == 0 do
-            [
-              ReqLLM.StreamChunk.tool_call("shell", %{"command" => "pwd"}, %{
-                id: "tc_shell_without_project",
-                index: 0
-              }),
-              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-            ]
-          else
-            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          project_root: nil,
-          tmp_dir: dir,
-          llm_client: client,
-          tools: nil,
-          process_backend: RecordingProcessBackend,
-          config: agent_config(tool_approval: :destructive, destructive_tools: ["shell"])
-        )
-
-      assert :ok = send_prompt(pid, "Print the working directory")
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{
-                        tool_call_id: "tc_shell_without_project",
-                        reply_to: reply_to
-                      }},
-                     5_000
-
-      send(reply_to, {:tool_approval_response, "tc_shell_without_project", :approve})
-      events = collect_run_events()
-
-      assert %Event.ToolEnd{is_error: false, result: result} =
-               Enum.find(events, &match?(%Event.ToolEnd{name: "shell"}, &1))
-
-      assert result =~ "shell command=pwd"
-      assert result =~ "cwd=#{File.cwd!()}"
-    end
-
-    test "system prompt keeps cacheable environment prefix stable within a session", %{
-      tmp_dir: dir
-    } do
-      {:ok, pid} = start_provider(tmp_dir: dir)
-
-      assert {:ok, session_state} = Native.get_state(pid)
-      assert session_state.system_prompt =~ "Project root: #{dir}"
-
-      assert session_state.system_prompt =~
-               "list_directory: List entries at a known-small path. Bounded and ignores generated trees."
-
-      assert session_state.system_prompt =~
-               "Do not use shell to recursively list or search files when find or grep can answer the question."
-
-      refute session_state.system_prompt =~ "Current time:"
-    end
-
     test "provider compaction honors configured threshold", %{tmp_dir: dir} do
       parent = self()
 
@@ -697,6 +726,9 @@ defmodule MingaAgent.Providers.NativeTest do
       )
 
       messages = Process.get({__MODULE__, pid, :messages})
+      assert {:error, _reason} = Native.compact(pid, messages, [])
+      refute_received :summary_called
+      assert {:ok, _prefix} = admitted_prefix(pid)
       assert {:ok, compacted, _summary} = Native.compact(pid, messages, [])
       assert compacted != messages
       assert_receive :summary_called, 1_000
@@ -725,123 +757,6 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "off"}} = Native.cycle_thinking_level(pid)
-    end
-
-    test "rebuilds built-in tool closures after fork store down so stale pids stop leaking", %{
-      tmp_dir: dir
-    } do
-      path = Path.join(dir, "lib/tool_rebuild.ex")
-      File.mkdir_p!(Path.dirname(path))
-      File.write!(path, "original\n")
-
-      {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
-      {:ok, pid} = start_provider(tmp_dir: dir, tools: nil)
-
-      fork_store = Native.fork_store(pid)
-      assert is_pid(fork_store)
-      write_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "write_file"))
-
-      assert {:ok, result} =
-               write_tool.callback.(%{"path" => "lib/tool_rebuild.ex", "content" => "forked\n"})
-
-      assert result =~ "via fork"
-      assert File.read!(path) == "original\n"
-      assert Minga.Buffer.content(buffer) == "original\n"
-
-      ref = Process.monitor(fork_store)
-      Process.exit(fork_store, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^fork_store, _reason}
-
-      assert Native.fork_store(pid) == nil
-      rebuilt_write_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "write_file"))
-
-      assert {:ok, result} =
-               rebuilt_write_tool.callback.(%{
-                 "path" => "lib/tool_rebuild.ex",
-                 "content" => "direct\n"
-               })
-
-      assert result =~ "wrote"
-      assert File.read!(path) == "original\n"
-      assert Minga.Buffer.content(buffer) == "direct\n"
-    end
-
-    test "rebuilds only custom tool declarations after fork store down", %{tmp_dir: dir} do
-      test_pid = self()
-
-      spec =
-        Spec.new!(
-          source: :config,
-          name: "custom_restart",
-          description: "Reports the bound fork store",
-          parameter_schema: %{},
-          build: fn context ->
-            fn _args ->
-              send(test_pid, {:bound_fork_store, context.router_context.fork_store})
-              {:ok, "reported"}
-            end
-          end
-        )
-
-      {:ok, pid} = start_provider(tmp_dir: dir, tools: [spec])
-      fork_store = Native.fork_store(pid)
-      assert is_pid(fork_store)
-
-      custom_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "custom_restart"))
-      assert {:ok, "reported"} = custom_tool.callback.(%{})
-      assert_receive {:bound_fork_store, ^fork_store}
-
-      ref = Process.monitor(fork_store)
-      Process.exit(fork_store, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^fork_store, _reason}
-      assert Native.fork_store(pid) == nil
-
-      rebuilt_tools = Native.tools(pid)
-
-      assert Enum.map(rebuilt_tools, & &1.name) == [
-               "custom_restart",
-               "todo_write",
-               "todo_read",
-               "notebook_write",
-               "notebook_read"
-             ]
-
-      rebuilt_custom_tool = Enum.find(rebuilt_tools, &(&1.name == "custom_restart"))
-      assert {:ok, "reported"} = rebuilt_custom_tool.callback.(%{})
-      assert_receive {:bound_fork_store, nil}
-    end
-
-    test "project_view-backed tools reuse the workspace-owned draft machinery and survive provider exit",
-         %{tmp_dir: dir} do
-      path = Path.join(dir, "lib/view_draft.ex")
-      File.mkdir_p!(Path.dirname(path))
-      File.write!(path, "original\n")
-
-      {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
-      {:ok, view} = ProjectView.overlay(dir)
-      {:ok, pid} = start_provider(tmp_dir: dir, project_view: view, tools: nil)
-
-      assert Native.project_view(pid) == view
-      assert Native.fork_store(pid) == nil
-      assert Native.changeset(pid) == nil
-
-      write_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "write_file"))
-
-      assert {:ok, result} =
-               write_tool.callback.(%{"path" => "lib/view_draft.ex", "content" => "draft\n"})
-
-      assert result =~ "via ProjectView"
-      assert File.read!(path) == "original\n"
-      assert {:ok, "draft\n"} = ProjectView.read_file(view, "lib/view_draft.ex")
-
-      assert {:ok, diff} = ProjectView.diff(view)
-      assert %{path: "lib/view_draft.ex", kind: :modified} in diff
-
-      GenServer.stop(pid, :normal)
-      assert {:ok, "draft\n"} = ProjectView.read_file(view, "lib/view_draft.ex")
-      assert {:ok, diff_after} = ProjectView.diff(view)
-      assert %{path: "lib/view_draft.ex", kind: :modified} in diff_after
-      assert Minga.Buffer.content(buffer) == "original\n"
     end
 
     test "send_prompt passes semantic reasoning_effort for each provider", %{tmp_dir: dir} do
@@ -887,56 +802,6 @@ defmodule MingaAgent.Providers.NativeTest do
 
         collect_run_events()
       end)
-    end
-  end
-
-  describe "model changes" do
-    test "set_model updates state, preserves thinking level, and keeps conversation context", %{
-      tmp_dir: dir
-    } do
-      test_pid = self()
-      calls = :counters.new(1, [:atomics])
-      messages_ref = make_ref()
-
-      client = fn model, messages, _opts ->
-        count = :counters.get(calls, 1)
-        :counters.add(calls, 1, 1)
-        send(test_pid, {messages_ref, count, model, messages})
-
-        build_stream_response([
-          ReqLLM.StreamChunk.text("Response #{count}"),
-          ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-        ])
-      end
-
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, thinking_level: "medium")
-
-      :ok = send_prompt(pid, "Hello")
-      collect_run_events()
-
-      switched_selection =
-        ModelSelectionFixture.selection(
-          model_id: "o4-mini",
-          display_name: "o4-mini",
-          reasoning: %{effort: "medium", options: ["off", "medium"]}
-        )
-
-      assert :ok = Native.set_model(pid, switched_selection)
-      assert {:ok, state} = Native.get_state(pid)
-      assert state.model.id == MingaAgent.ModelSelection.id(switched_selection)
-      assert state.model.name == "o4-mini"
-      assert state.thinking_level == "medium"
-
-      :ok = send_prompt(pid, "Follow up")
-      collect_run_events()
-
-      assert_received {^messages_ref, 1, %LLMDB.Model{provider_model_id: "o4-mini"}, messages}
-
-      assert Enum.map(messages, &{&1.role, text_content(&1)}) == [
-               {:user, "Hello"},
-               {:assistant, "Response 0"},
-               {:user, "Follow up"}
-             ]
     end
   end
 
@@ -1422,7 +1287,8 @@ defmodule MingaAgent.Providers.NativeTest do
 
       selection =
         ModelSelectionFixture.selection(
-          request_provider: :anthropic,
+          request_provider: :openai_codex,
+          model_id: "gpt-6.1-sol",
           capabilities: %{
             tools: true,
             images: true,
@@ -1573,7 +1439,8 @@ defmodule MingaAgent.Providers.NativeTest do
 
         selection =
           ModelSelectionFixture.selection(
-            request_provider: :anthropic,
+            request_provider: :openai_codex,
+            model_id: "gpt-6.1-sol",
             capabilities: %{tools: true, images: true, tool_result_images: true, streaming: true}
           )
 
@@ -1599,9 +1466,13 @@ defmodule MingaAgent.Providers.NativeTest do
           Context.user("Continue")
         ]
 
+        assert {:ok, prefix} = admitted_prefix(pid)
+
         {events, log} =
           with_log(fn ->
-            assert :ok = Native.continue(pid, Request.new("image-failure", 1, 0, messages))
+            assert :ok =
+                     Native.continue(pid, Request.new("image-failure", 1, 0, messages, prefix))
+
             collect_run_events()
           end)
 
@@ -1685,7 +1556,6 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(
           tmp_dir: dir,
-          model_selection: ModelSelectionFixture.selection(request_provider: :openrouter),
           llm_client: client,
           tools: Tools.all(project_root: dir)
         )
@@ -2148,34 +2018,29 @@ defmodule MingaAgent.Providers.NativeTest do
           end
         end
 
+        manager = start_effect_registration_manager(self(), {:error, :registration_rejected})
+
         {:ok, pid} =
-          start_provider(tmp_dir: dir, llm_client: client, tools: [tool_one, tool_two])
+          start_provider(
+            tmp_dir: dir,
+            llm_client: client,
+            tools: [tool_one, tool_two],
+            session_manager: manager
+          )
 
         assert :ok = send_prompt(pid, "Run both tools")
         assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
         assert_receive {:registration_cleanup_client_waiting, ^release_ref}, 1_000
 
         %{task: %Task{pid: task_pid}} = :sys.get_state(pid)
-        :erlang.trace(task_pid, true, [:procs])
-        :sys.suspend(pid)
 
         send(task_pid, {release_ref, :release})
-        worker_pids = collect_spawned_processes(task_pid, 2)
-        :erlang.trace(task_pid, false, [:procs])
+        assert_receive {:session_effect_workers_registered, _session, ^pid, worker_pids}, 1_000
+        assert length(worker_pids) == 2
         worker_refs = Enum.map(worker_pids, &Process.monitor/1)
 
         for {worker_ref, worker_pid} <- Enum.zip(worker_refs, worker_pids) do
           assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 7_000
-        end
-
-        if Process.alive?(pid) do
-          :sys.resume(pid)
-
-          try do
-            Native.get_state(pid)
-          catch
-            :exit, _ -> :ok
-          end
         end
 
         refute_receive :registration_cleanup_one_ran, 50
@@ -2185,464 +2050,6 @@ defmodule MingaAgent.Providers.NativeTest do
       after
         Process.flag(:trap_exit, previous_trap)
       end
-    end
-
-    test "empty destructive tool configuration allows formerly destructive builtins", %{
-      tmp_dir: dir
-    } do
-      call_count = :counters.new(1, [:atomics])
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          case count do
-            0 ->
-              [
-                ReqLLM.StreamChunk.tool_call(
-                  "write_file",
-                  %{"path" => "allowed.txt", "content" => "allowed\n"},
-                  %{id: "tc_write", index: 0}
-                ),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-              ]
-
-            _ ->
-              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          tools: nil,
-          config: agent_config(tool_approval: :destructive, destructive_tools: [])
-        )
-
-      assert :ok = send_prompt(pid, "Write the file")
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-      events = collect_run_events()
-
-      refute Enum.any?(events, &match?(%Event.ToolApproval{}, &1))
-
-      assert Enum.any?(
-               events,
-               &match?(%Event.ToolEnd{name: "write_file", is_error: false}, &1)
-             )
-    end
-
-    test "destructive mode asks for names in the configured list", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "configured.txt"), "configured\n")
-      call_count = :counters.new(1, [:atomics])
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          case count do
-            0 ->
-              [
-                ReqLLM.StreamChunk.tool_call(
-                  "read_file",
-                  %{"path" => "configured.txt"},
-                  %{id: "tc_read_configured", index: 0}
-                ),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-              ]
-
-            _ ->
-              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          tools: nil,
-          config: agent_config(tool_approval: :destructive, destructive_tools: ["read_file"])
-        )
-
-      assert :ok = send_prompt(pid, "Read the file")
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{
-                        tool_call_id: "tc_read_configured",
-                        reply_to: reply_to
-                      }},
-                     1_000
-
-      send(reply_to, {:tool_approval_response, "tc_read_configured", :approve})
-      events = collect_run_events()
-
-      assert Enum.any?(
-               events,
-               &match?(%Event.ToolEnd{name: "read_file", is_error: false}, &1)
-             )
-    end
-
-    test "custom spec approval metadata is honored", %{tmp_dir: dir} do
-      test_pid = self()
-      call_count = :counters.new(1, [:atomics])
-
-      spec =
-        Spec.new!(
-          source: :config,
-          name: "custom_approval",
-          description: "Requires approval",
-          parameter_schema: %{},
-          approval_level: :ask,
-          build: fn _context ->
-            fn _args ->
-              send(test_pid, :custom_approval_ran)
-              {:ok, "approved"}
-            end
-          end
-        )
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          if count == 0 do
-            [
-              ReqLLM.StreamChunk.tool_call("custom_approval", %{}, %{
-                id: "tc_custom_approval",
-                index: 0
-              }),
-              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-            ]
-          else
-            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          tools: [spec],
-          config: agent_config(tool_approval: :destructive, destructive_tools: [])
-        )
-
-      assert :ok = send_prompt(pid, "Run custom tool")
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{
-                        tool_call_id: "tc_custom_approval",
-                        reply_to: reply_to
-                      }},
-                     1_000
-
-      refute_receive :custom_approval_ran, 50
-      send(reply_to, {:tool_approval_response, "tc_custom_approval", :approve})
-      events = collect_run_events()
-
-      assert_received :custom_approval_ran
-
-      assert Enum.any?(
-               events,
-               &match?(%Event.ToolEnd{name: "custom_approval", is_error: false}, &1)
-             )
-    end
-
-    test "approval-required tools wait while allowed tools continue", %{tmp_dir: dir} do
-      test_pid = self()
-      release_ref = make_ref()
-      messages_ref = make_ref()
-      call_count = :counters.new(1, [:atomics])
-
-      ask_tool =
-        ReqLLM.Tool.new!(
-          name: "ask_tool",
-          description: "Requires approval before running",
-          parameter_schema: [],
-          callback: fn _args ->
-            send(test_pid, {:tool_started, "ask_tool", self()})
-
-            receive do
-              {^release_ref, :release} -> {:ok, "approved result"}
-            after
-              1_000 -> {:error, "approval tool timed out"}
-            end
-          end
-        )
-
-      allowed_tool =
-        ReqLLM.Tool.new!(
-          name: "allowed_tool",
-          description: "Runs without approval",
-          parameter_schema: [],
-          callback: fn _args ->
-            send(test_pid, {:tool_started, "allowed_tool", self()})
-
-            receive do
-              {^release_ref, :release} -> {:ok, "allowed result"}
-            after
-              1_000 -> {:error, "allowed tool timed out"}
-            end
-          end
-        )
-
-      client = fn _model, messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          case count do
-            0 ->
-              [
-                ReqLLM.StreamChunk.tool_call("ask_tool", %{}, %{id: "tc_ask", index: 0}),
-                ReqLLM.StreamChunk.tool_call("allowed_tool", %{}, %{id: "tc_allowed", index: 1}),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-              ]
-
-            _ ->
-              send(test_pid, {messages_ref, messages})
-              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          tools: [ask_tool, allowed_tool],
-          config: agent_config(tool_permissions: %{"ask_tool" => :ask, "allowed_tool" => :allow})
-        )
-
-      assert :ok = send_prompt(pid, "Run both tools")
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{tool_call_id: "tc_ask", reply_to: reply_to}},
-                     5_000
-
-      assert_receive {:tool_started, "allowed_tool", allowed_pid}, 5_000
-      send(reply_to, {:tool_approval_response, "tc_ask", :approve})
-      assert_receive {:effect_admitted, "tc_ask"}, 5_000
-      assert_receive {:tool_started, "ask_tool", ask_pid}, 5_000
-      assert MapSet.member?(:sys.get_state(pid).tool_workers, ask_pid)
-      send(ask_pid, {release_ref, :release})
-      send(allowed_pid, {release_ref, :release})
-      events = collect_run_events()
-      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "ask_tool", is_error: false}, &1))
-      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "allowed_tool", is_error: false}, &1))
-
-      assert_received {^messages_ref, messages}
-      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
-      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_ask", "tc_allowed"]
-    end
-
-    test "rejected approval-required tool does not prevent an allowed sibling from finishing", %{
-      tmp_dir: dir
-    } do
-      test_pid = self()
-      release_ref = make_ref()
-      messages_ref = make_ref()
-      call_count = :counters.new(1, [:atomics])
-
-      ask_tool =
-        ReqLLM.Tool.new!(
-          name: "reject_ask_tool",
-          description: "Requires approval before running",
-          parameter_schema: [],
-          callback: fn _args ->
-            send(test_pid, :rejected_approval_tool_ran)
-            {:ok, "should not run"}
-          end
-        )
-
-      allowed_tool =
-        ReqLLM.Tool.new!(
-          name: "reject_allowed_tool",
-          description: "Runs without approval",
-          parameter_schema: [],
-          callback: fn _args ->
-            send(test_pid, {:tool_started, "reject_allowed_tool", self()})
-
-            receive do
-              {^release_ref, :release} -> {:ok, "allowed result"}
-            after
-              1_000 -> {:error, "allowed tool timed out"}
-            end
-          end
-        )
-
-      client = fn _model, messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          case count do
-            0 ->
-              [
-                ReqLLM.StreamChunk.tool_call("reject_ask_tool", %{}, %{id: "tc_reject", index: 0}),
-                ReqLLM.StreamChunk.tool_call("reject_allowed_tool", %{}, %{
-                  id: "tc_allowed",
-                  index: 1
-                }),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-              ]
-
-            _ ->
-              send(test_pid, {messages_ref, messages})
-              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          tools: [ask_tool, allowed_tool],
-          config:
-            agent_config(
-              tool_permissions: %{"reject_ask_tool" => :ask, "reject_allowed_tool" => :allow}
-            )
-        )
-
-      assert :ok = send_prompt(pid, "Run both tools")
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{tool_call_id: "tc_reject", reply_to: reply_to}},
-                     5_000
-
-      assert_receive {:tool_started, "reject_allowed_tool", allowed_pid}, 5_000
-      send(reply_to, {:tool_approval_response, "tc_reject", :reject})
-      send(allowed_pid, {release_ref, :release})
-      events = collect_run_events()
-
-      rejected_end = Enum.find(events, &match?(%Event.ToolEnd{name: "reject_ask_tool"}, &1))
-      assert rejected_end != nil
-      assert rejected_end.is_error == true
-      assert rejected_end.result == "Tool rejected by user"
-
-      assert Enum.any?(
-               events,
-               &match?(%Event.ToolEnd{name: "reject_allowed_tool", is_error: false}, &1)
-             )
-
-      assert_received {^messages_ref, messages}
-      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
-      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_reject", "tc_allowed"]
-
-      assert Enum.map(tool_messages, &tool_message_text/1) == [
-               "Tool rejected by user",
-               "allowed result"
-             ]
-
-      assert Enum.map(tool_messages, &(&1.metadata[:is_error] == true)) == [true, false]
-      refute_received {:effect_admitted, "tc_reject"}
-      refute_receive :rejected_approval_tool_ran, 50
-    end
-
-    test "tool approval mode :all preserves the batch prompt after per-tool ask overrides", %{
-      tmp_dir: dir
-    } do
-      File.write!(Path.join(dir, "test.txt"), "file contents")
-      File.mkdir_p!(Path.join(dir, "subdir"))
-      call_count = :counters.new(1, [:atomics])
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          case count do
-            0 ->
-              [
-                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
-                  id: "tc_1",
-                  index: 0
-                }),
-                ReqLLM.StreamChunk.tool_call("list_directory", %{"path" => "."}, %{
-                  id: "tc_2",
-                  index: 1
-                }),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-              ]
-
-            _ ->
-              [
-                ReqLLM.StreamChunk.text("done"),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-              ]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      tools = Tools.all(project_root: dir)
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          tools: tools,
-          config: agent_config(tool_approval: :all, tool_permissions: %{"read_file" => :ask})
-        )
-
-      assert :ok = send_prompt(pid, "Read the file and then list the directory")
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{tool_call_id: "tc_1", reply_to: reply_to_1}},
-                     2_000
-
-      send(reply_to_1, {:tool_approval_response, "tc_1", :approve})
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolApproval{tool_call_id: "tc_2", reply_to: reply_to_2}},
-                     2_000
-
-      send(reply_to_2, {:tool_approval_response, "tc_2", :approve})
-
-      events = collect_run_events()
-
-      assert Enum.any?(
-               events,
-               &match?(%Event.ToolStart{tool_call_id: "tc_1", name: "read_file"}, &1)
-             )
-
-      assert Enum.any?(
-               events,
-               &match?(
-                 %Event.ToolEnd{tool_call_id: "tc_1", name: "read_file", is_error: false},
-                 &1
-               )
-             )
-
-      assert Enum.any?(
-               events,
-               &match?(%Event.ToolStart{tool_call_id: "tc_2", name: "list_directory"}, &1)
-             )
-
-      assert Enum.any?(
-               events,
-               &match?(
-                 %Event.ToolEnd{tool_call_id: "tc_2", name: "list_directory", is_error: false},
-                 &1
-               )
-             )
-
-      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
     end
 
     test "uses ProjectView-backed tools when project_view is passed to Native.start_link", %{
@@ -3247,7 +2654,6 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(
           tmp_dir: dir,
-          model_selection: ModelSelectionFixture.selection(request_provider: :openrouter),
           llm_client: client
         )
 
@@ -3290,7 +2696,8 @@ defmodule MingaAgent.Providers.NativeTest do
       messages =
         [Context.user("Inspect fixture.txt"), assistant] ++ results ++ [Context.user("Continue")]
 
-      request = Request.new("restored-request", 1, 0, messages)
+      assert {:ok, prefix} = admitted_prefix(pid)
+      request = Request.new("restored-request", 1, 0, messages, prefix)
       assert :ok = Native.continue(pid, request)
       events = collect_run_events()
 
@@ -3335,7 +2742,8 @@ defmodule MingaAgent.Providers.NativeTest do
       :ok = send_prompt(pid, "Long story")
       assert_streaming_started(pid, stream_ref)
 
-      assert {:error, "Already streaming"} = continue(pid)
+      request = Process.get({__MODULE__, pid, :active_request})
+      assert {:error, "Already streaming"} = Native.continue(pid, request)
 
       Native.abort(pid)
     end
@@ -3377,7 +2785,8 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:agent_provider_event, %Event.AgentStart{}}
       assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
 
-      assert {:error, :already_streaming} = send_prompt(pid, "Second prompt")
+      request = Process.get({__MODULE__, pid, :active_request})
+      assert {:error, :already_streaming} = Native.send_prompt(pid, request)
 
       Native.abort(pid)
     end
@@ -3525,7 +2934,7 @@ defmodule MingaAgent.Providers.NativeTest do
   # ── Cost budget tests (#404) ────────────────────────────────────────────────
 
   describe "cost budget" do
-    test "normalizes raw usage and reports prompt guidance", %{tmp_dir: dir} do
+    test "normalizes raw usage fields", %{tmp_dir: dir} do
       usage = %{
         input_tokens: 1000,
         output_tokens: 500,
@@ -3541,14 +2950,6 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
-
-      assert {:ok, session_state} = Native.get_state(pid)
-
-      assert session_state.system_prompt =~
-               "list_directory: List entries at a known-small path. Bounded and ignores generated trees."
-
-      assert session_state.system_prompt =~
-               "Do not use shell to recursively list or search files when find or grep can answer the question."
 
       :ok = send_prompt(pid, "test")
       events = collect_run_events()

@@ -39,13 +39,6 @@ defmodule MingaAgent.IntrospectionTest do
       end
     end
 
-    test "includes introspection tools themselves" do
-      tools = Introspection.describe_tools()
-      names = Enum.map(tools, & &1.name)
-      assert "describe_runtime" in names
-      assert "describe_tools" in names
-    end
-
     test "exposes bundled read-only tools with stable runtime metadata" do
       tools = Introspection.describe_tools()
       grouped = Enum.group_by(tools, & &1.name)

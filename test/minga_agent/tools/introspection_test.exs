@@ -31,13 +31,6 @@ defmodule MingaAgent.Tools.IntrospectionTest do
       assert text =~ "write_file"
     end
 
-    test "includes the introspection tools themselves" do
-      {:ok, text} = Introspection.describe_tools(%{})
-
-      assert text =~ "describe_runtime"
-      assert text =~ "describe_tools"
-    end
-
     test "each line has the expected format" do
       {:ok, text} = Introspection.describe_tools(%{})
 
