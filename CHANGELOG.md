@@ -41,6 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The native streaming contract fixture supplies explicit synthetic SDK cost and checks completed usage and continuation, so its terminal-event deadline does not depend on cold pricing-catalog initialization.
 - Test configuration roots are allocated exclusively across BEAM processes, so a new run cannot adopt stale artifact namespaces without their quota ledger. Missing-ledger recovery remains fail-closed.
 - Opening file URLs from iTerm2, Finder, or `open -a Minga` now preserves the native editor window, preventing tabs from showing stale contents after a second file opens.
 - macOS keeps workspace controls and open tabs in one fixed-height header row, including when no tabs are open. The default footer no longer repeats the workspace label. Tab reordering uses a declared native JSON drag type without competing workspace-swipe gestures.

@@ -1006,7 +1006,9 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} =
         start_provider(
           tmp_dir: dir,
-          llm_client: fake_llm_client(chunks, %{input_tokens: 10, output_tokens: 5})
+          # This contract exercises streaming, not cold-catalog pricing.
+          llm_client:
+            fake_llm_client(chunks, %{input_tokens: 10, output_tokens: 5, total_cost: 0.001})
         )
 
       assert :ok = send_prompt(pid, "Hi")
@@ -1022,7 +1024,14 @@ defmodule MingaAgent.Providers.NativeTest do
                "world!"
              ]
 
-      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+      assert %Event.AgentEnd{
+               usage: %TurnUsage{input: 10, output: 5, cost: 0.001},
+               outcome: %{messages: messages}
+             } = List.last(events)
+
+      assert %ReqLLM.Message{role: :assistant, content: content} = List.last(messages)
+      text = for %ContentPart{type: :text, text: text} <- content, do: text
+      assert IO.iodata_to_binary(text) == "Hello world!"
     end
   end
 
