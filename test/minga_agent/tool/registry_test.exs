@@ -290,6 +290,7 @@ defmodule MingaAgent.Tool.RegistryTest do
       table = :"registry_allocation_#{System.unique_integer([:positive])}"
       registry_pid = start_supervised!({Registry, name: table})
       :sys.get_state(registry_pid)
+      assert :ok = MingaAgent.ToolPacks.Introspection.register(table)
       refute_received {:factory_built, ^registry_pid, _, _, _}
 
       caller = self()
@@ -297,7 +298,8 @@ defmodule MingaAgent.Tool.RegistryTest do
       assert result =~ "Minga Runtime"
 
       assert_receive {:factory_built, ^caller, [:minga, :agent, :tool, :callback_built],
-                      %{count: 1}, %{name: "describe_runtime", source: :builtin}}
+                      %{count: 1},
+                      %{name: "describe_runtime", source: {:bundle, :introspection_tools}}}
 
       refute_received {:factory_built, ^caller, _, _, _}
     end

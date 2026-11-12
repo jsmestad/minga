@@ -2,6 +2,9 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
   # Real Git worktree commands spawn OS processes and must avoid erl_child_setup races.
   use ExUnit.Case, async: false
 
+  alias MingaAgent.Credentials
+  alias MingaAgent.OAuth
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tools.Subagent
   alias Minga.Test.SubagentWorktreeProvider
   alias ReqLLM.StreamResponse.MetadataHandle
@@ -14,17 +17,43 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
     tmp_dir: dir
   } do
     root = init_git_repo!(dir)
+    oauth_path = Path.join(dir, "credentials/oauth.json")
+
+    assert :ok =
+             OAuth.write_oauth_file(
+               %{
+                 access: "fixture-access",
+                 refresh: "fixture-refresh",
+                 expires: System.system_time(:millisecond) + 3_600_000,
+                 account_id: "fixture-account"
+               },
+               oauth_path
+             )
+
+    credential_opts = [
+      config_dir: Path.dirname(oauth_path),
+      oauth_path: oauth_path,
+      env:
+        Map.new(Credentials.known_providers(), fn provider ->
+          {Credentials.env_var_for(provider), nil}
+        end)
+    ]
+
+    # The second model call replays the write result, so use the qualified native route.
+    resolver_opts =
+      ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")
+      |> Keyword.put(:credential_snapshot, Credentials.snapshot(credential_opts))
 
     assert {:ok, result} =
              Subagent.execute("write through native tool",
                isolation: "worktree",
                project_root: root,
                provider: MingaAgent.Providers.Native,
-               model: MingaAgent.Test.ModelSelectionFixture.model_intent(),
+               model: "openai:gpt-6.1-sol",
                provider_opts: [
                  llm_client: native_write_client("child.txt", "from native\n", "native wrote"),
-                 credential_opts: [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}],
-                 model_resolver_opts: MingaAgent.Test.ModelSelectionFixture.resolver_opts(),
+                 credential_opts: credential_opts,
+                 model_resolver_opts: resolver_opts,
                  skip_api_key_env: true
                ]
              )
@@ -56,7 +85,7 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
   defp native_write_client(path, content, final_text) do
     call_count = :counters.new(1, [:atomics])
 
-    fn _model, _messages, _opts ->
+    fn model, _messages, _opts ->
       count = :counters.get(call_count, 1)
       :counters.add(call_count, 1, 1)
 
@@ -74,12 +103,13 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
           [StreamChunk.text(final_text), StreamChunk.meta(%{finish_reason: :stop})]
         end
 
-      build_stream_response(chunks)
+      build_stream_response(model, chunks)
     end
   end
 
-  @spec build_stream_response([StreamChunk.t()]) :: {:ok, ReqLLM.StreamResponse.t()}
-  defp build_stream_response(chunks) do
+  @spec build_stream_response(LLMDB.Model.t(), [StreamChunk.t()]) ::
+          {:ok, ReqLLM.StreamResponse.t()}
+  defp build_stream_response(model, chunks) do
     {:ok, handle} = MetadataHandle.start_link(fn -> %{usage: %{}, finish_reason: :stop} end)
 
     {:ok,
@@ -87,7 +117,7 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
        stream: chunks,
        metadata_handle: handle,
        cancel: fn -> :ok end,
-       model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+       model: model,
        context: ReqLLM.Context.new()
      }}
   end

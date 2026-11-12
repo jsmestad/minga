@@ -14,7 +14,7 @@ defmodule MingaAgent.Tools.Subagent do
   alias MingaAgent.Supervisor, as: AgentSupervisor
 
   @typedoc "Provider override accepted by direct callers and the tool schema."
-  @type provider_override :: :native | :pi_rpc | module() | String.t() | nil
+  @type provider_override :: :native | module() | String.t() | nil
 
   @typedoc "Context inherited from the parent agent session."
   @type parent_context :: SubagentContext.t()
@@ -357,8 +357,8 @@ defmodule MingaAgent.Tools.Subagent do
     resolve_registered_provider(:native)
   end
 
-  defp resolve_provider(:pi_rpc, _parent_context) do
-    {:ok, %{module: MingaAgent.Providers.PiRpc, name: "pi_rpc", id: "pi_rpc", source: :config}}
+  defp resolve_provider(provider, _parent_context) when provider in [:pi_rpc, "pi_rpc"] do
+    {:error, "pi_rpc is no longer supported. Use native or a registered provider."}
   end
 
   defp resolve_provider(provider, _parent_context) when is_atom(provider) do
@@ -366,7 +366,6 @@ defmodule MingaAgent.Tools.Subagent do
   end
 
   defp resolve_provider("native", _parent_context), do: resolve_registered_provider(:native)
-  defp resolve_provider("pi_rpc", parent_context), do: resolve_provider(:pi_rpc, parent_context)
 
   defp resolve_provider(provider, _parent_context) when is_binary(provider) do
     resolve_registered_provider(provider)

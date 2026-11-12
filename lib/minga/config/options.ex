@@ -733,7 +733,7 @@ defmodule Minga.Config.Options do
 
     case validate(name, value) do
       :ok ->
-        :ets.insert(table, {name, value})
+        :ets.insert(table, option_row(name, value))
 
         Minga.Events.broadcast(
           :option_changed,
@@ -755,7 +755,7 @@ defmodule Minga.Config.Options do
   @doc "Sets an option without validation. For test setup of intentionally invalid configurations."
   @spec set_unchecked(server(), option_name(), term()) :: :ok
   def set_unchecked(server \\ @default_server, name, value) when is_atom(name) do
-    :ets.insert(table_name(server), {name, value})
+    :ets.insert(table_name(server), option_row(name, value))
     :ok
   end
 
@@ -783,6 +783,7 @@ defmodule Minga.Config.Options do
     table = table_name(server)
 
     case :ets.lookup(table, name) do
+      [{^name, value, _revision}] -> value
       [{^name, value}] -> value
       [] -> Map.get(@defaults, name)
     end
@@ -836,6 +837,7 @@ defmodule Minga.Config.Options do
 
     :ets.foldl(
       fn
+        {name, value, _revision}, acc when is_atom(name) -> Map.put(acc, name, value)
         {name, value}, acc when is_atom(name) -> Map.put(acc, name, value)
         _filetype_entry, acc -> acc
       end,
@@ -843,6 +845,60 @@ defmodule Minga.Config.Options do
       table
     )
   end
+
+  @typedoc "Transient evidence of exact option publications in one ETS incarnation."
+  @type version_stamp :: {:option_versions, :ets.tid(), %{atom() => reference()}}
+
+  @doc "Reads authority values without default fallback, together with their publication revisions."
+  @spec read_versioned(server(), [option_name()]) ::
+          {:ok, map(), version_stamp()} | {:error, :options_unavailable}
+  def read_versioned(server \\ @default_server, names) when is_list(names) do
+    table = table_name(server)
+    incarnation = option_incarnation(table)
+    read_versioned_rows(incarnation, names)
+  rescue
+    ArgumentError -> {:error, :options_unavailable}
+  catch
+    :exit, _reason -> {:error, :options_unavailable}
+  end
+
+  @doc "Validates that every publication and the table incarnation still match."
+  @spec validate_version(server(), version_stamp()) ::
+          :ok | {:error, :options_changed | :options_unavailable}
+  def validate_version(server \\ @default_server, {:option_versions, incarnation, revisions}) do
+    case read_versioned(server, Map.keys(revisions)) do
+      {:ok, _values, {:option_versions, ^incarnation, ^revisions}} -> :ok
+      {:ok, _values, _different} -> {:error, :options_changed}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec read_versioned_rows(:ets.tid() | :undefined, [option_name()]) ::
+          {:ok, map(), version_stamp()} | {:error, :options_unavailable}
+  defp read_versioned_rows(:undefined, _names), do: {:error, :options_unavailable}
+
+  defp read_versioned_rows(incarnation, names) do
+    Enum.reduce_while(names, {:ok, %{}, %{}}, fn name, {:ok, values, revisions} ->
+      case :ets.lookup(incarnation, name) do
+        [{^name, value, revision}] when is_reference(revision) ->
+          {:cont, {:ok, Map.put(values, name, value), Map.put(revisions, name, revision)}}
+
+        _missing_or_unversioned ->
+          {:halt, {:error, :options_unavailable}}
+      end
+    end)
+    |> case do
+      {:ok, values, revisions} ->
+        {:ok, values, {:option_versions, incarnation, revisions}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec option_incarnation(:ets.table()) :: :ets.tid() | :undefined
+  defp option_incarnation(table) when is_atom(table), do: :ets.whereis(table)
+  defp option_incarnation(table), do: table
 
   @doc """
   Resets all options (global and per-filetype) to defaults.
@@ -1210,9 +1266,12 @@ defmodule Minga.Config.Options do
 
   @spec seed_defaults(:ets.table()) :: true
   defp seed_defaults(table) do
-    entries = Enum.map(@defaults, fn {name, value} -> {name, value} end)
+    entries = Enum.map(@defaults, fn {name, value} -> option_row(name, value) end)
     :ets.insert(table, entries ++ @filetype_defaults)
   end
+
+  @spec option_row(atom(), term()) :: {atom(), term(), reference()}
+  defp option_row(name, value), do: {name, value, make_ref()}
 
   @spec seed_runtime_metadata(:ets.table(), server(), Minga.Events.registry()) :: true
   defp seed_runtime_metadata(table, source, events_registry) do

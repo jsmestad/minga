@@ -192,7 +192,10 @@ defmodule MingaAgent.SessionStoreTest do
                  encoded |> Map.delete(field) |> ContinuationCodec.decode()
       end
 
-      malformed_boundary = %{"transcript_id" => 1, "message_count" => 1, "revision" => 1}
+      assert {:ok, history} =
+               Continuation.seed_messages(Continuation.new(), [Context.user("fixture")], 1)
+
+      [malformed_boundary] = ContinuationCodec.encode(history)["boundaries"]
 
       assert {:error, :invalid_continuation_boundaries} =
                encoded
@@ -301,13 +304,16 @@ defmodule MingaAgent.SessionStoreTest do
           output: image_output
         })
 
+      assert {:ok, frozen} = Continuation.seed_messages(Continuation.new(), [frozen_result], 1)
+      assert {:ok, frozen} = Continuation.branch_at(frozen, "inactive", 1)
+
       assert {:ok, continuation} =
                Continuation.restore(
                  [],
-                 0,
-                 0,
+                 frozen.revision,
+                 frozen.revision,
                  [],
-                 %{"inactive" => %{messages: [frozen_result], boundaries: []}},
+                 frozen.branch_messages,
                  :lossless
                )
 
@@ -1937,13 +1943,16 @@ defmodule MingaAgent.SessionStoreTest do
         output: branch_output
       })
 
+    {:ok, frozen} = Continuation.seed_messages(Continuation.new(), [frozen_result], 1)
+    {:ok, frozen} = Continuation.branch_at(frozen, "inactive", 1)
+
     {:ok, continuation} =
       Continuation.restore(
         [],
-        0,
-        0,
+        frozen.revision,
+        frozen.revision,
         [],
-        %{"inactive" => %{messages: [frozen_result], boundaries: []}},
+        frozen.branch_messages,
         :lossless
       )
 

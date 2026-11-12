@@ -982,35 +982,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
-  describe "cycle_model/1" do
-    test "updates model and thinking level from the session response" do
-      {:ok, session} =
-        StubServer.start_link(
-          cycle_model:
-            {:ok,
-             %{
-               "model" => "openai:o4-mini",
-               "index" => 2,
-               "total" => 3,
-               "thinking_level" => "high"
-             }}
-        )
-
-      state = base_state(session: session)
-
-      state =
-        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-          state,
-          (&UIState.set_thinking_level(&1, "medium")).(state.workspace.agent_ui)
-        )
-
-      new_state = AgentCommands.cycle_model(state)
-
-      assert new_state.workspace.agent_ui.panel.model_name == "openai:o4-mini"
-      assert new_state.workspace.agent_ui.panel.thinking_level == "high"
-    end
-  end
-
   describe "set_model/2" do
     test "preserves the prior model and shows an actionable rejection" do
       message = "Model \"missing\" is unavailable. Open /model and choose an exact route."

@@ -47,7 +47,7 @@ defmodule MingaAgent.Compaction do
   - `:keep_recent` — number of recent messages to preserve verbatim (default: 6)
   """
   @spec maybe_compact(Context.t(), compact_opts()) ::
-          {:compacted, Context.t(), String.t()} | {:ok, Context.t()}
+          {:compacted, Context.t(), String.t()} | {:ok, Context.t()} | {:error, String.t()}
   def maybe_compact(context, opts) do
     estimated = TokenEstimator.estimate(context.messages)
     limit = Keyword.get(opts, :context_limit)

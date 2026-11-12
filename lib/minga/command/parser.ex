@@ -116,7 +116,6 @@ defmodule Minga.Command.Parser do
           | {:agent_clear_history, []}
           | {:agent_set_model, [String.t()]}
           | {:agent_pick_model, []}
-          | {:agent_cycle_model, []}
           | {:agent_cycle_thinking, []}
           | {:tool_install_named, [String.t()]}
           | {:tool_uninstall_named, [String.t()]}
@@ -299,7 +298,6 @@ defmodule Minga.Command.Parser do
   defp do_parse("agent-clear-history"), do: {:agent_clear_history, []}
   defp do_parse("agent-model " <> model), do: {:agent_set_model, [String.trim(model)]}
   defp do_parse("agent-models"), do: {:agent_pick_model, []}
-  defp do_parse("agent-cycle-model"), do: {:agent_cycle_model, []}
   defp do_parse("agent-thinking"), do: {:agent_cycle_thinking, []}
   defp do_parse("ToolInstall " <> name), do: {:tool_install_named, [String.trim(name)]}
   defp do_parse("ToolUninstall " <> name), do: {:tool_uninstall_named, [String.trim(name)]}

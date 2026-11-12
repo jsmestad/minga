@@ -78,6 +78,7 @@ defmodule MingaAgent.Tool.Registry do
   def lookup(table, name) when is_atom(table) and is_binary(name) do
     case :ets.lookup(table, name) do
       [{^name, spec}] -> {:ok, spec}
+      [{^name, spec, _registration}] -> {:ok, spec}
       [] -> :error
     end
   catch
@@ -90,9 +91,15 @@ defmodule MingaAgent.Tool.Registry do
 
   @spec all(atom()) :: [Spec.t()]
   def all(table) when is_atom(table) do
-    table
-    |> :ets.tab2list()
-    |> Enum.map(fn {_name, spec} -> spec end)
+    :ets.foldl(
+      fn
+        {_name, %Spec{} = spec, _registration}, specs -> [spec | specs]
+        {_name, %Spec{} = spec}, specs -> [spec | specs]
+        _metadata, specs -> specs
+      end,
+      [],
+      table
+    )
     |> Enum.sort_by(& &1.name)
   catch
     :error, :badarg -> []
@@ -109,12 +116,41 @@ defmodule MingaAgent.Tool.Registry do
     :error, :badarg -> false
   end
 
+  @doc "Serializes final current-Spec resolution with source registration and removal."
+  @spec resolve_execution(atom(), String.t()) ::
+          {:ok, Spec.t(), reference()} | {:error, term()}
+  def resolve_execution(table \\ @table, name) when is_atom(table) and is_binary(name) do
+    GenServer.call(table, {:resolve_execution, name})
+  catch
+    :exit, _reason -> {:error, :registry_unavailable}
+  end
+
+  @doc "Returns the current publication generation for cheap advertisement freshness checks."
+  @spec revision(atom()) :: reference() | :unavailable
+  def revision(table \\ @table) do
+    case :ets.lookup(table, {__MODULE__, :revision}) do
+      [{_key, revision}] when is_reference(revision) -> revision
+      _missing -> :unavailable
+    end
+  catch
+    :error, :badarg -> :unavailable
+  end
+
+  @doc "Captures one coherent canonical declaration set in the serialized registry owner."
+  @spec snapshot(atom()) :: {:ok, reference(), [Spec.t()]} | {:error, :registry_unavailable}
+  def snapshot(table \\ @table) do
+    GenServer.call(table, :snapshot)
+  catch
+    :exit, _reason -> {:error, :registry_unavailable}
+  end
+
   @impl true
   @spec init(keyword()) :: {:ok, atom()}
   def init(opts) do
     table = Keyword.get(opts, :name, __MODULE__)
 
     :ets.new(table, [:named_table, :set, :protected, read_concurrency: true])
+    :ets.insert(table, {{__MODULE__, :revision}, make_ref()})
     maybe_register_cleanup_callback(table)
     register_builtins(table)
 
@@ -132,6 +168,20 @@ defmodule MingaAgent.Tool.Registry do
     {:reply, result, table}
   end
 
+  def handle_call({:resolve_execution, name}, _from, table) do
+    result =
+      case :ets.lookup(table, name) do
+        [{^name, spec, registration}] -> {:ok, spec, registration}
+        _missing -> {:error, {:tool_not_found, name}}
+      end
+
+    {:reply, result, table}
+  end
+
+  def handle_call(:snapshot, _from, table) do
+    {:reply, {:ok, revision(table), all(table)}, table}
+  end
+
   @doc "Converts a `ReqLLM.Tool` struct to a config-owned `MingaAgent.Tool.Spec`."
   @spec from_req_tool(ReqLLM.Tool.t()) :: Spec.t()
   def from_req_tool(%ReqLLM.Tool{} = tool) do
@@ -141,14 +191,22 @@ defmodule MingaAgent.Tool.Registry do
       source: :config,
       name: tool.name,
       description: tool.description || "",
-      parameter_schema: tool.parameter_schema || %{},
-      callback: tool.callback,
+      parameter_schema: get_in(ReqLLM.Tool.to_json_schema(tool), ["function", "parameters"]),
+      callback: req_callback(tool.callback),
       category: metadata.category,
       approval_level: metadata.approval_level,
       capabilities: metadata.capabilities,
-      context_requirements: metadata.context_requirements
+      context_requirements: metadata.context_requirements,
+      metadata: %{sdk_input: %{tool | callback: nil}}
     )
   end
+
+  @spec req_callback(ReqLLM.Tool.callback()) :: Spec.callback()
+  defp req_callback(callback) when is_function(callback, 1), do: callback
+  defp req_callback({module, function}), do: fn args -> apply(module, function, [args]) end
+
+  defp req_callback({module, function, extra}),
+    do: fn args -> apply(module, function, extra ++ [args]) end
 
   @spec canonical_metadata(String.t()) :: map()
   defp canonical_metadata(name) do
@@ -194,6 +252,8 @@ defmodule MingaAgent.Tool.Registry do
     |> Enum.filter(&(&1.source == source))
     |> Enum.each(fn spec -> :ets.delete(table, spec.name) end)
 
+    :ets.insert(table, {{__MODULE__, :revision}, make_ref()})
+
     :ok
   catch
     :error, :badarg -> :ok
@@ -203,7 +263,8 @@ defmodule MingaAgent.Tool.Registry do
   defp register_spec(table, %Spec{} = spec) do
     case registration_allowed?(table, spec) do
       :ok ->
-        :ets.insert(table, {spec.name, spec})
+        :ets.insert(table, {spec.name, spec, make_ref()})
+        :ets.insert(table, {{__MODULE__, :revision}, make_ref()})
         emit_direct_change(table, spec.source)
         :ok
 

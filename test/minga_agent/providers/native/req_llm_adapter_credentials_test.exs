@@ -25,7 +25,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
     assert :ok = Credentials.store("anthropic", "file-key", opts)
     selection = selection(:file)
     opts = Keyword.put(opts, :env, %{"ANTHROPIC_API_KEY" => "different-env-key"})
-    assert {:ok, request} = ReqLLMAdapter.stream_opts(selection, [], %Config{}, opts)
+    assert {:ok, binding} = Credentials.bind_request(selection.credential, nil, opts)
+    assert {:ok, request} = ReqLLMAdapter.stream_opts(selection, [], %Config{}, binding.material)
     assert request[:api_key] == "file-key"
     assert request[:auth_mode] == :api_key
   end
@@ -37,14 +38,14 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterCredentialsTest do
     opts = Keyword.put(opts, :env, %{"ANTHROPIC_API_KEY" => "other-account"})
 
     assert {:error, {:credential_unavailable, "anthropic:file"}} =
-             ReqLLMAdapter.stream_opts(selection, [], %Config{}, opts)
+             Credentials.bind_request(selection.credential, nil, opts)
   end
 
   test "missing selected environment profile cannot fall back to a stored key", %{opts: opts} do
     assert :ok = Credentials.store("anthropic", "other-account", opts)
 
     assert {:error, {:credential_unavailable, "anthropic:env"}} =
-             ReqLLMAdapter.stream_opts(selection(:env), [], %Config{}, opts)
+             Credentials.bind_request(selection(:env).credential, nil, opts)
   end
 
   defp selection(source) do

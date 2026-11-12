@@ -8,9 +8,8 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   alias MingaAgent.MCP.FakeTransport
   alias MingaAgent.MCP.ServerConfig
   alias MingaAgent.Providers.Native
-  alias MingaAgent.Session.Request
+  alias MingaAgent.Session.Continuation
   alias MingaAgent.Test.ModelSelectionFixture
-  alias ReqLLM.Context
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
@@ -51,7 +50,11 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     defaults = [
       subscriber: start_provider_subscriber(self(), store),
       model: "anthropic:claude-sonnet-4-20250514",
-      model_selection: ModelSelectionFixture.selection(),
+      model_selection:
+        ModelSelectionFixture.selection(
+          request_provider: :openai_codex,
+          model_id: "gpt-6.1-sol"
+        ),
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
       tools: [builtin_tool()],
       config: agent_config(),
@@ -62,11 +65,30 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       skip_api_key_env: true
     ]
 
-    start_supervised({Native, Keyword.merge(defaults, opts)})
+    merged = Keyword.merge(defaults, opts)
+
+    case start_supervised({Native, merged}) do
+      {:ok, provider} ->
+        Process.put({__MODULE__, provider, :subscriber}, merged[:subscriber])
+        {:ok, provider}
+
+      error ->
+        error
+    end
   end
 
   defp test_credential_opts do
-    [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}]
+    [
+      oauth_resolver: fn :openai_codex, oauth_file: path ->
+        {:ok,
+         %{
+           provider_key: "openai-codex",
+           account_id: "fixture-account",
+           oauth_file: path,
+           token: "fixture-oauth-token"
+         }}
+      end
+    ]
   end
 
   defp start_provider_subscriber(owner, store) do
@@ -87,13 +109,28 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         send(owner, {:agent_provider_lifecycle_event, event})
         provider_subscriber_loop(owner, owner_ref, store)
 
+      {:"$gen_call", from, {:preview_prefix, provider}} ->
+        Process.put(:native_provider, provider)
+        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, :current}))
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:commit_prefix_preview, provider, token}} ->
+        GenServer.reply(from, GenServer.call(provider, {:commit_prefix_preview, token}))
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:prepare_tool_invocation, _invocation}} ->
+        GenServer.reply(from, {:ok, :ready})
+        provider_subscriber_loop(owner, owner_ref, store)
+
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
         GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from,
-       {:admit_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _name, _args}} ->
-        GenServer.reply(from, {:ok, store})
+      {:"$gen_call", from, {:start_tool_invocation, invocation}} ->
+        {:ok, spec, _registration, _declaration} =
+          GenServer.call(Process.get(:native_provider), {:resolve_local_tool, invocation.name})
+
+        GenServer.reply(from, {:ok, spec, store})
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
@@ -134,10 +171,19 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   end
 
   defp send_prompt(provider, text) do
-    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+    subscriber = Process.get({__MODULE__, provider, :subscriber})
+    {:ok, prefix, token, _result} = GenServer.call(subscriber, {:preview_prefix, provider})
+    {:ok, :applied, continuation} = Continuation.change_prefix(Continuation.new(), prefix)
+    :ok = GenServer.call(subscriber, {:commit_prefix_preview, provider, token})
+    turn_id = System.unique_integer([:positive, :monotonic])
 
-    request =
-      Request.new("request-" <> identity, String.to_integer(identity), 0, [Context.user(text)])
+    {:ok, request, _admitted} =
+      Continuation.begin_request(
+        continuation,
+        "request-" <> Integer.to_string(turn_id),
+        turn_id,
+        text
+      )
 
     Native.send_prompt(provider, request)
   end

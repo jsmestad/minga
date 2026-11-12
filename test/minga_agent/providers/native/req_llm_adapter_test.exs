@@ -29,7 +29,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
                selection,
                [],
                config,
-               env: %{"ANTHROPIC_API_KEY" => "request-secret"}
+               auth_mode: :api_key,
+               api_key: "request-secret"
              )
 
     assert opts[:tools] == []
@@ -40,9 +41,6 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert opts[:provider_options][:anthropic_prompt_cache] == true
     assert opts[:provider_options][:anthropic_cache_messages] == true
     assert opts[:reasoning_effort] == :high
-
-    assert {:error, {:credential_unavailable, "anthropic:env"}} =
-             ReqLLMAdapter.stream_opts(selection, [], config, env: %{"OPENAI_API_KEY" => "other"})
   end
 
   test "cache options follow the executing protocol rather than the model source owner" do
@@ -55,10 +53,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
       assert {:ok, opts} =
                ReqLLMAdapter.stream_opts(selection, [], %AgentConfig{prompt_cache: true},
-                 env: %{
-                   "OPENAI_API_KEY" => "fixture-openai-key",
-                   "ANTHROPIC_API_KEY" => "fixture-anthropic-key"
-                 }
+                 auth_mode: :api_key,
+                 api_key: "fixture-key"
                )
 
       assert get_in(opts, [:provider_options, :anthropic_prompt_cache]) == true == expected_cache?
@@ -79,9 +75,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     end
 
     summary =
-      ReqLLMAdapter.summary_client(client, selection, %AgentConfig{},
-        env: %{"OPENAI_API_KEY" => "fixture-openai-key"}
-      )
+      ReqLLMAdapter.summary_client(client, selection, %AgentConfig{}, fn ->
+        {:ok, [auth_mode: :api_key, api_key: "fixture-openai-key"]}
+      end)
 
     assert {:ok, "summary"} = summary.(nil, [], max_tokens: 4_096)
     assert_receive {:summary_budget, 80}
@@ -273,9 +269,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     end
 
     summary =
-      ReqLLMAdapter.summary_client(client, selection(), %AgentConfig{},
-        env: %{"ANTHROPIC_API_KEY" => "fixture-anthropic-key"}
-      )
+      ReqLLMAdapter.summary_client(client, selection(), %AgentConfig{}, fn ->
+        {:ok, [auth_mode: :api_key, api_key: "fixture-anthropic-key"]}
+      end)
 
     assert {:ok, ^json} = summary.(nil, [], max_tokens: 100)
   end
@@ -316,9 +312,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     selection = ModelSelectionFixture.selection()
 
     summary_client =
-      ReqLLMAdapter.summary_client(client, selection, %AgentConfig{},
-        env: %{"OPENAI_API_KEY" => "fixture-openai-key"}
-      )
+      ReqLLMAdapter.summary_client(client, selection, %AgentConfig{}, fn ->
+        {:ok, [auth_mode: :api_key, api_key: "fixture-openai-key"]}
+      end)
 
     assert {:ok, "compacted"} =
              summary_client.(selection.request_model, [:message], max_tokens: 500)

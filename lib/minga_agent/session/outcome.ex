@@ -10,14 +10,20 @@ defmodule MingaAgent.Session.Outcome do
   alias ReqLLM.Message
 
   @enforce_keys [:request_id, :turn_id, :conversation_revision, :messages]
-  defstruct version: 1, request_id: nil, turn_id: nil, conversation_revision: 0, messages: []
+  defstruct version: 1,
+            request_id: nil,
+            turn_id: nil,
+            conversation_revision: 0,
+            messages: [],
+            epoch_id: :unknown
 
   @type t :: %__MODULE__{
           version: pos_integer(),
           request_id: String.t(),
           turn_id: pos_integer(),
           conversation_revision: non_neg_integer(),
-          messages: [Message.t()]
+          messages: [Message.t()],
+          epoch_id: MingaAgent.Session.PrefixStore.epoch_ref()
         }
 
   @doc "Builds a completed outcome for the exact request snapshot."
@@ -27,7 +33,8 @@ defmodule MingaAgent.Session.Outcome do
       request_id: request.request_id,
       turn_id: request.turn_id,
       conversation_revision: request.conversation_revision,
-      messages: messages
+      messages: messages,
+      epoch_id: request.epoch_id
     }
   end
 end

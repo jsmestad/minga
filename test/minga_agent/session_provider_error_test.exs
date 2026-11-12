@@ -6,6 +6,28 @@ defmodule MingaAgent.SessionProviderErrorTest do
     test "adds a system message and can still run a builtin tool", %{tmp_dir: dir} do
       test_pid = self()
       call_count = :counters.new(1, [:atomics])
+      oauth_path = Path.join(dir, "credentials/oauth.json")
+
+      assert :ok =
+               MingaAgent.OAuth.write_oauth_file(
+                 %{
+                   access: "fixture-access",
+                   refresh: "fixture-refresh",
+                   account_id: "fixture-account",
+                   expires: System.system_time(:millisecond) + 3_600_000
+                 },
+                 oauth_path
+               )
+
+      credential_opts = [
+        config_dir: Path.join(dir, "credentials"),
+        env: %{},
+        oauth_path: oauth_path
+      ]
+
+      resolver_opts =
+        MingaAgent.Test.ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")
+        |> Keyword.delete(:credential_snapshot)
 
       llm_client = fn _model, _messages, opts ->
         send(test_pid, {:session_mcp_tools, Enum.map(opts[:tools], & &1.name)})
@@ -47,16 +69,16 @@ defmodule MingaAgent.SessionProviderErrorTest do
           persist?: true,
           session_store_dir: Path.join(dir, "sessions"),
           provider: Native,
+          credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
           provider_opts: [
-            model: MingaAgent.Test.ModelSelectionFixture.model_intent(),
+            model: "openai:gpt-6.1-sol",
             project_root: dir,
             tools: [mcp_session_builtin_tool()],
             config: %MingaAgent.Config{
-              mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
-              tool_approval: :none
+              mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}]
             },
-            model_resolver_opts: MingaAgent.Test.ModelSelectionFixture.resolver_opts(),
-            credential_opts: [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}],
+            model_resolver_opts: resolver_opts,
+            credential_opts: credential_opts,
             mcp_enabled?: true,
             mcp_transport: FakeTransport,
             mcp_transport_opts: [
@@ -71,6 +93,11 @@ defmodule MingaAgent.SessionProviderErrorTest do
       _provider = Session.get_provider(session)
 
       assert :ok = Session.send_prompt(session, "discover mcp")
+
+      assert_receive {:agent_event, ^session, {:approval_pending, %{name: "list_mcp_tools"}}},
+                     @event_timeout
+
+      assert :ok = Session.respond_to_approval(session, :approve)
       assert_receive {:mcp_transport_started, "Local Tools", transport}, @event_timeout
       await_turn_complete()
 
@@ -119,6 +146,11 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
     test "structured provider errors render friendly transcript copy" do
       cases = [
+        {%Event.Error{
+           kind: :context_transition_required,
+           provider: "test",
+           message: "private provider payload api_key=not-for-display"
+         }, Event.Error.context_transition_message()},
         {%Event.Error{kind: :rate_limited, provider: "anthropic", message: "rate limited"},
          "The model provider is rate limiting requests. Wait a moment, then try again."},
         {%Event.Error{kind: :unreachable, provider: "anthropic", message: "nxdomain"},

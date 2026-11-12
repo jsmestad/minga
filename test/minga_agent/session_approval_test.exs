@@ -301,6 +301,36 @@ defmodule MingaAgent.SessionApprovalTest do
     test "turn trust clears before automatically queued follow-up turns", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "test.txt"), "file contents")
       call_count = :counters.new(1, [:atomics])
+      oauth_path = Path.join(dir, "credentials/oauth.json")
+
+      assert :ok =
+               MingaAgent.OAuth.write_oauth_file(
+                 %{
+                   access: "fixture-access",
+                   refresh: "fixture-refresh",
+                   account_id: "fixture-account",
+                   expires: System.system_time(:millisecond) + 3_600_000
+                 },
+                 oauth_path
+               )
+
+      credential_opts = [
+        config_dir: Path.join(dir, "credentials"),
+        env: %{},
+        oauth_path: oauth_path
+      ]
+
+      resolver_opts =
+        MingaAgent.Test.ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")
+        |> Keyword.delete(:credential_snapshot)
+
+      events = :"queued_turn_approval_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :duplicate, name: events})
+
+      options =
+        start_supervised!({Minga.Config.Options, name: nil, events_registry: events})
+
+      assert {:ok, :all} = Minga.Config.Options.set(options, :agent_tool_approval, :all)
 
       client = fn _model, _messages, _opts ->
         count = :counters.get(call_count, 1)
@@ -345,28 +375,55 @@ defmodule MingaAgent.SessionApprovalTest do
       tools = MingaAgent.Tools.all(project_root: dir)
 
       session =
-        start_subscribed_session(Native,
-          project_root: dir,
-          llm_client: client,
-          tools: tools,
-          config: agent_config(tool_approval: :all),
-          skip_api_key_env: true
+        start_test_session(
+          provider: Native,
+          persist?: true,
+          session_store_dir: Path.join(dir, "sessions"),
+          options_server: options,
+          credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
+          provider_opts: [
+            model: "openai:gpt-6.1-sol",
+            model_resolver_opts: resolver_opts,
+            credential_opts: credential_opts,
+            project_root: dir,
+            llm_client: client,
+            tools: tools,
+            config: agent_config([])
+          ]
         )
+
+      assert :ok = Session.subscribe(session)
 
       assert :ok = Session.set_tool_trust(session, "read_file", :turn)
       assert :ok = Session.send_prompt(session, "Read test.txt")
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "next turn")
 
-      assert_receive {:agent_event, _, {:tool_auto_approved, _, "read_file", :turn}},
+      assert_receive {:agent_event, ^session, {:tool_auto_approved, "tc_1", "read_file", :turn}},
                      @event_timeout
 
-      assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
-      assert pending.name == "read_file"
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending, %{tool_call_id: "tc_2", name: "read_file"}}},
+                     @event_timeout
+
+      assert_receive {:agent_event, ^session, {:resumable_boundary, _first_boundary}},
+                     @event_timeout
+
       assert Session.list_tool_trust(session) == %{}
 
       assert :ok = Session.respond_to_approval(session, :approve)
-      assert_receive {:agent_event, _, {:tool_started, "read_file", _}}, @event_timeout
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+
+      assert_receive {:agent_event, ^session, {:resumable_boundary, _follow_up_boundary}},
+                     @event_timeout
+
+      assert Session.status(session) == :idle
+
+      results =
+        for {:tool_call, %{name: "read_file", status: :complete, result: result}} <-
+              Session.messages(session),
+            do: result
+
+      assert length(results) == 2
+      assert Enum.all?(results, &String.contains?(&1, "file contents"))
     end
 
     test "turn trust clears on errors" do

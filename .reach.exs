@@ -83,6 +83,10 @@
       {"Minga.Keymap.NormalPrefixes.*", [:pure, :exception, :unknown, :io]},
       {"Minga.Keymap.Sigil", [:pure, :exception, :unknown, :io]},
       {"Minga.Keymap.Sigil.*", [:pure, :exception, :unknown, :io]},
+      {"MingaAgent.Session.Prefix", [:pure, :exception, :unknown, :io]},
+      {"MingaAgent.Session.Prefix.*", [:pure, :exception, :unknown, :io]},
+      {"MingaAgent.Session.PrefixStore", [:pure, :exception, :unknown, :io]},
+      {"MingaAgent.Session.PrefixStore.*", [:pure, :exception, :unknown, :io]},
       {"MingaEditor.UI.Picker.Item", [:pure, :exception, :unknown, :io]},
       {"MingaEditor.UI.Picker.Item.*", [:pure, :exception, :unknown, :io]}
     ]

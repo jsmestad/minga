@@ -9,6 +9,7 @@ defmodule MingaAgent.Session.ContinuationCodec do
 
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Request
+  alias MingaAgent.Session.PrefixStore
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Reference
@@ -17,8 +18,46 @@ defmodule MingaAgent.Session.ContinuationCodec do
   alias ReqLLM.Message.ReasoningDetails
   alias ReqLLM.ToolCall
 
-  @version 3
+  @version 4
   @legacy_version 2
+
+  # Version-four structural tags must decode before their lazy-loaded owners run.
+  # Provider payload atoms remain subject to the existing-atom safety contract.
+  @prefix_atoms Map.new(
+                  [
+                    :version,
+                    :instructions,
+                    :schemas,
+                    :prefixes,
+                    :epochs,
+                    :selected,
+                    :name,
+                    :description,
+                    :parameter_schema,
+                    :strict,
+                    :provider_options,
+                    :source,
+                    :builtin,
+                    :config,
+                    :bundle,
+                    :extension,
+                    :local,
+                    :selection_id,
+                    :authentication,
+                    :native_contract,
+                    :kind,
+                    :runtime_binding,
+                    :account_id,
+                    :source_id,
+                    :api_key,
+                    :oauth,
+                    :unknown,
+                    :provider_owned,
+                    :provider,
+                    :codex_responses_exact_prefix_v1
+                  ],
+                  &{Atom.to_string(&1), &1}
+                )
 
   @doc "Encodes a continuation boundary and any in-flight effect checkpoint into JSON-safe values."
   @spec encode(Continuation.t()) :: map()
@@ -28,6 +67,7 @@ defmodule MingaAgent.Session.ContinuationCodec do
       "revision" => continuation.revision,
       "durable_revision" => continuation.durable_revision,
       "provenance" => Atom.to_string(continuation.provenance),
+      "prefixes" => encode_term(PrefixStore.dump(continuation.prefixes)),
       "messages" => Enum.map(continuation.messages, &encode_term/1),
       "active_request" => encode_request(continuation.active_request),
       "tool_checkpoint" => encode_checkpoint(continuation.tool_checkpoint),
@@ -37,7 +77,8 @@ defmodule MingaAgent.Session.ContinuationCodec do
           {name,
            %{
              "messages" => Enum.map(snapshot.messages, &encode_term/1),
-             "boundaries" => Enum.map(snapshot.boundaries, &encode_boundary/1)
+             "boundaries" => Enum.map(snapshot.boundaries, &encode_boundary/1),
+             "epoch_id" => encode_term(Map.get(snapshot, :epoch_id, :unknown))
            }}
         end)
     }
@@ -45,7 +86,7 @@ defmodule MingaAgent.Session.ContinuationCodec do
 
   @doc "Decodes the current lossless format and the previous one-way-import format."
   @spec decode(map()) :: {:ok, Continuation.t()} | {:error, term()}
-  def decode(%{"version" => version} = encoded) when version in [@legacy_version, @version] do
+  def decode(%{"version" => version} = encoded) when version in [@legacy_version, 3, @version] do
     required_fields = [
       "provenance",
       "messages",
@@ -61,9 +102,11 @@ defmodule MingaAgent.Session.ContinuationCodec do
            Enum.all?(required_fields, &Map.has_key?(encoded, &1)) ||
              {:error, :invalid_continuation},
          :ok <- validate_version_tags(encoded, version),
+         :ok <- validate_current_epoch_fields(encoded, version),
+         {:ok, prefixes} <- decode_prefixes(encoded, version),
          {:ok, provenance} <- decode_provenance(encoded["provenance"]),
          {:ok, messages} <- decode_terms(encoded["messages"]),
-         {:ok, active_request} <- decode_request(encoded["active_request"]),
+         {:ok, active_request} <- decode_request(encoded["active_request"], prefixes),
          {:ok, tool_checkpoint} <- decode_checkpoint(encoded["tool_checkpoint"]),
          {:ok, boundaries} <- decode_boundaries(encoded["boundaries"]),
          {:ok, branches} <- decode_branches(encoded["branches"]),
@@ -76,7 +119,8 @@ defmodule MingaAgent.Session.ContinuationCodec do
              branches,
              provenance,
              tool_checkpoint,
-             active_request
+             active_request: active_request,
+             prefixes: prefixes
            ) do
       {:ok, continuation}
     else
@@ -92,13 +136,60 @@ defmodule MingaAgent.Session.ContinuationCodec do
     if output_tag?(encoded), do: {:error, :invalid_continuation}, else: :ok
   end
 
-  defp validate_version_tags(_encoded, @version), do: :ok
+  defp validate_version_tags(_encoded, version) when version in [3, @version], do: :ok
 
   @spec output_tag?(term()) :: boolean()
   defp output_tag?(%{"$" => "output"}), do: true
   defp output_tag?(value) when is_map(value), do: Enum.any?(Map.values(value), &output_tag?/1)
   defp output_tag?(value) when is_list(value), do: Enum.any?(value, &output_tag?/1)
   defp output_tag?(_value), do: false
+
+  @spec decode_prefixes(map(), pos_integer()) :: {:ok, PrefixStore.t()} | {:error, term()}
+  defp decode_prefixes(encoded, @version) do
+    with {:ok, data} <- decode_term(Map.get(encoded, "prefixes")),
+         do: PrefixStore.restore(data)
+  end
+
+  defp decode_prefixes(_encoded, _legacy), do: {:ok, PrefixStore.new()}
+
+  @spec validate_current_epoch_fields(map(), pos_integer()) :: :ok | {:error, term()}
+  defp validate_current_epoch_fields(
+         %{"boundaries" => boundaries, "branches" => branches} = encoded,
+         @version
+       )
+       when is_list(boundaries) and is_map(branches) do
+    branch_subjects =
+      Enum.flat_map(branches, fn
+        {_name, %{"boundaries" => branch_boundaries} = branch}
+        when is_list(branch_boundaries) ->
+          [branch | branch_boundaries]
+
+        {_name, invalid} ->
+          [invalid, :invalid_branch]
+      end)
+
+    subjects =
+      [encoded["active_request"], encoded["tool_checkpoint"]] ++
+        boundaries ++ branch_subjects
+
+    if Enum.all?(subjects, &(is_nil(&1) or (is_map(&1) and Map.has_key?(&1, "epoch_id")))),
+      do: :ok,
+      else: {:error, :missing_prefix_epoch}
+  end
+
+  defp validate_current_epoch_fields(_encoded, @version),
+    do: {:error, :invalid_prefix_epoch_structure}
+
+  defp validate_current_epoch_fields(_encoded, _legacy), do: :ok
+
+  @spec decode_epoch(map()) :: {:ok, PrefixStore.epoch_ref()} | {:error, term()}
+  defp decode_epoch(encoded) do
+    case decode_term(Map.get(encoded, "epoch_id", encode_term(:unknown))) do
+      {:ok, :unknown} -> {:ok, :unknown}
+      {:ok, id} when is_binary(id) -> {:ok, id}
+      _invalid -> {:error, :invalid_prefix_epoch}
+    end
+  end
 
   @doc "Returns the unique retained references reachable anywhere in a validated encoded continuation."
   @spec references(map()) :: [Reference.t()]
@@ -136,28 +227,35 @@ defmodule MingaAgent.Session.ContinuationCodec do
       "request_id" => request.request_id,
       "turn_id" => request.turn_id,
       "conversation_revision" => request.conversation_revision,
-      "messages" => Enum.map(request.messages, &encode_term/1)
+      "messages" => Enum.map(request.messages, &encode_term/1),
+      "epoch_id" => encode_term(request.epoch_id)
     }
   end
 
-  @spec decode_request(term()) :: {:ok, Request.t() | nil} | {:error, term()}
-  defp decode_request(nil), do: {:ok, nil}
+  @spec decode_request(term(), PrefixStore.t()) :: {:ok, Request.t() | nil} | {:error, term()}
+  defp decode_request(nil, _prefixes), do: {:ok, nil}
 
-  defp decode_request(%{
-         "version" => 1,
-         "request_id" => request_id,
-         "turn_id" => turn_id,
-         "conversation_revision" => conversation_revision,
-         "messages" => encoded_messages
-       })
+  defp decode_request(
+         %{
+           "version" => 1,
+           "request_id" => request_id,
+           "turn_id" => turn_id,
+           "conversation_revision" => conversation_revision,
+           "messages" => encoded_messages
+         } = encoded,
+         prefixes
+       )
        when is_binary(request_id) and is_integer(turn_id) and turn_id > 0 and
               is_integer(conversation_revision) and conversation_revision >= 0 do
-    with {:ok, messages} <- decode_terms(encoded_messages) do
-      {:ok, Request.new(request_id, turn_id, conversation_revision, messages)}
+    with {:ok, messages} <- decode_terms(encoded_messages),
+         {:ok, epoch_id} <- decode_epoch(encoded),
+         true <- PrefixStore.known?(prefixes, epoch_id) or {:error, :dangling_prefix_epoch} do
+      prefix = PrefixStore.resolve(prefixes, epoch_id)
+      {:ok, Request.new(request_id, turn_id, conversation_revision, messages, prefix)}
     end
   end
 
-  defp decode_request(_request), do: {:error, :invalid_active_request}
+  defp decode_request(_request, _prefixes), do: {:error, :invalid_active_request}
 
   @spec encode_checkpoint(Continuation.tool_checkpoint() | nil) :: map() | nil
   defp encode_checkpoint(nil), do: nil
@@ -168,7 +266,8 @@ defmodule MingaAgent.Session.ContinuationCodec do
       "checkpoint_id" => checkpoint.checkpoint_id,
       "request_id" => checkpoint.request_id,
       "messages" => Enum.map(checkpoint.messages, &encode_term/1),
-      "calls" => Enum.map(checkpoint.calls, &encode_checkpoint_call/1)
+      "calls" => Enum.map(checkpoint.calls, &encode_checkpoint_call/1),
+      "epoch_id" => encode_term(Map.get(checkpoint, :epoch_id, :unknown))
     }
   end
 
@@ -193,23 +292,27 @@ defmodule MingaAgent.Session.ContinuationCodec do
           {:ok, Continuation.tool_checkpoint() | nil} | {:error, term()}
   defp decode_checkpoint(nil), do: {:ok, nil}
 
-  defp decode_checkpoint(%{
-         "version" => 1,
-         "checkpoint_id" => checkpoint_id,
-         "request_id" => request_id,
-         "messages" => encoded_messages,
-         "calls" => encoded_calls
-       })
+  defp decode_checkpoint(
+         %{
+           "version" => 1,
+           "checkpoint_id" => checkpoint_id,
+           "request_id" => request_id,
+           "messages" => encoded_messages,
+           "calls" => encoded_calls
+         } = encoded
+       )
        when is_binary(checkpoint_id) and is_binary(request_id) and is_list(encoded_calls) do
     with {:ok, messages} <- decode_terms(encoded_messages),
-         {:ok, calls} <- decode_list(encoded_calls, &decode_checkpoint_call/1) do
+         {:ok, calls} <- decode_list(encoded_calls, &decode_checkpoint_call/1),
+         {:ok, epoch_id} <- decode_epoch(encoded) do
       {:ok,
        %{
          version: 1,
          checkpoint_id: checkpoint_id,
          request_id: request_id,
          messages: messages,
-         calls: calls
+         calls: calls,
+         epoch_id: epoch_id
        }}
     end
   end
@@ -268,7 +371,8 @@ defmodule MingaAgent.Session.ContinuationCodec do
     %{
       "transcript_id" => boundary.transcript_id,
       "message_count" => boundary.message_count,
-      "revision" => boundary.revision
+      "revision" => boundary.revision,
+      "epoch_id" => encode_term(Map.get(boundary, :epoch_id, :unknown))
     }
   end
 
@@ -280,14 +384,24 @@ defmodule MingaAgent.Session.ContinuationCodec do
   defp decode_boundaries(_boundaries), do: {:error, :invalid_continuation_boundaries}
 
   @spec decode_boundary(term()) :: {:ok, Continuation.boundary()} | {:error, term()}
-  defp decode_boundary(%{
-         "transcript_id" => transcript_id,
-         "message_count" => message_count,
-         "revision" => revision
-       })
+  defp decode_boundary(
+         %{
+           "transcript_id" => transcript_id,
+           "message_count" => message_count,
+           "revision" => revision
+         } = encoded
+       )
        when is_integer(transcript_id) and transcript_id > 0 and is_integer(message_count) and
               message_count >= 0 and is_integer(revision) and revision >= 0 do
-    {:ok, %{transcript_id: transcript_id, message_count: message_count, revision: revision}}
+    with {:ok, epoch_id} <- decode_epoch(encoded) do
+      {:ok,
+       %{
+         transcript_id: transcript_id,
+         message_count: message_count,
+         revision: revision,
+         epoch_id: epoch_id
+       }}
+    end
   end
 
   defp decode_boundary(_boundary), do: {:error, :invalid_continuation_boundary}
@@ -296,11 +410,13 @@ defmodule MingaAgent.Session.ContinuationCodec do
           {:ok, %{String.t() => Continuation.branch_snapshot()}} | {:error, term()}
   defp decode_branches(branches) when is_map(branches) do
     Enum.reduce_while(branches, {:ok, %{}}, fn
-      {name, %{"messages" => encoded_messages, "boundaries" => encoded_boundaries}}, {:ok, acc}
+      {name, %{"messages" => encoded_messages, "boundaries" => encoded_boundaries} = encoded},
+      {:ok, acc}
       when is_binary(name) ->
         with {:ok, messages} <- decode_terms(encoded_messages),
-             {:ok, boundaries} <- decode_boundaries(encoded_boundaries) do
-          snapshot = %{messages: messages, boundaries: boundaries}
+             {:ok, boundaries} <- decode_boundaries(encoded_boundaries),
+             {:ok, epoch_id} <- decode_epoch(encoded) do
+          snapshot = %{messages: messages, boundaries: boundaries, epoch_id: epoch_id}
           {:cont, {:ok, Map.put(acc, name, snapshot)}}
         else
           {:error, _reason} = error -> {:halt, error}
@@ -479,7 +595,10 @@ defmodule MingaAgent.Session.ContinuationCodec do
   end
 
   defp decode_term(%{"$" => "atom", "value" => value}) when is_binary(value) do
-    {:ok, String.to_existing_atom(value)}
+    case Map.fetch(@prefix_atoms, value) do
+      {:ok, atom} -> {:ok, atom}
+      :error -> {:ok, String.to_existing_atom(value)}
+    end
   rescue
     ArgumentError -> {:error, {:unknown_continuation_atom, value}}
   end
