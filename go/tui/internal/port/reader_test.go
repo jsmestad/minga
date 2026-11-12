@@ -117,3 +117,36 @@ func TestDecodePacketSurfacesStreamErrorOnUnknownOpcode(t *testing.T) {
 		t.Fatalf("a stream error should warn exactly once, got %v", warnings)
 	}
 }
+
+func TestDecodePacketContinuesAfterUnknownLengthPrefixedOpcode(t *testing.T) {
+	for _, unknown := range [][]byte{
+		{0xFF, 0, 0},
+		{0xFF, 0, 3, generated.OPSetCursorShape, 1, generated.OPBeginFrame},
+	} {
+		batch := []byte{generated.OPBeginFrame, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1}
+		batch = append(batch, generated.OPSetCursorShape, 0)
+		batch = append(batch, unknown...)
+		batch = append(batch, generated.OPSetCursorShape, 2)
+		batch = append(batch, generated.OPCommitFrame, 0, 0, 0, 5, 0, 0, 0, 0)
+
+		commands := decodePacket(batch, func(_ byte, text string) {
+			t.Fatalf("forward-compatible command invalidated the frame: %s", text)
+		})
+		var shapes []byte
+		for _, command := range commands {
+			if command.Kind == protocol.CommandSetCursorShape {
+				shapes = append(shapes, command.CursorShape)
+			}
+			if command.Kind == protocol.CommandStreamError {
+				t.Fatal("complete length-prefixed command produced a stream error")
+			}
+		}
+		if !bytes.Equal(shapes, []byte{0, 2}) {
+			t.Fatalf("cursor commands before/after unknown payload = %v, want [0 2]", shapes)
+		}
+		last := commands[len(commands)-1]
+		if last.Kind != protocol.CommandCommitFrame || last.FrameSeq != 5 {
+			t.Fatalf("following frame commit was not preserved: %+v", last)
+		}
+	}
+}

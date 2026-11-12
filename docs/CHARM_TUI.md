@@ -51,6 +51,34 @@ The TUI resolves text clicks and drags from the committed row store, terminal gr
 
 The input model activates the final committed text presentation for each Bubble Tea update and discards presentations it can no longer use. These lifecycle messages stay ordered with pointer input. Drag capture stays with the originating editor pane until release, including release after a stale or missing target. Chrome and overlays retain their input precedence. See [the input ownership contract](ARCHITECTURE.md#the-input-rule) and [the wire format](PROTOCOL.md#0x1e-editor_text_event).
 
+## Capture actual terminal output
+
+Use the production capture when a renderer change looks correct in a model test but leaves stale cells or loses updates in a terminal. `scripts/go_tui_capture.py` launches the supplied production binary with a real PTY, sends committed protocol frames through separate pipes, and reconstructs the emitted ANSI stream into terminal cells. It does not call `Model.View` in place of running the renderer.
+
+You need the pinned Elixir/OTP and Go toolchains, Python 3 with `venv`, and network access for the one-time decoder installation. Run this from the repository root:
+
+```bash
+capture_root="$(mktemp -d /tmp/minga-go-capture.XXXXXX)"
+capture_root="$(realpath "$capture_root")"
+python3 -m venv "$capture_root/venv"
+"$capture_root/venv/bin/python" -m pip install -r scripts/go_tui_capture_requirements.txt
+mix run --no-start scripts/go_tui_capture_corpus.exs --check
+go_bin="$(go env GOROOT)/bin"
+"$go_bin/go" -C go/tui build -mod=readonly -trimpath '-ldflags=-s -w' -o ../../priv/minga-renderer-go ./cmd/minga-renderer-go
+mkdir -p "$capture_root/home" "$capture_root/config" "$capture_root/data" "$capture_root/cache" "$capture_root/tmp"
+env HOME="$capture_root/home" XDG_CONFIG_HOME="$capture_root/config" XDG_DATA_HOME="$capture_root/data" XDG_CACHE_HOME="$capture_root/cache" TMPDIR="$capture_root/tmp" PATH="$go_bin:$PATH" "$capture_root/venv/bin/python" scripts/go_tui_capture.py --binary priv/minga-renderer-go --corpus test/fixtures/go_tui_capture/agent_workspace.json --output "$capture_root/artifacts"
+```
+
+The explicit build matters: the capture records the supplied binary's hash, not an assertion that an existing binary matches the checkout. Build metadata and the separate capture-checkout context let a reviewer distinguish those facts. The private HOME/XDG roots keep the renderer run away from normal configuration and data.
+
+The checked-in corpus uses canonical Elixir encoders and the astrodark theme at 60×24, 80×24 and 140×40. Each size captures a transcript with user and assistant messages, a completed tool result, an approval prompt, a composer and a status bar. Later committed frames replace one row through `0xA2` while retaining its neighbors, skip a framed unknown opcode before a known visible update, and replace the workspace without retaining old labels.
+
+Inspect every size's `.txt` or `.grid.json` files, not just the exit code. The run directory also retains raw terminal/protocol/input/stderr streams, the corpus, byte offsets and `metadata.json`. A timeout, partial grid, stale label, crash, unsuccessful or forced shutdown, or byte-limit failure exits nonzero and retains diagnostics. A forced shutdown fails even if the renderer's signal handler returns zero. Default bounds are five seconds per step, a sixty-second read/wall deadline, 32 MiB of artifacts and five retained owned runs. Use a dedicated artifact root. The driver rejects symlinked paths and only prunes marked run directories; it leaves unrelated entries untouched.
+
+To update the corpus after an intentional semantic change, run `mix run --no-start scripts/go_tui_capture_corpus.exs`, review the new committed frames and expectations, then run the check and actual capture again. Do not weaken an expectation to accept unexplained terminal residue. The optional developer tests run with `"$capture_root/venv/bin/python" test/scripts/go_tui_capture_test.py`; they cover emulator boundaries and failure handling, not production visual acceptance.
+
+This evidence is an emitted-text-cell capture, not pixel, color, animation or live-interaction proof. The ready-only `scripts/go_tui_boot_smoke.py`, model-only coverage tracked in #2101 and legacy Zig snapshots prove different contracts. Production capture gates Go UI acceptance, not the start of a focused repair. A user-facing change still needs its actual keyboard and mouse walkthrough, plus the relevant [screen snapshot review](recipes/update-snapshots.md).
+
 ## Validation
 
 Before pushing renderer changes, run:

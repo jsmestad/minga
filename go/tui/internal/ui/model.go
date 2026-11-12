@@ -537,10 +537,6 @@ func (m Model) View() tea.View {
 		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence()
-	residentCursor, residentCursorAuthority := m.residentCursor()
-	if !residentCursorAuthority {
-		out += m.cursorPositionSequence()
-	}
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
 	}
@@ -550,19 +546,17 @@ func (m Model) View() tea.View {
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
-	view.Cursor = residentCursor
+	view.Cursor = m.residentCursor()
 	return view
 }
 
-func (m Model) residentCursor() (*tea.Cursor, bool) {
-	authority := false
+func (m Model) residentCursor() *tea.Cursor {
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
 		semantics := m.residentSemanticsFor(window)
 		if semantics == nil {
 			continue
 		}
-		authority = true
 		if !semantics.cursor.Eligible {
 			continue
 		}
@@ -592,9 +586,9 @@ func (m Model) residentCursor() (*tea.Cursor, bool) {
 		default:
 			cursor.Shape = tea.CursorBlock
 		}
-		return cursor, true
+		return cursor
 	}
-	return nil, authority
+	return nil
 }
 
 // protocolErrorView renders the blocking full-screen surface shown when a
@@ -614,10 +608,6 @@ func (m Model) protocolErrorView() string {
 		block,
 		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(bg)),
 	)
-}
-
-func (m Model) cursorPositionSequence() string {
-	return ansi.CursorPosition(int(m.cursorCol)+1, int(m.cursorRow)+1)
 }
 
 // latencyHUDSequence renders the latency overlay (ticket #2215) as a top-right

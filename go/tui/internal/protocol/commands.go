@@ -681,9 +681,13 @@ func decodeSkipOrChrome(payload []byte) (Command, error) {
 		}
 	}
 
-	// Sizing is not consumption. Only the schema's declared skips may become
-	// no-ops; a sized required opcode still needs a concrete decoder.
+	// Known opcodes require a concrete decoder or declared skip; unknown high opcodes retain their forward-compatible length framing.
 	if size, status := generated.CommandSize(payload); status == generated.CommandSizeOK {
+		if opcode >= 0x90 {
+			if _, required := generated.GoRequiredOpcodes[opcode]; !required {
+				return Command{Kind: CommandNoop, Size: size}, nil
+			}
+		}
 		return skippedCommand(opcode, size)
 	}
 	if _, skipped := generated.GoSkippedOpcodes[opcode]; skipped {
