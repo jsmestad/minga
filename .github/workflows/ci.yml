@@ -506,6 +506,7 @@ jobs:
     name: CI gate
     if: ${{ always() }}
     runs-on: ubuntu-latest
+    permissions: {}
     # Keep this list in sync with every substantive CI job; docs deploys only on main.
     needs:
       - lint
