@@ -332,6 +332,16 @@ defmodule MingaAgent.SessionApprovalTest do
 
       assert {:ok, :all} = Minga.Config.Options.set(options, :agent_tool_approval, :all)
 
+      # Effect admission must not wait behind unrelated sessions' durable journal writes.
+      event_log =
+        start_supervised!(
+          {MingaAgent.EventLog,
+           name: nil,
+           db_dir: Path.join(dir, "events"),
+           retention_sweep?: false,
+           health_check: :none}
+        )
+
       client = fn _model, _messages, _opts ->
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
@@ -380,6 +390,7 @@ defmodule MingaAgent.SessionApprovalTest do
           persist?: true,
           session_store_dir: Path.join(dir, "sessions"),
           options_server: options,
+          event_log_server: event_log,
           credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
           provider_opts: [
             model: "openai:gpt-6.1-sol",
@@ -398,22 +409,38 @@ defmodule MingaAgent.SessionApprovalTest do
       assert :ok = Session.send_prompt(session, "Read test.txt")
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "next turn")
 
-      assert_receive {:agent_event, ^session, {:tool_auto_approved, "tc_1", "read_file", :turn}},
-                     @event_timeout
+      receive do
+        {:agent_event, ^session, {:tool_auto_approved, "tc_1", "read_file", :turn}} ->
+          :ok
 
-      assert_receive {:agent_event, ^session,
-                      {:approval_pending, %{tool_call_id: "tc_2", name: "read_file"}}},
-                     @event_timeout
+        {:agent_event, ^session, {:error, message}} ->
+          flunk("first turn failed before its trusted tool: #{message}")
+      after
+        @event_timeout -> flunk("first turn did not auto-approve read_file through turn trust")
+      end
 
-      assert_receive {:agent_event, ^session, {:resumable_boundary, _first_boundary}},
-                     @event_timeout
+      await_queued_turn_boundary(session, "first turn")
+
+      refute_received {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", _scope}}
+
+      receive do
+        {:agent_event, ^session, {:approval_pending, %{tool_call_id: "tc_2", name: "read_file"}}} ->
+          :ok
+
+        {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", scope}} ->
+          flunk("queued turn reused #{inspect(scope)} trust instead of requesting approval")
+
+        {:agent_event, ^session, {:error, message}} ->
+          flunk("queued turn failed before approval: #{message}")
+      after
+        @event_timeout -> flunk("queued turn did not request approval for tc_2")
+      end
 
       assert Session.list_tool_trust(session) == %{}
 
       assert :ok = Session.respond_to_approval(session, :approve)
 
-      assert_receive {:agent_event, ^session, {:resumable_boundary, _follow_up_boundary}},
-                     @event_timeout
+      await_queued_turn_boundary(session, "approved follow-up")
 
       assert Session.status(session) == :idle
 
@@ -481,6 +508,29 @@ defmodule MingaAgent.SessionApprovalTest do
       :ok = Session.abort(session)
 
       assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+    end
+  end
+
+  @spec await_queued_turn_boundary(GenServer.server(), String.t()) :: non_neg_integer()
+  defp await_queued_turn_boundary(session, phase) do
+    receive do
+      {:agent_event, ^session, {:resumable_boundary, revision}} ->
+        revision
+
+      {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", scope}} ->
+        flunk("#{phase}: queued turn unexpectedly reused #{inspect(scope)} trust")
+
+      {:agent_event, ^session, {:error, message}} ->
+        flunk("#{phase} failed before durable completion: #{message}")
+
+      {:agent_event, ^session, {:status_changed, :error}} ->
+        flunk("#{phase} entered error before durable completion")
+    after
+      @event_timeout ->
+        flunk(
+          "#{phase} did not publish a durable boundary; mailbox: " <>
+            inspect(Process.info(self(), :messages), limit: :infinity)
+        )
     end
   end
 end

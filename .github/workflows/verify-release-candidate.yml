@@ -1,0 +1,161 @@
+name: Verify immutable release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_artifact_id:
+        description: "Immutable manifest Actions artifact ID"
+        required: true
+      manifest_sha256:
+        description: "SHA256 of manifest.json (not the ZIP)"
+        required: true
+      source_sha:
+        description: "Expected full protected-main source SHA"
+        required: true
+      version:
+        description: "Expected source/app version"
+        required: true
+      workflow_sha:
+        description: "Expected full producing release.yml revision"
+        required: true
+      run_id:
+        description: "Producing preparation run ID"
+        required: true
+      run_attempt:
+        description: "Producing preparation attempt (reruns are new generations)"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    # Only reviewed protected-main verifier code may consume public input bytes.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out trusted verifier revision only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/release_candidate.py
+          sparse-checkout-cone-mode: false
+
+      - name: Acquire immutable API context and raw ZIP bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SOURCE: ${{ inputs.source_sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_WORKFLOW: ${{ inputs.workflow_sha }}
+          EXPECTED_RUN: ${{ inputs.run_id }}
+          EXPECTED_ATTEMPT: ${{ inputs.run_attempt }}
+          MANIFEST_ID: ${{ inputs.manifest_artifact_id }}
+          MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "scripts")
+          import release_candidate
+
+          def api(path):
+              return json.loads(subprocess.check_output(["gh", "api", path]))
+
+          def check(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          repository = os.environ["EXPECTED_REPOSITORY"]
+          source = os.environ["EXPECTED_SOURCE"]
+          workflow = os.environ["EXPECTED_WORKFLOW"]
+          for sha in (source, workflow):
+              check(re.fullmatch(r"[0-9a-f]{40}", sha), "Expected full lowercase SHA")
+          check(re.fullmatch(r"[0-9a-f]{64}", os.environ["MANIFEST_SHA"]), "Invalid manifest SHA256")
+          for key in ("EXPECTED_RUN", "EXPECTED_ATTEMPT", "MANIFEST_ID"):
+              check(re.fullmatch(r"[1-9][0-9]*", os.environ[key]), "Invalid numeric handle/generation")
+          run_id = int(os.environ["EXPECTED_RUN"])
+          attempt = int(os.environ["EXPECTED_ATTEMPT"])
+          manifest_id = int(os.environ["MANIFEST_ID"])
+          root = f"repos/{repository}"
+          check(api(f"{root}/branches/main")["protected"], "main must be protected")
+          for sha in (source, workflow):
+              comparison = api(f"{root}/compare/{sha}...main")
+              check(comparison["status"] in ("ahead", "identical"), "Pinned revision is not protected-main history")
+          # The attempt-specific endpoint prevents current-run metadata from silently relabeling an older or newer generation.
+          run = api(f"{root}/actions/runs/{run_id}/attempts/{attempt}")
+          check(run["repository"]["full_name"] == repository, "Wrong producing repository")
+          check(run["id"] == run_id and run["run_attempt"] == attempt, "Wrong producing generation")
+          check(run["event"] == "workflow_dispatch" and run["head_branch"] == "main", "Wrong preparation provenance")
+          check(run["path"] == ".github/workflows/release.yml" and run["head_sha"] == workflow, "Wrong producing workflow revision")
+          check(run["status"] == "completed" and run["conclusion"] == "success", "Preparation generation is incomplete/failed")
+          context = {
+              "repository": repository, "source_sha": source,
+              "version": os.environ["EXPECTED_VERSION"],
+              "workflow_path": ".github/workflows/release.yml",
+              "workflow_sha": workflow, "run_id": run_id,
+              "run_attempt": attempt, "run_started_at": run["run_started_at"],
+          }
+          Path("context.json").write_text(json.dumps(context))
+          prefix = f"candidate-{run_id}-{attempt}-"
+          artifacts = []
+          page = 1
+          while True:
+              batch = api(f"{root}/actions/runs/{run_id}/artifacts?per_page=100&page={page}")["artifacts"]
+              artifacts.extend(item for item in batch if item["name"].startswith(prefix))
+              if len(batch) < 100:
+                  break
+              page += 1
+          check(any(item["id"] == manifest_id for item in artifacts), "Exact manifest artifact is missing/deleted; no substitution")
+          release_candidate.validate_context(context)
+          release_candidate.validate_artifacts(artifacts, context, [*release_candidate.PAYLOADS, "checksums", "manifest"])
+          # Fetch each immutable ID again. Deleted/expired inputs stop here; names are only inventory constraints, never download selectors.
+          current = []
+          downloads = Path("downloads")
+          downloads.mkdir()
+          for artifact in artifacts:
+              identity = artifact["id"]
+              item = api(f"{root}/actions/artifacts/{identity}")
+              check(not item["expired"], "Artifact expired; no rebuild/substitution")
+              current.append(item)
+              with (downloads / f"{identity}.zip").open("wb") as output:
+                  subprocess.run(["gh", "api", f"{root}/actions/artifacts/{identity}/zip"], stdout=output, check=True)
+          Path("artifacts.json").write_text(json.dumps(current))
+          PY
+
+      - name: Verify bytes without executing or repackaging them
+        env:
+          MANIFEST_ID: ${{ inputs.manifest_artifact_id }}
+          MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release_candidate.py verify \
+            --context context.json --artifacts artifacts.json --downloads downloads \
+            --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$MANIFEST_SHA" \
+            --receipt receipt.json
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          receipt = Path("receipt.json").read_text()
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write("## Immutable candidate byte verification\n\n```json\n" + receipt + "```\n")
+          PY
+
+      - name: Retain the immutable verification receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: receipt.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: false

@@ -1552,7 +1552,15 @@ defmodule MingaAgent.SessionStoreTest do
           )
         end)
 
-      assert_receive {:candidate_pinned, writer_pid}
+      # The test deadline bounds readiness; durable pinning has no one-second latency contract.
+      writer_pid =
+        receive do
+          {:candidate_pinned, writer_pid} ->
+            writer_pid
+
+          {ref, result} when ref == writer.ref ->
+            flunk("snapshot writer returned before candidate pinning: #{inspect(result)}")
+        end
 
       reader =
         Task.async(fn ->

@@ -1,37 +1,223 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Check packaged resources and native headers, not installed/UI qualification."""
 
-usage() {
-  cat <<'USAGE'
-Usage: scripts/check-release-contents [release-dir]
+import argparse
+import os
+from pathlib import Path
+import platform
+import plistlib
+import struct
+import sys
 
-Fails if the repo-root scripts directory is present in an assembled release directory. The default release directory is _build/prod/rel/minga.
-USAGE
+
+TARGETS = ("linux_x86_64", "linux_aarch64", "macos_x86_64", "macos_aarch64")
+
+
+MACHO_ENDIAN = {b"\xcf\xfa\xed\xfe": "<", b"\xfe\xed\xfa\xcf": ">"}
+MACHO_CPUS = {0x01000007: "macos_x86_64", 0x0100000C: "macos_aarch64"}
+FAT_LAYOUTS = {
+    b"\xca\xfe\xba\xbe": (">", "IIIII"),
+    b"\xbe\xba\xfe\xca": ("<", "IIIII"),
+    b"\xca\xfe\xba\xbf": (">", "IIQQII"),
+    b"\xbf\xba\xfe\xca": ("<", "IIQQII"),
 }
 
-if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
-  usage
-  exit 0
-fi
 
-release_dir=${1:-_build/prod/rel/minga}
+def macho_identity(header, size, path):
+    """Read an actual thin slice, never a universal table's claimed CPU."""
+    endian = MACHO_ENDIAN.get(header[:4])
+    if endian is None or len(header) < 32:
+        raise ValueError(f"Expected a complete 64-bit Mach-O slice header: {path}")
+    cpu, subtype, _, commands, command_bytes = struct.unpack(endian + "IIIII", header[4:24])
+    if cpu not in MACHO_CPUS:
+        raise ValueError(f"Unsupported Mach-O CPU {cpu}: {path}")
+    if command_bytes > size - 32 or commands > command_bytes // 8:
+        raise ValueError(f"Mach-O load-command table exceeds slice bounds: {path}")
+    return cpu, subtype
 
-if [[ ! -d "$release_dir" ]]; then
-  echo "Release directory not found: $release_dir" >&2
-  exit 1
-fi
 
-scripts_dir="$release_dir/scripts"
-leaked_paths=""
+def universal_targets(stream, magic, file_size, path):
+    endian, layout = FAT_LAYOUTS[magic]
+    record_size = struct.calcsize(endian + layout)
+    stream.seek(4)
+    count_bytes = stream.read(4)
+    if len(count_bytes) != 4:
+        raise ValueError(f"Truncated universal Mach-O header: {path}")
+    count = struct.unpack(endian + "I", count_bytes)[0]
+    # Bound parser work independently of file size; real supported universals contain only a handful of CPU/subtype variants.
+    if not 1 <= count <= 64:
+        raise ValueError(f"Invalid universal Mach-O architecture count: {path}")
+    table_end = 8 + count * record_size
+    if table_end > file_size:
+        raise ValueError(f"Truncated universal Mach-O architecture table: {path}")
+    records = []
+    identities = set()
+    for _ in range(count):
+        record = stream.read(record_size)
+        if len(record) != record_size:
+            raise ValueError(f"Truncated universal Mach-O architecture record: {path}")
+        cpu, subtype, offset, size, alignment, *reserved = struct.unpack(endian + layout, record)
+        if cpu not in MACHO_CPUS:
+            raise ValueError(f"Unsupported universal Mach-O CPU {cpu}: {path}")
+        if reserved and reserved != [0]:
+            raise ValueError(f"Invalid universal Mach-O reserved field: {path}")
+        if alignment > (63 if reserved else 31) or offset % (1 << alignment):
+            raise ValueError(f"Invalid universal Mach-O slice alignment: {path}")
+        if offset < table_end or size < 32 or offset + size > file_size:
+            raise ValueError(f"Universal Mach-O slice exceeds file/table bounds: {path}")
+        if (cpu, subtype) in identities:
+            raise ValueError(f"Duplicate universal Mach-O architecture: {path}")
+        identities.add((cpu, subtype))
+        records.append((offset, size, cpu, subtype))
+    previous_end = table_end
+    targets = set()
+    for offset, size, cpu, subtype in sorted(records):
+        if offset < previous_end:
+            raise ValueError(f"Overlapping universal Mach-O slices: {path}")
+        previous_end = offset + size
+        stream.seek(offset)
+        if macho_identity(stream.read(32), size, path) != (cpu, subtype):
+            raise ValueError(f"Universal Mach-O slice CPU declaration contradicts actual header: {path}")
+        targets.add(MACHO_CPUS[cpu])
+    return frozenset(targets)
 
-if [[ -e "$scripts_dir" || -L "$scripts_dir" ]]; then
-  leaked_paths=$(find "$scripts_dir" -print)
-fi
 
-if [[ -n "$leaked_paths" ]]; then
-  echo "Repo-root scripts leaked into release:" >&2
-  echo "$leaked_paths" >&2
-  exit 1
-fi
+def native_targets(path):
+    """Return verified native CPU membership; never claim whole-package universality."""
+    with path.open("rb") as stream:
+        header = stream.read(64)
+        file_size = os.fstat(stream.fileno()).st_size
+        magic = header[:4]
+        if magic == b"\x7fELF":
+            if len(header) < 64 or header[4] != 2 or header[5] not in (1, 2):
+                raise ValueError(f"Invalid or non-64-bit ELF: {path}")
+            machine = struct.unpack("<H" if header[5] == 1 else ">H", header[18:20])[0]
+            arch = {62: "x86_64", 183: "aarch64"}.get(machine)
+            if arch is None:
+                raise ValueError(f"Unsupported ELF machine {machine}: {path}")
+            return frozenset(("linux_" + arch,))
+        if magic in MACHO_ENDIAN:
+            cpu, _ = macho_identity(header, file_size, path)
+            return frozenset((MACHO_CPUS[cpu],))
+        if magic in FAT_LAYOUTS:
+            return universal_targets(stream, magic, file_size, path)
+        if magic in (b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xce") or header[:2] == b"MZ":
+            raise ValueError(f"Unsupported native executable format: {path}")
+    return None
 
-echo "Release contents check passed: no repo-root scripts found in $release_dir"
+
+def require_file(path, executable=False):
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValueError(f"Missing/empty packaged file: {path}")
+    if executable and not os.access(path, os.X_OK):
+        raise ValueError(f"Packaged executable is not executable: {path}")
+
+
+def single(paths, description):
+    paths = list(paths)
+    if len(paths) != 1:
+        raise ValueError(f"Expected exactly one {description}, found {len(paths)}")
+    return paths[0]
+
+
+def check(release, target, app=None, binary=None):
+    release = release.resolve(strict=True)
+    if not release.is_dir():
+        raise ValueError(f"Not a release directory: {release}")
+    roots = [release]
+    if app:
+        app = app.resolve(strict=True)
+        if release != app / "Contents/Resources/release":
+            raise ValueError("Checked release is not embedded in the specified app")
+        roots = [app]
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.is_symlink() and not path.resolve().is_relative_to(root):
+                raise ValueError(f"Packaged symlink escapes package: {path}")
+    if (release / "scripts").exists() or (release / "scripts").is_symlink():
+        raise ValueError("Repo-root scripts leaked into release")
+    erts = single(release.glob("erts-*"), "packaged ERTS")
+    priv = single(release.glob("lib/minga-*/priv"), "Minga priv directory")
+    require_file(erts / "bin/beam.smp", executable=True)
+    entry_name = "minga_macos" if app else "minga"
+    require_file(release / "bin" / entry_name, executable=True)
+    require_file(release / "releases/start_erl.data")
+    runtime_version, app_version = (release / "releases/start_erl.data").read_text().split()
+    if erts.name != "erts-" + runtime_version:
+        raise ValueError("Release metadata does not match packaged ERTS")
+    if priv.parent.name != "minga-" + app_version:
+        raise ValueError("Release metadata does not match packaged application")
+    require_file(single(release.glob("releases/*/start.boot"), "release boot file"))
+    require_file(single(release.glob("lib/exqlite-*/priv/sqlite3_nif.so"), "SQLite NIF"))
+    require_file(priv / "tutor.txt")
+    require_file(priv / "tree_sitter/api.h")
+    require_file(priv / "tree_sitter/parser.h")
+    if not list((priv / "queries").rglob("*.scm")):
+        raise ValueError("Missing packaged tree-sitter queries")
+    for extension in ("git_porcelain", "knowledge_graph", "adversarial"):
+        if not list((priv / "extensions" / extension / "lib").rglob("*.ex")):
+            raise ValueError(f"Missing bundled extension source: {extension}")
+    required_native = [erts / "bin/beam.smp"]
+    for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner"):
+        path = priv / name
+        require_file(path, executable=True)
+        required_native.append(path)
+    if app:
+        with (app / "Contents/Info.plist").open("rb") as stream:
+            info = plistlib.load(stream)
+        if info.get("CFBundleShortVersionString") != app_version:
+            raise ValueError("GUI app version differs from embedded release")
+        if info.get("CFBundleExecutable") != "Minga":
+            raise ValueError("Unexpected GUI executable identity")
+        minimum_os = info.get("LSMinimumSystemVersion", "")
+        if minimum_os not in ("15", "15.0", "15.0.0"):
+            raise ValueError("GUI package must support the declared macOS 15.0 minimum")
+        for name in ("minga", "minga-tui", "minga-ipc"):
+            require_file(app / "Contents/Resources/bin" / name, executable=True)
+        for name in ("Info.plist", "Resources/default.metallib", "Resources/Assets.car"):
+            require_file(app / "Contents" / name)
+        if not list((app / "Contents/Resources/Fonts").rglob("*.ttf")):
+            raise ValueError("Missing packaged GUI fonts")
+        required_native.extend([app / "Contents/MacOS/Minga", app / "Contents/Resources/bin/minga-ipc"])
+    if binary:
+        require_file(binary, executable=True)
+        required_native.append(binary)
+    for path in required_native:
+        actual = native_targets(path)
+        if actual is None or target not in actual:
+            raise ValueError(f"Required executable does not contain {target}: {path}")
+    count = 0
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.is_file():
+                actual = native_targets(path)
+                if actual is None and (".so" in path.suffixes or path.suffix == ".dylib"):
+                    raise ValueError(f"Packaged native library has no supported header: {path}")
+                if actual is not None:
+                    if target not in actual:
+                        raise ValueError(f"Wrong packaged native targets {sorted(actual)}, expected membership of {target}: {path}")
+                    count += 1
+    print(f"Package resources and {count} native headers passed for selected target {target}; not whole-package universal support; no installed/UI/X0 qualification claimed")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("release_dir", nargs="?", default="_build/prod/rel/minga")
+    host_os = {"Darwin": "macos", "Linux": "linux"}.get(platform.system(), "unsupported")
+    host_arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64"}.get(platform.machine(), "unsupported")
+    parser.add_argument("--target", choices=TARGETS, default=f"{host_os}_{host_arch}")
+    parser.add_argument("--app", type=Path)
+    parser.add_argument("--binary", type=Path)
+    args = parser.parse_args()
+    try:
+        if args.target not in TARGETS:
+            raise ValueError("Unsupported native host; pass an explicit supported --target")
+        check(Path(args.release_dir), args.target, args.app, args.binary)
+    except (OSError, ValueError) as error:
+        print(f"Release contents check failed: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

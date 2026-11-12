@@ -1,679 +1,442 @@
-name: Release
+name: Prepare Release Candidate
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full reviewed source SHA from protected main history
+        required: true
+        type: string
+      version:
+        description: Exact source/app version from mix.exs (no v prefix)
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 env:
   MIX_ENV: prod
   ELIXIR_VERSION: "1.20.5-otp-29"
   OTP_VERSION: "29.1.2"
-  ZIG_VERSION: "0.16.0"
+  GO_VERSION: "1.26.4"
+  NATIVE_ZIG_VERSION: "0.16.0"
+  # Qualified independently against the locked Burrito.get_versions/0 contract.
+  BURRITO_ZIG_VERSION: "0.16.0"
+  RETENTION_DAYS: 14
 
 jobs:
-  # ── Gate: validate tag matches mix.exs release version ────────────────
   validate:
-    name: Validate Version
-    runs-on: ubuntu-latest
+    name: Validate immutable reviewed source and trusted workflow
+    runs-on: ubuntu-24.04
     outputs:
-      is_prerelease: ${{ steps.check.outputs.is_prerelease }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      version: ${{ steps.source.outputs.version }}
+      context: ${{ steps.source.outputs.context }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check tag matches mix.exs release version
-        id: check
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind selected source to protected main and producing attempt
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_VERSION: ${{ inputs.version }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        shell: bash
         run: |
-          # Extract version from mix.exs @version attribute
-          mix_version=$(grep -oP '@version\s+"\K[^"]+' mix.exs)
-          tag_version="${GITHUB_REF_NAME#v}"
-          release_version="${tag_version%%-*}"
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$WORKFLOW_SHA"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .protected)" = true
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+          git show "$SOURCE_SHA:mix.exs" > "$RUNNER_TEMP/source-mix.exs"
+          git show "$SOURCE_SHA:.tool-versions" > "$RUNNER_TEMP/source-tool-versions"
+          python3 - <<'PY'
+          import os, pathlib, re
+          source = pathlib.Path(os.environ['RUNNER_TEMP'], 'source-mix.exs').read_text()
+          versions = re.findall(r'^\s*@version "([^"]+)"', source, re.M)
+          assert versions == [os.environ['SOURCE_VERSION']], 'Source/app version mismatch'
+          pins = dict(line.split() for line in pathlib.Path(os.environ['RUNNER_TEMP'], 'source-tool-versions').read_text().splitlines() if line.strip())
+          assert pins == {'elixir': os.environ['ELIXIR_VERSION'], 'erlang': os.environ['OTP_VERSION'], 'zig': os.environ['NATIVE_ZIG_VERSION'], 'golang': os.environ['GO_VERSION']}, 'Source tool pins differ from trusted preparation pins'
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/run.json"
+          jq -e --arg sha "$WORKFLOW_SHA" --argjson attempt "$GITHUB_RUN_ATTEMPT" '.head_sha == $sha and .run_attempt == $attempt and .event == "workflow_dispatch" and .path == ".github/workflows/release.yml"' "$RUNNER_TEMP/run.json"
+          context=$(jq -cn --arg repository "$GITHUB_REPOSITORY" --arg source_sha "$SOURCE_SHA" --arg version "$SOURCE_VERSION" --arg workflow_sha "$WORKFLOW_SHA" --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" --arg started "$(jq -r .run_started_at "$RUNNER_TEMP/run.json")" '{repository:$repository,source_sha:$source_sha,version:$version,workflow_path:".github/workflows/release.yml",workflow_sha:$workflow_sha,run_id:$run_id,run_attempt:$run_attempt,run_started_at:$started}')
+          printf 'source_sha=%s\nversion=%s\ncontext=%s\n' "$SOURCE_SHA" "$SOURCE_VERSION" "$context" >> "$GITHUB_OUTPUT"
 
-          echo "mix.exs version:    $mix_version"
-          echo "Tag version:        $tag_version"
-          echo "Release version:    $release_version"
-
-          if [ "$mix_version" != "$release_version" ]; then
-            echo "::error::Version mismatch! mix.exs has '$mix_version' but tag '$GITHUB_REF_NAME' targets release '$release_version'"
-            exit 1
-          fi
-
-          # Detect pre-release: any tag with a hyphen after semver (v1.2.3-rc.1)
-          if [[ "$tag_version" == *-* ]]; then
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "Detected pre-release: $tag_version"
-          else
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "Detected stable release: $tag_version"
-          fi
-
-  # ── Gate: CI must pass ─────────────────────────────────────────────────
-  ci:
-    name: CI (${{ matrix.job }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        job: [lint, test, dialyzer]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: ci-deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: ci-deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
-
-      - name: Cache PLT
-        if: matrix.job == 'dialyzer'
-        uses: actions/cache@v4
-        with:
-          path: _build/dev/dialyxir_*.plt*
-          key: plt-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: plt-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
-
-      - run: mix deps.get
-
-      - name: Lint
-        if: matrix.job == 'lint'
-        run: |
-          mix format --check-formatted
-          mix credo --strict
-          mix compile --warnings-as-errors
-
-      - name: Test
-        if: matrix.job == 'test'
-        run: |
-          MIX_ENV=test mix test --warnings-as-errors
-          cd zig && zig build test
-
-      - name: Dialyzer
-        if: matrix.job == 'dialyzer'
-        run: MIX_ENV=dev mix dialyzer
-
-  # ── Build: cross-platform binaries ─────────────────────────────────────
   build:
-    name: Build (${{ matrix.target }})
-    needs: [validate, ci]
-    runs-on: ${{ matrix.os }}
+    name: Prepare ${{ matrix.filename }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: linux_x86_64
-            artifact: minga_linux_x86_64
-          - os: ubuntu-24.04-arm
-            target: linux_aarch64
-            artifact: minga_linux_aarch64
-          - os: macos-14
-            target: macos_aarch64
-            artifact: minga_macos_aarch64
-          - os: macos-13
-            target: macos_x86_64
-            artifact: minga_macos_x86_64
-
+          - runner: ubuntu-24.04
+            os: linux
+            arch: x86_64
+            uname: x86_64
+            goarch: amd64
+            filename: minga_linux_x86_64
+            gui: false
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: aarch64
+            uname: aarch64
+            goarch: arm64
+            filename: minga_linux_aarch64
+            gui: false
+          - runner: macos-15
+            os: macos
+            arch: aarch64
+            uname: arm64
+            goarch: arm64
+            filename: minga_macos_aarch64
+            gui: false
+          - runner: macos-15-intel
+            os: macos
+            arch: x86_64
+            uname: x86_64
+            goarch: amd64
+            filename: minga_macos_x86_64
+            gui: false
+          - runner: macos-15
+            os: macos
+            arch: aarch64
+            uname: arm64
+            goarch: arm64
+            filename: Minga.dmg
+            gui: true
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      TARGET_OS: ${{ matrix.os }}
+      TARGET_ARCH: ${{ matrix.arch }}
+      GOARCH: ${{ matrix.goarch }}
+      GOTOOLCHAIN: local
+      CANDIDATE_CONTEXT: ${{ needs.validate.outputs.context }}
+      PAYLOAD: ${{ matrix.filename }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-
-      - uses: mlugg/setup-zig@v2
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v4
         with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: release-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: release-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
-
-      - run: mix deps.get --only prod
-      - name: Compile
-        run: mix compile
-
-      - name: Build Burrito release
-        run: mix release minga
-
-      - name: Check release contents
-        run: scripts/check-release-contents _build/prod/rel/minga
-
-      - name: Smoke test
+          ref: ${{ needs.validate.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - name: Isolate runtime and tool caches; verify native host
         run: |
-          binary="burrito_out/${{ matrix.artifact }}"
-          chmod +x "$binary"
-          version=$(RELEASE_COOKIE="$(openssl rand -hex 32)" "$binary" --version 2>&1 || true)
-          echo "Binary output: $version"
-          echo "$version" | grep -q "minga"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: burrito_out/${{ matrix.artifact }}
-          if-no-files-found: error
-
-  # ── Build: macOS GUI app bundle (.app → signed DMG) ─────────────────
-  build-app:
-    name: Build macOS App
-    needs: [validate, ci]
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(jq -r .source_sha <<< "$CANDIDATE_CONTEXT")"
+          test "$(uname -m)" = '${{ matrix.uname }}'
+          if [ "$TARGET_OS" = macos ]; then test "$(uname -s)" = Darwin; else test "$(uname -s)" = Linux; fi
+          root="$RUNNER_TEMP/candidate-$PAYLOAD"
+          mkdir -p "$root"/{home,config,data,cache,tmp,mix,hex,rebar,zig,go-build,go-mod,out}
+          for entry in "HOME=home" "XDG_CONFIG_HOME=config" "XDG_DATA_HOME=data" "XDG_CACHE_HOME=cache" "TMPDIR=tmp" "MIX_HOME=mix" "HEX_HOME=hex" "REBAR_CACHE_DIR=rebar" "ZIG_GLOBAL_CACHE_DIR=zig" "GOCACHE=go-build" "GOMODCACHE=go-mod"; do
+            printf '%s=%s/%s\n' "${entry%%=*}" "$root" "${entry#*=}" >> "$GITHUB_ENV"
+          done
+          printf 'CANDIDATE_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf '%s\n' "$CANDIDATE_CONTEXT" > "$root/context.json"
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ env.OTP_VERSION }}
           elixir-version: ${{ env.ELIXIR_VERSION }}
-
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
       - uses: mlugg/setup-zig@v2
         with:
-          version: ${{ env.ZIG_VERSION }}
-
+          version: ${{ env.NATIVE_ZIG_VERSION }}
+      - name: Select supported Xcode explicitly
+        if: matrix.os == 'macos'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+      - name: Verify actual native toolchains
+        run: |
+          set -euo pipefail
+          test "$(elixir -e 'IO.write(System.version())')" = "${ELIXIR_VERSION%-otp-*}"
+          otp=$(elixir -e 'IO.write(File.read!(Path.join([:code.root_dir(), "releases", :erlang.system_info(:otp_release), "OTP_VERSION"])))')
+          test "$otp" = "$OTP_VERSION"
+          beam_arch=$(elixir -e 'IO.write(:erlang.system_info(:system_architecture))')
+          case "$beam_arch" in "$TARGET_ARCH"-*) ;; *) echo "Wrong host ERTS architecture: $beam_arch" >&2; exit 1;; esac
+          test "$(go env GOVERSION)" = "go$GO_VERSION"
+          test "$(go env GOHOSTARCH)" = '${{ matrix.goarch }}'
+          test "$(go env GOARCH)" = '${{ matrix.goarch }}'
+          test "$(zig version)" = "$NATIVE_ZIG_VERSION"
+          erts=$(elixir -e 'IO.write(:erlang.system_info(:version))')
+          printf 'EXPECTED_ERTS=%s\n' "$erts" >> "$GITHUB_ENV"
+          jq -n --arg elixir "$(elixir -e 'IO.write(System.version())')-otp-$(elixir -e 'IO.write(:erlang.system_info(:otp_release))')" --arg otp "$otp" --arg go "$(go env GOVERSION | cut -c 3-)" --arg zig "$(zig version)" --arg host "$beam_arch" --arg erts "$erts" '{elixir:$elixir,otp:$otp,go:$go,native_zig:$zig,host_erts_arch:$host,erts:$erts}' > "$CANDIDATE_ROOT/toolchains.json"
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get --only prod
+      - name: Build native Go and Zig with repository pins
+        if: '!matrix.gui'
+        run: |
+          set -euo pipefail
+          mix native.build.tui
+          mix compile --warnings-as-errors
+      - name: Select separately qualified Burrito wrapper compiler
+        if: '!matrix.gui'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.BURRITO_ZIG_VERSION }}
+      - name: Wrap exactly one intended native target
+        if: '!matrix.gui'
+        env:
+          BURRITO_TARGET: ${{ matrix.os }}_${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          actual=$(zig version)
+          required=$(mix run --no-compile --no-start -e 'IO.write(Version.to_string(Burrito.get_versions().zig))')
+          test "$actual" = "$BURRITO_ZIG_VERSION"
+          test "$actual" = "$required"
+          jq --arg wrapper "$actual" '. + {wrapper_zig:$wrapper}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
+          mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
+          mix release minga --no-compile --overwrite
+          test "$(find burrito_out -maxdepth 1 -type f | wc -l | tr -d ' ')" = 1
+          cp "burrito_out/$PAYLOAD" "$CANDIDATE_ROOT/out/$PAYLOAD"
+          chmod +x "$CANDIDATE_ROOT/out/$PAYLOAD"
+      - name: Boot final standalone bytes and inspect extracted package
+        if: '!matrix.gui'
+        run: |
+          set -euo pipefail
+          export MINGA_INSTALL_DIR="$CANDIDATE_ROOT/unpacked"
+          RELEASE_COOKIE=$(openssl rand -hex 32)
+          export RELEASE_COOKIE
+          export RELEASE_DISTRIBUTION=none
+          "$CANDIDATE_ROOT/out/$PAYLOAD" --version > "$CANDIDATE_ROOT/version.txt"
+          grep -Fx "minga $(jq -r .version "$CANDIDATE_ROOT/context.json")" "$CANDIDATE_ROOT/version.txt"
+          shopt -s nullglob
+          releases=("$MINGA_INSTALL_DIR"/.burrito/minga_erts-*)
+          test "${#releases[@]}" = 1
+          package="${releases[0]}"
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --binary "$CANDIDATE_ROOT/out/$PAYLOAD"
+          "$package/bin/minga" eval 'erts = to_string(:erlang.system_info(:version)); arch = to_string(:erlang.system_info(:system_architecture)); if erts != System.fetch_env!("EXPECTED_ERTS") or not String.starts_with?(arch, System.fetch_env!("TARGET_ARCH") <> "-"), do: raise("Packaged ERTS version/architecture mismatch"); {:ok, _} = Application.ensure_all_started(:crypto); if :crypto.hash(:sha256, "minga-package-probe") != <<0x1b45baf6461706ab791b75f5a031660a827efc4f51980372da69e5217d1d5257::256>>, do: raise("Packaged crypto NIF result mismatch"); {:ok, db} = Exqlite.Sqlite3.open(":memory:"); :ok = Exqlite.Sqlite3.close(db); IO.puts("packaged ERTS, crypto and SQLite NIFs " <> erts <> " " <> arch)'
       - name: Install pinned XcodeGen
-        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: app-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: app-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
-
-      - name: Cache Xcode DerivedData
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: xcode-${{ runner.os }}-${{ hashFiles('macos/Sources/**/*.swift', 'macos/Sources/**/*.metal', 'macos/project.yml') }}
-          restore-keys: xcode-${{ runner.os }}-
-
-      - run: mix deps.get --only prod
-
-      # Build the complete Minga.app bundle (BEAM release + Xcode build + assembly)
-      - name: Assemble Minga.app
-        run: MIX_ENV=prod mix app.assemble
-
-      # Locate the assembled .app bundle
-      - name: Find app bundle
-        id: find_app
+        if: matrix.gui
+        run: '"$GITHUB_WORKSPACE/trusted/scripts/install_xcodegen" "$CANDIDATE_ROOT/xcodegen" >> "$GITHUB_PATH"'
+      - name: Assemble authoritative plain-release app product
+        if: matrix.gui
         run: |
-          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Minga.app" -path "*/Release/*" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "::error::Minga.app not found in DerivedData"
-            exit 1
-          fi
-          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
-          echo "Found: $APP_PATH"
-
-      - name: Check app release contents
-        run: scripts/check-release-contents "${{ steps.find_app.outputs.app_path }}/Contents/Resources/release"
-
-      # Import Developer ID certificate into a temporary keychain
-      - name: Import signing certificate
+          set -euo pipefail
+          mix app.assemble --output-path-file "$CANDIDATE_ROOT/app-path"
+          IFS= read -r app < "$CANDIDATE_ROOT/app-path"
+          [[ "$app" = /*/Minga.app ]]
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" --target macos_aarch64 --app "$app"
+          xcodebuild -version > "$CANDIDATE_ROOT/xcode.txt"
+          jq --arg xcode "$(cat "$CANDIDATE_ROOT/xcode.txt")" '. + {xcode:$xcode}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
+          mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
+      # Apple credentials exist only in these trusted, reviewed signing/notary steps.
+      - name: Import temporary Developer ID signing identity
+        if: matrix.gui
         env:
           DEVELOPER_ID_CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           DEVELOPER_ID_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-          # Create temporary keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          # Import certificate
-          echo "$DEVELOPER_ID_CERT" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
-            -P "$DEVELOPER_ID_PASSWORD" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          # Allow codesign to access the keychain
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          # Add to search list
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
-
-          echo "keychain_path=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-
-      # Sign the app bundle with Developer ID (hardened runtime for notarization)
-      - name: Codesign Minga.app
+          set -euo pipefail
+          test -n "$DEVELOPER_ID_CERT"
+          test -n "$DEVELOPER_ID_PASSWORD"
+          keychain="$RUNNER_TEMP/candidate-signing.keychain-db"
+          password=$(openssl rand -base64 32)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          cert="$RUNNER_TEMP/candidate-certificate.p12"
+          trap 'rm -f "$cert"' EXIT
+          printf '%s' "$DEVELOPER_ID_CERT" | base64 --decode > "$cert"
+          security import "$cert" -P "$DEVELOPER_ID_PASSWORD" -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+      - name: Sign every native component and app, failing on every signing error
+        if: matrix.gui
         run: |
           set -euo pipefail
-          APP="${{ steps.find_app.outputs.app_path }}"
-
-          # Derive the signing identity from the just-imported keychain.
-          # This avoids hardcoding the developer name and fails fast if
-          # the certificate import didn't work.
-          IDENTITY=$(security find-identity -v -p codesigning "$keychain_path" \
-            | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          if [ -z "$IDENTITY" ]; then
-            echo "::error::No Developer ID Application cert found in keychain"
-            exit 1
-          fi
-          echo "Signing with: $IDENTITY"
-          ENTITLEMENTS="${{ github.workspace }}/macos/Entitlements.plist"
-
-          # Sign nested components first (per-component signing, not --deep)
-          find "$APP/Contents" \( -name "*.dylib" -o -name "*.framework" \) -print0 \
-            | xargs -0 -I{} codesign --force --options runtime --sign "$IDENTITY" "{}"
-
-          # Sign executable binaries inside the BEAM release with JIT entitlements.
-          # beam.smp is the binary that calls mmap(MAP_JIT); it needs the
-          # entitlement in its own code signature (entitlements are process-scoped).
-          # The || true skips non-Mach-O files (shell scripts, .beam bytecode).
-          find "$APP/Contents/Resources/release" -type f -perm /111 -print0 \
-            | xargs -0 -I{} sh -c 'codesign --force --options runtime --entitlements "'"$ENTITLEMENTS"'" --sign "'"$IDENTITY"'" "$1" 2>&1 || true' _ {}
-
-          # Sign the native IPC helper explicitly with the Developer ID identity.
-          # Do not rely on --deep traversal to discover this security boundary.
-          IPC_HELPER="$APP/Contents/Resources/bin/minga-ipc"
-          codesign --force --options runtime --sign "$IDENTITY" "$IPC_HELPER"
-
-          # Sign the main executable and the bundle itself
-          codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$APP"
-
-          # Verify
-          codesign --verify --strict "$IPC_HELPER"
-          codesign -dv --verbose=4 "$IPC_HELPER" 2>&1 | grep -F "Authority=Developer ID Application"
-          codesign --verify --deep --strict "$APP"
-          echo "Codesign verification passed"
-
-      # Create DMG
-      - name: Create DMG
-        run: |
-          APP="${{ steps.find_app.outputs.app_path }}"
-          DMG_PATH="$RUNNER_TEMP/Minga.dmg"
-
-          hdiutil create \
-            -volname "Minga" \
-            -srcfolder "$APP" \
-            -ov \
-            -format UDZO \
-            "$DMG_PATH"
-
-          echo "dmg_path=$DMG_PATH" >> "$GITHUB_ENV"
-
-      # Notarize the DMG
-      - name: Notarize DMG
+          IFS= read -r app < "$CANDIDATE_ROOT/app-path"
+          keychain="$RUNNER_TEMP/candidate-signing.keychain-db"
+          identity=$(security find-identity -v -p codesigning "$keychain" | ruby -e 'STDIN.each_line { |line| match = /\b([0-9A-F]{40})\s+"Developer ID Application/.match(line); puts match[1] if match }')
+          [[ "$identity" =~ ^[0-9A-F]{40}$ ]]
+          entitlements="$GITHUB_WORKSPACE/source/macos/Entitlements.plist"
+          while IFS= read -r -d '' file; do
+            if file -b "$file" | grep -q 'Mach-O'; then
+              codesign --force --options runtime --entitlements "$entitlements" --sign "$identity" "$file"
+              codesign --verify --strict "$file"
+            fi
+          done < <(find "$app/Contents" -type f -print0)
+          codesign --force --options runtime --entitlements "$entitlements" --sign "$identity" "$app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -F 'Authority=Developer ID Application'
+          hdiutil create -volname Minga -srcfolder "$app" -ov -format UDZO "$CANDIDATE_ROOT/out/Minga.dmg"
+          codesign --force --sign "$identity" "$CANDIDATE_ROOT/out/Minga.dmg"
+          codesign --verify --strict "$CANDIDATE_ROOT/out/Minga.dmg"
+      - name: Notarize and staple final DMG
+        if: matrix.gui
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcrun notarytool submit "$dmg_path" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-
-          # Staple the notarization ticket to the DMG
-          xcrun stapler staple "$dmg_path"
-          echo "Notarization and stapling complete"
-
-      # Clean up keychain
-      - name: Cleanup keychain
-        if: always()
+          set -euo pipefail
+          xcrun notarytool submit "$CANDIDATE_ROOT/out/Minga.dmg" --apple-id "$APPLE_ID" --password "$APPLE_ID_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json > "$CANDIDATE_ROOT/notary.json"
+          jq -e '.status == "Accepted"' "$CANDIDATE_ROOT/notary.json"
+          xcrun stapler staple "$CANDIDATE_ROOT/out/Minga.dmg"
+          xcrun stapler validate "$CANDIDATE_ROOT/out/Minga.dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$CANDIDATE_ROOT/out/Minga.dmg"
+      - name: Inspect and boot the final signed stapled DMG package
+        if: matrix.gui
         run: |
-          if [ -f "$keychain_path" ]; then
-            security delete-keychain "$keychain_path"
-          fi
-
-      # Verify the DMG contains a valid app bundle before uploading
-      - name: Smoke test DMG
-        run: |
-          trap 'hdiutil detach /tmp/minga-verify 2>/dev/null || true' EXIT
-          hdiutil attach "$dmg_path" -mountpoint /tmp/minga-verify -nobrowse
-          test -d "/tmp/minga-verify/Minga.app"
-          test -f "/tmp/minga-verify/Minga.app/Contents/MacOS/Minga"
-          test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga"
-          test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-tui"
-          test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-ipc"
-          IPC_HELPER="/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-ipc"
-          codesign --verify --strict "$IPC_HELPER"
-          codesign -dv --verbose=4 "$IPC_HELPER" 2>&1 | grep -F "Authority=Developer ID Application"
-          nonce=$($IPC_HELPER nonce)
-          echo "$nonce" | grep -E '^[0-9a-f-]{36}$'
-          helper_tmp="$RUNNER_TEMP/minga-ipc-empty"
-          mkdir -m 700 "$helper_tmp"
+          set -euo pipefail
+          RELEASE_COOKIE=$(openssl rand -hex 32)
+          export RELEASE_COOKIE
+          export RELEASE_DISTRIBUTION=none
+          mount="$CANDIDATE_ROOT/mounted"
+          mkdir "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          hdiutil attach "$CANDIDATE_ROOT/out/Minga.dmg" -mountpoint "$mount" -nobrowse -readonly
+          app="$mount/Minga.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -F 'Authority=Developer ID Application'
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" --target macos_aarch64 --app "$app"
+          helper="$app/Contents/Resources/bin/minga-ipc"
+          codesign --verify --strict "$helper"
+          "$helper" nonce | grep -E '^[0-9a-f-]{36}$'
+          mkdir -m 700 "$CANDIDATE_ROOT/empty-ipc"
           set +e
-          TMPDIR="$helper_tmp/" "$IPC_HELPER" probe
+          TMPDIR="$CANDIDATE_ROOT/empty-ipc/" "$helper" probe
           probe_status=$?
           set -e
-          test "$probe_status" -eq 3
-          test -d "/tmp/minga-verify/Minga.app/Contents/Resources/release"
-          mkdir -p "$RUNNER_TEMP/minga-release-smoke"
-          version_output=$(MINGA_APP_PATH="/tmp/minga-verify/Minga.app" RELEASE_TMP="$RUNNER_TEMP/minga-release-smoke" "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-tui" --version)
-          echo "$version_output" | grep -F "minga "
-          echo "DMG smoke test passed"
-
-      - name: Upload DMG
+          test "$probe_status" = 3
+          MINGA_APP_PATH="$app" RELEASE_TMP="$CANDIDATE_ROOT/release-smoke" "$app/Contents/Resources/bin/minga-tui" --version > "$CANDIDATE_ROOT/version.txt"
+          grep -Fx "minga $(jq -r .version "$CANDIDATE_ROOT/context.json")" "$CANDIDATE_ROOT/version.txt"
+          "$app/Contents/Resources/release/bin/minga_macos" eval 'erts = to_string(:erlang.system_info(:version)); arch = to_string(:erlang.system_info(:system_architecture)); if erts != System.fetch_env!("EXPECTED_ERTS") or not String.starts_with?(arch, "aarch64-"), do: raise("Packaged ERTS version/architecture mismatch"); {:ok, _} = Application.ensure_all_started(:crypto); if :crypto.hash(:sha256, "minga-package-probe") != <<0x1b45baf6461706ab791b75f5a031660a827efc4f51980372da69e5217d1d5257::256>>, do: raise("Packaged crypto NIF result mismatch"); {:ok, db} = Exqlite.Sqlite3.open(":memory:"); :ok = Exqlite.Sqlite3.close(db); IO.puts("packaged ERTS, crypto and SQLite NIFs " <> erts <> " " <> arch)'
+      - name: Record actual successful package evidence
+        run: |
+          set -euo pipefail
+          evidence='[{"id":"package-contents","result":"passed"},{"id":"native-architecture","result":"passed"},{"id":"package-boot","result":"passed","scope":"version command, packaged ERTS eval, fixed-result OTP crypto hash and in-memory SQLite NIF open/close; not installed/UI/X0 qualification"}]'
+          if [ "$PAYLOAD" = Minga.dmg ]; then
+            evidence=$(jq -c '. + [{id:"signature",result:"passed"},{id:"notarization",result:"passed"},{id:"stapling",result:"passed"}]' <<< "$evidence")
+          fi
+          jq -n --slurpfile context "$CANDIDATE_ROOT/context.json" --slurpfile tools "$CANDIDATE_ROOT/toolchains.json" --arg filename "$PAYLOAD" --arg os "$TARGET_OS" --arg arch "$TARGET_ARCH" --argjson evidence "$evidence" '{schema_version:1,context:$context[0],filename:$filename,target:{os:$os,arch:$arch},toolchains:$tools[0],evidence:$evidence}' > "$CANDIDATE_ROOT/out/$PAYLOAD.build.json"
+      - name: Upload immutable payload and sanitized evidence
         uses: actions/upload-artifact@v4
         with:
-          name: Minga_dmg
-          path: ${{ env.dmg_path }}
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.filename }}
+          path: ${{ env.CANDIDATE_ROOT }}/out/*
           if-no-files-found: error
-
-  # ── Release: create GitHub Release with all artifacts ──────────────────
-  release:
-    name: Create Release
-    needs: [validate, build, build-app]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+          retention-days: ${{ env.RETENTION_DAYS }}
+          compression-level: 0
+          overwrite: false
+      - name: Preserve sanitized partial diagnostics only
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          path: release-artifacts
-
-      - name: Prepare binaries
+          name: diagnostic-only-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.filename }}
+          path: |
+            ${{ env.CANDIDATE_ROOT }}/context.json
+            ${{ env.CANDIDATE_ROOT }}/toolchains.json
+            ${{ env.CANDIDATE_ROOT }}/version.txt
+          if-no-files-found: ignore
+          retention-days: ${{ env.RETENTION_DAYS }}
+      - name: Remove temporary Apple keychain and certificate
+        if: always() && matrix.gui
         run: |
-          mkdir -p release-binaries
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/candidate-signing.keychain-db"
+          if [ -f "$keychain" ]; then security delete-keychain "$keychain"; fi
+          rm -f "$RUNNER_TEMP/candidate-certificate.p12"
 
-          # TUI/Burrito binaries
-          for dir in release-artifacts/minga_*; do
-            name=$(basename "$dir")
-            cp "$dir/$name" "release-binaries/$name"
-            chmod +x "release-binaries/$name"
-          done
-
-          # macOS GUI DMG
-          if [ -d "release-artifacts/Minga_dmg" ]; then
-            cp release-artifacts/Minga_dmg/Minga.dmg release-binaries/Minga.dmg
-          fi
-
-          ls -lh release-binaries/
-
-      - name: Generate checksums
-        run: |
-          cd release-binaries
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -exec sha256sum {} + > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
-          files: |
-            release-binaries/minga_*
-            release-binaries/Minga.dmg
-            release-binaries/SHA256SUMS.txt
-
-  # ── Update Homebrew tap with new version and hashes ────────────────────
-  update-homebrew:
-    name: Update Homebrew Tap
-    needs: [validate, release]
-    if: needs.validate.outputs.is_prerelease == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-
-      - name: Compute SHA256 hashes
-        id: hashes
-        run: |
-          echo "macos_aarch64=$(sha256sum release-artifacts/minga_macos_aarch64/minga_macos_aarch64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "macos_x86_64=$(sha256sum release-artifacts/minga_macos_x86_64/minga_macos_x86_64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "linux_aarch64=$(sha256sum release-artifacts/minga_linux_aarch64/minga_linux_aarch64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "linux_x86_64=$(sha256sum release-artifacts/minga_linux_x86_64/minga_linux_x86_64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          if [ -f "release-artifacts/Minga_dmg/Minga.dmg" ]; then
-            echo "dmg=$(sha256sum release-artifacts/Minga_dmg/Minga.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout Homebrew tap
-        uses: actions/checkout@v4
-        with:
-          repository: jsmestad/homebrew-minga
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-tap
-
-      - name: Update formula and cask
-        env:
-          VERSION: ${{ github.ref_name }}
-          SHA_MACOS_AARCH64: ${{ steps.hashes.outputs.macos_aarch64 }}
-          SHA_MACOS_X86_64: ${{ steps.hashes.outputs.macos_x86_64 }}
-          SHA_LINUX_AARCH64: ${{ steps.hashes.outputs.linux_aarch64 }}
-          SHA_LINUX_X86_64: ${{ steps.hashes.outputs.linux_x86_64 }}
-          SHA_DMG: ${{ steps.hashes.outputs.dmg }}
-        run: |
-          version="${VERSION#v}"
-
-          # Generate formula
-          python3 << 'PYEOF'
-          import os
-          v = os.environ["VERSION"].lstrip("v")
-          formula = f'''# typed: false
-          # frozen_string_literal: true
-
-          class Minga < Formula
-            desc "BEAM-powered modal text editor with native GUI and terminal frontends"
-            homepage "https://github.com/jsmestad/minga"
-            version "{v}"
-            license "MIT"
-
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_macos_aarch64"
-                sha256 "{os.environ["SHA_MACOS_AARCH64"]}"
-              else
-                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_macos_x86_64"
-                sha256 "{os.environ["SHA_MACOS_X86_64"]}"
-              end
-            end
-
-            on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_linux_aarch64"
-                sha256 "{os.environ["SHA_LINUX_AARCH64"]}"
-              else
-                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_linux_x86_64"
-                sha256 "{os.environ["SHA_LINUX_X86_64"]}"
-              end
-            end
-
-            def install
-              binary = Dir["minga_*"].first
-              libexec.install binary => "minga-burrito"
-              executable_name = OS.mac? ? "minga-tui" : "minga"
-              wrapper = bin/executable_name
-              wrapper.write <<~SH
-                #!/bin/sh
-                set -eu
-
-                cookie_file=""
-                expects_value=""
-                for arg in "$@"; do
-                  if [ -n "$expects_value" ]; then
-                    if [ "$expects_value" = "--cookie-file" ]; then cookie_file=$arg; fi
-                    expects_value=""
-                    continue
-                  fi
-                  case "$arg" in
-                    --cookie-file) expects_value=$arg ;;
-                    --config|--debug-log|-D|--name|--sname|--host|--port) expects_value=$arg ;;
-                    --) break ;;
-                  esac
-                done
-
-                # A Homebrew-installed Burrito payload must never see inherited
-                # pre-VM distribution flags or its baked-in release cookie.
-                unset ERL_AFLAGS ERL_FLAGS ERL_ZFLAGS ELIXIR_ERL_OPTIONS RELEASE_VM_ARGS
-                export RELEASE_DISTRIBUTION=none
-                export MINGA_EXPECT_DISTRIBUTION=0
-                unset MINGA_RANDOM_RELEASE_COOKIE
-
-                if [ -n "$cookie_file" ]; then
-                  [ -f "$cookie_file" ] || {{ echo "error: Erlang cookie file does not exist: $cookie_file" >&2; exit 1; }}
-                  cookie_mode=$(stat -c '%a' "$cookie_file" 2>/dev/null || stat -f '%Lp' "$cookie_file")
-                  case "$cookie_mode" in
-                    [0-7]00) ;;
-                    *) echo "error: Erlang cookie file must not be accessible by group or other users: $cookie_file" >&2; exit 1 ;;
-                  esac
-                  RELEASE_COOKIE=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$cookie_file")
-                  [ -n "$RELEASE_COOKIE" ] || {{ echo "error: Erlang cookie file is empty: $cookie_file" >&2; exit 1; }}
-                elif MINGA_COOKIE_VALUE=$(printenv MINGA_COOKIE 2>/dev/null) && [ -n "$MINGA_COOKIE_VALUE" ]; then
-                  RELEASE_COOKIE=$MINGA_COOKIE_VALUE
-                elif RELEASE_COOKIE_VALUE=$(printenv RELEASE_COOKIE 2>/dev/null) && [ -n "$RELEASE_COOKIE_VALUE" ]; then
-                  : # Preserve the inherited release cookie.
-                else
-                  RELEASE_COOKIE=$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')
-                  export MINGA_RANDOM_RELEASE_COOKIE=1
-                fi
-                export RELEASE_COOKIE
-
-                exec "#{{libexec}}/minga-burrito" "$@"
-              SH
-              chmod 0755, wrapper
-            end
-
-            test do
-              executable = OS.mac? ? bin/"minga-tui" : bin/"minga"
-              assert_match version.to_s, shell_output("#{{executable}} --version")
-            end
-          end
-          '''
-          import textwrap
-          with open("homebrew-tap/Formula/minga.rb", "w") as f:
-              f.write(textwrap.dedent(formula).lstrip())
-          PYEOF
-
-          # Generate cask if DMG hash is available (skipped for TUI-only releases)
-          if [ -n "$SHA_DMG" ]; then
-            export DMG_SHA="$SHA_DMG"
-
-            python3 << 'PYEOF'
-          import os, textwrap
-          v = os.environ["VERSION"].lstrip("v")
-          dmg_sha = os.environ["DMG_SHA"]
-          cask = f'''cask "minga-mac" do
-            version "{v}"
-            sha256 "{dmg_sha}"
-
-            url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/Minga.dmg"
-            name "Minga"
-            desc "BEAM-powered modal text editor with native macOS GUI"
-            homepage "https://github.com/jsmestad/minga"
-
-            app "Minga.app"
-            binary "#{{appdir}}/Minga.app/Contents/Resources/bin/minga"
-            binary "#{{appdir}}/Minga.app/Contents/Resources/bin/minga-tui"
-
-            zap trash: [
-              "~/Library/Application Support/minga",
-              "~/Library/Preferences/com.minga.editor.plist",
-              "~/Library/Preferences/com.minga.minga-mac.plist",
-              "~/Library/Caches/com.minga.editor",
-              "~/Library/Caches/com.minga.minga-mac",
-            ]
-          end
-          '''
-          with open("homebrew-tap/Casks/minga-mac.rb", "w") as f:
-              f.write(textwrap.dedent(cask).lstrip())
-          PYEOF
-            rm -f homebrew-tap/Casks/minga.rb
-          else
-            echo "No .dmg found in release, skipping cask update"
-          fi
-
-      - name: Commit and push
-        run: |
-          cd homebrew-tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "chore: update to ${{ github.ref_name }}"
-          git push
-
-  # ── Update CHANGELOG.md with release notes ─────────────────────────────
-  update-changelog:
-    name: Update Changelog
-    needs: [validate, release]
-    runs-on: ubuntu-latest
+  finalize:
+    name: Verify uploaded final bytes and bind immutable candidate handle
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CANDIDATE_CONTEXT: ${{ needs.validate.outputs.context }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Prepend release notes to CHANGELOG.md
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Download actual immutable payload archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir downloads
+          printf '%s\n' "$CANDIDATE_CONTEXT" > context.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" | jq --arg prefix "candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-" '[.[].artifacts[] | select(.name | startswith($prefix))]' > artifacts.json
+          while IFS= read -r id; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "downloads/$id.zip"
+          done < <(jq -r '.[].id' artifacts.json)
+          python3 scripts/release_candidate.py checksums --context context.json --artifacts artifacts.json --downloads downloads --output SHA256SUMS.txt
+      - name: Upload exact final-payload checksums
+        id: checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}-checksums
+          path: SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+          overwrite: false
+      - name: Download checksum archive and construct versioned manifest
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          CHECKSUM_ID: ${{ steps.checksums.outputs.artifact-id }}
+        shell: bash
         run: |
-          version="${TAG#v}"
-          date=$(date -u +%Y-%m-%d)
-
-          # Fetch auto-generated release notes from the GitHub Release
-          release_body=$(gh release view "$TAG" --json body -q '.body' 2>/dev/null || echo "")
-          if [ -z "$release_body" ]; then
-            release_body="Release $TAG"
-          fi
-
-          export RELEASE_VERSION="$version"
-          export RELEASE_DATE="$date"
-          export RELEASE_BODY="$release_body"
-
-          python3 << 'PYEOF'
-          import os
-
-          version = os.environ["RELEASE_VERSION"]
-          date = os.environ["RELEASE_DATE"]
-          body = os.environ["RELEASE_BODY"]
-
-          entry = f"## [{version}] - {date}\n\n{body}\n\n"
-
-          with open("CHANGELOG.md", "r") as f:
-              content = f.read()
-
-          marker = "<!-- RELEASE_MARKER"
-          idx = content.find(marker)
-          if idx >= 0:
-              content = content[:idx] + entry + content[idx:]
-          else:
-              # No marker; insert after the first blank line
-              lines = content.split("\n", 3)
-              content = lines[0] + "\n\n" + entry + "\n".join(lines[1:])
-
-          with open("CHANGELOG.md", "w") as f:
-              f.write(content)
-          PYEOF
-
-      - name: Commit changelog
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CHECKSUM_ID" > checksum-artifact.json
+          jq --slurpfile artifact checksum-artifact.json '. + $artifact' artifacts.json > artifacts.next.json
+          mv artifacts.next.json artifacts.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CHECKSUM_ID/zip" > "downloads/$CHECKSUM_ID.zip"
+          python3 scripts/release_candidate.py create --context context.json --artifacts artifacts.json --downloads downloads --output manifest.json
+      - name: Upload immutable manifest (external handle; never self-hashed)
+        id: manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}-manifest
+          path: manifest.json
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+          overwrite: false
+      - name: Re-download manifest and verify the complete generation
+        env:
+          MANIFEST_ID: ${{ steps.manifest.outputs.artifact-id }}
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "docs: update CHANGELOG.md for ${{ github.ref_name }} [skip ci]"
-          git push
+          set -euo pipefail
+          manifest_sha=$(sha256sum manifest.json | cut -d ' ' -f 1)
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID" > manifest-artifact.json
+          jq --slurpfile artifact manifest-artifact.json '. + $artifact' artifacts.json > artifacts.next.json
+          mv artifacts.next.json artifacts.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID/zip" > "downloads/$MANIFEST_ID.zip"
+          python3 scripts/release_candidate.py verify --context context.json --artifacts artifacts.json --downloads downloads --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$manifest_sha" --receipt preparation-receipt.json
+          {
+            echo '### Complete immutable preparation (not installed/UI/X0 qualification)'
+            printf 'Manifest artifact ID: %s\n\nManifest-file SHA256: %s\n\n' "$MANIFEST_ID" "$manifest_sha"
+            printf 'Source: %s; workflow revision: %s; run/attempt: %s/%s\n\n' "$(jq -r .source_sha context.json)" "$(jq -r .workflow_sha context.json)" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+            echo 'Run the independent read-only verification workflow with this exact handle before any later approval.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain bounded successful preparation receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: preparation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: preparation-receipt.json
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+          overwrite: false

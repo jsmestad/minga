@@ -29,10 +29,20 @@ defmodule MingaAgent.SessionProviderErrorTest do
         MingaAgent.Test.ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")
         |> Keyword.delete(:credential_snapshot)
 
+      # Keep recovery and builtin effect admission on this case's own durability queue.
+      event_log =
+        start_supervised!(
+          {MingaAgent.EventLog,
+           name: nil,
+           db_dir: Path.join(dir, "events"),
+           retention_sweep?: false,
+           health_check: :none}
+        )
+
       llm_client = fn _model, _messages, opts ->
-        send(test_pid, {:session_mcp_tools, Enum.map(opts[:tools], & &1.name)})
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
+        send(test_pid, {:session_mcp_tools, count, Enum.map(opts[:tools], & &1.name)})
 
         chunks =
           case count do
@@ -68,6 +78,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
         start_test_session(
           persist?: true,
           session_store_dir: Path.join(dir, "sessions"),
+          event_log_server: event_log,
           provider: Native,
           credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
           provider_opts: [
@@ -99,17 +110,18 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
       assert :ok = Session.respond_to_approval(session, :approve)
       assert_receive {:mcp_transport_started, "Local Tools", transport}, @event_timeout
-      await_turn_complete()
+      await_durable_mcp_turn(session, "MCP discovery")
 
       FakeTransport.crash(transport)
 
       assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
       assert message =~ "MCP server Local Tools stopped"
       assert Enum.any?(Session.messages(session), &match?({:system, _text, :error}, &1))
+      assert_receive {:agent_event, ^session, {:status_changed, :error}}, @event_timeout
 
       assert :ok = Session.send_prompt(session, "continue")
-      await_turn_complete()
-      assert_receive {:session_mcp_tools, tool_names}, @event_timeout
+      await_durable_mcp_turn(session, "builtin recovery")
+      assert_receive {:session_mcp_tools, 2, tool_names}, @event_timeout
       assert "builtin_echo" in tool_names
       assert "list_mcp_tools" in tool_names
       assert "call_mcp_tool" in tool_names
@@ -244,6 +256,39 @@ defmodule MingaAgent.SessionProviderErrorTest do
                {:system, text, :error} -> text == expected
                _ -> false
              end) == 1
+    end
+  end
+
+  @spec await_durable_mcp_turn(GenServer.server(), String.t()) :: :ok
+  defp await_durable_mcp_turn(session, phase) do
+    receive do
+      {:agent_event, ^session, {:resumable_boundary, _revision}} ->
+        :ok
+
+      {:agent_event, ^session, {:error, message}} ->
+        flunk("#{phase} failed before durable completion: #{message}")
+
+      {:agent_event, ^session, {:status_changed, :error}} ->
+        flunk("#{phase} entered error before durable completion")
+    after
+      @event_timeout ->
+        flunk(
+          "#{phase} did not publish a durable boundary; mailbox: " <>
+            inspect(Process.info(self(), :messages), limit: :infinity)
+        )
+    end
+
+    receive do
+      {:agent_event, ^session, {:status_changed, :idle}} ->
+        :ok
+
+      {:agent_event, ^session, {:error, message}} ->
+        flunk("#{phase} failed after its durable boundary: #{message}")
+
+      {:agent_event, ^session, {:status_changed, :error}} ->
+        flunk("#{phase} entered error after its durable boundary")
+    after
+      @event_timeout -> flunk("#{phase} did not become idle after its durable boundary")
     end
   end
 end
