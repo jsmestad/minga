@@ -1,5 +1,5 @@
 defmodule MingaAgent.Session.PrefixAuthorizationTest do
-  # Executor advice uses the shared Advice table; every other owner is isolated below.
+  # Advice and project discovery use shared owners; the approved shell spawns an OS process.
   use ExUnit.Case, async: false
 
   alias Minga.Config.Advice
@@ -705,6 +705,12 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   end
 
   test "approved shell execution uses the working directory when no project is active", context do
+    # A nil override discovers the active Project before falling back to cwd.
+    # Close that owner explicitly instead of inheriting another scenario's workspace.
+    assert :ok = Minga.Project.close()
+    assert Minga.Project.root() == nil
+    working_directory = File.cwd!()
+
     assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, ["shell"])
 
@@ -720,7 +726,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     await_done(session, "shell")
     result = saved_tool_result(context, session)
     assert result.metadata.is_error == false
-    assert Enum.map_join(result.content, "", & &1.text) =~ File.cwd!()
+    assert Enum.map_join(result.content, "", & &1.text) == working_directory
   end
 
   test "builtin and bundled metadata do not add approval beyond the current global policy",
