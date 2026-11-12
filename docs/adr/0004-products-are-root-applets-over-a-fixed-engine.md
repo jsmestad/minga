@@ -1,104 +1,100 @@
-# ADR-0004: Products are root applets over a fixed engine; scripted code runs in host workers as new module generations
+# ADR-0004: Minga is a programmable editor with shared definitions
 
-**Status:** Accepted (2026-11-03). Refines ADR-0003's exit clause. Implementation epic: #3542. Design record: two adversarial review rounds over three proposal drafts, summarized under "Alternatives rejected".
+**Status:** Accepted product and release direction in [#3542](https://github.com/jsmestad/minga/issues/3542). Supersedes the 2026-11-03 decision at this path. This reconciliation does not approve a production restricted live-source contract.
 
-## Decision
+## Why this decision changed
 
-Minga splits into a fixed engine and a dynamic tier.
+Minga must let engineers improve their working environment without turning each customization into a fork of the editor. The previous decision made a neutral product host, a separate Chat product, fresh executable module names for every revision and deferred Go rendering prerequisites for that goal. Those mechanisms are no longer the approved direction.
 
-The engine is everything a frontend has compiled knowledge of: the core services that headless boots (buffers, agent runtime, LSP, git, config), the surface host (the Editor generation and the separate Renderer process), the primitive struct set and its semantic opcodes, the frame protocol and resident store, the input router and focus tree, and the window layout opcode. The engine changes only through ordinary pull requests and activates only in a new VM generation, exactly as ADR-0003 requires.
+The product is a programmable editor. Existing editor-oriented services may remain editor-oriented until a concrete supported capability needs a different boundary. A repository-wide coupling count, namespace rewrite or second application does not prove that customization works.
 
-The dynamic tier is everything expressible as data the frontends already render: products, their root view, and the applets they compose. A product is a root applet whose view is a region tree. The Editor is the first product. Agent Chat is the second. Session applets are drafted by an agent inside an agent session and scoped to it.
+[#3542](https://github.com/jsmestad/minga/issues/3542) defines the full v0.1.0 outcome. The requirements below describe that accepted outcome, not an inventory of features that already ship.
 
-There is one scripting contract, `Minga.Applet`, in Layer 0:
+## Two ways to develop the environment
 
-```elixir
-@callback contract_version() :: pos_integer()
-@callback init(Minga.Applet.Context.t()) :: {model, [effect]}
-@callback update(model, intent) :: {model, [effect]}
-@callback view(model) :: Minga.RenderModel.UI.Primitive.t()
-@callback subscriptions(model) :: [subscription]
-@callback migrate(from :: module(), model) :: {:ok, model} | :reinit
-```
+1. **Customize Minga:** discover supported capabilities, reuse them, author missing behavior in ordinary readable source, Save to attempt activation, inspect the result and Keep useful definitions. A task expressible with installed capabilities must not require a native rebuild.
+2. **Develop Minga itself:** add a missing runtime or native capability through ordinary source changes, tests, builds and a pull request. This does not imply that arbitrary Swift, Go, Zig, dependency or engine code hot-reloads.
 
-Callbacks return inert data only: no funs, pids, references, or ports at any depth. Effects are a closed, versioned sum type where each tag maps to one existing operation-named host workflow. Subscriptions are declared, not performed; the host delivers matching events as intents and cancels them on unmount or redefinition. This is a scoped exception to the AGENTS.md rule against effect lists, legitimate only because the author is on the far side of a contract boundary; host internals outside the contract still never return effect lists.
+The release workload exercises both paths. An engineer uses Minga's real editor and built-in agent to develop a reusable interactive graph component, inspect and edit source, steer architecture, request independent adversarial reviews, inspect actual checks and prepare the PR. During that work, the agent authors a meaningful review-workflow and interface improvement, Keeps it, restarts or reopens it, and reuses it on a different change without regenerating its definition. The graph capability must be merged into the release candidate, not left only in the demonstration PR.
 
-Four rules make the contract provable:
+The workflow must control actual review/check behavior. Prompt wording, a decorative dashboard, a static graph picture or a supplied completed application does not satisfy the promise. Existing build tools, Git and a browser remain usable; Minga does not need replacements for them.
 
-1. **Scripted code never runs in the Editor or the Renderer.** Session and extension applets run as resource-serialized `MingaEditor.EffectScheduler` invocations with a deadline and a heap limit, one in flight per mount. The worker runs `update/2` over the queued intent batch, runs `view/1` once, checks inertness and tree shape, and returns `{model, tree, effects}`. The Editor installs the result only if the mount's request id still matches. A timeout or heap kill faults the mount into an error card with the last good snapshot retained. Frames carry trees as data and `view/1` never runs per frame.
-2. **Redefinition adds a module; it never replaces one.** Every definition compiles as a module that was never loaded before, `Minga.Session.Applet.<Name>.G<n>`, with the generation assigned by the host. Redefinition is one Editor transition that installs the new identity together with the migrated model. In-flight frames finish on the old module. Revert remounts the previous identity, which is still loaded. Old generations are collected later with `:code.delete/1` and `:code.soft_purge/1`, retried, and only after the mount's scheduler resource is cancelled. Hard purge is never used. ADR-0003's exit clause named "a restricted extension API"; this is it, and it is provable because "add a new immutable module" is a fact the code server can confirm, where "replace a module safely" is not.
-3. **Host-compiled products run inline and are not scripted.** The Editor product (today `Shell.Traditional`) implements the same `Minga.Applet` callbacks against the same data contract but runs in the Editor turn, because it co-owns the workspace synchronously and because a faulted root leaves no UI. The runner is chosen from the applet identity's source at one dispatch point. Host-compiled product code is engine code: compiled with the engine, versioned with the engine, never redefined at runtime.
-4. **Safety is reversibility, not containment.** Applets are full-trust Elixir in the editor VM. Every definition is source-tagged, diffable, revertible, and recorded in `*Messages*` and the session transcript. Nothing in this design is a sandbox, and no document may imply one.
+The main conversation and one retained editor group stay independently usable while task-local views are created, changed, hidden and reopened. Inspecting a worker must not retarget the main conversation, lose its reading position or discard an unsent draft. Supported authored text inputs offer Vim and CUA; chat defaults to CUA with Vim opt-in, help uses active bindings and native OS dialogs remain native.
 
-## Layout authority
+## Keep the existing authorities
 
-The BEAM owns structure. The frontends own measurement.
+Programmability changes policy and composition through supported contracts. It does not create a second owner for facts Minga already owns.
 
-The BEAM commits the tree, child order, containment, size policy, scroll ownership, focus order, and a modal flag per node. Size policy is a flex weight plus preferred and minimum size hints in structural units: `:intrinsic`, `{:chars, n}`, or `{:lines, n}`, resolved by each frontend against its own font. The BEAM owns the committed size of every user-resizable split as a unitless fraction, which the frontend drags locally and commits on release, following the existing `WindowTree` ratio and `BottomPanel.height_percent` precedents. Overlays anchor to a node id or a buffer position. There are no absolutely positioned nodes.
+| Owner | Responsibility that remains authoritative |
+|---|---|
+| Buffer, document and history owners | Canonical text, edits, undo, revisions, selection and editing semantics. A view over a document edits that document, not a competing task database. Rebuildable indexes are allowed. |
+| Agent, Session, tool and permission owners | Conversations, admitted turns, execution, cancellation, permissions and observed execution evidence. Authored UI does not gain its own scheduler, conversation store or execution journal. |
+| Authored workflow policy | Context selection, delegation, check/review strategy and the domain decision that work is ready, using actual correlated outcomes from existing execution owners. |
+| Proposed definition/admission owner | Shared source identity, trusted snapshots, namespace ownership, installed revision and bounded activation. This is not an all-instance migration transaction. |
+| Application/record owner, where needed | Domain state not already owned by documents or runtime resources, named transitions, independent instance upgrades and truthful per-record persistence. Not a process per visual widget or Editor-generation state. |
+| Composition and native presentation owners | Stable structure, bindings, action offers and semantic focus upstream; measurement, drawing, accessibility, native input and discardable presentation in each client. |
 
-Frontends measure text, place nodes within a region, and hit-test their own rendered content. They send `{mount_id, node_id, event}` and never a payload or a coordinate; the host resolves the committed tree's action for that node. Drag is identity-only: a hit target declares what it can drag and what it accepts, the event names the source node and a before-or-after position the frontend derives from the target's own rect. Each scroll container reports its visible node range on settle, in the pattern ADR-0001 set for row fit, and the committed scroll anchor is a node id. Spatial focus navigation between regions is structural (move to the sibling subtree in the requested direction, then descend to the most recently focused leaf); geometric navigation by rect centers stays inside the editor grid, which really is a grid.
+Built-in review behavior must use the same supported workflow capabilities as an authored replacement. Session lifecycle, arbitrary native code and permission enforcement do not become dynamically replaceable as a consequence.
 
-This generalizes the #2330 input rule already recorded in `MingaEditor.Layout.SurfaceRegistry` (frontends hit-test their own content and send semantic intents; native GUIs own final pixel placement) and the ADR-0001 pattern (the frontend reports what fits, the BEAM lays out in what it is given). A cell-based layout on the BEAM would reintroduce the unit leak that made the macOS frontend opt out of the 0xA4 surface layout opcode, and would be wrong under proportional fonts.
+Preserve [ADR-0001](0001-frontend-owns-row-fit.md), [ADR-0002](0002-editor-state-transitions-have-explicit-owners.md) and [ADR-0003](0003-extension-code-updates-require-a-new-vm-generation.md). The BEAM remains the semantic authority. Frontends report measurements and row fit; the BEAM must not derive row counts from pixel math or line spacing. Resident models and stable identities remain the navigation contract, with only discardable local presentation in frontends.
 
-Hit identity is the only cross-frontend fact. Conformance is a placement-relation transcript (each frontend lays out the same committed tree in its own units and asserts containment, sibling order, minimum sizes, and weight shares within one unit) plus a hit transcript (a synthesized pointer inside each hit target emits the expected intent bytes, with the modal winner decided by committed order). Pixel equality and cell equality stay per frontend.
+When a surface moves into shared composition, delete its superseded placement, visibility and input-routing authority. Do not leave two writable layout or input paths. Preserve canonical parser and native input owners rather than removing them to obtain a neutral host.
 
-## Text input
+## Save source, then report activation separately
 
-An `Input` node is not an applet-rendered text field fed one intent per keystroke. Each `Input` node owns a `Minga.Buffer.Process` started and monitored by the Editor, and keys reach it through the mode FSM in the same Editor turn, exactly as the agent prompt does today. Vim modes, undo, IME composition, and bulk insert therefore come free, no applet rebuilds text editing, and a slow or faulted applet cannot stop typing. The applet sees changed or submitted intents, with repeated change intents coalesced to the latest per node, and may set text through an effect.
+A shared definition has one current executable revision. Named extensions are shared across instances, with local instance data and settings. Saving an improvement must not silently fork its code for each workspace or keep historical executables permanently pinned per instance. Explicit variants remain possible.
 
-## Admission and versioning
+An ordinary Save attempts one immutable source-unit snapshot. A grouped save has explicit membership and begin/complete/abort ownership; completion attempts exactly one snapshot. An interrupted group stays visibly pending or aborted, never inferred complete from elapsed time. Source-save success and activation success are separate outcomes. There is no additional Apply command for every revision.
 
-A primitive or embed target enters the engine only when two catalog pieces need it; one consumer is a composition, not a primitive. A guardrail reads the real struct set, renders every catalog applet's golden model through its real `view/1`, and fails unless every primitive appears in two distinct applets' trees or carries an exemption naming the second consumer's ticket. A second guardrail requires a conformance transcript for every primitive on every active frontend.
+Preparation, including compilation, requires an explicit revocable session grant as well as installation authority. The grant identifies the source unit, editing/execution scope and attribution. Check it before preparation and again before installation/publication, without prompting for every saved revision within its scope. Revocation closes new admission; it does not undo prior effects.
 
-The contract version is major.minor. A major bump refuses to mount; a minor bump is additive. Frontends advertise the primitive set version they support in the ready handshake and a product declares what it requires. Session applets re-initialize on a major bump and are never migrated across one; only catalog applets receive `migrate/2`. A committed fingerprint of the primitive tag set and callback list fails a test when the contract changes without a version bump.
+Trusted Elixir runs with OS-user privileges, including during disposable compilation. This is not a sandbox. Supported inspection and execution APIs still carry explicit permitted subjects: access to shared source is not permission to include unrelated workspaces' private content. Those API rules are not OS-level containment of full-trust code.
 
-## Frontends
+Keep makes useful source discoverable in future sessions, tabs and workspaces. It does not copy private task data or implicitly install an autostart policy. Preserve readable source and original instance data when code is missing or incompatible. Demonstrate missing-source inspection, restart/reopen and live authoring separately. Historical extension API compatibility is not promised, but wire negotiation and schema identification remain necessary for safe decoding.
 
-The macOS window becomes a region host: one window input host (keys, IME client, key equivalents, ready and resize, focus-policy attachment, drop, backing scale, and the window setup that today lives in the editor view's `viewDidMoveToWindow`) that is always mounted, and an editor surface mounted only when the committed layout has an editor region. New shared layout opcodes use structural units, never cells or pixels.
+Other Minga OS processes adopt shared-source changes by explicit reload or a later start, not a synchronized global hot update. An older process must not overwrite newer incompatible stored state.
 
-The Go TUI is parked, not dropped. The region half of its layout rework (a solver for the region tree, a rect map, identity intents for wheel and divider drag, a per-region size report) lands in the same step as the window layout opcode, because consuming that opcode without it would force the BEAM to keep a second, cell-based layout emission path for one frontend. The primitive renderer half is deferred: new primitive transcripts enter the corpus marked skipped for Go with a stated reason, the skip count is the visible rot measure, and products that need primitives mount only on frontends advertising the capability. Two obligations stay on Go from the first primitive ticket: the primitive opcode is fully schema-generated including nested trees, and a layout-only measurement check asserts every primitive has a declared terminal form. The TUI is dropped only if nobody needs an interactive editor on Linux or over SSH within two quarters of acceptance; before deleting it, the cross-language golden manifest moves out of the Go tree.
+## Definition, instance and record have different outcomes
 
-A web frontend is additive and last, accepted only once the primitive set has transcripts a non-Swift, non-Go consumer can run.
+Coupling source activation to every dormant saved record would make one incompatible instance block all users of a shared definition. The accepted contract separates those decisions.
 
-## Packaging
+| Operation | Required outcome |
+|---|---|
+| Definition activation | Admit one coherent current shared revision. Account for active executable consumers, in-flight work and publication, not an inventory and migration of every dormant record. |
+| Instance upgrade | On open or use, upgrade that instance's data under the current definition. A failure preserves its original source/data and reports unavailability without reverting the shared definition or blocking unrelated instances. Do not silently reinitialize it. |
+| Record commit | Report committed, conflict, definite failure or uncertain settlement truthfully. Identify the record, expected stored revision/schema, producing definition revision and operation identity; reject stale writers across Minga OS processes. |
 
-One runtime, one monorepo. The product is chosen at boot by widening the existing `:default_shell` option and registering a second entry in the shell registry. The seams this ADR names are enforced in-tree: the dependency-direction check gains an engine tier, Chat and catalog modules are forbidden by a data-driven rule from referencing Editor-product modules, and a boot probe starts the host with the Chat product and walks its state for forbidden struct modules. Separate bundles are not precluded, but nothing in the design requires them, and the seam is proven by the checks, not by the package boundary.
+A preparation or admission failure is not an instance-upgrade failure. Rejected candidates need a proved unchanged or restored accepted executable artifact before callbacks reopen; an uncertain restoration or interrupted authority must not be reported as successful activation. No force purge may be used to make replacement progress.
 
-## Build order
+Source replacement must reconcile or fence active migration callbacks and pending writes without involving dormant records. An unavailable instance still accepts host-owned settlement evidence. An uncertain write stays uncertain until reconciled; do not claim rollback or automatically replay an uncertain external operation. Executable restoration cannot undo compilation or external effects; the supported definition-validation contract must be effect-free.
 
-1. This ADR, docs only.
-2. Host neutrality in slices, with byte-identical conformance transcripts as the oracle. The first slice makes `MingaEditor.FocusTree` shell-neutral by moving its eight Editor-product clauses behind one callback. Later slices replace the root workspace and shell runtime with a product runtime, add mounts, express the Editor product as a host-compiled root applet, shrink the shell contract, and move product-neutral `MingaEditor.*` modules into the engine tier.
-3. The Chat product inside today's macOS window, proven independent by the forbidden-reference rule and the boot probe.
-4. Window composition on both frontends: the window layout opcode, the macOS region host and input-host split, the Go region solver, BEAM deletion of its TUI cell geometry.
-5. The applet runtime and primitive set: `Minga.Applet`, the primitive structs, mounts, the applet loader, worker invocation, the inert check, the compiler-tracer denylist, generated decode, the macOS tree renderer, the Go measurement check, one ported catalog surface, `Input` with host buffers and the focus-owner payload extension together.
-6. Session applets: the agent tool pack (define, redefine, mount, unmount) under the existing approval policy, with diff, revert, and transcript record.
-7. Generation restart with session restore for engine changes.
-8. The TUI primitive renderer, or the drop decision.
-9. A web frontend.
+## What R0 establishes, and what remains a gate
 
-## Alternatives rejected
+The merged [R0 investigation](../investigations/3547_live_definition.md) demonstrates a bounded stable-name replacement sequence with helper-dependent calls, rejected-candidate restoration and independent instance failure/recovery. All four admission-owner interruption schedules remain explicitly unavailable. The fixture does not demonstrate automatic production recovery, arbitrary-source confinement, durable storage, grants, grouped Save, packaged compilation or native interaction.
 
-- **A fixed component vocabulary (board, list, form).** The product goal is an agent drafting ad-hoc UI and logic for the task at hand. A vocabulary of finished components is the opposite of that and is the shape of the deleted Board shell (#1965, removed in #2396).
-- **Recomposing existing surfaces without dynamic logic.** A kanban needs business logic, not only placement.
-- **In-place module replacement with soft purge.** Frames in flight carry the module atom, presentation code already runs in the Renderer on an asynchronously cast snapshot, the compile cache skips already-loaded modules, and a third definition would need a purge. ADR-0003 rejected this for extensions and the reasons hold for applets.
-- **Inline scripted callbacks in the Editor or Renderer.** No preemption; the extension callback invoker has no timeout; the existing eval command already blocks the Editor for up to five seconds on the same pattern.
-- **One long-lived process per applet.** ADR-0002: values with owners, not additional processes. It also duplicates input serialization and moves the model out of stash and restore.
-- **Applet models in feature state.** Feature state is per tab, snapshotted with tabs, and silently drops unknown sources.
-- **A separate shell contract beside the applet contract.** Its layout, mounts, and routing callbacks were three projections of one state that could disagree, it still needed an update callback for events, and it had no home for a session-authored shell. One tree cannot disagree with itself.
-- **Cell-based layout of primitive trees on the BEAM.** See "Layout authority". Decided and closed.
-- **Region sizes held only in frontend state.** They do not survive a generation restart and disagree between frontends.
-- **Extending the focus tree's cell hit path or the 0xA4 opcode to primitives.** Both serve BEAM-routed cell input, which the Go layout rework deletes.
-- **Per-keystroke applet intents for text input.** Two synchronous scheduler calls and a spawn per keystroke, and a slow applet stops typing.
-- **Loading session applets through the extension admission ledger or compile cache.** The ledger rejects runtime redefinition on purpose (sealed generation, one artifact per source, grow-only module map) and those invariants are correct for extensions. Applets get their own loader and ledger.
-- **A bytecode import lint as the inert-data gate.** It cannot see `send/2`, `apply/3`, or dynamic calls and has no line numbers. The denylist lives in the isolated compiler tracer, which sees every remote call with file and line, and the runtime deep walk in the worker is the real gate.
-- **Editor windows as an applet primitive.** The Metal surface is one grid with one row-fit fact under ADR-0001. Editor embedding is a region-tree leaf.
-- **Building Chat before host neutrality.** It would add a sibling Chat state clause beside every Editor-product state clause at the root, the exact branching AGENTS.md Rule 3 forbids.
-- **Renaming `MingaEditor.*` first.** A namespace move proves nothing until the Editor product compiles against a neutral host; it closes the host-neutrality step instead of opening it.
-- **A Chat-only or read-only TUI.** Chat becomes catalog applets, so rendering it on the legacy chat opcodes would be a third emission path, and rendering it through primitives is the catch-up itself.
-- **Terminal graphics (kitty, sixel) in the first primitive set.** They bypass the cell-buffer diff renderer. Images degrade to an alt-text box; graphics are a separate ticket.
+That evidence enables the next restricted-source specification, not a production loader. ADR-0003 still requires a new VM generation for arbitrary extension code and dependency updates. Its restricted-API exit clause needs a separately reviewed boundary and real proof; this document grants no global loader exemption.
 
-## Consequences
+The candidate lanes in #3542 retain their own promotion contracts:
 
-Agents can draft, mount, redefine, and revert UI with logic inside a session without a restart, and the engine can prove it never replaced code in place. Engine changes still require a new VM generation. The Editor product is rebuilt on the same contract it offers everyone else, which is how the platform is validated. Chat runs without the editor. Frontends gain one generic tree renderer and one region host each and no product-specific views.
+- **B0/L0:** specify the eligible source family, complete namespace inventory and admission owner, trusted preparation, grants/revocation, grouped Save, bounded callback/drain behavior, installer lifetime, restoration and publication authority before production implementation.
+- **S0/S1/K0:** specify independent instance envelopes, per-record concurrency, durable commit/fencing, restart reconciliation, settlement after instance failure and retained-source discovery/reuse. Do not reuse the superseded all-record transaction.
+- **D0/W0:** provide scoped capability/source discovery and an execution-facing check-plus-independent-review seam through the existing runtime. Results identify the assessed source/worktree revision; idleness, session handles and text are not completion evidence. Closing a view does not end admitted work. Stop closes new dependent-work admission before targeted cancellation; cancellation is not undo. Restart restores data without automatically resuming uncertain work.
+- **H0/H1:** prove shared placement and input ownership through actual native interaction while preserving the retained editor and main conversation. Remove old authorities at cutover.
+- **X0:** demonstrate real graph development and the agent-authored, kept review-workflow/UI improvement reused on a second change, through Swift and Go.
+- **REL0/REL1:** qualify installed candidate artifacts without a source checkout or build caches, including provider access, editing, parser/helpers, live preparation and retained-source reuse. Development builds are not packaged-runtime proof.
 
-The costs are real: the host-neutrality step is the largest single piece of work and touches most shell-related tests; the primitive set is the most expensive thing to change later, which the two-consumer rule and minor versioning are meant to contain; Go gains a small second layout solver that must agree with the macOS frontend on relations; and a closure created inside an applet and handed to another process is undetectable by the inert walk, which is accepted and recorded because the no-processes rule makes it unreachable in practice.
+Retain the canonical [runtime recovery gate #3441](https://github.com/jsmestad/minga/issues/3441), [delegation gate #3442](https://github.com/jsmestad/minga/issues/3442) and [real workspace gate #3454](https://github.com/jsmestad/minga/issues/3454), including their approved dependencies. Required bounded TLA+/PlusCal models and implementation-linked regressions belong at the affected admission, record, workflow and composition protocols. Model checking does not replace actual loader, filesystem, process or native evidence.
+
+## Language and frontend direction
+
+Elixir/BEAM remains the programmable editor and agent core. Swift remains the native macOS presentation/input/accessibility client. Go remains the maintained single production TUI. Required shared surfaces ship through both clients; terminal presentation may differ, but graph nodes, edges, targets and supported actions cannot disappear or remain indefinitely skipped.
+
+Zig retains parser/query/grammar integration and the agent-hook process-group helper, not terminal rendering. The sibling Rust workspace is research, not a production dependency or a commitment to replace the core, Swift, parser or Go TUI. Any later adoption requires a separately authorized complete-cutover decision, concrete benefit, full-path compatibility evidence and deletion of the replaced implementation. Do not maintain two production TUIs indefinitely.
+
+A real release consumer and a tested contract justify a required capability. There is no mandatory two-catalog-consumer prerequisite. A prebuilt factory board, universal workflow/effect interpreter, second long-lived authoring BEAM, automatic source forks and default webview escape hatch are not the implementation plan.
+
+## Release checkpoint
+
+Live authoring, composition, Keep, independent upgrades and second-change reuse remain inside the full v0.1.0 scope, including installed Swift GUI and production Go TUI proof. Optional Rust adoption, Linux GUI and richer post-release systems are not authorized by the current factory run.
+
+Freeze an exact candidate with assets/checksums, toolchains, channel side effects, evidence and limitations. The current execution grant stops before creating or pushing any release tag or publishing any release, including a prerelease. Publication requires explicit candidate approval; post-v0.1 work requires a separate scope decision.
