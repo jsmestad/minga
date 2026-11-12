@@ -1,0 +1,1 @@
+PATH="$HOME/.asdf/installs/erlang/29.1.2/bin:$PATH" ELIXIR_ERL_OPTIONS='+S 2:2' "$HOME/.asdf/installs/elixir/1.20.5-otp-29/bin/elixir" /tmp/minga-r0-3547-gjD7eWxI/evidence/run-1794442801013505/inputs/fixture.exs /tmp/minga-r0-3547-gjD7eWxI/evidence/run-1794442801013505 after_install
