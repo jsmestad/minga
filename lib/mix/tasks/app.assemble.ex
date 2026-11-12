@@ -17,12 +17,12 @@ defmodule Mix.Tasks.App.Assemble do
       # Skip the Xcode/release builds if you already ran them:
       MIX_ENV=prod mix app.assemble --no-build
 
+      # Write the absolute successful product path for automation:
+      MIX_ENV=prod mix app.assemble --output-path-file /tmp/minga-app-path
+
   ## CPU Architecture
 
-  Apple Silicon (arm64) only. Minga does not target Intel Macs.
-  All three components (Swift GUI, BEAM release, Zig parser) are
-  compiled for arm64. The CI release pipeline runs on `macos-14`
-  (Apple Silicon) runners.
+  Apple Silicon (arm64) only. All native components are built for arm64. The candidate pipeline uses `macos-15` (Apple Silicon) runners and verifies the actual packaged architecture.
 
   ## Prerequisites
 
@@ -60,7 +60,26 @@ defmodule Mix.Tasks.App.Assemble do
   @doc false
   @spec run([String.t()]) :: :ok
   def run(args) do
-    no_build = "--no-build" in args
+    {opts, positional} =
+      OptionParser.parse!(args, strict: [no_build: :boolean, output_path_file: :string])
+
+    if positional != [], do: Mix.raise("Unexpected arguments: #{Enum.join(positional, " ")}")
+    no_build = Keyword.get(opts, :no_build, false)
+    output_path_file = opts[:output_path_file]
+
+    # A failed rerun must not leave a previous successful handoff available.
+    if output_path_file do
+      case File.rm(output_path_file) do
+        :ok ->
+          :ok
+
+        {:error, :enoent} ->
+          :ok
+
+        {:error, reason} ->
+          Mix.raise("Cannot clear output path file: #{:file.format_error(reason)}")
+      end
+    end
 
     release_path = build_beam_release(no_build)
 
@@ -73,6 +92,10 @@ defmodule Mix.Tasks.App.Assemble do
     verify_bundle_linkage!(app_bundle_path)
 
     report_size(app_bundle_path)
+
+    if output_path_file do
+      File.write!(output_path_file, Path.expand(app_bundle_path) <> "\n")
+    end
 
     Mix.shell().info("""
 
@@ -243,7 +266,7 @@ defmodule Mix.Tasks.App.Assemble do
            stderr_to_stdout: true
          ) do
       {_output, 0} -> :ok
-      {output, _} -> Mix.shell().error("codesign warning: #{output}")
+      {output, _} -> Mix.raise("Ad-hoc codesign failed:\n#{output}")
     end
 
     :ok
