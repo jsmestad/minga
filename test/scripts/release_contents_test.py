@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Behavioral checks of the real packaged-resource/architecture consumer CLI."""
 
+import json
 from pathlib import Path
+import platform
 import plistlib
+import shutil
 import struct
 import subprocess
 import sys
@@ -76,7 +79,6 @@ class ReleaseContentsTest(unittest.TestCase):
         result = subprocess.run([sys.executable, str(SCRIPT), str(self.release), "--target", self.target, *map(str, args)], capture_output=True, text=True, timeout=10)
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("no installed/UI/X0 qualification claimed", result.stdout)
         else:
             self.assertNotEqual(result.returncode, 0, result.stdout)
         return result
@@ -314,6 +316,87 @@ class ReleaseContentsTest(unittest.TestCase):
                 info["LSMinimumSystemVersion"] = minimum
                 self.put(info_path, plistlib.dumps(info))
                 self.run_checker("--app", app, success=False)
+
+
+    def runtime_receipt(self):
+        os_name, arch = self.target.split("_", 1)
+        helper = {"x86_64": "71c35316aff45bbfd243d8eb9bfc4a58b6eb97cee09514cd2030e145b68107fb",
+                  "aarch64": "6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e"}[arch]
+        receipt = {"version": 1, "kind": "local-source-build", "os": os_name, "arch": arch,
+                   "otp_version": "29.1.2", "erts_version": "17.1.1",
+                   "minimum_macos": "15.0" if os_name == "macos" else None,
+                   "musl_version": "1.2.5" if os_name == "linux" else None,
+                   "abi": {"interpreter": f"/tmp/libc-musl-{helper}.so", "musl_sha256": helper}}
+        path = self.root / "runtime-receipt.json"
+        path.write_text(json.dumps(receipt))
+        return path
+
+    def native_fixture(self, minimum="15.0"):
+        os_name = {"Darwin": "macos", "Linux": "linux"}[platform.system()]
+        arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64"}[platform.machine()]
+        self.target = f"{os_name}_{arch}"
+        self.fixture(self.target)
+        (self.release / "erts-17.1.2").rename(self.release / "erts-17.1.1")
+        self.put(self.release / "releases/start_erl.data", b"17.1.1 0.1.0\n")
+        source = self.put(self.root / "native.c", b'#include <stdio.h>\nint main(void) { puts("native ABI fixture"); return 0; }\n')
+        binary = self.root / "native"
+        command = ["cc", str(source), "-o", str(binary)]
+        if os_name == "macos":
+            command.append(f"-mmacosx-version-min={minimum}")
+        compiled = subprocess.run(command, capture_output=True, text=True, timeout=20)
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        for path in [self.release / "erts-17.1.1/bin/beam.smp",
+                     self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so",
+                     *(self.priv / name for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner"))]:
+            shutil.copy2(binary, path)
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Native Mach-O dependency checks require macOS")
+    def test_relative_native_dependency_is_relocatable(self):
+        self.native_fixture()
+        library_dir = self.release / "lib/exqlite-0.27/priv"
+        source = self.put(self.root / "library.c", b"int provided(void) { return 42; }\n")
+        library = library_dir / "libprovided.dylib"
+        built = subprocess.run(["cc", "-dynamiclib", "-mmacosx-version-min=15.0", str(source),
+                                "-Wl,-install_name,@loader_path/libprovided.dylib", "-o", str(library)],
+                               capture_output=True, text=True, timeout=20)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        consumer = self.put(self.root / "consumer.c", b"extern int provided(void); int consume(void) { return provided(); }\n")
+        linked = subprocess.run(["cc", "-dynamiclib", "-mmacosx-version-min=15.0", str(consumer), str(library),
+                                 "-o", str(library_dir / "sqlite3_nif.so")], capture_output=True, text=True, timeout=20)
+        self.assertEqual(linked.returncode, 0, linked.stderr)
+        self.run_checker("--runtime-receipt", self.runtime_receipt())
+        library.unlink()
+        self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Native Mach-O deployment checks require macOS")
+    def test_runtime_cannot_drop_macos_15_support(self):
+        self.native_fixture(minimum="16.0")
+        self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Native Mach-O dependency checks require macOS")
+    def test_absolute_build_path_dependency_is_not_relocatable_even_inside_package(self):
+        self.native_fixture()
+        library_dir = self.release / "lib/exqlite-0.27/priv"
+        source = self.put(self.root / "library.c", b"int provided(void) { return 42; }\n")
+        library = library_dir / "libprovided.dylib"
+        built = subprocess.run(["cc", "-dynamiclib", "-mmacosx-version-min=15.0", str(source),
+                                f"-Wl,-install_name,{library}", "-o", str(library)],
+                               capture_output=True, text=True, timeout=20)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        consumer = self.put(self.root / "consumer.c", b"extern int provided(void); int consume(void) { return provided(); }\n")
+        linked = subprocess.run(["cc", "-dynamiclib", "-mmacosx-version-min=15.0", str(consumer), str(library),
+                                 "-o", str(library_dir / "sqlite3_nif.so")], capture_output=True, text=True, timeout=20)
+        self.assertEqual(linked.returncode, 0, linked.stderr)
+        self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
+
+    @unittest.skipUnless(platform.system() == "Linux", "Native ELF dependency checks require Linux")
+    def test_glibc_runtime_cannot_claim_musl_closure(self):
+        self.native_fixture()
+        self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
+
+    def test_malformed_source_receipt_is_an_explicit_failure(self):
+        path = self.put(self.root / "invalid-receipt.json", b"[]\n")
+        self.run_checker("--runtime-receipt", path, success=False)
 
 
 if __name__ == "__main__":

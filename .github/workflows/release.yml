@@ -21,6 +21,7 @@ env:
   ELIXIR_VERSION: "1.20.5-otp-29"
   OTP_VERSION: "29.1.2"
   GO_VERSION: "1.26.4"
+  PYTHON_VERSION: "3.12.13"
   NATIVE_ZIG_VERSION: "0.16.0"
   # Qualified independently against the locked Burrito.get_versions/0 contract.
   BURRITO_ZIG_VERSION: "0.16.0"
@@ -183,12 +184,31 @@ jobs:
           mix local.hex --force
           mix local.rebar --force
           mix deps.get --only prod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Verify safe-extraction Python
+        run: |
+          set -euo pipefail
+          python3 -c 'import os, platform, tarfile; assert platform.python_version() == os.environ["PYTHON_VERSION"]; assert callable(tarfile.data_filter)'
+          jq --arg python "$(python3 -c 'import platform; print(platform.python_version())')" '. + {python:$python}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
+          mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
       - name: Build native Go and Zig with repository pins
         if: '!matrix.gui'
         run: |
           set -euo pipefail
           mix native.build.tui
           mix compile --warnings-as-errors
+      - name: Build and qualify the pinned local ERTS input
+        if: '!matrix.gui'
+        run: |
+          set -euo pipefail
+          python3 scripts/build-release-erts.py --os "$TARGET_OS" --arch "$TARGET_ARCH" --output "$CANDIDATE_ROOT/erts-input"
+          receipt="$CANDIDATE_ROOT/erts-input/receipt.json"
+          test -s "$receipt"
+          printf 'MINGA_RELEASE_ERTS_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
+          jq --slurpfile runtime "$receipt" '. + {erts_source:$runtime[0]}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
+          mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
       - name: Select separately qualified Burrito wrapper compiler
         if: '!matrix.gui'
         uses: mlugg/setup-zig@v2
@@ -224,7 +244,7 @@ jobs:
           releases=("$MINGA_INSTALL_DIR"/.burrito/minga_erts-*)
           test "${#releases[@]}" = 1
           package="${releases[0]}"
-          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --binary "$CANDIDATE_ROOT/out/$PAYLOAD"
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --binary "$CANDIDATE_ROOT/out/$PAYLOAD" --runtime-receipt "$MINGA_RELEASE_ERTS_RECEIPT"
           "$package/bin/minga" eval 'erts = to_string(:erlang.system_info(:version)); arch = to_string(:erlang.system_info(:system_architecture)); if erts != System.fetch_env!("EXPECTED_ERTS") or not String.starts_with?(arch, System.fetch_env!("TARGET_ARCH") <> "-"), do: raise("Packaged ERTS version/architecture mismatch"); {:ok, _} = Application.ensure_all_started(:crypto); if :crypto.hash(:sha256, "minga-package-probe") != <<0x1b45baf6461706ab791b75f5a031660a827efc4f51980372da69e5217d1d5257::256>>, do: raise("Packaged crypto NIF result mismatch"); {:ok, db} = Exqlite.Sqlite3.open(":memory:"); :ok = Exqlite.Sqlite3.close(db); IO.puts("packaged ERTS, crypto and SQLite NIFs " <> erts <> " " <> arch)'
       - name: Install pinned XcodeGen
         if: matrix.gui

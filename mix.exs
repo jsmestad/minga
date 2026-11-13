@@ -286,7 +286,7 @@ defmodule Minga.MixProject do
     [
       # TUI release: Burrito-wrapped standalone binary (macOS + Linux)
       minga: [
-        steps: [&clean_release/1, :assemble, &prepare_release_artifacts/1, &Burrito.wrap/1],
+        steps: [&clean_release/1, :assemble, &prepare_release_artifacts/1, &wrap_tui_release/1],
         burrito: [
           targets: burrito_targets(),
           debug: Mix.env() != :prod,
@@ -304,6 +304,12 @@ defmodule Minga.MixProject do
         strip_beams: Mix.env() == :prod
       ]
     ]
+  end
+
+  @spec wrap_tui_release(Mix.Release.t()) :: Mix.Release.t()
+  defp wrap_tui_release(release) do
+    Code.require_file("mix/release_erts.ex", __DIR__)
+    apply(Minga.ReleaseERTS, :wrap, [release])
   end
 
   @spec clean_release(Mix.Release.t()) :: Mix.Release.t()

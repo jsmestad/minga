@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "otp": {
+    "version": "29.1.2",
+    "erts_version": "17.1.1",
+    "url": "https://github.com/erlang/otp/releases/download/OTP-29.1.2/otp_src_29.1.2.tar.gz",
+    "sha256": "c79966661e35fe4aff8ec003db63682e3b33b10b672220d51bf93c0a9244b049"
+  },
+  "openssl": {
+    "version": "3.5.1",
+    "url": "https://www.openssl.org/source/openssl-3.5.1.tar.gz",
+    "sha256": "529043b15cffa5f36077a4d0af83f3de399807181d607441d734196d889b641f"
+  },
+  "musl": {
+    "version": "1.2.5",
+    "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
+    "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4",
+    "helpers": {
+      "linux_x86_64": {
+        "url": "https://beam-machine-universal.b-cdn.net/musl/libc-musl-71c35316aff45bbfd243d8eb9bfc4a58b6eb97cee09514cd2030e145b68107fb.so?please-respect-my-bandwidth-costs=thank-you",
+        "sha256": "71c35316aff45bbfd243d8eb9bfc4a58b6eb97cee09514cd2030e145b68107fb"
+      },
+      "linux_aarch64": {
+        "url": "https://beam-machine-universal.b-cdn.net/musl/libc-musl-6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e.so?please-respect-my-bandwidth-costs=thank-you",
+        "sha256": "6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e"
+      }
+    }
+  },
+  "linux_build_image": {
+    "image": "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "musl_version": "1.2.5",
+    "architectures": ["aarch64", "x86_64"]
+  },
+  "minimum_macos": "15.0",
+  "macos_build_environment": {
+    "developer_dir": "/Applications/Xcode_26.3.app/Contents/Developer",
+    "xcode_version": "26.3",
+    "xcode_build": "17C529"
+  }
+}
