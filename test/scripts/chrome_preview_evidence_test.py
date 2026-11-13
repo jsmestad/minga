@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -111,6 +112,35 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
             args.before_root = after
             with self.assertRaises(ValueError):
                 evidence.prepare_base(args)
+
+    def test_capture_support_missing_fixture_fails_before_mutating_base(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            before, after = root / "before", root / "after"
+            registry = (
+                "enum PreviewRegistry {\n"
+                "    private(set) static var captureAppState: AppState?\n"
+                "    static func view(named name: String) -> some View {\n"
+                "        switch name {\n"
+                '        case "ExistingView": existing()\n'
+                "        default: error()\n"
+                "        }\n"
+                "    }\n"
+                "}\n"
+            )
+            for checkout in (before, after):
+                sources = checkout / "macos/Sources"
+                sources.mkdir(parents=True)
+                (sources / "PreviewRegistry.swift").write_text(registry)
+                (sources / "PreviewSnapshotPolicy.swift").write_text("unmodified capture policy")
+            base_file = before / "macos/Sources/PreviewRegistry.swift"
+            original = hashlib.sha256(base_file.read_bytes()).hexdigest()
+            receipt = root / "supplement.json"
+            args = argparse.Namespace(before_root=before, after_root=after, output=receipt)
+            with self.assertRaises(FileNotFoundError):
+                evidence.prepare_base(args)
+            self.assertEqual(hashlib.sha256(base_file.read_bytes()).hexdigest(), original)
+            self.assertFalse(receipt.exists())
 
     def test_pixel_manifest_distinguishes_equal_metadata_from_changed_pixels(self):
         from PIL import Image, PngImagePlugin

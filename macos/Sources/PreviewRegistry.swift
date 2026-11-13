@@ -7,6 +7,9 @@ import MingaProtocol
 
 @MainActor
 enum PreviewRegistry {
+    /// Retains the production shell owner for capture readiness and metadata.
+    private(set) static var captureAppState: AppState?
+
 
     /// Returns the intended screenshot size for a preview.
     static func size(named name: String) -> CGSize {
@@ -29,7 +32,7 @@ enum PreviewRegistry {
                 if let nsView = appState.editorNSView {
                     EditorView(editorNSView: nsView)
                 } else {
-                    Color(red: 0.12, green: 0.12, blue: 0.14)
+                    previewFailureView(message: "Production editor surface is unavailable.")
                 }
             }
         )
@@ -288,23 +291,9 @@ enum PreviewRegistry {
     }
 
 
-    private static func previewFailureView(message: String) -> some View {
-        ZStack {
-            Color(red: 0.16, green: 0.08, blue: 0.08)
-            VStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.95, green: 0.58, blue: 0.28))
-                Text("Preview fixture failed")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text(message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-        }
+    private static func previewFailureView(message: String) -> Color {
+        fputs("error: \(message)\n", stderr)
+        exit(1)
     }
 
     /// Alias for the preview mode enum moved to PreviewFixtures.
@@ -326,10 +315,21 @@ enum PreviewRegistry {
         appState.gui.gitStatusState.hide()
         PreviewFixtures.populateTabBar(appState.gui.tabBarState)
         appState.gui.breadcrumbState.update(segments: ["lib", "minga", "editor.ex"])
-        appState.gui.statusBarState.update(from: PreviewFixtures.statusBarUpdate(agentVisible: agentVisible, mode: mode))
+        appState.gui.statusBarState.update(from: PreviewFixtures.statusBarUpdate(agentVisible: agentVisible, mode: mode, motionFrozen: agentVisible))
 
         if agentVisible {
             PreviewFixtures.populateAgentChat(appState.gui.agentChatState)
+            // A completed, immutable transcript has no indeterminate progress
+            // indicator. Freeze fixture motion here, never live agent behavior.
+            appState.gui.agentChatState.status = .idle
+            appState.gui.sidebarHostState.update(
+                activeId: "file_tree",
+                sidebars: [
+                    Wire.SidebarMetadata(
+                        id: "file_tree", displayName: "File Tree", semanticKind: "file_tree",
+                        icon: "folder", order: 10, visible: true, focused: false,
+                        preferredWidth: 30, badgeCount: nil)
+                ])
         } else if mode == .insert {
             // Completion fires while typing, so show it in the insert-mode
             // preview. The normal-mode editor stays clean so its snapshot
@@ -340,6 +340,7 @@ enum PreviewRegistry {
 
         guard let editorNSView = previewEditorNSView(appState: appState, encoder: encoder) else { return nil }
         appState.editorNSView = editorNSView
+        captureAppState = appState
         return appState
     }
 
@@ -356,7 +357,14 @@ enum PreviewRegistry {
         dispatcher.fontManager = fontManager
         populateEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 
-        let nsView = EditorNSView(encoder: encoder, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
+        guard dispatcher.committedEditorSnapshot != nil else {
+            fputs("error: production preview editor keyframe was rejected\n", stderr)
+            return nil
+        }
+        let nsView = EditorNSView(
+            encoder: encoder, dispatcher: dispatcher, coreTextRenderer: renderer,
+            fontManager: fontManager, reduceMotionEnabled: true)
+        nsView.setCursorBlinkEnabled(false)
         nsView.editorInput = appState.gui.editorInput
         nsView.statusBarState = appState.gui.statusBarState
         nsView.renderFrame()
@@ -447,12 +455,10 @@ enum PreviewRegistry {
         )
     }
 
-    /// Required theme slots painted a neutral grey. The snapshot freeze validates
-    /// only that every required slot is present; the committed `themeColors` are
-    /// frozen from the pre-apply defaults, so these values do not change preview
-    /// fidelity — they exist to satisfy the keyframe theme-completeness gate.
+    /// A keyframe applies these slots to live chrome too; neutral filler colors
+    /// erase all contrast in the agent workspace.
     private static func previewThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {
-        CommandDispatcher.requiredThemeSlots.map { ($0, 0x99, 0x99, 0x99) }
+        PreviewFixtures.themeSlots
     }
 
     /// Publishes a preview editor keyframe through the real begin/commit path so
@@ -480,6 +486,7 @@ enum PreviewRegistry {
         dispatcher.frameState.totalLineCount = totalLineCount
         dispatcher.frameState.scrollIndicatorColor = scrollIndicatorColor
 
+        PreviewFixtures.applyPreviewTheme(to: dispatcher.guiState.themeColors)
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: previewThemeSlots()))
         dispatcher.dispatch(.setCursorShape(cursorShape))

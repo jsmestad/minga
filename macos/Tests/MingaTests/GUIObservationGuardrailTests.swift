@@ -358,7 +358,7 @@ struct GUIObservationGuardrailTests {
         let sortedURLs = urls.sorted { $0.path < $1.path }
         #expect(!sortedURLs.isEmpty)
         return try sortedURLs.map { url in
-            let relativePath = String(url.path.dropFirst(Self.macosRoot.path.count + 1))
+            let relativePath = String(url.resolvingSymlinksInPath().path.dropFirst(Self.macosRoot.path.count + 1))
             let contents = try String(contentsOf: url, encoding: .utf8)
             return ProductionSource(
                 path: relativePath,
@@ -711,4 +711,5 @@ struct GUIObservationGuardrailTests {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
+        .resolvingSymlinksInPath()
 }

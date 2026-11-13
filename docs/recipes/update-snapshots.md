@@ -26,3 +26,5 @@ mix test.debug test/minga_editor/integration/snapshot_test.exs
 ```
 
 See [Snapshot Testing](../SNAPSHOT_TESTING.md) for the file format and `assert_screen_snapshot` examples.
+
+For production-view agent stills and the separate real native keyboard/mouse proof, use [Capture the native agent workspace](capture-agent-workspace.md). Preview images do not replace live-session evidence.
