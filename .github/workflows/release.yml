@@ -21,7 +21,6 @@ env:
   ELIXIR_VERSION: "1.20.5-otp-29"
   OTP_VERSION: "29.1.2"
   GO_VERSION: "1.26.4"
-  PYTHON_VERSION: "3.12.13"
   NATIVE_ZIG_VERSION: "0.16.0"
   # Qualified independently against the locked Burrito.get_versions/0 contract.
   BURRITO_ZIG_VERSION: "0.16.0"
@@ -35,6 +34,7 @@ jobs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       version: ${{ steps.source.outputs.version }}
       context: ${{ steps.source.outputs.context }}
+      python_version: ${{ steps.source.outputs.python_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,6 +58,9 @@ jobs:
           git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
           git show "$SOURCE_SHA:mix.exs" > "$RUNNER_TEMP/source-mix.exs"
           git show "$SOURCE_SHA:.tool-versions" > "$RUNNER_TEMP/source-tool-versions"
+          git show "$SOURCE_SHA:scripts/release_erts_sources.json" > "$RUNNER_TEMP/source-erts-inputs.json"
+          python_version=$(jq -er '.build_python_version | select(type == "string")' "$RUNNER_TEMP/source-erts-inputs.json")
+          [[ "$python_version" =~ ^3\.[0-9]+\.[0-9]+$ ]]
           python3 - <<'PY'
           import os, pathlib, re
           source = pathlib.Path(os.environ['RUNNER_TEMP'], 'source-mix.exs').read_text()
@@ -70,6 +73,7 @@ jobs:
           jq -e --arg sha "$WORKFLOW_SHA" --argjson attempt "$GITHUB_RUN_ATTEMPT" '.head_sha == $sha and .run_attempt == $attempt and .event == "workflow_dispatch" and .path == ".github/workflows/release.yml"' "$RUNNER_TEMP/run.json"
           context=$(jq -cn --arg repository "$GITHUB_REPOSITORY" --arg source_sha "$SOURCE_SHA" --arg version "$SOURCE_VERSION" --arg workflow_sha "$WORKFLOW_SHA" --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" --arg started "$(jq -r .run_started_at "$RUNNER_TEMP/run.json")" '{repository:$repository,source_sha:$source_sha,version:$version,workflow_path:".github/workflows/release.yml",workflow_sha:$workflow_sha,run_id:$run_id,run_attempt:$run_attempt,run_started_at:$started}')
           printf 'source_sha=%s\nversion=%s\ncontext=%s\n' "$SOURCE_SHA" "$SOURCE_VERSION" "$context" >> "$GITHUB_OUTPUT"
+          printf 'python_version=%s\n' "$python_version" >> "$GITHUB_OUTPUT"
 
   build:
     name: Prepare ${{ matrix.filename }}
@@ -120,6 +124,7 @@ jobs:
         shell: bash
         working-directory: source
     env:
+      PYTHON_VERSION: ${{ needs.validate.outputs.python_version }}
       TARGET_OS: ${{ matrix.os }}
       TARGET_ARCH: ${{ matrix.arch }}
       GOARCH: ${{ matrix.goarch }}
@@ -368,6 +373,7 @@ jobs:
             ${{ env.CANDIDATE_ROOT }}/context.json
             ${{ env.CANDIDATE_ROOT }}/toolchains.json
             ${{ env.CANDIDATE_ROOT }}/version.txt
+            ${{ env.CANDIDATE_ROOT }}/erts-input/**/command-*.log
           if-no-files-found: ignore
           retention-days: ${{ env.RETENTION_DAYS }}
       - name: Remove temporary Apple keychain and certificate
