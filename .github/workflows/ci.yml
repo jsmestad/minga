@@ -392,18 +392,17 @@ jobs:
       - name: Test native result classification
         run: python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
 
-      - name: Test and record focused conformance timing and mutations
-        run: python3 scripts/check_conformance_pixels --mutations
-
-      - name: Verify warm native unit reuse
-        run: scripts/test_macos_unit --output-dir conformance-pixel-evidence/unit-bundle/warm
+      # Timing, inverse mutations, and a second warm run live in swift-evidence.yml.
+      # The canonical unit runner still executes all Metal and production-view regressions here.
+      - name: Test native units and Metal conformance
+        run: scripts/test_macos_unit --output-dir macos-unit-evidence
 
       - name: Upload native unit test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: macos-unit-evidence
-          path: conformance-pixel-evidence/unit-bundle/
+          path: macos-unit-evidence/
           if-no-files-found: error
 
       - name: Prove recovery generation policy reaches native commits
@@ -417,13 +416,6 @@ jobs:
           path: conformance-recovery-evidence/
           if-no-files-found: warn
 
-      - name: Upload conformance pixel evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: conformance-pixel-evidence
-          path: conformance-pixel-evidence/
-          if-no-files-found: error
 
   swift-integration:
     name: Swift Protocol Integration
