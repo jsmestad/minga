@@ -8,9 +8,32 @@ enum PreviewSnapshotPolicy {
     private static let renderedWindowViews = fullShellViews
     private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename", "MessagesContentView"]
 
+    enum CaptureError: Error {
+        case unsupportedAgentWidth
+        case unexpectedImageSize(actual: CGSize, expected: CGSize)
+    }
+
+    /// Only the two reviewed workspace widths are supported, not an open matrix.
+    static func agentWidth(_ value: String?) throws -> CGFloat {
+        switch value {
+        case nil, "1200": return 1200
+        case "800": return 800
+        default: throw CaptureError.unsupportedAgentWidth
+        }
+    }
+
+    /// Never turn a partial or shadow-padded frame into apparent success by cropping.
+    static func validateRenderedSize(actual: CGSize, expected: CGSize) throws {
+        guard actual == expected else {
+            throw CaptureError.unexpectedImageSize(actual: actual, expected: expected)
+        }
+    }
+
     static func size(named name: String) -> CGSize {
         switch name {
-        case "EditorChromeView", "AgentChromeView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView": CGSize(width: 1200, height: 704)
+        case "AgentChromeView":
+            CGSize(width: (try? agentWidth(ProcessInfo.processInfo.environment["PREVIEW_AGENT_WIDTH"])) ?? 1200, height: 704)
+        case "EditorChromeView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView": CGSize(width: 1200, height: 704)
         case "WorkspaceChromeView", "WorkspaceEmptyChromeView": CGSize(width: 1280, height: 800)
         case "WorkspaceLongNameChromeView": CGSize(width: 800, height: 600)
         case "GitStatusView", "FileTreeView",

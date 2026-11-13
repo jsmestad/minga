@@ -1057,6 +1057,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .resolvingSymlinksInPath()
         let policy = try String(contentsOf: macosRoot.appendingPathComponent("Sources/Views/Editor/EditorFocusPolicy.swift"), encoding: .utf8)
         let editorView = try String(contentsOf: macosRoot.appendingPathComponent("Sources/Views/Editor/EditorView.swift"), encoding: .utf8)
         let editorNSView = try String(contentsOf: macosRoot.appendingPathComponent("Sources/Views/Editor/EditorNSView.swift"), encoding: .utf8)
@@ -1069,10 +1070,10 @@ struct GUIFrameSwiftUIInvalidationTests {
         let focusDeclaration = try NSRegularExpression(pattern: #"@FocusState\s+(?:(?:private|public|fileprivate|internal)\s+)?var\s+(\w+)"#)
         for case let sourceURL as URL in sourceEnumerator where sourceURL.pathExtension == "swift" {
             let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            let relativePath = String(sourceURL.resolvingSymlinksInPath().path.dropFirst(sourcesRoot.path.count + 1))
             if source.contains("makeFirstResponder(") {
-                firstResponderOwners.insert(sourceURL.path.replacingOccurrences(of: sourcesRoot.path + "/", with: ""))
+                firstResponderOwners.insert(relativePath)
             }
-            let relativePath = sourceURL.path.replacingOccurrences(of: sourcesRoot.path + "/", with: "")
             if source.contains("focusOwnerState.publish(") { mirrorWriters.insert(relativePath) }
             if relativePath != "Views/Editor/EditorFocusPolicy.swift" {
                 let nsSource = source as NSString

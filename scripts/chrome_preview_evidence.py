@@ -63,6 +63,71 @@ def isolate_preview_extensions(project):
     return "".join(result)
 
 
+def swift_fixture_member(source, signature):
+    """Locate one known preview-only member, refusing missing/ambiguous inputs."""
+    if source.count(signature) != 1:
+        raise ValueError(f"expected one preview fixture member: {signature}")
+    start = source.rfind("\n", 0, source.index(signature)) + 1
+    opening = source.index("{", source.index(signature))
+    depth = 1
+    cursor = opening + 1
+    while cursor < len(source) and depth:
+        if source[cursor] == "{":
+            depth += 1
+        elif source[cursor] == "}":
+            depth -= 1
+        cursor += 1
+    if depth:
+        raise ValueError(f"unclosed preview fixture member: {signature}")
+    return start, cursor
+
+
+def shared_capture_support(before_registry, after_registry, before_fixtures, after_fixtures):
+    """Share only capture-owned fixture members, not the base's production views."""
+    receipts = []
+    property_line = "    private(set) static var captureAppState: AppState?"
+    if property_line not in before_registry:
+        if before_registry.count("enum PreviewRegistry {") != 1:
+            raise ValueError("base has no unique PreviewRegistry owner for capture support")
+        before_registry = before_registry.replace("enum PreviewRegistry {", f"enum PreviewRegistry {{\n{property_line}", 1)
+    for filename, signatures in [
+        ("PreviewRegistry.swift", [
+            "static func productionPreviewAppState(", "static func previewEditorNSView(",
+            "static func previewThemeSlots(", "static func previewFailureView(",
+            "static func commitPreviewEditorFrame(",
+        ]),
+        ("PreviewFixtures.swift", [
+            "static var themeSlots:", "static func applyPreviewTheme(", "static func statusBarUpdate(",
+        ]),
+    ]:
+        current = before_registry if filename == "PreviewRegistry.swift" else before_fixtures
+        proposed = after_registry if filename == "PreviewRegistry.swift" else after_fixtures
+        for signature in signatures:
+            start, end = swift_fixture_member(proposed, signature)
+            replacement = proposed[start:end]
+            if signature in current:
+                old_start, old_end = swift_fixture_member(current, signature)
+                original = current[old_start:old_end]
+                current = current[:old_start] + replacement + current[old_end:]
+            elif signature == "static var themeSlots:":
+                insertion = current.index("public enum PreviewFixtures {") + len("public enum PreviewFixtures {")
+                original = ""
+                current = current[:insertion] + "\n" + replacement + "\n" + current[insertion:]
+            else:
+                raise ValueError(f"base lacks required capture fixture support: {signature}")
+            receipts.append({
+                "path": f"macos/Sources/{filename}", "member": signature,
+                "originalSha256": hashlib.sha256(original.encode()).hexdigest(),
+                "sha256": hashlib.sha256(replacement.encode()).hexdigest(),
+                "scope": "identical preview-only capture ownership, complete Doom One palette, frozen fixture state and explicit failure",
+            })
+        if filename == "PreviewRegistry.swift":
+            before_registry = current
+        else:
+            before_fixtures = current
+    return before_registry, before_fixtures, receipts
+
+
 def prepare_base(args):
     """Install identical preview fixtures and capture transport, never proposed production views, in the base."""
     if args.before_root.resolve() == args.after_root.resolve():
@@ -71,6 +136,17 @@ def prepare_base(args):
     registry_path = sources / "PreviewRegistry.swift"
     before_names = registry_names(args.before_root / registry_path)
     changes = []
+    after_registry = (args.after_root / registry_path).read_text()
+    has_capture_support = "private(set) static var captureAppState: AppState?" in after_registry
+    support = None
+    original_policy_hash = hashlib.sha256((args.before_root / sources / "PreviewSnapshotPolicy.swift").read_bytes()).hexdigest()
+    if has_capture_support:
+        fixture_path = sources / "PreviewFixtures.swift"
+        # Validate every required member before mutating the baseline.
+        support = shared_capture_support(
+            (args.before_root / registry_path).read_text(), after_registry,
+            (args.before_root / fixture_path).read_text(),
+            (args.after_root / fixture_path).read_text())
     for filename, kind, signature in [
         ("PreviewRegistry.swift", "cases", "static func view(named name: String)"),
         ("PreviewSnapshotPolicy.swift", "sizes", "static func size(named name: String)"),
@@ -86,9 +162,27 @@ def prepare_base(args):
     changes.append({"path": str(fixture), "scope": "identical preview-only fixture definitions",
                     "sha256": hashlib.sha256((args.before_root / fixture).read_bytes()).hexdigest()})
     capture = sources / "PreviewHostApp.swift"
+    original_capture_hash = hashlib.sha256((args.before_root / capture).read_bytes()).hexdigest()
     shutil.copyfile(args.after_root / capture, args.before_root / capture)
     changes.append({"path": str(capture), "scope": "identical preview-only capture transport; non-Sendable ScreenCaptureKit objects remain outside MainActor",
+                    "originalSha256": original_capture_hash,
                     "sha256": hashlib.sha256((args.before_root / capture).read_bytes()).hexdigest()})
+    if support is not None:
+        registry, fixtures, receipts = support
+        registry = install_preview_block(
+            registry, preview_block(after_registry, "cases"), "cases", "static func view(named name: String)")
+        (args.before_root / registry_path).write_text(registry)
+        fixture_path = sources / "PreviewFixtures.swift"
+        (args.before_root / fixture_path).write_text(fixtures)
+        changes.extend(receipts)
+        for relative in [sources / "PreviewSnapshotPolicy.swift"]:
+            destination = args.before_root / relative
+            shutil.copyfile(args.after_root / relative, destination)
+            changes.append({"path": str(relative), "scope": "identical complete screenshot dimensions and failure policy",
+                            "originalSha256": original_policy_hash,
+                            "sha256": hashlib.sha256(destination.read_bytes()).hexdigest()})
+        changes.append({"path": str(registry_path), "scope": "retained preview AppState for actual renderer/font/readiness receipts",
+                        "sha256": hashlib.sha256(registry.encode()).hexdigest()})
     project = Path("macos/project.yml")
     destination = args.before_root / project
     destination.write_text(isolate_preview_extensions(destination.read_text()))
@@ -97,10 +191,15 @@ def prepare_base(args):
     manifest = {
         "baseRevision": revision(args.before_root),
         "fixtureRevision": revision(args.after_root),
-        "scope": "Only preview dispatch, preview sizes, the additional fixture file, identical PreviewHost capture transport, and non-preview target membership exclusions are installed. Production Views sources remain those of the base checkout.",
+        "scope": "Only preview dispatch, capture policy/transport, explicitly hashed preview fixture support, and target membership exclusions are installed. Production Views sources remain those of the base checkout.",
         "originalBaseNames": before_names,
         "comparisonNames": registry_names(args.before_root / registry_path),
         "fixtureChanges": changes,
+        "evidenceLimit": (
+            "AgentChromeView on both revisions uses the corrected complete Doom One fixture palette, retained production renderer, "
+            "visible file-tree registration and immutable completed transcript. This compares production views under the same repaired "
+            "fixture, not the old unreadable neutral-gray baseline or live editor behavior."
+            if has_capture_support else "Additional preview fixtures and shared capture transport only."),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, indent=2) + "\n")

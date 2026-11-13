@@ -7,6 +7,7 @@ struct FocusWriterGuardrailTests {
     func writerSites() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Sources")
+            .resolvingSymlinksInPath()
         // Native fields have no exemptions. Workspace text leases are local
         // presentation, not BEAM surfaces; each declaration and binding is counted.
         let permitted: [(path: String, pattern: String, count: Int, reason: String)] = [
@@ -25,7 +26,7 @@ struct FocusWriterGuardrailTests {
         let files = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
         var seen: [String: [String: Int]] = [:]
         for case let file as URL in files where file.pathExtension == "swift" {
-            let path = String(file.path.dropFirst(root.path.count + 1))
+            let path = String(file.resolvingSymlinksInPath().path.dropFirst(root.path.count + 1))
             let source = try String(contentsOf: file, encoding: .utf8)
             for pattern in patterns {
                 let regex = try NSRegularExpression(pattern: pattern)

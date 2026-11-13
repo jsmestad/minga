@@ -50,9 +50,11 @@ jobs:
               ]).split(b"\0")
               relevant_files = {
                   b"scripts/preview.sh",
+                  b"scripts/preview_capture.py",
                   b"scripts/chrome_preview_evidence.py",
                   b"scripts/chrome_token_migration.json",
                   b"test/scripts/chrome_preview_evidence_test.py",
+                  b"test/scripts/preview_capture_test.py",
                   b".github/workflows/chrome-previews.yml",
               }
               required = any(
@@ -104,8 +106,8 @@ jobs:
           after/scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
           python3 -m pip install Pillow==11.3.0
 
-      - name: Test preview evidence accounting
-        run: python3 -m unittest discover -s after/test/scripts -p chrome_preview_evidence_test.py
+      - name: Test preview evidence and capture boundaries
+        run: python3 -m unittest discover -s after/test/scripts -p '*preview*_test.py'
 
       - name: Generate both revisions' protocol sources
         run: |

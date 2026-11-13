@@ -67,27 +67,62 @@ public enum PreviewFixtures {
         return theme
     }
 
-    /// Applies the Doom One preview palette to an existing `ThemeColors`.
-    /// Use this to theme a `GUIState`'s owned `themeColors` (which views read
-    /// via `\.themeColors`) rather than a standalone instance.
+    /// Doom One's GUI palette, including agent chrome. Keep this fixture aligned
+    /// with `lib/minga_editor/ui/theme/doom_one.ex` and the GUI theme encoder.
+    public static var themeSlots: [(UInt8, UInt8, UInt8, UInt8)] {
+        let colors: [UInt8: UInt32] = [
+            GUI_COLOR_EDITOR_BG: 0x282C34, GUI_COLOR_EDITOR_FG: 0xBBC2CF,
+            GUI_COLOR_TREE_BG: 0x23272E, GUI_COLOR_TREE_FG: 0xBBC2CF,
+            GUI_COLOR_TREE_SELECTION_BG: 0x3E4451, GUI_COLOR_TREE_SELECTION_FG: 0xBBC2CF,
+            GUI_COLOR_TREE_DIR_FG: 0xBBC2CF, GUI_COLOR_TREE_ACTIVE_FG: 0x98BE65,
+            GUI_COLOR_TREE_HEADER_BG: 0x23272E, GUI_COLOR_TREE_HEADER_FG: 0x51AFEF,
+            GUI_COLOR_TREE_SEPARATOR_FG: 0x5B6268, GUI_COLOR_TREE_GUIDE_FG: 0x5B6268,
+            GUI_COLOR_TREE_GIT_MODIFIED: 0xA9A1E1, GUI_COLOR_TREE_GIT_STAGED: 0x98BE65,
+            GUI_COLOR_TREE_GIT_UNTRACKED: 0x3F444A,
+            GUI_COLOR_TAB_BG: 0x23272E, GUI_COLOR_TAB_ACTIVE_BG: 0x282C34,
+            GUI_COLOR_TAB_ACTIVE_FG: 0xBBC2CF, GUI_COLOR_TAB_INACTIVE_FG: 0x5B6268,
+            GUI_COLOR_TAB_MODIFIED_FG: 0xDA8548, GUI_COLOR_TAB_SEPARATOR_FG: 0x3F444A,
+            GUI_COLOR_TAB_CLOSE_HOVER_FG: 0xFF6C6B, GUI_COLOR_TAB_ATTENTION_FG: 0xFF6C6B,
+            GUI_COLOR_POPUP_BG: 0x21242B, GUI_COLOR_POPUP_FG: 0xDFDFDF,
+            GUI_COLOR_POPUP_BORDER: 0x73797E, GUI_COLOR_POPUP_SEL_BG: 0x2257A0,
+            GUI_COLOR_POPUP_SEL_FG: 0xDFDFDF, GUI_COLOR_POPUP_KEY_FG: 0x46D9FF,
+            GUI_COLOR_POPUP_GROUP_FG: 0x51AFEF, GUI_COLOR_POPUP_DESC_FG: 0xDFDFDF,
+            GUI_COLOR_BREADCRUMB_BG: 0x23272E, GUI_COLOR_BREADCRUMB_FG: 0xBBC2CF,
+            GUI_COLOR_BREADCRUMB_SEPARATOR_FG: 0x5B6268,
+            GUI_COLOR_MODELINE_BAR_BG: 0x23272E, GUI_COLOR_MODELINE_BAR_FG: 0xBBC2CF,
+            GUI_COLOR_MODELINE_INFO_BG: 0x3F444A, GUI_COLOR_MODELINE_INFO_FG: 0xBBC2CF,
+            GUI_COLOR_MODE_NORMAL_BG: 0x51AFEF, GUI_COLOR_MODE_NORMAL_FG: 0x000000,
+            GUI_COLOR_MODE_INSERT_BG: 0x98BE65, GUI_COLOR_MODE_INSERT_FG: 0x000000,
+            GUI_COLOR_MODE_VISUAL_BG: 0xC678DD, GUI_COLOR_MODE_VISUAL_FG: 0x000000,
+            GUI_COLOR_STATUSBAR_ACCENT_FG: 0x51AFEF, GUI_COLOR_ACCENT: 0x51AFEF,
+            GUI_COLOR_GUTTER_FG: 0x5B6268, GUI_COLOR_GUTTER_CURRENT_FG: 0xBBC2CF,
+            GUI_COLOR_GUTTER_ERROR_FG: 0xFF6C6B, GUI_COLOR_GUTTER_WARNING_FG: 0xECBE7B,
+            GUI_COLOR_GUTTER_INFO_FG: 0x51AFEF, GUI_COLOR_GUTTER_HINT_FG: 0x5B6268,
+            GUI_COLOR_GUTTER_FOLD_FG: 0x5B6268,
+            GUI_COLOR_GIT_ADDED_FG: 0x98BE65, GUI_COLOR_GIT_MODIFIED_FG: 0xDA8548,
+            GUI_COLOR_GIT_DELETED_FG: 0xFF6C6B,
+            GUI_COLOR_HIGHLIGHT_READ_BG: 0x3A3F4B, GUI_COLOR_HIGHLIGHT_WRITE_BG: 0x4A3F2B,
+            GUI_COLOR_SELECTION_BG: 0x264F78,
+            GUI_COLOR_AGENT_STATUS_IDLE: 0x5B6268, GUI_COLOR_AGENT_STATUS_WORKING: 0x98BE65,
+            GUI_COLOR_AGENT_STATUS_ITERATING: 0x98BE65, GUI_COLOR_AGENT_STATUS_NEEDS_YOU: 0xDA8548,
+            GUI_COLOR_AGENT_STATUS_DONE: 0x98BE65, GUI_COLOR_AGENT_STATUS_ERRORED: 0xFF6C6B,
+            GUI_COLOR_AGENT_PANEL_BG: 0x282C34, GUI_COLOR_AGENT_HEADER_BG: 0x1E2127,
+            GUI_COLOR_AGENT_HEADER_FG: 0x51AFEF, GUI_COLOR_AGENT_USER_BORDER: 0x51AFEF,
+            GUI_COLOR_AGENT_USER_LABEL: 0x51AFEF, GUI_COLOR_AGENT_ASSISTANT_BORDER: 0x98BE65,
+            GUI_COLOR_AGENT_ASSISTANT_LABEL: 0x98BE65, GUI_COLOR_AGENT_INPUT_BORDER: 0x51AFEF,
+            GUI_COLOR_AGENT_INPUT_BG: 0x282C34, GUI_COLOR_AGENT_INPUT_PLACEHOLDER: 0x5B6268,
+            GUI_COLOR_AGENT_TEXT_FG: 0xBBC2CF, GUI_COLOR_AGENT_TOOL_BORDER: 0xECBE7B,
+            GUI_COLOR_AGENT_TOOL_HEADER: 0xECBE7B, GUI_COLOR_AGENT_CODE_BG: 0x1E2127,
+            GUI_COLOR_AGENT_CODE_BORDER: 0x5B6268,
+        ]
+        return colors.sorted { $0.key < $1.key }.map { slot, rgb in
+            (slot, UInt8((rgb >> 16) & 0xFF), UInt8((rgb >> 8) & 0xFF), UInt8(rgb & 0xFF))
+        }
+    }
+
+    /// Applies the complete Doom One fixture to the GUI state's owned theme.
     public static func applyPreviewTheme(to theme: ThemeColors) {
-        theme.applySlots([
-            (GUI_COLOR_EDITOR_BG, 0x28, 0x2C, 0x34),
-            (GUI_COLOR_EDITOR_FG, 0xBB, 0xC2, 0xCF),
-            (GUI_COLOR_TREE_BG, 0x21, 0x24, 0x2B),
-            (GUI_COLOR_TREE_FG, 0xBB, 0xC2, 0xCF),
-            (GUI_COLOR_TREE_SELECTION_BG, 0x22, 0x57, 0xA0),
-            (GUI_COLOR_TAB_BG, 0x21, 0x24, 0x2B),
-            (GUI_COLOR_TAB_ACTIVE_BG, 0x28, 0x2C, 0x34),
-            (GUI_COLOR_TAB_ACTIVE_FG, 0xBB, 0xC2, 0xCF),
-            (GUI_COLOR_TAB_INACTIVE_FG, 0x5B, 0x62, 0x68),
-            (GUI_COLOR_POPUP_BG, 0x21, 0x24, 0x2B),
-            (GUI_COLOR_POPUP_FG, 0xBB, 0xC2, 0xCF),
-            (GUI_COLOR_MODELINE_BAR_BG, 0x21, 0x24, 0x2B),
-            (GUI_COLOR_MODELINE_BAR_FG, 0xBB, 0xC2, 0xCF),
-            (GUI_COLOR_ACCENT, 0x51, 0xAF, 0xEF),
-            (GUI_COLOR_SELECTION_BG, 0x26, 0x4F, 0x78),
-        ])
+        theme.applySlots(themeSlots)
     }
 
     public static func encoder() -> OutboundActionEncoding {
@@ -195,15 +230,16 @@ public enum PreviewFixtures {
 
     // MARK: - StatusBar Helpers
 
-    public static func statusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal) -> StatusBarUpdate {
+    public static func statusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal, motionFrozen: Bool = false) -> StatusBarUpdate {
         let modeValue: UInt8 = mode == .insert ? 1 : 0
+        let working = agentVisible && !motionFrozen
         return StatusBarUpdate(
             contentKind: 0, mode: modeValue, cursorLine: 42, cursorCol: 9,
             lineCount: 1250, flags: 0x02, lspStatus: 1, gitBranch: "main",
             message: "", filetype: "elixir", errorCount: 0, warningCount: 2,
-            modelName: agentVisible ? "claude-sonnet-4" : "", messageCount: agentVisible ? 6 : 0, sessionStatus: agentVisible ? 2 : 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 1, agentStatus: agentVisible ? 2 : 0,
-            activeToolName: agentVisible ? "read" : "",
+            modelName: agentVisible ? "claude-sonnet-4" : "", messageCount: agentVisible ? 6 : 0, sessionStatus: working ? 2 : 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 1, agentStatus: working ? 2 : 0,
+            activeToolName: working ? "read" : "",
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0x88, iconColorG: 0x57, iconColorB: 0xA6, filename: "editor.ex", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",

@@ -120,6 +120,13 @@ def validate_action(name, summary, tests, log, exit_code):
     return errors, pids
 
 
+def canonical_path(value):
+    """Resolve symlinks in absolute execution paths, retaining empty/invalid sentinels."""
+    if isinstance(value, str) and value and Path(value).is_absolute():
+        return str(Path(value).resolve())
+    return value
+
+
 def validate_build_identity(settings, products, hosted):
     targets = [item.get("buildSettings", {}) for item in settings if item.get("target") == "MingaTests"] if isinstance(settings, list) else []
     if len(targets) != 1:
@@ -128,10 +135,11 @@ def validate_build_identity(settings, products, hosted):
     host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
     bundle = products / ("Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest" if hosted else "Debug/MingaTests.xctest")
     errors = []
-    if target.get("TEST_HOST", "") != (str(host) if hosted else "") or target.get("BUNDLE_LOADER", "") != (str(host) if hosted else ""):
+    expected_host = canonical_path(str(host)) if hosted else ""
+    if any(canonical_path(target.get(key, "")) != expected_host for key in ("TEST_HOST", "BUNDLE_LOADER")):
         errors.append("Wrong resolved TEST_HOST/BUNDLE_LOADER execution identity")
     actual_bundle = Path(target.get("TARGET_BUILD_DIR", "")) / target.get("FULL_PRODUCT_NAME", "")
-    if actual_bundle != bundle:
+    if not actual_bundle.is_absolute() or actual_bundle.resolve() != bundle.resolve():
         errors.append(f"Wrong actual test-bundle placement: {actual_bundle}; expected {bundle}")
     if not bundle.is_dir() or (hosted and not host.is_file()):
         errors.append("Expected bare/hosted test product is missing from the observed build location")
@@ -144,7 +152,8 @@ def validate_execution_identity(settings, log, products, hosted):
     host_pids = set(re.findall(r"\[MingaTestHost\] didFinishLaunching pid=(\d+)", log))
     scope_pids = set(re.findall(r"\[Focus application .+?\] startup pid=(\d+)\b", log))
     if hosted:
-        if len(host_pids) != 1 or host_pids != scope_pids or f"bundle=com.minga.test-host executable={host}" not in log:
+        runtime_hosts = {canonical_path(path.rstrip()) for path in re.findall(r"bundle=com\.minga\.test-host executable=([^\r\n]+)", log)}
+        if len(host_pids) != 1 or host_pids != scope_pids or runtime_hosts != {canonical_path(str(host))}:
             errors.append("Missing or contradictory actual host/scope runtime identity")
     elif host_pids or scope_pids or not re.search(r"\bxctest\[\d+:", log):
         errors.append("Missing genuine bare xctest runtime identity (or observed an application host)")
@@ -179,14 +188,14 @@ def validate_hosted_plan(plan, products):
     host_bundle = products / "Debug/MingaTestHost.app"
     bundle = host_bundle / "Contents/PlugIns/MingaTests.xctest"
     def resolve(value):
-        return str(value).replace("__TESTROOT__", str(products)).replace("__TESTHOST__", str(host_bundle)).replace("$(BUILT_PRODUCTS_DIR)", str(products / "Debug"))
-    if resolve(target.get("TestHostPath", "")) != str(host_bundle) or resolve(target.get("TestBundlePath", "")) != str(bundle):
+        return canonical_path(str(value).replace("__TESTROOT__", str(products)).replace("__TESTHOST__", str(host_bundle)).replace("$(BUILT_PRODUCTS_DIR)", str(products / "Debug")))
+    if resolve(target.get("TestHostPath", "")) != canonical_path(str(host_bundle)) or resolve(target.get("TestBundlePath", "")) != canonical_path(str(bundle)):
         raise ValueError("Plan has wrong hosted application bundle or test bundle")
     if target.get("IsAppHostedTestBundle") is False or target.get("IsUITestBundle", False):
         raise ValueError("Plan contradicts hosted unit-test execution")
     environments = [target.get(key, {}) for key in ("EnvironmentVariables", "TestingEnvironmentVariables")]
     app_paths = {resolve(env["MINGA_TEST_PRODUCTION_APP_PATH"]) for env in environments if "MINGA_TEST_PRODUCTION_APP_PATH" in env}
-    if app_paths != {str(products / "Debug/Minga.app")}:
+    if app_paths != {canonical_path(str(products / "Debug/Minga.app"))}:
         raise ValueError("Plan has missing or wrong production-app environment")
 
 

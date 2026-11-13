@@ -180,6 +180,45 @@ class MacOSUnitResultsTest(unittest.TestCase):
                 bundle.rmdir()
                 self.assertTrue(native.validate_execution_identity(settings, runtime, products, hosted))
 
+    def test_symlinked_product_paths_identify_the_same_runner_and_replay_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            products = root / "Products"
+            products.mkdir()
+            alias = root / "Alias"
+            alias.symlink_to(products, target_is_directory=True)
+            host_relative = Path("Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost")
+            host = products / host_relative
+            host.parent.mkdir(parents=True)
+            host.touch()
+            for hosted in (False, True):
+                relative = Path("Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest" if hosted else "Debug/MingaTests.xctest")
+                bundle = products / relative
+                bundle.mkdir(parents=True)
+                settings = [{"target": "MingaTests", "buildSettings": {
+                    "TEST_HOST": str(alias / host_relative) if hosted else "",
+                    "BUNDLE_LOADER": str(alias / host_relative) if hosted else "",
+                    "TARGET_BUILD_DIR": str((alias / relative).parent),
+                    "FULL_PRODUCT_NAME": bundle.name,
+                }}]
+                runtime = f"[MingaTestHost] didFinishLaunching pid=4101 bundle=com.minga.test-host executable={alias / host_relative}\n{log(4101)}" if hosted else "xctest[4100:123] native runtime\n"
+                self.assertEqual(native.validate_execution_identity(settings, runtime, products, hosted), [])
+                wrong = copy.deepcopy(settings)
+                wrong[0]["buildSettings"]["TARGET_BUILD_DIR"] = str(root / "Other" / relative.parent)
+                self.assertTrue(native.validate_execution_identity(wrong, runtime, products, hosted))
+                bundle.rmdir()
+
+            plan = hosted_plan()
+            target = plan["MingaTests"]
+            target["TestHostPath"] = str(alias / "Debug/MingaTestHost.app")
+            target["TestBundlePath"] = str(alias / "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
+            target["EnvironmentVariables"]["MINGA_TEST_PRODUCTION_APP_PATH"] = str(alias / "Debug/Minga.app")
+            source = products / "MingaUnitTests_macosx.xctestrun"
+            source.write_bytes(plistlib.dumps(plan))
+            receipts = native.snapshot_plans(products, root / "receipts")
+            selected, _ = native.select_hosted_plan({}, receipts, products, True)
+            self.assertEqual(Path(selected), source)
+
     def test_only_a_current_successful_unique_hosted_plan_authorizes_replay(self):
         with tempfile.TemporaryDirectory() as directory:
             products = Path(directory) / "Products"

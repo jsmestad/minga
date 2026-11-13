@@ -45,6 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- macOS agent-workspace previews now capture readable, frozen production views at narrow and default widths, with full-window images, bounded failures and build-input receipts. A separate procedure covers real native keyboard and mouse evidence.
 - Native release preparation selects a Python build published for every host, fetches Linux prerequisites from the authenticated version-locked package index, reports bounded command failures and retains isolated build logs. CI checks changed release prerequisites on all four native hosts before the aggregate gate can pass.
 - Go terminal updates no longer erase the workspace header or retain trailing status text after a shorter replacement. Cursor presentation uses Bubble Tea's typed cursor metadata instead of embedding cursor-position controls in rendered cells.
 - The Go protocol reader skips valid length-framed unknown UI opcodes without losing later commands in the same committed frame, while still rejecting truncated payloads and unsupported required commands.
