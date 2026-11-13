@@ -37,6 +37,8 @@ The locked Burrito 1.6.0 declares wrapper Zig `0.16.0`. The workflow checks `Bur
 
 Standalone preparation builds its own pinned OTP/ERTS input from the official sources in `scripts/release_erts_sources.json`; it does not depend on Burrito having published an archive for that OTP version. Actions selects Python 3.14.10, which has published builds for every native preparation host in the [upstream manifest](https://github.com/actions/python-versions/blob/main/versions-manifest.json). The Linux container retains its separately pinned interpreter. The producer requires the exact native CPU and committed build environment. macOS uses Xcode 26.3 build 17C529 with minimum macOS 15.0. Linux uses the digest-pinned Alpine recipe and verified musl helper bytes.
 
+The Linux build verifies the complete Alpine package index before fetching packages by name. That index pins direct and transitive versions. Installation then uses only the downloaded packages with networking disabled; no package or index fallback is allowed.
+
 The producer writes `erts.tar.gz` and a successful `receipt.json` only after source integrity, native architecture, runtime/header completeness, library closure, crypto execution and platform ABI checks pass. A failed rerun invalidates the old successful receipt. For a native standalone build, create the input before invoking Mix:
 
 ```bash

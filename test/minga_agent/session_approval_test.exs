@@ -342,6 +342,20 @@ defmodule MingaAgent.SessionApprovalTest do
            health_check: :none}
         )
 
+      # Durable checkpoints must not queue behind unrelated sessions' artifact quota work.
+      artifact_suffix = System.unique_integer([:positive])
+
+      artifact_opts = [
+        name: nil,
+        root: Path.join(dir, "artifacts"),
+        quota: Module.concat(__MODULE__, "QueuedTurnArtifactQuota#{artifact_suffix}"),
+        registry: Module.concat(__MODULE__, "QueuedTurnArtifactRegistry#{artifact_suffix}"),
+        store_supervisor: Module.concat(__MODULE__, "QueuedTurnArtifactStores#{artifact_suffix}")
+      ]
+
+      start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+      {:ok, artifact_runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
+
       client = fn _model, _messages, _opts ->
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
@@ -391,6 +405,7 @@ defmodule MingaAgent.SessionApprovalTest do
           session_store_dir: Path.join(dir, "sessions"),
           options_server: options,
           event_log_server: event_log,
+          artifact_runtime: artifact_runtime,
           credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
           provider_opts: [
             model: "openai:gpt-6.1-sol",
