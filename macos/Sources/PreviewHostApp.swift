@@ -30,8 +30,8 @@ struct PreviewHostApp: App {
                     transaction.animation = nil
                     transaction.disablesAnimations = true
                 }
-                .background(PreviewWindowProbe { window in
-                    delegate.captureAndExit(window: window)
+                .background(PreviewWindowProbe { window, fixtureView in
+                    delegate.captureAndExit(window: window, fixtureView: fixtureView)
                 })
         }
         .windowStyle(.hiddenTitleBar)
@@ -55,7 +55,7 @@ private enum PreviewCaptureError: Error {
 /// Selects the window actually hosting the requested fixture, not an unrelated
 /// first application window. No desktop automation or Accessibility is involved.
 private struct PreviewWindowProbe: NSViewRepresentable {
-    let ready: @MainActor (NSWindow) -> Void
+    let ready: @MainActor (NSWindow, NSView) -> Void
 
     func makeNSView(context: Context) -> ProbeView {
         ProbeView(ready: ready)
@@ -64,9 +64,9 @@ private struct PreviewWindowProbe: NSViewRepresentable {
     func updateNSView(_ nsView: ProbeView, context: Context) {}
 
     final class ProbeView: NSView {
-        let ready: @MainActor (NSWindow) -> Void
+        let ready: @MainActor (NSWindow, NSView) -> Void
 
-        init(ready: @escaping @MainActor (NSWindow) -> Void) {
+        init(ready: @escaping @MainActor (NSWindow, NSView) -> Void) {
             self.ready = ready
             super.init(frame: .zero)
         }
@@ -75,7 +75,7 @@ private struct PreviewWindowProbe: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let window { ready(window) }
+            if let window { ready(window, self) }
         }
     }
 }
@@ -89,18 +89,21 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         exit(1)
     }
 
-    func captureAndExit(window: NSWindow) {
+    func captureAndExit(window: NSWindow, fixtureView: NSView) {
         guard !started else { return }
         started = true
         window.ignoresMouseEvents = true
         Task { @MainActor in
-            await captureAndExitAsync(window: window)
+            await captureAndExitAsync(window: window, fixtureView: fixtureView)
         }
     }
 
-    private func captureAndExitAsync(window: NSWindow) async {
+    private func captureAndExitAsync(window: NSWindow, fixtureView: NSView) async {
         guard let contentView = window.contentView else {
             fail("fixture window has no content view")
+        }
+        guard fixtureView.window === window else {
+            fail("fixture view does not belong to the capture window")
         }
 
         let outputDir = ProcessInfo.processInfo.environment["PREVIEW_OUTPUT_DIR"]
@@ -138,7 +141,7 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
             fail("cannot create output directory: \(error)")
         }
 
-        let pngData = await captureSettledPNG(window: window, contentView: contentView, viewName: viewName)
+        let pngData = await captureSettledPNG(window: window, contentView: contentView, fixtureView: fixtureView, viewName: viewName)
         guard let capturedBitmap = NSBitmapImageRep(data: pngData) else {
             fail("encoded preview PNG could not be decoded for its metadata")
         }
@@ -154,6 +157,7 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
                 "system_reduce_motion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
                 "backing_scale": window.backingScaleFactor,
                 "content_points": ["width": contentView.bounds.width, "height": contentView.bounds.height],
+                "fixture_points": ["width": fixtureView.bounds.width, "height": fixtureView.bounds.height],
                 "image_pixels": ["width": capturedBitmap.pixelsWide, "height": capturedBitmap.pixelsHigh],
                 "window_points": ["width": window.frame.width, "height": window.frame.height],
                 "window_id": window.windowNumber,
@@ -184,14 +188,14 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
 
     /// Require three identical compositor frames after layout, rather than
     /// treating a fixed sleep or window existence as successful rendering.
-    private func captureSettledPNG(window: NSWindow, contentView: NSView, viewName: String) async -> Data {
+    private func captureSettledPNG(window: NSWindow, contentView: NSView, fixtureView: NSView, viewName: String) async -> Data {
         guard viewName == "AgentChromeView" else {
-            return await captureWindowPNG(window: window, contentView: contentView, viewName: viewName)
+            return await captureWindowPNG(window: window, contentView: contentView, fixtureView: fixtureView, viewName: viewName)
         }
         var previous: Data?
         var identicalFrames = 0
         for _ in 0..<20 {
-            let png = await captureWindowPNG(window: window, contentView: contentView, viewName: viewName)
+            let png = await captureWindowPNG(window: window, contentView: contentView, fixtureView: fixtureView, viewName: viewName)
             identicalFrames = png == previous ? identicalFrames + 1 : 1
             if identicalFrames == 3 { return png }
             previous = png
@@ -202,7 +206,7 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         fail("agent workspace did not settle to three identical rendered frames within 20 samples")
     }
 
-    private func captureWindowPNG(window: NSWindow, contentView: NSView, viewName: String) async -> Data {
+    private func captureWindowPNG(window: NSWindow, contentView: NSView, fixtureView: NSView, viewName: String) async -> Data {
         let expectedPixelSize = PreviewSnapshotPolicy.expectedPixelSize(named: viewName, scale: window.backingScaleFactor)
 
         if PreviewSnapshotPolicy.shouldUseRenderedWindowCapture(viewName) {
@@ -228,7 +232,8 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        let bounds = contentView.bounds
+        // The hosting view can include native titlebar space. Capture the actual fixture region, not that container.
+        let bounds = fixtureView.convert(fixtureView.bounds, to: contentView)
         guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: bounds) else {
             fail("bitmapImageRepForCachingDisplay returned nil")
         }
