@@ -35,6 +35,19 @@ Runner labels are configuration, not architecture evidence. Each job checks its 
 
 The locked Burrito 1.6.0 declares wrapper Zig `0.16.0`. The workflow checks `Burrito.get_versions/0` before wrapping and records native-Zig and wrapper-Zig facts separately, even when their versions are equal. `BURRITO_TARGET` selects exactly one existing target per standalone job. The GUI embeds the plain `minga_macos` release instead of a Burrito wrapper.
 
+Standalone preparation builds its own pinned OTP/ERTS input from the official sources in `scripts/release_erts_sources.json`; it does not depend on Burrito having published an archive for that OTP version. The producer requires Python 3.12.13 in Actions, the exact native CPU and the committed native build environment. macOS uses Xcode 26.3 build 17C529 with minimum macOS 15.0. Linux uses the digest-pinned Alpine recipe and verified musl helper bytes.
+
+The producer writes `erts.tar.gz` and a successful `receipt.json` only after source integrity, native architecture, runtime/header completeness, library closure, crypto execution and platform ABI checks pass. A failed rerun invalidates the old successful receipt. For a native standalone build, create the input before invoking Mix:
+
+```bash
+python3 scripts/build-release-erts.py --os macos --arch aarch64 --output "$PWD/erts-input"
+MINGA_RELEASE_ERTS_RECEIPT="$PWD/erts-input/receipt.json" MIX_ENV=prod BURRITO_TARGET=macos_aarch64 mix release minga
+```
+
+Use the matching native target on other hosts. `mix/release_erts.ex` validates the explicit receipt and archive against this checkout, then supplies a private copy through Burrito's public resolver. It preserves Burrito's musl fetch step and checks the fetched helper and interpreter binding before wrapping. There is no host-ERTS, alternate-download or ABI fallback.
+
+This input receipt is not final package qualification. Final standalone bytes must still extract their own helper into fresh state, boot the selected runtime, and execute crypto and SQLite checks. Source hashes and a patched Linux build sysroot do not establish that the frozen Burrito helper contains those patches; assess that helper separately rather than claiming blanket security qualification.
+
 macOS runtime components can be universal Mach-O images. The checker validates their architecture tables and actual slice headers, then requires the declared CPU to be present in every native component. The final package must also boot and report the expected active runtime architecture, including working OTP crypto and SQLite native operations. This qualifies the selected target, not a universally runnable whole package; the wrapper, renderer and helpers can remain target-specific.
 
 `mix app.assemble` resolves its app through Xcode build settings. Automation consumes its successful absolute output path instead of searching cached DerivedData:
@@ -90,7 +103,7 @@ The local-only `scripts/release_candidate.py` also supports the workflow's `chec
 
 ## Separate package checks from release qualification
 
-`scripts/check-release-contents` checks concrete resource presence, release/app metadata, native headers and package containment. The workflow additionally boots final standalone bytes or the final mounted signed DMG's terminal launcher, checks packaged ERTS, verifies a fixed-result OTP crypto hash and opens/closes the SQLite NIF. These checks identify what ran; they do not claim native GUI interaction, an installed authored-source workflow, sustained use or release approval.
+`scripts/check-release-contents` checks concrete resource presence, release/app metadata, native headers and package containment. Standalone preparation also supplies `--runtime-receipt` to inspect actual ERTS and NIF library dependencies, ELF interpreter binding or Mach-O minimum OS, and reject unbundled or build-root dependencies. The workflow additionally boots final standalone bytes or the final mounted signed DMG's terminal launcher, checks packaged ERTS, verifies a fixed-result OTP crypto hash and opens/closes the SQLite NIF. These checks identify what ran; they do not claim native GUI interaction, an installed authored-source workflow, sustained use or release approval.
 
 Before any later promotion, qualify the exact unchanged candidate from clean user state without a development checkout or build caches. Retain the full runtime/recovery, Swift GUI and Go TUI interaction, programmability/X0 and installed-distribution evidence required by [the v0.1.0 plan](https://github.com/jsmestad/minga/issues/3542). Verify the actual minimum supported OS and every architecture-specific package. Development-build evidence is not installed-package evidence.
 
