@@ -75,11 +75,11 @@ class Commands:
                                            env=env, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                                            start_new_session=True)
             except OSError as error:
-                raise BuildError("cannot start %s; diagnostics: %s" % (argv[0], log)) from error
+                raise BuildError("cannot start %s: %s; diagnostics: %s" % (argv[0], error, log)) from error
             try:
                 status = process.wait(timeout=remaining)
                 if status != 0:
-                    raise BuildError("command failed (%s); diagnostics: %s" % (status, log))
+                    raise self._failure("command failed (%s)" % status, log)
             except BaseException as error:
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
@@ -99,11 +99,18 @@ class Commands:
                 except ProcessLookupError:
                     pass
                 if isinstance(error, subprocess.TimeoutExpired):
-                    raise BuildError("command timed out; diagnostics: %s" % log) from error
+                    raise self._failure("command timed out", log) from error
                 raise
-        require(status == 0, "command failed (%s); diagnostics: %s" % (status, log))
-        require(log.stat().st_size <= 32 * 1024 * 1024, "command diagnostics exceed bound: %s" % log)
+        if log.stat().st_size > 32 * 1024 * 1024:
+            raise self._failure("command diagnostics exceed bound", log)
         return log.read_text(errors="replace").split("\n", 1)[1].strip()
+
+    def _failure(self, description, log):
+        with log.open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            source.seek(max(0, source.tell() - 8192))
+            tail = source.read(8192).decode("utf-8", errors="replace")
+        return BuildError("%s; diagnostics: %s\nLast command output (at most 8192 bytes):\n%s" % (description, log, tail))
 
 
 def private_environment(work):

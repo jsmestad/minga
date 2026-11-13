@@ -494,6 +494,58 @@ jobs:
       - run: mix deps.get
       - run: mix dialyzer
 
+  release-prerequisites:
+    name: Native release prerequisites (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select changed native release inputs
+        id: inputs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          changed=true
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            if git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/ci.yml .github/workflows/release.yml .tool-versions scripts/build-release-erts.py scripts/release-erts.Dockerfile scripts/release_erts_sources.json mix/release_erts.ex mix.exs mix.lock test/scripts/release_erts_producer_test.py; then
+              changed=false
+            fi
+          fi
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
+          python_version=$(jq -er '.build_python_version | select(type == "string")' scripts/release_erts_sources.json)
+          [[ "$python_version" =~ ^3\.[0-9]+\.[0-9]+$ ]]
+          printf 'python_version=%s\n' "$python_version" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        if: steps.inputs.outputs.changed == 'true'
+        with:
+          python-version: ${{ steps.inputs.outputs.python_version }}
+      - name: Verify the native Python and producer boundaries
+        if: steps.inputs.outputs.changed == 'true'
+        env:
+          PYTHON_VERSION: ${{ steps.inputs.outputs.python_version }}
+        run: |
+          set -euo pipefail
+          python3 -c 'import os, platform, tarfile; assert platform.python_version() == os.environ["PYTHON_VERSION"]; assert callable(tarfile.data_filter)'
+          python3 test/scripts/release_erts_producer_test.py
+      - name: Build the actual pinned Linux prerequisite image
+        if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          context=$(mktemp -d "$RUNNER_TEMP/minga-erts-prerequisite.XXXXXX")
+          home=$(mktemp -d "$RUNNER_TEMP/minga-erts-prerequisite-home.XXXXXX")
+          trap 'rm -rf "$context" "$home"' EXIT
+          cp scripts/release-erts.Dockerfile "$context/Dockerfile"
+          env -i HOME="$home" PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C docker build --pull=false --progress=plain "$context"
+
   ci-gate:
     name: CI gate
     if: ${{ always() }}
@@ -511,6 +563,7 @@ jobs:
       - swift
       - swift-integration
       - dialyzer
+      - release-prerequisites
     steps:
       - name: Require every substantive job to succeed
         env:

@@ -1,5 +1,6 @@
 # The digest pins both native architectures. No package upgrade or floating index.
 FROM alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+# The verified index pins direct and transitive versions; apk fetch accepts package names, not name=version constraints.
 RUN printf '%s\n' 'https://dl-cdn.alpinelinux.org/alpine/v3.20/main' > /etc/apk/repositories \
  && mkdir /locked /packages \
  && apk --cache-dir /locked update \
@@ -12,10 +13,8 @@ RUN printf '%s\n' 'https://dl-cdn.alpinelinux.org/alpine/v3.20/main' > /etc/apk/
  && test "$#" = 1 \
  && printf '%s  %s\n' "$expected" "$1" | sha256sum -c - \
  && apk --cache-dir /locked fetch --recursive --output /packages \
-      gcc=13.2.1_git20240309-r1 g++=13.2.1_git20240309-r1 \
-      make=4.4.1-r2 perl=5.38.5-r0 python3=3.12.13-r0 \
-      musl=1.2.5-r4 musl-dev=1.2.5-r4 linux-headers=6.6-r0 \
-      patchelf=0.18.0-r3 binutils=2.42-r1 ca-certificates=20261020-r0 \
+      gcc g++ make perl python3 musl musl-dev linux-headers \
+      patchelf binutils ca-certificates \
  && apk add --no-network /packages/*.apk \
  && apk info -v > /minga-erts-packages.txt \
  && printf '%s\n' 'alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc' > /minga-erts-base-image \

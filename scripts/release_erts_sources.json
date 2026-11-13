@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "build_python_version": "3.14.10",
   "otp": {
     "version": "29.1.2",
     "erts_version": "17.1.1",

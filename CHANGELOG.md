@@ -45,6 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Native release preparation selects a Python build published for every host, fetches Linux prerequisites from the authenticated version-locked package index, reports bounded command failures and retains isolated build logs. CI checks changed release prerequisites on all four native hosts before the aggregate gate can pass.
 - Go terminal updates no longer erase the workspace header or retain trailing status text after a shorter replacement. Cursor presentation uses Bubble Tea's typed cursor metadata instead of embedding cursor-position controls in rendered cells.
 - The Go protocol reader skips valid length-framed unknown UI opcodes without losing later commands in the same committed frame, while still rejecting truncated payloads and unsupported required commands.
 - Standalone candidate builds now qualify a pinned native OTP/ERTS source input instead of requesting unavailable Burrito runtime archives. Build receipts, source hashes and final ERTS/NIF ABI checks fail closed without a host-runtime or download fallback.
@@ -52,7 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Test configuration roots are allocated exclusively across BEAM processes, so a new run cannot adopt stale artifact namespaces without their quota ledger. Missing-ledger recovery remains fail-closed.
 - Opening file URLs from iTerm2, Finder, or `open -a Minga` now preserves the native editor window, preventing tabs from showing stale contents after a second file opens.
 - macOS keeps workspace controls and open tabs in one fixed-height header row, including when no tabs are open. The default footer no longer repeats the workspace label. Tab reordering uses a declared native JSON drag type without competing workspace-swipe gestures.
-- CI now reports fail-closed aggregate gates for all ten substantive jobs and Chrome preview evidence. Preview path detection runs on every pull request, skips captures only for unrelated changes, and always requires real captures for manual dispatches.
+- CI now reports fail-closed aggregate gates for every substantive job and Chrome preview evidence. Preview path detection runs on every pull request, skips captures only for unrelated changes, and always requires real captures for manual dispatches.
 - Repeated release builds no longer accumulate obsolete Erlang runtimes and dependency versions. macOS and standalone TUI packages include only Minga's runtime resources, excluding test harnesses, retired renderers, and other development leftovers. Production Go renderers omit debug metadata and local build paths without removing language support or runtime extension compilation.
 - Release cleanup refuses output paths outside the active Mix build directory, protecting shared installation prefixes from deletion. Custom `mix release --path` destinations must be below that build directory.
 - Cursor-left and Backspace no longer scan all preceding buffer text on each action. Line-boundary lookup searches backward in bounded chunks, and grapheme lookup reads only the final line while preserving Unicode and CRLF boundaries.

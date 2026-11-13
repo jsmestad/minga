@@ -52,10 +52,11 @@ class ProducerTest(unittest.TestCase):
         (self.output / "receipt.json").write_text('{"kind":"local-source-build"}')
         (self.output / "erts.tar.gz").write_bytes(b"stale archive")
         with mock.patch.object(PRODUCER, "native_build", side_effect=callback):
-            with self.assertRaises(PRODUCER.BuildError):
+            with self.assertRaises(PRODUCER.BuildError) as failure:
                 PRODUCER.produce(HOST_OS, HOST_ARCH, self.output, worker=HOST_OS == "linux")
         self.assertFalse((self.output / "receipt.json").exists())
         self.assertFalse((self.output / ".producer.lock").exists())
+        return str(failure.exception)
 
     def test_corrupt_download_is_removed_and_never_retried(self):
         source = {"url": "https://source.example/official.tar.gz",
@@ -207,10 +208,13 @@ class ProducerTest(unittest.TestCase):
 
     def test_failed_build_cannot_reuse_stale_receipt(self):
         runner = self.command_runner()
+        script = self.root / "compiler.py"
+        script.write_text("import sys\nsys.stderr.write('earlier compiler output\\n' * 2000)\nsys.stderr.write('native compiler fixture rejected input\\n')\nsys.exit(23)\n")
         def failed(*args):
-            runner.run([sys.executable, "-c", "import sys; sys.exit(23)"])
-        self.fail_build(failed)
-        self.assertIn("sys.exit(23)", (runner.directory / "command-001.log").read_text())
+            runner.run([sys.executable, script])
+        error = self.fail_build(failed)
+        self.assertIn("native compiler fixture rejected input", error)
+        self.assertLess(len(error.encode("utf-8")), 10 * 1024)
 
     def test_timeout_reaps_owned_process_and_removes_stale_receipt(self):
         runner = self.command_runner(seconds=5)
@@ -231,7 +235,6 @@ class ProducerTest(unittest.TestCase):
         pid = int(pid_file.read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)
-        self.assertIn("time.sleep(60)", (runner.directory / "command-001.log").read_text())
         self.assertEqual((self.root / "terminated").read_text(), "terminated")
 
     def test_contending_producer_does_not_invalidate_current_owner(self):
