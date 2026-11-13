@@ -364,7 +364,7 @@ A rejected or uncommitted frame fails with **"no committed snapshot"**; it never
 
 ### Timing and honest mutation evidence
 
-The existing Swift CI job runs:
+The Swift acceptance evidence workflow runs:
 
 ```bash
 mix protocol.gen
@@ -378,7 +378,13 @@ The script delegates the complete unit run to `scripts/test_macos_unit`, so both
 It then warms the focused conformance suite and measures it without/with the pixel sub-suite using the same Debug build products.
 `conformance-pixel-evidence/evidence.json` records revision, device information, macOS build, commands, exit codes, wall-clock durations, the added-pixel delta and the historical whole-unit baseline (2026-10-29: **136 s / 1555 tests**).
 The pixel increment budget is **10 s**.
-CI uploads JSON, logs and result bundles; copy measured values into the PR rather than presenting historical numbers as new measurements.
+PR CI runs the complete canonical unit suite once, including the three Metal pixel transcripts and the production spacing and scroll regressions, with `MINGA_REQUIRE_METAL=1`. It retains both renderer performance gates and recovery evidence.
+The separate **Swift acceptance evidence** workflow runs every Monday and can be dispatched on a chosen branch to collect paired pixel timing, all three inverse mutations, and a second warm canonical unit run. Dispatch it when changing these tests or their collector; those changes can weaken detection without failing ordinary regression tests.
+It uploads JSON, logs and result bundles; copy measured values into the PR rather than presenting historical numbers as new measurements.
+
+```bash
+gh workflow run swift-evidence.yml --ref your-branch
+```
 
 The three scenarios name the actual historical fixes: background fill `6ab625b2c` (#2687), spaced IME/accessibility geometry `966352a7c` (#2674), and captured-snapshot local scroll reconciliation `559792551` (#3397).
 **A direct Metal region cannot prove an IME or view-owned scroll fix.**
