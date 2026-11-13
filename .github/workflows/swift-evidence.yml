@@ -1,0 +1,66 @@
+name: Swift acceptance evidence
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MIX_ENV: test
+
+jobs:
+  evidence:
+    name: Pixel timing, mutations, and warm unit evidence
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      MINGA_REQUIRE_METAL: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: swift-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: swift-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix protocol.gen
+      - run: mix conformance.gen
+
+      - name: Install pinned XcodeGen
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
+
+      - name: Generate Xcode project
+        run: cd macos && xcodegen generate
+
+      # No DerivedData restore: the first canonical unit run must start cold.
+      - name: Test and record focused conformance timing and mutations
+        run: python3 scripts/check_conformance_pixels --mutations
+
+      - name: Verify warm native unit execution
+        run: scripts/test_macos_unit --output-dir conformance-pixel-evidence/unit-bundle/warm
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-acceptance-evidence
+          path: conformance-pixel-evidence/
+          if-no-files-found: error
