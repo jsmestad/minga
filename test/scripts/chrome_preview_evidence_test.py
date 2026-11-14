@@ -31,6 +31,20 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
             ''')
             self.assertEqual(evidence.registry_names(registry), ["RowView", "PanelView"])
 
+    @staticmethod
+    def capture_host(readiness, transport):
+        return f"""
+final class PreviewHostDelegate {{
+    private func captureAndExitAsync() {{ {readiness} }}
+    private func captureSettledPNG() {{ {transport} }}
+    private func captureWindowPNG() {{ {transport} }}
+    private func encodePNG() {{ {transport} }}
+    private func assertBitmapDimensions() {{ {transport} }}
+    private func assertCGImageDimensions() {{ {transport} }}
+    private nonisolated static func captureRenderedWindow() {{ {transport} }}
+}}
+"""
+
     def test_base_supplement_preserves_existing_views_and_uses_identical_new_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -51,12 +65,15 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
                 "        }\n"
                 "    }\n"
             )
+            before_capture = self.capture_host("legacyReadiness()", "legacyTransport()")
+            after_capture = self.capture_host(
+                "guard editor.agentPromptPlacement != nil else { fail() }", "sharedTransport()")
             for checkout in [before, after]:
                 sources = checkout / "macos/Sources"
                 (sources / "Views").mkdir(parents=True)
                 (sources / "PreviewRegistry.swift").write_text(registry)
                 (sources / "PreviewSnapshotPolicy.swift").write_text(policy)
-                (sources / "PreviewHostApp.swift").write_text("shared preview capture transport")
+                (sources / "PreviewHostApp.swift").write_text(before_capture if checkout == before else after_capture)
                 (sources / "Views/ExistingView.swift").write_text(f"production view from {checkout.name}")
                 project = "".join(
                     f'  {target}:\n    sources:\n      - path: Sources\n        excludes:\n          - "PreviewRegistry.swift"\n'
@@ -102,6 +119,23 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
             manifest = json.loads(args.output.read_text())
             self.assertEqual(manifest["originalBaseNames"], ["ExistingView"])
             self.assertEqual(manifest["comparisonNames"], ["ExistingView", "AddedView"])
+            prepared_capture = (before_sources / "PreviewHostApp.swift").read_text()
+            self.assertIn("legacyReadiness()", prepared_capture)
+            self.assertNotIn("agentPromptPlacement", prepared_capture)
+            self.assertNotIn("legacyTransport()", prepared_capture)
+            self.assertEqual((after_sources / "PreviewHostApp.swift").read_text(), after_capture)
+            capture_changes = [change for change in manifest["fixtureChanges"]
+                               if change["path"] == "macos/Sources/PreviewHostApp.swift"]
+            installed = next(change for change in capture_changes if "member" not in change)
+            self.assertEqual(installed["originalSha256"], hashlib.sha256(before_capture.encode()).hexdigest())
+            self.assertEqual(installed["sha256"], hashlib.sha256(prepared_capture.encode()).hexdigest())
+            members = [change for change in capture_changes if "member" in change]
+            self.assertEqual(len(members), 6)
+            for member in members:
+                start, end = evidence.swift_fixture_member(after_capture, member["member"])
+                shared = after_capture[start:end]
+                self.assertIn(shared, prepared_capture)
+                self.assertEqual(member["sha256"], hashlib.sha256(shared.encode()).hexdigest())
             # Preparing an already supplemented base must not duplicate registry cases.
             with patch.object(evidence, "revision", side_effect=["base-sha", "head-sha"]):
                 evidence.prepare_base(args)
@@ -109,9 +143,20 @@ class ChromePreviewEvidenceTest(unittest.TestCase):
                 evidence.registry_names(before_sources / "PreviewRegistry.swift"), ["ExistingView", "AddedView"]
             )
             self.assertEqual((before / "macos/project.yml").read_text(), prepared_project)
+            self.assertEqual((before_sources / "PreviewHostApp.swift").read_text(), prepared_capture)
             args.before_root = after
             with self.assertRaises(ValueError):
                 evidence.prepare_base(args)
+
+    def test_capture_transport_requires_unique_members_on_both_revisions(self):
+        source = self.capture_host("revisionReadiness()", "sharedTransport()")
+        start, end = evidence.swift_fixture_member(source, "private nonisolated static func captureRenderedWindow(")
+        malformed_sources = [source[:start] + source[end:], source + source[start:end]]
+        for malformed in malformed_sources:
+            for before, after in [(malformed, source), (source, malformed)]:
+                with self.subTest(before=before, after=after):
+                    with self.assertRaisesRegex(ValueError, "expected one preview fixture member"):
+                        evidence.shared_capture_transport(before, after)
 
     def test_capture_support_missing_fixture_fails_before_mutating_base(self):
         with tempfile.TemporaryDirectory() as directory:

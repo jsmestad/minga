@@ -36,6 +36,39 @@ enum PreviewRegistry {
                 }
             }
         )
+        .environment(\.agentPromptSurface, appState.editorNSView.map { AgentPromptSurface(editor: $0) })
+    }
+    /// Standalone chrome captures still mount and draw the production canonical prompt.
+    static func productionAgentChatView(state: AgentChatState, width: CGFloat, height: CGFloat) -> AnyView {
+        let appState = AppState()
+        let encoder = PreviewFixtures.encoder()
+        appState.encoder = encoder
+        let chat = appState.gui.agentChatState
+        chat.update(
+            visible: true, status: state.status, model: state.model, thinkingLevel: state.thinkingLevel,
+            prompt: state.prompt, promptLineCount: state.promptLineCount,
+            promptCursorLine: state.promptCursorLine, promptCursorCol: state.promptCursorCol,
+            promptMode: state.promptMode, promptVisibleRows: state.promptVisibleRows,
+            promptCompletion: state.promptCompletion, helpVisible: state.helpVisible, helpGroups: state.helpGroups
+        )
+        guard let editor = previewEditorNSView(appState: appState, encoder: encoder) else {
+            return AnyView(previewFailureView(message: "Canonical agent prompt renderer is unavailable."))
+        }
+        chat.publishTranscript(state.transcriptSnapshot)
+        appState.editorNSView = editor
+        appState.hasReceivedFirstFrame = true
+        captureAppState = appState
+        return AnyView(
+            ZStack {
+                EditorView(editorNSView: editor)
+                AgentChatView(state: chat, isInsertMode: chat.isPromptInsertMode, sendAction: { _ in })
+            }
+            .frame(width: width, height: height)
+            // Match the production window surface behind transparent Metal pixels.
+            .background(appState.gui.themeColors.editorBg)
+            .environment(\.agentPromptSurface, AgentPromptSurface(editor: editor))
+            .environment(\.themeColors, PreviewFixtures.theme())
+        )
     }
 
     /// Returns a preview for the named view, or an error label for unknown names.
@@ -344,7 +377,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewEditorNSView(appState: AppState, encoder: OutboundActionEncoding) -> EditorNSView? {
+    static func previewEditorNSView(appState: AppState, encoder: OutboundActionEncoding) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
         guard let renderer = CoreTextMetalRenderer() else { return nil }
@@ -372,6 +405,10 @@ enum PreviewRegistry {
     }
 
     private static func populateEditorFrame(dispatcher: CommandDispatcher, guiState: GUIState) {
+        if guiState.agentChatState.visible {
+            populatePromptFrame(dispatcher: dispatcher, state: guiState.agentChatState)
+            return
+        }
         let gutter = Wire.WindowGutter(
             windowId: 1,
             contentRow: 1,
@@ -429,6 +466,43 @@ enum PreviewRegistry {
             gutter: gutter,
             indentGuides: indentGuides
         )
+    }
+    /// Seeds the same reserved, source-backed semantic window used by the live composer.
+    private static func populatePromptFrame(dispatcher: CommandDispatcher, state: AgentChatState) {
+        let gutter = Wire.WindowGutter(
+            windowId: 65534, contentRow: 0, contentCol: 0, contentHeight: 1,
+            isActive: true, contentWidth: 80, cursorLine: 0,
+            lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+        let row = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: state.prompt,
+            spans: [span(0, UInt16(clamping: state.prompt.utf16.count), 0xBBC2CF)]
+        )
+        guard let content = try? GUIWindowContent(
+            windowId: 65534, fullRefresh: true, contentEpoch: 1,
+            cursorVisible: !state.status.isWorking, cursorRow: 0,
+            cursorCol: UInt16(clamping: state.prompt.utf16.count),
+            cursorShape: state.promptMode.usesBlockCursor ? .block : .beam,
+            rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], paneGeometry: previewPaneGeometry(for: gutter, totalLineCount: 1),
+            accessibilityLabel: "Agent prompt", accessibilityGeneration: 1,
+            accessibilityCursor: GUIAccessibilityCursor(row: 0, utf16: UInt32(state.prompt.utf16.count))
+        ) else {
+            preconditionFailure("Invalid canonical prompt preview fixture")
+        }
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: previewThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.dispatch(.guiTextPresentation(windowID: 65534, presentationID: 1))
+        dispatcher.dispatch(.guiAgentChat(
+            visible: true, status: state.status, model: state.model, thinkingLevel: state.thinkingLevel,
+            prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0,
+            promptCursorCol: state.promptCursorCol, promptMode: state.promptMode, promptVisibleRows: 1,
+            promptCompletion: state.promptCompletion, pendingToolName: nil, pendingToolSummary: "",
+            helpVisible: state.helpVisible, helpGroups: []
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
     }
 
     /// Derives a committed pane geometry from a preview gutter so the snapshot

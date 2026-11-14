@@ -143,7 +143,7 @@ defmodule MingaEditor.Agent.PromptBuffer do
 
       {_line, _col} ->
         Buffer.move(pid, :up)
-        state
+        UIState.replace_panel(state, Panel.follow_prompt_cursor(state.panel))
     end
   end
 
@@ -158,7 +158,7 @@ defmodule MingaEditor.Agent.PromptBuffer do
       :at_bottom
     else
       Buffer.move(pid, :down)
-      state
+      UIState.replace_panel(state, Panel.follow_prompt_cursor(state.panel))
     end
   end
 
@@ -259,13 +259,14 @@ defmodule MingaEditor.Agent.PromptBuffer do
     lines = input_lines(state)
     index = Enum.count(panel.pasted_blocks)
     placeholder = @paste_placeholder_prefix <> Integer.to_string(index)
-    {before, after_cursor} = lines |> Enum.at(cursor_line) |> String.split_at(cursor_col)
+    line = Enum.at(lines, cursor_line)
+    <<before::binary-size(^cursor_col), after_cursor::binary>> = line
     new_lines = insert_placeholder_lines(lines, cursor_line, before, after_cursor, placeholder)
     placeholder_line = Enum.find_index(new_lines, &(&1 == placeholder))
     new_cursor_line = min(placeholder_line + 1, Enum.count(new_lines) - 1)
 
     new_cursor_col =
-      if new_cursor_line > placeholder_line, do: 0, else: String.length(placeholder)
+      if new_cursor_line > placeholder_line, do: 0, else: byte_size(placeholder)
 
     Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
     Buffer.move_to(pid, {new_cursor_line, new_cursor_col})

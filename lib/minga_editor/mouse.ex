@@ -91,22 +91,33 @@ defmodule MingaEditor.Mouse do
 
   def handle_text_event(state, %TextEvent{}, nil), do: state
 
-  def handle_text_event(state, %TextEvent{event_type: :drag} = event, %TextTarget{} = target),
+  def handle_text_event(state, %TextEvent{} = event, %TextTarget{window_id: 65_534} = target) do
+    if MingaEditor.Agent.PromptInput.current_source?(state, target),
+      do: apply_text_event(state, event, target),
+      else: state
+  end
+
+  def handle_text_event(state, %TextEvent{} = event, %TextTarget{} = target),
+    do: apply_text_event(state, event, target)
+
+  @spec apply_text_event(state(), TextEvent.t(), TextTarget.t()) :: state()
+
+  defp apply_text_event(state, %TextEvent{event_type: :drag} = event, %TextTarget{} = target),
     do: handle_text_drag(state, event, target)
 
-  def handle_text_event(state, %TextEvent{event_type: :motion} = event, %TextTarget{} = target),
+  defp apply_text_event(state, %TextEvent{event_type: :motion} = event, %TextTarget{} = target),
     do: handle_text_motion(state, event, target)
 
-  def handle_text_event(state, %TextEvent{button: :middle, event_type: :press}, target),
+  defp apply_text_event(state, %TextEvent{button: :middle, event_type: :press}, target),
     do: apply_middle_press(state, target)
 
-  def handle_text_event(state, %TextEvent{button: :right, event_type: :press}, target),
+  defp apply_text_event(state, %TextEvent{button: :right, event_type: :press}, target),
     do: apply_context_press(state, target)
 
-  def handle_text_event(state, %TextEvent{button: :left, event_type: :press} = event, target),
+  defp apply_text_event(state, %TextEvent{button: :left, event_type: :press} = event, target),
     do: handle_text_left_press(state, event, target)
 
-  def handle_text_event(state, %TextEvent{}, %TextTarget{}), do: state
+  defp apply_text_event(state, %TextEvent{}, %TextTarget{}), do: state
 
   @spec handle_text_left_press(state(), TextEvent.t(), TextTarget.t()) :: state()
   defp handle_text_left_press(original, event, target) do
@@ -253,9 +264,15 @@ defmodule MingaEditor.Mouse do
     buffer = target_buffer(target)
 
     anchor =
-      case {state.workspace.buffers.active, Minga.Editing.mode(state)} do
-        {^buffer, :visual} -> MingaEditor.Editing.visual_anchor(state)
-        _ -> Buffer.cursor(buffer)
+      case {target, state.workspace.buffers.active, Minga.Editing.mode(state)} do
+        {%TextTarget{window_id: 65_534}, _active, :visual} ->
+          MingaEditor.Editing.visual_anchor(state)
+
+        {_target, ^buffer, :visual} ->
+          MingaEditor.Editing.visual_anchor(state)
+
+        _ ->
+          Buffer.cursor(buffer)
       end
 
     case focus_and_move_target(state, target, target_position(target)) do
@@ -282,7 +299,7 @@ defmodule MingaEditor.Mouse do
       {:ok, focused, _position} ->
         focused
         |> normalize_mode_for_targeted_gesture()
-        |> MingaEditor.dispatch_command(:paste_after)
+        |> dispatch_target_command(target, :paste_after)
 
       _ ->
         state
@@ -312,8 +329,13 @@ defmodule MingaEditor.Mouse do
     with {:ok, position} <- validate_target(target),
          {:ok, focused} <- focus_target(state, target) do
       preserve? =
-        state.workspace.buffers.active == target_buffer(target) and
-          click_inside_visual_selection?(state, elem(position, 0), elem(position, 1))
+        selection_source_matches?(state, target) and
+          click_inside_visual_selection?(
+            state,
+            target_buffer(target),
+            elem(position, 0),
+            elem(position, 1)
+          )
 
       apply_context_position(state, focused, target, preserve?)
     else
@@ -341,8 +363,8 @@ defmodule MingaEditor.Mouse do
              source_version == target.source_version ->
         case validate_target(target) do
           {:ok, position} ->
+            # Record edge scrolling against the resulting selection cursor, after follow.
             state
-            |> text_drag_auto_scroll(origin_window, event.scroll_x, event.scroll_y)
             |> update_drag_selection(
               target.buffer,
               anchor,
@@ -350,6 +372,8 @@ defmodule MingaEditor.Mouse do
               position,
               &move_target(target, &1)
             )
+            |> follow_target_cursor(target)
+            |> text_drag_auto_scroll(origin_window, event.scroll_x, event.scroll_y)
 
           {:error, _reason} ->
             state
@@ -363,6 +387,9 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec text_drag_auto_scroll(state(), Window.id(), -1 | 0 | 1, -1 | 0 | 1) :: state()
+  defp text_drag_auto_scroll(state, 65_534, _scroll_x, scroll_y),
+    do: MingaEditor.Agent.PromptInput.scroll_current(state, scroll_y)
+
   defp text_drag_auto_scroll(state, window_id, scroll_x, scroll_y) do
     state =
       case scroll_y do
@@ -444,6 +471,9 @@ defmodule MingaEditor.Mouse do
   defp target_window_id(%{window_id: window_id}), do: window_id
 
   @spec focus_target(state(), text_target()) :: {:ok, state()} | {:error, atom()}
+  defp focus_target(state, %TextTarget{window_id: 65_534} = target),
+    do: MingaEditor.Agent.PromptInput.focus(state, target)
+
   defp focus_target(state, target),
     do: WindowFocus.focus_buffer_result(state, target_window_id(target), target_buffer(target))
 
@@ -453,9 +483,36 @@ defmodule MingaEditor.Mouse do
     with {:ok, _position} <- validate_target(target),
          {:ok, focused} <- focus_target(state, target),
          {:ok, moved_position} <- move_target(target, position) do
-      {:ok, focused, moved_position}
+      {:ok, follow_target_cursor(focused, target), moved_position}
     end
   end
+
+  @spec follow_target_cursor(state(), text_target()) :: state()
+  defp follow_target_cursor(state, %TextTarget{window_id: 65_534}),
+    do: MingaEditor.Agent.PromptInput.follow_cursor(state)
+
+  defp follow_target_cursor(state, _target), do: state
+
+  @spec dispatch_target_command(state(), text_target(), atom()) :: state()
+  defp dispatch_target_command(state, %TextTarget{window_id: 65_534}, command),
+    do:
+      MingaEditor.Input.AgentPanel.with_prompt_buffer(
+        state,
+        &MingaEditor.dispatch_command(&1, command)
+      )
+
+  defp dispatch_target_command(state, _target, command),
+    do: MingaEditor.dispatch_command(state, command)
+
+  @spec selection_source_matches?(state(), text_target()) :: boolean()
+  defp selection_source_matches?(state, %TextTarget{window_id: 65_534, buffer: buffer}),
+    do:
+      state.workspace.keymap_scope == :agent and
+        state.workspace.agent_ui.panel.input_focused and
+        state.workspace.agent_ui.panel.prompt_buffer == buffer
+
+  defp selection_source_matches?(state, target),
+    do: state.workspace.buffers.active == target_buffer(target)
 
   @spec move_target(text_target(), text_position()) ::
           {:ok, text_position()} | {:error, atom()}
@@ -1576,14 +1633,15 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec click_inside_visual_selection?(state(), non_neg_integer(), non_neg_integer()) :: boolean()
+  @spec click_inside_visual_selection?(state(), pid(), non_neg_integer(), non_neg_integer()) ::
+          boolean()
   defp click_inside_visual_selection?(
          %{
            workspace: %{
-             editing: %{mode: :visual, mode_state: %VisualState{visual_type: :char} = mode_state},
-             buffers: %{active: buf}
+             editing: %{mode: :visual, mode_state: %VisualState{visual_type: :char} = mode_state}
            }
          },
+         buf,
          target_line,
          target_col
        )
@@ -1602,10 +1660,10 @@ defmodule MingaEditor.Mouse do
   defp click_inside_visual_selection?(
          %{
            workspace: %{
-             editing: %{mode: :visual, mode_state: %VisualState{visual_type: :line} = mode_state},
-             buffers: %{active: buf}
+             editing: %{mode: :visual, mode_state: %VisualState{visual_type: :line} = mode_state}
            }
          },
+         buf,
          target_line,
          _target_col
        )
@@ -1618,7 +1676,7 @@ defmodule MingaEditor.Mouse do
     target_line >= min_line and target_line <= max_line
   end
 
-  defp click_inside_visual_selection?(_state, _target_line, _target_col), do: false
+  defp click_inside_visual_selection?(_state, _buffer, _target_line, _target_col), do: false
 
   @spec normalize_position_range(
           {non_neg_integer(), non_neg_integer()},

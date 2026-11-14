@@ -1145,6 +1145,7 @@ defmodule MingaEditor.Commands.Agent do
     |> create_active_agent_tab()
     |> reset_agent_state_for_new_session()
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
+    |> scope_focus_input()
   end
 
   @spec reset_agent_state_for_new_session(state()) :: state()
@@ -1156,6 +1157,8 @@ defmodule MingaEditor.Commands.Agent do
     agent_ui =
       UIState.new()
       |> UIState.set_thinking_level(old_panel.thinking_level)
+      |> UIState.toggle()
+      |> UIState.activate(state.workspace.windows, state.workspace.file_tree)
 
     TraditionalWorkflow.install_agent_ui(state, agent_ui)
   end

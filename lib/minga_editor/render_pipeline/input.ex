@@ -39,7 +39,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     :font_registry,
     :message_store,
     :frame_seq,
-    :composed_highlights
+    :composed_highlights,
+    prompt: nil
   ]
 
   @type t :: %__MODULE__{
@@ -52,7 +53,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           font_registry: FontRegistry.t(),
           message_store: MessageStore.t(),
           frame_seq: non_neg_integer() | nil,
-          composed_highlights: HighlightCache.highlights()
+          composed_highlights: HighlightCache.highlights(),
+          prompt: MingaEditor.Agent.View.PromptFrame.t() | nil
         }
 
   @type workspace :: WorkspaceIntent.t()
@@ -164,6 +166,10 @@ defmodule MingaEditor.RenderPipeline.Input do
       ) do
     %{input | caches: caches, font_registry: font_registry, message_store: message_store}
   end
+
+  @spec record_prompt(t(), MingaEditor.Agent.View.PromptFrame.t()) :: t()
+  def record_prompt(%__MODULE__{} = input, %MingaEditor.Agent.View.PromptFrame{} = prompt),
+    do: %{input | prompt: prompt, caches: Caches.retain_prompt(input.caches, prompt.presentation)}
 
   @spec reset_frame_rows_rasterized(t()) :: t()
   def reset_frame_rows_rasterized(%__MODULE__{caches: caches} = input),

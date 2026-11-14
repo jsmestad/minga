@@ -36,6 +36,24 @@ defmodule Minga.Core.WrapMapTest do
       assert WrapMap.display_text(Enum.at(entry, 1)) == "foo"
     end
 
+    test "word boundaries retain repeated whitespace and exact source byte offsets" do
+      source = "é  界  tail"
+      [entry] = WrapMap.compute([source], 4, breakindent: false)
+      assert Enum.map_join(entry, & &1.source_text) == source
+
+      Enum.reduce(entry, 0, fn row, offset ->
+        assert row.byte_offset == offset
+        assert binary_part(source, offset, byte_size(row.source_text)) == row.source_text
+        offset + byte_size(row.source_text)
+      end)
+    end
+
+    test "narrow continuation rows never use the old four-column minimum" do
+      [entry] = WrapMap.compute(["abcdef"], 2, breakindent: false)
+      assert Enum.map(entry, & &1.text) == ["ab", "cd", "ef"]
+      assert Enum.map(entry, & &1.byte_offset) == [0, 2, 4]
+    end
+
     test "wraps long text into multiple visual rows" do
       line = "one two three four five six seven eight"
       [entry] = WrapMap.compute([line], 15)

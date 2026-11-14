@@ -51,6 +51,10 @@ public enum OutboundAction: Equatable, Sendable {
     case mouse(row: Int16, column: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     case editorText(target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8)
     case textPresentationState(windowID: UInt16, presentationID: UInt64, state: TextPresentationState)
+    /// Physical fit observed for the exact retained prompt TextPresentation.
+    case agentPromptFit(windowID: UInt16, generation: UInt64, columns: UInt16, maxRows: UInt16)
+    /// Wrapped viewport movement; positive rows scroll down.
+    case agentPromptScroll(windowID: UInt16, generation: UInt64, deltaRows: Int32)
     case scrollBatch(windowID: UInt16, deltaLines: Int16, direction: UInt8)
     case paste(String)
     case log(level: UInt8, message: String)

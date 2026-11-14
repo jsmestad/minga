@@ -108,9 +108,8 @@ defmodule Minga.Core.WrapMap do
       if breakindent, do: leading_whitespace_width(text, oracle, tab_width), else: 0
 
     # First row gets the full width; continuation rows lose indent columns.
-    # Ensure continuation width is at least 4 to avoid infinite loops on
-    # deeply indented lines wider than the viewport.
-    continuation_width = max(width - indent_width, 4)
+    # Deep indentation must still leave a positive continuation width.
+    continuation_width = max(width - indent_width, 1)
     graphemes = String.graphemes(text)
 
     config = %{
@@ -266,7 +265,7 @@ defmodule Minga.Core.WrapMap do
       {_g, idx} when idx > 0 ->
         {before, after_space} = Enum.split(taken, idx + 1)
         bytes = before |> Enum.map(&byte_size/1) |> Enum.sum()
-        remaining = strip_leading_spaces(after_space) ++ overflow_rest
+        remaining = after_space ++ overflow_rest
         {Enum.join(before), remaining, bytes}
 
       _ ->
@@ -275,10 +274,6 @@ defmodule Minga.Core.WrapMap do
         {Enum.join(taken), overflow_rest, bytes}
     end
   end
-
-  @spec strip_leading_spaces([String.t()]) :: [String.t()]
-  defp strip_leading_spaces([" " | rest]), do: strip_leading_spaces(rest)
-  defp strip_leading_spaces(other), do: other
 
   @spec whitespace?(String.t()) :: boolean()
   defp whitespace?(" "), do: true

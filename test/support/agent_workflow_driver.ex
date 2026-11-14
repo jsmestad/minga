@@ -14,6 +14,9 @@ defmodule Minga.Test.AgentWorkflowDriver do
   alias Minga.Test.EditorCase
   alias MingaAgent.Session
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
 
   @ctrl MingaEditor.Input.mod_ctrl()
@@ -85,11 +88,14 @@ defmodule Minga.Test.AgentWorkflowDriver do
   @spec trust_tool_turn(editor_ctx()) :: map()
   def trust_tool_turn(ctx), do: EditorCase.send_key_sync(ctx, ?t, 0)
 
-  @doc "Builds the visible agent chat render model from the current editor state."
+  @doc "Builds agent Content before reading its same-frame prompt and chat render model."
   @spec chat_model(map()) :: AgentChat.t()
   def chat_model(state) do
-    state
-    |> Context.from_editor_state()
+    input = state |> Input.from_editor_state() |> Layout.put()
+    {_contents, _cursor, input} = Content.build_agent_chat_content(input, Layout.get(input))
+
+    input
+    |> Context.from_input()
     |> AgentChatBuilder.build()
   end
 

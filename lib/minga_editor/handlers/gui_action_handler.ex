@@ -107,6 +107,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec dispatch_action(state(), Protocol.GUI.gui_action()) :: state()
 
+  defp dispatch_action(state, {:agent_prompt_fit, window_id, generation, columns, rows}),
+    do: MingaEditor.Agent.PromptInput.fit(state, window_id, generation, columns, rows)
+
+  defp dispatch_action(state, {:agent_prompt_scroll, window_id, generation, delta}),
+    do: MingaEditor.Agent.PromptInput.scroll(state, window_id, generation, delta)
+
   defp dispatch_action(state, {:file_dialog_result, request_id, result}),
     do: BufferManagement.handle_file_dialog_result(state, request_id, result)
 
@@ -621,6 +627,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end)
   end
 
+  defp dispatch_action(state, {:focus_window, 65_534, generation}),
+    do: MingaEditor.Agent.PromptInput.focus_presentation(state, 65_534, generation)
+
   defp dispatch_action(state, {:focus_window, window_id, generation}) do
     with_target(state, {:window, window_id, generation}, fn {:window, window} ->
       case WindowFocus.focus_result(state, window.id) do
@@ -634,11 +643,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, :cmd_copy) do
-    Commands.Editing.execute(state, :cmd_copy)
+    MingaEditor.Agent.PromptInput.command(state, &Commands.Editing.execute(&1, :cmd_copy))
   end
 
   defp dispatch_action(state, :cmd_cut) do
-    Commands.Editing.execute(state, :cmd_cut)
+    MingaEditor.Agent.PromptInput.command(state, &Commands.Editing.execute(&1, :cmd_cut))
   end
 
   defp dispatch_action(state, {:git_open_file, path}) do

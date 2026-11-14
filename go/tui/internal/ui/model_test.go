@@ -1388,12 +1388,14 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 	model := New(120, 34, nil, nil)
 	chat := protocol.AgentChat{
-		Visible:       true,
-		Status:        2,
-		ModelName:     "anthropic:claude-sonnet-4",
-		ThinkingLevel: "medium",
-		Prompt:        "fix the renderer",
+		Visible:           true,
+		Status:            2,
+		ModelName:         "anthropic:claude-sonnet-4",
+		ThinkingLevel:     "medium",
+		Prompt:            "fix the renderer",
+		PromptVisibleRows: 1,
 	}
+	model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows(chat.Prompt), 0, 0, 0, 0, protocol.Selection{}), 700)
 	model.transcript.apply(protocol.AgentTranscript{Present: true, Mode: 0, Epoch: 1, Messages: []protocol.AgentChatMessage{
 		{Kind: 0x01, Text: "please fix the agent view"},
 		{Kind: 0x02, Text: "I will make the agent surface semantic."},
@@ -1699,6 +1701,7 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 		{Kind: 0x05, Text: "Session started · 14:57:49 UTC"},
 	}})
 	model.putWindow(protocol.WindowContent{ID: 7, Rows: []protocol.WindowRow{{Text: ""}}})
+	model.putWindow(protocol.WindowContent{ID: protocol.AgentPromptWindowID, Rows: []protocol.WindowRow{{ID: 1, Text: ""}}})
 	model.viewport.SetContent(model.content())
 
 	bodyLines := strings.Split(ansi.Strip(model.content()), "\n")

@@ -191,6 +191,7 @@ class TerminalGrid:
     """Thin pyte adapter: incremental UTF-8, stateful VT parsing, DSR replies.
 
     Qualification is emitted-output-specific, not full xterm compatibility.
+    The pinned parser omits SU/SD; local dispatch implements those operations with its existing margin-aware IND/RI primitives, preserving the cursor.
     Private color/mouse/synchronized-output modes may be ignored by pyte: text grids do not prove color, animation, pixel placement, or live interactions.
     """
 
@@ -202,8 +203,28 @@ class TerminalGrid:
             def write_process_input(self, data):
                 replies.extend(data.encode())
 
+            def scroll_up(self, count=1):
+                x, y = self.cursor.x, self.cursor.y
+                top, bottom = self.margins or (0, self.lines - 1)
+                self.cursor.y = bottom
+                for _ in range(min(count or 1, bottom - top + 1)):
+                    self.index()
+                self.cursor.x, self.cursor.y = x, y
+
+            def scroll_down(self, count=1):
+                x, y = self.cursor.x, self.cursor.y
+                top, bottom = self.margins or (0, self.lines - 1)
+                self.cursor.y = top
+                for _ in range(min(count or 1, bottom - top + 1)):
+                    self.reverse_index()
+                self.cursor.x, self.cursor.y = x, y
+
+        class Stream(pyte.Stream):
+            csi = {**pyte.Stream.csi, "S": "scroll_up", "T": "scroll_down"}
+            events = pyte.Stream.events | {"scroll_up", "scroll_down"}
+
         self.screen = Screen(columns, rows)
-        self.stream = pyte.Stream(self.screen)
+        self.stream = Stream(self.screen)
         self.decoder = codecs.getincrementaldecoder("utf-8")("strict")
         self.bytes = 0
 

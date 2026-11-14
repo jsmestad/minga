@@ -123,6 +123,9 @@ defmodule Minga.Frontend.Adapter.GUI do
   @spec encode_windows_with_metrics([RenderModel.Window.t()], Caches.t()) ::
           {[binary()], Caches.t(), window_metrics()}
   def encode_windows_with_metrics(windows, %Caches{} = caches) when is_list(windows) do
+    {retired, caches} = Caches.retire_gutters(caches, MapSet.new(windows, & &1.window_id))
+    retirement_commands = Enum.map(retired, &WindowEncoder.encode_retired_gutter/1)
+
     {cmds, caches, metrics} =
       windows
       |> Enum.reduce({[], caches, empty_window_metrics()}, fn window,
@@ -131,7 +134,9 @@ defmodule Minga.Frontend.Adapter.GUI do
         {cmds, caches, merge_window_metrics(metrics_acc, metrics)}
       end)
 
-    {Enum.reverse(cmds), caches, metrics}
+    retirement_bytes = IO.iodata_length(retirement_commands)
+    metrics = %{metrics | gutter_bytes: metrics.gutter_bytes + retirement_bytes}
+    {retirement_commands ++ Enum.reverse(cmds), caches, metrics}
   end
 
   @spec encode_metal_ui(RenderModel.UI.t(), Caches.t()) :: {[binary()], Caches.t()}

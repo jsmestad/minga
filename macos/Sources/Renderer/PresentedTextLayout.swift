@@ -52,8 +52,37 @@ final class PresentedTextLayout {
     }
 
     let panes: [Pane]
+    let promptTransform: AgentPromptPresentationTransform?
+    let renderedWindowIDs: Set<UInt16>
 
-    init(panes: [Pane]) { self.panes = panes }
+    init(panes: [Pane], promptTransform: AgentPromptPresentationTransform? = nil, renderedWindowIDs: Set<UInt16>? = nil) {
+        self.promptTransform = promptTransform
+        self.renderedWindowIDs = renderedWindowIDs ?? Set(panes.map(\.windowID))
+        guard let transform = promptTransform else {
+            self.panes = panes
+            return
+        }
+        self.panes = panes.compactMap { pane in
+            let rect = transform.rect(pane.rect)
+            guard !rect.isNull, !rect.isEmpty else { return nil }
+            return Pane(
+                windowID: pane.windowID, presentationID: pane.presentationID,
+                rect: rect, scrollOffset: pane.scrollOffset,
+                rows: pane.rows.compactMap { row in
+                    let rect = transform.rect(row.rect)
+                    guard !rect.isNull, !rect.isEmpty else { return nil }
+                    return Row(
+                        rowIndex: row.rowIndex, rowID: row.rowID,
+                        presentationRow: row.presentationRow,
+                        composedUTF16Start: row.composedUTF16Start, composedUTF16End: row.composedUTF16End,
+                        line: row.line,
+                        origin: CGPoint(x: row.origin.x + transform.offset.x, y: row.origin.y + transform.offset.y),
+                        rect: rect
+                    )
+                }
+            )
+        }
+    }
 
     func hit(at point: CGPoint, capturedWindowID: UInt16? = nil) -> Hit? {
         let pane: Pane?

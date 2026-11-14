@@ -14,7 +14,7 @@ import (
 
 func (m Model) content() string {
 	if chat, ok := m.agentChat(); ok && chat.Visible {
-		return strings.Join(m.renderAgentChatBody(chat), "\n")
+		return strings.Join(m.withFileTree(m.renderAgentChatBody(chat)), "\n")
 	}
 	// The launchpad (#2689) takes over the editor region when the workspace has
 	// zero buffers, exactly as the zero-windows path below takes over: its
@@ -156,7 +156,9 @@ func (m Model) leftChromeWidth() int {
 		return fileTreeWidth(m.width, tree) + 1 // +1 for the │ border separator
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
-		return semanticSidebarWidth(m.width, sidebars) + 1 // +1 for │ separator column
+		if width := semanticSidebarWidth(m.width, sidebars); width > 0 {
+			return width + 1 // +1 for │ separator column
+		}
 	}
 	return 0
 }
@@ -518,6 +520,9 @@ func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, 
 
 func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow, sourceRowIndex int, contentRowIndex int, width int, cursorline bool, cursorlineBG uint32) string {
 	base := m.editorStyle().Width(width)
+	if window.ID == protocol.AgentPromptWindowID {
+		base = base.Background(m.palette().AgentInputSurface())
+	}
 	if cursorline && cursorlineBG != 0 {
 		base = base.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
 	}
@@ -535,6 +540,9 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 			continue
 		}
 		style := m.styleForEditorSpan(span)
+		if window.ID == protocol.AgentPromptWindowID && span.BG == 0 {
+			style = style.Background(m.palette().AgentInputSurface())
+		}
 		if cursorline && span.BG == 0 && cursorlineBG != 0 {
 			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
 		}

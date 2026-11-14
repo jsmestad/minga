@@ -90,19 +90,15 @@ func TestKeyPacketEncodesLoggedInsertSentence(t *testing.T) {
 	}
 }
 
-func TestKeyPacketParsesFragmentedSGRMouseTail(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<65;57;23M"}), 0)
+func TestTerminalInputParsesFragmentedSGRMouseTail(t *testing.T) {
+	msg := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<65;57;23M"}))
+	wheel, ok := msg.(tea.MouseWheelMsg)
 	if !ok {
-		t.Fatal("SGR mouse tail should encode a mouse packet")
+		t.Fatalf("SGR wheel tail normalized as %T, want a mouse event", msg)
 	}
-	if packet[0] != generated.OPMouseEvent {
-		t.Fatalf("opcode = 0x%02X, want mouse", packet[0])
-	}
-	if gotRow, gotCol := int16(packet[1])<<8|int16(packet[2]), int16(packet[3])<<8|int16(packet[4]); gotRow != 22 || gotCol != 56 {
-		t.Fatalf("mouse coordinates = row %d col %d, want row 22 col 56", gotRow, gotCol)
-	}
-	if packet[5] != 0x41 || packet[7] != 0 {
-		t.Fatalf("mouse button/event = button %#x event %#x, want wheel-down press", packet[5], packet[7])
+	mouse := wheel.Mouse()
+	if mouse.X != 56 || mouse.Y != 22 || mouse.Button != tea.MouseWheelDown {
+		t.Fatalf("SGR physical mouse coordinates/button = %+v", mouse)
 	}
 }
 
@@ -181,7 +177,8 @@ func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
 		{name: "free motion", text: "<35;10;5M", wantEventType: protocol.MouseMotion},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: tc.text}), 0)
+			mouse := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: tc.text})).(tea.MouseMsg)
+			packet, ok := New(80, 24, nil, nil).mousePacket(mouse)
 			if !ok {
 				t.Fatal("SGR motion tail should encode a mouse packet")
 			}
@@ -192,8 +189,9 @@ func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
 	}
 }
 
-func TestKeyPacketParsesShiftWheelSGRMouseTailAsHorizontal(t *testing.T) {
-	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"}), 0)
+func TestTerminalInputPreservesShiftWheelSGRMouseTail(t *testing.T) {
+	mouse := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"})).(tea.MouseMsg)
+	packet, ok := New(80, 24, nil, nil).mousePacket(mouse)
 	if !ok {
 		t.Fatal("SGR shift wheel tail should encode a mouse packet")
 	}

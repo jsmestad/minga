@@ -38,6 +38,12 @@ defmodule MingaEditor.Renderer.TextPresentations do
           []
       end)
 
+    presentations =
+      case output.prompt do
+        nil -> presentations
+        %{presentation: presentation} -> [presentation | presentations]
+      end
+
     state = acknowledge(state, presentations)
     window_ids = MapSet.new(presentations, & &1.window_id)
     %{state | index: TextInteractionIndex.retain_current_windows(state.index, window_ids)}

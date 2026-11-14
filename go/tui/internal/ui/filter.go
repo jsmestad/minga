@@ -21,6 +21,7 @@ func NewInputFilter() *InputFilter {
 }
 
 func (f *InputFilter) Filter(_ tea.Model, msg tea.Msg) tea.Msg {
+	msg = normalizeTerminalInput(msg)
 	switch msg := msg.(type) {
 	case tea.MouseMotionMsg:
 		if !f.allow(&f.lastMotion) {

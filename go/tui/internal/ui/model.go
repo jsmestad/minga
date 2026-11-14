@@ -243,6 +243,7 @@ func agentAnimationTick() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	msg = normalizeTerminalInput(msg)
 	m.pendingClipboard = ""
 	var cmd tea.Cmd
 	transitionNow := time.Time{}
@@ -316,6 +317,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
 			delta := m.drainScrollDelta(msg)
+			if m.sendAgentPromptScroll(msg, delta) {
+				break
+			}
 			m.queueAgentWheelScroll(msg, delta)
 			m = m.applyPresentationScrollDelta(msg, delta)
 			if !m.sendScrollBatchDelta(msg, delta) {
@@ -387,6 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, feedbackTick(delay))
 	}
 
+	m.reportAgentPromptFit()
 	m.viewport.SetWidth(max(m.width, 1))
 	m.viewport.SetHeight(m.layout.body.Height)
 	m.viewport.SetContent(m.composeBody())
@@ -546,7 +551,11 @@ func (m Model) View() tea.View {
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
-	view.Cursor = m.residentCursor()
+	if chat, ok := m.agentChat(); ok && chat.Visible {
+		view.Cursor = m.agentPromptCursor()
+	} else {
+		view.Cursor = m.residentCursor()
+	}
 	return view
 }
 

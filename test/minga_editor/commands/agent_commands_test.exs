@@ -1085,6 +1085,19 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert agent_window.content == {:agent_chat, :semantic}
       assert new_state.workspace.buffers.active == nil
+      assert new_state.workspace.keymap_scope == :agent
+      assert new_state.workspace.editing.mode == :insert
+      assert new_state.workspace.agent_ui.panel.visible
+      assert new_state.workspace.agent_ui.panel.input_focused
+      prompt = new_state.workspace.agent_ui.panel.prompt_buffer
+      assert is_pid(prompt)
+      original = state.workspace.buffers.active
+      original_text = Minga.Buffer.content(original)
+
+      assert {:handled, typed} = MingaEditor.Input.AgentPanel.handle_key(new_state, ?X, 0)
+      assert Minga.Buffer.content(prompt) == "X"
+      assert typed.workspace.buffers.active == nil
+      assert Minga.Buffer.content(original) == original_text
     end
 
     test "creates an active agent workspace with no file context" do

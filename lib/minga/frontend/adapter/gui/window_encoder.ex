@@ -244,11 +244,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_text_presentation(RenderWindow.t()) :: binary() | nil
   def encode_text_presentation(
         %RenderWindow{
-          content_kind: :buffer,
+          content_kind: kind,
           text_presentation_id: presentation_id
         } = window
       )
-      when presentation_id > 0 do
+      when kind in [:buffer, :agent_prompt] and presentation_id > 0 do
     :gui_text_presentation
     |> Writer.new()
     |> Writer.append(<<@op_gui_text_presentation>>)
@@ -1120,6 +1120,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_annotation_kind(:gutter_icon), do: 2
 
   # ── Gutter ──────────────────────────────────────────────────────────────
+
+  @doc "Encodes ownership retirement for a previously committed gutter."
+  @spec encode_retired_gutter(Gutter.t()) :: binary()
+  def encode_retired_gutter(%Gutter{} = gutter), do: encode_gutter_binary(gutter, false)
 
   @spec encode_gutter(Gutter.t() | nil, boolean()) :: [binary()]
   defp encode_gutter(nil, _retain?), do: []

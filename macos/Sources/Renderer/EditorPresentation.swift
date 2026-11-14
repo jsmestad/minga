@@ -14,6 +14,45 @@ struct VisibleEditorPresentation: Sendable {
     let localTransform: EditorLocalPresentationTransform?
     var textLayout: PresentedTextLayout? = nil
 }
+/// Discardable app-layer allocation in the continuously mounted editor's coordinates.
+struct AgentPromptPlacement: Equatable, Sendable {
+    let rect: CGRect
+    let maximumHeight: CGFloat
+
+    func fit(cellWidth: CGFloat, rowPitch: CGFloat, generation: UInt64) -> OutboundAction? {
+        guard cellWidth > 0, rowPitch > 0, rect.width.isFinite, maximumHeight.isFinite,
+              rect.width >= cellWidth, maximumHeight >= rowPitch else { return nil }
+        return .agentPromptFit(
+            windowID: 65534, generation: generation,
+            columns: UInt16(clamping: Int(floor(rect.width / cellWidth))),
+            maxRows: UInt16(clamping: Int(floor(maximumHeight / rowPitch)))
+        )
+    }
+}
+
+/// One translation and clip captured for every draw pass and every geometry consumer.
+struct AgentPromptPresentationTransform: Equatable, Sendable {
+    let offset: CGPoint
+    let clip: CGRect
+
+    init(placement: AgentPromptPlacement, surface: PresentedWindowSurface, cellWidth: CGFloat, rowPitch: CGFloat) {
+        offset = CGPoint(
+            x: placement.rect.minX - CGFloat(surface.paneGeometry.textRect.col) * cellWidth,
+            y: placement.rect.minY - CGFloat(surface.paneGeometry.textRect.row) * rowPitch
+        )
+        clip = placement.rect
+    }
+    /// The aperture expressed in committed source coordinates, before the GPU translation.
+    /// A committed source origin can lie beyond a resized drawable while its
+    /// frame is retained. Clip in source space before translating into the slot.
+    var sourceClip: CGRect {
+        clip.offsetBy(dx: -offset.x, dy: -offset.y)
+    }
+
+    func rect(_ source: CGRect) -> CGRect {
+        source.offsetBy(dx: offset.x, dy: offset.y).intersection(clip)
+    }
+}
 
 /// Immutable gutter state owned by one committed editor surface.
 enum GutterPresentation: Sendable {
@@ -102,7 +141,9 @@ struct PresentedWindowSurface: Sendable {
         if let presentation = content.scrollPresentation {
             start = content.rowStore.lowerBound(bufferLine: presentation.anchorTop) + Int(presentation.anchorVisualRowOffset)
         } else {
-            start = content.rowStore.lowerBound(bufferLine: viewport.top) + Int(viewport.visualRowOffset)
+            // Windowed payloads already start at the committed viewport, including
+            // a leading continuation. Match ResidentRenderPreparation's row origin.
+            start = 0
         }
         let end = start + Int(viewport.rows)
         return min(start, content.rowStore.count)..<min(max(end, start), content.rowStore.count)

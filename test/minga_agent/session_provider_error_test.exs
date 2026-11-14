@@ -71,7 +71,20 @@ defmodule MingaAgent.SessionProviderErrorTest do
               ]
           end
 
-        mcp_session_stream(chunks)
+        # Only successful enumeration signals exhaustion; cancellation must not satisfy the wait.
+        stream =
+          Stream.transform(
+            chunks,
+            fn -> count end,
+            fn chunk, call -> {[chunk], call} end,
+            fn call ->
+              send(test_pid, {:mcp_response_stream_exhausted, call})
+              {[], call}
+            end,
+            fn _call -> :ok end
+          )
+
+        mcp_session_stream(stream)
       end
 
       session =
@@ -110,7 +123,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
       assert :ok = Session.respond_to_approval(session, :approve)
       assert_receive {:mcp_transport_started, "Local Tools", transport}, @event_timeout
-      await_durable_mcp_turn(session, "MCP discovery")
+      await_durable_mcp_turn(session, 1, "MCP discovery")
 
       FakeTransport.crash(transport)
 
@@ -120,7 +133,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
       assert_receive {:agent_event, ^session, {:status_changed, :error}}, @event_timeout
 
       assert :ok = Session.send_prompt(session, "continue")
-      await_durable_mcp_turn(session, "builtin recovery")
+      await_durable_mcp_turn(session, 3, "builtin recovery")
       assert_receive {:session_mcp_tools, 2, tool_names}, @event_timeout
       assert "builtin_echo" in tool_names
       assert "list_mcp_tools" in tool_names
@@ -259,8 +272,22 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
   end
 
-  @spec await_durable_mcp_turn(GenServer.server(), String.t()) :: :ok
-  defp await_durable_mcp_turn(session, phase) do
+  @spec await_durable_mcp_turn(GenServer.server(), non_neg_integer(), String.t()) :: :ok
+  defp await_durable_mcp_turn(session, response_call, phase) do
+    # Tool/checkpoint work precedes the final response; the durability deadline starts after it.
+    receive do
+      {:mcp_response_stream_exhausted, ^response_call} ->
+        :ok
+
+      {:agent_event, ^session, {:error, message}} ->
+        flunk("#{phase} failed before its response stream was exhausted: #{message}")
+
+      {:agent_event, ^session, {:status_changed, :error}} ->
+        flunk("#{phase} entered error before its response stream was exhausted")
+    after
+      @event_timeout -> flunk("#{phase} response stream was not exhausted")
+    end
+
     receive do
       {:agent_event, ^session, {:resumable_boundary, _revision}} ->
         :ok

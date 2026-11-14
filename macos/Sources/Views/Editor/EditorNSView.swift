@@ -174,12 +174,33 @@ final class EditorNSView: MTKView {
     /// Window currently registered for key/resign notifications.
     private weak var observedWindow: NSWindow?
 
-    /// When true, the agent chat SwiftUI overlay is visible. The Metal
-    /// surface is at opacity(0) so the SwiftUI overlay is not occluded
-    /// by the NSView layer. A local key event monitor forwards keyboard
-    /// events to keyDown since opacity(0) disconnects normal event
-    /// delivery from the SwiftUI hosting layer.
+    /// Chat chrome leaves a transparent aperture over this same input/render surface.
     var agentChatVisible: Bool { focusPolicy.agentOverlayVisible }
+    private(set) var agentPromptPlacement: AgentPromptPlacement?
+    private var agentPromptPlacementOwner: ObjectIdentifier?
+    private var lastPromptFit: OutboundAction?
+    private var promptScrollAccumulator = ScrollAccumulator()
+
+    /// Installs discardable physical placement; no draft or responder ownership moves.
+    func setAgentPromptPlacement(_ placement: AgentPromptPlacement?, owner: ObjectIdentifier) {
+        if placement == nil, agentPromptPlacementOwner != owner { return }
+        agentPromptPlacementOwner = placement == nil ? nil : owner
+        guard placement != agentPromptPlacement else { return }
+        agentPromptPlacement = placement
+        layer?.isOpaque = placement == nil && !agentChatVisible
+        lastPromptFit = nil
+        presentationAvailabilityEpoch &+= 1
+        renderFrame()
+    }
+
+    private func reportAgentPromptFit(snapshot: CommittedEditorSnapshot) {
+        guard let placement = agentPromptPlacement,
+              snapshot.surface(for: 65534) != nil,
+              let generation = snapshot.metadata.textPresentations[65534],
+              let action = placement.fit(cellWidth: cellWidth, rowPitch: cellHeight * CGFloat(snapshot.frameState.lineSpacing), generation: generation),
+              action != lastPromptFit else { return }
+        if encoder.send(action) == .accepted { lastPromptFit = action }
+    }
 
     /// Border overlay shown during file drag-and-drop hover.
     private var dropHighlightLayer: CAShapeLayer?
@@ -318,6 +339,14 @@ final class EditorNSView: MTKView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if agentChatVisible || agentPromptPlacement != nil {
+            let local = convert(point, from: superview)
+            guard let pane = editorPresentation?.textLayout?.panes.first(where: { $0.windowID == 65534 }),
+                  pane.rect.contains(local) else { return nil }
+        }
+        return super.hitTest(point)
+    }
     override var isFlipped: Bool { true }
 
     // MARK: - Cursor blink control
@@ -648,6 +677,8 @@ final class EditorNSView: MTKView {
             dispatcher.discardPendingPresentation(reason: .hidden)
             return
         }
+        reportAgentPromptFit(snapshot: committedSnapshot)
+        let promptPlacement = agentPromptPlacement
 
         let localScrollPresentation = prepareLocalScrollPresentationForDraw(committedSnapshot: committedSnapshot)
         if !isDraggingScrollIndicator,
@@ -692,6 +723,8 @@ final class EditorNSView: MTKView {
                 Float(localScrollPresentation?.offset.y ?? 0)
             ),
             presentationWindowId: localScrollPresentation?.windowId,
+            promptPlacement: promptPlacement,
+            agentPromptVisible: agentChatVisible,
             presentationInputSeq: presentationInputSeq,
             latencyRecorder: dispatcher.latency,
             connectionID: connectionID,
@@ -1531,13 +1564,19 @@ final class EditorNSView: MTKView {
 
     // MARK: - Agent chat key forwarding
 
-    /// Activates the agent chat overlay mode. The Metal surface goes to
-    /// opacity(0) so the SwiftUI chat overlay is visible. Since opacity(0)
-    /// disconnects normal event delivery, a local event monitor forwards
-    /// keyboard events to keyDown. SwiftUI text selection still works
-    /// because the monitor yields to NSText field editors.
+    /// Publishes overlay presence to the sole responder policy.
     func setAgentChatVisible(_ visible: Bool) {
+        guard agentChatVisible != visible else { return }
         focusPolicy.agentOverlayVisibilityDidChange(visible)
+        layer?.isOpaque = !visible
+        if !visible {
+            agentPromptPlacement = nil
+            agentPromptPlacementOwner = nil
+            lastPromptFit = nil
+            promptScrollAccumulator.reset()
+        }
+        presentationAvailabilityEpoch &+= 1
+        renderFrame()
     }
 
     // MARK: - Keyboard
@@ -1787,7 +1826,9 @@ final class EditorNSView: MTKView {
         let hit = dispatcher.visibleEditorPresentation?.textLayout?.hit(at: point, capturedWindowID: capturedWindow)
         if eventType == MOUSE_RELEASE { textGestureWindows.removeValue(forKey: button) }
         guard let hit else {
-            guard let capturedWindow else { return false }
+            guard let capturedWindow else {
+                return agentChatVisible || editorPresentation?.textLayout?.promptTransform != nil
+            }
             if eventType == MOUSE_RELEASE {
                 let target = EditorTextTarget(windowID: capturedWindow, presentationID: 0, rowIndex: 0, rowID: 0, utf16Offset: 0)
                 encoder.send(.editorText(target: target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: 0, scrollY: 0))
@@ -1819,7 +1860,7 @@ final class EditorNSView: MTKView {
 
         // Scroll indicator track: intercept clicks on the right edge.
         let point = convert(event.locationInWindow, from: nil)
-        if shouldCaptureScrollTrackClick(point) {
+        if editorPresentation?.textLayout?.promptTransform == nil, shouldCaptureScrollTrackClick(point) {
             isDraggingScrollIndicator = true
             scrollIndicatorDragOffset = scrollTrackDragOffset(forY: point.y)
             let line = scrollTrackYToLine(point.y)
@@ -1830,14 +1871,14 @@ final class EditorNSView: MTKView {
             return
         }
 
-        if handleFoldChevronClick(at: point) {
+        if editorPresentation?.textLayout?.promptTransform == nil, handleFoldChevronClick(at: point) {
             return
         }
 
         resetCursorBlink()
         leftMouseDownPoint = point
         leftMouseDragStarted = false
-        dividerDragState = dividerHitState(at: point)
+        dividerDragState = editorPresentation?.textLayout?.promptTransform == nil ? dividerHitState(at: point) : .none
         if dividerDragState != .none {
             setDividerCursorState(dividerDragState)
         }
@@ -2034,8 +2075,10 @@ final class EditorNSView: MTKView {
     override func mouseMoved(with event: NSEvent) {
         guard !inLiveResize else { return }
         let point = convert(event.locationInWindow, from: nil)
-        setDividerCursorState(dividerHitState(at: point))
-        updateGutterHover(at: point)
+        if editorPresentation?.textLayout?.promptTransform == nil {
+            setDividerCursorState(dividerHitState(at: point))
+            updateGutterHover(at: point)
+        }
         let (row, col) = cellPosition(from: event)
         clearSmoothScrollOffsetIfPointerLeftTarget(row: row, col: col)
         if sendPresentedText(event: event, button: MOUSE_BUTTON_NONE, eventType: MOUSE_MOTION, clickCount: 1) { return }
@@ -2142,6 +2185,7 @@ final class EditorNSView: MTKView {
         // event mid-resize would hit-test in-flux geometry and re-establish the scroll
         // offset the resize discard just cleared.
         guard !inLiveResize else { return }
+        if sendAgentPromptScroll(event) { return }
         // A resident thumb drag owns scroll presentation while the button is held: ignore concurrent
         // wheel input so the two do not fight over the offset. A post-release reconcile (button up)
         // is superseded by a fresh wheel gesture, so flush-and-drop it and let the wheel take over.
@@ -2168,6 +2212,26 @@ final class EditorNSView: MTKView {
             handleDiscreteScroll(event: event, row: row, col: col, mods: mods)
         }
     }
+    /// Wheel input targets the same displayed TextPresentation as pointer input.
+    private func sendAgentPromptScroll(_ event: NSEvent) -> Bool {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let pane = editorPresentation?.textLayout?.panes.first(where: {
+            $0.windowID == 65534 && $0.rect.contains(point)
+        }) else { return false }
+        if event.phase == .began { promptScrollAccumulator.reset() }
+        let delta: Int32
+        if event.hasPreciseScrollingDeltas {
+            let events = promptScrollAccumulator.accumulateVertical(deltaY: event.scrollingDeltaY, cellHeight: effectiveCellHeight)
+            delta = events.reduce(0) { $0 + ($1 == .scrollDown ? 1 : -1) }
+        } else {
+            delta = Int32(clamping: Int((-event.scrollingDeltaY).rounded(.awayFromZero)))
+        }
+        if delta != 0 {
+            encoder.send(.agentPromptScroll(windowID: pane.windowID, generation: pane.presentationID, deltaRows: delta))
+        }
+        return true
+    }
+
 
     /// Smooth trackpad scrolling: accumulate pixel deltas, emit discrete
     /// events at cell boundaries, and render the fractional offset via Metal.
@@ -3745,6 +3809,13 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         guard let window else { return 0 }
         let windowPoint = window.convertPoint(fromScreen: point)
         let localPoint = convert(windowPoint, from: nil)
+        if editorPresentation?.textLayout?.renderedWindowIDs.isEmpty == true { return 0 }
+        synchronizeAccessibilityPresentation()
+        if let hit = editorPresentation?.textLayout?.hit(at: localPoint),
+           let projection = accessibilityProjections.first(where: { $0.identity.windowID == hit.target.windowID }),
+           let row = projection.rows.first(where: { $0.absoluteRow == Int(hit.target.rowIndex) }) {
+            return row.insertionRange(atSourceUTF16Offset: Int(hit.target.utf16Offset))?.location ?? 0
+        }
         let point = presentationNormalizedPoint(localPoint)
         let row = max(0, Int(point.y / effectiveCellHeight))
         let col = max(0, Int(cellColumn(at: point, row: Int16(clamping: row))))
@@ -3769,6 +3840,16 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
             return NSRect(x: 0, y: 0, width: cellWidth, height: effectiveCellHeight)
         }
         let content = surface.content
+        if let layout = editorPresentation?.textLayout, !layout.renderedWindowIDs.contains(surface.windowId) {
+            return .zero
+        }
+        if let cursor = content.accessibilityCursor,
+           let layout = editorPresentation?.textLayout,
+           let pane = layout.panes.first(where: { $0.windowID == surface.windowId }),
+           let point = layout.cursor(windowID: surface.windowId, row: cursor.row, utf16: cursor.utf16) {
+            return CGRect(x: point.x - pane.scrollOffset.x, y: point.y - pane.scrollOffset.y, width: cellWidth, height: effectiveCellHeight)
+                .intersection(pane.rect)
+        }
         let scrollLeft = CGFloat(content.scrollLeft) * cellWidth
         let localOffset = visibleLocalScrollPresentation?.windowId == surface.windowId ? visibleLocalScrollPresentation?.offset ?? .zero : .zero
         let cursorCol = surface.residentSemantics.map { UInt32($0.cursor.col) } ?? UInt32(content.cursorCol)
@@ -3791,6 +3872,7 @@ private struct AccessibilityProjectionKey: Equatable {
     let generation: UInt32
     let frameSeq: UInt32
     let localTransform: EditorLocalPresentationTransform?
+    let promptTransform: AgentPromptPresentationTransform?
     let cellWidth: CGFloat
     let cellHeight: CGFloat
 }
@@ -3915,6 +3997,7 @@ extension EditorNSView {
         guard let presentation = editorPresentation, cellWidth > 0, effectiveCellHeight > 0 else { return [] }
         let snapshot = presentation.snapshot
         return snapshot.surfaces
+            .filter { presentation.textLayout?.renderedWindowIDs.contains($0.windowId) ?? true }
             .sorted { lhs, rhs in
                 let left = lhs.paneGeometry.textRect
                 let right = rhs.paneGeometry.textRect
@@ -3927,7 +4010,8 @@ extension EditorNSView {
                     isActivePane: snapshot.activeSurface?.windowId == surface.windowId,
                     localTransform: presentation.localTransform,
                     cellWidth: cellWidth,
-                    cellHeight: effectiveCellHeight
+                    cellHeight: effectiveCellHeight,
+                    promptTransform: presentation.textLayout?.promptTransform
                 )
             }
     }
@@ -3944,6 +4028,7 @@ extension EditorNSView {
             generation: snapshot.generation,
             frameSeq: snapshot.frameSeq,
             localTransform: presentation.localTransform,
+            promptTransform: presentation.textLayout?.promptTransform,
             cellWidth: cellWidth,
             cellHeight: effectiveCellHeight
         )

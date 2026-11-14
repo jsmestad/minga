@@ -40,6 +40,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_window_content_fps: %{non_neg_integer() => integer()},
           last_window_overlay_fps: %{non_neg_integer() => integer()},
           last_window_gutter_fps: %{non_neg_integer() => term()},
+          last_window_gutters: %{non_neg_integer() => Minga.RenderModel.Window.Gutter.t()},
           pending_gutter_ids: MapSet.t(non_neg_integer()),
           last_window_content_epochs: %{non_neg_integer() => non_neg_integer()},
           last_window_row_keys: %{non_neg_integer() => [{non_neg_integer(), non_neg_integer()}]},
@@ -83,6 +84,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_window_overlay_fps: %{},
             last_window_content_epochs: %{},
             last_window_gutter_fps: %{},
+            last_window_gutters: %{},
             pending_gutter_ids: MapSet.new(),
             last_window_row_keys: %{},
             last_window_rows: %{},
@@ -140,7 +142,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
   def prepare_gutter(
         caches,
         id,
-        %{entries: %Minga.RenderModel.Window.Gutter.ResidentRows{} = rows},
+        %{entries: %Minga.RenderModel.Window.Gutter.ResidentRows{} = rows} = gutter,
         full_refresh?
       ) do
     retain? =
@@ -154,17 +156,40 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
      %{
        caches
        | last_window_gutter_fps: Map.put(caches.last_window_gutter_fps, id, rows),
+         last_window_gutters: Map.put(caches.last_window_gutters, id, gutter),
          pending_gutter_ids: pending
      }}
   end
 
-  def prepare_gutter(caches, id, _gutter, _full_refresh?) do
+  def prepare_gutter(caches, id, gutter, _full_refresh?) do
     {false,
      %{
        caches
        | last_window_gutter_fps: Map.delete(caches.last_window_gutter_fps, id),
+         last_window_gutters: remember_gutter(caches.last_window_gutters, id, gutter),
          pending_gutter_ids: MapSet.delete(caches.pending_gutter_ids, id)
      }}
+  end
+
+  @spec remember_gutter(map(), non_neg_integer(), Minga.RenderModel.Window.Gutter.t() | nil) ::
+          map()
+  defp remember_gutter(gutters, id, nil), do: Map.delete(gutters, id)
+  defp remember_gutter(gutters, id, gutter), do: Map.put(gutters, id, gutter)
+
+  @doc "Retires obsolete gutter ownership through ordinary gutter metadata, not a keyframe."
+  @spec retire_gutters(t(), MapSet.t(non_neg_integer())) ::
+          {[Minga.RenderModel.Window.Gutter.t()], t()}
+  def retire_gutters(%__MODULE__{} = caches, visible_ids) do
+    {visible, absent} =
+      Enum.split_with(caches.last_window_gutters, fn {id, _gutter} ->
+        MapSet.member?(visible_ids, id)
+      end)
+
+    retired =
+      for {_id, %{is_active: true} = gutter} <- absent,
+          do: Minga.RenderModel.Window.Gutter.deactivate(gutter)
+
+    {retired, %{caches | last_window_gutters: Map.new(visible)}}
   end
 
   @doc "Acknowledges pending row and gutter updates in one successfully applied frame."

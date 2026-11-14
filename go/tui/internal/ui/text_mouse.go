@@ -96,6 +96,12 @@ func editorTextMouseParts(msg tea.MouseMsg) (button byte, eventType byte, suppor
 }
 
 func (m Model) editorTextTargetAt(screenX, screenY int, capturedWindowID uint16) (editorTextTarget, bool) {
+	if chat, ok := m.agentChat(); ok && chat.Visible && (capturedWindowID == 0 || capturedWindowID == protocol.AgentPromptWindowID) {
+		if capturedWindowID == 0 && m.editorTextOccluded(screenX, screenY) {
+			return editorTextTarget{}, false
+		}
+		return m.agentPromptTextTargetAt(screenX, screenY, capturedWindowID != 0)
+	}
 	if capturedWindowID == 0 && m.editorTextOccluded(screenX, screenY) {
 		return editorTextTarget{}, false
 	}
@@ -163,9 +169,6 @@ func (m Model) editorTextTargetAt(screenX, screenY int, capturedWindowID uint16)
 }
 
 func (m Model) editorTextOccluded(screenX, screenY int) bool {
-	if chat, ok := m.agentChat(); ok && chat.Visible {
-		return true
-	}
 	if state, ok := m.emptyState(); ok && state.Visible {
 		return true
 	}

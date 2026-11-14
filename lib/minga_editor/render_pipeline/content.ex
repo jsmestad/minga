@@ -11,6 +11,8 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Agent.ViewContext
+  alias MingaEditor.Agent.View.PromptFrame
+  alias MingaEditor.Agent.View.PromptProjection
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
@@ -412,33 +414,28 @@ defmodule MingaEditor.RenderPipeline.Content do
     win_layout = Layout.add_sidebar(win_layout)
     {row_off, col_off, chat_width, height} = win_layout.content
 
-    # Compute prompt height and subdivide the content rect for chat content vs
-    # prompt input. PromptRenderer here is pure layout math (no cell drawing).
-    prompt_height = PromptRenderer.prompt_height(ctx, chat_width)
+    inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
+
+    projection =
+      PromptProjection.build(ctx.ui_state.panel, inner_width,
+        oracle: MingaEditor.Frontend.Capabilities.width_oracle(ctx.capabilities)
+      )
+
+    prompt_height = projection.visible_rows + 2
     input_v_gap = 1
     chat_height = max(height - prompt_height - input_v_gap, 1)
     prompt_row = row_off + chat_height + input_v_gap
-    prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
-    full_rect = {row_off, col_off, chat_width, height}
+    prompt_rect = {prompt_row + 1, col_off + 4, projection.columns, projection.visible_rows}
     state = update_agent_window_viewport(state, window, win_id, chat_height, chat_width)
 
-    # When help is visible the chat buffer is suppressed. The help overlay
-    # and prompt both reach the live (semantic) frontends through the
-    # AgentChat semantic model, so this branch emits no window models.
-    help_visible = state.workspace.agent_ui.view.help_visible
-
-    if help_visible do
-      {WindowContent.new(nil, [], nil), nil, state}
-    else
-      render_semantic_agent_chat_window(
-        state,
-        ctx,
-        chat_width,
-        chat_height,
-        prompt_rect,
-        full_rect
-      )
-    end
+    render_semantic_agent_chat_window(
+      state,
+      ctx,
+      chat_width,
+      chat_height,
+      prompt_rect,
+      projection
+    )
   end
 
   @spec render_semantic_agent_chat_window(
@@ -447,32 +444,49 @@ defmodule MingaEditor.RenderPipeline.Content do
           pos_integer(),
           pos_integer(),
           {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()},
-          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
+          PromptProjection.t()
         ) :: {WindowContent.t(), Cursor.t() | nil, state()}
   defp render_semantic_agent_chat_window(
          state,
          ctx,
-         chat_width,
+         _chat_width,
          chat_height,
          prompt_rect,
-         full_rect
+         projection
        ) do
-    inner_width = PromptRenderer.input_inner_width(PromptRenderer.input_box_width(chat_width))
+    presentation_id =
+      if is_integer(state.frame_seq),
+        do: state.frame_seq + 1,
+        else: System.unique_integer([:positive, :monotonic])
 
-    prompt_models =
-      case PromptRenderWindow.build(ctx, inner_width, prompt_rect,
-             content_epoch: 0,
-             full_refresh: true
-           ) do
-        nil -> []
-        prompt_window_model -> [prompt_window_model]
-      end
+    {prompt_window, lease} =
+      PromptRenderWindow.build_presented(ctx, projection.columns, prompt_rect,
+        projection: projection,
+        presentation_id: presentation_id,
+        previous_presentation: state.caches.prompt_presentation,
+        cursor_eligible:
+          state.intent.frame.focus_owner.responder == :editor_view and
+            state.intent.frame.focus_owner.surface == :agent,
+        full_refresh: false
+      )
 
-    cursor = prompt_cursor(ctx, full_rect)
+    prompt = %PromptFrame{window: prompt_window, presentation: lease, projection: projection}
+    state = Input.record_prompt(state, prompt)
+    {row, col, _width, _height} = prompt_rect
+
+    cursor =
+      if prompt_window.cursor_visible,
+        do:
+          Cursor.new(
+            row + prompt_window.cursor_row,
+            col + prompt_window.cursor_col,
+            prompt_window.cursor_shape
+          )
+
     total_lines = Enum.count(state.workspace.agent_ui.panel.transcript.line_index)
     state = update_agent_scroll_metrics(state, total_lines, chat_height)
 
-    {WindowContent.new(nil, prompt_models, cursor), cursor, state}
+    {WindowContent.new(nil, [prompt_window], cursor), cursor, state}
   end
 
   @spec update_agent_window_viewport(
@@ -498,17 +512,6 @@ defmodule MingaEditor.RenderPipeline.Content do
   @spec update_agent_scroll_metrics(state(), non_neg_integer(), pos_integer()) :: state()
   defp update_agent_scroll_metrics(state, total_lines, visible_height) do
     Input.record_agent_scroll_metrics(state, total_lines, visible_height)
-  end
-
-  @spec prompt_cursor(
-          ViewContext.t(),
-          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
-        ) :: Cursor.t() | nil
-  defp prompt_cursor(ctx, full_rect) do
-    case PromptRenderer.cursor_position_in_rect(ctx, full_rect) do
-      {row, col} -> Cursor.new(row, col, :beam)
-      nil -> nil
-    end
   end
 
   defp cursor_text_from_snapshot(lines, cursor_line, first_line) do

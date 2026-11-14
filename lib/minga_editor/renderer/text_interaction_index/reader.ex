@@ -51,6 +51,31 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
     end
   end
 
+  @doc "Resolves the exact active source lease without inventing a row hit."
+  @spec source(t(), pos_integer(), pos_integer()) ::
+          {:ok, {pid(), non_neg_integer()}} | {:error, :inactive | :unavailable}
+  def source(%__MODULE__{table: table}, window_id, presentation_id) do
+    with {:ok, ^presentation_id} <- read(table, {:active, window_id}),
+         {:ok, {buffer, version, _rows}} <- read(table, {:lease, window_id, presentation_id}),
+         :ok <- active_still_exact(table, window_id, presentation_id) do
+      {:ok, {buffer, version}}
+    else
+      {:error, :unavailable} -> {:error, :unavailable}
+      _ -> {:error, :inactive}
+    end
+  end
+
+  @doc "Resolves a published retained source for physical observations, without admitting text input."
+  @spec retained_source(t(), pos_integer(), pos_integer()) ::
+          {:ok, {pid(), non_neg_integer()}} | {:error, :unknown | :unavailable}
+  def retained_source(%__MODULE__{table: table}, window_id, presentation_id) do
+    case read(table, {:lease, window_id, presentation_id}) do
+      {:ok, {buffer, version, _rows}} -> {:ok, {buffer, version}}
+      :error -> {:error, :unknown}
+      {:error, :unavailable} -> {:error, :unavailable}
+    end
+  end
+
   @spec row_at(
           :ets.table(),
           {:resident, reference() | nil} | {:windowed, tuple()},

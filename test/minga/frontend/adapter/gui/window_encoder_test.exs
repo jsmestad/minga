@@ -894,4 +894,36 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert opcodes(commands) == [Opcodes.gui_window_content()]
     assert commands |> hd() |> GUIWindowDecoder.decode() |> Map.fetch!(:window_id) == 65_534
   end
+
+  test "switching semantic windows retires old active gutter ownership without a keyframe" do
+    old = window(gutter: gutter_model(), full_refresh: false)
+    {_commands, cache} = AdapterGUI.encode_windows([old], Caches.new())
+
+    prompt_gutter = %{
+      gutter_model()
+      | window_id: 65_534,
+        line_number_width: 0,
+        sign_col_width: 0,
+        entries: []
+    }
+
+    prompt =
+      window(
+        content_kind: :agent_prompt,
+        window_id: 65_534,
+        gutter: prompt_gutter,
+        full_refresh: false
+      )
+
+    {commands, cache} = AdapterGUI.encode_windows([prompt], cache)
+    retired = WindowEncoder.encode_retired_gutter(Gutter.deactivate(old.gutter))
+    assert hd(commands) == retired
+    assert cache.last_window_gutters == %{65_534 => prompt_gutter}
+    refute Map.has_key?(cache.last_window_gutters, 1)
+
+    {commands, cache} = AdapterGUI.encode_windows([], cache)
+    assert commands == [WindowEncoder.encode_retired_gutter(Gutter.deactivate(prompt_gutter))]
+    assert cache.last_window_gutters == %{}
+    assert {[], _cache} = AdapterGUI.encode_windows([], cache)
+  end
 end

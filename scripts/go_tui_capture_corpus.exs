@@ -75,14 +75,17 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
 
   @spec size({String.t(), pos_integer(), pos_integer()}) :: map()
   defp size({name, columns, rows}) do
-    {workspace, caches} = workspace_commands("OLD", 1, Caches.new())
+    {workspace, caches} = workspace_commands("OLD", 1, columns, Caches.new())
     base_window = window(columns, rows, "ROW_OLD")
     delta_window = window(columns, rows, "ROW_NEW")
     {hide, _caches} = AgentChatEncoder.encode(%AgentChat{visible?: false}, caches)
     delta = RowDelta.from_snapshots(base_window.rows, delta_window.rows)
     hashes = Map.new(base_window.rows, &{&1.row_id, &1.content_hash})
     {row_delta, false} = WindowEncoder.encode_rows_delta(delta_window, delta, hashes)
-    {replacement, _caches} = workspace_commands("NEW", 2, Caches.new())
+    {replacement, _caches} = workspace_commands("NEW", 2, columns, Caches.new())
+
+    {row_theme, _caches} =
+      ThemeEncoder.encode(AstroDark.theme() |> ThemeBuilder.build(), Caches.new())
 
     # AgentChat.Visible replaces the entire editor body in the production Go renderer.
     # Seed visible editor rows in a separate scene, not hidden rows behind the agent workspace.
@@ -92,8 +95,8 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
       step(
         "row-base",
         2,
-        1,
-        [hide] ++ WindowEncoder.encode(base_window) ++ [status("STATUS_ROWS")],
+        0,
+        [row_theme, hide] ++ WindowEncoder.encode(base_window) ++ [status("STATUS_ROWS")],
         @neighbors ++ ["ROW_OLD", "STATUS_ROWS"],
         @old_labels ++ ["ROW_NEW"]
       ),
@@ -126,15 +129,20 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
     %{"name" => name, "columns" => columns, "rows" => rows, "steps" => steps}
   end
 
-  @spec workspace_commands(String.t(), pos_integer(), Caches.t()) :: {[binary()], Caches.t()}
-  defp workspace_commands(suffix, epoch, caches) do
+  @spec workspace_commands(String.t(), pos_integer(), pos_integer(), Caches.t()) ::
+          {[binary()], Caches.t()}
+  defp workspace_commands(suffix, epoch, columns, caches) do
     {theme, caches} = ThemeEncoder.encode(AstroDark.theme() |> ThemeBuilder.build(), caches)
     chat = chat(suffix, epoch)
     {chrome, caches} = AgentChatEncoder.encode(chat, caches)
     {transcript, caches} = AgentTranscriptEncoder.encode(chat, caches)
+    prompt = text_window(65_534, columns, 1, ["COMPOSE_#{suffix}"], epoch, true)
 
-    {[Protocol.encode_set_title(@header), theme, chrome, transcript, status("STATUS_#{suffix}")],
-     caches}
+    commands =
+      [Protocol.encode_set_title(@header), theme, chrome, transcript] ++
+        WindowEncoder.encode(prompt) ++ [status("STATUS_#{suffix}")]
+
+    {commands, caches}
   end
 
   @spec chat(String.t(), pos_integer()) :: AgentChat.t()
@@ -173,30 +181,62 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
   end
 
   @spec window(pos_integer(), pos_integer(), String.t()) :: Window.t()
-  defp window(columns, rows, middle) do
-    height = rows - 2
+  defp window(columns, rows, middle),
+    do:
+      text_window(
+        1,
+        columns,
+        rows - 2,
+        ["NEIGHBOR_TOP", middle, "NEIGHBOR_BOTTOM"],
+        1,
+        middle == "ROW_OLD"
+      )
+
+  @spec text_window(
+          pos_integer(),
+          pos_integer(),
+          pos_integer(),
+          [String.t()],
+          pos_integer(),
+          boolean()
+        ) ::
+          Window.t()
+  defp text_window(window_id, columns, height, texts, epoch, full_refresh) do
     rect = {0, 0, columns, height}
 
+    {content_kind, presentation_id} =
+      case window_id do
+        65_534 -> {:agent_prompt, epoch}
+        1 -> {:buffer, 0}
+      end
+
     %Window{
-      window_id: 1,
-      content_kind: :buffer,
+      window_id: window_id,
+      content_kind: content_kind,
+      text_presentation_id: presentation_id,
       rect: rect,
-      rows: Enum.with_index(["NEIGHBOR_TOP", middle, "NEIGHBOR_BOTTOM"], &row/2),
+      rows: Enum.with_index(texts, &row/2),
       cursor_row: 0,
       cursor_col: 0,
       cursor_shape: :block,
       cursor_visible: false,
-      content_epoch: 1,
-      full_refresh: middle == "ROW_OLD",
+      content_epoch: epoch,
+      full_refresh: full_refresh,
       contiguous_rows: true,
       geometry: %PaneGeometry{
-        window_id: 1,
+        window_id: window_id,
         total_rect: rect,
         content_rect: rect,
         text_rect: rect,
         gutter_rect: {0, 0, 0, height},
         clip_rect: rect,
-        viewport: %Viewport{top: 0, left: 0, rows: height, cols: columns, total_lines: 3},
+        viewport: %Viewport{
+          top: 0,
+          left: 0,
+          rows: height,
+          cols: columns,
+          total_lines: length(texts)
+        },
         gutter_metrics: %GutterMetrics{line_number_width: 0, sign_col_width: 0},
         hit_regions: []
       }

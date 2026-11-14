@@ -138,6 +138,62 @@ defmodule Minga.Credo.ExplicitTargetCheckTest do
     |> refute_issues()
   end
 
+  test "the exact retained-prompt fit describes physical capacity, not item positions" do
+    for payload <- [
+          "<<65_534::16, generation::64, columns::16, max_rows::16>>",
+          "<<65_534::unsigned-size(16), generation::unsigned-size(64), columns::unsigned-size(16), max_rows::unsigned-size(16)>>"
+        ] do
+      """
+      defmodule MingaEditor.Frontend.Protocol.GUI do
+        def decode_gui_action(@gui_action_agent_prompt_fit, #{payload})
+            when generation > 0 and columns > 0 and max_rows > 0, do: :ok
+      end
+      """
+      |> check()
+      |> refute_issues()
+    end
+  end
+
+  test "physical capacity never exempts other targets, identities, or positional fields" do
+    cases = [
+      {:gui_action_other, "<<65_534::16, generation::64, columns::16, max_rows::16>>",
+       ["columns", "max_rows"]},
+      {:gui_action_agent_prompt_fit, "<<65_533::16, generation::64, columns::16, max_rows::16>>",
+       ["columns", "max_rows"]},
+      {:gui_action_agent_prompt_fit,
+       "<<window_id::16, generation::64, columns::16, max_rows::16>>",
+       ["columns", "max_rows", "window_id"]},
+      {:gui_action_agent_prompt_fit, "<<65_534::16, generation::32, columns::16, max_rows::16>>",
+       ["columns", "max_rows"]},
+      {:gui_action_agent_prompt_fit, "<<65_534::16, columns::16, max_rows::16>>",
+       ["columns", "max_rows"]},
+      {:gui_action_agent_prompt_fit, "<<65_534::16, generation::64, position::16, max_rows::16>>",
+       ["max_rows", "position"]},
+      {:gui_action_agent_prompt_fit,
+       "<<65_534::16, generation::64, columns::16, max_rows::16, index::16>>",
+       ["columns", "index", "max_rows"]},
+      {:gui_action_agent_prompt_fit, "<<65_534::16, generation::64, columns::32, max_rows::16>>",
+       ["max_rows"]},
+      {:gui_action_agent_prompt_fit, "<<65_534::16, generation::64, columns::16, max_rows::32>>",
+       ["columns"]},
+      {:gui_action_agent_prompt_fit,
+       "<<65_534::16, generation::signed-64, columns::16, max_rows::16>>",
+       ["columns", "max_rows"]}
+    ]
+
+    for {opcode, payload, triggers} <- cases do
+      issues =
+        """
+        defmodule MingaEditor.Frontend.Protocol.GUI do
+          def decode_gui_action(@#{opcode}, #{payload}), do: :ok
+        end
+        """
+        |> check()
+
+      assert Enum.sort(Enum.map(issues, & &1.trigger)) == triggers
+    end
+  end
+
   test "existing narrow identities need a reasoned capped exemption" do
     code = """
     defmodule MingaEditor.Frontend.Protocol.GUI do

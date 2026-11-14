@@ -181,6 +181,10 @@ func (m Model) presentationScrollWindowAt(x int, y int) (uint16, bool) {
 }
 
 func (m Model) presentationScrollWindowAtBody(x int, y int) (uint16, bool) {
+	// Chat replaces the ordinary semantic canvas. Its transcript and source-backed prompt aperture have dedicated wheel routes; hidden editor geometry must not claim those physical cells.
+	if m.agentChatVisible() {
+		return 0, false
+	}
 	for _, id := range m.windowOrder {
 		placement, ok := m.semanticWindowPlacement(m.windows[id])
 		if !ok {
@@ -245,6 +249,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.overlayMousePacket(msg); ok {
 		return packet, true
 	}
+	if packet, ok := m.agentComposerControlPacket(msg); ok {
+		return packet, true
+	}
 	// The launchpad takes over the whole editor body, so its clickable rows are
 	// checked before the spatial header/left-pane/footer dispatch (#2689).
 	if packet, ok := m.emptyStateMousePacket(msg); ok {
@@ -259,6 +266,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	case m.layout.footer.Contains(mouse.X, mouse.Y):
 		return m.footerMousePacket(msg)
 	case m.layout.body.Contains(mouse.X, mouse.Y):
+		if m.agentChatVisible() {
+			return nil, false
+		}
 		return m.gutterFoldMousePacket(msg)
 	}
 	return nil, false

@@ -3,6 +3,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   Keeps explicitly targeted workflows on their named subject and rejects index-only GUI activations.
 
   A clause that receives a Target must not rediscover its subject through active editor state. Binary lengths are framing, not positions; existing 16-bit identity contracts require a documented exemption.
+
+  Prompt fit has one structural physical-capacity exception: window 65534 and its u64 retained presentation identify the subject; columns and max_rows are u16 measurements, not item positions. Changed or additional fields are not exempt.
   """
 
   use Credo.Check,
@@ -91,7 +93,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   defp position_issues({:when, _, [head | _guards]}, meta, exemptions), do: position_issues(head, meta, exemptions)
   defp position_issues({:decode_gui_action, _, [{:@, _, [{opcode, _, _}]}, payload]}, meta, exemptions) do
     fields = binary_fields(payload)
-    if opcode == :gui_action_tab_reorder or Keyword.has_key?(exemptions, opcode) or identity?(fields) do
+    if opcode == :gui_action_tab_reorder or Keyword.has_key?(exemptions, opcode) or
+         identity?(fields) or physical_capacity?(opcode, fields) do
       []
     else
       for {name, line} <- bare_positions(fields) do
@@ -104,6 +107,20 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   defp binary_fields({:<<>>, _, fields}), do: fields
   defp binary_fields({:=, _, [left, right]}), do: binary_fields(left) ++ binary_fields(right)
   defp binary_fields(_pattern), do: []
+
+  defp physical_capacity?(:gui_action_agent_prompt_fit, [
+         {:"::", _, [65_534, window_type]},
+         {:"::", _, [{:generation, _, _}, generation_type]},
+         {:"::", _, [{:columns, _, _}, columns_type]},
+         {:"::", _, [{:max_rows, _, _}, rows_type]}
+       ]) do
+    unsigned_integer_width(window_type) == 16 and
+      unsigned_integer_width(generation_type) == 64 and
+      unsigned_integer_width(columns_type) == 16 and
+      unsigned_integer_width(rows_type) == 16
+  end
+
+  defp physical_capacity?(_opcode, _fields), do: false
 
   defp identity?(fields) do
     Enum.any?(fields, fn

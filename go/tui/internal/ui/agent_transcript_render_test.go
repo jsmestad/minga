@@ -270,7 +270,7 @@ func TestAgentTranscriptPageKeysUseContentBudget(t *testing.T) {
 	chat, _ := model.agentChat()
 	panelWidth := max(model.width-2, 1)
 	mainBudget := model.bodyHeight() - 1
-	composerRows := len(model.renderAgentComposer(chat, panelWidth))
+	composerRows := len(model.renderAgentComposerWithLimit(chat, panelWidth, mainBudget))
 	expected := mainBudget - composerRows - 1 - 1
 	page := model.agentTranscriptPageSize()
 	if page != expected {

@@ -22,6 +22,9 @@ This uses the existing PreviewHost, production `ContentView` and editor renderer
 
 The deadline includes protocol generation, project generation, compilation and capture. An unavailable renderer, failed command, unstable image or expired deadline is a failure, not a successful screenshot of an error panel. The command removes stale images for the selected captures before starting.
 
+Agent fixtures wait up to five seconds for the canonical prompt to reach the production Metal surface.
+A readiness timeout reports placement, presentation and native host state instead of capturing an unready frame.
+
 Keep `preview-run.json`, each PNG and its adjacent JSON together. They record actual source and executable hashes, generated protocol inputs, build command, OS, Xcode, Swift, SDK, fonts, backing scale and window/image dimensions. Git revision alone does not identify uncommitted source changes. The source hashes bind those changes to the build.
 
 Inspect the full shell, transcript, tool cards, composer and footer. Do not accept a blank strip or clipped footer because the process returned zero. A short bottom-anchored transcript can leave space above it. The metadata explicitly reports when production chat hides the editor renderer; that image does not prove visible editor pixels.

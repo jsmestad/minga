@@ -17,6 +17,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   alias MingaEditor.Agent.Transcript
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.TranscriptProjection
+  alias MingaEditor.Agent.PromptViewport
 
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
   @type paste_block :: %{text: String.t(), expanded: boolean()}
@@ -26,6 +27,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
           visible: boolean(),
           scroll: Scroll.t(),
           prompt_buffer: pid() | nil,
+          prompt_viewport: PromptViewport.t(),
           prompt_history: [String.t()],
           history_index: integer(),
           spinner_frame: non_neg_integer(),
@@ -43,6 +45,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   defstruct visible: false,
             scroll: %Scroll{},
             prompt_buffer: nil,
+            prompt_viewport: %PromptViewport{},
             prompt_history: [],
             history_index: -1,
             spinner_frame: 0,
@@ -55,6 +58,19 @@ defmodule MingaEditor.Agent.UIState.Panel do
             pasted_blocks: [],
             credentials_configured: false,
             credential_readiness: :unconfigured
+
+  @doc "Records physical fit without changing the prompt draft or its reading anchor."
+  @spec fit_prompt(t(), pos_integer(), pos_integer()) :: t()
+  def fit_prompt(%__MODULE__{prompt_viewport: viewport} = panel, columns, rows),
+    do: %{panel | prompt_viewport: PromptViewport.fit(viewport, columns, rows)}
+
+  @spec scroll_prompt(t(), PromptViewport.marker(), PromptViewport.anchor()) :: t()
+  def scroll_prompt(%__MODULE__{prompt_viewport: viewport} = panel, marker, anchor),
+    do: %{panel | prompt_viewport: PromptViewport.read_at(viewport, marker, anchor)}
+
+  @spec follow_prompt_cursor(t()) :: t()
+  def follow_prompt_cursor(%__MODULE__{prompt_viewport: viewport} = panel),
+    do: %{panel | prompt_viewport: PromptViewport.follow(viewport)}
 
   @doc "Creates a new panel state with truthful model defaults."
   @spec new() :: t()

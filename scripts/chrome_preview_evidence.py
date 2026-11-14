@@ -82,6 +82,31 @@ def swift_fixture_member(source, signature):
     return start, cursor
 
 
+def shared_capture_transport(before_capture, after_capture):
+    """Share capture methods without transplanting revision-specific readiness or metadata."""
+    receipts = []
+    for signature in [
+        "private func captureSettledPNG(",
+        "private func captureWindowPNG(",
+        "private func encodePNG(",
+        "private func assertBitmapDimensions(",
+        "private func assertCGImageDimensions(",
+        "private nonisolated static func captureRenderedWindow(",
+    ]:
+        start, end = swift_fixture_member(after_capture, signature)
+        replacement = after_capture[start:end]
+        old_start, old_end = swift_fixture_member(before_capture, signature)
+        original = before_capture[old_start:old_end]
+        before_capture = before_capture[:old_start] + replacement + before_capture[old_end:]
+        receipts.append({
+            "path": "macos/Sources/PreviewHostApp.swift", "member": signature,
+            "originalSha256": hashlib.sha256(original.encode()).hexdigest(),
+            "sha256": hashlib.sha256(replacement.encode()).hexdigest(),
+            "scope": "identical preview-only PNG/compositor capture transport; revision-local readiness and metadata preserved",
+        })
+    return before_capture, receipts
+
+
 def shared_capture_support(before_registry, after_registry, before_fixtures, after_fixtures):
     """Share only capture-owned fixture members, not the base's production views."""
     receipts = []
@@ -129,7 +154,7 @@ def shared_capture_support(before_registry, after_registry, before_fixtures, aft
 
 
 def prepare_base(args):
-    """Install identical preview fixtures and capture transport, never proposed production views, in the base."""
+    """Install identical fixtures and capture methods, preserving base production views and readiness."""
     if args.before_root.resolve() == args.after_root.resolve():
         raise ValueError("before and after must be separate checkouts")
     sources = Path("macos/Sources")
@@ -147,6 +172,11 @@ def prepare_base(args):
             (args.before_root / registry_path).read_text(), after_registry,
             (args.before_root / fixture_path).read_text(),
             (args.after_root / fixture_path).read_text())
+    capture = sources / "PreviewHostApp.swift"
+    original_capture_hash = hashlib.sha256((args.before_root / capture).read_bytes()).hexdigest()
+    capture_source, capture_receipts = shared_capture_transport(
+        (args.before_root / capture).read_text(),
+        (args.after_root / capture).read_text())
     for filename, kind, signature in [
         ("PreviewRegistry.swift", "cases", "static func view(named name: String)"),
         ("PreviewSnapshotPolicy.swift", "sizes", "static func size(named name: String)"),
@@ -161,12 +191,11 @@ def prepare_base(args):
     shutil.copyfile(args.after_root / fixture, args.before_root / fixture)
     changes.append({"path": str(fixture), "scope": "identical preview-only fixture definitions",
                     "sha256": hashlib.sha256((args.before_root / fixture).read_bytes()).hexdigest()})
-    capture = sources / "PreviewHostApp.swift"
-    original_capture_hash = hashlib.sha256((args.before_root / capture).read_bytes()).hexdigest()
-    shutil.copyfile(args.after_root / capture, args.before_root / capture)
-    changes.append({"path": str(capture), "scope": "identical preview-only capture transport; non-Sendable ScreenCaptureKit objects remain outside MainActor",
+    (args.before_root / capture).write_text(capture_source)
+    changes.append({"path": str(capture), "scope": "shared preview-only capture methods; base readiness and metadata remain revision-local",
                     "originalSha256": original_capture_hash,
                     "sha256": hashlib.sha256((args.before_root / capture).read_bytes()).hexdigest()})
+    changes.extend(capture_receipts)
     if support is not None:
         registry, fixtures, receipts = support
         registry = install_preview_block(
@@ -191,14 +220,14 @@ def prepare_base(args):
     manifest = {
         "baseRevision": revision(args.before_root),
         "fixtureRevision": revision(args.after_root),
-        "scope": "Only preview dispatch, capture policy/transport, explicitly hashed preview fixture support, and target membership exclusions are installed. Production Views sources remain those of the base checkout.",
+        "scope": "Only preview dispatch, capture policy/transport members, explicitly hashed preview fixture support, and target membership exclusions are installed. Production Views sources and capture readiness/metadata remain those of the base checkout.",
         "originalBaseNames": before_names,
         "comparisonNames": registry_names(args.before_root / registry_path),
         "fixtureChanges": changes,
         "evidenceLimit": (
             "AgentChromeView on both revisions uses the corrected complete Doom One fixture palette, retained production renderer, "
             "visible file-tree registration and immutable completed transcript. This compares production views under the same repaired "
-            "fixture, not the old unreadable neutral-gray baseline or live editor behavior."
+            "fixture, not the old unreadable neutral-gray baseline or live editor behavior. Capture readiness and metadata remain revision-local."
             if has_capture_support else "Additional preview fixtures and shared capture transport only."),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

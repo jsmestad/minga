@@ -66,10 +66,12 @@ struct EditorAccessibilityProjection: Sendable {
     let value: String
     let frameInView: CGRect
     let rows: [Row]
+    let lineRanges: [NSRange]
     let selectedRanges: [NSRange]
     let hasSelection: Bool
     let insertionRange: NSRange?
     let insertionPointLineNumber: Int?
+    let insertionViewportRow: Int?
     let isActivePane: Bool
     let rowsVisited: Int
     let utf16UnitsVisited: Int
@@ -77,10 +79,38 @@ struct EditorAccessibilityProjection: Sendable {
     var selectedText: String? {
         guard !selectedRanges.isEmpty else { return nil }
         let string = value as NSString
-        return selectedRanges.map { string.substring(with: $0) }.joined(separator: "\n")
+        var text = ""
+        text.reserveCapacity(selectedRanges.reduce(0) { $0 + $1.length + 1 })
+        var previousEnd: Int?
+        for range in selectedRanges {
+            if let previousEnd,
+               logicalLine(atUTF16Offset: previousEnd) != logicalLine(atUTF16Offset: range.location) {
+                text.append("\n")
+            }
+            text.append(string.substring(with: range))
+            previousEnd = NSMaxRange(range)
+        }
+        return text
+    }
+
+    /// AX text offsets count actual source newlines, not visual wrap boundaries.
+    func logicalLine(atUTF16Offset offset: Int) -> Int? {
+        guard offset >= 0, let last = lineRanges.last, offset <= NSMaxRange(last) else { return nil }
+        return lineRanges.firstIndex { offset >= $0.location && offset <= NSMaxRange($0) }
     }
 
     func localRect(for range: NSRange) -> CGRect? {
+        if range.length == 0 {
+            let row: Row?
+            if let insertionViewportRow, range == insertionRange {
+                row = rows.first { $0.viewportRow == insertionViewportRow }
+            } else {
+                row = rows.first { range.location >= $0.valueRange.location && range.location < NSMaxRange($0.valueRange) }
+                    ?? rows.last { range.location == NSMaxRange($0.valueRange) }
+            }
+            guard let rect = row?.localRect(forValueRange: range)?.intersection(frameInView), !rect.isNull else { return nil }
+            return rect
+        }
         let rects = rows.compactMap { $0.localRect(forValueRange: range) }
         guard let first = rects.first else { return nil }
         let clipped = rects.dropFirst().reduce(first) { $0.union($1) }.intersection(frameInView)
@@ -93,11 +123,12 @@ struct EditorAccessibilityProjection: Sendable {
         isActivePane: Bool,
         localTransform: EditorLocalPresentationTransform?,
         cellWidth: CGFloat,
-        cellHeight: CGFloat
+        cellHeight: CGFloat,
+        promptTransform: AgentPromptPresentationTransform? = nil
     ) -> EditorAccessibilityProjection {
         let content = surface.content
         let geometry = surface.paneGeometry
-        let paneFrame = CGRect(
+        let sourceFrame = CGRect(
             x: CGFloat(geometry.textRect.col) * cellWidth,
             y: CGFloat(geometry.textRect.row) * cellHeight,
             width: CGFloat(geometry.textRect.width) * cellWidth,
@@ -105,6 +136,7 @@ struct EditorAccessibilityProjection: Sendable {
         )
         let offset = localTransform?.windowId == surface.windowId ? localTransform?.offset ?? .zero : .zero
         let baseRange = surface.visibleRowRange
+        let paneFrame = promptTransform.map { $0.rect(sourceFrame) } ?? sourceFrame
         let rowOffset = offset.y / max(cellHeight, 1)
         let localLower = Int(floor(CGFloat(baseRange.lowerBound) + rowOffset))
         let localUpper = Int(ceil(CGFloat(baseRange.upperBound) + rowOffset))
@@ -112,14 +144,15 @@ struct EditorAccessibilityProjection: Sendable {
         let candidateUpper = min(max(localUpper + 1, candidateLower), content.rowStore.count)
         let candidateRange = candidateLower..<candidateUpper
         let resident = content.rowStore.rows(in: candidateRange)
-        let textOriginX = paneFrame.minX - CGFloat(content.scrollLeft) * cellWidth - offset.x
+        let textOriginX = sourceFrame.minX + (promptTransform?.offset.x ?? 0) - CGFloat(content.scrollLeft) * cellWidth - offset.x
         let clipStart = Int(floor((paneFrame.minX - textOriginX) / max(cellWidth, 1)))
         let clipEnd = Int(ceil((paneFrame.maxX - textOriginX) / max(cellWidth, 1)))
-
         struct PendingRow {
             let absoluteRow: Int
             let viewportRow: Int
             let text: String
+            let bufferLine: UInt32
+            let isSourceText: Bool
             let sourceDisplayRange: Range<Int>
             let sourceMap: GUIDisplayColumnMap
             let exposedUTF16Range: Range<Int>
@@ -131,7 +164,7 @@ struct EditorAccessibilityProjection: Sendable {
         for (offsetIndex, row) in resident.rows.enumerated() {
             let residentIndex = candidateRange.lowerBound + offsetIndex
             let viewportRow = residentIndex - baseRange.lowerBound
-            let y = paneFrame.minY + CGFloat(viewportRow) * cellHeight - offset.y
+            let y = sourceFrame.minY + (promptTransform?.offset.y ?? 0) + CGFloat(viewportRow) * cellHeight - offset.y
             guard y < paneFrame.maxY, y + cellHeight > paneFrame.minY else { continue }
             let map = GUIDisplayColumnMap(row.text, limitedTo: max(clipStart, 0)..<max(clipEnd, 0))
             let exposedLower = min(max(clipStart, 0), map.displayWidth)
@@ -145,6 +178,8 @@ struct EditorAccessibilityProjection: Sendable {
                 absoluteRow: residentIndex,
                 viewportRow: viewportRow,
                 text: text,
+                bufferLine: row.bufLine,
+                isSourceText: row.rowType == .normal || row.rowType == .wrapContinuation,
                 sourceDisplayRange: sourceStart..<sourceEnd,
                 sourceMap: map,
                 exposedUTF16Range: exposedUTF16,
@@ -153,11 +188,24 @@ struct EditorAccessibilityProjection: Sendable {
         }
 
         var valueParts: [String] = []
-        valueParts.reserveCapacity(pending.count)
+        valueParts.reserveCapacity(pending.count * 2)
         var rows: [Row] = []
         rows.reserveCapacity(pending.count)
         var valueOffset = 0
+        var lineRanges: [NSRange] = []
+        lineRanges.reserveCapacity(pending.count)
+        var logicalLineStart = 0
         for (index, row) in pending.enumerated() {
+            if index > 0 {
+                let previous = pending[index - 1]
+                let continuesSourceLine = previous.isSourceText && row.isSourceText && previous.bufferLine == row.bufferLine
+                if !continuesSourceLine {
+                    lineRanges.append(NSRange(location: logicalLineStart, length: valueOffset - logicalLineStart))
+                    valueParts.append("\n")
+                    valueOffset += 1
+                    logicalLineStart = valueOffset
+                }
+            }
             valueParts.append(row.text)
             let length = row.text.utf16.count
             rows.append(Row(
@@ -171,15 +219,18 @@ struct EditorAccessibilityProjection: Sendable {
                 cellWidth: cellWidth,
                 cellHeight: cellHeight
             ))
-            valueOffset += length + (index == pending.count - 1 ? 0 : 1)
+            valueOffset += length
+        }
+        if !pending.isEmpty {
+            lineRanges.append(NSRange(location: logicalLineStart, length: valueOffset - logicalLineStart))
         }
 
-        let value = valueParts.joined(separator: "\n")
+        let value = valueParts.joined()
         let selectedRanges = selectionRanges(surface: surface, rows: rows)
         let hasSelection = surface.residentSemantics?.selection != nil || content.selection != nil
-        let insertion = hasSelection ? nil : insertionRange(surface: surface, rows: rows)
+        let insertion = hasSelection ? nil : insertionPoint(surface: surface, rows: rows)
         let insertionLine = insertion.flatMap { insertion in
-            rows.firstIndex { NSLocationInRange(insertion.location, $0.valueRange) || insertion.location == NSMaxRange($0.valueRange) }
+            lineRanges.firstIndex { insertion.range.location >= $0.location && insertion.range.location <= NSMaxRange($0) }
         }
         let label = content.accessibilityLabel.isEmpty
             ? "Editor pane \(surface.windowId)"
@@ -190,27 +241,31 @@ struct EditorAccessibilityProjection: Sendable {
             value: value,
             frameInView: paneFrame,
             rows: rows,
+            lineRanges: lineRanges,
             selectedRanges: selectedRanges,
             hasSelection: hasSelection,
-            insertionRange: insertion,
+            insertionRange: insertion?.range,
             insertionPointLineNumber: insertionLine,
+            insertionViewportRow: insertion?.viewportRow,
             isActivePane: isActivePane,
             rowsVisited: resident.counters.rowsVisited,
             utf16UnitsVisited: pending.reduce(into: 0) { $0 += $1.sourceMap.utf16UnitsVisited }
         )
     }
 
-    private static func insertionRange(surface: PresentedWindowSurface, rows: [Row]) -> NSRange? {
+    private static func insertionPoint(surface: PresentedWindowSurface, rows: [Row]) -> (range: NSRange, viewportRow: Int)? {
         let content = surface.content
         if let semantics = surface.residentSemantics {
             guard semantics.cursor.eligible,
-                  let row = rows.first(where: { $0.absoluteRow == Int(semantics.cursor.row) }) else { return nil }
-            return row.insertionRange(atSourceUTF16Offset: row.sourceMap.utf16Offset(at: Int(semantics.cursor.col)))
+                  let row = rows.first(where: { $0.absoluteRow == Int(semantics.cursor.row) }),
+                  let range = row.insertionRange(atSourceUTF16Offset: row.sourceMap.utf16Offset(at: Int(semantics.cursor.col))) else { return nil }
+            return (range, row.viewportRow)
         }
         guard content.cursorVisible,
               let cursor = content.accessibilityCursor,
-              let row = rows.first(where: { $0.viewportRow == Int(cursor.row) }) else { return nil }
-        return row.insertionRange(atSourceUTF16Offset: Int(cursor.utf16))
+              let row = rows.first(where: { $0.viewportRow == Int(cursor.row) }),
+              let range = row.insertionRange(atSourceUTF16Offset: Int(cursor.utf16)) else { return nil }
+        return (range, row.viewportRow)
     }
 
     private static func selectionRanges(surface: PresentedWindowSurface, rows: [Row]) -> [NSRange] {
@@ -239,12 +294,16 @@ struct EditorAccessibilityProjection: Sendable {
     private static func contiguousRanges(_ ranges: [(row: Row, range: NSRange)]) -> [NSRange] {
         var groups: [NSRange] = []
         var previousViewportRow: Int?
+        var previousRowEnd: Int?
 
         for selected in ranges {
             if let previous = groups.last,
                let previousViewportRow,
                selected.row.viewportRow == previousViewportRow + 1,
-               selected.range.location == NSMaxRange(previous) + 1 {
+               NSMaxRange(previous) == previousRowEnd,
+               selected.range.location == selected.row.valueRange.location,
+               selected.range.location >= NSMaxRange(previous),
+               selected.range.location <= NSMaxRange(previous) + 1 {
                 groups[groups.count - 1] = NSRange(
                     location: previous.location,
                     length: NSMaxRange(selected.range) - previous.location
@@ -253,6 +312,7 @@ struct EditorAccessibilityProjection: Sendable {
                 groups.append(selected.range)
             }
             previousViewportRow = selected.row.viewportRow
+            previousRowEnd = NSMaxRange(selected.row.valueRange)
         }
 
         return groups

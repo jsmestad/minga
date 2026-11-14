@@ -170,6 +170,8 @@ func (m Model) overlayCandidates() []overlayCandidate {
 	sig, sigOK := m.signatureHelp()
 	float, floatOK := m.floatPopup()
 	context, contextOK := m.agentContext()
+	// The full chat owns agent status presentation; its compact editor overlay must not cover the composer or Stop control.
+	contextOK = contextOK && !m.agentChatVisible()
 	bottom, bottomOK := m.bottomPanel()
 	ext, extOK := m.extensionPanel()
 	obs, obsOK := m.observatory()

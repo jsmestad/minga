@@ -136,7 +136,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert window.render_cache.last_buf_version >= 0
     end
 
-    test "agent prompt window receives parent reset epoch and full-refresh" do
+    test "agent prompt publishes its source lease and canonical text geometry without forcing refresh" do
       state = gui_state(content: "regular buffer")
       win_id = state.workspace.windows.active
       window = Window.new_agent_chat(win_id, 24, 80)
@@ -167,10 +167,13 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       {content_row, _content_col, _content_width, _content_height} =
         layout.window_layouts[win_id].content
 
-      {prompt_row, _prompt_col, prompt_width, _prompt_height} = prompt_model.rect
+      {prompt_row, _prompt_col, _prompt_width, _prompt_height} = prompt_model.rect
 
-      assert updated_window.viewport.rows == prompt_row - content_row - 1
-      assert updated_window.viewport.cols == prompt_width
+      {_row, _col, chat_width, _height} =
+        Layout.add_sidebar(layout.window_layouts[win_id]).content
+
+      assert updated_window.viewport.rows == prompt_row - content_row - 2
+      assert updated_window.viewport.cols == chat_width
       assert updated_window.viewport.reserved == 0
 
       assert output.workspace.agent_ui.panel.scroll.metrics == %{
@@ -185,7 +188,12 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
           prompt_model.rect
         )
 
-      assert prompt_model.full_refresh == true
+      assert prompt_model.full_refresh == false
+      assert output.prompt.window == prompt_model
+      assert output.prompt.projection.visible_rows == prompt_model.geometry.viewport.rows
+      assert output.prompt.presentation.presentation_id == prompt_model.text_presentation_id
+      assert output.prompt.presentation.buffer == agent_ui.panel.prompt_buffer
+      refute Map.has_key?(output.windows.map, PromptRenderWindow.prompt_window_id())
       assert prompt_model.content_epoch == default_prompt.content_epoch
     end
 
