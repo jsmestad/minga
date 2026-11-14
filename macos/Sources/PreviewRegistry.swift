@@ -64,6 +64,8 @@ enum PreviewRegistry {
                 AgentChatView(state: chat, isInsertMode: chat.isPromptInsertMode, sendAction: { _ in })
             }
             .frame(width: width, height: height)
+            // Match the production window surface behind transparent Metal pixels.
+            .background(appState.gui.themeColors.editorBg)
             .environment(\.agentPromptSurface, AgentPromptSurface(editor: editor))
             .environment(\.themeColors, PreviewFixtures.theme())
         )

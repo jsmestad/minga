@@ -136,11 +136,20 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
             }
         }
         if let state = PreviewRegistry.captureAppState, state.gui.agentChatState.visible {
-            guard let editor = state.editorNSView,
-                  editor.agentPromptPlacement != nil,
-                  let visible = editor.dispatcher.visibleEditorPresentation,
-                  let pane = visible.textLayout?.panes.first(where: { $0.windowID == 65534 }),
-                  visible.snapshot.metadata.textPresentations[65534] == pane.presentationID else {
+            guard await waitForCanonicalAgentPromptPresentation(state) else {
+                let editor = state.editorNSView
+                let visible = editor?.dispatcher.visibleEditorPresentation
+                let pane = visible?.textLayout?.panes.first(where: { $0.windowID == 65534 })
+                let expectedID = visible?.snapshot.metadata.textPresentations[65534]
+                let matchingID = pane.map { expectedID == $0.presentationID } ?? false
+                fputs(
+                    "agent fixture readiness: placement=\(String(describing: editor?.agentPromptPlacement)) "
+                    + "visible_presentation=\(visible != nil) pane65534=\(pane != nil) "
+                    + "expected_id=\(String(describing: expectedID)) presented_id=\(String(describing: pane?.presentationID)) "
+                    + "matching_id=\(matchingID) bounds=\(String(describing: editor?.bounds)) "
+                    + "window_attached=\(editor?.window != nil) hidden=\(String(describing: editor?.isHiddenOrHasHiddenAncestor))\n",
+                    stderr
+                )
                 fail("agent fixture has not presented its canonical prompt window through the production Metal aperture")
             }
         }
@@ -195,6 +204,28 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         }
 
         NSApplication.shared.terminate(nil)
+    }
+
+    /// Layout schedules asynchronous offscreen rendering and drawable-copy completion.
+    /// Observe the same strict postcondition until it is published, not for a fixed delay.
+    private func waitForCanonicalAgentPromptPresentation(_ state: AppState) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while !Task.isCancelled, clock.now < deadline {
+            if let editor = state.editorNSView,
+               editor.agentPromptPlacement != nil,
+               let visible = editor.dispatcher.visibleEditorPresentation,
+               let pane = visible.textLayout?.panes.first(where: { $0.windowID == 65534 }),
+               visible.snapshot.metadata.textPresentations[65534] == pane.presentationID {
+                return true
+            }
+            do {
+                try await clock.sleep(until: min(deadline, clock.now.advanced(by: .milliseconds(16))))
+            } catch {
+                return false
+            }
+        }
+        return false
     }
 
     /// Require three identical compositor frames after layout, rather than
