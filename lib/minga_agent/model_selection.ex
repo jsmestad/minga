@@ -147,12 +147,12 @@ defmodule MingaAgent.ModelSelection do
   @spec native_contract(Route.t()) :: atom()
   defp native_contract(%Route{
          request_provider: :openai_codex,
-         model_id: "gpt-6.1-sol",
+         model_id: model_id,
          execution: %{
            wire_protocol: "openai_codex_responses",
            path: "/codex/responses",
            base_url: "https://chatgpt.com/backend-api",
-           provider_model_id: "gpt-6.1-sol"
+           provider_model_id: model_id
          }
        }),
        do: :codex_responses_exact_prefix_v1

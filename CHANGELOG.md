@@ -45,6 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Codex models such as GPT-5.6 Luna can continue conversations instead of stopping silently after the first reply. Replay qualification checks the exact official transport and captured inputs, including a bounded path for previously unqualified records. Rejected prompts retain their drafts and report failures; pre-admission refusal no longer adds a misleading user entry.
 - Agent workspace switches preserve each conversation's transcript and draft, clear stale launchpad routing, and restore composer input instead of creating an Untitled buffer. Returning to the editor without an available target keeps Agent input usable.
 - The macOS Add menu creates a new agent workspace with its composer instead of toggling an existing workspace.
 - Agent drafts soft-wrap into a text area that grows to eight rows and then scrolls vertically. Both frontends render canonical prompt rows with source-backed caret and selection, keep Send/Stop outside the scrolling text, and submit or stop independently of Vim mode. Native text placement stays fixed across mode changes; terminal composition preserves combining marks. Hidden sidebars no longer offset terminal composer pointer targets.

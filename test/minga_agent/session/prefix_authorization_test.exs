@@ -12,6 +12,9 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   alias MingaAgent.OAuth
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
+  alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.Outcome
+  alias MingaAgent.Session.PrefixStore
   alias MingaAgent.SessionStore
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tool.Registry, as: ToolRegistry
@@ -105,6 +108,132 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       store_dir: Path.join(dir, "records"),
       suffix: suffix
     }
+  end
+
+  for model_id <- ["gpt-6.1-sol", "gpt-5.6-luna", "gpt-5.6-terra"] do
+    test "#{model_id} preserves its actual wire prefix and opaque reasoning through restart",
+         context do
+      model_id = unquote(model_id)
+      install_write_tool(context)
+
+      resolver_opts =
+        ModelSelectionFixture.resolver_opts(model_id: model_id)
+        |> Keyword.delete(:credential_snapshot)
+
+      opts = [
+        model: "openai:#{model_id}",
+        tool_call?: false,
+        wire?: true,
+        opaque?: true,
+        provider_opts: [model_resolver_opts: resolver_opts]
+      ]
+
+      session = start_session(context, opts)
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:transport_request, 1, _messages, _options}, @timeout
+      assert_receive {:wire_request, 1, first_wire}, @timeout
+      await_idle(session)
+      record = Session.session_id(session)
+
+      assert {:ok, saved} =
+               SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+      captured =
+        PrefixStore.resolve(saved.continuation.prefixes, saved.continuation.prefixes.selected)
+
+      {instructions, tools} = wire_prefix(first_wire)
+      assert instructions == captured.instructions
+      assert Enum.any?(tools, &(&1["name"] == "prefix_write"))
+
+      # Reproduce records written before these routes were qualified without rewriting their evidence.
+      restored =
+        if model_id == "gpt-6.1-sol" do
+          saved
+        else
+          assert {:ok, historical_prefix} =
+                   PrefixStore.candidate(
+                     :unknown,
+                     captured.instructions,
+                     captured.schemas,
+                     Map.put(captured.identity, :native_contract, :unknown),
+                     captured.skills
+                   )
+
+          assert {:ok, :applied, initial} =
+                   Continuation.change_prefix(Continuation.new(), historical_prefix)
+
+          user_id =
+            Enum.zip(saved.message_ids, saved.messages)
+            |> Enum.find_value(fn
+              {id, {:user, "first"}} -> id
+              _other -> nil
+            end)
+
+          assert {:ok, request, active} =
+                   Continuation.begin_request(initial, "historical-request", user_id, "first")
+
+          outcome = Outcome.new(request, saved.continuation.messages)
+          boundary = List.last(saved.continuation.boundaries)
+
+          assert {:ok, historical} =
+                   Continuation.complete(active, outcome, boundary.transcript_id)
+
+          Map.put(saved, :continuation, Continuation.mark_durable(historical))
+        end
+
+      restored = Map.put(restored, :model_selection, GenServer.call(session, :model_selection))
+
+      assert :ok =
+               SessionStore.save(restored, context.store_dir, artifact_runtime: context.runtime)
+
+      assert :ok = stop_supervised!({:session, context.suffix})
+      restarted = start_session(context, opts)
+      assert :ok = Session.load_session(restarted, record)
+      assert :ok = Session.send_prompt(restarted, "second")
+      assert_receive {:transport_request, 1, second_messages, _options}, @timeout
+      assert_receive {:wire_request, 1, second_wire}, @timeout
+      await_idle(restarted)
+
+      assert Enum.take(second_messages, length(restored.continuation.messages)) ==
+               restored.continuation.messages
+
+      assert wire_prefix(second_wire) == {instructions, tools}
+
+      assert Enum.any?(second_wire["input"], fn item ->
+               item["type"] == "reasoning" and item["id"] == "rs_fixture_1" and
+                 item["encrypted_content"] == "fixture-opaque-1"
+             end)
+
+      assert {:ok, final} =
+               SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+      assert final.continuation.prefixes == restored.continuation.prefixes
+
+      assert Enum.filter(Session.messages(restarted), &match?({:user, _text}, &1)) ==
+               [{:user, "first"}, {:user, "second"}]
+
+      refute_received :callback_built
+    end
+  end
+
+  defp wire_prefix(%{"instructions" => instructions, "tools" => tools}),
+    do: {instructions, tools}
+
+  defp wire_prefix(%{"input" => input, "reasoning" => %{"context" => "all_turns"}} = wire) do
+    refute Map.has_key?(wire, "instructions")
+    refute Map.has_key?(wire, "tools")
+
+    assert [
+             %{"type" => "additional_tools", "role" => "developer", "tools" => tools},
+             %{
+               "type" => "message",
+               "role" => "developer",
+               "content" => [%{"type" => "input_text", "text" => instructions}]
+             }
+             | _
+           ] = input
+
+    {instructions, tools}
   end
 
   test "revocation during approval is an ordinary durable refusal, not a storage failure",
@@ -1126,6 +1255,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   defp start_session(context, opts \\ []) do
     owner = self()
     calls = :atomics.new(1, [])
+    model = Keyword.get(opts, :model, "openai:gpt-6.1-sol")
 
     client = fn model, messages, options ->
       count = :atomics.add_get(calls, 1, 1)
@@ -1158,7 +1288,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     session_opts = [
       provider: Native,
-      model_name: "openai:gpt-6.1-sol",
+      model_name: model,
       persist?: true,
       session_store_dir: context.store_dir,
       artifact_runtime: context.runtime,
@@ -1168,7 +1298,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       credentials_snapshot_fn: fn -> Credentials.snapshot(context.credential_opts) end,
       provider_opts:
         [
-          model: "openai:gpt-6.1-sol",
+          model: model,
           model_resolver_opts: context.resolver_opts,
           config: %MingaAgent.Config{
             compaction_threshold: nil,

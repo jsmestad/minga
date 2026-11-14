@@ -37,7 +37,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert Session.status(session) == :error
     end
 
-    test "failed prompt submission restores the exact terminal turn state" do
+    test "failed prompt submission replaces the old error with the current refusal" do
       session =
         start_test_session(
           provider: Minga.Test.StubProvider,
@@ -45,10 +45,10 @@ defmodule MingaAgent.SessionLifecycleTest do
         )
 
       send_provider_event(session, %Event.Error{message: "failed turn"})
-      source_execution = :sys.get_state(session).turn_execution
+      assert Session.editor_snapshot(session).error == "failed turn"
 
       assert {:error, :prompt_failed} = Session.send_prompt(session, "retry")
-      assert :sys.get_state(session).turn_execution == source_execution
+      assert Session.editor_snapshot(session).error =~ "prompt_failed"
       assert Session.status(session) == :error
     end
   end

@@ -135,6 +135,7 @@ defmodule MingaAgent.Session do
         }
 
   @provider_stop_timeout_ms 1_000
+  @boundary_save_failure_message "Conversation save failed. The previous durable boundary remains resumable; this change is not yet durable."
   @provider_restart_options [
     provider_restart_backoff_base_ms: :base_delay_ms,
     provider_restart_backoff_max_ms: :max_delay_ms,
@@ -2841,9 +2842,7 @@ defmodule MingaAgent.Session do
 
         failed =
           state
-          |> append_error_message_once(
-            "Conversation save failed. The previous durable boundary remains resumable; this completed turn is not yet durable."
-          )
+          |> append_error_message_once(@boundary_save_failure_message)
           |> broadcast(:messages_changed)
           |> broadcast({:error, "Conversation save failed: #{inspect(reason)}"})
           |> schedule_save_retry()
@@ -3273,27 +3272,41 @@ defmodule MingaAgent.Session do
           TurnExecution.t()
         ) :: {:reply, :ok | {:error, term()}, state()}
   defp begin_new_turn(content, state, execution) do
-    {user_message, send_content} = build_user_message(content)
+    case prepare_provider_request(state) do
+      {:ok, prepared} ->
+        admit_new_turn(content, prepared, execution)
 
-    state =
-      state
-      |> append_msg(user_message)
-      |> record_user_message_event(user_message)
-      |> notify_messages_changed()
-
-    case begin_provider_request(state, send_content) do
-      {:ok, request, request_state} ->
-        dispatch_new_turn_request(state, request_state, request, execution)
-
-      {:error, reason, failed_state} ->
-        failed_state = announce_turn_status(failed_state, state.turn_execution)
-        {:reply, {:error, reason}, failed_state}
+      {:error, reason} ->
+        reply_to_prompt_admission_failure(state, reason)
     end
   end
 
-  @spec dispatch_new_turn_request(state(), state(), Request.t(), TurnExecution.t()) ::
+  @spec admit_new_turn(
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          state(),
+          TurnExecution.t()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp admit_new_turn(content, state, execution) do
+    {user_message, send_content} = build_user_message(content)
+    candidate = append_msg(state, user_message)
+
+    case admit_provider_request(state, candidate, send_content) do
+      {:ok, request, admitted} ->
+        admitted =
+          admitted
+          |> record_user_message_event(user_message)
+          |> notify_messages_changed()
+
+        dispatch_new_turn_request(admitted, request, execution)
+
+      {:error, reason, failed_state} ->
+        reply_to_prompt_admission_failure(failed_state, reason)
+    end
+  end
+
+  @spec dispatch_new_turn_request(state(), Request.t(), TurnExecution.t()) ::
           {:reply, :ok | {:error, term()}, state()}
-  defp dispatch_new_turn_request(state, request_state, request, execution) do
+  defp dispatch_new_turn_request(request_state, request, execution) do
     case request_state.provider.module.send_prompt(
            ProviderLifecycle.pid(request_state.provider),
            request
@@ -3305,10 +3318,45 @@ defmodule MingaAgent.Session do
         {:error, failure_reason, failed_state} =
           persist_provider_dispatch_failure(request_state, reason)
 
-        failed_state = announce_turn_status(failed_state, state.turn_execution)
-        {:reply, {:error, failure_reason}, failed_state}
+        reply_to_prompt_admission_failure(failed_state, failure_reason)
     end
   end
+
+  @spec reply_to_prompt_admission_failure(state(), term()) ::
+          {:reply, {:error, term()}, state()}
+  defp reply_to_prompt_admission_failure(
+         state,
+         {:conversation_persistence_failed, _reason} = reason
+       ) do
+    # The failed write already published its error and scheduled a retry; this is not another transcript edit.
+    execution =
+      case TurnExecution.error(state.turn_execution) do
+        nil -> TurnExecution.report_error(state.turn_execution, @boundary_save_failure_message)
+        _existing_error -> state.turn_execution
+      end
+
+    state = announce_turn_status(state, execution)
+    {:reply, {:error, reason}, %{state | turn_execution: execution}}
+  end
+
+  defp reply_to_prompt_admission_failure(state, reason) do
+    message = prompt_admission_failure_message(reason)
+    Minga.Log.error(:agent, "[Agent.Session] #{message}")
+    {:reply, {:error, reason}, report_turn_error(state, message)}
+  end
+
+  @spec prompt_admission_failure_message(term()) :: String.t()
+  defp prompt_admission_failure_message(
+         {:portable_context_transition_required, %{message: message}}
+       )
+       when is_binary(message),
+       do: "#{message} Your draft was not sent and is preserved."
+
+  defp prompt_admission_failure_message(reason) when is_binary(reason),
+    do: "Prompt not sent: #{reason}. Your draft is preserved."
+
+  defp prompt_admission_failure_message(reason),
+    do: "Prompt not sent: #{inspect(reason)}. Your draft is preserved."
 
   @spec reply_to_prompt_veto(state(), HookResult.t()) :: {:reply, {:error, term()}, state()}
   defp reply_to_prompt_veto(state, result),
@@ -4193,25 +4241,48 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()]
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
   defp begin_provider_request(state, content) do
-    with {:ok, state, _result} <- refresh_continuation_prefix(state, :current),
-         {:ok, state} <- compact_request_continuation(state),
-         {:ok, turn_id} <- request_turn_id(state),
+    case prepare_provider_request(state) do
+      {:ok, prepared} -> admit_provider_request(prepared, prepared, content)
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  @spec prepare_provider_request(state()) :: {:ok, state()} | {:error, term()}
+  defp prepare_provider_request(state) do
+    with {:ok, prepared, _result} <- refresh_continuation_prefix(state, :current) do
+      compact_request_continuation(prepared)
+    end
+  end
+
+  @spec admit_provider_request(
+          state(),
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
+  defp admit_provider_request(previous, candidate, content) do
+    with {:ok, turn_id} <- request_turn_id(candidate),
          request_id = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
          {:ok, request, continuation} <-
-           Continuation.begin_request(state.continuation, request_id, turn_id, content) do
-      candidate = %{state | continuation: continuation}
-      {persisted, save_result} = persist_completed_boundary(candidate)
+           Continuation.begin_request(candidate.continuation, request_id, turn_id, content) do
+      candidate = %{candidate | continuation: continuation}
+
+      {persisted, save_result} =
+        if Persistence.enabled?(candidate.persistence) do
+          durable = %{candidate | continuation: Continuation.mark_durable(continuation)}
+          persist_boundary_candidate(previous, durable)
+        else
+          {candidate, :ok}
+        end
 
       case save_result do
         :ok ->
           {:ok, request, persisted}
 
         {:error, reason} ->
-          {:error, {:conversation_persistence_failed, reason},
-           %{persisted | continuation: state.continuation}}
+          {:error, {:conversation_persistence_failed, reason}, persisted}
       end
     else
-      {:error, reason} -> {:error, reason, state}
+      {:error, reason} -> {:error, reason, previous}
     end
   end
 

@@ -148,6 +148,17 @@ defmodule MingaAgent.Session.Continuation do
   end
 
   def change_prefix(%__MODULE__{} = continuation, %Prefix{} = candidate) do
+    with %Prefix{} = captured <-
+           PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected),
+         true <- Prefix.requalifies?(captured, candidate) do
+      {:ok, :unchanged, continuation}
+    else
+      _changed_or_missing -> prefix_transition_required(continuation, candidate)
+    end
+  end
+
+  @spec prefix_transition_required(t(), Prefix.t()) :: {:error, term()}
+  defp prefix_transition_required(continuation, candidate) do
     {:error,
      {:portable_context_transition_required,
       %{

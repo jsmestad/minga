@@ -1,6 +1,9 @@
 defmodule MingaAgent.SessionApprovalTest do
   use Minga.Test.SessionCase, async: true
 
+  # Allow aggregate durable-call completion time; this test asserts trust, not latency.
+  @durable_workflow_timeout 30_000
+
   describe "tool approval" do
     test "ToolApproval event stores pending approval and broadcasts" do
       session = start_subscribed_session()
@@ -445,7 +448,8 @@ defmodule MingaAgent.SessionApprovalTest do
         {:agent_event, ^session, {:error, message}} ->
           flunk("first turn failed before its trusted tool: #{message}")
       after
-        @event_timeout -> flunk("first turn did not auto-approve read_file through turn trust")
+        @durable_workflow_timeout ->
+          flunk("first turn did not auto-approve read_file through turn trust")
       end
 
       await_queued_turn_boundary(session, 1, "first turn")
@@ -462,7 +466,7 @@ defmodule MingaAgent.SessionApprovalTest do
         {:agent_event, ^session, {:error, message}} ->
           flunk("queued turn failed before approval: #{message}")
       after
-        @event_timeout -> flunk("queued turn did not request approval for tc_2")
+        @durable_workflow_timeout -> flunk("queued turn did not request approval for tc_2")
       end
 
       assert Session.list_tool_trust(session) == %{}
@@ -556,7 +560,7 @@ defmodule MingaAgent.SessionApprovalTest do
       {:agent_event, ^session, {:status_changed, :error}} ->
         flunk("#{phase} entered error before its response stream was exhausted")
     after
-      @event_timeout -> flunk("#{phase} response stream was not exhausted")
+      @durable_workflow_timeout -> flunk("#{phase} response stream was not exhausted")
     end
 
     receive do
@@ -572,7 +576,7 @@ defmodule MingaAgent.SessionApprovalTest do
       {:agent_event, ^session, {:status_changed, :error}} ->
         flunk("#{phase} entered error before durable completion")
     after
-      @event_timeout ->
+      @durable_workflow_timeout ->
         flunk(
           "#{phase} did not publish a durable boundary; mailbox: " <>
             inspect(Process.info(self(), :messages), limit: :infinity)

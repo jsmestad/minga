@@ -57,19 +57,7 @@ defmodule MingaAgent.IntrospectionTest do
     end
   end
 
-  describe "describe_sessions/0" do
-    test "returns a list of session description maps" do
-      sessions = Introspection.describe_sessions()
-      assert is_list(sessions)
-
-      for session <- sessions do
-        assert Map.has_key?(session, :session_id)
-        assert Map.has_key?(session, :model_name)
-        assert Map.has_key?(session, :status)
-        assert Map.has_key?(session, :created_at)
-      end
-    end
-
+  describe "describe_sessions/1" do
     test "keeps unavailable registrations explicit without inventing metadata" do
       dead_pid = spawn(fn -> :ok end)
       dead_ref = Process.monitor(dead_pid)

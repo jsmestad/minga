@@ -135,6 +135,88 @@ defmodule MingaAgent.Session.PrefixTest do
     assert checkpointed.tool_checkpoint.epoch_id == original.epoch_id
   end
 
+  test "official Codex selections qualify by transport while model and endpoint identities remain distinct" do
+    authentication = identity().authentication
+
+    identities =
+      for model_id <- ["gpt-6.1-sol", "gpt-5.6-luna", "gpt-5.6-terra"] do
+        selection =
+          ModelSelectionFixture.selection(request_provider: :openai_codex, model_id: model_id)
+
+        selected = ModelSelection.replay_identity(selection, authentication)
+        assert selected.native_contract == :codex_responses_exact_prefix_v1
+        selected
+      end
+
+    assert identities |> Enum.map(& &1.selection_id) |> Enum.uniq() |> length() == 3
+
+    for changed <- [
+          [provider_model_id: "different-model"],
+          [base_url: "http://chatgpt.com/backend-api"],
+          [base_url: "https://chatgpt.com.invalid/backend-api"],
+          [base_url: "https://custom.example/backend-api"]
+        ] do
+      selection =
+        ModelSelectionFixture.selection(
+          [request_provider: :openai_codex, model_id: "gpt-5.6-luna"] ++ changed
+        )
+
+      assert ModelSelection.replay_identity(selection, authentication).native_contract == :unknown
+    end
+  end
+
+  test "classifier-only requalification retains captured epochs and refuses every changed input" do
+    current = candidate()
+    captured_identity = Map.put(current.identity, :native_contract, :unknown)
+
+    assert {:ok, captured} =
+             PrefixStore.candidate(
+               :unknown,
+               current.instructions,
+               current.schemas,
+               captured_identity,
+               current.skills
+             )
+
+    {_request, history} = completed(captured)
+    assert {:ok, restored} = history |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+    assert {:ok, :unchanged, ^restored} = Continuation.change_prefix(restored, current)
+    assert PrefixStore.resolve(restored.prefixes, restored.prefixes.selected) == captured
+
+    assert {:ok, request, active} =
+             Continuation.begin_request(restored, "qualified-second", 3, "second")
+
+    assert request.epoch_id == captured.epoch_id
+    assert request.prefix == captured
+    assert request.messages == history.messages ++ [Context.user("second")]
+    assert {:error, :request_active} = Continuation.change_prefix(active, current)
+
+    changed_authentication =
+      Map.put(current.identity.authentication, :account_id, "another-account")
+
+    different_selection =
+      ModelSelectionFixture.selection(request_provider: :openai_codex, model_id: "gpt-5.6-luna")
+
+    different_identity =
+      ModelSelection.replay_identity(different_selection, current.identity.authentication)
+
+    for {instructions, schemas, replay_identity, skills} <- [
+          {"changed instructions", current.schemas, current.identity, current.skills},
+          {current.instructions, [schema("changed")], current.identity, current.skills},
+          {current.instructions, current.schemas, current.identity, ["changed-skill"]},
+          {current.instructions, current.schemas,
+           Map.put(current.identity, :authentication, changed_authentication), current.skills},
+          {current.instructions, current.schemas, different_identity, current.skills},
+          {current.instructions, current.schemas, captured_identity, current.skills}
+        ] do
+      assert {:ok, changed} =
+               PrefixStore.candidate(:unknown, instructions, schemas, replay_identity, skills)
+
+      assert {:error, {:portable_context_transition_required, _}} =
+               Continuation.change_prefix(restored, changed)
+    end
+  end
+
   test "a skill preview before any dispatched history can replace only the initial prefix" do
     original = candidate()
     changed = candidate("selected skill")
