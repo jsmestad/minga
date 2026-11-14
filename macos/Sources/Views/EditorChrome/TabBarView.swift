@@ -127,9 +127,9 @@ public struct TabBarView: View {
                     Label("New File", systemImage: "doc")
                 }
                 Button(action: {
-                    sendAction?(.executeCommand(name: "toggle_agentic_view"))
+                    sendAction?(.executeCommand(name: "agent_new_session"))
                 }) {
-                    Label("Agent", systemImage: "cpu")
+                    Label("New Agent Workspace", systemImage: "cpu")
                 }
             } label: {
                 Image(systemName: "plus")
@@ -140,7 +140,7 @@ public struct TabBarView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 28)
-            .help("New file or agent session")
+            .help("New file or agent workspace")
             .pointingHandCursor()
 
             // Window split buttons
