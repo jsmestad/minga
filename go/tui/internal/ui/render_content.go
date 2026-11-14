@@ -156,7 +156,9 @@ func (m Model) leftChromeWidth() int {
 		return fileTreeWidth(m.width, tree) + 1 // +1 for the │ border separator
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
-		return semanticSidebarWidth(m.width, sidebars) + 1 // +1 for │ separator column
+		if width := semanticSidebarWidth(m.width, sidebars); width > 0 {
+			return width + 1 // +1 for │ separator column
+		}
 	}
 	return 0
 }

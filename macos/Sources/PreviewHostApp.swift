@@ -98,6 +98,8 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Readiness and metadata belong to this revision's production surface.
+    /// Cross-revision evidence shares only the capture transport helpers below.
     private func captureAndExitAsync(window: NSWindow, fixtureView: NSView) async {
         guard let contentView = window.contentView else {
             fail("fixture window has no content view")

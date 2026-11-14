@@ -46,6 +46,78 @@ class TerminalConsumerTest(unittest.TestCase):
         terminal.feed(b"\x1b[6n")
         self.assertTrue(terminal.replies.startswith(b"\x1b[1;"))
 
+    def test_scroll_operations_preserve_cursor_and_respect_margins(self):
+        original_dispatch = dict(self.pyte.Stream.csi)
+        initial = ["HEADER", "OUTSIDE_TOP", "one", "", "three", "four", "OUTSIDE_END", "SEND"]
+        seed = b"\x1b[2J" + b"".join(
+            f"\x1b[{row + 1};1H{text}".encode()
+            for row, text in enumerate(initial) if text)
+        for top, bottom, margins in ((0, 7, b""), (2, 5, b"\x1b[3;6r")):
+            for direction in ("S", "T"):
+                for parameter in ("", "0", "1", "2", "99"):
+                    amount = min(int(parameter or "1") or 1, bottom - top + 1)
+                    region = initial[top:bottom + 1]
+                    shifted = (region[amount:] + [""] * amount if direction == "S"
+                               else [""] * amount + region[:-amount])
+                    expected = initial[:top] + shifted + initial[bottom + 1:]
+                    for row, col in ((0, 1), (4, 2), (7, 15)):
+                        emitted = seed + margins + f"\x1b[31m\x1b[{row + 1};{col + 1}H\x1b[{parameter}{direction}\x1b[6n".encode()
+                        for fragmented in (False, True):
+                            with self.subTest(margins=(top, bottom), direction=direction,
+                                              parameter=parameter, cursor=(row, col),
+                                              fragmented=fragmented):
+                                terminal = capture.TerminalGrid(self.pyte, 16, 8)
+                                chunks = ([bytes([byte]) for byte in emitted]
+                                          if fragmented else [emitted])
+                                for chunk in chunks:
+                                    terminal.feed(chunk)
+                                self.assertEqual([line.rstrip() for line in terminal.lines()], expected)
+                                self.assertEqual((terminal.screen.cursor.x, terminal.screen.cursor.y), (col, row))
+                                self.assertEqual(terminal.screen.cursor.attrs.fg, "red")
+                                self.assertEqual(terminal.replies, f"\x1b[{row + 1};{col + 1}R".encode())
+                                self.assertEqual(terminal.bytes, len(emitted))
+        # Extending one capture must not change the pinned parser globally.
+        self.assertEqual(self.pyte.Stream.csi, original_dispatch)
+
+    def test_scroll_operations_preserve_pending_wrap(self):
+        for direction, before_draw, after_draw in (
+                ("S", ["BBBB", "CCCC", ""], ["CCCC", "", "Z"]),
+                ("T", ["", "AAAA", "BBBB"], ["AAAA", "BBBB", "Z"])):
+            with self.subTest(direction=direction):
+                terminal = capture.TerminalGrid(self.pyte, 4, 3)
+                terminal.feed(b"\x1b[HAAAA\x1b[2;1HBBBB\x1b[3;1HCCCC")
+                terminal.feed(f"\x1b[{direction}".encode())
+                self.assertEqual([line.rstrip() for line in terminal.lines()], before_draw)
+                self.assertEqual((terminal.screen.cursor.x, terminal.screen.cursor.y), (4, 2))
+                terminal.feed(b"Z")
+                self.assertEqual([line.rstrip() for line in terminal.lines()], after_draw)
+
+    def test_emitted_scroll_discards_old_composer_border_before_replacement(self):
+        # Actual Ultraviolet bytes[124075:124100] from the 124942-byte live NORMAL Send/working Stop stream, SHA-256 08a24b6880dd9bb088a5864fbbe520204235784f2a0e82d977f5ef8e84ee646d.
+        # Native Terminal rendered it cleanly; pyte silently ignored the SU.
+        update = b"\x1b[5;16r\x1b[16;1H\x1b[2S\x1b[1;24r"
+        old_rows = {0: "HEADER", 1: "TAB", 4: "OLD_PROMPT_TOP", 13: "OLD_CONTROLS", 14: "OLD_PROMPT_BOTTOM", 23: "STATUS"}
+        old_rows.update({row: f"OLD_DRAFT_{row - 5}" for row in range(5, 13)})
+        seed = b"\x1b[2J" + b"".join(
+            f"\x1b[{row + 1};1H{text}".encode() for row, text in old_rows.items())
+        replacement = b"".join(
+            f"\x1b[{row + 1};1H\x1b[2KTRANSCRIPT_{row - 4}".encode()
+            for row in range(4, 14))
+        replacement += b"\x1b[19;1HPrompt\x1b[20;1HKeep this draft\x1b[21;1Hcancelled.\x1b[22;1HSend\x1b[23;1HBOTTOM"
+        for fragmented in (False, True):
+            with self.subTest(fragmented=fragmented):
+                terminal = capture.TerminalGrid(self.pyte, 60, 24)
+                terminal.feed(seed)
+                emitted = update + replacement
+                for chunk in ([bytes([byte]) for byte in emitted] if fragmented else [emitted]):
+                    terminal.feed(chunk)
+                lines = [line.rstrip() for line in terminal.lines()]
+                self.assertNotIn("OLD_", "\n".join(lines))
+                self.assertEqual(lines[4:14], [f"TRANSCRIPT_{row}" for row in range(10)])
+                self.assertEqual(lines[14:18], [""] * 4)
+                self.assertEqual(lines[18:24], ["Prompt", "Keep this draft", "cancelled.", "Send", "BOTTOM", "STATUS"])
+                self.assertEqual(lines[:2], ["HEADER", "TAB"])
+
     def test_masks_use_terminal_cells_without_modifying_unmasked_grid(self):
         original = ["界S meaningful"]
         compared = capture.comparison_grid(original, [{"row": 0, "col": 2, "length": 1}])
