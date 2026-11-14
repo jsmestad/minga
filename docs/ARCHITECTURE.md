@@ -438,6 +438,10 @@ Chrome and shared UI (tab bars, file trees, status bars, which-key popups, compl
 
 Because the model carries character offsets, not pixel positions, the same model drives both monospaced and variable-width font rendering in GUI frontends: a monospaced frontend multiplies by cell width; a proportional frontend measures preceding characters to find the pixel X. The `measure_text` opcode handles the cases where the BEAM needs the frontend to measure precise display widths.
 
+The agent composer reuses the editor text surface so that typing, wrapping, selection and input methods cannot disagree with a separate chrome renderer. `PromptBuffer` owns the editable draft. `PromptRenderWindow` projects it through `WrapMap` into the existing window-content transport as window 65534. The wrapped prompt uses the windowed lifecycle, not the sequential resident store.
+
+Frontends report their maximum inner text capacity through `agent_prompt_fit` (0x66), tagged with the committed `TextPresentation` identity. The BEAM chooses the line breaks, applies the eight-row limit and handles `agent_prompt_scroll` (0x67) against the same source identity. Swift draws through a transparent SwiftUI aperture using the existing Metal editor; Go uses its existing styled-row renderer. Drawing, pointer input, accessibility and IME use the same placement. Neither frontend owns an editable draft mirror or wraps raw prompt text. See the action payloads in [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
+
 #### Resident-store history
 
 Historical note (recorded 2026-10-29): epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 completed that work and deleted velocity-aware overscan prefetch. The windowed emit path remains for wrapped/folded buffers and the brief pre-promotion arming frame, with fixed overscan rather than velocity tiers. New scrollable surfaces reuse that lifecycle instead of defining per-surface reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).

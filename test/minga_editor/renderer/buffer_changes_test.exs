@@ -84,6 +84,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :intent,
                :layout,
                :message_store,
+               :prompt,
                :windows,
                :workspace
              ]

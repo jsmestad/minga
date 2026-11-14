@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.Caches do
             last_acknowledged_frame_seq: 0,
             recovery_generation: 0,
             last_frame_keyframe?: false,
+            prompt_presentation: nil,
             adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
 
   @type t :: %__MODULE__{
@@ -34,6 +35,7 @@ defmodule MingaEditor.Renderer.Caches do
           last_acknowledged_frame_seq: non_neg_integer(),
           recovery_generation: non_neg_integer(),
           last_frame_keyframe?: boolean(),
+          prompt_presentation: MingaEditor.Renderer.TextPresentation.t() | nil,
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
 
@@ -41,6 +43,10 @@ defmodule MingaEditor.Renderer.Caches do
   def new(recovery_generation \\ 0)
       when is_integer(recovery_generation) and recovery_generation >= 0,
       do: %__MODULE__{recovery_generation: recovery_generation}
+
+  @spec retain_prompt(t(), MingaEditor.Renderer.TextPresentation.t()) :: t()
+  def retain_prompt(%__MODULE__{} = caches, presentation),
+    do: %{caches | prompt_presentation: presentation}
 
   @spec reset_frame_rows_rasterized(t()) :: t()
   def reset_frame_rows_rasterized(%__MODULE__{} = caches),

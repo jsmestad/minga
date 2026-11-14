@@ -13,7 +13,6 @@ extension PreviewRegistry {
 
     static func agentChatView(width: CGFloat, height: CGFloat) -> some View {
         let state = AgentChatState()
-        let theme = PreviewFixtures.theme()
         state.update(
             visible: true,
             status: .executingTool,
@@ -31,17 +30,13 @@ extension PreviewRegistry {
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: PreviewFixtures.agentChatMessages())
 
-        return AgentChatView(state: state, isInsertMode: true, sendAction: { _ in }, cellHeight: 18)
-            .frame(width: width, height: height)
-            .background(theme.agentPanelBg)
-            .environment(theme)
+        return productionAgentChatView(state: state, width: width, height: height)
     }
 
     // MARK: - AgentChatStreaming
 
     static func agentChatStreamingPreview() -> some View {
         let state = AgentChatState()
-        let theme = PreviewFixtures.theme()
         state.update(
             visible: true,
             status: .thinking,
@@ -64,17 +59,13 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
-            .frame(width: 760, height: 600)
-            .background(theme.agentPanelBg)
-            .environment(theme)
+        return productionAgentChatView(state: state, width: 760, height: 600)
     }
 
     // MARK: - AgentChatApproval
 
     static func agentChatApprovalPreview() -> some View {
         let state = AgentChatState()
-        let theme = PreviewFixtures.theme()
         state.update(
             visible: true,
             status: .executingTool,
@@ -98,17 +89,13 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
-            .frame(width: 760, height: 600)
-            .background(theme.agentPanelBg)
-            .environment(theme)
+        return productionAgentChatView(state: state, width: 760, height: 600)
     }
 
     // MARK: - AgentChatError
 
     static func agentChatErrorPreview() -> some View {
         let state = AgentChatState()
-        let theme = PreviewFixtures.theme()
         state.update(
             visible: true,
             status: .error,
@@ -134,17 +121,13 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
-            .frame(width: 760, height: 600)
-            .background(theme.agentPanelBg)
-            .environment(theme)
+        return productionAgentChatView(state: state, width: 760, height: 600)
     }
 
     // MARK: - AgentChatCompletion
 
     static func agentChatCompletionPreview() -> some View {
         let state = AgentChatState()
-        let theme = PreviewFixtures.theme()
         state.update(
             visible: true,
             status: .idle,
@@ -178,17 +161,13 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: true, sendAction: { _ in }, cellHeight: 18)
-            .frame(width: 760, height: 600)
-            .background(theme.agentPanelBg)
-            .environment(theme)
+        return productionAgentChatView(state: state, width: 760, height: 600)
     }
 
     // MARK: - AgentChatSummary
 
     static func agentChatSummaryPreview() -> some View {
         let state = AgentChatState()
-        let theme = PreviewFixtures.theme()
         state.update(
             visible: true,
             status: .idle,
@@ -216,9 +195,6 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
-            .frame(width: 760, height: 600)
-            .background(theme.agentPanelBg)
-            .environment(theme)
+        return productionAgentChatView(state: state, width: 760, height: 600)
     }
 }

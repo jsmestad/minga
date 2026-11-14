@@ -18,7 +18,8 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
 
   alias MingaEditor.Agent.ViewContext
 
-  alias MingaEditor.Input.Wrap, as: InputWrap
+  alias MingaEditor.Agent.View.PromptProjection
+  alias Minga.Core.WrapMap
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
@@ -39,9 +40,8 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   """
   @spec prompt_height(ViewContext.t(), pos_integer()) :: pos_integer()
   def prompt_height(%ViewContext{} = ctx, chat_width) do
-    input_lines = MingaEditor.Agent.PromptBuffer.input_lines(ctx.ui_state.panel)
-    box_width = max(chat_width - 2 * @input_h_margin, 10)
-    compute_input_height(input_lines, input_inner_width(box_width))
+    columns = input_inner_width(input_box_width(chat_width))
+    MingaEditor.Agent.View.PromptRenderWindow.visible_rows(ctx.ui_state.panel, columns) + 2
   end
 
   @doc """
@@ -66,24 +66,18 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
       box_col = col_off + @input_h_margin
       inner_width = input_inner_width(box_width)
 
-      lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
-      cursor = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
-
-      total_visual = InputWrap.visual_line_count(lines, inner_width)
-      visible_lines = max(min(total_visual, @max_input_lines), 1)
-      input_height = compute_input_height(lines, inner_width)
+      projection = PromptProjection.build(panel, inner_width)
+      input_height = projection.visible_rows + 2
       chat_height = max(height - input_height - @input_v_gap, 1)
       input_row = row_off + chat_height + @input_v_gap
+      {visual_line, visual_col} = PromptProjection.position(projection, projection.cursor)
+      visible_offset = visual_line - projection.scroll
 
-      {visual_line, visual_col} =
-        InputWrap.logical_to_visual(lines, inner_width, cursor)
-
-      scroll = InputWrap.scroll_offset(visual_line, visible_lines, total_visual)
-      visible_offset = visual_line - scroll
-
-      input_text_row = input_row + 1 + min(visible_offset, visible_lines - 1)
-      input_col = box_col + 1 + @input_pad_left + visual_col
-      {input_text_row, input_col}
+      if visible_offset >= 0 and visible_offset < projection.visible_rows do
+        input_text_row = input_row + 1 + visible_offset
+        input_col = box_col + 1 + @input_pad_left + visual_col
+        {input_text_row, input_col}
+      end
     else
       nil
     end
@@ -124,7 +118,13 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   """
   @spec compute_input_height([String.t()], pos_integer()) :: pos_integer()
   def compute_input_height(input_lines, inner_width) do
-    visible = InputWrap.visible_height(input_lines, inner_width, @max_input_lines)
+    visible =
+      input_lines
+      |> WrapMap.compute(inner_width, breakindent: false)
+      |> WrapMap.visual_row_count()
+      |> min(@max_input_lines)
+      |> max(1)
+
     visible + 2
   end
 end

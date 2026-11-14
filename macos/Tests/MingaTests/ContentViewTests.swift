@@ -714,6 +714,45 @@ struct ContentViewTests {
         #expect(fixture.view.inFlightNativePresentationCountForTesting == 2)
     }
 
+    @Test("duplicate Agent dismissal cannot invalidate an in-flight replacement editor frame")
+    func duplicateAgentDismissalPreservesReplacementPresentation() throws {
+        let fixture = try makeNativeSaturationFixture()
+        defer {
+            fixture.window.orderOut(nil)
+            fixture.window.contentView = nil
+        }
+        fixture.view.needsDisplay = false
+        fixture.view.setAgentChatVisible(true)
+        #expect(fixture.view.needsDisplay)
+        fixture.view.setAgentChatVisible(true)
+
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 1, anchorTop: 10)
+        fixture.view.draw(fixture.view.bounds)
+        try #require(fixture.completions.completions.count == 1)
+
+        fixture.view.needsDisplay = false
+        fixture.view.setAgentChatVisible(false)
+        #expect(fixture.view.needsDisplay, "A genuine availability transition must schedule its replacement")
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 2, anchorTop: 11)
+        fixture.view.draw(fixture.view.bounds)
+        try #require(fixture.completions.completions.count == 2)
+
+        // AppKit owns redraw flags; duplicate dismissal must preserve both replacement completion stages.
+        fixture.view.setAgentChatVisible(false)
+        fixture.completions.complete(1)
+        try #require(fixture.completions.completions.count == 3, "Duplicate dismissal must not discard the replacement before its drawable copy")
+        fixture.view.setAgentChatVisible(false)
+        fixture.completions.complete(2)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 2)
+        #expect(fixture.completions.presentationCount == 1)
+
+        fixture.completions.complete(0)
+        #expect(fixture.completions.completions.count == 3, "The superseded Agent attempt must remain invalidated")
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 2)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 0)
+    }
+
+
     @Test("native saturation coalesces the newest committed snapshot and retries after complete slot release")
     func saturatedNativePresentationRetriesLatestCommit() async throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -1461,6 +1500,9 @@ struct ContentViewTests {
         let initialChildren = try #require(editorView.accessibilityChildren() as? [EditorPaneAccessibilityElement])
         #expect(initialChildren.count == 2)
         #expect(initialChildren.map { $0.accessibilityRole() } == [.textArea, .textArea])
+        #expect(initialChildren.allSatisfy { $0.isAccessibilityEnabled() })
+        #expect(initialChildren[0].accessibilityIdentifier() == "minga.editor.\(dispatcher.connectionID).1.1")
+        #expect(initialChildren[1].accessibilityIdentifier() == "minga.editor.\(dispatcher.connectionID).2.2")
         #expect(initialChildren.compactMap { $0.accessibilityLabel() } == ["Editor pane 1", "Editor pane 2"])
         #expect(initialChildren[0].accessibilityFrame().maxX <= initialChildren[1].accessibilityFrame().minX)
         #expect((initialChildren[0].accessibilityValue() as? String)?.contains("left row 0") == true)
@@ -1537,6 +1579,13 @@ struct ContentViewTests {
 
         let replacement = try #require(editorView.accessibilityChildren()?.first as? EditorPaneAccessibilityElement)
         #expect(replacement !== initialChildren[1])
+        #expect(replacement.isAccessibilityEnabled())
+        #expect(replacement.accessibilityRole() == .textArea)
+        #expect(replacement.accessibilityIdentifier() == "minga.editor.\(dispatcher.connectionID).2.3")
+        #expect(!initialChildren[0].isAccessibilityEnabled())
+        #expect(!initialChildren[1].isAccessibilityEnabled())
+        #expect(initialChildren[1].accessibilityRole() == .textArea)
+        #expect(initialChildren[1].accessibilityIdentifier() == "minga.editor.\(dispatcher.connectionID).2.2")
         #expect(initialChildren[1].accessibilityValue() == nil)
         if NSApp.isActive && window.isKeyWindow {
             #expect(editorView.accessibilityFocusedUIElement as? EditorPaneAccessibilityElement === replacement)
@@ -1548,6 +1597,9 @@ struct ContentViewTests {
         #expect(spy.actions.count == actionCount)
 
         editorView.invalidateConnection()
+        #expect(!replacement.isAccessibilityEnabled())
+        #expect(replacement.accessibilityValue() == nil)
+        #expect(replacement.accessibilityIdentifier() == "minga.editor.\(dispatcher.connectionID).2.3")
         #expect(editorView.accessibilityFocusedUIElement == nil)
         window.contentView = nil
         #expect(editorView.accessibilityFocusedUIElement == nil)

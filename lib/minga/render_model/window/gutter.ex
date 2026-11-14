@@ -45,4 +45,7 @@ defmodule Minga.RenderModel.Window.Gutter do
           sign_col_width: non_neg_integer(),
           entries: [GutterEntry.t()] | __MODULE__.ResidentRows.t()
         }
+  @doc "Retires keyboard ownership while preserving the committed gutter geometry."
+  @spec deactivate(t()) :: t()
+  def deactivate(%__MODULE__{} = gutter), do: %{gutter | is_active: false}
 end

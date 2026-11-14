@@ -207,6 +207,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
   @gui_action_file_dialog_result Opcodes.gui_action_file_dialog_result()
   @gui_action_semantic_item_activate Opcodes.gui_action_semantic_item_activate()
+  @gui_action_agent_prompt_fit Opcodes.gui_action_agent_prompt_fit()
+  @gui_action_agent_prompt_scroll Opcodes.gui_action_agent_prompt_scroll()
 
   @search_flag_replace_mode 0x01
   @search_flag_case_sensitive 0x02
@@ -330,6 +332,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :float_popup_dismiss
           | :chat_scrolled_away_from_bottom
           | :chat_returned_to_bottom
+          | {:agent_prompt_fit, pos_integer(), pos_integer(), pos_integer(), pos_integer()}
+          | {:agent_prompt_scroll, pos_integer(), pos_integer(), integer()}
           | {:file_dialog_result, request_id :: non_neg_integer(),
              :cancel | {:open, [String.t()]} | {:save_as, String.t()}}
 
@@ -674,6 +678,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   Called from `Protocol.decode_event/1` when the outer opcode is `0x07` (gui_action).
   """
   @spec decode_gui_action(non_neg_integer(), binary()) :: {:ok, gui_action()} | :error
+  def decode_gui_action(
+        @gui_action_agent_prompt_fit,
+        <<65_534::16, generation::64, columns::16, max_rows::16>>
+      )
+      when generation > 0 and columns > 0 and max_rows > 0,
+      do: {:ok, {:agent_prompt_fit, 65_534, generation, columns, max_rows}}
+
+  def decode_gui_action(
+        @gui_action_agent_prompt_scroll,
+        <<65_534::16, generation::64, delta_rows::signed-32>>
+      )
+      when generation > 0,
+      do: {:ok, {:agent_prompt_scroll, 65_534, generation, delta_rows}}
+
   def decode_gui_action(@gui_action_select_tab, <<id::32>>), do: {:ok, {:select_tab, id}}
   def decode_gui_action(@gui_action_close_tab, <<id::32>>), do: {:ok, {:close_tab, id}}
 

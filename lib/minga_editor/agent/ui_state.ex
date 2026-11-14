@@ -45,13 +45,19 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Attaches the process-backed prompt buffer to this UI value."
   @spec attach_prompt_buffer(t(), pid()) :: t()
   def attach_prompt_buffer(%__MODULE__{panel: panel} = state, pid) when is_pid(pid) do
-    %{state | panel: %{panel | prompt_buffer: pid}}
+    %{
+      state
+      | panel: %{panel | prompt_buffer: pid, prompt_viewport: %MingaEditor.Agent.PromptViewport{}}
+    }
   end
 
   @doc "Forgets a dead prompt buffer while preserving prompt metadata."
   @spec detach_prompt_buffer(t()) :: t()
   def detach_prompt_buffer(%__MODULE__{panel: panel} = state) do
-    %{state | panel: %{panel | prompt_buffer: nil}}
+    %{
+      state
+      | panel: %{panel | prompt_buffer: nil, prompt_viewport: %MingaEditor.Agent.PromptViewport{}}
+    }
   end
 
   @doc "Forgets a prompt buffer only when the retiring process owns it."
@@ -65,7 +71,7 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Records metadata shared by ordinary prompt edits."
   @spec record_prompt_edit(t()) :: t()
   def record_prompt_edit(%__MODULE__{panel: panel} = state) do
-    %{state | panel: %{panel | history_index: -1}}
+    %{state | panel: Panel.follow_prompt_cursor(%{panel | history_index: -1})}
   end
 
   @doc "Resets prompt history selection and collapsed-paste metadata."

@@ -12,13 +12,8 @@ var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
 
 // keyPacket encodes a key press, stamping the latency correlation sequence
 // (ticket #2215) into every actual key_press packet so the resulting frame's
-// commit_frame can resolve a keystroke-to-write sample. Mouse-tail and paste
-// packets use other opcodes and carry no sequence.
+// commit_frame can resolve a keystroke-to-write sample. Paste packets carry no sequence.
 func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
-	if packet, ok := sgrMouseTailPacket(msg); ok {
-		return packet, true
-	}
-
 	key := msg.Key()
 	if key.Mod.Contains(tea.ModCtrl) && key.Code >= 'a' && key.Code <= 'z' {
 		return protocol.EncodeKeyPress(key.Code, keyModifiers(key), seq), true
@@ -63,82 +58,55 @@ func pastePacket(msg tea.PasteMsg) []byte {
 	return protocol.EncodePaste(msg.String())
 }
 
-func sgrMouseTailPacket(msg tea.KeyPressMsg) ([]byte, bool) {
-	text := msg.Key().Text
+// normalizeTerminalInput restores fragmented SGR reports to physical mouse events before filtering or surface dispatch.
+func normalizeTerminalInput(msg tea.Msg) tea.Msg {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return msg
+	}
+	text := key.Key().Text
 	if len(text) < 5 {
-		return nil, false
+		return msg
 	}
 	matches := sgrMouseTailPattern.FindStringSubmatch(text)
 	if len(matches) != 5 {
-		return nil, false
+		return msg
 	}
-	buttonCode, err := strconv.Atoi(matches[1])
+	code, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return nil, false
+		return msg
 	}
 	x, err := strconv.Atoi(matches[2])
 	if err != nil {
-		return nil, false
+		return msg
 	}
 	y, err := strconv.Atoi(matches[3])
 	if err != nil {
-		return nil, false
+		return msg
 	}
-	button, mods, eventType := sgrMouseParts(buttonCode, matches[4] == "m")
-	return protocol.EncodeMouseEvent(int16(y-1), int16(x-1), button, mods, eventType, 1), true
-}
-
-func sgrMouseParts(code int, release bool) (byte, byte, byte) {
-	const (
-		shiftBit  = 0x04
-		altBit    = 0x08
-		ctrlBit   = 0x10
-		motionBit = 0x20
-		wheelBit  = 0x40
-	)
-	mods := byte(0)
-	if code&shiftBit != 0 {
-		mods |= protocol.ModShift
+	mouse := tea.Mouse{X: x - 1, Y: y - 1}
+	if code&0x04 != 0 {
+		mouse.Mod |= tea.ModShift
 	}
-	if code&altBit != 0 {
-		mods |= protocol.ModAlt
+	if code&0x08 != 0 {
+		mouse.Mod |= tea.ModAlt
 	}
-	if code&ctrlBit != 0 {
-		mods |= protocol.ModCtrl
+	if code&0x10 != 0 {
+		mouse.Mod |= tea.ModCtrl
 	}
-	button := byte(3)
-	if code&wheelBit != 0 {
-		button = wheelButtonByte(code&0x03, code&shiftBit != 0)
-	} else {
-		button = byte(code & 0x03)
+	if code&0x40 != 0 {
+		mouse.Button = tea.MouseWheelUp + tea.MouseButton(code&0x03)
+		return tea.MouseWheelMsg(mouse)
 	}
-	eventType := protocol.MousePress
-	if release && code&wheelBit == 0 {
-		eventType = protocol.MouseRelease
-	} else if code&motionBit != 0 && code&wheelBit == 0 {
-		// SGR motion: the low two bits carry the held button (0=left, 1=middle,
-		// 2=right, 3=none). A held button means a drag; "none" means free
-		// pointer motion. The BEAM only extends a selection on a drag, so keep
-		// the two distinct (mirrors mousePacket and the macOS frontend).
-		if code&0x03 == 0x03 {
-			eventType = protocol.MouseMotion
-		} else {
-			eventType = protocol.MouseDrag
-		}
+	buttons := [4]tea.MouseButton{tea.MouseLeft, tea.MouseMiddle, tea.MouseRight, tea.MouseNone}
+	mouse.Button = buttons[code&0x03]
+	if code&0x20 != 0 {
+		return tea.MouseMotionMsg(mouse)
 	}
-	return button, mods, eventType
-}
-
-func wheelButtonByte(bits int, shifted bool) byte {
-	if shifted {
-		switch bits {
-		case 0:
-			return 0x43
-		case 1:
-			return 0x42
-		}
+	if matches[4] == "m" {
+		return tea.MouseReleaseMsg(mouse)
 	}
-	return 0x40 + byte(bits)
+	return tea.MouseClickMsg(mouse)
 }
 
 func printableTextModifiers(key tea.Key) byte {

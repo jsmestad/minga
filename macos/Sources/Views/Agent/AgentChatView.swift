@@ -26,22 +26,21 @@ public struct AgentChatView: View {
         case chatReturnedToBottom
     }
 
-    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?, cellHeight: CGFloat = 16) {
+    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.isInsertMode = isInsertMode
         self.sendAction = sendAction
-        self.cellHeight = cellHeight
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
     public let sendAction: ViewActionHandler<Action>?
-    /// Cell dimensions from the Metal renderer, used to size the prompt gap.
-    public var cellHeight: CGFloat = 16
 
     @State private var scrollViewHeight: CGFloat = 0
     /// Tracks whether the user has scrolled away from the bottom.
+    @State private var availableHeight: CGFloat = 0
+    @State private var headerHeight: CGFloat = 0
     /// When true, auto-scroll is paused to let the user read earlier content.
     @State private var userHasScrolledUp: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -58,6 +57,7 @@ public struct AgentChatView: View {
                 }
             })
 
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
             // Messages: bottom-anchored so few messages cluster near the
             // prompt input rather than leaving a void below them.
             ZStack {
@@ -140,11 +140,23 @@ public struct AgentChatView: View {
             // Prompt (completion popup + input capsule)
             AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { action in
                 switch action {
-                case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
+                case .submit: .executeCommand(name: "agent_submit_or_newline")
+                case .abort: .executeCommand(name: "agent_abort")
                 }
-            })
+            }, maximumHeight: max(0, availableHeight - headerHeight))
         }
-        .background(theme.agentPanelBg)
+        .backgroundPreferenceValue(AgentPromptApertureKey.self) { aperture in
+            GeometryReader { geometry in
+                Path { path in
+                    path.addRect(CGRect(origin: .zero, size: geometry.size))
+                    if !aperture.isEmpty { path.addRect(aperture) }
+                }
+                .fill(theme.agentPanelBg, style: FillStyle(eoFill: true))
+            }
+            .allowsHitTesting(false)
+        }
+        .coordinateSpace(name: "agentChat")
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
     }
 
     // MARK: - Messages
@@ -185,11 +197,11 @@ public struct AgentChatView: View {
         case .user(_, let text):
             userMessage(text)
         case .assistant(_, let text):
-            assistantBlock(text)
+            assistantMessage { assistantBlock(text) }
         case .styledAssistant(_, let lines):
-            styledAssistantBlock(lines)
+            assistantMessage { styledAssistantBlock(lines) }
         case .assistantMarkdown(_, let blocks):
-            assistantMarkdownBlock(blocks)
+            assistantMessage { assistantMarkdownBlock(blocks) }
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
         case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines):
@@ -211,6 +223,33 @@ public struct AgentChatView: View {
         case .usage(_, let input, let output, _, _, let costMicros):
             usageRow(input: input, output: output, costMicros: costMicros)
         }
+    }
+
+    private func assistantMessage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "sparkles")
+                    .font(Typography.font(.micro))
+                Text("Minga")
+                    .font(Typography.font(.small, weight: .medium))
+            }
+            .foregroundStyle(theme.agentAssistantLabel)
+
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.lg)
+                .fill(theme.agentAssistantBorder.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.lg)
+                .strokeBorder(theme.agentAssistantBorder.opacity(0.35), lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Assistant reply")
     }
 
     @ViewBuilder
@@ -241,17 +280,11 @@ public struct AgentChatView: View {
         HStack {
             Text(text)
                 .font(Typography.font(.emphasis))
-                .foregroundStyle(theme.agentTextFg.opacity(0.9))
+                .foregroundStyle(theme.agentTextFg)
                 .textSelection(.enabled)
                 .lineSpacing(4)
             Spacer(minLength: 40)
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.md)
-                .fill(theme.agentAssistantBorder.opacity(0.03))
-        )
     }
 
     @ViewBuilder
@@ -369,7 +402,7 @@ public struct AgentChatView: View {
             if run.fgR != 0 || run.fgG != 0 || run.fgB != 0 {
                 attr.foregroundColor = fg
             } else {
-                attr.foregroundColor = theme.agentTextFg.opacity(0.9)
+                attr.foregroundColor = theme.agentTextFg
             }
             // Apply background if non-zero
             if run.bgR != 0 || run.bgG != 0 || run.bgB != 0 {
@@ -633,6 +666,6 @@ private func agentChatPreviewState() -> AgentChatState {
 }
 
 #Preview("Agent Chat", traits: .mingaChrome) {
-    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, sendAction: { _ in }, cellHeight: 18)
+    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, sendAction: { _ in })
         .frame(width: 760, height: 600)
 }

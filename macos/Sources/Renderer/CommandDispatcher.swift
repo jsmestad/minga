@@ -686,6 +686,11 @@ final class CommandDispatcher {
                 )
             }
         }
+        if let snapshot = committedEditorSnapshot, let fontManager {
+            guiState.agentChatState.updatePromptRowPitch(
+                CGFloat(fontManager.cellHeight) * CGFloat(snapshot.frameState.lineSpacing)
+            )
+        }
         if let metadata = transaction.metadata {
             for command in metadata.commands { apply(command, effects: &effects) }
         }

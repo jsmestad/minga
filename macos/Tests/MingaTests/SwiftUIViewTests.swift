@@ -1373,75 +1373,6 @@ struct WorkspaceHeaderViewTests {
 
 // MARK: - AgentChatView
 
-@Suite("Agent prompt native caret layout")
-struct AgentPromptCaretLayoutTests {
-    private let accuracy: CGFloat = 0.01
-
-    @Test("UTF-8 byte offsets resolve to native glyph boundaries")
-    @MainActor func unicodeGlyphBoundaries() throws {
-        let samples = [
-            "hello",
-            "café",
-            "é",
-            "👩‍💻",
-            "漢字",
-            "a\tb"
-        ]
-
-        for text in samples {
-            let caret = try #require(AgentPromptLineLayout.caretMetrics(text: text, utf8ByteOffset: text.utf8.count))
-            #expect(caret.x > 0)
-            #expect(caret.blockWidth > 0)
-        }
-
-        let ascii = try #require(AgentPromptLineLayout.caretMetrics(text: "M", utf8ByteOffset: 1))
-        let accented = try #require(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 2))
-        let decomposed = try #require(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 3))
-        #expect(abs(accented.x - ascii.x) < accuracy)
-        #expect(abs(decomposed.x - ascii.x) < accuracy)
-
-        let tab = try #require(AgentPromptLineLayout.caretMetrics(text: "\t", utf8ByteOffset: 1))
-        #expect(tab.x > ascii.x)
-    }
-
-    @Test("empty and end-of-line positions retain a measurable block cell")
-    @MainActor func endOfLineMetrics() throws {
-        let empty = try #require(AgentPromptLineLayout.caretMetrics(text: "", utf8ByteOffset: 0))
-        let end = try #require(AgentPromptLineLayout.caretMetrics(text: "abc", utf8ByteOffset: 3))
-
-        #expect(empty.x == 0)
-        #expect(empty.blockWidth > 0)
-        #expect(end.x > 0)
-        #expect(abs(end.blockWidth - empty.blockWidth) < accuracy)
-    }
-
-    @Test("malformed and out-of-range byte positions do not produce a cursor")
-    @MainActor func invalidOffsets() {
-        #expect(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 1) == nil)
-        #expect(AgentPromptLineLayout.caretMetrics(text: "é", utf8ByteOffset: 1) == nil)
-        #expect(AgentPromptLineLayout.caretMetrics(text: "abc", utf8ByteOffset: -1) == nil)
-        #expect(AgentPromptLineLayout.caretMetrics(text: "abc", utf8ByteOffset: 4) == nil)
-    }
-
-    @Test("native prompt renderer uses measured block and beam shapes")
-    @MainActor func cursorShapesAndInvalidUpdate() throws {
-        let view = AgentPromptLineNSView()
-        view.update(text: "👩‍💻x", cursorByteOffset: "👩‍💻".utf8.count, cursorShape: .block, textColor: .white, cursorColor: .red)
-        let measuredBlockWidth = try #require(view.promptLayout.caret?.blockWidth)
-        let blockRect = try #require(view.cursorRect())
-        #expect(abs(blockRect.width - measuredBlockWidth) < accuracy)
-
-        view.update(text: "👩‍💻x", cursorByteOffset: "👩‍💻".utf8.count, cursorShape: .beam, textColor: .white, cursorColor: .red)
-        let beamRect = try #require(view.cursorRect())
-        #expect(abs(beamRect.minX - blockRect.minX) < accuracy)
-        #expect(beamRect.width == 1.5)
-
-        view.update(text: "é", cursorByteOffset: 1, cursorShape: .beam, textColor: .white, cursorColor: .red)
-        #expect(view.cursorRect() == nil)
-        #expect(view.acceptsFirstResponder == false)
-        #expect(view.hitTest(.zero) == nil)
-    }
-}
 
 @Suite("AgentChatView View Structure")
 struct AgentChatViewTests {
@@ -1501,8 +1432,6 @@ struct AgentChatViewTests {
         // Header shows model name and status
         #expect(strings.contains("claude-sonnet-4"))
         #expect(strings.contains("idle"))
-        // Prompt shows placeholder in normal mode
-        #expect(strings.contains("Ask anything..."))
         // NORMAL mode indicator shown in prompt border
         #expect(strings.contains("NORMAL"))
     }
@@ -1617,6 +1546,47 @@ struct AgentChatViewTests {
         #expect(strings.contains("┌─ python"))
         #expect(strings.contains("└"))
         #expect(!strings.contains("python"))
+    }
+
+    @Test("Plain, styled, and Markdown replies expose their author without hiding response content")
+    @MainActor func assistantRepliesIdentifyTheirAuthor() throws {
+        func run(_ text: String) -> Wire.StyledTextRun {
+            Wire.StyledTextRun(text: text, fgR: 0, fgG: 0, fgB: 0, bgR: 0, bgG: 0, bgB: 0, bold: false, italic: false, underline: false, code: false)
+        }
+
+        let block = Wire.AgentMarkdownBlock(
+            id: 1,
+            kind: .paragraph,
+            flags: 0,
+            lines: [[run("Markdown reply")]],
+            level: 0,
+            indent: 0,
+            ordered: false,
+            ordinal: 0,
+            height: 1,
+            language: "",
+            label: "",
+            targetPath: "",
+            capabilityFlags: 0
+        )
+        let state = chatState(messages: [
+            .user(id: 1, text: "Review the change"),
+            .assistant(id: 2, text: "Plain reply"),
+            .styledAssistant(id: 3, lines: [[run("Styled reply")]]),
+            .assistantMarkdown(id: 4, blocks: [block])
+        ])
+        let body = try AgentChatView(state: state, isInsertMode: false, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let roles = body.findAll(ViewType.VStack.self).compactMap { try? $0.accessibilityLabel().string() }
+
+        #expect(strings.filter { $0 == "Minga" }.count == 3)
+        #expect(roles.filter { $0 == "Assistant reply" }.count == 3)
+        #expect(strings.contains("You"))
+        for reply in ["Plain reply", "Styled reply", "Markdown reply"] {
+            #expect(strings.contains(reply))
+        }
     }
 
     @Test("Assistant markdown renders semantic code card")

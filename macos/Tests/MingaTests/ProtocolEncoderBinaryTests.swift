@@ -937,3 +937,47 @@ struct EncoderDisplayedTextTests {
         #expect(payload == Data([OP_TEXT_PRESENTATION_STATE, 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1]))
     }
 }
+
+@Suite("Encoder Binary: canonical multiline agent prompt")
+struct EncoderAgentPromptTests {
+    @Test("fit preserves the entire source presentation generation and both physical dimensions")
+    func fitLayout() {
+        let payload = captureFrame {
+            $0.send(.agentPromptFit(windowID: 65534, generation: 0x0102030405060708, columns: 93, maxRows: 17))
+        }
+        #expect(payload == Data([
+            OP_GUI_ACTION, 0x66, 0xFF, 0xFE,
+            1, 2, 3, 4, 5, 6, 7, 8, 0, 93, 0, 17
+        ]))
+    }
+
+    @Test("scroll uses signed big-endian i32 in both directions", arguments: [Int32.min, -257, 0, 257, Int32.max])
+    func scrollLayout(delta: Int32) {
+        let payload = captureFrame {
+            $0.send(.agentPromptScroll(windowID: 65534, generation: UInt64.max, deltaRows: delta))
+        }
+        #expect(payload.count == 16)
+        #expect(payload[0] == OP_GUI_ACTION && payload[1] == 0x67)
+        #expect(readU16(payload, 2) == 65534)
+        #expect(readU64(payload, 4) == UInt64.max)
+        #expect(Int32(bitPattern: readU32(payload, 12)) == delta)
+    }
+
+    @Test("invalid targets and zero fit dimensions are rejected before transport")
+    func fitAdmission() throws {
+        let pipe = Pipe()
+        let encoder = try ProtocolEncoder(output: pipe.fileHandleForWriting)
+        for action: OutboundAction in [
+            .agentPromptFit(windowID: 1, generation: 3, columns: 80, maxRows: 8),
+            .agentPromptFit(windowID: 65534, generation: 3, columns: 0, maxRows: 8),
+            .agentPromptFit(windowID: 65534, generation: 3, columns: 80, maxRows: 0),
+            .agentPromptScroll(windowID: 1, generation: 3, deltaRows: 1)
+        ] {
+            guard case .rejected(.invalidPayload) = encoder.send(action) else {
+                Issue.record("Invalid prompt geometry entered the transport")
+                continue
+            }
+        }
+        #expect(encoder.send(.agentPromptFit(windowID: 65534, generation: 3, columns: 1, maxRows: 1)) == .accepted)
+    }
+}

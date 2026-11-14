@@ -270,7 +270,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       search_focus: 0x62,
       file_dialog_result: 0x63,
       focus_window: 0x64,
-      semantic_item_activate: 0x65
+      semantic_item_activate: 0x65,
+      agent_prompt_fit: 0x66,
+      agent_prompt_scroll: 0x67
     )
   end
 

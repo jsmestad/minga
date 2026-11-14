@@ -14,7 +14,7 @@ struct PreviewSnapshotPolicyTests {
         #expect(PreviewSnapshotPolicy.expectedPixelSize(named: "StatusBarView", scale: 2.0) == CGSize(width: 1600, height: 56))
     }
 
-    @Test("rendered window capture is reserved for full-shell Metal previews")
+    @Test("every Metal-backed production fixture requires rendered window capture")
     func renderedCapturePolicy() {
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("EditorChromeView"))
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("AgentChromeView"))
@@ -33,6 +33,10 @@ struct PreviewSnapshotPolicyTests {
         #expect(PreviewSnapshotPolicy.requiresRenderedWindowCapture("AgentChromeView"))
         #expect(!PreviewSnapshotPolicy.requiresRenderedWindowCapture("FileTreeView"))
         #expect(!PreviewSnapshotPolicy.requiresRenderedWindowCapture("GitStatusView"))
+        for name in ["AgentChatView", "AgentChatStreaming", "AgentChatApproval", "AgentChatError", "AgentChatCompletion", "AgentChatSummary"] {
+            #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture(name))
+            #expect(PreviewSnapshotPolicy.requiresRenderedWindowCapture(name))
+        }
     }
 
     @Test("eager layout only turns on for isolated component snapshots")

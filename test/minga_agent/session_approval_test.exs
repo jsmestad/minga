@@ -299,6 +299,7 @@ defmodule MingaAgent.SessionApprovalTest do
 
     @tag :tmp_dir
     test "turn trust clears before automatically queued follow-up turns", %{tmp_dir: dir} do
+      test_pid = self()
       File.write!(Path.join(dir, "test.txt"), "file contents")
       call_count = :counters.new(1, [:atomics])
       oauth_path = Path.join(dir, "credentials/oauth.json")
@@ -393,7 +394,20 @@ defmodule MingaAgent.SessionApprovalTest do
               ]
           end
 
-        build_stream_response(chunks)
+        # Observe consumption in Native, not construction of the mocked StreamResponse.
+        stream =
+          Stream.transform(
+            chunks,
+            fn -> count end,
+            fn chunk, call -> {[chunk], call} end,
+            fn call ->
+              send(test_pid, {:queued_response_stream_exhausted, call})
+              {[], call}
+            end,
+            fn _call -> :ok end
+          )
+
+        build_stream_response(stream)
       end
 
       tools = MingaAgent.Tools.all(project_root: dir)
@@ -434,7 +448,7 @@ defmodule MingaAgent.SessionApprovalTest do
         @event_timeout -> flunk("first turn did not auto-approve read_file through turn trust")
       end
 
-      await_queued_turn_boundary(session, "first turn")
+      await_queued_turn_boundary(session, 1, "first turn")
 
       refute_received {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", _scope}}
 
@@ -455,7 +469,7 @@ defmodule MingaAgent.SessionApprovalTest do
 
       assert :ok = Session.respond_to_approval(session, :approve)
 
-      await_queued_turn_boundary(session, "approved follow-up")
+      await_queued_turn_boundary(session, 3, "approved follow-up")
 
       assert Session.status(session) == :idle
 
@@ -526,8 +540,25 @@ defmodule MingaAgent.SessionApprovalTest do
     end
   end
 
-  @spec await_queued_turn_boundary(GenServer.server(), String.t()) :: non_neg_integer()
-  defp await_queued_turn_boundary(session, phase) do
+  @spec await_queued_turn_boundary(GenServer.server(), non_neg_integer(), String.t()) ::
+          non_neg_integer()
+  defp await_queued_turn_boundary(session, response_call, phase) do
+    receive do
+      {:queued_response_stream_exhausted, ^response_call} ->
+        :ok
+
+      {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", scope}} ->
+        flunk("#{phase}: queued turn unexpectedly reused #{inspect(scope)} trust")
+
+      {:agent_event, ^session, {:error, message}} ->
+        flunk("#{phase} failed before its response stream was exhausted: #{message}")
+
+      {:agent_event, ^session, {:status_changed, :error}} ->
+        flunk("#{phase} entered error before its response stream was exhausted")
+    after
+      @event_timeout -> flunk("#{phase} response stream was not exhausted")
+    end
+
     receive do
       {:agent_event, ^session, {:resumable_boundary, revision}} ->
         revision

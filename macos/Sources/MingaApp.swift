@@ -57,6 +57,7 @@ struct MingaApp: App {
                 }
             )
                 .environment(\.editorFocusPolicy, appDelegate.appState.editorNSView?.focusPolicy)
+                .environment(\.agentPromptSurface, appDelegate.appState.editorNSView.map { AgentPromptSurface(editor: $0) })
                 .frame(minWidth: 160, minHeight: 80)
                 // Disable SwiftUI's focus system so it doesn't steal
                 // first responder from the EditorNSView.

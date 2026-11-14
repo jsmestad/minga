@@ -133,6 +133,15 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
                 fail("agent workspace fixture is missing its production renderer, committed frame, transcript, or prompt")
             }
         }
+        if let state = PreviewRegistry.captureAppState, state.gui.agentChatState.visible {
+            guard let editor = state.editorNSView,
+                  editor.agentPromptPlacement != nil,
+                  let visible = editor.dispatcher.visibleEditorPresentation,
+                  let pane = visible.textLayout?.panes.first(where: { $0.windowID == 65534 }),
+                  visible.snapshot.metadata.textPresentations[65534] == pane.presentationID else {
+                fail("agent fixture has not presented its canonical prompt window through the production Metal aperture")
+            }
+        }
 
         let dirURL = URL(fileURLWithPath: outputDir, isDirectory: true)
         do {

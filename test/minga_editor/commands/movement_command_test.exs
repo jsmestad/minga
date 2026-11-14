@@ -173,37 +173,28 @@ defmodule MingaEditor.Commands.MovementCommandTest do
 
   describe "Layer 1 command/state handler — wrap-aware movement" do
     test "wrapped j and k honor tab width when computing visual rows" do
-      state =
-        TestHelpers.base_state(content: "\t" <> String.duplicate("a", 30), cols: 7, rows: 10)
+      cols = 7 + Gutter.total_width(0)
 
-      buffer = state.workspace.buffers.active
+      for {tab_width, next_byte} <- [{2, 6}, {4, 4}] do
+        state =
+          TestHelpers.base_state(content: "\t" <> String.duplicate("a", 30), cols: cols, rows: 10)
 
-      _ = BufferProcess.set_option(buffer, :wrap, true)
-      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
-      _ = BufferProcess.set_option(buffer, :linebreak, false)
-      _ = BufferProcess.set_option(buffer, :breakindent, true)
-      _ = BufferProcess.set_option(buffer, :tab_width, 4)
+        buffer = state.workspace.buffers.active
 
-      [wrap_entry] =
-        WrapMap.compute(["\t" <> String.duplicate("a", 30)], 7,
-          breakindent: true,
-          linebreak: false,
-          tab_width: 4
-        )
+        _ = BufferProcess.set_option(buffer, :wrap, true)
+        _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+        _ = BufferProcess.set_option(buffer, :linebreak, false)
+        _ = BufferProcess.set_option(buffer, :breakindent, true)
+        _ = BufferProcess.set_option(buffer, :tab_width, tab_width)
 
-      assert Enum.map(Enum.take(wrap_entry, 3), &{&1.byte_offset, &1.indent_width}) == [
-               {0, 0},
-               {4, 4},
-               {8, 4}
-             ]
+        BufferProcess.move_to(buffer, {0, 1})
 
-      BufferProcess.move_to(buffer, {0, 4})
+        state = Movement.execute(state, :move_down)
+        assert BufferProcess.cursor(buffer) == {0, next_byte}
 
-      _ = Movement.execute(state, :move_down)
-      assert BufferProcess.cursor(buffer) == {0, 8}
-
-      _ = Movement.execute(state, :move_up)
-      assert BufferProcess.cursor(buffer) == {0, 4}
+        _ = Movement.execute(state, :move_up)
+        assert BufferProcess.cursor(buffer) == {0, 1}
+      end
     end
 
     test "j/k/0/$ stay logical when folds are active" do

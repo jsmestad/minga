@@ -233,6 +233,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(query, limit: Int(UInt16.max))
         case .searchReplace(let replacement), .searchReplaceAll(let replacement):
             return oversizedString(replacement, limit: Int(UInt16.max))
+        case .agentPromptFit(let windowID, _, let columns, let maxRows):
+            guard windowID == 65534, columns > 0, maxRows > 0 else {
+                return .invalidPayload("Invalid agent prompt fit")
+            }
+            return nil
+        case .agentPromptScroll(let windowID, _, _):
+            return windowID == 65534 ? nil : .invalidPayload("Invalid agent prompt scroll target")
         case .ready, .keyPress, .resize, .requestKeyframe, .frameApplied, .frameRejected,
              .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
              .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
@@ -356,6 +363,23 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .agentDismiss: encodeAgentDismiss()
         case .chatScrolledAwayFromBottom: encodeChatScrolledAwayFromBottom()
         case .chatReturnedToBottom: encodeChatReturnedToBottom()
+        case .agentPromptFit(let windowID, let generation, let columns, let maxRows):
+            var buf = Data(count: 16)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_AGENT_PROMPT_FIT
+            writeU16(&buf, 2, windowID)
+            writeU64(&buf, 4, generation)
+            writeU16(&buf, 12, columns)
+            writeU16(&buf, 14, maxRows)
+            writeFrame(buf)
+        case .agentPromptScroll(let windowID, let generation, let deltaRows):
+            var buf = Data(count: 16)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_AGENT_PROMPT_SCROLL
+            writeU16(&buf, 2, windowID)
+            writeU64(&buf, 4, generation)
+            writeU32(&buf, 12, UInt32(bitPattern: deltaRows))
+            writeFrame(buf)
         case .scrollToLine(let windowID, let generation, let line): encodeScrollToLine(windowID: windowID, generation: generation, line: line)
         case .foldToggleAtLine(let windowID, let generation, let bufferLine): encodeFoldToggleAtLine(windowId: windowID, generation: generation, bufferLine: bufferLine)
         case .focusWindow(let windowID, let generation): encodeFocusWindow(windowId: windowID, generation: generation)

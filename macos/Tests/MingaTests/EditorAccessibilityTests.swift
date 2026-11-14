@@ -201,6 +201,78 @@ struct EditorAccessibilityTests {
         ])
         #expect(projection.selectedText == "first\nthird")
     }
+    @Test("soft wraps preserve one logical Unicode value and contiguous selected source offsets")
+    func logicalSoftWraps() throws {
+        let surface = try makeSurface(
+            texts: ["aé", "界👩‍💻", "tail"],
+            rowTypes: [.normal, .wrapContinuation, .normal],
+            selection: GUISelectionOverlay(type: .char, startRow: 0, startCol: 1, endRow: 1, endCol: 2),
+            bufferLines: [4, 4, 5]
+        )
+        let projection = EditorAccessibilityProjection.build(
+            surface: surface, connectionID: 1, isActivePane: true, localTransform: nil, cellWidth: 8, cellHeight: 16
+        )
+        #expect(projection.value == "aé界👩‍💻\ntail")
+        #expect(projection.rows[1].valueRange == NSRange(location: 2, length: 6))
+        #expect(projection.lineRanges == [NSRange(location: 0, length: 8), NSRange(location: 9, length: 4)])
+        #expect(projection.selectedRanges == [NSRange(location: 1, length: 2)])
+        #expect(projection.selectedText == "é界")
+        #expect(projection.logicalLine(atUTF16Offset: 3) == 0)
+        #expect(projection.logicalLine(atUTF16Offset: 9) == 1)
+    }
+    @Test("disjoint selected wrap fragments neither select omitted text nor invent a newline")
+    func disjointSoftWrapSelection() throws {
+        let projection = EditorAccessibilityProjection.build(
+            surface: try makeSurface(
+                texts: ["abc", "def"],
+                selection: GUISelectionOverlay(type: .char, startRow: 0, startCol: 0, endRow: 1, endCol: 1),
+                accessibilitySelectionRanges: [
+                    GUIAccessibilityRange(row: 0, startUTF16: 0, endUTF16: 2),
+                    GUIAccessibilityRange(row: 1, startUTF16: 0, endUTF16: 1)
+                ],
+                bufferLines: [0, 0]
+            ),
+            connectionID: 1, isActivePane: true, localTransform: nil, cellWidth: 8, cellHeight: 16
+        )
+        #expect(projection.value == "abcdef")
+        #expect(projection.selectedRanges == [NSRange(location: 0, length: 2), NSRange(location: 3, length: 1)])
+        #expect(projection.selectedText == "abd")
+    }
+
+
+    @Test("a caret at a wrap boundary keeps the committed visual row, not both row rectangles")
+    func softWrapCaretGeometry() throws {
+        let projection = EditorAccessibilityProjection.build(
+            surface: try makeSurface(
+                texts: ["aé", "界👩‍💻"], bufferLines: [0, 0], cursorRow: 1, cursorUTF16: 0
+            ),
+            connectionID: 1, isActivePane: true, localTransform: nil, cellWidth: 8, cellHeight: 16
+        )
+        #expect(projection.value == "aé界👩‍💻")
+        #expect(projection.insertionRange == NSRange(location: 2, length: 0))
+        #expect(projection.insertionPointLineNumber == 0)
+        #expect(projection.localRect(for: NSRange(location: 2, length: 0)) == CGRect(x: 0, y: 16, width: 8, height: 16))
+    }
+
+    @Test("genuine empty lines and a trailing newline remain in logical AX text and ranges")
+    func explicitAndTrailingNewlines() throws {
+        let projection = EditorAccessibilityProjection.build(
+            surface: try makeSurface(
+                texts: ["café ", "界👩‍💻", "", "tail", ""],
+                bufferLines: [0, 0, 1, 2, 3], cursorRow: 4, cursorUTF16: 0
+            ),
+            connectionID: 1, isActivePane: true, localTransform: nil, cellWidth: 8, cellHeight: 16
+        )
+        #expect(projection.value == "café 界👩‍💻\n\ntail\n")
+        #expect(projection.lineRanges == [
+            NSRange(location: 0, length: 11), NSRange(location: 12, length: 0),
+            NSRange(location: 13, length: 4), NSRange(location: 18, length: 0)
+        ])
+        #expect(projection.insertionRange == NSRange(location: 18, length: 0))
+        #expect(projection.insertionPointLineNumber == 3)
+        #expect(projection.localRect(for: NSRange(location: 18, length: 0)) == CGRect(x: 0, y: 64, width: 8, height: 16))
+    }
+
 
     private func makeSurface(
         texts: [String],
@@ -211,7 +283,10 @@ struct EditorAccessibilityTests {
         cols: UInt16 = 80,
         rows: UInt16? = nil,
         contentEpoch: UInt32 = 1,
-        accessibilitySelectionRanges: [GUIAccessibilityRange]? = nil
+        accessibilitySelectionRanges: [GUIAccessibilityRange]? = nil,
+        bufferLines: [UInt32]? = nil,
+        cursorRow: UInt16 = 0,
+        cursorUTF16: UInt32? = nil
     ) throws -> PresentedWindowSurface {
         let visibleRows = rows ?? UInt16(clamping: texts.count)
         let geometry = GUIPaneGeometry(
@@ -221,7 +296,7 @@ struct EditorAccessibilityTests {
             textRect: GUICellRect(row: 0, col: 0, width: cols, height: visibleRows),
             gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: visibleRows),
             clipRect: GUICellRect(row: 0, col: 0, width: cols, height: visibleRows),
-            viewport: GUIViewportSummary(top: 0, left: scrollLeft, rows: visibleRows, cols: cols, totalLines: UInt32(texts.count), visualRowOffset: 0, totalVisualRows: UInt32(texts.count)),
+            viewport: GUIViewportSummary(top: 0, left: scrollLeft, rows: visibleRows, cols: cols, totalLines: bufferLines.map { ($0.max() ?? 0) + 1 } ?? UInt32(texts.count), visualRowOffset: 0, totalVisualRows: UInt32(texts.count)),
             gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
             hitRegions: []
         )
@@ -229,12 +304,12 @@ struct EditorAccessibilityTests {
             windowId: 1,
             fullRefresh: true,
             contentEpoch: contentEpoch,
-            cursorRow: 0,
+            cursorRow: cursorRow,
             cursorCol: cursorCol,
             cursorShape: .block,
             scrollLeft: scrollLeft,
             rows: texts.enumerated().map { index, text in
-                GUIVisualRow(rowType: rowTypes?[index] ?? .normal, rowId: UInt64(index + 1), bufLine: UInt32(index), contentHash: UInt32(index), text: text, spans: [])
+                GUIVisualRow(rowType: rowTypes?[index] ?? .normal, rowId: UInt64(index + 1), bufLine: bufferLines?[index] ?? UInt32(index), contentHash: UInt32(index), text: text, spans: [])
             },
             selection: selection,
             searchMatches: [],
@@ -243,7 +318,7 @@ struct EditorAccessibilityTests {
             paneGeometry: geometry,
             accessibilityLabel: "sample.ex",
             accessibilityGeneration: UInt64(contentEpoch),
-            accessibilityCursor: GUIAccessibilityCursor(row: 0, utf16: UInt32(GUIDisplayColumnMap(texts.first ?? "").utf16Offset(at: Int(cursorCol)))),
+            accessibilityCursor: GUIAccessibilityCursor(row: cursorRow, utf16: cursorUTF16 ?? UInt32(GUIDisplayColumnMap(texts[Int(cursorRow)]).utf16Offset(at: Int(cursorCol)))),
             accessibilitySelectionRanges: accessibilitySelectionRanges ?? selectionRanges(selection, texts: texts)
         )
         return PresentedWindowSurface(content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil)

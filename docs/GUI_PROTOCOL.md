@@ -1176,6 +1176,17 @@ The frontend sends user interactions with native chrome back to the BEAM using t
 opcode(1) + action_type(1) + payload...
 ```
 
+
+### Retained multiline agent prompt
+
+The editable draft lives only in the BEAM PromptBuffer. Window 65534 uses the existing styled window transport as a **windowed**, soft-wrapped row store, never a sequential resident document. Logical positions are UTF-8 byte positions; `buf_line` is a logical line and `visual_index` is its continuation index. The viewport top names the logical source line, with `visual_row_offset` naming its continuation. Cursor and selection overlays are viewport-relative display cells. Source-backed `gui_text_presentation` identities support the ordinary retained text-input lifecycle.
+
+Prompt accessibility section `0x0C` names the surface **Agent prompt** and uses its retained TextPresentation ID as the accessibility generation. Cursor and selection ranges use row-local composed UTF-16 offsets mapped from canonical source bytes, including wrapped rows and paste replacements. `focus_window` for the prompt validates that generation against the exact active lease and current prompt owner before focusing the real agent pane; it never creates a WindowTree buffer or replaces a draft from a stale accessibility observation.
+
+Actions 0x66 and 0x67 must echo that exact committed TextPresentation generation (u64), not an accessibility generation or frontend counter. Physical fit admits an exact published, retained lease for the current prompt-buffer owner, including before the frontend's ordered text-activation event; it does not admit editing or scrolling. Scroll and text input still require the exact active lease. Unknown, discarded and replacement-owner observations are rejected. Fit dimensions must be positive u16 values. Capacity comes from the **maximum available** inner text allocation after controls/padding, not the collapsed composer height. The BEAM chooses `max(1, min(total_visual_rows, 8, max_rows))`, subject to advertised resource limits. Learned fit survives ordinary edits to the same owner, but not a replacement prompt.
+
+Scrolling changes only the BEAM-owned logical/continuation viewport anchor, never draft content or cursor. Editing and cursor motion restore caret-follow. Frontends draw only committed wrapped rows, keep Send/Stop outside the scrolling aperture, and do not independently wrap the read-only `AgentChat.prompt` metadata. `AgentChat.prompt_visible_rows`, window geometry and rows are published atomically from the same projection. Obsolete active gutter ownership is retired with ordinary inactive gutter metadata, without weakening snapshot validation or forcing recovery keyframes.
+
 | Action Type | Name | Payload | Description |
 |-------------|------|---------|-------------|
 | 0x01 | select_tab | id(4) | User clicked a tab |
@@ -1234,6 +1245,8 @@ opcode(1) + action_type(1) + payload...
 | 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
 | 0x64 | focus_window | window_id(2) + generation(8) | Request semantic activation of the exact accessible pane; the BEAM ignores a stale pane generation |
 | 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate an exact completion, picker, file-tree, command-completion, or timeline item |
+| 0x66 | agent_prompt_fit | window_id(2) + generation(8) + columns(2) + max_rows(2) | Report the maximum physical inner text allocation for committed prompt window 65534 |
+| 0x67 | agent_prompt_scroll | window_id(2) + generation(8) + delta_rows(4, signed) | Scroll the committed prompt by wrapped visual rows; positive is down |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

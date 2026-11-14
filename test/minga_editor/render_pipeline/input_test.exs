@@ -62,6 +62,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
                  :intent,
                  :layout,
                  :message_store,
+                 :prompt,
                  :windows,
                  :workspace
                ]

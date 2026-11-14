@@ -122,7 +122,73 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert model.selection.start_row == 0
       assert model.selection.start_col == 1
       assert model.selection.end_row == 0
-      assert model.selection.end_col == 4
+      assert model.selection.end_col == 5
+    end
+
+    test "normalizes inclusive source endpoints before Unicode and wrap projection" do
+      cases = [
+        {"abc", {0, 1}, {0, 1}, 40, {0, 1}, {0, 2}},
+        {"a界b", {0, 1}, {0, 1}, 40, {0, 1}, {0, 3}},
+        {"aéb", {0, 1}, {0, 1}, 40, {0, 1}, {0, 2}},
+        {"a👩‍💻b", {0, 1}, {0, 1}, 40, {0, 1}, {0, 3}},
+        {"abcdef", {0, 4}, {0, 1}, 40, {0, 1}, {0, 5}},
+        {"ab\n界éx", {1, 3}, {0, 1}, 40, {0, 1}, {1, 3}},
+        {"abcdefgh", {0, 1}, {0, 3}, 4, {0, 1}, {1, 0}},
+        {"a界bcdef", {0, 1}, {0, 1}, 3, {0, 1}, {1, 0}}
+      ]
+
+      for {text, anchor, cursor, columns, from, to} <- cases do
+        ctx =
+          prompt_ctx(text,
+            cursor: cursor,
+            mode: :visual,
+            mode_state: %{visual_anchor: anchor, visual_type: :char}
+          )
+
+        model = PromptRenderWindow.build(ctx, columns)
+        assert model.selection.type == :char
+        assert {model.selection.start_row, model.selection.start_col} == from
+        assert {model.selection.end_row, model.selection.end_col} == to
+      end
+    end
+
+    test "clips normalized selections to the physical prompt viewport" do
+      for {anchor, cursor, from, to} <- [
+            {{0, 1}, {0, 13}, {0, 0}, {1, 2}},
+            {{0, 18}, {0, 5}, {1, 1}, {1, 4}}
+          ] do
+        ctx =
+          prompt_ctx("abcdefghijklmnopqrst",
+            cursor: cursor,
+            mode: :visual,
+            mode_state: %{visual_anchor: anchor, visual_type: :char}
+          )
+
+        panel = UIState.Panel.fit_prompt(ctx.ui_state.panel, 4, 2)
+        ctx = %{ctx | ui_state: UIState.replace_panel(ctx.ui_state, panel)}
+        model = PromptRenderWindow.build(ctx, 4)
+
+        assert length(model.rows) == 2
+        assert {model.selection.start_row, model.selection.start_col} == from
+        assert {model.selection.end_row, model.selection.end_col} == to
+      end
+    end
+
+    test "keeps linewise selection inclusive across wrapped logical lines in either direction" do
+      for {anchor, cursor} <- [{{0, 1}, {1, 3}}, {{1, 3}, {0, 1}}] do
+        ctx =
+          prompt_ctx("abcdef\n界éx",
+            cursor: cursor,
+            mode: :visual_line,
+            mode_state: %{visual_anchor: anchor, visual_type: :line}
+          )
+
+        model = PromptRenderWindow.build(ctx, 4)
+        assert Enum.map(model.rows, & &1.text) == ["abcd", "ef", "界éx", ""]
+        assert model.selection.type == :line
+        assert {model.selection.start_row, model.selection.start_col} == {0, 0}
+        assert {model.selection.end_row, model.selection.end_col} == {3, 0}
+      end
     end
 
     test "renders collapsed paste placeholders as prompt pill rows" do
@@ -157,7 +223,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       [row] = model.rows
       accent = Theme.agent_theme(ctx.theme).input_border
 
-      assert Enum.any?(row.spans, &match?(%{start_col: 2, end_col: 15, fg: ^accent}, &1))
+      assert Enum.any?(row.spans, &match?(%{start_col: 3, end_col: 16, fg: ^accent}, &1))
     end
 
     test "marks unknown slash commands and unresolved mentions with diagnostic ranges" do
@@ -195,7 +261,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert model.selection.start_row == 0
       assert model.selection.start_col == 4
       assert model.selection.end_row == 0
-      assert model.selection.end_col == 17
+      assert model.selection.end_col == 18
     end
   end
 

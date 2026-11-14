@@ -918,14 +918,12 @@ public struct ContentView<EditorSurface: View>: View {
         return ZStack(alignment: .topLeading) {
             // The Metal surface is unconditional so its AppKit and resident identity survives.
             makeEditorSurface()
-                .opacity(input.agentChatState.visible || input.emptyStateState.visible ? 0 : 1)
 
             if input.agentChatState.visible {
                 AgentChatView(
                     state: input.agentChatState,
-                    isInsertMode: input.statusBarState.isInsertMode,
-                    sendAction: translatedAction(FrontendActionComposition.outbound),
-                    cellHeight: geo.cellHeight
+                    isInsertMode: input.agentChatState.isPromptInsertMode,
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
                 )
             }
 

@@ -9,10 +9,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
-  alias MingaEditor.Agent.View.PromptRenderWindow
+  alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.Theme
-  alias Minga.Buffer
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
@@ -28,7 +27,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
     session = active_session(ctx)
 
-    if is_agent_chat && session do
+    if is_agent_chat && session && match?(%PromptFrame{}, ctx.prompt) do
       build_visible(ctx, session)
     else
       %AgentChat{visible?: false}
@@ -51,10 +50,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     panel = agent_ui.panel
     view = agent_ui.view
 
-    prompt_text = safe_prompt_content(panel.prompt_buffer)
-    {cursor_line, cursor_col} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
-    inner_width = max(ctx.intent.frame.terminal_viewport.cols - 10, 20)
-    visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
+    projection = ctx.prompt.projection
+    prompt_text = Enum.join(projection.lines, "\n")
+    {cursor_line, cursor_col} = projection.cursor
+    visible_rows = projection.visible_rows
 
     full_pairs = panel.transcript.message_pairs
     full_styled_cache = resolve_styled_cache(panel, ctx.intent.frame.theme)
@@ -85,7 +84,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       model_name: Panel.model_label(panel),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
-      prompt_line_count: MingaEditor.Agent.PromptBuffer.input_line_count(panel),
+      prompt_line_count: length(projection.lines),
       prompt_cursor_line: cursor_line,
       prompt_cursor_col: cursor_col,
       prompt_vim_mode: ctx.workspace.editing.mode,
@@ -93,7 +92,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_completion: build_prompt_completion(panel),
       help_visible?: help_visible,
       help_groups: help_groups,
-      input_focused: panel.input_focused,
+      input_focused:
+        panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
+          ctx.intent.frame.focus_owner.surface == :agent,
       resident_messages: resident_messages,
       resident_truncated?: resident_truncated?,
       transcript_epoch: transcript_epoch(session, panel)
@@ -139,15 +140,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp build_prompt_completion(_panel), do: nil
-
-  @spec safe_prompt_content(pid() | nil) :: String.t()
-  defp safe_prompt_content(nil), do: ""
-
-  defp safe_prompt_content(buf) do
-    Buffer.content(buf) |> String.trim_trailing("\n")
-  catch
-    :exit, _ -> ""
-  end
 
   @spec resolve_styled_cache(MingaEditor.Agent.UIState.Panel.t(), Theme.t() | nil) ::
           [term()] | nil

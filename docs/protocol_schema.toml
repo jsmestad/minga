@@ -66,7 +66,9 @@ version = "2.0.0"
 # protocol_version 30 (2026-10-30, #3518) extends gui_focus_owner.surface with
 # focused hover (12) and empty launchpad (13). Version 29 native clients reject
 # these values, so the exact ready handshake must exclude those stale decoders.
-protocol_version = 30
+# protocol_version 31 adds source-presentation-targeted prompt fit and wrapped
+# visual-row scroll actions. Prompt window 65534 remains a windowed row store.
+protocol_version = 31
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1388,6 +1390,18 @@ value = 0x64
 [[gui_actions]]
 name = "semantic_item_activate"
 value = 0x65
+
+# window_id(u16, exactly 65534) + source presentation generation(u64) +
+# inner columns(u16, positive) + maximum physical rows(u16, positive).
+[[gui_actions]]
+name = "agent_prompt_fit"
+value = 0x66
+
+# window_id(u16, exactly 65534) + source presentation generation(u64) +
+# signed visual-row delta(i32), positive down.
+[[gui_actions]]
+name = "agent_prompt_scroll"
+value = 0x67
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #

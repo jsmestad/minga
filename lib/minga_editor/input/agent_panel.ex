@@ -77,7 +77,7 @@ defmodule MingaEditor.Input.AgentPanel do
              keymap_server: state.interaction.keymap_server
            ) do
         {:command, command} ->
-          Commands.execute(state, command)
+          execute_prompt_binding(state, command)
 
         {:prefix, _node} ->
           # No prefix sequences in insert/CUA mode currently
@@ -117,12 +117,33 @@ defmodule MingaEditor.Input.AgentPanel do
     end
   end
 
-  defp handle_panel_self_insert(state, cp, _mods)
-       when cp >= 32 do
-    AgentCommands.input_char(state, <<cp::utf8>>)
+  defp handle_panel_self_insert(state, cp, mods) do
+    case Minga.Keymap.Bindings.lookup(Minga.Keymap.CUADefaults.horizontal_nav_trie(), {cp, mods}) do
+      {:command, command} ->
+        execute_prompt_binding(state, command)
+
+      _not_horizontal_navigation ->
+        with_prompt_buffer(state, fn scoped ->
+          handler = MingaEditor.Input.editing_dispatch_handler(scoped)
+          {:handled, updated} = handler.handle_key(scoped, cp, mods)
+          updated
+        end)
+    end
   end
 
-  defp handle_panel_self_insert(state, _cp, _mods), do: state
+  @spec execute_prompt_binding(EditorState.t(), atom() | tuple()) :: EditorState.t()
+  defp execute_prompt_binding(state, command) when is_atom(command) do
+    case Minga.Command.lookup(command) do
+      {:ok, %Minga.Command{requires_buffer: true}} ->
+        with_prompt_buffer(state, &MingaEditor.KeyDispatch.dispatch_command(&1, command))
+
+      _not_a_buffer_command ->
+        MingaEditor.KeyDispatch.dispatch_command(state, command)
+    end
+  end
+
+  defp execute_prompt_binding(state, command) when is_tuple(command),
+    do: with_prompt_buffer(state, &MingaEditor.KeyDispatch.dispatch_command(&1, command))
 
   # Panel insert mode keys are resolved through the agent scope insert
   # trie (see Minga.Keymap.Scope.Agent.insert_trie). This eliminates the
@@ -216,24 +237,7 @@ defmodule MingaEditor.Input.AgentPanel do
     prompt_pid = panel.prompt_buffer
 
     if is_pid(prompt_pid) do
-      try do
-        real_active = state.workspace.buffers.active
-        state = set_active_buffer_override(state, prompt_pid)
-        state = MingaEditor.do_handle_key(state, cp, mods)
-
-        # Only restore if a command didn't legitimately change buffers.active.
-        # Same guard as chat navigation: only restore if the command did not
-        # legitimately change buffers.active.
-        if state.workspace.buffers.active == prompt_pid do
-          set_active_buffer_override(state, real_active)
-        else
-          state
-        end
-      catch
-        # Hot path race: prompt buffer may die between existence check and
-        # key dispatch. Targeted catch per AGENTS.md rule 4.
-        :exit, _ -> state
-      end
+      with_prompt_buffer(state, &MingaEditor.do_handle_key(&1, cp, mods))
     else
       # No prompt buffer, try scope bindings
       key = {cp, mods}
@@ -249,5 +253,43 @@ defmodule MingaEditor.Input.AgentPanel do
         :not_found -> state
       end
     end
+  end
+
+  @doc "Runs a prompt operation through the existing scoped buffer override."
+  @spec with_prompt_buffer(EditorState.t(), (EditorState.t() -> EditorState.t())) ::
+          EditorState.t()
+  def with_prompt_buffer(state, operation) do
+    prompt = state.workspace.agent_ui.panel.prompt_buffer
+
+    if is_pid(prompt) do
+      marker = Minga.Buffer.inspection_marker(prompt)
+      real_active = state.workspace.buffers.active
+      state = operation.(set_active_buffer_override(state, prompt))
+
+      state =
+        if state.workspace.buffers.active == prompt,
+          do: set_active_buffer_override(state, real_active),
+          else: state
+
+      {version, _} = marker
+
+      case Minga.Buffer.inspection_marker(prompt) do
+        ^marker ->
+          state
+
+        {^version, _} ->
+          MingaEditor.Agent.PromptInput.follow_cursor(state)
+
+        {_new_version, _} ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            UIState.record_prompt_edit(state.workspace.agent_ui)
+          )
+      end
+    else
+      state
+    end
+  catch
+    :exit, _reason -> state
   end
 end

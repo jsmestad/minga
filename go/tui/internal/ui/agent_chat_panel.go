@@ -13,6 +13,7 @@ import (
 type agentPanel struct {
 	animationFrame   uint64
 	animationRunning bool
+	lastPromptFit    protocol.AgentPromptFit
 }
 
 func (m Model) agentAnimating(chat protocol.AgentChat) bool {
@@ -93,7 +94,7 @@ func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
 
 func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
 	p := m.palette()
-	width := max(m.width, 1)
+	width := max(m.layout.body.Width, 1)
 	limit := m.bodyHeight()
 	contentWidth := max(width-2, 1)
 	lines := m.renderAgentChatPanelWithLimit(chat, contentWidth, limit)
@@ -119,6 +120,9 @@ func (m Model) insetAgentLine(line string, width int) string {
 func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
 	limit = max(limit, 1)
 	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(m.agentTranscriptMessages()) == 0
+	if limit <= 2 {
+		return m.renderAgentMainColumn(chat, width, limit, empty)
+	}
 	lines := []string{m.renderAgentHeader(chat, width)}
 
 	if agentDetailsVisible(width) && limit > 5 {
@@ -153,8 +157,8 @@ func agentColumnGap() int {
 
 func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget int, empty bool) []string {
 	lines := make([]string, 0, budget)
-	composer := m.renderAgentComposer(chat, width)
-	composerHeight, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget)
+	composer := m.renderAgentComposerWithLimit(chat, width, budget)
+	_, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget)
 	messageCount := len(m.agentTranscriptMessages())
 	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
 	if chat.Pending != "" && len(lines) < contentBudget {
@@ -180,7 +184,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	if statusHeight > 0 {
 		lines = append(lines, m.renderAgentTranscriptStatus(chat, width))
 	}
-	lines = append(lines, composer[:composerHeight]...)
+	lines = append(lines, composer...)
 	return takeLines(lines, budget)
 }
 
@@ -205,14 +209,14 @@ func (m Model) agentTranscriptPageSize() int {
 		return 1
 	}
 	limit := m.bodyHeight()
-	panelWidth := max(m.width-2, 1)
+	panelWidth := max(m.layout.body.Width-2, 1)
 	mainWidth := panelWidth
 	if agentDetailsVisible(panelWidth) && limit > 5 {
 		detailWidth := agentDetailsWidth(panelWidth)
 		mainWidth = max(panelWidth-detailWidth-agentColumnGap(), 40)
 	}
-	mainBudget := max(limit-1, 0)
-	composerRows := len(m.renderAgentComposer(chat, mainWidth))
+	mainBudget := max(limit-agentPanelHeaderRows(limit), 0)
+	composerRows := len(m.renderAgentComposerWithLimit(chat, mainWidth, mainBudget))
 	_, _, _, messageBudget := agentMainColumnBudgets(chat, composerRows, mainBudget)
 	return max(messageBudget, 1)
 }
@@ -1156,52 +1160,6 @@ func (m Model) renderAgentUsageMessage(msg protocol.AgentChatMessage, width int)
 		text += fmt.Sprintf(" · $%.2f", float64(usage.CostMicros)/1_000_000)
 	}
 	return lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width).Render(fitStyled(text, width))
-}
-
-func (m Model) renderAgentComposer(chat protocol.AgentChat, width int) []string {
-	p := m.palette()
-	if width < 4 {
-		return nil
-	}
-	inputBG := p.AgentInputSurface()
-	prompt := strings.TrimRight(chat.Prompt, "\n")
-	placeholder := prompt == ""
-	if placeholder {
-		prompt = "Ask Minga to edit, explain, search, or run tools"
-	}
-	mode := agentPromptModeName(chat.PromptVimMode)
-	cursor := fmt.Sprintf("%d:%d", int(chat.PromptCursorLine)+1, int(chat.PromptCursorCol)+1)
-	markerColor := p.Accent()
-	if chat.Status == 1 || chat.Status == 2 {
-		markerColor = p.Warning()
-	}
-	borderColor := p.AgentInputBorder()
-	if chat.Status == 1 || chat.Status == 2 {
-		borderColor = markerColor
-	}
-	border := lipgloss.NewStyle().Foreground(borderColor).Background(inputBG)
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(inputBG).Render(" " + agentComposerTitle(chat) + " ")
-	top := border.Render("╭") + title + border.Render(strings.Repeat("─", max(width-2-lipgloss.Width(title), 0))+"╮")
-	innerWidth := max(width-2, 1)
-	marker := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(inputBG).Render("❯")
-	modeText := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(inputBG).Render(mode)
-	promptStyle := lipgloss.NewStyle().Foreground(p.AgentText()).Background(inputBG)
-	if placeholder {
-		promptStyle = promptStyle.Foreground(p.AgentInputPlaceholder()).Italic(true)
-	}
-	prefix := " " + marker + " " + modeText + "  "
-	promptText := promptStyle.Render(firstCompactLine(prompt, max(innerWidth-lipgloss.Width(prefix)-1, 8)))
-	input := border.Render("│") + lipgloss.NewStyle().Background(inputBG).Width(innerWidth).Render(fitStyled(prefix+promptText, innerWidth)) + border.Render("│")
-	hints := lipgloss.NewStyle().Foreground(p.Muted()).Background(inputBG).Render(" Enter send · Esc normal · / commands · " + cursor)
-	help := border.Render("│") + lipgloss.NewStyle().Background(inputBG).Width(innerWidth).Render(fitStyled(" "+hints, innerWidth)) + border.Render("│")
-	bottom := border.Render("╰" + strings.Repeat("─", max(width-2, 0)) + "╯")
-	style := lipgloss.NewStyle().Background(inputBG).Width(width)
-	return []string{
-		style.Render(fitStyled(top, width)),
-		style.Render(fitStyled(input, width)),
-		style.Render(fitStyled(help, width)),
-		style.Render(fitStyled(bottom, width)),
-	}
 }
 
 func agentPromptModeName(mode byte) string {

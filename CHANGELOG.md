@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Agent drafts soft-wrap into a text area that grows to eight rows and then scrolls vertically. Both frontends render canonical prompt rows with source-backed caret and selection, keep Send/Stop outside the scrolling text, and submit or stop independently of Vim mode. Native text placement stays fixed across mode changes; terminal composition preserves combining marks.
+- macOS assistant replies share a visible author label, theme-colored background and border across plain, styled and Markdown output instead of blending into the transcript background.
 - macOS agent-workspace previews now capture readable, frozen production views at narrow and default widths, with full-window images, bounded failures and build-input receipts. A separate procedure covers real native keyboard and mouse evidence.
 - Native release preparation selects a Python build published for every host, fetches Linux prerequisites from the authenticated version-locked package index, reports bounded command failures and retains isolated build logs. CI checks changed release prerequisites on all four native hosts before the aggregate gate can pass.
 - Go terminal updates no longer erase the workspace header or retain trailing status text after a shorter replacement. Cursor presentation uses Bubble Tea's typed cursor metadata instead of embedding cursor-position controls in rendered cells.

@@ -8,13 +8,15 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   lets the macOS Metal renderer draw the prompt with identical cursor
   shapes, selection overlays, and styled spans as regular editor buffers.
 
+  Visual selections retain inclusive source-byte endpoints until projection.
+  Their drawn end is advanced by one source grapheme before wrapping and clipping, so the published selection ends exclusively in display coordinates.
+
   The prompt uses a reserved window_id (65534) that the Swift renderer
   recognizes for special positioning (bottom of the agent chat panel).
 
   Called from the content stage when the GUI agent chat prompt is visible.
   """
 
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaAgent.FileMention
   alias MingaEditor.Agent.ViewContext
@@ -30,11 +32,17 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
   alias Minga.RenderModel.Window.Viewport, as: RenderViewport
-  alias MingaEditor.Input.Wrap, as: InputWrap
+  alias MingaEditor.Agent.View.PromptProjection
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.RenderModel.Window.VisualRow
+  alias MingaEditor.Renderer.TextPresentation
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
+  alias Minga.Core.Unicode
   alias MingaEditor.UI.Theme
 
   @typedoc "Agent view context."
   @type ctx :: ViewContext.t()
+  @type projection :: PromptProjection.t()
   @type token_status :: :valid | :invalid
   @type token_range :: %{
           start_col: non_neg_integer(),
@@ -49,8 +57,6 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   @doc "Reserved window_id for the agent prompt RenderWindow."
   @spec prompt_window_id() :: pos_integer()
   def prompt_window_id, do: 65_534
-
-  @max_input_lines 8
 
   @doc """
   Builds a `RenderWindow` for the agent prompt buffer.
@@ -80,14 +86,65 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   Returns the prompt height in visual rows (excluding borders).
 
   This is the number of rows of text content the prompt displays,
-  clamped to `@max_input_lines`. Used by the emit stage to compute
-  the total prompt area height for the GUI layout.
+  clamped to the canonical eight-row limit. Used by prompt layout helpers.
   """
   @spec visible_rows(Panel.t(), pos_integer()) :: pos_integer()
-  def visible_rows(%Panel{} = panel, inner_width) do
-    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
-    total_visual = InputWrap.visual_line_count(lines, inner_width)
-    max(min(total_visual, @max_input_lines), 1)
+  def visible_rows(%Panel{prompt_buffer: nil}, _inner_width), do: 1
+
+  def visible_rows(%Panel{} = panel, inner_width),
+    do: PromptProjection.build(panel, inner_width).visible_rows
+
+  @doc "Builds the visible window and its exact immutable source lease together."
+  @spec build_presented(ctx(), pos_integer(), RenderWindow.rect() | nil, keyword()) ::
+          {RenderWindow.t(), TextPresentation.t()} | nil
+  def build_presented(%ViewContext{} = ctx, width, rect \\ nil, opts \\ []) do
+    panel = ctx.ui_state.panel
+
+    if is_pid(panel.prompt_buffer) do
+      projection =
+        Keyword.get_lazy(opts, :projection, fn ->
+          PromptProjection.build(panel, width,
+            oracle: Capabilities.width_oracle(ctx.capabilities)
+          )
+        end)
+
+      model =
+        build_from_panel(ctx, panel, width, rect, Keyword.put(opts, :projection, projection))
+
+      entries =
+        Enum.zip_with(model.rows, PromptProjection.visible(projection), fn row, source ->
+          VisualRow.new(row, source.offset_map, source.start_col, source.end_col, 0)
+        end)
+        |> Enum.with_index()
+        |> Enum.map(fn {entry, index} -> VisualRow.with_display_row(entry, index) end)
+        |> List.to_tuple()
+
+      identity = {projection.columns, projection.scroll, entries}
+
+      id =
+        Keyword.get_lazy(opts, :presentation_id, fn ->
+          System.unique_integer([:positive, :monotonic])
+        end)
+
+      lease =
+        TextPresentation.retain(
+          Keyword.get(opts, :previous_presentation),
+          prompt_window_id(),
+          projection.buffer,
+          projection.version,
+          identity,
+          {:windowed, entries},
+          id
+        )
+
+      {%{
+         model
+         | text_presentation_id: lease.presentation_id,
+           accessibility_generation: lease.presentation_id,
+           accessibility_cursor: accessibility_cursor(model, projection, entries),
+           accessibility_selection_ranges: accessibility_selection(ctx, projection, entries)
+       }, lease}
+    end
   end
 
   # ── Private ─────────────────────────────────────────────────────────────
@@ -95,31 +152,31 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   @spec build_from_panel(ctx(), Panel.t(), pos_integer(), RenderWindow.rect() | nil, keyword()) ::
           RenderWindow.t()
   defp build_from_panel(ctx, panel, inner_width, rect, opts) do
-    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
-    cursor = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
+    projection =
+      Keyword.get_lazy(opts, :projection, fn ->
+        PromptProjection.build(panel, inner_width,
+          oracle: Capabilities.width_oracle(ctx.capabilities)
+        )
+      end)
+
+    lines = projection.lines
+    cursor = projection.cursor
+    inner_width = projection.columns
     mode = ctx.editing.mode
     mode_state = ctx.editing.mode_state
-    theme = ctx.theme
-    at = Theme.agent_theme(theme)
-
-    total_visual = InputWrap.visual_line_count(lines, inner_width)
-    visible_count = max(min(total_visual, @max_input_lines), 1)
-
-    # Compute scroll offset so the cursor is always visible
-    {cursor_visual, cursor_visual_col} =
-      InputWrap.logical_to_visual(lines, inner_width, cursor)
-
-    scroll = InputWrap.scroll_offset(cursor_visual, visible_count, total_visual)
-
-    # Build wrapped visual lines
-    wrapped = InputWrap.wrap_lines(lines, inner_width)
+    at = Theme.agent_theme(ctx.theme)
+    total_visual = length(projection.rows)
+    visible_count = projection.visible_rows
+    scroll = projection.scroll
+    {cursor_visual, cursor_visual_col} = PromptProjection.position(projection, cursor)
     token_context = token_context(opts)
 
     {visual_rows, diagnostic_ranges} =
-      wrapped
-      |> Enum.slice(scroll, visible_count)
+      projection
+      |> PromptProjection.visible()
       |> Enum.with_index()
-      |> Enum.map_reduce([], fn {{logical_idx, vl}, display_row}, acc ->
+      |> Enum.map_reduce([], fn {vl, display_row}, acc ->
+        logical_idx = vl.logical_line
         line_text = Enum.at(lines, logical_idx)
 
         {row, ranges} =
@@ -149,7 +206,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     cursor_shape = cursor_shape_for_mode(mode)
 
     # Selection overlay
-    selection = build_selection(mode, mode_state, cursor, scroll, inner_width, lines)
+    selection = build_selection(mode, mode_state, cursor, projection)
 
     prompt_id = prompt_window_id()
     rect = rect || {0, 0, inner_width, visible_count}
@@ -157,21 +214,24 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     %RenderWindow{
       window_id: prompt_id,
       content_kind: :agent_prompt,
+      accessibility_label: "Agent prompt",
       rect: rect,
       rows: visual_rows,
       cursor_row: max(display_cursor_row, 0),
       cursor_col: max(display_cursor_col, 0),
       cursor_shape: cursor_shape,
-      cursor_visible: panel.input_focused,
+      cursor_visible:
+        panel.input_focused and Keyword.get(opts, :cursor_eligible, true) and
+          display_cursor_row >= 0 and display_cursor_row < visible_count,
       selection: selection,
       search_matches: [],
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: [],
       annotations: [],
       gutter: prompt_gutter(prompt_id, rect, panel.input_focused),
+      scroll_seq: panel.prompt_viewport.sequence,
       indent_guides: IndentGuides.empty(prompt_id),
-      geometry:
-        prompt_geometry(prompt_id, rect, inner_width, visible_count, total_visual, scroll),
+      geometry: prompt_geometry(prompt_id, rect, projection),
       content_epoch:
         prompt_content_epoch(
           prompt_id,
@@ -221,15 +281,9 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     }
   end
 
-  @spec prompt_geometry(
-          pos_integer(),
-          RenderWindow.rect(),
-          pos_integer(),
-          pos_integer(),
-          pos_integer(),
-          non_neg_integer()
-        ) :: PaneGeometry.t()
-  defp prompt_geometry(window_id, rect, inner_width, visible_count, total_visual, scroll) do
+  @spec prompt_geometry(pos_integer(), RenderWindow.rect(), projection()) :: PaneGeometry.t()
+  defp prompt_geometry(window_id, rect, projection) do
+    first = Enum.at(projection.rows, projection.scroll)
     metrics = %GutterMetrics{line_number_width: 0, sign_col_width: 0}
 
     %PaneGeometry{
@@ -240,13 +294,13 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       gutter_rect: {elem(rect, 0), elem(rect, 1), 0, elem(rect, 3)},
       clip_rect: rect,
       viewport: %RenderViewport{
-        top: scroll,
+        top: first.logical_line,
         left: 0,
-        rows: visible_count,
-        cols: inner_width,
-        total_lines: total_visual,
-        visual_row_offset: 0,
-        total_visual_rows: total_visual
+        rows: projection.visible_rows,
+        cols: projection.columns,
+        total_lines: length(projection.lines),
+        visual_row_offset: first.visual_index,
+        total_visual_rows: length(projection.rows)
       },
       gutter_metrics: metrics,
       hit_regions: [
@@ -256,7 +310,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   end
 
   @spec build_visual_row(
-          InputWrap.visual_line(),
+          PromptProjection.visual_row(),
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
@@ -265,29 +319,14 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
           pos_integer(),
           token_context()
         ) :: {Row.t(), [DiagnosticRange.t()]}
-  defp build_visual_row(vl, line_text, logical_idx, display_row, panel, at, inner_width, ctx) do
-    {display_text, fg_color, bg_color, style_tokens?} =
-      if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
-        case UIState.paste_block_index(line_text) do
-          nil ->
-            {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg), true}
-
-          block_index ->
-            line_count = paste_block_line_count(panel.pasted_blocks, block_index)
-            indicator = "󰆏 [pasted #{line_count} lines]"
-            text = String.slice(indicator, 0, inner_width)
-            # Paste pills use a distinct background for visual separation.
-            # Blend the input_bg with a subtle highlight to create a pill effect.
-            pill_bg = paste_pill_bg(at.input_bg)
-            {text, rgb_to_int(at.hint_fg), pill_bg, false}
-        end
-      else
-        {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg), true}
-      end
-
-    text_width = String.length(display_text)
-    row_start = vl.col_offset
-    row_end = row_start + text_width
+  defp build_visual_row(vl, line_text, logical_idx, display_row, _panel, at, _inner_width, ctx) do
+    display_text = vl.text
+    fg_color = rgb_to_int(if(vl.pill?, do: at.hint_fg, else: at.text_fg))
+    bg_color = if(vl.pill?, do: paste_pill_bg(at.input_bg), else: rgb_to_int(at.input_bg))
+    style_tokens? = not vl.pill?
+    text_width = Unicode.display_width(display_text)
+    row_start = vl.start_col
+    row_end = vl.end_col
     accent_color = rgb_to_int(at.input_border)
 
     token_ranges =
@@ -304,10 +343,10 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     diagnostic_ranges = diagnostic_ranges(display_row, invalid_ranges)
 
     row = %Row{
-      row_id: Row.stable_id(:normal, logical_idx, vl.col_offset),
+      row_id: Row.stable_id(:normal, logical_idx, vl.visual_index),
       row_type: :normal,
       buf_line: logical_idx,
-      visual_index: vl.col_offset,
+      visual_index: vl.visual_index,
       text: display_text,
       spans: spans,
       content_hash: Row.compute_hash(display_text, spans)
@@ -338,7 +377,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   defp slash_token_ranges("/" <> _ = line_text, 0) do
     token_length = leading_token_length(line_text)
     token = String.slice(line_text, 0, token_length)
-    [%{start_col: 0, end_col: token_length, status: slash_token_status(token)}]
+    [%{start_col: 0, end_col: Unicode.display_width(token), status: slash_token_status(token)}]
   end
 
   defp slash_token_ranges(_line_text, _logical_idx), do: []
@@ -366,10 +405,21 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     |> FileMention.extract_mentions()
     |> Enum.map(fn %{path: path, start_col: start_col, end_col: end_col} ->
       %{
-        start_col: start_col,
-        end_col: end_col,
+        start_col: token_display_col(line_text, start_col),
+        end_col: token_display_col(line_text, end_col),
         status: mention_token_status(path, ctx)
       }
+    end)
+  end
+
+  @spec token_display_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp token_display_col(text, graphemes) do
+    text
+    |> String.graphemes()
+    |> Enum.take(graphemes)
+    |> Enum.reduce(0, fn
+      "\t", col -> col + 2 - rem(col, 2)
+      grapheme, col -> col + Unicode.grapheme_width(grapheme)
     end)
   end
 
@@ -522,62 +572,130 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   defp normalize_project_file("./" <> path), do: normalize_project_file(path)
   defp normalize_project_file(path), do: path
 
-  @spec build_selection(
-          atom(),
-          term(),
-          {non_neg_integer(), non_neg_integer()},
-          non_neg_integer(),
-          pos_integer(),
-          [String.t()]
-        ) ::
-          Selection.t() | nil
-  defp build_selection(mode, mode_state, cursor, scroll, inner_width, lines)
+  @spec accessibility_cursor(RenderWindow.t(), projection(), tuple()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp accessibility_cursor(%RenderWindow{cursor_visible: false}, _projection, _entries), do: nil
+
+  defp accessibility_cursor(model, projection, entries) do
+    entry = elem(entries, model.cursor_row)
+    {_line, byte} = projection.cursor
+    {entry.display_row, accessibility_offset(entry, byte, :start)}
+  end
+
+  @spec accessibility_selection(ctx(), projection(), tuple()) ::
+          [{non_neg_integer(), non_neg_integer(), non_neg_integer()}]
+  defp accessibility_selection(%{editing: %{mode: mode, mode_state: state}}, projection, entries)
        when mode in [:visual, :visual_line] do
-    visual_start = Map.get(mode_state, :visual_start)
+    case Map.get(state, :visual_anchor, Map.get(state, :visual_start)) do
+      {line, byte} = anchor when is_integer(line) and is_integer(byte) ->
+        {from, to} =
+          if anchor <= projection.cursor,
+            do: {anchor, projection.cursor},
+            else: {projection.cursor, anchor}
+
+        linewise? = mode == :visual_line or Map.get(state, :visual_type) == :line
+        source = Enum.at(projection.lines, elem(to, 0))
+        end_exclusive = Unicode.next_grapheme_byte_offset(source, elem(to, 1))
+
+        entries
+        |> Tuple.to_list()
+        |> Enum.filter(&(&1.buf_line >= elem(from, 0) and &1.buf_line <= elem(to, 0)))
+        |> Enum.flat_map(&accessibility_selection_range(&1, from, to, end_exclusive, linewise?))
+
+      _not_a_source_selection ->
+        []
+    end
+  end
+
+  defp accessibility_selection(_ctx, _projection, _entries), do: []
+
+  @spec accessibility_selection_range(
+          VisualRow.t(),
+          PromptProjection.position(),
+          PromptProjection.position(),
+          non_neg_integer(),
+          boolean()
+        ) :: [{non_neg_integer(), non_neg_integer(), non_neg_integer()}]
+  defp accessibility_selection_range(entry, _from, _to, _end_exclusive, true),
+    do: [{entry.display_row, 0, row_utf16_length(entry)}]
+
+  defp accessibility_selection_range(
+         entry,
+         {start_line, start_byte},
+         {end_line, _end_byte},
+         end_exclusive,
+         false
+       ) do
+    start_byte = if entry.buf_line == start_line, do: start_byte, else: entry.source_start_byte
+    end_byte = if entry.buf_line == end_line, do: end_exclusive, else: entry.source_end_byte
+    selected_start = max(start_byte, entry.source_start_byte)
+    selected_end = min(end_byte, entry.source_end_byte)
+
+    if selected_end > selected_start do
+      start_utf16 = accessibility_offset(entry, selected_start, :start)
+      end_utf16 = accessibility_offset(entry, selected_end, :end)
+      if end_utf16 > start_utf16, do: [{entry.display_row, start_utf16, end_utf16}], else: []
+    else
+      []
+    end
+  end
+
+  @spec accessibility_offset(VisualRow.t(), non_neg_integer(), SourceOffsetMap.affinity()) ::
+          non_neg_integer()
+  defp accessibility_offset(entry, byte, affinity) do
+    entry.source_offset_map
+    |> SourceOffsetMap.source_to_composed_utf16(byte, affinity)
+    |> Kernel.-(entry.composed_start_utf16)
+    |> Kernel.+(entry.indent_width)
+    |> max(0)
+    |> min(row_utf16_length(entry))
+  end
+
+  @spec row_utf16_length(VisualRow.t()) :: non_neg_integer()
+  defp row_utf16_length(entry),
+    do: entry.indent_width + entry.composed_end_utf16 - entry.composed_start_utf16
+
+  @spec build_selection(atom(), term(), PromptProjection.position(), projection()) ::
+          Selection.t() | nil
+  defp build_selection(mode, mode_state, cursor, projection)
+       when mode in [:visual, :visual_line] do
+    visual_start = Map.get(mode_state, :visual_anchor, Map.get(mode_state, :visual_start))
+    linewise? = mode == :visual_line or Map.get(mode_state, :visual_type) == :line
 
     case visual_start do
-      {vl, vc} when is_integer(vl) ->
-        {from, to} = if {vl, vc} <= cursor, do: {{vl, vc}, cursor}, else: {cursor, {vl, vc}}
+      {line, byte} = anchor when is_integer(line) and is_integer(byte) ->
+        {from, to} = if anchor <= cursor, do: {anchor, cursor}, else: {cursor, anchor}
 
         {from, to} =
-          if mode == :visual_line do
-            {from_line, _} = from
-            {to_line, _} = to
-            {{from_line, 0}, {to_line, 999_999}}
+          if linewise? do
+            {{elem(from, 0), 0}, {elem(to, 0), byte_size(Enum.at(projection.lines, elem(to, 0)))}}
           else
-            {from, to}
+            {line, byte} = to
+            source = Enum.at(projection.lines, line)
+            {from, {line, Unicode.next_grapheme_byte_offset(source, byte)}}
           end
 
-        # Convert logical selection to visual coordinates
-        {from_line, from_col} = from
-        {to_line, to_col} = to
+        {from_row, from_col} = PromptProjection.position(projection, from)
+        {to_row, to_col} = PromptProjection.position(projection, to)
+        top = projection.scroll
+        bottom = top + projection.visible_rows - 1
 
-        {from_vis_row, from_vis_col} =
-          InputWrap.logical_to_visual(lines, inner_width, {from_line, from_col})
-
-        {to_vis_row, to_vis_col} =
-          InputWrap.logical_to_visual(lines, inner_width, {to_line, to_col})
-
-        # Adjust for scroll
-        from_display_row = from_vis_row - scroll
-        to_display_row = to_vis_row - scroll
-
-        sel_type = if mode == :visual_line, do: :line, else: :char
-
-        %Selection{
-          type: sel_type,
-          start_row: max(from_display_row, 0),
-          start_col: from_vis_col,
-          end_row: max(to_display_row, 0),
-          end_col: to_vis_col
-        }
+        if to_row >= top and from_row <= bottom do
+          %Selection{
+            type: if(linewise?, do: :line, else: :char),
+            start_row: max(from_row - top, 0),
+            start_col: if(from_row < top, do: 0, else: from_col),
+            end_row: min(to_row, bottom) - top,
+            end_col: if(to_row > bottom, do: projection.columns, else: to_col)
+          }
+        end
 
       _ ->
         nil
     end
   end
 
-  defp build_selection(_, _, _, _, _, _), do: nil
+  defp build_selection(_, _, _, _), do: nil
 
   @spec cursor_shape_for_mode(atom()) :: RenderWindow.cursor_shape()
   defp cursor_shape_for_mode(:insert), do: :beam
@@ -586,14 +704,6 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   defp cursor_shape_for_mode(:visual_line), do: :block
   defp cursor_shape_for_mode(:operator_pending), do: :underline
   defp cursor_shape_for_mode(_), do: :block
-
-  @spec paste_block_line_count([Panel.paste_block()], non_neg_integer()) :: non_neg_integer()
-  defp paste_block_line_count(blocks, index) do
-    case Enum.at(blocks, index) do
-      %{text: text} -> text |> String.split("\n") |> Enum.count()
-      nil -> 0
-    end
-  end
 
   # Computes a subtle highlight background for paste pill indicators.
   # Lightens the input background by blending toward white (~10%).

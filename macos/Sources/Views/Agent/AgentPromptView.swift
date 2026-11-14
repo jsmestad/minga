@@ -1,40 +1,62 @@
 import SwiftUI
 import MingaProtocol
-import CoreText
+
+/// App composition injects a placement aperture, never a second text renderer.
+public struct AgentPromptSurface: Sendable {
+    public let makeAperture: @MainActor @Sendable (CGFloat) -> AnyView
+
+    public init(makeAperture: @escaping @MainActor @Sendable (CGFloat) -> AnyView) {
+        self.makeAperture = makeAperture
+    }
+}
+
+private struct AgentPromptSurfaceKey: EnvironmentKey {
+    static let defaultValue: AgentPromptSurface? = nil
+}
+
+extension EnvironmentValues {
+    public var agentPromptSurface: AgentPromptSurface? {
+        get { self[AgentPromptSurfaceKey.self] }
+        set { self[AgentPromptSurfaceKey.self] = newValue }
+    }
+}
+
+struct AgentPromptApertureKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    /// Absence is neutral; a fresh reduction still clears a removed producer.
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if !next.isEmpty { value = next }
+    }
+}
 
 public struct AgentPromptView: View {
     public enum Action: Equatable, Sendable {
-        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+        case submit
+        case abort
     }
 
-    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?) {
+    public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?, maximumHeight: CGFloat = 0) {
         self.state = state
         self.isInsertMode = isInsertMode
         self.sendAction = sendAction
+        self.maximumHeight = maximumHeight
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
 
     public let isInsertMode: Bool
     public let sendAction: ViewActionHandler<Action>?
+    public let maximumHeight: CGFloat
+    @Environment(\.agentPromptSurface) private var surface
+    @State private var measuredHeight: CGFloat = 0
+
+    private var textHeight: CGFloat {
+        CGFloat(max(1, Int(state.promptVisibleRows))) * state.promptRowPitch
+    }
 
     /// Whether the agent is actively streaming a response.
     private var isStreaming: Bool { state.status.isWorking }
-
-    /// Whether the send button should be enabled (insert mode with text).
-    private var canSend: Bool { isInsertMode && !state.prompt.isEmpty && !isStreaming }
-
-    /// The SF Symbol name for the action button, morphing between send and stop.
-    private var actionButtonIcon: String {
-        isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill"
-    }
-
-    /// The action button's foreground color based on state.
-    private var actionButtonColor: Color {
-        if isStreaming { return .red }
-        if canSend { return theme.agentInputBorder }
-        return theme.agentTextFg.opacity(0.2)
-    }
 
     /// Capsule border color: accent when in insert mode, subtle border otherwise.
     private var capsuleBorderColor: Color {
@@ -56,7 +78,7 @@ public struct AgentPromptView: View {
         case .visual: return "VISUAL"
         case .visualLine: return "V-LINE"
         case .operatorPending: return "OP"
-        case .insert: return ""
+        case .insert: return "INSERT"
         case .unknown: return "NORMAL"
         }
     }
@@ -71,6 +93,7 @@ public struct AgentPromptView: View {
             // Prompt area
             promptArea
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measuredHeight = $0 }
     }
 
     // MARK: - Prompt area
@@ -79,7 +102,7 @@ public struct AgentPromptView: View {
     private var promptArea: some View {
         HStack(spacing: Spacing.md) {
             promptCapsule
-            actionButton
+            AgentPromptActionButton(state: state, sendAction: sendAction)
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
@@ -90,114 +113,54 @@ public struct AgentPromptView: View {
     @ViewBuilder
     private var promptCapsule: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Mode indicator bar (only in non-insert modes)
-            if !modeLabel.isEmpty {
-                HStack(spacing: Spacing.xs) {
-                    Text(modeLabel)
-                        .font(Typography.font(.micro, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.agentInputBorder)
-                    Spacer()
-                }
-                .padding(.horizontal, Spacing.lg)
-                .padding(.top, Spacing.xs)
-                .padding(.bottom, Spacing.hairline)
-            }
-
-            // Prompt text with monospaced font and cursor
-            HStack(spacing: 0) {
-                if isStreaming && state.prompt.isEmpty {
-                    Text("Generating...")
-                        .font(Typography.font(.emphasis, design: .monospaced))
-                        .foregroundStyle(theme.agentInputPlaceholder)
-                        .italic()
-                } else if state.prompt.isEmpty && !isInsertMode {
-                    Text("Ask anything...")
-                        .font(Typography.font(.emphasis, design: .monospaced))
-                        .foregroundStyle(theme.agentInputPlaceholder)
-                } else {
-                    // Render prompt text with cursor overlay
-                    promptTextWithCursor
-                }
-
-                Spacer(minLength: 4)
+            // Mode changes must not move text between clicks in one selection gesture.
+            HStack(spacing: Spacing.xs) {
+                Text(modeLabel)
+                    .font(Typography.font(.micro, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.agentInputBorder)
+                Spacer()
             }
             .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, modeLabel.isEmpty ? Spacing.md : Spacing.sm)
+            .padding(.top, Spacing.xs)
+            .padding(.bottom, Spacing.hairline)
+
+            if let surface {
+                surface.makeAperture(max(0, maximumHeight - measuredHeight + textHeight))
+                    .frame(height: textHeight)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: AgentPromptApertureKey.self,
+                                value: geometry.frame(in: .named("agentChat"))
+                            )
+                        }
+                    }
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.sm)
+            }
         }
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl)
-                .fill(theme.agentInputBg.opacity(capsuleBgOpacity))
-        )
+        .backgroundPreferenceValue(AgentPromptApertureKey.self) { aperture in
+            GeometryReader { geometry in
+                let origin = geometry.frame(in: .named("agentChat")).origin
+                Path { path in
+                    path.addRoundedRect(
+                        in: CGRect(origin: .zero, size: geometry.size),
+                        cornerSize: CGSize(width: Radius.xl, height: Radius.xl)
+                    )
+                    if !aperture.isEmpty {
+                        path.addRect(aperture.offsetBy(dx: -origin.x, dy: -origin.y))
+                    }
+                }
+                .fill(theme.agentInputBg.opacity(capsuleBgOpacity), style: FillStyle(eoFill: true))
+            }
+            .allowsHitTesting(false)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: Radius.xl)
                 .strokeBorder(capsuleBorderColor, lineWidth: 1)
         )
-        .contentShape(RoundedRectangle(cornerRadius: Radius.xl))
-        .onTapGesture {
-            if !isInsertMode && !isStreaming {
-                sendAction?(.keyPress(codepoint: 0x69, modifiers: 0, sequence: 0))
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Chat input")
-        .accessibilityValue(state.prompt.isEmpty ? "Empty" : state.prompt)
-        .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
     }
 
-    /// Line height for the prompt font, derived from actual font metrics.
-    private var promptLineHeight: CGFloat {
-        let font = AgentPromptLineLayout.font
-        return ceil(font.ascender - font.descender + font.leading)
-    }
-
-    /// Renders each prompt line and its cursor through one native text layout.
-    /// The BEAM column remains a UTF-8 byte offset until the line resolves it to a glyph boundary.
-    @ViewBuilder
-    private var promptTextWithCursor: some View {
-        let lines = state.prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        let cursorLine = Int(state.promptCursorLine)
-        let cursorCol = Int(state.promptCursorCol)
-        let isBlock = state.promptMode.usesBlockCursor
-        let lineH = promptLineHeight
-
-        VStack(alignment: .leading, spacing: Spacing.hairline) {
-            ForEach(Array(lines.prefix(8).enumerated()), id: \.offset) { lineIdx, line in
-                AgentPromptLineView(
-                    text: line,
-                    cursorByteOffset: lineIdx == cursorLine && !isStreaming ? cursorCol : nil,
-                    cursorShape: isBlock ? .block : .beam,
-                    textColor: theme.agentTextFg.opacity(isStreaming ? 0.4 : 1.0),
-                    cursorColor: theme.agentInputBorder.opacity(isBlock ? 0.7 : 1.0)
-                )
-                .frame(height: lineH)
-            }
-        }
-    }
-
-    // MARK: - Action button
-
-    @ViewBuilder
-    private var actionButton: some View {
-        Button {
-            if isStreaming {
-                // Send Ctrl+C to abort
-                sendAction?(.keyPress(codepoint: 0x63, modifiers: 0x02, sequence: 0))
-            } else if canSend {
-                // Send Enter to submit
-                sendAction?(.keyPress(codepoint: 0x0D, modifiers: 0, sequence: 0))
-            }
-        } label: {
-            Image(systemName: actionButtonIcon)
-                .font(Typography.font(.action))
-                .foregroundStyle(actionButtonColor)
-                .contentTransition(.symbolEffect(.replace))
-        }
-        .buttonStyle(.plain)
-        .disabled(!canSend && !isStreaming)
-        .accessibilityLabel(isStreaming ? "Stop generating" : "Send message")
-        .accessibilityHint(isStreaming ? "Sends Ctrl+C to abort" : "Sends the current prompt")
-        .accessibilityAddTraits(.isButton)
-    }
 
     // MARK: - Prompt completion popup
 
@@ -249,160 +212,48 @@ public struct AgentPromptView: View {
     }
 }
 
-enum AgentPromptCursorShape {
-    case block
-    case beam
-}
+/// Mode-independent controls do not read the mounted native text aperture or key focus.
+struct AgentPromptActionButton: View {
+    let state: AgentChatState
+    let sendAction: ViewActionHandler<AgentPromptView.Action>?
+    @Environment(\.themeColors) private var theme
 
-struct AgentPromptCaretMetrics {
-    let x: CGFloat
-    let blockWidth: CGFloat
-}
+    private var isStreaming: Bool { state.status.isWorking }
 
-@MainActor struct AgentPromptLineLayout {
-    static let font = NSFont.monospacedSystemFont(ofSize: Typography.Step.emphasis.rawValue, weight: .regular)
+    /// A nonempty draft can be submitted independently of Vim mode or native key focus.
+    private var canSend: Bool { !state.prompt.isEmpty && !isStreaming }
 
-    let line: CTLine
-    let size: CGSize
-    let baseline: CGFloat
-    let caret: AgentPromptCaretMetrics?
-
-    static func make(text: String, cursorByteOffset: Int?, textColor: NSColor) -> AgentPromptLineLayout {
-        let displayText = text + " "
-        let attributedText = NSAttributedString(string: displayText, attributes: [
-            .font: font,
-            .foregroundColor: textColor
-        ])
-        let line = CTLineCreateWithAttributedString(attributedText)
-        var ascent: CGFloat = 0
-        var descent: CGFloat = 0
-        var leading: CGFloat = 0
-        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
-        let height = ceil(ascent + descent + leading)
-        let baseline = descent + leading / 2
-        let caret = cursorByteOffset.flatMap { caretMetrics(text: text, displayLine: line, utf8ByteOffset: $0) }
-
-        return AgentPromptLineLayout(
-            line: line,
-            size: CGSize(width: ceil(width), height: height),
-            baseline: baseline,
-            caret: caret
-        )
+    /// The SF Symbol name for the action button, morphing between send and stop.
+    private var actionButtonIcon: String {
+        isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill"
     }
 
-    static func caretMetrics(text: String, utf8ByteOffset: Int) -> AgentPromptCaretMetrics? {
-        let displayText = text + " "
-        let attributedText = NSAttributedString(string: displayText, attributes: [.font: font])
-        let line = CTLineCreateWithAttributedString(attributedText)
-        return caretMetrics(text: text, displayLine: line, utf8ByteOffset: utf8ByteOffset)
+    /// The action button's foreground color based on state.
+    private var actionButtonColor: Color {
+        if isStreaming { return .red }
+        if canSend { return theme.agentInputBorder }
+        return theme.agentTextFg.opacity(0.2)
     }
 
-    private static func caretMetrics(text: String, displayLine: CTLine, utf8ByteOffset: Int) -> AgentPromptCaretMetrics? {
-        guard let stringIndex = stringIndex(in: text, utf8ByteOffset: utf8ByteOffset) else { return nil }
-        let utf16Offset = stringIndex.utf16Offset(in: text)
-        let nextUTF16Offset: Int
-
-        if stringIndex == text.endIndex {
-            nextUTF16Offset = utf16Offset + 1
-        } else {
-            nextUTF16Offset = text.index(after: stringIndex).utf16Offset(in: text)
+    var body: some View {
+        Button {
+            if isStreaming {
+                sendAction?(.abort)
+            } else if canSend {
+                sendAction?(.submit)
+            }
+        } label: {
+            Image(systemName: actionButtonIcon)
+                .font(Typography.font(.action))
+                .foregroundStyle(actionButtonColor)
+                .contentTransition(.symbolEffect(.replace))
         }
-
-        let x = CTLineGetOffsetForStringIndex(displayLine, utf16Offset, nil)
-        let nextX = CTLineGetOffsetForStringIndex(displayLine, nextUTF16Offset, nil)
-        return AgentPromptCaretMetrics(x: x, blockWidth: max(nextX - x, 1))
-    }
-
-    private static func stringIndex(in text: String, utf8ByteOffset: Int) -> String.Index? {
-        guard utf8ByteOffset >= 0 && utf8ByteOffset <= text.utf8.count else { return nil }
-        let utf8Index = text.utf8.index(text.utf8.startIndex, offsetBy: utf8ByteOffset)
-        return String.Index(utf8Index, within: text)
+        .buttonStyle(.plain)
+        .disabled(!canSend && !isStreaming)
+        .frame(width: Typography.Step.action.rawValue)
+        .accessibilityLabel(isStreaming ? "Stop generating" : "Send message")
+        .accessibilityHint(isStreaming ? "Aborts the current response" : "Sends the current prompt")
+        .accessibilityAddTraits(.isButton)
     }
 }
 
-private struct AgentPromptLineView: NSViewRepresentable {
-    let text: String
-    let cursorByteOffset: Int?
-    let cursorShape: AgentPromptCursorShape
-    let textColor: Color
-    let cursorColor: Color
-
-    func makeNSView(context: Context) -> AgentPromptLineNSView {
-        let view = AgentPromptLineNSView()
-        update(view)
-        return view
-    }
-
-    func updateNSView(_ nsView: AgentPromptLineNSView, context: Context) {
-        update(nsView)
-    }
-
-    private func update(_ view: AgentPromptLineNSView) {
-        view.update(
-            text: text,
-            cursorByteOffset: cursorByteOffset,
-            cursorShape: cursorShape,
-            textColor: Self.nsColor(textColor),
-            cursorColor: Self.nsColor(cursorColor)
-        )
-    }
-
-    private static func nsColor(_ color: Color) -> NSColor {
-        NSColor(color).usingColorSpace(.sRGB) ?? NSColor(color)
-    }
-}
-
-final class AgentPromptLineNSView: NSView {
-    private(set) var promptLayout = AgentPromptLineLayout.make(text: "", cursorByteOffset: nil, textColor: .textColor)
-    private(set) var cursorShape = AgentPromptCursorShape.beam
-    private(set) var cursorColor = NSColor.controlAccentColor
-
-    override var acceptsFirstResponder: Bool { false }
-    override var intrinsicContentSize: NSSize { promptLayout.size }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setAccessibilityElement(false)
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setAccessibilityElement(false)
-    }
-
-    func update(text: String, cursorByteOffset: Int?, cursorShape: AgentPromptCursorShape, textColor: NSColor, cursorColor: NSColor) {
-        promptLayout = AgentPromptLineLayout.make(text: text, cursorByteOffset: cursorByteOffset, textColor: textColor)
-        self.cursorShape = cursorShape
-        self.cursorColor = cursorColor
-        invalidateIntrinsicContentSize()
-        needsDisplay = true
-    }
-
-    func cursorRect() -> CGRect? {
-        guard let caret = promptLayout.caret else { return nil }
-        let width = cursorShape == .block ? caret.blockWidth : 1.5
-        return CGRect(x: caret.x, y: 0, width: width, height: promptLayout.size.height)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-
-        context.saveGState()
-        if let cursorRect = cursorRect(), cursorShape == .block {
-            context.setFillColor(cursorColor.cgColor)
-            context.fill(cursorRect)
-        }
-        context.textPosition = CGPoint(x: 0, y: promptLayout.baseline)
-        CTLineDraw(promptLayout.line, context)
-        if let cursorRect = cursorRect(), cursorShape == .beam {
-            context.setFillColor(cursorColor.cgColor)
-            context.fill(cursorRect)
-        }
-        context.restoreGState()
-    }
-}

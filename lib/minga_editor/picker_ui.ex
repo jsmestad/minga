@@ -151,7 +151,7 @@ defmodule MingaEditor.PickerUI do
         picker,
         source_module,
         callback_source,
-        state.workspace.buffers.active_index,
+        picker_restore_index(state),
         state.appearance.theme,
         context,
         layout
@@ -321,7 +321,7 @@ defmodule MingaEditor.PickerUI do
         picker: picker,
         source: source_module,
         callback_source: callback_source,
-        restore: state.workspace.buffers.active_index,
+        restore: picker_restore_index(state),
         restore_theme: state.appearance.theme,
         context: context,
         layout: layout
@@ -1505,6 +1505,17 @@ defmodule MingaEditor.PickerUI do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
+
+  @spec picker_restore_index(state()) :: non_neg_integer() | nil
+  defp picker_restore_index(state) do
+    buffer = state.workspace.buffers.active
+    windows = state.workspace.windows
+
+    case Map.get(windows.map, windows.active) do
+      %{content: {:buffer, ^buffer}} when is_pid(buffer) -> state.workspace.buffers.active_index
+      _non_buffer_surface -> nil
+    end
+  end
 
   # Restores the buffer that was active when the picker opened before promoting a preview.
   # Preview leaves the tab bar unchanged, so the outgoing tab must be snapshotted from

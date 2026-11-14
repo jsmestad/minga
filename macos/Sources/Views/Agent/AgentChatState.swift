@@ -512,6 +512,13 @@ public final class AgentChatState {
     public var promptMode: PromptMode = .normal
     /// Number of visible rows in the prompt (after wrapping, clamped to max).
     public var promptVisibleRows: UInt8 = 1
+    /// Production font pitch projected only at accepted editor-frame publication.
+    public private(set) var promptRowPitch: CGFloat = 0
+
+    /// Publishes physical font metrics without introducing a prompt font or text layout.
+    public func updatePromptRowPitch(_ pitch: CGFloat) {
+        promptRowPitch = pitch
+    }
 
     /// Whether the prompt is in insert mode (for SwiftUI styling).
     public var isPromptInsertMode: Bool { promptMode.isInsert }

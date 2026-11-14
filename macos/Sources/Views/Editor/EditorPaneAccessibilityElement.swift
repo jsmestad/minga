@@ -58,6 +58,11 @@ final class EditorPaneAccessibilityElement: NSAccessibilityElement {
         snapshot.withLock { $0.projection = nil }
     }
 
+    /// Availability belongs to the live projection, not keyboard focus or GPU readiness.
+    override func isAccessibilityEnabled() -> Bool {
+        currentProjection() != nil
+    }
+
     override func accessibilityLabel() -> String? {
         currentProjection()?.label
     }
@@ -103,12 +108,12 @@ final class EditorPaneAccessibilityElement: NSAccessibilityElement {
 
     override func accessibilityLine(for index: Int) -> Int {
         guard let projection = currentProjection() else { return NSNotFound }
-        return projection.rows.firstIndex { NSLocationInRange(index, $0.valueRange) || index == NSMaxRange($0.valueRange) } ?? NSNotFound
+        return projection.logicalLine(atUTF16Offset: index) ?? NSNotFound
     }
 
     override func accessibilityRange(forLine line: Int) -> NSRange {
-        guard let projection = currentProjection(), projection.rows.indices.contains(line) else { return NSRange(location: NSNotFound, length: 0) }
-        return projection.rows[line].valueRange
+        guard let projection = currentProjection(), projection.lineRanges.indices.contains(line) else { return NSRange(location: NSNotFound, length: 0) }
+        return projection.lineRanges[line]
     }
 
     override func accessibilityString(for range: NSRange) -> String? {

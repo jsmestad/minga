@@ -5,7 +5,10 @@ import Foundation
 /// Shared policy for preview screenshots and snapshot-fixture layout.
 enum PreviewSnapshotPolicy {
     private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "WorkspaceChromeView", "WorkspaceEmptyChromeView", "WorkspaceLongNameChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
-    private static let renderedWindowViews = fullShellViews
+    private static let renderedWindowViews = fullShellViews.union([
+        "AgentChatView", "AgentChatStreaming", "AgentChatApproval",
+        "AgentChatError", "AgentChatCompletion", "AgentChatSummary"
+    ])
     private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename", "MessagesContentView"]
 
     enum CaptureError: Error {
@@ -88,7 +91,7 @@ enum PreviewSnapshotPolicy {
     }
 
     static func requiresRenderedWindowCapture(_ viewName: String) -> Bool {
-        fullShellViews.contains(viewName)
+        renderedWindowViews.contains(viewName)
     }
 
     static func shouldUseEagerLayout(for viewName: String, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {

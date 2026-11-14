@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaAgent.ToolApproval
@@ -11,16 +12,20 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias MingaEditor.UI.Theme
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
-  alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Appearance
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.VimState
   alias MingaEditor.Window
 
   test "visible pending discovery does not claim a missing model" do
@@ -35,6 +40,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       assert model.visible?
       assert model.model_name == "Model not resolved"
     end
+  end
+
+  test "build/1 requires the Content stage's retained prompt in the same frame" do
+    session = fake_session_pid()
+    ctx = context(session, synced_panel([{:assistant, "ready"}]))
+
+    assert AgentChatBuilder.build(ctx).visible?
+    refute AgentChatBuilder.build(%{ctx | prompt: nil}).visible?
+    assert Process.info(session, :messages) == {:messages, []}
   end
 
   test "build/1 sends cached display message pairs to resident agent transcript" do
@@ -373,29 +387,35 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
     window = Window.new_agent_chat(1, 24, 80)
 
-    ctx =
-      TestHelpers.base_state(port_manager: nil)
-      |> Context.from_editor_state()
+    state = TestHelpers.base_state(port_manager: nil)
+    agent_ui = PromptBuffer.ensure(%UIState{panel: panel})
+    windows = Windows.set_map(state.workspace.windows, %{1 => window})
 
-    agent_ui = %UIState{panel: panel}
-    workspace = %{ctx.workspace | agent_ui: agent_ui, editing: VimState.new()}
+    workspace =
+      state.workspace
+      |> SessionState.set_windows(windows)
+      |> SessionState.set_buffers(Buffers.set_active_override(state.workspace.buffers, nil))
+      |> SessionState.set_agent_ui(agent_ui)
+      |> SessionState.set_keymap_scope(:agent)
 
-    frame = %{
-      ctx.intent.frame
-      | shell_state:
-          TraditionalState.install_tab_bar(
-            TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
-            tab_bar
-          ),
-        theme: Keyword.get(opts, :theme)
-    }
+    shell = TraditionalState.install_tab_bar(state.shell_runtime.state, tab_bar)
 
-    %{
-      ctx
+    state = %{
+      state
       | workspace: workspace,
-        windows: %Windows{map: %{1 => window}, active: 1},
-        intent: %{ctx.intent | frame: frame, workspace: workspace}
+        appearance:
+          Appearance.select_theme(
+            state.appearance,
+            Keyword.get(opts, :theme, state.appearance.theme)
+          )
     }
+
+    # Capture live status before attaching the identity-only session for Content and emit.
+    input = state |> Input.from_editor_state() |> Layout.put()
+    frame = %{input.intent.frame | shell_state: shell}
+    input = %{input | intent: %{input.intent | frame: frame}}
+    {[_content], _cursor, input} = Content.build_agent_chat_content(input, Layout.get(input))
+    Context.from_input(input)
   end
 
   defp fake_session_pid do
