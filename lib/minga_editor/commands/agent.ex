@@ -444,7 +444,7 @@ defmodule MingaEditor.Commands.Agent do
     )
   end
 
-  @doc "Returns from the agent view to the recorded editor context without stopping the session."
+  @doc "Returns from the agent view to the recorded editor context without stopping the session. If no file tab or recorded context exists, keeps the agent view active and reports the unavailable target."
   @spec return_to_editor(state()) :: state()
   def return_to_editor(state) do
     state = ShellWorkflow.ensure_available(state)
@@ -501,9 +501,6 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_target_without_tab(state, nil) do
-    state = mark_agent_view_inactive(state)
-    workspace = MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
-    state = %{state | workspace: workspace}
     NoticeWorkflow.publish(state, "No file tabs in this workspace")
   end
 

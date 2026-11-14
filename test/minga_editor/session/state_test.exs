@@ -187,6 +187,41 @@ defmodule MingaEditor.Session.StateTest do
       assert restored.windows == ws.windows
     end
 
+    test "restoring an agent pane repairs dismissed routing without stealing sidebar focus" do
+      ws = base_state().workspace
+      window_id = ws.windows.active
+
+      dismissed =
+        ws
+        |> SessionState.replace_window(window_id, Window.new_agent_chat(window_id, 24, 80))
+        |> SessionState.activate_buffer(%Buffers{})
+
+      context = SessionState.to_tab_context(dismissed)
+      launchpad = SessionState.enter_empty_state(ws)
+
+      for {saved_scope, expected_scope} <- [
+            {:editor, :agent},
+            {:agent, :agent},
+            {:file_tree, :file_tree}
+          ] do
+        restored =
+          SessionState.restore_tab_context(
+            launchpad,
+            Context.put_fields(context, keymap_scope: saved_scope)
+          )
+
+        assert restored.keymap_scope == expected_scope
+        assert restored.launchpad == nil
+      end
+
+      for partial <- [%{}, Context.empty(), %{buffers: %Buffers{}}] do
+        assert SessionState.restore_tab_context(dismissed, partial).keymap_scope == :editor
+
+        assert SessionState.restore_tab_context(launchpad, partial).launchpad ==
+                 launchpad.launchpad
+      end
+    end
+
     test "ignores fields that are not part of the workspace" do
       ws = base_state().workspace
 

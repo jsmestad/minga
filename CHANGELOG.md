@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Agent workspace switches preserve each conversation's transcript and draft, clear stale launchpad routing, and restore composer input instead of creating an Untitled buffer. Returning to the editor without an available target keeps Agent input usable.
+- The macOS Add menu creates a new agent workspace with its composer instead of toggling an existing workspace.
 - Agent drafts soft-wrap into a text area that grows to eight rows and then scrolls vertically. Both frontends render canonical prompt rows with source-backed caret and selection, keep Send/Stop outside the scrolling text, and submit or stop independently of Vim mode. Native text placement stays fixed across mode changes; terminal composition preserves combining marks. Hidden sidebars no longer offset terminal composer pointer targets.
 - macOS assistant replies share a visible author label, theme-colored background and border across plain, styled and Markdown output instead of blending into the transcript background.
 - macOS agent-workspace previews now capture readable, frozen production views at narrow and default widths, with full-window images, bounded failures and build-input receipts. A separate procedure covers real native keyboard and mouse evidence.

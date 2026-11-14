@@ -79,19 +79,31 @@ defmodule MingaEditor.Session.State do
     TabContext.from_workspace(ws)
   end
 
-  @doc "Restores a tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions. Dead buffer pids in the restored context are scrubbed to prevent activating a dead process."
+  @doc "Restores a tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions. Dead buffer pids are scrubbed. A restored agent pane leaves the launchpad and recovers agent routing without replacing explicit non-editor focus."
   @spec restore_tab_context(t(), TabContext.t() | TabContext.legacy()) :: t()
   def restore_tab_context(%__MODULE__{} = ws, context) when is_map(context) do
+    fields = TabContext.to_workspace_map(context)
+
     ws =
-      context
-      |> TabContext.to_workspace_map()
+      fields
       |> Enum.reduce(ws, fn {field, value}, acc -> Map.put(acc, field, value) end)
       # The Cmd/Ctrl-hover link is transient pointer state, not snapshotted per
       # tab. Force it off on every restore so a switch never carries a stale
       # underline (or GUI hand cursor) from the previous tab's buffer (#2630).
       |> clear_cmd_hover_link()
 
-    update_in(ws.buffers, &Buffers.scrub_dead_active/1)
+    ws = update_in(ws.buffers, &Buffers.scrub_dead_active/1)
+
+    case {fields, ws.keymap_scope, active_window_struct(ws)} do
+      {%{windows: _}, :editor, %{content: {:agent_chat, _}}} ->
+        %{ws | keymap_scope: :agent, launchpad: nil}
+
+      {%{windows: _}, _scope, %{content: {:agent_chat, _}}} ->
+        %{ws | launchpad: nil}
+
+      _ ->
+        ws
+    end
   end
 
   # ── Pure workspace operations ─────────────────────────────────────────────

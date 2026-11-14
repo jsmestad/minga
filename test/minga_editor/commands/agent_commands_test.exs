@@ -155,6 +155,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     }
   end
 
+  @spec stop_owned_prompt(pid()) :: :ok
+  defp stop_owned_prompt(pid) when is_pid(pid) do
+    GenServer.stop(pid)
+  catch
+    :exit, {:noproc, {GenServer, :stop, [^pid, :normal, :infinity]}} -> :ok
+  end
+
   defp with_model_name(state, model_name) do
     agent_ui = UIState.set_model_name(state.workspace.agent_ui, model_name)
     MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, agent_ui)
@@ -1118,6 +1125,150 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert manual_workspace.files == source_workspace.files
       assert manual_workspace.payload == source_workspace.payload
       assert %TabAgent{session: ^session} = TabBar.active(tab_bar).payload
+    end
+
+    test "creating sessions beside restored workspaces preserves unique ownership and independent drafts" do
+      registry = :"#{__MODULE__}.draft_options.#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+
+      options =
+        start_supervised!({Minga.Config.Options, name: nil, events_registry: registry})
+
+      assert {:ok, "test:test-model"} =
+               Minga.Config.Options.set(options, :agent_model, "test:test-model")
+
+      restored_workspaces =
+        for id <- 1..2 do
+          id
+          |> MingaEditor.State.Workspace.new_agent("Restored #{id}")
+          |> MingaEditor.State.Workspace.set_agent_ui(UIState.new())
+        end
+
+      tab_bar = TabBar.restore_workspaces(TabBar.new_empty(nil), restored_workspaces, nil)
+
+      state =
+        %EditorState{
+          frontend: %Frontend{port_manager: nil},
+          workspace:
+            %WorkspaceState{}
+            |> WorkspaceState.set_windows(
+              Windows.add_window(%Windows{}, Window.new_agent_chat(1, 24, 80))
+            )
+            |> WorkspaceState.enter_empty_state(),
+          interaction: Interaction.new(options_server: options),
+          shell_runtime:
+            Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
+        }
+        |> install_tab_bar(tab_bar)
+
+      state_a = MingaEditor.Commands.execute(state, :agent_new_session)
+      tab_a = Runtime.active_tab(state_a.shell_runtime)
+      session_a = Runtime.active_session(state_a.shell_runtime)
+      prompt_a = state_a.workspace.agent_ui.panel.prompt_buffer
+
+      on_exit(fn ->
+        stop_owned_prompt(prompt_a)
+        MingaAgent.SessionManager.stop_session_by_pid(session_a)
+      end)
+
+      owning_workspaces = fn state, session ->
+        state.shell_runtime.state.tab_bar.workspaces
+        |> Enum.filter(&match?(%{payload: %WorkspaceAgent{session: ^session}}, &1))
+        |> Enum.map(& &1.id)
+      end
+
+      assert owning_workspaces.(state_a, session_a) == [tab_a.group_id]
+
+      assert :ok =
+               Session.seed_messages(session_a, [
+                 {:user, "Focus question"},
+                 {:assistant, "Focus answer"}
+               ])
+
+      assert {:handled, state_a} =
+               MingaEditor.Input.AgentPanel.handle_paste(state_a, "keyboard draft")
+
+      state_a = MingaEditor.Input.Router.route_key(state_a, 27, 0)
+      state_a = MingaEditor.Commands.execute(state_a, :agent_close)
+      assert state_a.workspace.keymap_scope == :agent
+      assert View.active?(state_a.workspace.agent_ui.view)
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(state_a.workspace.agent_ui) ==
+               "keyboard draft"
+
+      state_b = MingaEditor.Commands.execute(state_a, :agent_new_session)
+      tab_b = Runtime.active_tab(state_b.shell_runtime)
+      session_b = Runtime.active_session(state_b.shell_runtime)
+      prompt_b = state_b.workspace.agent_ui.panel.prompt_buffer
+
+      on_exit(fn ->
+        stop_owned_prompt(prompt_b)
+        MingaAgent.SessionManager.stop_session_by_pid(session_b)
+      end)
+
+      refute session_a == session_b
+      assert owning_workspaces.(state_b, session_a) == [tab_a.group_id]
+      assert owning_workspaces.(state_b, session_b) == [tab_b.group_id]
+
+      for restored <- restored_workspaces do
+        workspace = TabBar.get_workspace(state_b.shell_runtime.state.tab_bar, restored.id)
+        assert workspace.payload.session == nil
+      end
+
+      assert :ok =
+               Session.seed_messages(session_b, [
+                 {:user, "Draft question"},
+                 {:assistant, "Draft answer"}
+               ])
+
+      assert {:handled, state_b} =
+               MingaEditor.Input.AgentPanel.handle_paste(state_b, "preserved beta draft")
+
+      state_b = MingaEditor.Input.Router.route_key(state_b, 27, 0)
+
+      placeholder = MingaEditor.Commands.Workspace.workspace_next(state_b)
+      assert Runtime.active_session(placeholder.shell_runtime) == nil
+
+      active_a = MingaEditor.TabWorkflow.switch(placeholder, tab_a.id)
+      assert Runtime.active_session(active_a.shell_runtime) == session_a
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(active_a.workspace.agent_ui) ==
+               "keyboard draft"
+
+      assert active_a.workspace.keymap_scope == :agent
+      assert active_a.workspace.agent_ui.panel.visible
+      assert View.active?(active_a.workspace.agent_ui.view)
+      assert {:assistant, "Focus answer"} in active_a.workspace.agent_ui.panel.transcript.messages
+      refute {:assistant, "Draft answer"} in active_a.workspace.agent_ui.panel.transcript.messages
+
+      assert WorkspaceState.active_window_struct(active_a.workspace).content ==
+               {:agent_chat, :semantic}
+
+      assert Minga.Editing.mode(active_a) == :normal
+      {0, input_col} = MingaEditor.Agent.PromptBuffer.input_cursor(active_a.workspace.agent_ui)
+      {before_cursor, after_cursor} = String.split_at("keyboard draft", input_col)
+
+      active_a =
+        active_a
+        |> MingaEditor.Input.Router.route_key(?i, 0)
+        |> MingaEditor.Input.Router.route_key(?!, 0)
+
+      assert Runtime.active_tab(active_a.shell_runtime).id == tab_a.id
+      assert Minga.Editing.mode(active_a) == :insert
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(active_a.workspace.agent_ui) ==
+               before_cursor <> "!" <> after_cursor
+
+      active_b = MingaEditor.TabWorkflow.switch(active_a, tab_b.id)
+      assert Runtime.active_session(active_b.shell_runtime) == session_b
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(active_b.workspace.agent_ui) ==
+               "preserved beta draft"
+
+      assert active_b.workspace.agent_ui.panel.visible
+      assert View.active?(active_b.workspace.agent_ui.view)
+      assert {:assistant, "Draft answer"} in active_b.workspace.agent_ui.panel.transcript.messages
+      refute {:assistant, "Focus answer"} in active_b.workspace.agent_ui.panel.transcript.messages
     end
 
     test "new_agent_session from empty tab bar activates first real tab through workflow" do

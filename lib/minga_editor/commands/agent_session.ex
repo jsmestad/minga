@@ -138,10 +138,8 @@ defmodule MingaEditor.Commands.AgentSession do
 
     case start_and_subscribe(state, session_opts) do
       {:ok, pid} ->
-        # Create the workspace first so set_tab_session/3 does not project the session onto the manual workspace.
         state
         |> ensure_agent_workspace(pid, project_view)
-        |> assign_session_to_tab(pid)
         |> AgentLifecycle.rebuild_agent_from_session(pid)
 
       {:error, reason} ->
@@ -376,21 +374,6 @@ defmodule MingaEditor.Commands.AgentSession do
   def format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   # ── Private helpers ────────────────────────────────────────────────────────
-
-  @spec assign_session_to_tab(state(), pid()) :: state()
-  defp assign_session_to_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, pid) do
-    case TabBar.find_sessionless_agent(tb) do
-      %Tab{id: agent_tab_id} ->
-        state = MingaEditor.Shell.Workflow.ensure_available(state)
-        runtime = Runtime.set_tab_session(state.shell_runtime, agent_tab_id, pid)
-        %{state | shell_runtime: runtime}
-
-      nil ->
-        state
-    end
-  end
-
-  defp assign_session_to_tab(state, _pid), do: state
 
   @spec start_and_subscribe(state(), keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(state, opts) do
