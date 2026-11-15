@@ -3152,6 +3152,42 @@ func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 	}
 }
 
+func TestBottomPanelMessageUsesProtocolSeverity(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	p := palette{colors: map[byte]uint32{
+		themeTabInactiveFG:   0x111111,
+		themeDiagnosticInfo:  0x222222,
+		themeWarningFG:       0x333333,
+		themeDiagnosticError: 0x444444,
+		themeDiagnosticHint:  0x555555,
+	}}
+	for _, tc := range []struct {
+		name      string
+		level     byte
+		badge     string
+		wantColor color.Color
+	}{
+		{"debug", 0, "DBG", p.Muted()},
+		{"info", 1, "INF", p.Info()},
+		{"warning", 2, "WRN", p.Warning()},
+		{"error", 3, "ERR", p.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := protocol.PanelMessage{ID: 1, Level: tc.level, Text: "retained log message"}
+			row := model.renderBottomPanelMessage(message, 16, 50, 80)
+			got := strings.Join(strings.Fields(ansi.Strip(row)), " ")
+			if want := tc.badge + " messages retained log message"; got != want {
+				t.Fatalf("rendered Messages row = %q, want %q", got, want)
+			}
+			gotColor := color.NRGBAModel.Convert(bottomPanelLevelColor(p, tc.level))
+			wantColor := color.NRGBAModel.Convert(tc.wantColor)
+			if gotColor != wantColor {
+				t.Fatalf("severity badge color = %v, want semantic color %v", gotColor, wantColor)
+			}
+		})
+	}
+}
+
 func TestBottomPanelShowsLatestMessagesByDefault(t *testing.T) {
 	model, panel := bottomPanelTestModel(10, nil)
 	visible := model.visibleBottomPanelMessages(panel)
