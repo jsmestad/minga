@@ -338,10 +338,10 @@ func decodeFileTreeRows(body []byte, offset int, count int) []FileTreeRow {
 	return rows
 }
 
-func decodeStatus(payload []byte) (StatusBar, string, int) {
+func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 	size := sectionedSize(payload)
 	if size == 0 {
-		return StatusBar{}, "", len(payload)
+		return StatusBar{}, "", 0, fmt.Errorf("malformed gui_status_bar sections")
 	}
 
 	status := StatusBar{}
@@ -392,10 +392,16 @@ func decodeStatus(payload []byte) (StatusBar, string, int) {
 			if err == nil {
 				status.Operation = &operation
 			}
+		case 0x10:
+			review, err := decodeStatusReview(section)
+			if err != nil {
+				return StatusBar{}, "", 0, err
+			}
+			status.Review = &review
 		}
 	}
 
-	return status, stringsJoin(parts, "  "), size
+	return status, stringsJoin(parts, "  "), size, nil
 }
 
 func decodeStatusSegments(section []byte) ([]StatusSegment, []StatusSegment) {

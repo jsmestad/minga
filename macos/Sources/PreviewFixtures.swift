@@ -221,9 +221,7 @@ public enum PreviewFixtures {
             promptCursorCol: 52,
             promptMode: .insert,
             promptVisibleRows: 1,
-            promptCompletion: nil,
-            helpVisible: false,
-            helpGroups: []
+            promptCompletion: nil
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: agentChatMessages())
     }

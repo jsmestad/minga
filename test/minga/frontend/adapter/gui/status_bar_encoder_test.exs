@@ -15,6 +15,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   alias Minga.RenderModel.UI.StatusBar.Language
   alias Minga.RenderModel.UI.StatusBar.Operation
   alias Minga.RenderModel.UI.StatusBar.Selection
+  alias Minga.RenderModel.UI.StatusBar.Review
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
   @op_gui_status_bar Minga.Protocol.Opcodes.gui_status_bar()
@@ -358,6 +359,26 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       {cmd2, _caches} = StatusBarEncoder.encode(model, caches)
 
       assert cmd1 == cmd2
+    end
+
+    test "Review carries complete Unicode source offers and disappears when no longer selected" do
+      path = "lib/é/界.ex"
+      item_id = "r1.opaque-source"
+
+      model = %StatusBar{
+        content_kind: :buffer,
+        data: status_data(),
+        review: %Review{path: path, freshness: :stale, generation: 42, item_id: item_id}
+      }
+
+      {command, caches} = StatusBarEncoder.encode(model, Caches.new())
+
+      assert decode_sections(command)[0x10] ==
+               <<byte_size(path)::16, path::binary, 1, 42::32, byte_size(item_id)::16,
+                 item_id::binary>>
+
+      {ordinary, _caches} = StatusBarEncoder.encode(%{model | review: nil}, caches)
+      refute Map.has_key?(decode_sections(ordinary), 0x10)
     end
   end
 

@@ -3,6 +3,16 @@ defmodule MingaEditor.Layout.GUITest do
 
   alias MingaEditor.Layout
   alias MingaEditor.Layout.GUI, as: LayoutGUI
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Layout.SurfaceRegistry
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.Frontend
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Window
   import MingaEditor.RenderPipeline.TestHelpers
 
   describe "Layout.GUI.compute/1" do
@@ -78,5 +88,89 @@ defmodule MingaEditor.Layout.GUITest do
       {_r, _c, _w, content_h} = win_layout.content
       assert content_h == editor_h
     end
+  end
+
+  test "Agent timeline reservation stays separate from content and footer across background bursts" do
+    for {cols, rows} <- [{140, 40}, {60, 24}], body <- [:chat, :review], count <- [0, 1, 100] do
+      state = agent_state(body, count, :tui, cols, rows)
+      layout = LayoutGUI.compute(state)
+      assert layout.edit_timeline == {rows - 4, 0, cols, 3}
+      assert layout.editor_area == {0, 0, cols, rows - 4}
+      assert layout.minibuffer == {rows - 1, 0, cols, 1}
+      assert SurfaceRegistry.rect_for(state, :edit_timeline) == layout.edit_timeline
+    end
+  end
+
+  test "a visible minibuffer has its own row below the timeline and status" do
+    state = agent_state(:chat, 0, :tui, 140, 40)
+
+    workspace =
+      SessionState.transition_mode(
+        state.workspace,
+        :command,
+        Minga.Mode.CommandState.new("write")
+      )
+
+    state = %{state | workspace: workspace}
+
+    for input <- [state, MingaEditor.RenderPipeline.Input.from_editor_state(state)] do
+      layout = LayoutGUI.compute(input)
+      assert layout.editor_area == {0, 0, 140, 35}
+      assert layout.edit_timeline == {35, 0, 140, 3}
+      assert layout.minibuffer == {39, 0, 140, 1}
+    end
+  end
+
+  test "native Agent chrome never subtracts timeline rows from the already fitted editor" do
+    for body <- [:chat, :review], count <- [0, 1, 100] do
+      state = agent_state(body, count, :native_gui, 80, 24)
+      layout = LayoutGUI.compute(state)
+      assert layout.editor_area == {0, 0, 80, 24}
+      assert layout.edit_timeline == nil
+    end
+  end
+
+  defp agent_state(body, count, frontend_type, cols, rows) do
+    state = base_state(rows: rows, cols: cols)
+
+    frontend =
+      Frontend.accept_capabilities(state.frontend, %Capabilities{
+        frontend_type: frontend_type,
+        semantic_ui: true
+      })
+
+    id = state.workspace.windows.active
+    window = Window.new_agent_chat(id, rows, cols)
+    windows = Windows.replace_window(state.workspace.windows, id, window)
+
+    timeline =
+      Enum.reduce(1..count//1, EditTimeline.new(), fn index, timeline ->
+        EditTimeline.record_edit(
+          timeline,
+          "file-#{index}.ex",
+          "call-#{index}",
+          "edit_file",
+          "before",
+          "after"
+        )
+      end)
+
+    ui = UIState.replace_edit_timeline(UIState.new(), timeline)
+
+    ui =
+      if body == :review do
+        ui
+        |> UIState.replace_preview(
+          Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
+        )
+        |> UIState.set_focus(:file_viewer)
+      else
+        ui
+      end
+
+    workspace =
+      state.workspace |> SessionState.set_windows(windows) |> SessionState.set_agent_ui(ui)
+
+    %{state | frontend: frontend, workspace: workspace}
   end
 end

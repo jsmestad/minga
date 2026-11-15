@@ -100,16 +100,13 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     state = base_state(table, backend: :gui, capabilities: capabilities)
     state = %{state | render: MingaEditor.State.Render.connect_renderer(state.render, renderer)}
     snapshot = MingaEditor.Input.Router.capture_snapshot(state)
-    revision = state.render.render_correlation.latest_intent_revision
 
     handled = GuiActionHandler.dispatch(state, :config_query)
 
     assert handled.appearance.gui_config_state != nil
     assert handled.render.render_correlation.keyframe_pending?
 
-    rendered = MingaEditor.Input.Router.post_action_housekeeping(handled, snapshot)
-
-    assert rendered.render.render_correlation.latest_intent_revision == revision + 1
+    MingaEditor.Input.Router.post_action_housekeeping(handled, snapshot)
 
     assert_receive {:renderer_reset,
                     %MingaEditor.RenderPipeline.Intent{

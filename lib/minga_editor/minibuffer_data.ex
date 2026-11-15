@@ -86,6 +86,52 @@ defmodule MingaEditor.MinibufferData do
     rem(rem(index, count) + count, count)
   end
 
+  @doc "Reports semantic minibuffer visibility without constructing completion candidates."
+  @spec visible?(EditorState.t() | map()) :: boolean()
+  def visible?(%EditorState{session: %{pending_quit: kind}, shell_runtime: %Runtime{}})
+      when kind in [:quit, :quit_all],
+      do: true
+
+  def visible?(%{pending_quit: kind, shell_state: _shell_state})
+      when kind in [:quit, :quit_all],
+      do: true
+
+  def visible?(%EditorState{
+        shell_runtime: %Runtime{
+          state: %{modal: {:prompt, %{prompt_ui: %PromptState{handler: handler}}}}
+        }
+      })
+      when handler != nil,
+      do: true
+
+  def visible?(%{
+        shell_state: %{modal: {:prompt, %{prompt_ui: %PromptState{handler: handler}}}}
+      })
+      when handler != nil,
+      do: true
+
+  def visible?(%{workspace: %{editing: %{mode: mode}}})
+      when mode in [
+             :command,
+             :search,
+             :search_prompt,
+             :eval,
+             :substitute_confirm,
+             :extension_confirm,
+             :delete_confirm,
+             :branch_delete_confirm
+           ],
+      do: true
+
+  def visible?(%{
+        workspace: %{
+          editing: %{mode: :normal, mode_state: %{describe_key: %Minga.Mode.DescribeKey{}}}
+        }
+      }),
+      do: true
+
+  def visible?(_state), do: false
+
   @doc """
   Extracts structured minibuffer data from the current editor state.
 

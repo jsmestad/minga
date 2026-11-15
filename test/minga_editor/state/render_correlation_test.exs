@@ -91,7 +91,7 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     refute RenderCorrelation.scheduled?(delivered.render.render_correlation)
   end
 
-  test "frontend readiness queues one renderer handoff without resetting ordering evidence" do
+  test "frontend readiness fences outstanding receipts without resetting accepted ordering evidence" do
     correlation = %RenderCorrelation{
       latest_intent_revision: 8,
       last_receipt_revision: 7,
@@ -101,12 +101,18 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     ready = RenderCorrelation.frontend_ready(correlation)
     assert {true, handed_off} = RenderCorrelation.take_keyframe_request(ready)
     assert {false, ^handed_off} = RenderCorrelation.take_keyframe_request(handed_off)
-    assert RenderCorrelation.latest_intent_revision(handed_off) == 8
+
+    assert RenderCorrelation.classify_receipt(handed_off, 8, 42) ==
+             {:stale, :superseded_intent}
+
     assert RenderCorrelation.last_receipt_revision(handed_off) == 7
     assert RenderCorrelation.last_receipt_sequence(handed_off) == 41
 
+    {next, revision} = RenderCorrelation.submit(handed_off)
+    assert RenderCorrelation.classify_receipt(next, revision, 42) == {:fresh, revision}
+
     reset = RenderCorrelation.reset(correlation)
-    assert reset == ready
+    assert RenderCorrelation.classify_receipt(reset, 8, 42) == {:stale, :superseded_intent}
   end
 
   test "intent submissions advance independently of receipt acknowledgement" do

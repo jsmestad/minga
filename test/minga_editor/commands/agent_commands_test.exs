@@ -1025,10 +1025,21 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   end
 
   describe "scope_switch_focus/1" do
-    test "switches from chat to file_viewer" do
+    test "switches from chat to the retained review" do
       state = base_state(panel_visible: true)
 
-      view = state.workspace.agent_ui.view |> View.activate(nil, nil) |> View.set_focus(:chat)
+      preview =
+        MingaEditor.Agent.View.Preview.set_diff(
+          MingaEditor.Agent.View.Preview.new(),
+          MingaEditor.Agent.DiffReview.new("selected.ex", "before", "after")
+        )
+
+      view =
+        state.workspace.agent_ui.view
+        |> View.activate(nil, nil)
+        |> View.replace_preview(preview)
+        |> View.set_focus(:chat)
+
       state = MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
 
       new_state = AgentCommands.scope_switch_focus(state)

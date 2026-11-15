@@ -1,32 +1,18 @@
 defmodule MingaEditor.Layout.OverlayBand do
   @moduledoc """
-  Shared footer-band geometry for the single-active secondary overlays (#2281).
+  Shared footer-band geometry for single-active secondary overlays (#2281).
 
-  The Go compositor historically footer-appended one secondary overlay at the
-  bottom of the screen, sizing its height with `maxOverlayHeight()`
-  (`go/tui/internal/ui/model.go`: `min(max(height/3, 4), 12)`) and spanning the
-  full terminal width. These seven surfaces (float popup, agent context, extension
-  panel, observatory, edit timeline, notifications, and extension overlay) are
-  identical footer-band shapes, so the BEAM owns one rect helper for all of them
-  instead of seven copies.
+  Float popups, compact agent context, extension panels, observatory, notifications and extension overlays share this band.
+  The edit timeline is persistent chrome with its own `Layout.edit_timeline` rectangle and does not compete for this band.
 
-  `rect/2` ports that exact clamp. `content_height` is the surface's content line
-  count (BEAM-derivable from the chrome/UI models) or `:max` for a surface whose
-  wrapped line count the BEAM cannot know. The rect is bottom-anchored: it occupies
-  the lowest `height` rows of the terminal and the full width, the same band the
-  frontend appended into, so the rect's bottom edge sits where the old footer-append
-  put the overlay (directly above the minibuffer).
+  `rect/2` preserves the historical Go `maxOverlayHeight()` clamp: `min(max(height / 3, 4), 12)`.
+  The rectangle spans the full terminal width and is bottom-anchored.
+  `content_height` is the surface's BEAM-derived line count, or `:max` when wrapping determines the final height.
 
-  Only one overlay shows at a time in that band (single-active model, #2268 AC-4).
-  For the count-derivable surfaces (notifications, observatory, edit_timeline,
-  extension_overlay) the caller passes a real `content_height` so the band shrinks
-  to the content and the overlay hugs the screen bottom. For wrap-dependent
-  active surfaces (float_popup, extension_panel, and agent_context) the caller
-  passes `:max` (the clamp ceiling); the frontend bottom-aligns the
-  rendered content inside that band, so a short overlay still hugs the bottom and
-  the residual phantom rows sit ABOVE it (see `MingaEditor.Layout.FooterOverlays`).
-  Either way the rect only needs to CONTAIN the overlay so clicks over it are
-  hit-tested, not pixel-match it.
+  Only one overlay appears in the band at a time.
+  Notifications, observatory and extension overlays provide a real content height so short overlays hug the bottom.
+  Float popups, extension panels and compact agent context use `:max`; the frontend bottom-aligns their rendered content inside the band.
+  The rectangle must contain the rendered overlay for hit testing, not match every rendered pixel.
   """
 
   alias MingaEditor.Layout

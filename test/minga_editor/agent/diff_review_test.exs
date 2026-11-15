@@ -264,29 +264,29 @@ defmodule MingaEditor.Agent.DiffReviewTest do
     test "includes hunk headers" do
       review = simple_review()
       lines = DiffReview.to_display_lines(review)
-      headers = Enum.filter(lines, fn {_, type, _} -> type == :hunk_header end)
+      headers = Enum.filter(lines, &(&1.kind == :hunk_header))
       assert [_ | _] = headers
     end
 
     test "includes added lines for additions" do
       review = DiffReview.new("f.ex", "a\n", "a\nb\n")
       lines = DiffReview.to_display_lines(review)
-      added = Enum.filter(lines, fn {_, type, _} -> type == :added end)
+      added = Enum.filter(lines, &(&1.kind == :added))
       assert [_ | _] = added
     end
 
     test "includes removed lines for deletions" do
       review = DiffReview.new("f.ex", "a\nb\n", "a\n")
       lines = DiffReview.to_display_lines(review)
-      removed = Enum.filter(lines, fn {_, type, _} -> type == :removed end)
+      removed = Enum.filter(lines, &(&1.kind == :removed))
       assert [_ | _] = removed
     end
 
     test "includes both removed and added for modifications" do
       review = DiffReview.new("f.ex", "a\nold\nb\n", "a\nnew\nb\n")
       lines = DiffReview.to_display_lines(review)
-      added = Enum.filter(lines, fn {_, type, _} -> type == :added end)
-      removed = Enum.filter(lines, fn {_, type, _} -> type == :removed end)
+      added = Enum.filter(lines, &(&1.kind == :added))
+      removed = Enum.filter(lines, &(&1.kind == :removed))
       assert [_ | _] = added
       assert [_ | _] = removed
     end
@@ -294,9 +294,9 @@ defmodule MingaEditor.Agent.DiffReviewTest do
     test "hunk headers carry hunk index" do
       review = multi_hunk_review()
       lines = DiffReview.to_display_lines(review)
-      headers = Enum.filter(lines, fn {_, type, _} -> type == :hunk_header end)
+      headers = Enum.filter(lines, &(&1.kind == :hunk_header))
 
-      indices = Enum.map(headers, fn {_, _, idx} -> idx end)
+      indices = Enum.map(headers, & &1.hunk_index)
       assert 0 in indices
       assert 1 in indices
     end
@@ -305,7 +305,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.new("f.ex", "a\nb\nc\n", "a\nB\nc\n")
       lines = DiffReview.to_display_lines(review, 0)
 
-      refute Enum.any?(lines, fn {_text, type, _idx} -> type == :context end)
+      refute Enum.any?(lines, &(&1.kind == :context))
     end
 
     test "does not duplicate overlapping context lines for nearby hunks" do
@@ -316,8 +316,8 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       context_lines =
         review
         |> DiffReview.to_display_lines()
-        |> Enum.filter(fn {_text, type, _idx} -> type == :context end)
-        |> Enum.map(fn {text, _type, _idx} -> text end)
+        |> Enum.filter(&(&1.kind == :context))
+        |> Enum.map(& &1.text)
 
       assert context_lines == ["l1", "l3", "l4", "l6", "l7", "l8"]
     end
@@ -326,8 +326,8 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.new("f.ex", "a\nold\nc\n", "a\nnew\nc\n")
       lines = DiffReview.to_display_lines(review)
 
-      assert {"old", :removed, 0} in lines
-      assert {"new", :added, 0} in lines
+      assert Enum.any?(lines, &match?(%{text: "old", kind: :removed, hunk_index: 0}, &1))
+      assert Enum.any?(lines, &match?(%{text: "new", kind: :added, hunk_index: 0}, &1))
       refute Map.has_key?(Map.from_struct(review), :before_lines)
     end
   end

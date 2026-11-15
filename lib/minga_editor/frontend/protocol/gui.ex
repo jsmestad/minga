@@ -1045,6 +1045,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_surface(3), do: {:ok, :file_tree}
   defp decode_semantic_surface(4), do: {:ok, :command_completion}
   defp decode_semantic_surface(5), do: {:ok, :timeline}
+  defp decode_semantic_surface(6), do: {:ok, :review}
   defp decode_semantic_surface(_surface), do: :error
 
   @spec decode_semantic_intent(atom(), non_neg_integer()) :: {:ok, atom()} | :error
@@ -1061,6 +1062,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_intent(:file_tree, 8), do: {:ok, :new_folder}
   defp decode_semantic_intent(:command_completion, 1), do: {:ok, :accept}
   defp decode_semantic_intent(:timeline, 1), do: {:ok, :navigate}
+  defp decode_semantic_intent(:timeline, 2), do: {:ok, :review_file}
+  defp decode_semantic_intent(:review, 1), do: {:ok, :back_to_chat}
+  defp decode_semantic_intent(:review, 2), do: {:ok, :review_file}
   defp decode_semantic_intent(_surface, _intent), do: :error
 
   @spec decode_file_dialog_result(

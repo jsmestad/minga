@@ -916,29 +916,39 @@ public struct ContentView<EditorSurface: View>: View {
     ) -> some View {
         let geo = editorGeometry()
         return ZStack(alignment: .topLeading) {
-            // The Metal surface is unconditional so its AppKit and resident identity survives.
-            makeEditorSurface()
+            ZStack(alignment: .topLeading) {
+                // The Metal surface is unconditional so its AppKit and resident identity survives.
+                makeEditorSurface()
 
-            if input.agentChatState.visible {
-                AgentChatView(
-                    state: input.agentChatState,
-                    isInsertMode: input.agentChatState.isPromptInsertMode,
-                    sendAction: translatedAction(FrontendActionComposition.outbound)
-                )
-            }
-
-            if input.emptyStateState.visible {
-                EmptyStateView(
-                    state: input.emptyStateState,
-                    sendAction: translatedAction(FrontendActionComposition.outbound)
-                )
-                .background {
-                    frameProbeView(
-                        .editor,
-                        value: input.emptyStateState.sections.flatMap(\.items).map(\.label).joined(separator: ","),
-                        stateObject: input.emptyStateState
+                if input.agentChatState.visible {
+                    AgentChatView(
+                        state: input.agentChatState,
+                        isInsertMode: input.agentChatState.isPromptInsertMode,
+                        sendAction: translatedAction(FrontendActionComposition.outbound)
                     )
                 }
+
+                if input.emptyStateState.visible {
+                    EmptyStateView(
+                        state: input.emptyStateState,
+                        sendAction: translatedAction(FrontendActionComposition.outbound)
+                    )
+                    .background {
+                        frameProbeView(
+                            .editor,
+                            value: input.emptyStateState.sections.flatMap(\.items).map(\.label).joined(separator: ","),
+                            stateObject: input.emptyStateState
+                        )
+                    }
+                }
+            }
+            .accessibilityHidden(input.agentHelpState.visible)
+
+            if input.agentHelpState.visible {
+                AgentHelpView(
+                    state: input.agentHelpState,
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
+                )
             }
 
             EditorOverlayHost(

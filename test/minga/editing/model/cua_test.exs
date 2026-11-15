@@ -161,6 +161,35 @@ defmodule Minga.Editing.Model.CUATest do
     end
   end
 
+  test "canonical navigation keys preserve CUA movement and extension commands" do
+    for {key, movement, direction} <- [
+          {57_352, :move_up, :up},
+          {57_353, :move_down, :down},
+          {57_350, :move_left, :left},
+          {57_351, :move_right, :right},
+          {57_360, :first_non_blank, :line_start},
+          {57_361, :line_end, :line_end}
+        ] do
+      assert {:cua, [^movement], _} = CUA.process_key(CUA.initial_state(), {key, 0})
+
+      assert {:cua, [{:extend_selection, ^direction}], _} =
+               CUA.process_key(CUA.initial_state(), {key, @shift})
+    end
+  end
+
+  test "unhandled functional keys are not inserted, without banning private-use text" do
+    for key <- [57_364, 0xF704] do
+      assert {:cua, [], _} = CUA.process_key(CUA.initial_state(), {key, 0})
+    end
+
+    for codepoint <- [0xE123, 0xF8FF] do
+      text = <<codepoint::utf8>>
+
+      assert {:cua, [{:insert_char, ^text}], _} =
+               CUA.process_key(CUA.initial_state(), {codepoint, 0})
+    end
+  end
+
   # ── Key dispatch: Cmd chords ───────────────────────────────────────────────
 
   describe "process_key/2 with Cmd chords" do

@@ -967,11 +967,17 @@ final class CommandDispatcher {
         frameState.resize(newCols: newCols, newRows: newRows)
     }
 
+    /// Previews Help only when no higher-priority picker or completion covers it.
+    func previewAgentHelpNavigation(_ event: NSEvent, in window: NSWindow?) {
+        guard !guiState.pickerState.visible, guiState.completionState.content == nil else { return }
+        guiState.agentHelpState.previewNavigation(event, in: window)
+    }
+
     /// Applies a zero-latency local file-tree navigation preview when the BEAM marks the current tree model as eligible.
     /// The key still goes to the BEAM; this only moves the transient selection highlight until the next authoritative file-tree payload reconciles it.
     @discardableResult
     func previewFileTreeNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
-        guard modifiers == 0 else { return false }
+        guard modifiers == 0, !guiState.agentHelpState.visible else { return false }
 
         let delta: Int
         switch codepoint {
@@ -1219,19 +1225,19 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _):
             let wasVisible = guiState.agentChatState.visible
             if visible {
-                let groups = helpGroups.map { g in
-                    HelpGroup(title: g.title, bindings: g.bindings.map { ($0.key, $0.description) })
-                }
-                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion)
             } else {
                 guiState.agentChatState.hide()
             }
             if guiState.agentChatState.visible != wasVisible {
                 effects.append(.application(.agentChatVisibilityChanged(guiState.agentChatState.visible)))
             }
+
+        case .guiAgentHelp(let visible, let groups):
+            guiState.agentHelpState.update(visible: visible, groups: groups)
 
         case .guiAgentTranscript:
             // Prepared transactions publish the validated value snapshot directly.

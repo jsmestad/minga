@@ -168,6 +168,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
           | :signature_help
           | :float_popup
           | :agent_context
+          | :agent_help
           | :extension_panel
           | :observatory
           | :edit_timeline
@@ -423,6 +424,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id(:signature_help), do: :signature_help
   def surface_id(:float_popup), do: :float_popup
   def surface_id(:agent_context), do: :agent_context
+  def surface_id(:agent_help), do: :agent_help
   def surface_id(:extension_panel), do: :extension_panel
   def surface_id(:observatory), do: :observatory
   def surface_id(:edit_timeline), do: :edit_timeline
@@ -465,6 +467,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   def surface_id_u16(:edit_timeline), do: 24
   def surface_id_u16(:notifications), do: 25
   def surface_id_u16(:extension_overlay), do: 26
+  def surface_id_u16(:agent_help), do: 27
 
   @doc """
   Maps a registry `hit_kind` atom to its `u8` wire value.
@@ -506,6 +509,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp z_for(:edit_timeline), do: @z_edit_timeline
   defp z_for(:notifications), do: @z_notifications
   defp z_for(:extension_overlay), do: @z_extension_overlay
+  defp z_for(:agent_help), do: @z_overlay
   defp z_for(id) when id in [:picker_backdrop, :completion_backdrop], do: @z_overlay
   defp z_for(id) when id in [:picker, :completion_menu], do: @z_overlay + 1
   defp z_for(_base_chrome), do: @z_base_chrome
@@ -519,6 +523,7 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   defp hit_kind_for(id) when id in [:picker, :completion_menu], do: :overlay
   defp hit_kind_for(id) when id in [:picker_backdrop, :completion_backdrop], do: :overlay
   defp hit_kind_for(id) when id in [:hover_popup, :signature_help], do: :overlay
+  defp hit_kind_for(:agent_help), do: :overlay
 
   defp hit_kind_for(id)
        when id in [

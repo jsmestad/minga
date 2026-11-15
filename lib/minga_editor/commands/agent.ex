@@ -444,6 +444,28 @@ defmodule MingaEditor.Commands.Agent do
     )
   end
 
+  @doc "Reveals an already resolved Agent tab without toggling it or starting a session."
+  @spec reveal_agent_view(state(), Tab.id()) :: state()
+  def reveal_agent_view(state, agent_tab_id) do
+    state = ShellWorkflow.ensure_available(state)
+    tab_bar = Runtime.state(state.shell_runtime).tab_bar
+
+    case {TabBar.get(tab_bar, agent_tab_id), Runtime.active_tab(state.shell_runtime)} do
+      {%Tab{kind: :agent}, %Tab{id: ^agent_tab_id}} ->
+        state
+
+      {%Tab{kind: :agent}, _current} ->
+        return_target = build_return_target(state)
+
+        state
+        |> MingaEditor.TabWorkflow.switch(agent_tab_id)
+        |> activate_agent_view(return_target)
+
+      {_missing, _current} ->
+        NoticeWorkflow.publish(state, "Agent review workspace is no longer available")
+    end
+  end
+
   @doc "Returns from the agent view to the recorded editor context without stopping the session. If no file tab or recorded context exists, keeps the agent view active and reports the unavailable target."
   @spec return_to_editor(state()) :: state()
   def return_to_editor(state) do
@@ -1423,25 +1445,13 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Jumps to next code block or diff hunk."
   @spec scope_next_code_block(state()) :: state()
   def scope_next_code_block(state) do
-    case state.workspace.agent_ui.view.preview do
-      %Preview{content: {:diff, review}} ->
-        update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
-
-      _ ->
-        state
-    end
+    update_preview(state, &Preview.navigate_hunk(&1, :next))
   end
 
   @doc "Jumps to previous code block or diff hunk."
   @spec scope_prev_code_block(state()) :: state()
   def scope_prev_code_block(state) do
-    case state.workspace.agent_ui.view.preview do
-      %Preview{content: {:diff, review}} ->
-        update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
-
-      _ ->
-        state
-    end
+    update_preview(state, &Preview.navigate_hunk(&1, :previous))
   end
 
   # ── Copy ───────────────────────────────────────────────────────────────────
@@ -1694,13 +1704,26 @@ defmodule MingaEditor.Commands.Agent do
   @spec scope_reset_panel(state()) :: state()
   def scope_reset_panel(state), do: update_agent_ui(state, &UIState.reset_split/1)
 
+  @doc "Resumes the retained chat draft without changing its text, selection or editing mode."
+  @spec return_to_chat(state()) :: state()
+  def return_to_chat(state) do
+    ui =
+      state.workspace.agent_ui
+      |> UIState.set_input_focused(true)
+      |> UIState.clear_prefix()
+
+    TraditionalWorkflow.install_agent_ui(state, ui)
+  end
+
   @doc "Switches focus between chat and file viewer panels."
   @spec scope_switch_focus(state()) :: state()
   def scope_switch_focus(state) do
-    if state.workspace.agent_ui.view |> UIState.View.focus() == :chat do
-      update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
-    else
-      update_agent_ui(state, &UIState.set_focus(&1, :chat))
+    case UIState.switch_focus(state.workspace.agent_ui) do
+      {:ok, ui} ->
+        TraditionalWorkflow.install_agent_ui(state, ui)
+
+      {:error, :no_review} ->
+        NoticeWorkflow.publish(state, "No review selected. Choose Review for a changed file.")
     end
   end
 
@@ -1728,6 +1751,10 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Toggles the help overlay."
   @spec scope_toggle_help(state()) :: state()
   def scope_toggle_help(state), do: update_agent_ui(state, &UIState.toggle_help/1)
+
+  @doc "Closes Agent Help without changing the covered draft or Review."
+  @spec scope_dismiss_help(state()) :: state()
+  def scope_dismiss_help(state), do: update_agent_ui(state, &UIState.dismiss_help/1)
 
   # ── Close / dismiss ────────────────────────────────────────────────────────
 
@@ -2277,6 +2304,8 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_ctrl_c, "Abort (streaming) or normal mode (idle)", :scope_ctrl_c},
     {:agent_queue_follow_up, "Queue as follow-up or submit if idle", :scope_queue_follow_up},
     {:agent_dequeue, "Dequeue messages back to editor", :scope_dequeue},
+    {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
+    {:agent_dismiss_help, "Close agent help", :scope_dismiss_help},
     {:agent_input_backspace, "Agent input backspace", :input_backspace},
     {:agent_input_up, "Agent input up", :scope_input_up},
     {:agent_input_down, "Agent input down", :scope_input_down},
@@ -2313,7 +2342,6 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_next_search_match, "Next agent search match", :scope_next_search_match},
     {:agent_prev_search_match, "Previous agent search match", :scope_prev_search_match},
     {:agent_session_switcher, "Agent session switcher", :scope_session_switcher},
-    {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
     {:agent_close, "Return to editor", :scope_close},
     {:agent_provenance_return, "Return to provenance source line", :scope_provenance_return},
     {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},

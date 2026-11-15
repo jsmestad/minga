@@ -18,6 +18,7 @@ const (
 	zonePrefixNotificationAct  = "notification:action:"
 	zonePrefixObservatoryNode  = "observatory:node:"
 	zonePrefixTimelineEntry    = "timeline:entry:"
+	zonePrefixTimelineReview   = "timeline:review:"
 	zonePrefixEmptyStateItem   = "empty-state:item:"
 	zoneIDHoverAction          = "hover:action"
 	bottomPanelWheelLines      = 3
@@ -77,10 +78,37 @@ func zoneIDTimelineEntry(generation uint32, entryID string) string {
 	return fmt.Sprintf("%s%d:%s", zonePrefixTimelineEntry, generation, url.QueryEscape(entryID))
 }
 
+// zoneIDTimelineReview keeps full paths distinct even when basenames coincide.
+func zoneIDTimelineReview(generation uint32, path string) string {
+	return fmt.Sprintf("%s%d:%s", zonePrefixTimelineReview, generation, url.QueryEscape(path))
+}
+
 func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
 	mouse := msg.Mouse()
 	if mouse.Button != tea.MouseWheelUp && mouse.Button != tea.MouseWheelDown {
 		return m, false
+	}
+	if m.agentHelpWheel(mouse) {
+		return m, true
+	}
+	if m.layout.timeline.Contains(mouse.X, mouse.Y) && !m.floatingOverlayContains(mouse.X, mouse.Y) {
+		timeline, visible := m.editTimeline()
+		if !visible {
+			return m, false
+		}
+		rows := m.timelineFileRows()
+		if len(timeline.Files) == 0 || rows == 0 {
+			return m, true
+		}
+		start := m.timelineFileStart(timeline)
+		if mouse.Button == tea.MouseWheelUp {
+			start -= bottomPanelWheelLines
+		} else {
+			start += bottomPanelWheelLines
+		}
+		start = min(max(start, 0), max(len(timeline.Files)-rows, 0))
+		m.timelineFirstPath = timeline.Files[start].Path
+		return m, true
 	}
 	panel, ok := m.bottomPanel()
 	if !ok || !panel.Visible || !m.mouseInBottomPanel(mouse.Y) {
@@ -249,6 +277,21 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.overlayMousePacket(msg); ok {
 		return packet, true
 	}
+	mouse := msg.Mouse()
+	if m.layout.timeline.Contains(mouse.X, mouse.Y) {
+		if !m.floatingOverlayContains(mouse.X, mouse.Y) {
+			if packet, ok := m.editTimelineMousePacket(msg); ok {
+				return packet, true
+			}
+		}
+		// Empty, separator, header, and summary cells never fall through to text.
+		return nil, true
+	}
+	if chat, ok := m.agentChat(); ok && chat.Visible {
+		if zone := m.zones.Get(zoneIDAgentHeaderHelp); zone != nil && zone.InBounds(msg) {
+			return protocol.EncodeGUIExecuteCommand("agent_toggle_help"), true
+		}
+	}
 	if packet, ok := m.agentComposerControlPacket(msg); ok {
 		return packet, true
 	}
@@ -257,7 +300,6 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.emptyStateMousePacket(msg); ok {
 		return packet, true
 	}
-	mouse := msg.Mouse()
 	switch {
 	case m.layout.header.Contains(mouse.X, mouse.Y):
 		return m.headerMousePacket(msg)
@@ -277,6 +319,9 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 // overlayMousePacket is checked before spatial dispatch because overlays render
 // above all layout zones and must intercept clicks regardless of position.
 func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.agentHelpMousePacket(msg); ok {
+		return packet, true
+	}
 	if packet, ok := m.completionMousePacket(msg); ok {
 		return packet, true
 	}
@@ -290,9 +335,6 @@ func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		return packet, true
 	}
 	if packet, ok := m.observatoryMousePacket(msg); ok {
-		return packet, true
-	}
-	if packet, ok := m.editTimelineMousePacket(msg); ok {
 		return packet, true
 	}
 	return nil, false
@@ -316,6 +358,9 @@ func (m Model) leftPaneMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 }
 
 func (m Model) footerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.reviewStatusMousePacket(msg); ok {
+		return packet, true
+	}
 	return m.modelineMousePacket(msg)
 }
 
@@ -429,14 +474,27 @@ func (m Model) observatoryMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
-// editTimelineMousePacket maps a click on an edit-timeline row to the same
-// semantic gui_action the macOS frontend sends (EditTimelineView.swift):
-// semantic_item_activate with the clicked entry's identity and generation. A click that hits no row zone
-// returns ok=false so the overlay's BEAM containment swallows it (the surface is
-// registry-placed, #2281), satisfying the AC2 containment fallback (#2335).
+// editTimelineMousePacket preserves historical entry navigation (intent 1) and exposes explicit cumulative file Review (intent 2).
+// Only rendered exact identities may activate; blank chrome is contained by spatial dispatch.
 func (m Model) editTimelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	mouse := msg.Mouse()
+	if !m.layout.timeline.Contains(mouse.X, mouse.Y) || m.floatingOverlayContains(mouse.X, mouse.Y) {
+		return nil, false
+	}
 	timeline, ok := m.editTimeline()
 	if !ok || !timeline.Visible {
+		return nil, false
+	}
+	if len(timeline.Files) > 0 {
+		if timeline.Generation == 0 {
+			return nil, false
+		}
+		for _, file := range timeline.Files {
+			zoneInfo := m.zones.Get(zoneIDTimelineReview(timeline.Generation, file.Path))
+			if zoneInfo != nil && zoneInfo.InBounds(msg) {
+				return protocol.EncodeGUISemanticItemActivate(5, 2, timeline.Generation, []byte(file.Path)), true
+			}
+		}
 		return nil, false
 	}
 	for _, entry := range timeline.Entries {

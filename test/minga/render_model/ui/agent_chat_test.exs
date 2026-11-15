@@ -16,8 +16,6 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
       assert model.prompt_line_count == 1
       assert model.prompt_visible_rows == 1
       assert model.prompt_completion == nil
-      refute model.help_visible?
-      assert model.help_groups == []
       assert model.resident_messages == []
     end
 
@@ -80,16 +78,6 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
 
       model = %AgentChat{visible?: true, prompt_completion: completion}
       assert model.prompt_completion.type == :slash
-    end
-
-    test "holds help groups" do
-      model = %AgentChat{
-        visible?: true,
-        help_visible?: true,
-        help_groups: [{"Navigation", [{"j", "down"}]}]
-      }
-
-      assert [{"Navigation", [{"j", "down"}]}] = model.help_groups
     end
   end
 end

@@ -14,6 +14,7 @@ defmodule MingaEditor.Input do
      after overlays pass through.
   """
 
+  alias MingaEditor.Input.AgentHelp
   alias MingaEditor.Input.AgentNav
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.BottomPanel
@@ -83,6 +84,7 @@ defmodule MingaEditor.Input do
       Prompt,
       Picker,
       Completion,
+      AgentHelp,
       WhichKey,
       Hover,
       SignatureHelp,

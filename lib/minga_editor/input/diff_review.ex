@@ -16,45 +16,36 @@ defmodule MingaEditor.Input.DiffReview do
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias Minga.Keymap
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(state, cp, _mods) do
+  def handle_key(state, cp, mods) do
     view = state.workspace.agent_ui.view
     panel = state.workspace.agent_ui.panel
 
     if View.focus(view) == :file_viewer and
          match?(%Preview{content: {:diff, _}}, view.preview) and
          not panel.input_focused do
-      dispatch_diff_key(state, cp)
+      dispatch_diff_key(state, cp, mods)
     else
       {:passthrough, state}
     end
   end
 
-  @spec dispatch_diff_key(EditorState.t(), non_neg_integer()) ::
+  @spec dispatch_diff_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  defp dispatch_diff_key(state, ?y), do: {:handled, Commands.execute(state, :agent_accept_hunk)}
-  defp dispatch_diff_key(state, ?x), do: {:handled, Commands.execute(state, :agent_reject_hunk)}
+  defp dispatch_diff_key(state, ?y, 0),
+    do: {:handled, Commands.execute(state, :agent_accept_hunk)}
 
-  defp dispatch_diff_key(state, ?Y),
+  defp dispatch_diff_key(state, ?x, 0),
+    do: {:handled, Commands.execute(state, :agent_reject_hunk)}
+
+  defp dispatch_diff_key(state, ?Y, 0),
     do: {:handled, Commands.execute(state, :agent_accept_all_hunks)}
 
-  defp dispatch_diff_key(state, ?X),
+  defp dispatch_diff_key(state, ?X, 0),
     do: {:handled, Commands.execute(state, :agent_reject_all_hunks)}
 
-  # Navigation keys still work during diff review: pass through to scope
-  defp dispatch_diff_key(state, cp) do
-    key = {cp, 0}
-
-    case Keymap.resolve_scoped_key(:agent, :normal, key,
-           keymap_server: state.interaction.keymap_server
-         ) do
-      {:command, command} -> {:handled, Commands.execute(state, command)}
-      {:prefix, _node} -> {:handled, state}
-      :not_found -> {:handled, state}
-    end
-  end
+  defp dispatch_diff_key(state, _cp, _mods), do: {:passthrough, state}
 end

@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.Agent.ToolEventWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Compaction, as: CompactionState
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Registry, as: ShellRegistry
@@ -180,7 +181,36 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
-  test "file workflow records cumulative hunks and timeline before installing the diff render" do
+  test "background tools keep a selected current or stale review while activity still advances" do
+    preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
+    stale = Preview.refresh_after_write(preview, "selected.ex", "newer", EditTimeline.new())
+
+    for preview <- [preview, stale],
+        {tool, args, result} <- [
+          {"shell", %{"command" => "mix test"}, "3 tests"},
+          {"read_file", %{"path" => "other.ex"}, "other contents"},
+          {"list_directory", %{"path" => "."}, "a.ex\nb.ex"}
+        ] do
+      state = event_state()
+      ui = UIState.replace_preview(state.workspace.agent_ui, preview)
+      state = TraditionalWorkflow.install_agent_ui(state, ui)
+      started = ToolEventWorkflow.started(state, "tc1", tool, args)
+      assert started.workspace.agent_ui.view.preview == preview
+
+      assert AgentState.active_tool_name(TraditionalState.agent(started.shell_runtime.state)) ==
+               tool
+
+      updated = ToolEventWorkflow.updated(started, "tc1", tool, "partial output")
+      assert updated.workspace.agent_ui.view.preview == preview
+      ended = ToolEventWorkflow.ended(updated, "tc1", tool, result, :done)
+      assert ended.workspace.agent_ui.view.preview == preview
+      assert AgentState.active_tool_name(TraditionalState.agent(ended.shell_runtime.state)) == nil
+      interrupted = ToolEventWorkflow.interrupted(ended, "tc1")
+      assert interrupted.workspace.agent_ui.view.preview == preview
+    end
+  end
+
+  test "file workflow records cumulative hunks and timeline without selecting a preview" do
     state = event_state()
 
     state = FileEventWorkflow.changed(state, "/tmp/a.ex", "before", "after", "tc1", "edit")
@@ -191,25 +221,34 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     assert [entry] = timeline.entries["/tmp/a.ex"]
     assert entry.tool_call_id == "tc1"
-    assert %DiffReview{path: "/tmp/a.ex"} = diff_review(state)
-    refute Map.has_key?(Map.from_struct(state.workspace.agent_ui.view), :diff_baselines)
-    assert state.workspace.agent_ui.view.presentation.focus == :file_viewer
+    assert diff_review(state) == nil
+    assert state.workspace.agent_ui.view.preview.content == :empty
+    assert state.workspace.agent_ui.view.presentation.focus == :chat
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
-  test "file workflow keeps displaced previews cumulative from first before to latest after" do
+  test "a selected file keeps its stale reading revision and explicit Review acquires all cumulative writes" do
     state =
       event_state()
       |> FileEventWorkflow.changed("/tmp/a.ex", "a0", "a1", "tc1", "edit")
+      |> select_review("/tmp/a.ex")
       |> FileEventWorkflow.changed("/tmp/b.ex", "b0", "b1", "tc2", "edit")
       |> FileEventWorkflow.changed("/tmp/a.ex", "a1", "a2", "tc3", "edit")
+
+    assert state.workspace.agent_ui.view.preview.freshness == :stale
+    assert diff_review(state) == nil
+
+    assert {:diff, %DiffReview{after_lines: ["a1"]}} =
+             state.workspace.agent_ui.view.preview.content
+
+    state = select_review(state, "/tmp/a.ex")
 
     assert %DiffReview{path: "/tmp/a.ex"} = review = diff_review(state)
 
     display_lines = DiffReview.to_display_lines(review)
-    assert {"a0", :removed, 0} in display_lines
-    assert {"a2", :added, 0} in display_lines
-    refute {"a1", :removed, 0} in display_lines
+    assert Enum.any?(display_lines, &match?(%{text: "a0", kind: :removed}, &1))
+    assert Enum.any?(display_lines, &match?(%{text: "a2", kind: :added}, &1))
+    refute Enum.any?(display_lines, &match?(%{text: "a1", kind: :removed}, &1))
     refute Map.has_key?(Map.from_struct(state.workspace.agent_ui.view), :diff_baselines)
   end
 
@@ -224,19 +263,21 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     state =
       event_state()
       |> FileEventWorkflow.changed(path, "a", "x\na", "tc1", "edit")
+      |> select_review(path)
       |> AgentSubStates.reject_hunk()
 
     assert File.read!(path) == "a"
 
     File.write!(path, "a\nb")
     state = FileEventWorkflow.changed(state, path, "a", "a\nb", "tc2", "edit")
+    state = select_review(state, path)
     review = diff_review(state)
 
     assert DiffReview.summary(review) == {1, 0}
     display_lines = DiffReview.to_display_lines(review)
-    assert {"b", :added, 0} in display_lines
-    refute {"a", :added, 0} in display_lines
-    refute {"a", :removed, 0} in display_lines
+    assert Enum.any?(display_lines, &match?(%{text: "b", kind: :added}, &1))
+    refute Enum.any?(display_lines, &match?(%{text: "a", kind: :added}, &1))
+    refute Enum.any?(display_lines, &match?(%{text: "a", kind: :removed}, &1))
 
     state = AgentSubStates.reject_hunk(state)
     assert File.read!(path) == "a"
@@ -254,6 +295,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     state =
       event_state()
       |> FileEventWorkflow.changed(path_a, "a", "x\na", "tc1", "edit")
+      |> select_review(path_a)
       |> AgentSubStates.reject_hunk()
       |> FileEventWorkflow.changed(path_b, "b0", "b1", "tc2", "edit")
 
@@ -262,13 +304,14 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     File.write!(path_a, "a\nb")
     state = FileEventWorkflow.changed(state, path_a, "a", "a\nb", "tc3", "edit")
+    state = select_review(state, path_a)
     review = diff_review(state)
 
     assert %DiffReview{path: ^path_a} = review
     assert DiffReview.summary(review) == {1, 0}
     display_lines = DiffReview.to_display_lines(review)
-    assert {"b", :added, 0} in display_lines
-    refute {"a", :added, 0} in display_lines
+    assert Enum.any?(display_lines, &match?(%{text: "b", kind: :added}, &1))
+    refute Enum.any?(display_lines, &match?(%{text: "a", kind: :added}, &1))
 
     _state = AgentSubStates.reject_hunk(state)
     assert File.read!(path_a) == "a"
@@ -471,6 +514,20 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     after
       remaining -> flunk("Agent: error was not routed to the messages log")
     end
+  end
+
+  @spec select_review(EditorState.t(), String.t()) :: EditorState.t()
+  defp select_review(state, path) do
+    timeline = state.workspace.agent_ui.view.edit_timeline
+    index = EditTimeline.entry_count(timeline, path) - 1
+    {:ok, content} = EditTimeline.content_at(timeline, path, index)
+    review = DiffReview.from_hunks(path, content, EditTimeline.cumulative_hunks(timeline, path))
+    preview = Preview.set_diff(Preview.new(), review)
+
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      UIState.replace_preview(state.workspace.agent_ui, preview)
+    )
   end
 
   @spec diff_review(EditorState.t()) :: DiffReview.t() | nil

@@ -16,6 +16,25 @@ defmodule MingaEditor.MinibufferDataTest do
   alias MingaEditor.State.ModalOverlay.CommandCompletion
   alias MingaEditor.State.Prompt, as: PromptState
 
+  test "layout visibility follows minibuffer modes without requiring completion payloads" do
+    for mode <- [
+          :command,
+          :search,
+          :search_prompt,
+          :eval,
+          :substitute_confirm,
+          :extension_confirm,
+          :delete_confirm,
+          :branch_delete_confirm
+        ] do
+      assert MinibufferData.visible?(%{workspace: %{editing: %{mode: mode}}})
+    end
+
+    for mode <- [:normal, :insert, :visual, :visual_line, :operator_pending] do
+      refute MinibufferData.visible?(%{workspace: %{editing: %{mode: mode, mode_state: %{}}}})
+    end
+  end
+
   describe "clamp_index/2" do
     test "returns 0 for empty list" do
       assert MinibufferData.clamp_index(5, 0) == 0
@@ -50,6 +69,7 @@ defmodule MingaEditor.MinibufferDataTest do
       result = MinibufferData.from_state(state)
 
       assert result.visible == true
+      assert MinibufferData.visible?(state)
       assert result.mode == 6
       assert result.prompt == "Quit Minga? (y/n)"
       assert result.input == ""
@@ -78,6 +98,7 @@ defmodule MingaEditor.MinibufferDataTest do
       result = MinibufferData.from_state(state)
 
       assert result.visible == true
+      assert MinibufferData.visible?(state)
       assert result.mode == 10
       assert result.prompt == "Add project: "
       assert result.input == "~/code"

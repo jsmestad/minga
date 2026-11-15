@@ -320,10 +320,21 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 		right += muted.Render("  ◌ " + chat.ThinkingLevel)
 	}
 
-	leftBudget := max(width-lipgloss.Width(right)-1, 1)
+	helpLabel := "[Help]"
+	if width < 24 {
+		helpLabel = "?"
+	}
+	help := m.zones.Mark(zoneIDAgentHeaderHelp, muted.Render(helpLabel))
+	helpWidth := lipgloss.Width(help)
+	if width <= helpWidth {
+		return base.Render(help)
+	}
+	rightBudget := max(width-helpWidth-1, 0)
+	right = fitStyled(right, min(lipgloss.Width(right), rightBudget))
+	leftBudget := max(width-lipgloss.Width(right)-helpWidth-2, 0)
 	left = fitStyled(left, leftBudget)
-	spacer := muted.Render(strings.Repeat(" ", max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)))
-	return base.Render(fitStyled(left+spacer+right, width))
+	spacer := muted.Render(strings.Repeat(" ", max(width-lipgloss.Width(left)-lipgloss.Width(right)-helpWidth-1, 0)))
+	return base.Render(fitStyled(left+spacer+right+" "+help, width))
 }
 
 func agentHeaderIcon() string {

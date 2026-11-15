@@ -2,8 +2,7 @@ defmodule Minga.RenderModel.Window.RowSlotAllocator do
   @moduledoc """
   Persistent producer-owned allocator for the 28-bit row slot field.
 
-  Slots are monotonic within `{content_epoch, source_id, identity_kind}` and a
-  key keeps its slot for the epoch. Allocation never reuses removed keys.
+  Slots are monotonic within `{content_epoch, source_id, identity_kind}`. A retained key keeps its slot for the epoch; retired keys never reclaim their old slots.
   """
 
   @max_slot 0x0FFF_FFFF
@@ -30,6 +29,18 @@ defmodule Minga.RenderModel.Window.RowSlotAllocator do
       {:ok, slot} -> {:ok, slot, allocator}
       :error -> allocate_new(allocator, scope, key, Map.get(allocator.next, scope, 0))
     end
+  end
+
+  @doc "Retires keys absent from the live set within one scope without recycling slots."
+  @spec retain(t(), scope(), MapSet.t(key())) :: t()
+  def retain(%__MODULE__{} = allocator, scope, %MapSet{} = live_keys) do
+    slots =
+      Map.reject(allocator.slots, fn
+        {{^scope, key}, _slot} -> not MapSet.member?(live_keys, key)
+        {_other_scope_key, _slot} -> false
+      end)
+
+    %{allocator | slots: slots}
   end
 
   @spec allocate_new(t(), scope(), key(), non_neg_integer()) ::

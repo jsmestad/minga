@@ -33,7 +33,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_model 0x02
   @section_chat_prompt 0x03
   @section_chat_pending 0x04
-  @section_chat_help 0x05
   @section_chat_completion 0x07
   @section_chat_thinking 0x08
   # input_focused: whether the composer captures keys. A frontend that owns the
@@ -83,10 +82,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       encode_section(@section_chat_prompt, encode_prompt(model)),
       encode_section(@section_chat_completion, encode_prompt_completion(model.prompt_completion)),
       encode_section(@section_chat_pending, <<0::8>>),
-      encode_section(
-        @section_chat_help,
-        encode_help_overlay(model.help_visible?, model.help_groups)
-      ),
       encode_section(
         @section_chat_thinking,
         Writer.new(@command)
@@ -164,39 +159,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     Writer.new(@command)
     |> Writer.string16(:completion_candidate_name, name)
     |> Writer.string16(:completion_candidate_description, "")
-    |> Writer.finish()
-  end
-
-  # ── Help overlay ──
-
-  # Wire format: visible(1) [workspace_count(1) [title_len(2) title(utf8)
-  #   binding_count(1) [key_len(1) key(utf8) desc_len(2) desc(utf8)]...]*]
-  @spec encode_help_overlay(boolean() | nil, [{String.t(), [{String.t(), String.t()}]}] | nil) ::
-          binary()
-  defp encode_help_overlay(true, groups) when is_list(groups) and groups != [] do
-    Writer.new(@command)
-    |> Writer.uint8(:help_visible, 1)
-    |> Writer.uint8(:help_group_count, Enum.count(groups))
-    |> Writer.append(Enum.map(groups, &encode_help_group/1))
-    |> Writer.finish()
-  end
-
-  defp encode_help_overlay(_, _), do: <<0::8>>
-
-  @spec encode_help_group({String.t(), [{String.t(), String.t()}]}) :: binary()
-  defp encode_help_group({title, bindings}) do
-    Writer.new(@command)
-    |> Writer.string16(:help_group_title, title)
-    |> Writer.uint8(:help_binding_count, Enum.count(bindings))
-    |> Writer.append(Enum.map(bindings, &encode_help_binding/1))
-    |> Writer.finish()
-  end
-
-  @spec encode_help_binding({String.t(), String.t()}) :: binary()
-  defp encode_help_binding({key, description}) do
-    Writer.new(@command)
-    |> Writer.string8(:help_binding_key, key)
-    |> Writer.string16(:help_binding_description, description)
     |> Writer.finish()
   end
 

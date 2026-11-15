@@ -201,7 +201,8 @@ defmodule MingaEditor.TabWorkflow do
         replay_pending_events(state, tab_bar)
 
       %Workspace{payload: %WorkspaceAgent{agent_ui: nil}} ->
-        replay_pending_events(state, tab_bar)
+        workspace = SessionState.set_agent_ui(state.workspace, state.workspace.agent_ui)
+        replay_pending_events(%{state | workspace: workspace}, tab_bar)
 
       _workspace ->
         workspace = SessionState.set_agent_ui(state.workspace, UIState.new())
@@ -211,7 +212,9 @@ defmodule MingaEditor.TabWorkflow do
 
   @spec activate_agent_ui(SessionState.t(), UIState.t()) :: UIState.t()
   defp activate_agent_ui(%SessionState{keymap_scope: :agent} = workspace, agent_ui) do
-    UIState.activate(agent_ui, workspace.windows, workspace.file_tree)
+    agent_ui
+    |> UIState.activate(workspace.windows, workspace.file_tree)
+    |> UIState.set_focus(UIState.View.focus(agent_ui.view))
   end
 
   defp activate_agent_ui(%SessionState{}, agent_ui), do: agent_ui

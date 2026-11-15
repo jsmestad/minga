@@ -188,6 +188,15 @@ defmodule MingaEditor.Agent.UIState.View do
   @spec focus(t()) :: focus()
   def focus(%__MODULE__{presentation: presentation}), do: Presentation.current_focus(presentation)
 
+  @doc "Selects an Agent body without treating a frozen stale review as absent."
+  @spec agent_body(t()) :: :chat | :review
+  def agent_body(%__MODULE__{} = view) do
+    case {focus(view), Preview.diff?(view.preview)} do
+      {:file_viewer, true} -> :review
+      _chat_or_non_diff -> :chat
+    end
+  end
+
   @doc "Returns the editor target restored when presentation completes."
   @spec return_target(t()) :: return_target() | nil
   def return_target(%__MODULE__{presentation: presentation}),
@@ -302,10 +311,20 @@ defmodule MingaEditor.Agent.UIState.View do
         )
         |> unresolved_review()
 
+      {preview, presentation} =
+        case updated_review do
+          nil ->
+            {Preview.clear(view.preview), Presentation.focus(view.presentation, :chat)}
+
+          %DiffReview{} = review ->
+            {Preview.replace_diff(view.preview, review), view.presentation}
+        end
+
       updated_view = %{
         view
         | edit_timeline: timeline,
-          preview: Preview.replace_diff(view.preview, updated_review)
+          preview: preview,
+          presentation: presentation
       }
 
       {:ok, updated_view, write_request(action, resolved_review.path, materialized_lines)}

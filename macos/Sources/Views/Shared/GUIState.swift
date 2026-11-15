@@ -52,6 +52,7 @@ public final class GUIState {
     @ObservationIgnored public lazy private(set) var editorInput = EditorHostInput(
         theme: themeBacking, windows: windowContentBacking,
         statusBarState: statusBarState, agentChatState: agentChatState,
+        agentHelpState: agentHelpState,
         emptyStateState: emptyStateState, extensionPanelState: extensionPanelState
     )
 
@@ -102,6 +103,7 @@ public final class GUIState {
         feedbackState.cancel()
         pickerState.hide()
         agentChatState.hide()
+        agentHelpState.hide()
         bottomPanelState.hide()
         minibufferState.hide()
         hoverPopupState.hide()
@@ -163,6 +165,9 @@ public final class GUIState {
 
     /// Agent chat state.
     public let agentChatState = AgentChatState()
+
+    /// Independent Agent Help state (0xAB).
+    public let agentHelpState = AgentHelpState()
 
     /// Bottom panel container state.
     public let bottomPanelState = BottomPanelState()
@@ -288,6 +293,7 @@ public final class EditorHostInput {
     fileprivate let windows: GUIWindowContentBacking
     public let statusBarState: StatusBarState
     public let agentChatState: AgentChatState
+    public let agentHelpState: AgentHelpState
     public let emptyStateState: EmptyStateState
     public let extensionPanelState: ExtensionPanelState
 
@@ -298,12 +304,14 @@ public final class EditorHostInput {
     fileprivate init(
         theme: GUIThemeBacking, windows: GUIWindowContentBacking,
         statusBarState: StatusBarState, agentChatState: AgentChatState,
+        agentHelpState: AgentHelpState,
         emptyStateState: EmptyStateState, extensionPanelState: ExtensionPanelState
     ) {
         self.theme = theme
         self.windows = windows
         self.statusBarState = statusBarState
         self.agentChatState = agentChatState
+        self.agentHelpState = agentHelpState
         self.emptyStateState = emptyStateState
         self.extensionPanelState = extensionPanelState
     }

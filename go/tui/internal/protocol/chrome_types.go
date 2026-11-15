@@ -215,6 +215,7 @@ type StatusBar struct {
 	Message     string
 	PendingKeys string
 	Operation   *generated.GuiStatusBarOperation
+	Review      *StatusReview
 	Left        []StatusSegment
 	Right       []StatusSegment
 }
@@ -449,6 +450,36 @@ type AgentProgress struct {
 
 type AgentTodo struct {
 	Status      byte
+	Description string
+}
+
+type ReviewFreshness byte
+
+const (
+	ReviewCurrent ReviewFreshness = iota
+	ReviewStale
+)
+
+// StatusReview is an immutable action offer, not a mutable buffer selection.
+type StatusReview struct {
+	Path       string
+	Freshness  ReviewFreshness
+	Generation uint32
+	ItemID     string
+}
+
+type AgentHelp struct {
+	Visible bool
+	Groups  []AgentHelpGroup
+}
+
+type AgentHelpGroup struct {
+	Title    string
+	Bindings []AgentHelpBinding
+}
+
+type AgentHelpBinding struct {
+	Key         string
 	Description string
 }
 

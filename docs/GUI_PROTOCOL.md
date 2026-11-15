@@ -65,13 +65,14 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x95 | gui_cursor_animation | Cursor movement animation preference for GUI renderers. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 | 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars. Uses a 32-bit payload length because large supervision trees can exceed 64KB. |
-| 0x9B | gui_edit_timeline | Agent edit timeline overlay with per-file summaries appended after the per-entry list. Uses a 16-bit payload length. |
+| 0x9B | gui_edit_timeline | Persistent Agent changed-file timeline with per-file summaries appended after the per-entry list. Uses a 16-bit payload length. |
 | 0x9F | gui_sidebars | Semantic sidebar host metadata. Uses a 32-bit payload length so future sidebar lists can grow without changing the envelope. |
 | 0xA3 | gui_extension_runtime | Generic frontend-extension runtime envelope. Uses a 32-bit payload length so extension-owned payloads can grow without changing the shared envelope. |
 | 0xA6 | gui_completion_selection | Narrow completion selection and documentation update. |
 | 0xA7 | gui_picker_selection | Narrow picker item and action selection update. |
 | 0xA9 | gui_resident_semantics | Atomic absolute-rank semantics for retained editor rows. |
 | 0xAA | gui_focus_owner | Authoritative keyboard responder and owning surface, changed frames and every keyframe. |
+| 0xAB | gui_agent_help | Independent Agent Help groups. Uses a 32-bit payload length and remains available while Chat is hidden. |
 
 ### 0xA3 — gui_extension_runtime
 
@@ -342,12 +343,17 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0D | Workspace | id(2) + kind(1) + status(1) + flags(2) + draft_count(2) + conflict_count(2) + background_count(2) + attention_count(2) + label_len(1) + label + icon_len(1) + icon |
 | 0x0E | PendingKeys | keys_len(2) + keys |
 | 0x0F | Operation | operation_id(8) + kind(1) + status(1) + flags(1) + message_len(2) + message + queue_position(2) + queue_total(2) + progress_current(4) + progress_total(4) |
+| 0x10 | Review | path_len(2) + path + freshness(1: 0=current, 1=stale) + generation(4) + item_id_len(2) + item_id |
 
 The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
 
 Operation kind values: 0=unknown, 1=external_format, 2=git_stage, 3=git_unstage, 4=git_discard, 5=git_stage_all, 6=git_unstage_all, 7=git_commit, 8=lsp_references, 9=lsp_rename.
 
 Operation status values: 1=pending, 2=queued, 3=running, 4=success, 5=error, 6=timeout, 7=canceled, 8=stale. Flags: bit 0=cancelable, bit 1=queue values present, bit 2=progress values present. Queue and progress integer fields are zero placeholders when their presence flag is clear. Message punctuation has no semantic meaning; clients must use the generated status value.
+
+The optional Review section identifies a read-only review, not an editable buffer. Omission clears the previous Review offer. Reserve Back to chat, Review latest and Help before optional path or ordinary status metadata. Keep the Refresh slot disabled while current, and keep all three controls in place when the review becomes stale. Back and Refresh activate the exact committed offer through `semantic_item_activate` surface 6; neither control derives a file from current selection.
+
+Back resumes the retained draft without changing its text, cursor, selection or editing mode. It restores input focus through the BEAM owner; frontends do not infer draft focus from the displayed mode label.
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` is the currently running tool label when the agent status is `tool_executing`; it is empty otherwise.
 
@@ -486,7 +492,6 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x02 | Model | `model_len(2) + model` |
 | 0x03 | Prompt | `prompt_len(2) + prompt + line_count(1) + cursor_line(2) + cursor_col(2) + vim_mode(1) + visible_rows(1)` |
 | 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as transcript message type `0x09`. |
-| 0x05 | Help | `visible(1) + optional groups` |
 | 0x07 | Completion | prompt completion popup state |
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 | 0x09 | InputFocused | `input_focused(1)` |
@@ -498,6 +503,16 @@ Pending approval payload:
 0(1) — no pending approval
 1(1) + name_len(2) + name(name_len) + summary_len(2) + summary(summary_len)
 ```
+
+### 0xAB: gui_agent_help
+
+Help must remain usable when the user is reviewing a file and Chat is hidden. This independent model replaces the former `gui_agent_chat` Help section 0x05; no Help state remains in Chat.
+
+The envelope is `opcode(1) + payload_length(4, big-endian) + payload`. The payload starts with `version(1=1) + visible(1)`. Hidden payloads end there. Visible payloads continue with `group_count(1)`, then each group contains `title_len(2) + title + binding_count(1)` and each binding contains `key_len(1) + key + description_len(2) + description`. Lengths count UTF-8 bytes. Zero groups is valid. Reject unsupported versions, invalid visibility, truncated fields, count mismatches and trailing payload bytes.
+
+Help overlays the existing body without reserving editor rows or changing the draft, selection, input method, mode or keyboard owner. The Go frontend uses the BEAM-authored `agent_help` surface placement, numeric ID 27, with the active pane's fitted content rectangle. Picker and completion retain higher precedence. Native frontends use their existing body allocation. Scrolling is discardable local presentation.
+
+The Help button sends named command `agent_toggle_help`; Close Help sends directional command `agent_dismiss_help`. They do not synthesize question-mark or Escape typing. Covered editing input cannot change or submit the draft, and dismissal restores the same underlying context.
 
 
 ### 0x79 — gui_gutter_separator
@@ -1144,7 +1159,7 @@ TUI frontends do not render this opcode. The BEAM should also log important noti
 
 ### 0x9B — gui_edit_timeline
 
-Edit timeline overlay data for native frontends. The BEAM sends the active entry list and the aggregate changed-file summaries in one payload so the frontend can switch between per-entry scrubbing and per-file review without guessing from local state.
+Persistent Agent changed-file timeline data for both frontends. The BEAM sends the active entry list and aggregate changed-file summaries together so per-entry scrubbing and per-file Review use the same committed source.
 
 ```
 opcode(1) + payload_len(2) + payload(payload_len)
@@ -1167,6 +1182,8 @@ Per entry ID (same order as entries):
 `review_status`: 0 = pending, 1 = reviewing.
 
 The opaque entry ID binds the entry to its file. The timeline owner advances `generation` when entries change or the timeline resets. Activate with `semantic_item_activate` surface 5, intent 1. Navigation uses the resolved file and entry, never the active buffer or a list offset. Hidden timelines retain the existing header and empty-list fields and omit the identity trailer.
+
+An active Agent chat or Review body keeps the timeline visible even when both lists are empty. Surface 24 has its own persistent placement, outside the floating-overlay winner. The terminal receives a fixed three-row band above status and any visible minibuffer, with one locally scrollable file row; file count does not move the composer or footer actions. Native chrome keeps a fixed height outside its reported content grid. Outside Agent bodies the timeline is hidden without discarding retained changes.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
@@ -1244,7 +1261,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x62 | search_focus | replace_mode(1) | Open or focus the native search toolbar |
 | 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
 | 0x64 | focus_window | window_id(2) + generation(8) | Request semantic activation of the exact accessible pane; the BEAM ignores a stale pane generation |
-| 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate an exact completion, picker, file-tree, command-completion, or timeline item |
+| 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate an exact completion, picker, file-tree, command-completion, timeline or Review item |
 | 0x66 | agent_prompt_fit | window_id(2) + generation(8) + columns(2) + max_rows(2) | Report the maximum physical inner text allocation for committed prompt window 65534 |
 | 0x67 | agent_prompt_scroll | window_id(2) + generation(8) + delta_rows(4, signed) | Scroll the committed prompt by wrapped visual rows; positive is down |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
@@ -1260,7 +1277,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
 | 0x42 | git_open_diff | path_len(2) + path(path_len) + section(1) | Open a diff view for a git status file in the selected section |
 
-`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, and `5 = timeline`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item` and `2 = activate action`. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry.
+`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, `5 = timeline`, and `6 = review`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item` and `2 = activate action`. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry; intent `2` reviews the exact offered full file path. Review intents are `1 = back to chat` and `2 = review latest`. Review uses the opaque item ID and generation from status section 0x10, bound to the shell registration, workspace/session, tab, pane incarnation and selected source. Refresh is offered only while stale.
 
 All targeted handling resolves the BEAM-issued identity before applying the action. A stale generation or missing target leaves editor semantics unchanged, logs a warning with the surface, generation, ID, and reason, and resets frontend render observations so the next frame is authoritative. Tab actions retain their monotonic, non-reused tab IDs and separate sub-opcodes. Destination positions such as `tab_reorder.new_index` are not target identities.
 

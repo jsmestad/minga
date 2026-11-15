@@ -241,10 +241,14 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | scroll: Minga.Editing.scroll_to_top(panel.scroll)}}
   end
 
-  @doc "Records whether prompt input owns focus; buffer attachment belongs to PromptBuffer."
+  @doc "Focuses the draft in chat, or releases input without changing the selected body."
   @spec set_input_focused(t(), boolean()) :: t()
-  def set_input_focused(%__MODULE__{panel: panel} = state, focused?) when is_boolean(focused?) do
-    %{state | panel: %{panel | input_focused: focused?}}
+  def set_input_focused(%__MODULE__{panel: panel, view: view} = state, true) do
+    %{state | panel: %{panel | input_focused: true}, view: View.set_focus(view, :chat)}
+  end
+
+  def set_input_focused(%__MODULE__{panel: panel} = state, false) do
+    %{state | panel: %{panel | input_focused: false}}
   end
 
   @doc """
@@ -369,8 +373,22 @@ defmodule MingaEditor.Agent.UIState do
 
   @doc "Switches focus to the given panel."
   @spec set_focus(t(), View.focus()) :: t()
-  def set_focus(%__MODULE__{view: view} = state, focus) do
-    %{state | view: View.set_focus(view, focus)}
+  def set_focus(%__MODULE__{view: view, panel: panel} = state, :file_viewer) do
+    %{state | view: View.set_focus(view, :file_viewer), panel: %{panel | input_focused: false}}
+  end
+
+  def set_focus(%__MODULE__{view: view} = state, :chat) do
+    %{state | view: View.set_focus(view, :chat)}
+  end
+
+  @doc "Switches between chat and a retained review without acquiring another source."
+  @spec switch_focus(t()) :: {:ok, t()} | {:error, :no_review}
+  def switch_focus(%__MODULE__{view: view} = state) do
+    case {View.focus(view), Preview.diff?(view.preview)} do
+      {:file_viewer, _review?} -> {:ok, set_focus(state, :chat)}
+      {:chat, true} -> {:ok, set_focus(state, :file_viewer)}
+      {:chat, false} -> {:error, :no_review}
+    end
   end
 
   @doc "Scrolls the preview pane down by the given number of lines."

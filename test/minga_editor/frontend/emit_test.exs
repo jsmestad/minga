@@ -256,6 +256,25 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert base_frame_seq == 11, "non-keyframe bases on the previously acknowledged frame_seq"
     end
 
+    test "removing a semantic pane retires its retained pixels through a complete frame" do
+      review = window_frame_with_content()
+      [window] = review.windows
+      chat = %{review | windows: [window, %{window | window_id: 65_534}]}
+      state = semantic_state()
+
+      {_commands, caches} = emit_and_capture(chat, state, %Caches{}, frame_seq: 11)
+      caches = acknowledge(caches, 11)
+      {replacement, caches} = emit_and_capture(review, state, caches, frame_seq: 22)
+
+      assert [<<@op_begin_frame, 22::32, 0::32, _generation::32>> | _] = replacement
+      assert Enum.any?(replacement, &match?(<<0x80, _::binary>>, &1))
+
+      caches = acknowledge(caches, 22)
+      {unchanged, _caches} = emit_and_capture(review, state, caches, frame_seq: 33)
+      assert [<<@op_begin_frame, 33::32, 22::32, _generation::32>> | _] = unchanged
+      refute Enum.any?(unchanged, &match?(<<0x80, _::binary>>, &1))
+    end
+
     test "an invalid late window field writes nothing and the next valid frame recovers with a keyframe" do
       frame = window_frame_with_content()
       state = semantic_state()

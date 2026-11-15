@@ -205,6 +205,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["modeline_right_segments"] = statusBarSegmentsToJSON(update.modelineRightSegments)
         result["selection_mode"] = Int(update.selection.mode)
         result["selection_size"] = Int(update.selection.size)
+        if let review = update.review {
+            result["review"] = [
+                "path": review.path, "freshness": Int(review.freshness.rawValue),
+                "generation": Int(review.generation), "item_id": review.itemID
+            ]
+        }
         return result
 
     case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration):
@@ -242,12 +248,18 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
-    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups):
-        let helpGroupArray = helpGroups.map { group -> [String: Any] in
-            let bindings = group.bindings.map { ["key": $0.key, "description": $0.description] }
-            return ["title": group.title, "bindings": bindings]
-        }
-        var result: [String: Any] = [
+    case .guiAgentHelp(let visible, let groups):
+        return [
+            "type": "gui_agent_help", "visible": visible,
+            "groups": groups.map { group -> [String: Any] in
+                ["title": group.title, "bindings": group.bindings.map {
+                    ["key": $0.key, "description": $0.description]
+                }]
+            }
+        ]
+
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary):
+        let result: [String: Any] = [
             "type": "gui_agent_chat",
             "visible": visible,
             "status": Int(status.rawValue),
@@ -261,11 +273,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "prompt_visible_rows": Int(promptVisibleRows),
             "has_completion": promptCompletion != nil,
             "pending_tool_name": pendingToolName ?? "",
-            "pending_tool_summary": pendingToolSummary,
-            "help_visible": helpVisible,
-            "help_groups": helpGroupArray
+            "pending_tool_summary": pendingToolSummary
         ]
-        _ = result // suppress unused warning
         return result
 
     case .guiGutterSeparator(let col, let r, let g, let b):

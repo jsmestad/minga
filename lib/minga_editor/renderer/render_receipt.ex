@@ -10,10 +10,13 @@ defmodule MingaEditor.Renderer.RenderReceipt do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.WindowObservation
+  alias MingaEditor.Renderer.RenderWindow
+  alias MingaEditor.Renderer.ReviewObservation
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Windows
 
+  @type observation :: WindowObservation.t() | ReviewObservation.t()
   @enforce_keys [
     :layout,
     :focus_tree,
@@ -47,7 +50,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
           keyframe?: boolean(),
           render_sent_at: integer(),
           intent_revision: non_neg_integer(),
-          window_observations: %{optional(MingaEditor.Window.id()) => WindowObservation.t()}
+          window_observations: %{optional(MingaEditor.Window.id()) => observation()}
         }
 
   @doc "Builds a focused receipt from a completed pipeline frame."
@@ -77,16 +80,22 @@ defmodule MingaEditor.Renderer.RenderReceipt do
       do: %{receipt | intent_revision: revision}
 
   @spec window_observations(Input.t()) :: %{
-          optional(MingaEditor.Window.id()) => WindowObservation.t()
+          optional(MingaEditor.Window.id()) => observation()
         }
   defp window_observations(%Input{windows: %Windows{map: windows}}) do
     Enum.reduce(windows, %{}, fn {id, window}, observations ->
-      case WindowObservation.from_window(window) do
-        %WindowObservation{} = observation -> Map.put(observations, id, observation)
+      case window_observation(window) do
         nil -> observations
+        observation -> Map.put(observations, id, observation)
       end
     end)
   end
+
+  @spec window_observation(RenderWindow.t()) :: observation() | nil
+  defp window_observation(%RenderWindow{content: {:agent_review, :semantic}} = window),
+    do: ReviewObservation.from_window(window)
+
+  defp window_observation(%RenderWindow{} = window), do: WindowObservation.from_window(window)
 
   @spec click_regions(term(), term()) :: ClickRegions.t() | nil
   defp click_regions(%TraditionalState{}, %Chrome{} = chrome) do

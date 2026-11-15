@@ -4,6 +4,12 @@ defmodule MingaEditor.Window.RenderCacheTest do
   alias Minga.Buffer
   alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.Renderer.WindowCache, as: RenderCache
+  alias Minga.Core.WidthOracle.Monospace
+  alias Minga.RenderModel.Window.RowSlotAllocator
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.RenderModel.Window.ReviewLayout
+  alias MingaEditor.UI.Theme
 
   describe "detect_invalidation/6" do
     test "marks all lines dirty when buffer version changes with the same line count" do
@@ -121,4 +127,84 @@ defmodule MingaEditor.Window.RenderCacheTest do
       assert full_refresh? == true
     end
   end
+
+  describe "resident review identity" do
+    test "content refresh preserves epoch while frontend recovery reuses retained rows" do
+      layout = review_layout(80)
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "first"))
+
+      {:ok, _projection, nil, cache} =
+        RenderCache.project_review(RenderCache.reset(), preview, :workspace, layout)
+
+      {cache, epoch, true} = RenderCache.prepare_epoch(cache, :review)
+
+      preview = Preview.set_diff(preview, DiffReview.new("selected.ex", "before", "second"))
+
+      {:ok, projection, delta, cache} =
+        RenderCache.project_review(cache, preview, :workspace, layout)
+
+      assert delta != nil
+      {cache, same_epoch, false} = RenderCache.prepare_epoch(cache, :review)
+      assert same_epoch == epoch
+
+      cache = RenderCache.mark_reset_pending(cache)
+
+      {:ok, reused, nil, cache} =
+        RenderCache.project_review(cache, Preview.scroll_down(preview, 4), :workspace, layout)
+
+      assert :erts_debug.same(projection, reused)
+      {_cache, same_epoch, true} = RenderCache.prepare_epoch(cache, :review)
+      assert same_epoch == epoch
+    end
+
+    test "layout incompatibility replaces the projection and allocator in one new epoch" do
+      preview =
+        Preview.set_diff(
+          Preview.new(),
+          DiffReview.new("selected.ex", "before", String.duplicate("wide ", 30))
+        )
+
+      {:ok, previous, nil, cache} =
+        RenderCache.project_review(RenderCache.reset(), preview, :workspace, review_layout(80))
+
+      {cache, previous_epoch, true} = RenderCache.prepare_epoch(cache, :review)
+
+      {:ok, updated, nil, cache} =
+        RenderCache.project_review(cache, preview, :workspace, review_layout(20))
+
+      assert updated.row_count > previous.row_count
+      {_cache, next_epoch, true} = RenderCache.prepare_epoch(cache, :review)
+      assert next_epoch > previous_epoch
+      assert Map.keys(RenderCache.row_slot_allocator(cache).next) == [{next_epoch, 0, :normal}]
+    end
+
+    test "slot exhaustion publishes one complete fresh-epoch projection instead of partial rows" do
+      layout = review_layout(80)
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "first"))
+
+      {:ok, _previous, nil, cache} =
+        RenderCache.project_review(RenderCache.reset(), preview, :workspace, layout)
+
+      {cache, previous_epoch, true} = RenderCache.prepare_epoch(cache, :review)
+      allocator = RenderCache.row_slot_allocator(cache)
+
+      exhausted = %RowSlotAllocator{
+        slots: allocator.slots,
+        next: %{{previous_epoch, 0, :normal} => 0x1000_0000}
+      }
+
+      cache = RenderCache.put_row_slot_allocator(cache, exhausted)
+
+      preview = Preview.set_diff(preview, DiffReview.new("selected.ex", "before", "second"))
+      {:ok, updated, nil, cache} = RenderCache.project_review(cache, preview, :workspace, layout)
+      assert Enum.any?(updated.rows, &(&1.text == "+ second"))
+      refute Enum.any?(updated.rows, &(&1.text == "+ first"))
+      assert length(Enum.uniq_by(updated.rows, & &1.row_id)) == updated.row_count
+      {_cache, next_epoch, true} = RenderCache.prepare_epoch(cache, :review)
+      assert next_epoch > previous_epoch
+    end
+  end
+
+  defp review_layout(width),
+    do: ReviewLayout.new(width, %Monospace{}, Theme.get!(:minga_default), 4)
 end

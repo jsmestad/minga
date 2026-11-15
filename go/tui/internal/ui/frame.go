@@ -11,6 +11,9 @@ func (m Model) composeFrame(content string) string {
 		lipgloss.NewLayer(m.windowBackground()).X(0).Y(0).Z(0),
 		lipgloss.NewLayer(content).X(0).Y(0).Z(1),
 	}
+	if timeline := m.timelineLayer(); timeline != nil {
+		layers = append(layers, timeline)
+	}
 	layers = append(layers, m.floatingOverlayLayers()...)
 	return lipgloss.NewCompositor(layers...).Render()
 }

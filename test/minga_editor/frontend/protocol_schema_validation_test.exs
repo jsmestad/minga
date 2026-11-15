@@ -867,6 +867,12 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     %StatusBar{
       content_kind: :buffer,
       data: data,
+      review: %StatusBar.Review{
+        path: "test.ex",
+        freshness: :current,
+        generation: 1,
+        item_id: "r1.test"
+      },
       operation: %Operation{
         id: 1,
         kind: :external_format,

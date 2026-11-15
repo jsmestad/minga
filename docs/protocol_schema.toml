@@ -68,7 +68,8 @@ version = "2.0.0"
 # these values, so the exact ready handshake must exclude those stale decoders.
 # protocol_version 31 adds source-presentation-targeted prompt fit and wrapped
 # visual-row scroll actions. Prompt window 65534 remains a windowed row store.
-protocol_version = 31
+# protocol_version 32 separates Agent Help from chat visibility and adds source-bound Review actions.
+protocol_version = 32
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1041,6 +1042,14 @@ direction = "beam_to_frontend"
 consumers = ["swift", "go"]
 framing = "len16"
 
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_agent_help"
+value = 0xAB
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len32"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1386,7 +1395,7 @@ value = 0x64
 # opaque bytes authored by the owning BEAM surface; frontends only echo it.
 # Surfaces: 1 completion, 2 picker, 3 file_tree, 4 command_completion, 5 timeline.
 # File-tree intents 7/8 create a file/folder under the named parent (empty = root).
-# Command-completion intent 1 accepts a candidate; timeline intent 1 navigates.
+# Command-completion intent 1 accepts a candidate; timeline intent 1 navigates to an entry ID and intent 2 reviews the full offered file path.
 [[gui_actions]]
 name = "semantic_item_activate"
 value = 0x65
@@ -2153,6 +2162,17 @@ fields = [
   { name = "queue_total", type = "u16" },
   { name = "progress_current", type = "u32" },
   { name = "progress_total", type = "u32" },
+]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x10
+name = "review"
+fields = [
+  { name = "path", type = "string16" },
+  { name = "freshness", type = "u8" },
+  { name = "generation", type = "u32" },
+  { name = "item_id", type = "string16" },
 ]
 
 # gui_gutter (0x7B) sections

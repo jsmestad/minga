@@ -32,10 +32,15 @@ defmodule MingaEditor.Agent.EditTimeline do
     defstruct [:index, :tool_call_id, :tool_name, :timestamp, :snapshot]
   end
 
+  @typedoc "Exact current post-image evidence for asynchronous review acquisition."
+  @type postimage_digest :: <<_::256>>
+
   @type t :: %__MODULE__{
           generation: non_neg_integer(),
           entries: %{String.t() => [Entry.t()]},
+          file_order: [String.t()],
           cumulative_hunks: %{String.t() => [Minga.Core.Diff.hunk()]},
+          postimage_digests: %{String.t() => postimage_digest()},
           viewing: %{String.t() => non_neg_integer() | nil}
         }
 
@@ -51,7 +56,9 @@ defmodule MingaEditor.Agent.EditTimeline do
 
   defstruct generation: 0,
             entries: %{},
+            file_order: [],
             cumulative_hunks: %{},
+            postimage_digests: %{},
             viewing: %{}
 
   @spec new() :: t()
@@ -85,11 +92,20 @@ defmodule MingaEditor.Agent.EditTimeline do
       snapshot: DiffSnapshot.from_content(after_content)
     }
 
+    file_order =
+      case existing do
+        [] -> timeline.file_order ++ [path]
+        _entries -> timeline.file_order
+      end
+
     %{
       timeline
       | entries: Map.put(timeline.entries, path, Enum.concat(existing, [entry])),
+        file_order: file_order,
         generation: next_generation(),
-        cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks)
+        cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks),
+        postimage_digests:
+          Map.put(timeline.postimage_digests, path, :crypto.hash(:sha256, after_content))
     }
   end
 
@@ -97,7 +113,13 @@ defmodule MingaEditor.Agent.EditTimeline do
   def reproject(%__MODULE__{} = timeline, path, original_lines, materialized_lines)
       when is_binary(path) and is_list(original_lines) and is_list(materialized_lines) do
     hunks = original_lines |> Git.diff_lines(materialized_lines) |> detach_hunk_old_lines()
-    %{timeline | cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks)}
+    digest = :crypto.hash(:sha256, Enum.intersperse(materialized_lines, "\n"))
+
+    %{
+      timeline
+      | cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks),
+        postimage_digests: Map.put(timeline.postimage_digests, path, digest)
+    }
   end
 
   @spec entries_for(t(), String.t()) :: [Entry.t()]
@@ -191,11 +213,10 @@ defmodule MingaEditor.Agent.EditTimeline do
   end
 
   @spec file_summaries(t()) :: [file_summary()]
-  def file_summaries(%__MODULE__{entries: entries} = timeline) do
-    entries
-    |> non_empty_file_entries()
-    |> file_summaries_for_entries(timeline)
-    |> Enum.sort_by(& &1.path)
+  def file_summaries(%__MODULE__{} = timeline) do
+    Enum.flat_map(timeline.file_order, fn path ->
+      file_summary(timeline, {path, Map.fetch!(timeline.entries, path)})
+    end)
   end
 
   @spec reset(t()) :: t()
@@ -224,6 +245,11 @@ defmodule MingaEditor.Agent.EditTimeline do
     Map.get(hunks, path, [])
   end
 
+  @doc "Returns the latest cumulative post-image fingerprint, including human reprojection."
+  @spec postimage_digest(t(), String.t()) :: postimage_digest() | nil
+  def postimage_digest(%__MODULE__{postimage_digests: digests}, path),
+    do: Map.get(digests, path)
+
   @spec original_lines(t(), String.t(), [String.t()]) :: [String.t()]
   defp original_lines(%__MODULE__{} = timeline, path, before_lines) do
     timeline
@@ -244,18 +270,6 @@ defmodule MingaEditor.Agent.EditTimeline do
     if byte_size(line) < :binary.referenced_byte_size(line), do: :binary.copy(line), else: line
   end
 
-  @spec non_empty_file_entries(%{String.t() => [Entry.t()]}) :: [{String.t(), [Entry.t()]}]
-  defp non_empty_file_entries(entries) do
-    Enum.reject(entries, fn {_path, path_entries} -> path_entries == [] end)
-  end
-
-  @spec file_summaries_for_entries([{String.t(), [Entry.t()]}], t()) :: [file_summary()]
-  defp file_summaries_for_entries([_single_file], _timeline), do: []
-
-  defp file_summaries_for_entries(file_entries, timeline) do
-    Enum.flat_map(file_entries, &file_summary(timeline, &1))
-  end
-
   @spec file_summary(t(), {String.t(), [Entry.t()]}) :: [file_summary()]
   defp file_summary(_timeline, {_path, []}), do: []
 
@@ -268,7 +282,7 @@ defmodule MingaEditor.Agent.EditTimeline do
         entry_count: Enum.count(entries),
         lines_added: added,
         lines_removed: removed,
-        review_status: review_status(timeline, path)
+        review_status: :pending
       }
     ]
   end
@@ -288,14 +302,6 @@ defmodule MingaEditor.Agent.EditTimeline do
 
   defp add_hunk_counts(%{type: :modified, count: count, old_count: old_count}, {added, removed}) do
     {added + count, removed + old_count}
-  end
-
-  @spec review_status(t(), String.t()) :: review_status()
-  defp review_status(%__MODULE__{} = timeline, path) do
-    case viewing_index(timeline, path) do
-      nil -> :pending
-      _index -> :reviewing
-    end
   end
 
   @spec set_viewing(t(), String.t(), non_neg_integer()) :: t()

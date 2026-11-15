@@ -3,8 +3,11 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Window
+  alias MingaEditor.Window.Content
 
   @typedoc "A visible footer overlay: its registry surface id and its band content height."
   @type entry :: {surface_id :: atom(), content_height :: non_neg_integer() | :max}
@@ -16,7 +19,6 @@ defmodule MingaEditor.Layout.FooterOverlays do
       {:extension_overlay, extension_overlay_visible?(state),
        content_height_extension_overlay(state)},
       {:notifications, notifications_visible?(state), content_height_notifications(state)},
-      {:edit_timeline, edit_timeline_visible?(state), content_height_edit_timeline(state)},
       {:observatory, observatory_visible?(state), content_height_observatory(state)},
       {:extension_panel, extension_panel_visible?(), :max},
       {:agent_context, agent_context_visible?(state), :max},
@@ -56,23 +58,6 @@ defmodule MingaEditor.Layout.FooterOverlays do
     do: 1 + Enum.count(Minga.SystemObserver.TreeNode.flatten(tree))
 
   defp observatory_content_height(nil), do: 1
-
-  @spec content_height_edit_timeline(map()) :: non_neg_integer()
-  defp content_height_edit_timeline(state) do
-    case edit_timeline_state(state) do
-      nil ->
-        1
-
-      timeline ->
-        file_summaries = MingaEditor.Agent.EditTimeline.file_summaries(timeline)
-
-        if file_summaries != [] do
-          1 + Enum.count(file_summaries)
-        else
-          active_entries_count(state, timeline)
-        end
-    end
-  end
 
   @spec content_height_extension_overlay(map()) :: non_neg_integer()
   defp content_height_extension_overlay(_state) do
@@ -127,13 +112,23 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   defp float_window_visible?(_state), do: false
 
-  # Agent context: live BEAM-owned agent activity projection. The builder's
-  # visibility predicate reads the same live editor state as the render model but
-  # avoids building the full emit context, so this check stays cheap and non-recursive.
+  # Native chrome still consumes the activity model.
+  # The compact overlay is only placed over ordinary editors, never full Agent chat or Review.
   @spec agent_context_visible?(map()) :: boolean()
-  defp agent_context_visible?(state) do
-    AgentContextBuilder.visible?(state)
+  defp agent_context_visible?(%Input{windows: windows} = state) do
+    agent_context_visible?(state, Map.get(windows.map, windows.active))
   end
+
+  defp agent_context_visible?(%{workspace: %{windows: windows}} = state) do
+    agent_context_visible?(state, Map.get(windows.map, windows.active))
+  end
+
+  @spec agent_context_visible?(map(), Window.t() | RenderWindow.t() | nil) :: boolean()
+  defp agent_context_visible?(state, %{content: content}) do
+    not Content.agent_body?(content) and AgentContextBuilder.visible?(state)
+  end
+
+  defp agent_context_visible?(state, nil), do: AgentContextBuilder.visible?(state)
 
   # Extension panel: any visible extension or semantic panel.
   # Mirrors MingaEditor.RenderModel.UI.ExtensionPanelBuilder.
@@ -163,60 +158,6 @@ defmodule MingaEditor.Layout.FooterOverlays do
        do: TraditionalState.observatory(shell_state)
 
   defp observatory(_state), do: nil
-
-  # Edit timeline: the active buffer has timeline entries.
-  # Mirrors MingaEditor.RenderModel.UI.EditTimelineBuilder.
-  @spec edit_timeline_visible?(map()) :: boolean()
-  defp edit_timeline_visible?(state) do
-    case edit_timeline_state(state) do
-      nil ->
-        false
-
-      timeline ->
-        MingaEditor.Agent.EditTimeline.file_summaries(timeline) != [] or
-          active_timeline_entries?(state, timeline)
-    end
-  end
-
-  @spec active_entries_count(map(), term()) :: non_neg_integer()
-  defp active_entries_count(state, timeline) do
-    case active_buffer_path(state) do
-      path when is_binary(path) ->
-        1 + Enum.count(MingaEditor.Agent.EditTimeline.entries_for(timeline, path))
-
-      _ ->
-        1
-    end
-  end
-
-  @spec active_timeline_entries?(map(), term()) :: boolean()
-  defp active_timeline_entries?(state, timeline) do
-    case active_buffer_path(state) do
-      path when is_binary(path) -> MingaEditor.Agent.EditTimeline.has_entries?(timeline, path)
-      _ -> false
-    end
-  end
-
-  @spec edit_timeline_state(map()) :: term() | nil
-  defp edit_timeline_state(%{workspace: %{agent_ui: %{view: %{edit_timeline: timeline}}}}),
-    do: timeline
-
-  defp edit_timeline_state(_state), do: nil
-
-  defp active_buffer_path(%Input{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    Minga.Buffer.file_path(buf)
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec active_buffer_path(map()) :: String.t() | nil
-  defp active_buffer_path(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    Minga.Buffer.file_path(buf)
-  catch
-    :exit, _ -> nil
-  end
-
-  defp active_buffer_path(_state), do: nil
 
   defp notifications_visible?(%Input{intent: %{frame: %{notifications: %{items: [_ | _]}}}}),
     do: true

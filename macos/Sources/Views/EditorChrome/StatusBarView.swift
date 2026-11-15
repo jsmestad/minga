@@ -36,6 +36,8 @@ public struct StatusBarView: View {
     public enum Action: Equatable, Sendable {
         case executeCommand(name: String)
         case togglePanel(panel: UInt8)
+        case reviewBack(generation: UInt32, itemID: String)
+        case reviewLatest(generation: UInt32, itemID: String)
     }
 
     public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
@@ -67,30 +69,128 @@ public struct StatusBarView: View {
 
     public var body: some View {
         GeometryReader { proxy in
-            let layout = modelineLayout(totalWidth: proxy.size.width)
+            if let review = state.review {
+                reviewStatus(review, width: proxy.size.width)
+            } else {
+                let layout = modelineLayout(totalWidth: proxy.size.width)
+                HStack(spacing: 0) {
+                    leftStatusZone(layout)
+                        .frame(width: layout.leftRect.width, height: barHeight, alignment: .leading)
+                        .clipped()
+                        .contentShape(Rectangle())
 
-            HStack(spacing: 0) {
-                leftStatusZone(layout)
-                    .frame(width: layout.leftRect.width, height: barHeight, alignment: .leading)
-                    .clipped()
-                    .contentShape(Rectangle())
+                    centerSegment
+                        .frame(width: layout.centerRect.width, height: barHeight, alignment: .center)
+                        .clipped()
+                        .contentShape(Rectangle())
 
-                centerSegment
-                    .frame(width: layout.centerRect.width, height: barHeight, alignment: .center)
-                    .clipped()
-                    .contentShape(Rectangle())
-
-                rightStatusZone(layout)
-                    .frame(width: layout.rightRect.width, height: barHeight, alignment: .trailing)
-                    .clipped()
-                    .contentShape(Rectangle())
+                    rightStatusZone(layout)
+                        .frame(width: layout.rightRect.width, height: barHeight, alignment: .trailing)
+                        .clipped()
+                        .contentShape(Rectangle())
+                }
+                .frame(width: layout.totalWidth, height: barHeight, alignment: .leading)
             }
-            .frame(width: layout.totalWidth, height: barHeight, alignment: .leading)
         }
         .frame(height: barHeight)
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    /// Protected Review chrome bypasses the bounded generic modeline groups.
+    /// The compact form fits the supported 160pt minimum without hiding any action.
+    private func reviewStatus(_ review: StatusBarUpdate.Review, width: CGFloat) -> some View {
+        HStack(spacing: Spacing.xs) {
+            ReviewFreshnessLabel(freshness: review.freshness, compact: width < 420)
+            ReviewButtons(review: review, compact: width < 420, sendAction: sendAction)
+            if width >= 560 {
+                Text(review.path)
+                    .font(Typography.font(.small))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.xs)
+        .foregroundStyle(theme.modelineBarFg)
+        .frame(width: width, height: barHeight, alignment: .leading)
+    }
+
+    /// Reserves the same intrinsic width when a background write changes freshness.
+    public struct ReviewFreshnessLabel: View {
+        public let freshness: StatusBarUpdate.Review.Freshness
+        public let compact: Bool
+
+        public init(freshness: StatusBarUpdate.Review.Freshness, compact: Bool) {
+            self.freshness = freshness
+            self.compact = compact
+        }
+
+        public var body: some View {
+            ZStack(alignment: .leading) {
+                Text(compact ? "RO · Current" : "Read-only · Current").hidden()
+                Text(compact
+                     ? (freshness == .stale ? "RO · Stale" : "RO · Current")
+                     : (freshness == .stale ? "Read-only · Stale" : "Read-only · Current"))
+            }
+            .font(Typography.font(.caption))
+            .fixedSize()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(freshness == .stale ? "Read-only Review, stale" : "Read-only Review, current")
+        }
+    }
+
+    /// Each rendered Button closes over this value snapshot, never mutable selection.
+    public struct ReviewButtons: View {
+        public let review: StatusBarUpdate.Review
+        public let compact: Bool
+        public let sendAction: ViewActionHandler<Action>?
+
+        public init(review: StatusBarUpdate.Review, compact: Bool, sendAction: ViewActionHandler<Action>?) {
+            self.review = review
+            self.compact = compact
+            self.sendAction = sendAction
+        }
+
+        public var body: some View {
+            HStack(spacing: 0) {
+                reviewButton("Back to chat", symbol: "arrow.uturn.backward", accessibility: "Back to chat") {
+                    sendAction?(.reviewBack(generation: review.generation, itemID: review.itemID))
+                }
+                reviewButton("Review latest", symbol: "arrow.clockwise", accessibility: "Review latest changes in \(review.path)") {
+                    sendAction?(.reviewLatest(generation: review.generation, itemID: review.itemID))
+                }
+                .disabled(review.freshness != .stale || sendAction == nil)
+                .opacity(review.freshness == .stale ? 1 : 0.4)
+                reviewButton("Help", symbol: "questionmark.circle", accessibility: "Agent help") {
+                    sendAction?(.executeCommand(name: "agent_toggle_help"))
+                }
+            }
+            .fixedSize()
+        }
+
+        private func reviewButton(_ title: String, symbol: String, accessibility: String, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Group {
+                    if compact {
+                        Image(systemName: symbol)
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Text(title)
+                            .padding(.horizontal, Spacing.sm)
+                            .frame(height: 24)
+                    }
+                }
+                .font(Typography.font(.small))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(sendAction == nil)
+            .focusable(false)
+            .accessibilityLabel(accessibility)
+            .help(accessibility)
+        }
     }
 
     private var leftModelineGroups: [StatusBarSegmentGroup] {

@@ -8,6 +8,25 @@ import Foundation
 
 /// Typed snapshot of status bar data from the BEAM. Named fields prevent transposition bugs.
 public struct StatusBarUpdate: Sendable {
+    /// Immutable source-bound action offer for the read-only Review buffer.
+    public struct Review: Sendable, Equatable {
+        public enum Freshness: UInt8, Sendable {
+            case current = 0
+            case stale = 1
+        }
+        public let path: String
+        public let freshness: Freshness
+        public let generation: UInt32
+        public let itemID: String
+
+        public init(path: String, freshness: Freshness, generation: UInt32, itemID: String) {
+            self.path = path
+            self.freshness = freshness
+            self.generation = generation
+            self.itemID = itemID
+        }
+    }
+
     public struct IndentInfo: Sendable, Equatable {
         public let kind: UInt8
         public let size: UInt8
@@ -94,6 +113,7 @@ public struct StatusBarUpdate: Sendable {
     public let workspace: WorkspaceInfo?
     /// vim showcmd: pending key sequence typed but not yet resolved. Empty when nothing is pending.
     public let pendingKeys: String
+    public let review: Review?
 
     public init(
         contentKind: UInt8,
@@ -134,7 +154,8 @@ public struct StatusBarUpdate: Sendable {
         modelineRightSegments: [Wire.StatusBarSegment] = [],
         selection: SelectionInfo = .init(mode: 0, size: 0),
         workspace: WorkspaceInfo? = nil,
-        pendingKeys: String = ""
+        pendingKeys: String = "",
+        review: Review? = nil
     ) {
         self.contentKind = EditorContentKind(rawValue: contentKind)
         self.mode = EditorMode(rawValue: mode)
@@ -175,6 +196,7 @@ public struct StatusBarUpdate: Sendable {
         self.selection = selection
         self.workspace = workspace
         self.pendingKeys = pendingKeys
+        self.review = review
     }
 
     /// Whether the editor is running in safe mode.

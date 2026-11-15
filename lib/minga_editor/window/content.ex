@@ -19,6 +19,7 @@ defmodule MingaEditor.Window.Content do
   |-----|-----------|-----------|
   | `:buffer` | `pid()` (Buffer.Process) | Yes |
   | `:agent_chat` | `:semantic` | No |
+  | `:agent_review` | `:semantic` | No |
   | `:empty` | `:semantic` | No |
 
   `:empty` is the zero-buffers launchpad surface (#2689): the window stays
@@ -33,6 +34,7 @@ defmodule MingaEditor.Window.Content do
   @type t ::
           {:buffer, pid()}
           | {:agent_chat, :semantic}
+          | {:agent_review, :semantic}
           | {:empty, :semantic}
 
   @doc "Creates a buffer content reference."
@@ -42,6 +44,10 @@ defmodule MingaEditor.Window.Content do
   @doc "Creates a semantic agent chat content reference."
   @spec agent_chat() :: t()
   def agent_chat, do: {:agent_chat, :semantic}
+
+  @doc "Creates a read-only semantic projection of the selected agent review."
+  @spec agent_review() :: t()
+  def agent_review, do: {:agent_review, :semantic}
 
   @doc "Creates a semantic empty-state (launchpad) content reference."
   @spec empty() :: t()
@@ -71,6 +77,16 @@ defmodule MingaEditor.Window.Content do
   @spec agent_chat?(t()) :: boolean()
   def agent_chat?({:agent_chat, :semantic}), do: true
   def agent_chat?(_other), do: false
+
+  @doc "Returns true if this content reference displays the selected agent review."
+  @spec agent_review?(t()) :: boolean()
+  def agent_review?({:agent_review, :semantic}), do: true
+  def agent_review?(_other), do: false
+
+  @doc "Returns true when the pane hosts the shared Agent workspace presentation."
+  @spec agent_body?(t()) :: boolean()
+  def agent_body?({kind, :semantic}) when kind in [:agent_chat, :agent_review], do: true
+  def agent_body?(_other), do: false
 
   @doc "Returns true if this content reference is the empty-state launchpad."
   @spec empty?(t()) :: boolean()

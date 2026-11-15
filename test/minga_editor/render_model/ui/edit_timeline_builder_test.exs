@@ -13,10 +13,11 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
       assert %EditTimeline{visible?: false, entries: []} = EditTimelineBuilder.build(context(nil))
     end
 
-    test "builds a hidden timeline when there is no active buffer" do
-      ctx = context(nil)
+    test "an empty Agent workspace mounts the timeline before any background file arrives" do
+      ctx = context(EditTimelineState.new())
 
-      assert %EditTimeline{visible?: false} = EditTimelineBuilder.build(ctx)
+      assert %EditTimeline{visible?: true, files: [], entries: []} =
+               EditTimelineBuilder.build(ctx)
     end
 
     test "builds aggregate file entries for multi-file turns without an active buffer path" do
@@ -93,12 +94,17 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
   end
 
   defp context(timeline, buffer \\ nil) do
-    ctx =
-      TestHelpers.base_state(port_manager: nil)
-      |> Context.from_editor_state()
+    state = TestHelpers.base_state(port_manager: nil)
+    id = state.workspace.windows.active
+    window = MingaEditor.Window.new_agent_chat(id, 24, 80)
+    windows = MingaEditor.State.Windows.replace_window(state.workspace.windows, id, window)
+    state = %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+    ctx = Context.from_editor_state(state)
 
-    agent_ui = UIState.new()
-    agent_ui = put_in(agent_ui.view.edit_timeline, timeline)
+    agent_ui =
+      if timeline == nil,
+        do: nil,
+        else: UIState.replace_edit_timeline(UIState.new(), timeline)
 
     buffers = %{
       ctx.workspace.buffers

@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.ReceiptProjection do
 
   alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.WindowObservation
+  alias MingaEditor.Renderer.ReviewObservation
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.Runtime
@@ -16,7 +17,6 @@ defmodule MingaEditor.Renderer.ReceiptProjection do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Render
   alias MingaEditor.State.RenderCorrelation
-  alias MingaEditor.Viewport
 
   @typedoc "Projected root values produced by one accepted receipt."
   @type result :: {SessionState.t(), Runtime.t(), Render.t()}
@@ -30,7 +30,9 @@ defmodule MingaEditor.Renderer.ReceiptProjection do
           RenderCorrelation.t()
         ) :: result()
   def project(workspace, runtime, render, %RenderReceipt{} = receipt, correlation) do
-    workspace = observe_windows(workspace, receipt.window_observations)
+    workspace =
+      observe_windows(workspace, receipt.window_observations, Runtime.review_scope(runtime))
+
     runtime = accept_click_regions(runtime, receipt)
 
     render =
@@ -41,19 +43,26 @@ defmodule MingaEditor.Renderer.ReceiptProjection do
     {workspace, runtime, render}
   end
 
-  @spec observe_windows(SessionState.t(), map()) :: SessionState.t()
-  defp observe_windows(%SessionState{} = workspace, observations) do
-    Enum.reduce(observations, workspace, fn
-      {id,
-       %WindowObservation{
-         buffer: buffer,
-         buffer_version: version,
-         viewport: %Viewport{} = viewport
-       }},
-      acc ->
-        SessionState.observe_window(acc, id, buffer, viewport, version)
+  @spec observe_windows(SessionState.t(), map(), Runtime.review_scope() | nil) :: SessionState.t()
+  defp observe_windows(%SessionState{} = workspace, observations, scope) do
+    Enum.reduce(observations, workspace, fn {id, observation}, acc ->
+      observe_window(acc, id, observation, scope)
     end)
   end
+
+  @spec observe_window(
+          SessionState.t(),
+          MingaEditor.Window.id(),
+          RenderReceipt.observation(),
+          Runtime.review_scope() | nil
+        ) :: SessionState.t()
+  defp observe_window(workspace, id, %WindowObservation{} = observation, _scope),
+    do: SessionState.observe_window(workspace, id, observation)
+
+  defp observe_window(workspace, id, %ReviewObservation{scope: scope} = observation, scope),
+    do: SessionState.observe_window(workspace, id, observation)
+
+  defp observe_window(workspace, _id, %ReviewObservation{}, _other_scope), do: workspace
 
   @spec accept_click_regions(Runtime.t(), RenderReceipt.t()) :: Runtime.t()
   defp accept_click_regions(

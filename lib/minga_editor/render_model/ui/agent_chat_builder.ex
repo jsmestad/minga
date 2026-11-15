@@ -6,7 +6,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.View.PromptFrame
@@ -48,7 +47,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     agent_ui = ctx.workspace.agent_ui
     shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
     panel = agent_ui.panel
-    view = agent_ui.view
 
     projection = ctx.prompt.projection
     prompt_text = Enum.join(projection.lines, "\n")
@@ -69,15 +67,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
       |> select_resident_messages()
 
-    help_visible = view.help_visible
-
-    help_groups =
-      if help_visible do
-        Minga.Keymap.Scope.Agent.help_groups(UIState.View.focus(view))
-      else
-        []
-      end
-
     %AgentChat{
       visible?: true,
       status: shell_agent.runtime.status || :idle,
@@ -90,8 +79,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_vim_mode: ctx.workspace.editing.mode,
       prompt_visible_rows: visible_rows,
       prompt_completion: build_prompt_completion(panel),
-      help_visible?: help_visible,
-      help_groups: help_groups,
       input_focused:
         panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
           ctx.intent.frame.focus_owner.surface == :agent,

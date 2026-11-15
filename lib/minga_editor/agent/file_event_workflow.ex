@@ -3,6 +3,9 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   Applies agent-authored file change events to buffers, review state, and tabs.
 
   Buffer and session actions run during the owner transition. Rendering is scheduled after all state transitions, then deferred remote reload notices are logged in their established order.
+
+  Writes record every edit without selecting a preview or moving input focus.
+  Dirty remote buffers keep human edits; their agent post-images remain in the timeline for explicit review, and an explicit save still checks conflicts.
   """
 
   alias Minga.Buffer
@@ -10,11 +13,9 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   alias Minga.Distribution.ConnectionManager
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.Activity
-  alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
-  alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Shell.Workflow
@@ -80,7 +81,7 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
     state = track_active_shell_agent_file(state, path)
     state = associate_file_with_agent_workspace(state, path)
     state = add_file_changed_message(state, path, tool_name)
-    state = install_diff_review(state, path, after_content)
+    state = refresh_selected_preview(state, path, after_content)
     {state, notices}
   end
 
@@ -111,30 +112,10 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
     )
   end
 
-  @spec install_diff_review(EditorState.t(), String.t(), String.t()) :: EditorState.t()
-  defp install_diff_review(state, path, after_content) do
-    cumulative_hunks =
-      EditTimeline.cumulative_hunks(state.workspace.agent_ui.view.edit_timeline, path)
-
-    review =
-      case existing_diff_for_path(state, path) do
-        nil -> DiffReview.from_hunks(path, after_content, cumulative_hunks)
-        existing -> DiffReview.update_after(existing, after_content, cumulative_hunks)
-      end
-
-    install_diff_review(state, review)
-  end
-
-  @spec install_diff_review(EditorState.t(), DiffReview.t() | nil) :: EditorState.t()
-  defp install_diff_review(state, nil), do: state
-
-  defp install_diff_review(state, review) do
-    state = update_preview(state, &Preview.set_diff(&1, review))
-
-    TraditionalWorkflow.install_agent_ui(
-      state,
-      UIState.set_focus(state.workspace.agent_ui, :file_viewer)
-    )
+  @spec refresh_selected_preview(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp refresh_selected_preview(state, path, after_content) do
+    timeline = state.workspace.agent_ui.view.edit_timeline
+    update_preview(state, &Preview.refresh_after_write(&1, path, after_content, timeline))
   end
 
   @spec reload_remote_buffer_if_open(EditorState.t(), String.t(), String.t()) ::
@@ -251,15 +232,16 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
       pid when is_pid(pid) -> reload_remote_buffer_content(state, pid, path, after_content)
       _missing -> {state, []}
     end
-  catch
-    :exit, reason ->
-      {state, [{:error, "Failed to reload remote file #{path}: #{inspect(reason)}"}]}
   end
 
   @spec reload_remote_buffer_content(EditorState.t(), pid(), String.t(), String.t()) ::
           {EditorState.t(), [reload_notice()]}
-  defp reload_remote_buffer_content(state, pid, path, after_content),
-    do: reload_remote_buffer_content(Buffer.dirty?(pid), state, pid, path, after_content)
+  defp reload_remote_buffer_content(state, pid, path, after_content) do
+    reload_remote_buffer_content(Buffer.dirty?(pid), state, pid, path, after_content)
+  catch
+    :exit, reason ->
+      {state, [{:error, "Failed to reload remote file #{path}: #{inspect(reason)}"}]}
+  end
 
   @spec reload_remote_buffer_content(
           boolean(),
@@ -268,17 +250,14 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
           String.t(),
           String.t()
         ) :: {EditorState.t(), [reload_notice()]}
-  defp reload_remote_buffer_content(true, state, pid, path, after_content) do
+  defp reload_remote_buffer_content(true, state, _pid, path, _after_content) do
+    # Remote retains the buffer identity and the timeline records the post-image below.
+    # Leave the dirty human buffer intact until an explicit review or save.
     state =
-      state
-      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-        "Agent modified this file. Reload, keep editing, or show diff. Save will check for conflicts."
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Agent modified this file. Review agent changes or keep editing. Save will check for conflicts."
       )
-      |> PickerUI.open(MingaEditor.UI.Picker.RemoteFileConflictSource, %{
-        buffer: pid,
-        path: path,
-        content: after_content
-      })
 
     {state, [{:warning, "Agent modified dirty remote file #{Path.basename(path)}"}]}
   end
@@ -343,14 +322,6 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
       state,
       (fn ui -> UIState.replace_preview(ui, fun.(ui.view.preview)) end).(state.workspace.agent_ui)
     )
-  end
-
-  @spec existing_diff_for_path(EditorState.t(), String.t()) :: DiffReview.t() | nil
-  defp existing_diff_for_path(state, path) do
-    case Preview.diff_review(state.workspace.agent_ui.view.preview) do
-      %DiffReview{path: ^path} = review -> review
-      _review -> nil
-    end
   end
 
   @spec track_active_shell_agent_file(EditorState.t(), String.t()) :: EditorState.t()

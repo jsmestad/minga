@@ -1,8 +1,11 @@
 import SwiftUI
 
+/// Bounded, source-ordered review offers. Selection and focus remain BEAM-owned.
 public struct EditTimelineView: View {
     public enum Action: Equatable, Sendable {
         case navigate(generation: UInt32, entryID: String)
+        /// Requests the cumulative review for the exact path in this timeline offer.
+        case reviewFile(generation: UInt32, path: String)
     }
 
     public init(state: EditTimelineState, sendAction: ViewActionHandler<Action>?) {
@@ -14,46 +17,69 @@ public struct EditTimelineView: View {
 
     public let sendAction: ViewActionHandler<Action>?
 
+    private let timelineHeight: CGFloat = 24
+    private let fileControlWidth: CGFloat = 320
+    private let summaryWidth: CGFloat = 100
+
     public var body: some View {
         if state.visible && !state.files.isEmpty {
-            HStack(spacing: Spacing.md) {
-                ForEach(state.files) { file in
-                    HStack(spacing: Spacing.sm) {
-                        Circle()
-                            .fill(file.reviewStatus == 1 ? themeColors.accent : themeColors.editorFg.opacity(0.35))
-                            .frame(width: 6, height: 6)
+            let generation = state.generation
+            // Stable widths keep count updates and appended files from moving controls. The scroll view retains the reader's position; new offers never scroll it.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.md) {
+                    ForEach(state.files) { file in
+                        Button {
+                            sendAction?(.reviewFile(generation: generation, path: file.path))
+                        } label: {
+                            HStack(spacing: Spacing.sm) {
+                                Circle()
+                                    .fill(file.reviewStatus == 1 ? themeColors.accent : themeColors.editorFg.opacity(0.35))
+                                    .frame(width: 6, height: 6)
 
-                        Text(file.name)
-                            .font(Typography.font(.small, weight: .medium))
-                            .foregroundStyle(themeColors.editorFg)
-                            .lineLimit(1)
+                                Text("Review")
+                                    .font(Typography.font(.small, weight: .semibold))
+                                    .foregroundStyle(themeColors.accent)
+                                    .fixedSize()
 
-                        Text("\(file.entryCount)")
-                            .font(Typography.font(.caption, design: .monospaced))
-                            .foregroundStyle(themeColors.editorFg.opacity(0.65))
+                                Text(file.path)
+                                    .font(Typography.font(.small, weight: .medium))
+                                    .foregroundStyle(themeColors.editorFg)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Text("+\(file.linesAdded)/-\(file.linesRemoved)")
-                            .font(Typography.font(.caption, design: .monospaced))
-                            .foregroundStyle(themeColors.editorFg.opacity(0.65))
+                                Text("\(file.entryCount) +\(file.linesAdded)/-\(file.linesRemoved)")
+                                    .font(Typography.font(.caption, design: .monospaced))
+                                    .foregroundStyle(themeColors.editorFg.opacity(0.65))
+                                    .lineLimit(1)
+                                    .frame(width: summaryWidth, alignment: .trailing)
+                            }
+                            .padding(.horizontal, Spacing.md)
+                            .padding(.vertical, Spacing.xs)
+                            .frame(width: fileControlWidth, height: timelineHeight)
+                            .background(themeColors.editorFg.opacity(0.08))
+                            .clipShape(.rect(cornerRadius: Radius.sm))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(sendAction == nil || generation == 0)
+                        .accessibilityLabel("Review \(file.path)")
+                        .accessibilityValue("\(file.entryCount) edits, \(file.linesAdded) lines added, \(file.linesRemoved) lines removed")
+                        .accessibilityHint("Opens cumulative changes for this file")
+                        .help("Review cumulative changes in \(file.path)")
                     }
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.xs)
-                    .background(themeColors.editorFg.opacity(0.08))
-                    .clipShape(.rect(cornerRadius: Radius.sm))
-                    .help(file.path)
                 }
-
-                Spacer(minLength: 0)
+                .padding(.horizontal, Spacing.md)
             }
-            .padding(.horizontal, Spacing.md)
-            .frame(height: 24)
+            .frame(maxWidth: .infinity)
+            .frame(height: timelineHeight)
             .background(themeColors.editorBg.opacity(0.95))
         } else if state.visible && !state.entries.isEmpty {
             HStack(spacing: 0) {
                 GeometryReader { geometry in
                     let count = state.entries.count
                     let generation = state.generation
-                    let width = geometry.size.width - Spacing.section
+                    let width = max(0, geometry.size.width - Spacing.section)
                     let spacing = count > 1 ? width / CGFloat(count - 1) : width / 2
 
                     ZStack(alignment: .leading) {
@@ -72,23 +98,83 @@ public struct EditTimelineView: View {
                             let isActive = entry.index == state.viewingIndex
                             let isLast = entry.index == count - 1 && state.viewingIndex == -1
 
-                            Circle()
-                                .fill(isActive || isLast
-                                    ? themeColors.accent
-                                    : themeColors.editorFg.opacity(0.5))
-                                .frame(width: isActive || isLast ? 10 : 7,
-                                       height: isActive || isLast ? 10 : 7)
-                                .position(x: x, y: geometry.size.height / 2)
-                                .onTapGesture {
-                                    sendAction?(.navigate(generation: generation, entryID: entry.entryID))
-                                }
-                                .help("\(entry.toolName) (edit \(entry.index + 1)/\(count))")
+                            Button {
+                                sendAction?(.navigate(generation: generation, entryID: entry.entryID))
+                            } label: {
+                                Circle()
+                                    .fill(isActive || isLast
+                                        ? themeColors.accent
+                                        : themeColors.editorFg.opacity(0.5))
+                                    .frame(width: isActive || isLast ? 10 : 7,
+                                           height: isActive || isLast ? 10 : 7)
+                                    .frame(width: 20, height: 20)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(sendAction == nil || generation == 0)
+                            .accessibilityLabel("View \(entry.toolName) edit \(entry.index + 1) of \(count)")
+                            .help("\(entry.toolName) (edit \(entry.index + 1)/\(count))")
+                            .position(x: x, y: geometry.size.height / 2)
                         }
                     }
                 }
             }
-            .frame(height: 24)
+            .frame(height: timelineHeight)
             .background(themeColors.editorBg.opacity(0.95))
+        } else if state.visible {
+            Text("No changed files")
+                .font(Typography.font(.small))
+                .foregroundStyle(themeColors.editorFg.opacity(0.65))
+                .padding(.horizontal, Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: timelineHeight)
+                .background(themeColors.editorBg.opacity(0.95))
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("Single cumulative Review", traits: .mingaChrome) {
+    EditTimelineView(
+        state: EditTimelineState(
+            visible: true,
+            files: [.init(path: "Sources/Editor.swift", entryCount: 1, linesAdded: 12, linesRemoved: 3, reviewStatus: 0)],
+            generation: 1
+        ),
+        sendAction: { _ in }
+    )
+    .frame(width: 900, height: 80, alignment: .top)
+}
+
+#Preview("Narrow Review burst", traits: .mingaChrome) {
+    EditTimelineView(
+        state: EditTimelineState(
+            visible: true,
+            files: (0..<100).map { (index: Int) -> EditTimelineState.TimelineFile in
+                EditTimelineState.TimelineFile(
+                    path: "Sources/LongDirectoryName/Feature\(index)/Editor.swift",
+                    entryCount: index + 1,
+                    linesAdded: UInt32(index * 10),
+                    linesRemoved: UInt32(index),
+                    reviewStatus: 0
+                )
+            },
+            generation: 1
+        ),
+        sendAction: { _ in }
+    )
+    .frame(width: 280, height: 80, alignment: .top)
+}
+
+#Preview("Review without connection", traits: .mingaChrome) {
+    EditTimelineView(
+        state: EditTimelineState(
+            visible: true,
+            files: [.init(path: "Tests/Editor.swift", entryCount: 1, linesAdded: 12, linesRemoved: 3, reviewStatus: 0)],
+            generation: 1
+        ),
+        sendAction: nil
+    )
+    .frame(width: 400, height: 80, alignment: .top)
 }

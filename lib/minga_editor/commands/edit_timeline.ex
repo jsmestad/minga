@@ -12,6 +12,8 @@ defmodule MingaEditor.Commands.EditTimeline do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.Effects.AgentReview
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.State, as: EditorState
 
@@ -110,6 +112,10 @@ defmodule MingaEditor.Commands.EditTimeline do
     end
   end
 
+  @doc "Reviews the explicitly resolved cumulative file through the generation-owned worker."
+  @spec review_file(EditorState.t(), String.t()) :: EditorState.t()
+  def review_file(state, path) when is_binary(path), do: AgentReview.schedule(state, path)
+
   defp with_timeline(state, fun) do
     buf = state.workspace.buffers.active
 
@@ -133,33 +139,10 @@ defmodule MingaEditor.Commands.EditTimeline do
         NoticeWorkflow.publish(state, "No agent-changed files")
 
       _ ->
-        current_path = active_path(state)
-        target_path = next_path(paths, current_path, direction)
-
-        case BufferRegistry.open_file_by_path_result(state, target_path) do
-          {:ok, new_state} ->
-            NoticeWorkflow.publish(
-              new_state,
-              "Agent change file: #{target_path}"
-            )
-
-          {:error, reason} ->
-            NoticeWorkflow.publish(
-              state,
-              "Could not open agent change file #{target_path}: #{inspect(reason)}"
-            )
-        end
+        current_path = Preview.selected_path(state.workspace.agent_ui.view.preview)
+        review_file(state, next_path(paths, current_path, direction))
     end
   end
-
-  @spec active_path(EditorState.t()) :: String.t() | nil
-  defp active_path(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    Buffer.file_path(buf)
-  catch
-    :exit, _ -> nil
-  end
-
-  defp active_path(_state), do: nil
 
   @spec next_path([String.t()], String.t() | nil, 1 | -1) :: String.t()
   defp next_path(paths, nil, 1), do: hd(paths)

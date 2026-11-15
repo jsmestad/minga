@@ -7,11 +7,14 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   alias Minga.RenderModel.UI.StatusBar.Data, as: SemanticStatusData
   alias Minga.RenderModel.UI.StatusBar.File, as: StatusFile
   alias Minga.RenderModel.UI.StatusBar.Operation, as: StatusOperation
+  alias Minga.RenderModel.UI.StatusBar.Review, as: StatusReview
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
+  alias MingaEditor.Agent.ReviewTarget
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
   alias MingaEditor.State.Operation, as: EditorOperation
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.StatusBar.Data.Agent, as: EditorStatusAgent
   alias MingaEditor.StatusBar.Data.Buffer, as: EditorStatusBuffer
@@ -28,9 +31,28 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
       content_kind: content_kind(content),
       data: data_model(common, content),
       workspace: active_workspace_model(chrome_state),
-      operation: operation_model(common.selected_operation)
+      operation: operation_model(common.selected_operation),
+      review: review_model(ctx)
     }
   end
+
+  @spec review_model(term()) :: StatusReview.t() | nil
+  defp review_model(ctx) when is_struct(ctx, Context) or is_struct(ctx, EditorState) do
+    case ReviewTarget.capture(ctx) do
+      %ReviewTarget{} = offer ->
+        %StatusReview{
+          path: offer.path,
+          freshness: offer.freshness,
+          generation: offer.generation,
+          item_id: offer.item_id
+        }
+
+      nil ->
+        nil
+    end
+  end
+
+  defp review_model(_chrome_context), do: nil
 
   @spec content_kind(EditorStatusBuffer.t() | EditorStatusAgent.t()) :: StatusBar.content_kind()
   defp content_kind(%EditorStatusBuffer{}), do: :buffer

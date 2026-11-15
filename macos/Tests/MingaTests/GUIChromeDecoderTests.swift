@@ -2176,7 +2176,7 @@ struct GUIAgentChatDecoderTests {
     private func buildChatData(status: UInt8 = 0, model: String = "", thinkingLevel: String = "", prompt: String = "",
                                 promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0,
                                 promptVimMode: UInt8 = 0, promptVisibleRows: UInt8 = 1,
-                                pending: Data? = nil, help: Data? = nil, completion: Data? = nil, includeThinking: Bool = true) -> Data {
+                                pending: Data? = nil, completion: Data? = nil, includeThinking: Bool = true) -> Data {
         var headerPayload = Data()
         headerPayload.append(1) // visible
         headerPayload.append(status)
@@ -2193,19 +2193,17 @@ struct GUIAgentChatDecoderTests {
         promptPayload.append(promptVisibleRows)
 
         let pendingPayload = pending ?? Data([0]) // no pending
-        let helpPayload = help ?? Data([0]) // no help
         var thinkingPayload = Data()
         appendString16(&thinkingPayload, thinkingLevel)
         let completionPayload = completion ?? Data([0])
 
         var data = Data()
         data.append(OP_GUI_AGENT_CHAT)
-        data.append(includeThinking ? 8 : 7)
+        data.append(includeThinking ? 7 : 6)
         data.append(contentsOf: buildSectionData(0x01, headerPayload))
         data.append(contentsOf: buildSectionData(0x02, modelPayload))
         data.append(contentsOf: buildSectionData(0x03, promptPayload))
         data.append(contentsOf: buildSectionData(0x04, pendingPayload))
-        data.append(contentsOf: buildSectionData(0x05, helpPayload))
         data.append(contentsOf: buildSectionData(0x07, completionPayload))
         if includeThinking {
             data.append(contentsOf: buildSectionData(0x08, thinkingPayload))
@@ -2223,7 +2221,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
         #expect(visible == false)
@@ -2232,11 +2230,6 @@ struct GUIAgentChatDecoderTests {
 
     @Test("Decode gui_agent_chat ordinary frame with all retained sections")
     func decodeOrdinaryFrameWithAllRetainedSections() throws {
-        var help = Data([1, 1])
-        appendString16(&help, "Prompt")
-        help.append(1)
-        appendString8(&help, "C-j")
-        appendString16(&help, "accept")
         var completion = Data([1, 2, 1])
         appendU16(&completion, 3)
         appendU16(&completion, 7)
@@ -2246,11 +2239,11 @@ struct GUIAgentChatDecoderTests {
         let data = buildChatData(status: 1, model: "claude", thinkingLevel: "high", prompt: "fix",
                                  promptLineCount: 4, promptCursorLine: 2, promptCursorCol: 5,
                                  promptVimMode: 1, promptVisibleRows: 3,
-                                 help: help, completion: completion)
+                                 completion: completion)
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
-        #expect(data[1] == 8)
-        guard case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        #expect(data[1] == 7)
+        guard case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(visible == true)
         #expect(status == .thinking)
         #expect(model == "claude")
@@ -2267,10 +2260,6 @@ struct GUIAgentChatDecoderTests {
         #expect(promptCompletion?.anchorCol == 7)
         #expect(promptCompletion?.candidates.first?.name == "write")
         #expect(promptCompletion?.candidates.first?.description == "run command")
-        #expect(helpVisible == true)
-        #expect(helpGroups.first?.title == "Prompt")
-        #expect(helpGroups.first?.bindings.first?.key == "C-j")
-        #expect(helpGroups.first?.bindings.first?.description == "accept")
     }
 
     @Test("Decode gui_agent_chat preserves prompt cursor as a UTF-8 byte offset")
@@ -2280,7 +2269,7 @@ struct GUIAgentChatDecoderTests {
         let data = buildChatData(prompt: prompt, promptCursorCol: byteOffset, promptVimMode: 1)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, let decodedPrompt, _, _, let decodedCursorCol, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, let decodedPrompt, _, _, let decodedCursorCol, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiAgentChat")
             return
         }
@@ -2304,7 +2293,7 @@ struct GUIAgentChatDecoderTests {
         data.insert(contentsOf: retired, at: 2 + buildSectionData(0x01, Data([1, 0])).count)
         data[1] += 1
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(let visible, _, let model, let thinkingLevel, let prompt, _, _, _, _, _, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(let visible, _, let model, let thinkingLevel, let prompt, _, _, _, _, _, let promptCompletion, let pendingToolName, let pendingToolSummary) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(size == data.count)
         #expect(visible == true)
         #expect(model == "claude")
@@ -2313,8 +2302,6 @@ struct GUIAgentChatDecoderTests {
         #expect(promptCompletion == nil)
         #expect(pendingToolName == nil)
         #expect(pendingToolSummary == "")
-        #expect(helpVisible == false)
-        #expect(helpGroups.isEmpty)
     }
 
 
@@ -2327,7 +2314,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(status: 2, model: "claude", pending: pendingPayload)
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(pendingToolName == "write_file")
         #expect(pendingToolSummary == "Writing to config.toml")
     }
@@ -3254,4 +3241,168 @@ struct AgentTranscriptDecoderTests {
         #expect(previewLines.isEmpty == !withPreview)
     }
 
+}
+
+@Suite("Independent Agent Help Decoder")
+struct GUIAgentHelpDecoderTests {
+    private func frame(_ payload: Data) -> Data {
+        var data = Data([OP_GUI_AGENT_HELP])
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+        return data
+    }
+
+    private func visiblePayload() -> Data {
+        var payload = Data([1, 1, 2])
+        appendString16(&payload, "Révision 👩‍💻")
+        payload.append(1)
+        appendString8(&payload, "⌘?")
+        appendString16(&payload, "Afficher l’aide")
+        appendString16(&payload, "Empty group")
+        payload.append(0)
+        return payload
+    }
+
+    @Test("Version 1 Help decodes Unicode groups independently of Chat")
+    func visibleUnicode() throws {
+        let data = frame(visiblePayload())
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentHelp(let visible, let groups) = command else {
+            Issue.record("Expected independent Help"); return
+        }
+        #expect(size == data.count)
+        #expect(visible)
+        #expect(groups.count == 2)
+        #expect(groups[0].title == "Révision 👩‍💻")
+        #expect(groups[0].bindings[0].key == "⌘?")
+        #expect(groups[0].bindings[0].description == "Afficher l’aide")
+        #expect(groups[1].bindings.isEmpty)
+    }
+
+    @Test("Hidden and visible empty Help consume exactly their len32 frame")
+    func emptyAndHidden() throws {
+        for payload in [Data([1, 0]), Data([1, 1, 0])] {
+            let first = frame(payload)
+            var packet = first
+            packet.append(contentsOf: [OP_GUI_AGENT_CHAT, 0])
+            let (command, size) = try decodeCommand(data: packet, offset: 0)
+            guard case .guiAgentHelp(let visible, let groups) = command else {
+                Issue.record("Expected independent Help"); return
+            }
+            #expect(size == first.count)
+            #expect(visible == (payload[1] == 1))
+            #expect(groups.isEmpty)
+            let (next, consumed) = try decodeCommand(data: packet, offset: size)
+            guard case .guiAgentChat(let chatVisible, _, _, _, _, _, _, _, _, _, _, _, _) = next else {
+                Issue.record("Expected following Chat command"); return
+            }
+            #expect(!chatVisible)
+            #expect(consumed == 2)
+        }
+    }
+
+    @Test("Help uses len32 rather than truncating at 65,535 bytes")
+    func largeHelp() throws {
+        var payload = Data([1, 1, 1])
+        appendString16(&payload, "Large help")
+        payload.append(2)
+        for key in ["a", "b"] {
+            appendString8(&payload, key)
+            appendString16(&payload, String(repeating: key, count: 40_000))
+        }
+        let data = frame(payload)
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentHelp(_, let groups) = command else {
+            Issue.record("Expected independent Help"); return
+        }
+        #expect(size == data.count)
+        #expect(size > 65_535)
+        #expect(groups[0].bindings[1].description.utf8.count == 40_000)
+    }
+
+    @Test("Help rejects unsupported version, invalid visibility, trailing and count-invalid data")
+    func malformedPayloads() {
+        let payloads: [Data] = [
+            Data(), Data([1]), Data([2, 0]), Data([1, 2]),
+            Data([1, 0, 0]), Data([1, 1]), Data([1, 1, 1]),
+            Data([1, 1, 1, 0, 0]), // title without binding count
+            Data([1, 1, 1, 0, 0, 1]), // binding without key
+            Data([1, 1, 1, 0, 0, 1, 2, 65]), // truncated key
+            Data([1, 1, 1, 0, 0, 1, 0, 0, 2, 65]), // truncated description
+            Data([1, 1, 0, 255]) // extra bytes
+        ]
+        for payload in payloads {
+            #expect(throws: (any Error).self) {
+                _ = try decodeCommand(data: frame(payload), offset: 0)
+            }
+        }
+    }
+
+    @Test("Every truncated Help frame fails instead of publishing partial groups")
+    func truncatedFrame() {
+        let data = frame(visiblePayload())
+        for cutoff in 0..<data.count {
+            #expect(throws: (any Error).self) {
+                _ = try decodeCommand(data: Data(data.prefix(cutoff)), offset: 0)
+            }
+        }
+    }
+}
+
+@Suite("Review Status Decoder")
+struct GUIReviewStatusDecoderTests {
+    private func payload(freshness: UInt8) -> Data {
+        var data = Data()
+        appendString16(&data, "lib/é/👩‍💻.ex")
+        data.append(freshness)
+        appendU32(&data, 0x12345678)
+        appendString16(&data, "opaque:é/old?revision=7")
+        return data
+    }
+
+    private func status(_ payload: Data) -> Data {
+        var data = Data([OP_GUI_STATUS_BAR, 1])
+        data.append(buildSectionData(0x10, payload))
+        return data
+    }
+
+    @Test("Optional Review preserves exact path, freshness and opaque source offer")
+    func typedReview() throws {
+        for freshness: UInt8 in [0, 1] {
+            let data = status(payload(freshness: freshness))
+            let (command, size) = try decodeCommand(data: data, offset: 0)
+            guard case .guiStatusBar(let update) = command else {
+                Issue.record("Expected status"); return
+            }
+            let review = try #require(update.review)
+            #expect(size == data.count)
+            #expect(review.path == "lib/é/👩‍💻.ex")
+            #expect(review.freshness.rawValue == freshness)
+            #expect(review.generation == 0x12345678)
+            #expect(review.itemID == "opaque:é/old?revision=7")
+        }
+        let (command, _) = try decodeCommand(data: Data([OP_GUI_STATUS_BAR, 0]), offset: 0)
+        guard case .guiStatusBar(let update) = command else {
+            Issue.record("Expected ordinary status"); return
+        }
+        #expect(update.review == nil)
+    }
+
+    @Test("Review rejects unknown freshness and section-local truncation")
+    func malformedReview() {
+        #expect(throws: (any Error).self) {
+            _ = try decodeCommand(data: status(payload(freshness: 2)), offset: 0)
+        }
+        let valid = payload(freshness: 1)
+        for cutoff in 0..<valid.count {
+            #expect(throws: (any Error).self) {
+                _ = try decodeCommand(data: status(Data(valid.prefix(cutoff))), offset: 0)
+            }
+        }
+        var extra = valid
+        extra.append(0)
+        #expect(throws: (any Error).self) {
+            _ = try decodeCommand(data: status(extra), offset: 0)
+        }
+    }
 }

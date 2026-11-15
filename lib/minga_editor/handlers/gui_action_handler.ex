@@ -601,17 +601,21 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:scroll_to_line, window_id, generation, line}) do
-    with_target(state, {:window, window_id, generation}, fn {:window, window} ->
-      viewport = Viewport.put_top(window.viewport, max(line, 0))
-      updated = scroll_to_line_commit(window, viewport)
+    with_target(state, {:window, window_id, generation}, fn
+      {:window, %Window{content: {:agent_review, :semantic}} = window} ->
+        MingaEditor.Mouse.scroll_review_to_line(state, window, max(line, 0))
 
-      windows =
-        Windows.set_map(
-          state.workspace.windows,
-          Map.put(state.workspace.windows.map, window.id, updated)
-        )
+      {:window, window} ->
+        viewport = Viewport.put_top(window.viewport, max(line, 0))
+        updated = scroll_to_line_commit(window, viewport)
 
-      %{state | workspace: State.set_windows(state.workspace, windows)}
+        windows =
+          Windows.set_map(
+            state.workspace.windows,
+            Map.put(state.workspace.windows.map, window.id, updated)
+          )
+
+        %{state | workspace: State.set_windows(state.workspace, windows)}
     end)
   end
 
@@ -1238,6 +1242,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp apply_semantic_target(state, %Target{}, :navigate, {:timeline_entry, path, entry}),
     do: Commands.EditTimeline.navigate_to_entry(state, path, entry)
+
+  defp apply_semantic_target(state, %Target{}, :review_file, {:timeline_file, _generation, path}),
+    do: Commands.EditTimeline.review_file(state, path)
+
+  defp apply_semantic_target(state, %Target{}, :back_to_chat, {:review, _review}),
+    do: Commands.Agent.return_to_chat(state)
+
+  defp apply_semantic_target(state, %Target{}, :review_file, {:review, review}),
+    do: Commands.EditTimeline.review_file(state, review.path)
 
   defp apply_semantic_target(state, %Target{}, intent, {:file_tree, tree, entry})
        when intent in [:new_file, :new_folder],

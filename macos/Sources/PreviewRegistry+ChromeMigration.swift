@@ -180,7 +180,7 @@ extension PreviewRegistry {
         let state = EditTimelineState(visible: true, files: [
             .init(path: "Sources/Chrome.swift", entryCount: 3, linesAdded: 18, linesRemoved: 7, reviewStatus: 1),
             .init(path: "Tests/ChromeTests.swift", entryCount: 2, linesAdded: 24, linesRemoved: 0, reviewStatus: 0)
-        ])
+        ], generation: 1)
         return VStack(spacing: 0) {
             EditTimelineView(state: state, sendAction: { _ in })
             Spacer(minLength: 0)
@@ -195,7 +195,7 @@ extension PreviewRegistry {
             .init(entryID: "read", index: 0, toolName: "read_file", timestampDelta: 0),
             .init(entryID: "edit", index: 1, toolName: "edit_file", timestampDelta: 10),
             .init(entryID: "review", index: 2, toolName: "review", timestampDelta: 20)
-        ])
+        ], generation: 1)
         return VStack(spacing: 0) {
             EditTimelineView(state: state, sendAction: { _ in })
             Spacer(minLength: 0)

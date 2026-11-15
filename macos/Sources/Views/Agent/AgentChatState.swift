@@ -342,17 +342,6 @@ private struct AgentTranscriptStore {
     }
 }
 
-/// A group of keybindings for the help overlay cheatsheet.
-public struct HelpGroup: Identifiable {
-    public init(title: String, bindings: [(key: String, description: String)]) {
-        self.title = title
-        self.bindings = bindings
-    }
-    public let title: String
-    public let bindings: [(key: String, description: String)]
-
-    public var id: String { title }
-}
 
 /// Value-semantic resident transcript used to validate and prepare a complete
 /// frame before any GUI state is published.
@@ -429,7 +418,7 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
 @MainActor
 @Observable
 public final class AgentChatState {
-    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], helpVisible: Bool = false, helpGroups: [HelpGroup] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
+    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -443,8 +432,6 @@ public final class AgentChatState {
         } catch {
             preconditionFailure("preview transcript resource accounting overflowed")
         }
-        self.helpVisible = helpVisible
-        self.helpGroups = helpGroups
         self.promptVersion = promptVersion
         self.promptLineCount = promptLineCount
         self.promptCursorLine = promptCursorLine
@@ -493,9 +480,6 @@ public final class AgentChatState {
     /// True when older messages sit outside the resident byte-cap window (0x86
     /// `truncated` flag). A UI hint that the visible history is not the full session.
     public var transcriptTruncated: Bool { transcriptSnapshotStorage.truncated }
-
-    public var helpVisible: Bool = false
-    public var helpGroups: [HelpGroup] = []
 
     /// Monotonically increasing counter for change detection.
     /// Increments on every update() so SwiftUI observers detect frame changes.
@@ -564,10 +548,10 @@ public final class AgentChatState {
         }
     }
 
-    /// Updates the chat chrome (visibility, status, model, prompt, help).
+    /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup]) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -580,8 +564,6 @@ public final class AgentChatState {
         self.promptVisibleRows = promptVisibleRows
         self.promptCompletion = promptCompletion
         self.promptVersion += 1
-        self.helpVisible = helpVisible
-        self.helpGroups = helpGroups
     }
 
     /// Applies a resident transcript frame (0x86, #2654 slice 2).
@@ -746,8 +728,6 @@ public final class AgentChatState {
 
     public func hide() {
         visible = false
-        helpVisible = false
-        helpGroups = []
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: [],

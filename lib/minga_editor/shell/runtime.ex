@@ -14,6 +14,7 @@ defmodule MingaEditor.Shell.Runtime do
   @type shell_state :: MingaEditor.Shell.shell_state()
   @type stash :: %{Identity.t() => StateStash.t()}
   @type persistence_change :: {Entry.t(), shell_state(), shell_state()}
+  @type review_scope :: {non_neg_integer(), pid() | nil}
 
   @enforce_keys [:entry, :state]
   defstruct [:entry, :state, stash: %{}]
@@ -407,6 +408,23 @@ defmodule MingaEditor.Shell.Runtime do
   @spec active_session(t()) :: pid() | nil
   def active_session(%__MODULE__{} = runtime),
     do: runtime.entry.module.active_session(runtime.state)
+
+  @doc "Returns the active workspace/session scope through its shell owner."
+  @spec review_scope(t()) :: review_scope() | nil
+  def review_scope(%__MODULE__{entry: %Entry{module: module}, state: state}),
+    do: review_scope(module, state)
+
+  @doc "Resolves the same scope from an immutable renderer shell snapshot."
+  @spec review_scope(module(), shell_state()) :: review_scope() | nil
+  def review_scope(module, state) when is_atom(module) do
+    case module.active_tab(state) do
+      %MingaEditor.State.Tab{group_id: workspace_id} ->
+        {workspace_id, module.active_session(state)}
+
+      nil ->
+        nil
+    end
+  end
 
   @spec restore_target(stash(), Entry.t(), shell_state()) :: {shell_state(), stash()}
   defp restore_target(stash, %Entry{} = target, initialized_state) do

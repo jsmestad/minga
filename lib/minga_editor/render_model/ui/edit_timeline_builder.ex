@@ -4,22 +4,25 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.EditTimeline
   alias MingaEditor.Agent.EditTimeline, as: EditTimelineState
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Window.Content
 
   @spec build(Context.t()) :: EditTimeline.t()
   def build(ctx) do
     timeline = get_timeline(ctx)
     path = active_buffer_path(ctx)
 
-    if timeline != nil and visible?(timeline, path) do
-      build_visible(timeline, path)
+    if timeline != nil and mounted?(ctx) do
+      build_visible(timeline, path, Preview.selected_path(ctx.workspace.agent_ui.view.preview))
     else
       build_hidden()
     end
   end
 
-  @spec build_visible(EditTimelineState.t(), String.t() | nil) :: EditTimeline.t()
-  defp build_visible(timeline, path) do
+  @spec build_visible(EditTimelineState.t(), String.t() | nil, String.t() | nil) ::
+          EditTimeline.t()
+  defp build_visible(timeline, path, selected_path) do
     entries = active_entries(timeline, path)
     viewing = active_viewing_index(timeline, path)
 
@@ -44,7 +47,7 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
       generation: timeline.generation,
       viewing_index: viewing,
       entries: timeline_entries,
-      files: file_entries(timeline, path)
+      files: file_entries(timeline, selected_path)
     }
   end
 
@@ -68,10 +71,12 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
 
   defp active_buffer_path(_ctx), do: nil
 
-  @spec visible?(EditTimelineState.t(), String.t() | nil) :: boolean()
-  defp visible?(timeline, path) do
-    EditTimelineState.file_summaries(timeline) != [] or
-      (path != nil and EditTimelineState.has_entries?(timeline, path))
+  @spec mounted?(Context.t()) :: boolean()
+  defp mounted?(%Context{windows: windows}) do
+    case Map.get(windows.map, windows.active) do
+      %{content: content} -> Content.agent_body?(content)
+      _ -> false
+    end
   end
 
   @spec active_entries(EditTimelineState.t(), String.t() | nil) :: [EditTimelineState.Entry.t()]
@@ -104,5 +109,5 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilder do
   @spec file_review_status(EditTimelineState.file_summary(), String.t() | nil) ::
           EditTimeline.FileEntry.review_status()
   defp file_review_status(%{path: path}, path), do: :reviewing
-  defp file_review_status(%{review_status: status}, _active_path), do: status
+  defp file_review_status(_summary, _selected_path), do: :pending
 end

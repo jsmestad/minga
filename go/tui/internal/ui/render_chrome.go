@@ -219,7 +219,9 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
 func (m Model) footerLines() []string {
 	status := fmt.Sprintf("row %d col %d", m.cursorRow+1, m.cursorCol+1)
 	if chromeStatus, ok := m.statusBar(); ok {
-		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 || chromeStatus.PendingKeys != "" {
+		if chromeStatus.Review != nil {
+			status = m.renderReviewStatus(*chromeStatus.Review)
+		} else if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 || chromeStatus.PendingKeys != "" {
 			status = m.renderStatusSegments(chromeStatus)
 		} else if chromeStatus.Filename != "" {
 			icon := devIconForPath(chromeStatus.Filename, false)
@@ -253,16 +255,10 @@ func (m Model) footerLines() []string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
 	}
-	// The single active secondary overlay is no longer footer-appended here: it is
-	// composited at its BEAM placement rect by overlayLayer (#2281). The footer
-	// still carries the minibuffer when no full overlay is active so the prompt
-	// line stays in the vertical layout.
-	if !m.modalOverlayActive() {
-		if _, active := m.overlayWinner(); !active {
-			if mini, ok := m.minibuffer(); ok && mini.Visible {
-				lines = append(lines, m.renderMinibuffer(mini))
-			}
-		}
+	// The committed minibuffer visibility authors the second footer row. Popup
+	// visibility must not independently change the body's available allocation.
+	if mini, ok := m.minibuffer(); ok && mini.Visible {
+		lines = append(lines, m.renderMinibuffer(mini))
 	}
 	return lines
 }

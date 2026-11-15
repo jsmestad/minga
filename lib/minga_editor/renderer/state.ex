@@ -23,6 +23,7 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.Renderer.ObservedBuffers
   alias MingaEditor.Renderer.ResidentWindowState
   alias MingaEditor.Renderer.TextPresentations
+  alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
@@ -31,6 +32,7 @@ defmodule MingaEditor.Renderer.State do
   @type editor_ref :: pid() | atom() | nil
   @type pipeline :: (Input.t() -> Input.t())
   @type recovery_reserver :: (-> FrontendManager.recovery_context())
+  @typep review_windows :: %{optional(Window.id()) => {pos_integer(), WindowCache.t()}}
 
   @type frame_successor :: FrameAttempt.t()
   @type frame_credit ::
@@ -51,6 +53,7 @@ defmodule MingaEditor.Renderer.State do
           caches: Caches.t(),
           message_store: MessageStore.t() | nil,
           resident_windows: %{optional(Window.id()) => ResidentWindowState.t()},
+          review_windows: review_windows(),
           text_presentations: TextPresentations.t(),
           observed_buffers: ObservedBuffers.t(),
           pipeline: pipeline(),
@@ -70,6 +73,7 @@ defmodule MingaEditor.Renderer.State do
             caches: Caches.new(),
             message_store: nil,
             resident_windows: %{},
+            review_windows: %{},
             text_presentations: nil,
             observed_buffers: ObservedBuffers.new(),
             pipeline: &RenderPipeline.run/1,
@@ -367,9 +371,80 @@ defmodule MingaEditor.Renderer.State do
     %{
       state
       | resident_windows: resident_windows,
+        review_windows: retain_review_windows(state.review_windows, windows),
         observed_buffers: observed_buffers
     }
   end
+
+  @doc "Returns the cache owned by the currently reconciled window source."
+  @spec window_cache(t(), Window.id()) :: WindowCache.t()
+  def window_cache(%__MODULE__{} = state, id) do
+    case {Map.get(state.resident_windows, id), Map.get(state.review_windows, id)} do
+      {%ResidentWindowState{} = resident, _review} ->
+        WindowCache.with_fetch_version(resident.render_cache, resident.last_version)
+
+      {nil, {_generation, cache}} ->
+        cache
+
+      {nil, nil} ->
+        WindowCache.reset()
+    end
+  end
+
+  @doc "Retains only live read-only review windows after a completed frame."
+  @spec commit_review_windows(t(), Input.t()) :: t()
+  def commit_review_windows(%__MODULE__{} = state, %Input{} = output) do
+    reviews =
+      Enum.reduce(output.windows.map, %{}, fn
+        {id,
+         %{
+           content: {:agent_review, :semantic},
+           accessibility_generation: generation,
+           render_cache: cache
+         }},
+        acc ->
+          Map.put(acc, id, {generation, cache})
+
+        {_id, _other}, acc ->
+          acc
+      end)
+
+    %{state | review_windows: reviews}
+  end
+
+  @doc "Requests a review keyframe without retiring its compatible identities."
+  @spec invalidate_review_window(t(), Window.id()) :: t()
+  def invalidate_review_window(%__MODULE__{} = state, id) do
+    case Map.fetch(state.review_windows, id) do
+      {:ok, {generation, cache}} ->
+        reviews =
+          Map.put(state.review_windows, id, {generation, WindowCache.mark_reset_pending(cache)})
+
+        %{state | review_windows: reviews}
+
+      :error ->
+        state
+    end
+  end
+
+  @spec retain_review_windows(review_windows(), %{
+          optional(Window.id()) => MingaEditor.RenderPipeline.WindowIntent.t()
+        }) :: review_windows()
+  defp retain_review_windows(existing, windows) do
+    Enum.reduce(windows, %{}, fn
+      {id, %{content: {:agent_review, :semantic}, accessibility_generation: generation}}, acc ->
+        cache = retain_review_cache(Map.get(existing, id), generation)
+        Map.put(acc, id, {generation, cache})
+
+      {_id, _other}, acc ->
+        acc
+    end)
+  end
+
+  @spec retain_review_cache({pos_integer(), WindowCache.t()} | nil, pos_integer()) ::
+          WindowCache.t()
+  defp retain_review_cache({generation, cache}, generation), do: cache
+  defp retain_review_cache(_previous, _generation), do: WindowCache.reset()
 
   @spec drop_buffer_down(t(), reference(), pid()) :: {t(), boolean()}
   def drop_buffer_down(%__MODULE__{} = state, ref, buffer)
@@ -414,7 +489,11 @@ defmodule MingaEditor.Renderer.State do
       | caches: Caches.reset_frontend_state(state.caches, recovery_generation),
         font_registry: FontRegistry.require_reregistration(state.font_registry),
         message_store: reset_message_cursor(state.message_store),
-        resident_windows: residents
+        resident_windows: residents,
+        review_windows:
+          Map.new(state.review_windows, fn {id, {generation, cache}} ->
+            {id, {generation, WindowCache.mark_reset_pending(cache)}}
+          end)
     }
   end
 
