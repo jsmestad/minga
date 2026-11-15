@@ -546,6 +546,11 @@ defmodule MingaAgent.SessionPersistenceTest do
     assert :ok = Session.send_prompt(session, "first prompt")
     assert_receive {:continuation_request, first_request}, @event_timeout
 
+    assert Enum.any?(Session.messages_with_ids(session), fn
+             {id, {:user, "first prompt"}} -> id == first_request.turn_id
+             _other -> false
+           end)
+
     assistant = %ReqLLM.Message{
       role: :assistant,
       content: [
@@ -579,6 +584,12 @@ defmodule MingaAgent.SessionPersistenceTest do
 
     assert {:error, {:portable_context_transition_required, _}} =
              Session.send_prompt(restarted, "follow-up")
+
+    refute {:user, "follow-up"} in Session.messages(restarted)
+    assert_receive {:agent_event, ^restarted, {:error, message}}, @event_timeout
+    assert Session.editor_snapshot(restarted).error == message
+    assert Session.status(restarted) == :error
+    assert {:system, message, :error} in Session.messages(restarted)
 
     refute_receive {:continuation_request, _request}, 0
     assert {:ok, preserved} = SessionStore.load(session_id, dir)
@@ -879,7 +890,8 @@ defmodule MingaAgent.SessionPersistenceTest do
   end
 
   @tag :tmp_dir
-  test "a successful persistence retry clears the durability failure", %{tmp_dir: dir} do
+  test "a completed turn still recovers when another submission is refused during its save retry",
+       %{tmp_dir: dir} do
     session =
       start_test_session(
         provider: Minga.Test.SessionContinuationProvider,
@@ -898,21 +910,34 @@ defmodule MingaAgent.SessionPersistenceTest do
     assert :ok = File.rename(sessions_dir, blocked_path)
     assert :ok = File.write(sessions_dir, "blocked")
 
-    try do
-      outcome =
-        MingaAgent.Session.Outcome.new(
-          request,
-          Enum.concat(request.messages, [ReqLLM.Context.assistant("completed but not saved")])
-        )
+    retry_token =
+      try do
+        outcome =
+          MingaAgent.Session.Outcome.new(
+            request,
+            Enum.concat(request.messages, [ReqLLM.Context.assistant("completed but not saved")])
+          )
 
-      send_provider_event(session, %MingaAgent.Event.AgentEnd{outcome: outcome})
-      assert Session.status(session) == :error
-    after
-      assert :ok = File.rm(sessions_dir)
-      assert :ok = File.rename(blocked_path, sessions_dir)
-    end
+        send_provider_event(session, %MingaAgent.Event.AgentEnd{outcome: outcome})
+        assert Session.status(session) == :error
+        before_retry = :sys.get_state(session).persistence
+        durability_error = Session.editor_snapshot(session).error
 
-    send(session, :save_session)
+        assert {:error, {:conversation_persistence_failed, _reason}} =
+                 Session.send_prompt(session, "do not publish this rejected draft")
+
+        after_retry = :sys.get_state(session).persistence
+        assert after_retry.retry_count == before_retry.retry_count + 1
+        assert Session.editor_snapshot(session).error == durability_error
+        refute {:user, "do not publish this rejected draft"} in Session.messages(session)
+        {token, _timer_ref} = after_retry.timer
+        token
+      after
+        assert :ok = File.rm(sessions_dir)
+        assert :ok = File.rename(blocked_path, sessions_dir)
+      end
+
+    send(session, {:save_session, retry_token})
     assert Session.status(session) == :idle
     assert {:ok, saved} = SessionStore.load(session_id, dir)
     assert Continuation.durable?(saved.continuation)

@@ -825,8 +825,10 @@ defmodule MingaAgent.Providers.Native do
            ),
          current_identity =
            ModelSelection.replay_identity(state.selection, authentication.identity),
-         true <- current_identity == identity,
-         true <- not retained? or identity.native_contract != :unknown do
+         true <-
+           current_identity == identity or
+             Prefix.requalifies_replay_identity?(identity, current_identity),
+         true <- not retained? or current_identity.native_contract != :unknown do
       {:reply, {:ok, authentication.material}, %{state | authentication: authentication}}
     else
       false ->

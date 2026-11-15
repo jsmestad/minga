@@ -45,6 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Codex models such as GPT-5.6 Luna can continue conversations instead of stopping silently after the first reply. Replay qualification checks the exact official transport and captured inputs, including a bounded path for previously unqualified records. Rejected prompts retain their drafts and report failures; pre-admission refusal no longer adds a misleading user entry.
 - Go Messages label and color log entries by their committed severity. Errors show `ERR` instead of `OK`, warnings show `WRN`, and informational entries show `INF`.
 - Agent workspace switches preserve each conversation's transcript and draft, clear stale launchpad routing, and restore composer input instead of creating an Untitled buffer. Returning to the editor without an available target keeps Agent input usable.
 - The macOS Add menu creates a new agent workspace with its composer instead of toggling an existing workspace.

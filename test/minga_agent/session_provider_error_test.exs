@@ -1,6 +1,9 @@
 defmodule MingaAgent.SessionProviderErrorTest do
   use Minga.Test.SessionCase, async: true
 
+  # Completion includes durable checkpoints and shared filesystem waits, not a five-second event SLA.
+  @durable_workflow_timeout 30_000
+
   describe "MCP crash handling" do
     @tag :tmp_dir
     test "adds a system message and can still run a builtin tool", %{tmp_dir: dir} do
@@ -38,6 +41,19 @@ defmodule MingaAgent.SessionProviderErrorTest do
            retention_sweep?: false,
            health_check: :none}
         )
+
+      suffix = System.unique_integer([:positive])
+
+      artifact_opts = [
+        name: nil,
+        root: Path.join(dir, "artifacts"),
+        quota: Module.concat(__MODULE__, "RecoveryArtifactQuota#{suffix}"),
+        registry: Module.concat(__MODULE__, "RecoveryArtifactRegistry#{suffix}"),
+        store_supervisor: Module.concat(__MODULE__, "RecoveryArtifactStores#{suffix}")
+      ]
+
+      start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+      {:ok, artifact_runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
 
       llm_client = fn _model, _messages, opts ->
         count = :counters.get(call_count, 1)
@@ -92,6 +108,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
           persist?: true,
           session_store_dir: Path.join(dir, "sessions"),
           event_log_server: event_log,
+          artifact_runtime: artifact_runtime,
           provider: Native,
           credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
           provider_opts: [
@@ -123,7 +140,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
       assert :ok = Session.respond_to_approval(session, :approve)
       assert_receive {:mcp_transport_started, "Local Tools", transport}, @event_timeout
-      await_durable_mcp_turn(session, 1, "MCP discovery")
+      await_durable_mcp_turn(session, "list_mcp_tools", 1, "MCP discovery")
 
       FakeTransport.crash(transport)
 
@@ -133,7 +150,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
       assert_receive {:agent_event, ^session, {:status_changed, :error}}, @event_timeout
 
       assert :ok = Session.send_prompt(session, "continue")
-      await_durable_mcp_turn(session, 3, "builtin recovery")
+      await_durable_mcp_turn(session, "builtin_echo", 3, "builtin recovery")
       assert_receive {:session_mcp_tools, 2, tool_names}, @event_timeout
       assert "builtin_echo" in tool_names
       assert "list_mcp_tools" in tool_names
@@ -141,8 +158,12 @@ defmodule MingaAgent.SessionProviderErrorTest do
       refute "mcp_local_tools__echo_text" in tool_names
 
       assert Enum.any?(Session.messages(session), fn
-               {:tool_call, %{name: "builtin_echo", status: :complete, is_error: false}} -> true
-               _ -> false
+               {:tool_call,
+                %{name: "builtin_echo", status: :complete, is_error: false, result: "builtin ok"}} ->
+                 true
+
+               _ ->
+                 false
              end)
     end
   end
@@ -272,12 +293,39 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
   end
 
-  @spec await_durable_mcp_turn(GenServer.server(), non_neg_integer(), String.t()) :: :ok
-  defp await_durable_mcp_turn(session, response_call, phase) do
-    # Tool/checkpoint work precedes the final response; the durability deadline starts after it.
+  @spec await_durable_mcp_turn(GenServer.server(), String.t(), non_neg_integer(), String.t()) ::
+          :ok
+  defp await_durable_mcp_turn(session, tool_name, response_call, phase) do
+    receive do
+      {:agent_event, ^session, {:tool_ended, ^tool_name, _result, :done}} ->
+        :ok
+
+      {:agent_event, ^session, {:tool_ended, ^tool_name, result, status}} ->
+        flunk("#{phase} tool ended with #{inspect(status)}: #{inspect(result)}")
+
+      {:agent_event, ^session, {:approval_pending, approval}} ->
+        flunk("#{phase} unexpectedly needs approval: #{inspect(approval)}")
+
+      {:agent_event, ^session, {:error, message}} ->
+        flunk("#{phase} failed before its tool completed: #{message}")
+
+      {:agent_event, ^session, {:status_changed, :error}} ->
+        flunk("#{phase} entered error before its tool completed")
+    after
+      @durable_workflow_timeout ->
+        flunk(
+          "#{phase} tool did not complete; mailbox: " <>
+            inspect(Process.info(self(), :messages), limit: :infinity)
+        )
+    end
+
+    # Final-response completion starts after the public tool/persistence completion event.
     receive do
       {:mcp_response_stream_exhausted, ^response_call} ->
         :ok
+
+      {:agent_event, ^session, {:approval_pending, approval}} ->
+        flunk("#{phase} unexpectedly needs approval: #{inspect(approval)}")
 
       {:agent_event, ^session, {:error, message}} ->
         flunk("#{phase} failed before its response stream was exhausted: #{message}")
@@ -285,12 +333,19 @@ defmodule MingaAgent.SessionProviderErrorTest do
       {:agent_event, ^session, {:status_changed, :error}} ->
         flunk("#{phase} entered error before its response stream was exhausted")
     after
-      @event_timeout -> flunk("#{phase} response stream was not exhausted")
+      @durable_workflow_timeout ->
+        flunk(
+          "#{phase} response stream was not exhausted; mailbox: " <>
+            inspect(Process.info(self(), :messages), limit: :infinity)
+        )
     end
 
     receive do
       {:agent_event, ^session, {:resumable_boundary, _revision}} ->
         :ok
+
+      {:agent_event, ^session, {:approval_pending, approval}} ->
+        flunk("#{phase} unexpectedly needs approval: #{inspect(approval)}")
 
       {:agent_event, ^session, {:error, message}} ->
         flunk("#{phase} failed before durable completion: #{message}")
@@ -298,7 +353,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
       {:agent_event, ^session, {:status_changed, :error}} ->
         flunk("#{phase} entered error before durable completion")
     after
-      @event_timeout ->
+      @durable_workflow_timeout ->
         flunk(
           "#{phase} did not publish a durable boundary; mailbox: " <>
             inspect(Process.info(self(), :messages), limit: :infinity)
@@ -309,13 +364,20 @@ defmodule MingaAgent.SessionProviderErrorTest do
       {:agent_event, ^session, {:status_changed, :idle}} ->
         :ok
 
+      {:agent_event, ^session, {:approval_pending, approval}} ->
+        flunk("#{phase} unexpectedly needs approval: #{inspect(approval)}")
+
       {:agent_event, ^session, {:error, message}} ->
         flunk("#{phase} failed after its durable boundary: #{message}")
 
       {:agent_event, ^session, {:status_changed, :error}} ->
         flunk("#{phase} entered error after its durable boundary")
     after
-      @event_timeout -> flunk("#{phase} did not become idle after its durable boundary")
+      @durable_workflow_timeout ->
+        flunk(
+          "#{phase} did not become idle after its durable boundary; mailbox: " <>
+            inspect(Process.info(self(), :messages), limit: :infinity)
+        )
     end
   end
 end

@@ -12,6 +12,9 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
   @moduletag :tmp_dir
   @event_timeout 2_000
 
+  # The replay fixture commits several durable checkpoints before reporting completion.
+  @durable_workflow_timeout 30_000
+
   defmodule SteeringProvider do
     @behaviour MingaAgent.Provider
 
@@ -236,6 +239,19 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
         {EventLog, name: log_name, db_dir: tmp_dir, retention_sweep?: false, health_check: :none}
       )
 
+    suffix = System.unique_integer([:positive])
+
+    artifact_opts = [
+      name: nil,
+      root: Path.join(tmp_dir, "artifacts"),
+      quota: Module.concat(__MODULE__, "ReplayArtifactQuota#{suffix}"),
+      registry: Module.concat(__MODULE__, "ReplayArtifactRegistry#{suffix}"),
+      store_supervisor: Module.concat(__MODULE__, "ReplayArtifactStores#{suffix}")
+    ]
+
+    start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+    {:ok, artifact_runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
+
     session =
       start_supervised!(
         {Session,
@@ -245,13 +261,13 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
          persist?: true,
          session_store_dir: tmp_dir,
          hooks_enabled?: false,
+         artifact_runtime: artifact_runtime,
          provider_opts: [test_pid: self()]}
       )
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "hello")
-    :sys.get_state(Session.get_provider(session))
-    assert_receive {:replay_provider_finished, "hello"}
+    assert_receive {:replay_provider_finished, "hello"}, @durable_workflow_timeout
     :sys.get_state(session)
     :sys.get_state(log_pid)
 
