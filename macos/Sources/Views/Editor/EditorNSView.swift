@@ -1709,6 +1709,8 @@ final class EditorNSView: MTKView {
             return
         }
 
+        dispatcher.previewAgentHelpNavigation(event, in: window)
+
         // Special keys outside composition bypass IME.
         if let codepoint = mapKeyCode(event) {
             sendKeyPress(codepoint: codepoint, modifiers: mods)

@@ -52,7 +52,8 @@ defmodule MingaEditor.Renderer.RenderWindow do
     :scroll_velocity,
     :scroll_detach_cursor,
     :scroll_echo_top,
-    :authoritative_scroll_seq
+    :authoritative_scroll_seq,
+    :review_frame_rendered?
   ]
 
   @type t :: %__MODULE__{
@@ -68,7 +69,8 @@ defmodule MingaEditor.Renderer.RenderWindow do
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
           scroll_echo_top: integer() | nil,
-          authoritative_scroll_seq: non_neg_integer()
+          authoritative_scroll_seq: non_neg_integer(),
+          review_frame_rendered?: boolean()
         }
 
   @enforce_keys @fields
@@ -89,7 +91,8 @@ defmodule MingaEditor.Renderer.RenderWindow do
       scroll_velocity: carrier.scroll_velocity,
       scroll_detach_cursor: carrier.scroll_detach_cursor,
       scroll_echo_top: carrier.scroll_echo_top,
-      authoritative_scroll_seq: carrier.authoritative_scroll_seq
+      authoritative_scroll_seq: carrier.authoritative_scroll_seq,
+      review_frame_rendered?: false
     }
   end
 
@@ -100,6 +103,30 @@ defmodule MingaEditor.Renderer.RenderWindow do
   def set_viewport(%__MODULE__{} = window, %Viewport{} = viewport) do
     %{window | viewport: viewport}
   end
+
+  @doc "Records a built Review frame and settles its visual-row scroll authority."
+  @spec observe_review_frame(t(), Viewport.t(), non_neg_integer()) :: t()
+  def observe_review_frame(
+        %__MODULE__{content: {:agent_review, :semantic}, render_cache: cache} = window,
+        %Viewport{} = viewport,
+        visual_top
+      ) do
+    cache =
+      RenderCache.settle_scroll_seq(
+        cache,
+        visual_top,
+        window.scroll_echo_top,
+        window.authoritative_scroll_seq
+      )
+
+    %{window | viewport: viewport, render_cache: cache, review_frame_rendered?: true}
+  end
+
+  @doc "Returns the bounded source evidence for a rendered Review observation."
+  @spec review_observation_source(t()) ::
+          {term(), MingaEditor.Agent.View.Preview.review_source(), non_neg_integer()} | nil
+  def review_observation_source(%__MODULE__{render_cache: cache}),
+    do: RenderCache.review_observation_source(cache)
 
   @doc "Stores the renderer-local cursor for this window."
   @spec set_cursor(t(), Buffer.position()) :: t()
@@ -483,6 +510,26 @@ defmodule MingaEditor.Renderer.RenderWindow do
   def prepare_render_epoch(%__MODULE__{render_cache: cache} = window, reset_fingerprint) do
     {cache, epoch, full_refresh?} = RenderCache.prepare_epoch(cache, reset_fingerprint)
     {%{window | render_cache: cache}, epoch, full_refresh?}
+  end
+
+  @doc "Projects resident review rows through the render-cache owner."
+  @spec project_review(
+          t(),
+          MingaEditor.Agent.View.Preview.t(),
+          term(),
+          MingaEditor.RenderModel.Window.ReviewLayout.t()
+        ) ::
+          {:ok, MingaEditor.RenderModel.Window.ReviewProjection.t(),
+           Minga.RenderModel.Window.RowDelta.t() | nil, t()}
+          | {:error, :review_unavailable | :row_slot_capacity}
+  def project_review(%__MODULE__{render_cache: cache} = window, preview, selection, layout) do
+    case RenderCache.project_review(cache, preview, selection, layout) do
+      {:ok, projection, delta, cache} ->
+        {:ok, projection, delta, %{window | render_cache: cache}}
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   @doc "Returns a cached wrapped visual row total when the key matches."

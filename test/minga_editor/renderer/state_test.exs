@@ -16,6 +16,17 @@ defmodule MingaEditor.Renderer.StateTest do
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.TextPresentations
+  alias Minga.Core.WidthOracle.Monospace
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.Renderer.RenderWindow
+  alias MingaEditor.RenderModel.Window.ReviewLayout
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Traditional.Workflow
+  alias MingaEditor.State.Windows
+  alias MingaEditor.UI.Theme
+  alias MingaEditor.Window, as: EditorWindow
 
   test "new state starts with idle frame credit" do
     assert State.new([]).frame_credit == :idle
@@ -143,6 +154,101 @@ defmodule MingaEditor.Renderer.StateTest do
     reset = State.reset_connection(recovered, 3)
     assert State.text_interaction_reader(reset) == reader
     assert {:error, :inactive} = Reader.resolve(reader, event(replacement))
+  end
+
+  test "review rows survive frame materialization and recovery without creating buffer authority" do
+    {editor, preview} = review_editor()
+    input = Input.from_editor_state(editor)
+    id = input.windows.active
+    carrier = Map.fetch!(input.intent.windows, id)
+    renderer = State.reconcile_windows(State.new([]), input.intent)
+    layout = ReviewLayout.new(80, %Monospace{}, Theme.get!(:minga_default), 4)
+    window = RenderWindow.materialize(id, carrier, State.window_cache(renderer, id))
+
+    {:ok, projection, nil, window} =
+      RenderWindow.project_review(window, preview, :workspace, layout)
+
+    {window, epoch, true} = RenderWindow.prepare_render_epoch(window, :review)
+    output = Input.record_render_window(input, id, window)
+    renderer = State.commit_review_windows(renderer, output)
+    assert renderer.resident_windows == %{}
+    assert map_size(renderer.review_windows) == 1
+
+    renderer = State.reconcile_windows(renderer, input.intent)
+    window = RenderWindow.materialize(id, carrier, State.window_cache(renderer, id))
+
+    {:ok, retained, nil, window} =
+      RenderWindow.project_review(window, preview, :workspace, layout)
+
+    assert :erts_debug.same(projection, retained)
+    {_window, same_epoch, false} = RenderWindow.prepare_render_epoch(window, :review)
+    assert same_epoch == epoch
+
+    renderer = State.reset_frontend(renderer, 2)
+    window = RenderWindow.materialize(id, carrier, State.window_cache(renderer, id))
+
+    {:ok, retained, nil, window} =
+      RenderWindow.project_review(window, preview, :workspace, layout)
+
+    assert :erts_debug.same(projection, retained)
+    {_window, same_epoch, true} = RenderWindow.prepare_render_epoch(window, :review)
+    assert same_epoch == epoch
+  end
+
+  test "leaving review drops its cache and a replacement window cannot inherit old rows" do
+    {editor, preview} = review_editor()
+    input = Input.from_editor_state(editor)
+    id = input.windows.active
+    renderer = State.reconcile_windows(State.new([]), input.intent)
+    carrier = Map.fetch!(input.intent.windows, id)
+    layout = ReviewLayout.new(80, %Monospace{}, Theme.get!(:minga_default), 4)
+    window = RenderWindow.materialize(id, carrier, State.window_cache(renderer, id))
+
+    {:ok, _projection, nil, window} =
+      RenderWindow.project_review(window, preview, :workspace, layout)
+
+    renderer =
+      State.commit_review_windows(renderer, Input.record_render_window(input, id, window))
+
+    original = Windows.active_struct(editor.workspace.windows)
+
+    replaced =
+      EditorWindow.new_agent_chat(original.id, original.viewport.rows, original.viewport.cols)
+      |> EditorWindow.show_agent_body(:review)
+
+    replacement = replace_editor_window(editor, replaced) |> Input.from_editor_state()
+    renderer = State.reconcile_windows(renderer, replacement.intent)
+    assert State.window_cache(renderer, id).review_projection == nil
+
+    closed =
+      replace_editor_window(editor, EditorWindow.show_empty_state(original))
+      |> Input.from_editor_state()
+
+    renderer = State.reconcile_windows(renderer, closed.intent)
+    assert renderer.review_windows == %{}
+  end
+
+  defp review_editor do
+    editor = TestHelpers.base_state()
+    original = Windows.active_struct(editor.workspace.windows)
+
+    window =
+      EditorWindow.new_agent_chat(original.id, original.viewport.rows, original.viewport.cols)
+
+    editor = replace_editor_window(editor, window)
+    preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
+
+    ui =
+      editor.workspace.agent_ui
+      |> UIState.replace_preview(preview)
+      |> UIState.set_focus(:file_viewer)
+
+    {Workflow.install_agent_ui(editor, ui), preview}
+  end
+
+  defp replace_editor_window(editor, window) do
+    windows = Windows.replace_window(editor.workspace.windows, window.id, window)
+    %{editor | workspace: SessionState.set_windows(editor.workspace, windows)}
   end
 
   defp presentation(window_id, row_id, line, text) do

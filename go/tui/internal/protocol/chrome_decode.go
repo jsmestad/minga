@@ -28,7 +28,11 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 	case generated.OPGuiFileTree:
 		chrome.Tree, chrome.Summary, chrome.Bytes = decodeFileTree(payload)
 	case generated.OPGuiStatusBar:
-		chrome.Status, chrome.Summary, chrome.Bytes = decodeStatus(payload)
+		var err error
+		chrome.Status, chrome.Summary, chrome.Bytes, err = decodeStatus(payload)
+		if err != nil {
+			return ChromePayload{}, true, err
+		}
 	case generated.OPGuiTheme:
 		chrome.Theme, chrome.Summary, chrome.Bytes = decodeTheme(payload)
 	case generated.OPGuiBreadcrumb:
@@ -61,6 +65,13 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 		chrome.AgentContext, chrome.Summary, chrome.Bytes = decodeAgentContext(payload)
 	case generated.OPGuiAgentChat:
 		chrome.AgentChat, chrome.Summary, chrome.Bytes = decodeAgentChat(payload)
+	case generated.OPGuiAgentHelp:
+		var err error
+		chrome.AgentHelp, chrome.Bytes, err = decodeAgentHelp(payload)
+		if err != nil {
+			return ChromePayload{}, true, err
+		}
+		chrome.Summary = "agent help"
 	case generated.OPGuiAgentTranscript:
 		chrome.AgentTranscript, chrome.Summary, chrome.Bytes = decodeAgentTranscript(payload)
 	case generated.OPGuiEditTimeline:

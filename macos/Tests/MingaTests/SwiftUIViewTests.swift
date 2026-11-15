@@ -1482,6 +1482,12 @@ struct AgentChatViewTests {
         }))
         try highButton.tap()
         #expect(spy.actions.contains(.executeCommand(name: "agent_thinking_high")))
+        let help = try #require(headerButtons.first {
+            (try? $0.accessibilityLabel().string()) == "Agent help"
+        })
+        try help.tap()
+        #expect(spy.actions.last == .executeCommand(name: "agent_toggle_help"))
+        #expect(spy.keyPressCalls.isEmpty)
     }
 
     @Test("Approval buttons dispatch the matching trust keypresses")

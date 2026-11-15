@@ -104,11 +104,39 @@ defmodule MingaEditor.TargetTest do
          intent: :resolve,
          generation: timeline.generation,
          item_id: timeline_id
-       }, {:timeline_entry, "/project/named.ex", timeline_entry}}
+       }, {:timeline_entry, "/project/named.ex", timeline_entry}},
+      {timelines,
+       %MingaEditor.Target{
+         surface: :timeline,
+         intent: :review_file,
+         generation: timeline.generation,
+         item_id: "/project/named.ex"
+       }, {:timeline_file, timeline.generation, "/project/named.ex"}}
     ]
 
     for {snapshot, target, expected} <- cases do
       assert Target.resolve(snapshot, target) == {:ok, expected}, inspect(target)
+    end
+  end
+
+  test "file Review rejects stale generations and unoffered paths instead of resolving an entry or another file" do
+    {state, timeline, entry} = timeline_state(TestHelpers.base_state())
+    entry_id = EditTimeline.entry_id("/project/named.ex", entry)
+
+    for {generation, path, reason} <- [
+          {0, "/project/named.ex", :stale_generation},
+          {timeline.generation + 1, "/project/named.ex", :stale_generation},
+          {timeline.generation, "/other/named.ex", :not_found},
+          {timeline.generation, entry_id, :not_found}
+        ] do
+      target = %Target{
+        surface: :timeline,
+        intent: :review_file,
+        generation: generation,
+        item_id: path
+      }
+
+      assert Target.resolve(state, target) == {:error, reason}
     end
   end
 

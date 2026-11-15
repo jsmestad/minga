@@ -176,6 +176,7 @@ defmodule MingaEditor.FocusTree do
       |> Kernel.++([editor_area_node(layout, window_map, bottom_handler)])
       |> maybe_add(layout.file_tree, &file_tree_node(&1, state))
       |> maybe_add(layout.agent_panel, &agent_panel_node/1)
+      |> maybe_add(layout.edit_timeline, &timeline_node/1)
       |> maybe_add(layout.status_bar, &TreeNode.new(:status_bar, &1, handler: bottom_handler))
       |> Kernel.++([TreeNode.new(:minibuffer, layout.minibuffer, handler: bottom_handler)])
       |> maybe_add(bottom_panel_rect(layout, state), &bottom_panel_node/1)
@@ -189,6 +190,15 @@ defmodule MingaEditor.FocusTree do
       focusable?: false,
       children: children
     }
+  end
+
+  @spec timeline_node(Layout.rect()) :: TreeNode.t()
+  defp timeline_node(rect) do
+    TreeNode.new(:edit_timeline, rect,
+      handler: Input.OverlaySink,
+      scrollable?: true,
+      focusable?: true
+    )
   end
 
   @spec bottom_panel_rect(Layout.t(), map() | nil) :: Layout.rect() | nil
@@ -521,7 +531,18 @@ defmodule MingaEditor.FocusTree do
   defp add_modal_overlays(%TreeNode{} = root, state, layout) do
     case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       %Completion{} = completion -> add_completion_overlay(root, completion, state, layout)
-      _ -> root
+      _ -> add_agent_help_overlay(root, state, layout)
+    end
+  end
+
+  @spec add_agent_help_overlay(t(), EditorState.t() | RenderInput.t(), Layout.t()) :: t()
+  defp add_agent_help_overlay(root, state, layout) do
+    case {Input.AgentHelp.active?(state), active_window_layout(layout, state)} do
+      {true, %{content: {_row, _col, width, height} = rect}} when width > 0 and height > 0 ->
+        append_root_child(root, TreeNode.new(:agent_help, rect, handler: Input.OverlaySink))
+
+      _ ->
+        root
     end
   end
 
@@ -570,7 +591,7 @@ defmodule MingaEditor.FocusTree do
   defp add_completion_overlay(%TreeNode{} = root, completion, state, layout) do
     case CompletionUI.menu_rect(completion, completion_render_opts(state, layout)) do
       nil ->
-        root
+        add_agent_help_overlay(root, state, layout)
 
       rect ->
         backdrop =

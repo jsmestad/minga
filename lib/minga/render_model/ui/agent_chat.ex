@@ -4,9 +4,8 @@ defmodule Minga.RenderModel.UI.AgentChat do
 
   Describes the agent conversation view: visibility, runtime status, the active
   model name and thinking level, the prompt buffer plus its cell-grid metadata
-  (cursor, vim mode, line counts), an optional prompt completion popup, an
-  optional help overlay, and the resident conversation messages with their stable
-  BEAM-assigned IDs.
+  (cursor, vim mode, line counts), an optional prompt completion popup, and the resident conversation messages with their stable BEAM-assigned IDs.
+  Agent Help has its own semantic model and transport, so it remains available while chat is hidden.
   This is pure data with domain fields and **core types only**. It does not
   reference any product module; the editor builder pre-resolves every agent
   struct into the core views defined here before putting them on the model. The
@@ -99,8 +98,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
           prompt_vim_mode: atom() | nil,
           prompt_visible_rows: non_neg_integer() | nil,
           prompt_completion: PromptCompletion.t() | nil,
-          help_visible?: boolean(),
-          help_groups: [{String.t(), [{String.t(), String.t()}]}],
           input_focused: boolean(),
           resident_messages: [message()],
           resident_truncated?: boolean(),
@@ -118,8 +115,6 @@ defmodule Minga.RenderModel.UI.AgentChat do
             prompt_vim_mode: nil,
             prompt_visible_rows: 1,
             prompt_completion: nil,
-            help_visible?: false,
-            help_groups: [],
             input_focused: false,
             resident_messages: [],
             resident_truncated?: false,

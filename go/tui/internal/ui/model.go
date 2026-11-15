@@ -18,12 +18,14 @@ import (
 )
 
 const (
-	arrowLeft  rune = 57350
-	arrowRight rune = 57351
-	arrowUp    rune = 57352
-	arrowDown  rune = 57353
-	pageUp     rune = 57362
-	pageDown   rune = 57363
+	arrowLeft   rune = 57350
+	arrowRight  rune = 57351
+	arrowUp     rune = 57352
+	arrowDown   rune = 57353
+	homeKeyCode rune = 57360
+	endKeyCode  rune = 57361
+	pageUp      rune = 57362
+	pageDown    rune = 57363
 )
 
 type Model struct {
@@ -66,9 +68,13 @@ type Model struct {
 	// Once an extension ships a terminal runtime decoder, it reads from here.
 	extensionRuntimes     map[string]protocol.ExtensionRuntimePayload
 	bottomPanelScrollback int
-	agent                 agentPanel
-	feedback              feedbackState
-	now                   func() time.Time
+	// timelineFirstPath is a discardable reading anchor in the BEAM-ordered file list.
+	// New offers and review-status changes never select or reveal a file.
+	timelineFirstPath string
+	agentHelpScroll   int
+	agent             agentPanel
+	feedback          feedbackState
+	now               func() time.Time
 	// latency records end-to-end keystroke-to-write samples (ticket #2215).
 	// It is a pointer so the recorder persists across value-copied Model
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
@@ -266,6 +272,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		component, _ := m.focusedComponent()
+		if m.presentAgentHelpKey(msg, component) {
+			// Presentation scrolling does not change input ownership; the canonical encoder still forwards supported keys to the BEAM's Help handler.
+			seq := m.latency.Stamp()
+			if packet, ok := keyPacket(msg, seq); ok {
+				m.send(packet)
+			}
+			break
+		}
 		if packet, handled := m.localPreviewActivationPacket(msg, component); handled {
 			m.send(packet)
 			break
@@ -336,7 +350,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case handled:
 			default:
 				if packet, ok := m.semanticMousePacket(msg); ok {
-					m.send(packet)
+					if packet != nil {
+						m.send(packet)
+					}
 				} else if updated, packet, handled := m.handleEditorTextMouse(msg); handled {
 					m = updated
 					if packet != nil {
@@ -537,8 +553,14 @@ func (m Model) View() tea.View {
 		content = m.protocolErrorView()
 	} else {
 		body := m.viewport.View()
-		parts := append(m.headerLines(), body)
-		parts = append(parts, m.footerLines()...)
+		parts := append(m.headerLines()[:m.layout.header.Height], body)
+		if gap := m.layout.footer.Y - m.layout.body.Y - m.layout.body.Height; gap > 0 {
+			blank := strings.Repeat(" ", max(m.width, 1))
+			for range gap {
+				parts = append(parts, blank)
+			}
+		}
+		parts = append(parts, m.footerLines()[:m.layout.footer.Height]...)
 		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence()
@@ -815,6 +837,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	}
 
 	if m.staging.base == 0 {
+		m.retireMissingWindows(windowSnapshot.windows)
 		m.lineCache.reset()
 		m.renderWork.fullResets++
 	}
@@ -825,6 +848,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	for _, staged := range m.staging.commands {
 		m.applyMutation(staged)
 	}
+	m.scrollAgentHelp(0)
 	// Gutter state is prepared as a detached frame candidate so retain updates,
 	// keyframe clears, and structural replacements publish atomically.
 	m.gutters = gutterCandidate
@@ -961,20 +985,26 @@ type gutterReferenceFailure struct {
 // validateWindowReferences resolves deltas against a temporary window snapshot.
 // It performs no observable writes, so any failure is reported before publication.
 func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowReferenceFailure) {
-	working := make(map[uint16]protocol.WindowContent, len(m.windows))
-	stores := make(map[uint16]residentRows, len(m.residentRows))
-	semantics := make(map[uint16]*residentSemanticStore, len(m.residentSemantics))
-	initializedSemantics := make(map[uint16]bool, len(m.residentSemantics))
+	retained := 0
+	if m.staging.base != 0 {
+		retained = len(m.windows)
+	}
+	working := make(map[uint16]protocol.WindowContent, retained)
+	stores := make(map[uint16]residentRows, retained)
+	semantics := make(map[uint16]*residentSemanticStore, retained)
+	initializedSemantics := make(map[uint16]bool, retained)
 	pendingSemantics := make(map[uint16]bool)
-	for id, window := range m.windows {
-		working[id] = window
-	}
-	for id, store := range m.residentRows {
-		stores[id] = store
-	}
-	for id, semantic := range m.residentSemantics {
-		semantics[id] = semantic
-		initializedSemantics[id] = true
+	if m.staging.base != 0 {
+		for id, window := range m.windows {
+			working[id] = window
+		}
+		for id, store := range m.residentRows {
+			stores[id] = store
+		}
+		for id, semantic := range m.residentSemantics {
+			semantics[id] = semantic
+			initializedSemantics[id] = true
+		}
 	}
 	for _, command := range m.staging.commands {
 		switch command.Kind {
@@ -1170,6 +1200,12 @@ func (m *Model) applyMutation(command protocol.Command) {
 	case protocol.CommandExtensionRuntime:
 		m.applyExtensionRuntime(command.ExtensionRuntime)
 	case protocol.CommandChrome:
+		if command.Chrome.Opcode == generated.OPGuiAgentHelp {
+			previous, _ := m.agentHelp()
+			if !command.Chrome.AgentHelp.Visible || !previous.Visible {
+				m.agentHelpScroll = 0
+			}
+		}
 		if command.Chrome.Opcode == generated.OPGuiBottomPanel {
 			command.Chrome.Bottom = m.mergedBottomPanel(command.Chrome.Bottom)
 		}
@@ -1381,10 +1417,7 @@ func (m *Model) refreshCursorFromWindows() {
 }
 
 func (m *Model) removeWindow(id uint16) {
-	delete(m.windows, id)
-	delete(m.residentSemantics, id)
-	delete(m.residentRows, id)
-	m.localPresentation.removeWindow(id)
+	m.discardWindowState(id)
 	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {
 		if windowID == id {
@@ -1392,6 +1425,33 @@ func (m *Model) removeWindow(id uint16) {
 			return
 		}
 	}
+}
+
+func (m *Model) discardWindowState(id uint16) {
+	delete(m.windows, id)
+	delete(m.residentSemantics, id)
+	delete(m.residentRows, id)
+	delete(m.gutters, id)
+	delete(m.indentGuides, id)
+	m.localPresentation.removeWindow(id)
+	if m.textDrag != nil && m.textDrag.windowID == id {
+		m.textDrag = nil
+	}
+}
+
+func (m *Model) retireMissingWindows(next map[uint16]protocol.WindowContent) {
+	for id := range m.windows {
+		if _, retained := next[id]; !retained {
+			m.discardWindowState(id)
+		}
+	}
+	order := m.windowOrder[:0]
+	for _, id := range m.windowOrder {
+		if _, retained := next[id]; retained {
+			order = append(order, id)
+		}
+	}
+	m.windowOrder = order
 }
 
 func (m Model) bodyHeight() int {

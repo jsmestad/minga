@@ -571,9 +571,9 @@ struct EncoderGUIActionTests {
         #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
     }
 
-    @Test("command completion and timeline activation use semantic surfaces")
+    @Test("command completion, timeline and Review activation use semantic surfaces")
     func additionalSemanticSurfaces() {
-        for surface in [SemanticItemSurface.commandCompletion, .timeline] {
+        for surface in [SemanticItemSurface.commandCompletion, .timeline, .review] {
             let payload = captureFrame {
                 $0.send(.semanticItemActivate(surface: surface, intent: 1, generation: 42, itemID: Data("stable-id".utf8)))
             }
@@ -583,6 +583,23 @@ struct EncoderGUIActionTests {
             #expect(readU32(payload, 4) == 42)
             let (id, end) = readString16(payload, 8)
             #expect(id == "stable-id")
+            #expect(end == payload.count)
+        }
+    }
+
+    @Test("Review Back and Refresh echo exact Unicode item IDs on surface six")
+    func reviewActivationLayout() {
+        for intent: UInt8 in [1, 2] {
+            let payload = captureFrame {
+                $0.send(.semanticItemActivate(surface: .review, intent: intent, generation: 0x0102_0304, itemID: Data("opaque:é/👩‍💻?old=7".utf8)))
+            }
+            #expect(payload[0] == OP_GUI_ACTION)
+            #expect(payload[1] == GUI_ACTION_SEMANTIC_ITEM_ACTIVATE)
+            #expect(payload[2] == 6)
+            #expect(payload[3] == intent)
+            #expect(readU32(payload, 4) == 0x0102_0304)
+            let (itemID, end) = readString16(payload, 8)
+            #expect(itemID == "opaque:é/👩‍💻?old=7")
             #expect(end == payload.count)
         }
     }

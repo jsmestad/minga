@@ -47,6 +47,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
       end)
 
     %{state | resident_windows: residents}
+    |> State.commit_review_windows(output)
   end
 
   @doc "Invalidates one renderer-owned window for targeted frontend recovery."
@@ -63,6 +64,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
       |> Map.reject(fn {_id, value} -> is_nil(value) end)
 
     %{state | resident_windows: residents}
+    |> State.invalidate_review_window(window_id)
   end
 
   @spec consume_changed_buffers(State.t(), %{optional(pid()) => non_neg_integer()}) :: State.t()
@@ -219,7 +221,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
   defp materialize(%State{} = state, %Intent{} = intent, highlights) do
     map =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
-        cache = materialize_cache(state, id)
+        cache = State.window_cache(state, id)
         {id, RenderWindow.materialize(id, carrier, cache)}
       end)
 
@@ -241,21 +243,6 @@ defmodule MingaEditor.Renderer.BufferChanges do
       message_store,
       highlights
     )
-  end
-
-  @spec materialize_cache(State.t(), MingaEditor.Window.id()) ::
-          MingaEditor.Renderer.WindowCache.t()
-  defp materialize_cache(state, id) do
-    case Map.get(state.resident_windows, id) do
-      %ResidentWindowState{} = resident ->
-        MingaEditor.Renderer.WindowCache.with_fetch_version(
-          resident.render_cache,
-          resident.last_version
-        )
-
-      nil ->
-        MingaEditor.Renderer.WindowCache.reset()
-    end
   end
 
   @spec merge_message_store(

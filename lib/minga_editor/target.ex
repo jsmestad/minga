@@ -9,6 +9,7 @@ defmodule MingaEditor.Target do
   alias Minga.Editing.Completion
   alias Minga.Project.FileTree
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.ReviewTarget
   alias MingaEditor.FileTree.Row
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State, as: EditorState
@@ -27,7 +28,7 @@ defmodule MingaEditor.Target do
           item_id: binary()
         }
 
-  @type surface :: :completion | :picker | :file_tree | :command_completion | :timeline
+  @type surface :: :completion | :picker | :file_tree | :command_completion | :timeline | :review
   @type target ::
           {:tab, Tab.id()}
           | {:window, Window.id(), non_neg_integer()}
@@ -43,6 +44,8 @@ defmodule MingaEditor.Target do
           | {:file_tree, FileTree.t(), FileTree.entry() | nil}
           | {:command_completion, String.t()}
           | {:timeline_entry, String.t(), EditTimeline.Entry.t()}
+          | {:timeline_file, non_neg_integer(), String.t()}
+          | {:review, ReviewTarget.t()}
 
   @spec resolve(EditorState.t(), target()) :: {:ok, resolved()} | {:error, reason()}
   def resolve(state, {:tab, id}) do
@@ -135,6 +138,34 @@ defmodule MingaEditor.Target do
 
       _ ->
         {:error, :target_mismatch}
+    end
+  end
+
+  def resolve(state, %__MODULE__{
+        surface: :review,
+        intent: intent,
+        generation: generation,
+        item_id: item_id
+      }) do
+    with {:ok, review} <- ReviewTarget.resolve(state, generation, item_id, intent) do
+      {:ok, {:review, review}}
+    end
+  end
+
+  def resolve(state, %__MODULE__{
+        surface: :timeline,
+        intent: :review_file,
+        generation: requested_generation,
+        item_id: path
+      })
+      when is_binary(path) do
+    timeline = state.workspace.agent_ui.view.edit_timeline
+
+    with :ok <- generation(timeline.generation, requested_generation) do
+      case EditTimeline.entries_for(timeline, path) do
+        [_entry | _rest] -> {:ok, {:timeline_file, requested_generation, path}}
+        [] -> {:error, :not_found}
+      end
     end
   end
 

@@ -85,6 +85,7 @@ public final class StatusBarState {
     public var selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0)
     /// vim showcmd: pending key sequence echoed instantly. Empty when nothing is pending.
     public var pendingKeys: String = ""
+    public private(set) var review: StatusBarUpdate.Review?
 
     /// Updates status bar properties, guarding each assignment with an
     /// equality check to prevent redundant `@Observable` notifications.
@@ -92,6 +93,7 @@ public final class StatusBarState {
     /// stay the same. Without guards, every write fires a notification
     /// that invalidates the SwiftUI sub-view reading that property.
     public func update(from data: StatusBarUpdate) {
+        if self.review != data.review { self.review = data.review }
         if self.contentKind != data.contentKind { self.contentKind = data.contentKind }
         if self.mode != data.mode { self.mode = data.mode }
         if self.cursorLine != data.cursorLine { self.cursorLine = data.cursorLine }
@@ -139,6 +141,7 @@ public final class StatusBarState {
         mode = .normal
         cursorLine = 1
         cursorCol = 1
+        review = nil
         lineCount = 1
         flags = []
         lspStatus = 0

@@ -97,9 +97,15 @@ defmodule MingaEditor.State.RenderCorrelation do
 
   def take_keyframe_request(%__MODULE__{} = correlation), do: {false, correlation}
 
-  @doc "Resets frontend correlation without making an older receipt fresh again."
+  @doc "Fences pre-reset intents while preserving accepted revision and sequence evidence."
   @spec reset(t()) :: t()
-  def reset(%__MODULE__{} = correlation), do: request_keyframe(correlation)
+  def reset(%__MODULE__{} = correlation) do
+    %{
+      correlation
+      | latest_intent_revision: correlation.latest_intent_revision + 1,
+        keyframe_pending?: true
+    }
+  end
 
   @doc "Marks a newly ready frontend as requiring a renderer-owned keyframe reset."
   @spec frontend_ready(t()) :: t()
@@ -112,7 +118,7 @@ defmodule MingaEditor.State.RenderCorrelation do
     {%{correlation | latest_intent_revision: revision}, revision}
   end
 
-  @doc "Returns the latest submitted render intent revision."
+  @doc "Returns the current semantic render revision."
   @spec latest_intent_revision(t()) :: non_neg_integer()
   def latest_intent_revision(%__MODULE__{latest_intent_revision: revision}), do: revision
 

@@ -70,6 +70,9 @@ defmodule MingaEditor.Renderer.WindowCache do
   alias Minga.RenderModel.Window.RowSlotAllocator
   alias MingaEditor.Renderer.ContentEpoch
   alias MingaEditor.Renderer.TextPresentation
+  alias Minga.RenderModel.Window.RowDelta
+  alias MingaEditor.RenderModel.Window.ReviewLayout
+  alias MingaEditor.RenderModel.Window.ReviewProjection
 
   @type t :: %__MODULE__{
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
@@ -91,6 +94,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           identity_buffer: pid() | nil,
           applied_change_sequence: non_neg_integer(),
           row_slot_allocator: RowSlotAllocator.t(),
+          review_projection: ReviewProjection.t() | nil,
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
           resident_semantic_state: MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil,
           text_presentation: TextPresentation.t() | nil,
@@ -103,6 +107,12 @@ defmodule MingaEditor.Renderer.WindowCache do
           scroll_seq_last_top: integer() | nil,
           scroll_seq_last_authoritative: non_neg_integer()
         }
+
+  @typep preview :: MingaEditor.Agent.View.Preview.t()
+  @typep review_layout :: ReviewLayout.t()
+  @type review_result ::
+          {:ok, ReviewProjection.t(), RowDelta.t() | nil, t()}
+          | {:error, :review_unavailable | :row_slot_capacity}
 
   defstruct dirty_lines: %{},
             last_viewport_top: -1,
@@ -123,6 +133,7 @@ defmodule MingaEditor.Renderer.WindowCache do
             identity_buffer: nil,
             applied_change_sequence: 0,
             row_slot_allocator: RowSlotAllocator.new(),
+            review_projection: nil,
             resident_build: nil,
             resident_semantic_state: nil,
             text_presentation: nil,
@@ -460,6 +471,66 @@ defmodule MingaEditor.Renderer.WindowCache do
     end)
   end
 
+  @doc "Returns bounded source evidence without exposing resident rows or allocator state."
+  @spec review_observation_source(t()) ::
+          {term(), MingaEditor.Agent.View.Preview.review_source(), non_neg_integer()} | nil
+  def review_observation_source(%__MODULE__{review_projection: %ReviewProjection{} = projection}) do
+    {scope, source} = ReviewProjection.observation_source(projection)
+    {scope, source, projection.row_count}
+  end
+
+  def review_observation_source(%__MODULE__{review_projection: nil}), do: nil
+
+  @doc "Projects a review with an atomic identity reset when its source or layout changes."
+  @spec project_review(t(), preview(), term(), review_layout()) :: review_result()
+  def project_review(%__MODULE__{review_projection: nil} = cache, preview, selection, layout) do
+    build_fresh_review(mark_identity_reset(cache), preview, selection, layout)
+  end
+
+  def project_review(%__MODULE__{} = cache, preview, selection, layout) do
+    case ReviewProjection.refresh(
+           cache.review_projection,
+           preview,
+           selection,
+           layout,
+           cache.row_slot_allocator,
+           cache.content_epoch
+         ) do
+      :reset_required ->
+        build_fresh_review(mark_identity_reset(cache), preview, selection, layout)
+
+      result ->
+        install_review_projection(cache, result)
+    end
+  end
+
+  @spec build_fresh_review(t(), preview(), term(), review_layout()) :: review_result()
+  defp build_fresh_review(cache, preview, selection, layout) do
+    case ReviewProjection.refresh(
+           nil,
+           preview,
+           selection,
+           layout,
+           cache.row_slot_allocator,
+           cache.content_epoch
+         ) do
+      :reset_required -> {:error, :row_slot_capacity}
+      result -> install_review_projection(cache, result)
+    end
+  end
+
+  @spec install_review_projection(
+          t(),
+          {:ok, ReviewProjection.t(), RowSlotAllocator.t(), RowDelta.t() | nil}
+          | {:error, :review_unavailable}
+        ) :: review_result()
+  defp install_review_projection(cache, {:ok, projection, allocator, delta}) do
+    {:ok, projection, delta,
+     %{cache | review_projection: projection, row_slot_allocator: allocator, resident: true}}
+  end
+
+  defp install_review_projection(_cache, {:error, reason}), do: {:error, reason}
+
   @doc "Forces the next hydration to establish a fresh durable content epoch."
   @spec mark_identity_reset(t()) :: t()
   def mark_identity_reset(%__MODULE__{} = cache) do
@@ -470,6 +541,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         applied_change_sequence: 0,
         content_epoch: ContentEpoch.next(),
         row_slot_allocator: RowSlotAllocator.new(),
+        review_projection: nil,
         resident_build: nil,
         resident_semantic_state: nil,
         pending_edit_deltas: [],

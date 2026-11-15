@@ -74,20 +74,30 @@ defmodule Minga.Mode.InsertTest do
   end
 
   describe "arrow keys" do
-    test "up arrow (57_352) emits :move_up" do
-      assert {:execute, :move_up, _} = Insert.handle_key({57_352, 0}, fresh_state())
+    test "canonical and NSEvent arrows retain Vim movement semantics with or without Shift" do
+      for {keys, command} <- [
+            {[57_352, 0xF700], :move_up},
+            {[57_353, 0xF701], :move_down},
+            {[57_350, 0xF702], :move_left},
+            {[57_351, 0xF703], :move_right}
+          ],
+          key <- keys,
+          modifiers <- [0, 1] do
+        assert {:execute, ^command, _} = Insert.handle_key({key, modifiers}, fresh_state())
+      end
+    end
+  end
+
+  test "functional keys do not insert private-use glyphs, while other Unicode text remains valid" do
+    for key <- [57_364, 57_360, 0xF704], modifiers <- [0, 1] do
+      assert {:continue, _} = Insert.handle_key({key, modifiers}, fresh_state())
     end
 
-    test "down arrow (57_353) emits :move_down" do
-      assert {:execute, :move_down, _} = Insert.handle_key({57_353, 0}, fresh_state())
-    end
+    for codepoint <- [?A, ?é, ?界, 0xE123, 0xF8FF], modifiers <- [0, 1] do
+      text = <<codepoint::utf8>>
 
-    test "left arrow (57_350) emits :move_left" do
-      assert {:execute, :move_left, _} = Insert.handle_key({57_350, 0}, fresh_state())
-    end
-
-    test "right arrow (57_351) emits :move_right" do
-      assert {:execute, :move_right, _} = Insert.handle_key({57_351, 0}, fresh_state())
+      assert {:execute, {:insert_char, ^text}, _} =
+               Insert.handle_key({codepoint, modifiers}, fresh_state())
     end
   end
 

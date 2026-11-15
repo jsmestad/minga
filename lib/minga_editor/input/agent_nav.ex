@@ -12,8 +12,8 @@ defmodule MingaEditor.Input.AgentNav do
 
   ## File viewer navigation
 
-  When `agent_ui.focus == :file_viewer`, keys route to file viewer
-  scroll commands (j/k/Ctrl-d/Ctrl-u/G) which scroll the preview pane.
+  When `agent_ui.focus == :file_viewer`, navigation keys scroll the preview pane.
+  Keys not claimed by earlier scope handlers stop here so the read-only viewer cannot edit an underlying human buffer.
 
   ## Side panel usage
 
@@ -89,7 +89,7 @@ defmodule MingaEditor.Input.AgentNav do
          )}
 
       :passthrough ->
-        {:passthrough, state}
+        {:handled, state}
     end
   end
 

@@ -41,10 +41,9 @@ defmodule MingaEditor.Frontend.Emit do
 
     # Frame transaction (#2219). frame_seq is the strictly monotonic global frame
     # sequence (Renderer.Server's seq on the async path; a fresh monotonic value on
-    # sync/headless paths). A keyframe is forced by an inbound request_keyframe, and
-    # is also the first-frame state (no committed base yet). A keyframe drops the
-    # adapter delta caches so every window emits full content and every chrome
-    # surface re-emits, and brackets the frame with base_frame_seq 0.
+    # sync/headless paths). Recovery, attach and pane removal require a complete
+    # replacement because delta transactions retain omitted window content.
+    # Reset adapter caches so every remaining window and chrome surface re-emits.
     frame_seq = frame_seq(ctx)
 
     acknowledged_base =
@@ -52,7 +51,13 @@ defmodule MingaEditor.Frontend.Emit do
         do: caches.last_acknowledged_frame_seq,
         else: caches.last_emitted_frame_seq
 
-    keyframe? = ctx.intent.frame.force_keyframe? or acknowledged_base == 0
+    keyframe? =
+      ctx.intent.frame.force_keyframe? or acknowledged_base == 0 or
+        Minga.Frontend.Adapter.GUI.Caches.windows_removed?(
+          caches.adapter_gui_caches,
+          render_model.windows
+        )
+
     base_frame_seq = if keyframe?, do: 0, else: acknowledged_base
 
     caches =
@@ -147,7 +152,7 @@ defmodule MingaEditor.Frontend.Emit do
     if keyframe? do
       Minga.Log.info(
         :render,
-        "Emitting keyframe #{frame_seq} in response to frontend recovery or attach"
+        "Emitting complete keyframe #{frame_seq}"
       )
     end
 

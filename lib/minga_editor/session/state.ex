@@ -13,6 +13,9 @@ defmodule MingaEditor.Session.State do
   """
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.Renderer.ReviewObservation
+  alias MingaEditor.Renderer.WindowObservation
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.HoverObservation
   alias MingaEditor.State.Buffers
@@ -136,6 +139,25 @@ defmodule MingaEditor.Session.State do
     end)
   end
 
+  @doc "Finds an existing Agent pane, preferring the already active Agent window."
+  @spec find_agent_window(t()) :: {Window.id(), Window.t()} | nil
+  def find_agent_window(%__MODULE__{windows: windows} = workspace) do
+    case active_window_struct(workspace) do
+      %Window{content: {kind, :semantic}} = window when kind in [:agent_chat, :agent_review] ->
+        {window.id, window}
+
+      _human_or_absent ->
+        Enum.find_value(windows.map, fn
+          {id, %Window{content: {kind, :semantic}} = window}
+          when kind in [:agent_chat, :agent_review] ->
+            {id, window}
+
+          _human ->
+            nil
+        end)
+    end
+  end
+
   @doc "Returns true if the workspace has more than one window."
   @spec split?(t()) :: boolean()
   def split?(%__MODULE__{windows: ws}), do: Windows.split?(ws)
@@ -146,14 +168,16 @@ defmodule MingaEditor.Session.State do
     %{workspace | windows: Windows.replace_window(windows, id, window)}
   end
 
-  @doc "Records a renderer observation for one session-owned window."
-  @spec observe_window(t(), Window.id(), pid(), Viewport.t(), non_neg_integer()) :: t()
+  @doc "Records one source-validated renderer observation through its value owners."
+  @spec observe_window(t(), Window.id(), WindowObservation.t() | ReviewObservation.t()) :: t()
   def observe_window(
         %__MODULE__{windows: windows} = workspace,
         id,
-        buffer,
-        %Viewport{} = viewport,
-        version
+        %WindowObservation{
+          buffer: buffer,
+          viewport: %Viewport{} = viewport,
+          buffer_version: version
+        }
       )
       when is_pid(buffer) and is_integer(version) and version >= 0 do
     case Windows.fetch(windows, id) do
@@ -164,6 +188,34 @@ defmodule MingaEditor.Session.State do
 
       _stale_or_missing ->
         workspace
+    end
+  end
+
+  def observe_window(
+        %__MODULE__{windows: windows, agent_ui: ui} = workspace,
+        id,
+        %ReviewObservation{
+          accessibility_generation: generation,
+          source: source,
+          viewport: %Viewport{} = viewport,
+          total_rows: total_rows
+        }
+      ) do
+    with {:ok,
+          %Window{content: {:agent_review, :semantic}, accessibility_generation: ^generation} =
+            window} <- Windows.fetch(windows, id),
+         {:ok, preview} <-
+           Preview.observe_review(
+             ui.view.preview,
+             source,
+             total_rows,
+             Viewport.content_rows(viewport)
+           ) do
+      workspace
+      |> replace_window(id, Window.set_viewport(window, viewport))
+      |> set_agent_ui(UIState.replace_preview(ui, preview))
+    else
+      _stale_or_missing -> workspace
     end
   end
 
@@ -435,6 +487,7 @@ defmodule MingaEditor.Session.State do
   """
   @spec scope_for_content(Content.t(), Scope.scope_name()) :: Scope.scope_name()
   def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
+  def scope_for_content({:agent_review, :semantic}, _current_scope), do: :agent
   def scope_for_content({:empty, :semantic}, _current_scope), do: :editor
   def scope_for_content({:buffer, _pid}, :agent), do: :editor
   def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
@@ -602,10 +655,20 @@ defmodule MingaEditor.Session.State do
     %{wspace | feature_state: feature_state}
   end
 
-  @doc "Updates the agent UI state."
+  @doc "Installs Agent UI and projects its body onto existing Agent panes without changing focus or human windows."
   @spec set_agent_ui(t(), UIState.t()) :: t()
-  def set_agent_ui(%__MODULE__{} = wspace, agent_ui) do
-    %{wspace | agent_ui: agent_ui}
+  def set_agent_ui(%__MODULE__{windows: windows} = wspace, %UIState{} = agent_ui) do
+    body = UIState.View.agent_body(agent_ui.view)
+
+    windows =
+      Enum.reduce(windows.map, windows, fn {id, window}, windows ->
+        case Window.show_agent_body(window, body) do
+          ^window -> windows
+          changed -> Windows.replace_window(windows, id, changed)
+        end
+      end)
+
+    %{wspace | agent_ui: agent_ui, windows: windows}
   end
 
   @doc "Forgets a retired process when it owns the agent prompt buffer."

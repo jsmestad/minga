@@ -94,6 +94,8 @@ var minimalBodyOverrides = map[byte][]byte{
 	generated.OPGuiResidentSemantics: append([]byte{generated.OPGuiResidentSemantics, 0x00, 0x00, 0x00, 0x38}, make([]byte, 56)...),
 	// gui_focus_owner (len16): the body must contain exactly 10 bytes.
 	generated.OPGuiFocusOwner: {generated.OPGuiFocusOwner, 0, 10, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+	// gui_agent_help (len32): version 1 and hidden visibility form the minimal body.
+	generated.OPGuiAgentHelp: {generated.OPGuiAgentHelp, 0, 0, 0, 2, 1, 0},
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {

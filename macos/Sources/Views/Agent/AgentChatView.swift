@@ -52,7 +52,6 @@ public struct AgentChatView: View {
             // Header bar
             AgentChatHeaderView(state: state, sendAction: childAction { action in
                 switch action {
-                case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
                 case .executeCommand(let name): .executeCommand(name: name)
                 }
             })
@@ -129,11 +128,6 @@ public struct AgentChatView: View {
                             value: userHasScrolledUp
                         )
                     }
-                }
-                .opacity(state.helpVisible ? 0.15 : 1.0)
-
-                if state.helpVisible {
-                    helpOverlay
                 }
             }
 
@@ -520,66 +514,6 @@ public struct AgentChatView: View {
         }
         .font(Typography.font(.caption))
         .foregroundStyle(theme.agentTextFg.opacity(0.3))
-    }
-
-    // MARK: - Help overlay
-
-    @ViewBuilder
-    private var helpOverlay: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                HStack {
-                    Text("Keyboard Shortcuts")
-                        .font(Typography.font(.title, weight: .semibold))
-                        .foregroundStyle(theme.agentTextFg)
-                    Spacer()
-                    Text("Press ? or Esc to close")
-                        .font(Typography.font(.small))
-                        .foregroundStyle(theme.agentTextFg.opacity(0.4))
-                }
-
-                ForEach(state.helpGroups) { group in
-                    helpGroupView(group)
-                }
-            }
-            .padding(Spacing.xxl)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: Radius.xl)
-                .fill(theme.agentPanelBg.opacity(0.95))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.xl)
-                .strokeBorder(theme.agentCodeBorder.opacity(0.3), lineWidth: 1)
-        )
-        .padding(Spacing.xl)
-        .transition(.opacity)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Keyboard shortcuts help")
-    }
-
-    @ViewBuilder
-    private func helpGroupView(_ group: HelpGroup) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(group.title)
-                .font(Typography.font(.body, weight: .semibold))
-                .foregroundStyle(theme.agentHeaderFg)
-
-            ForEach(Array(group.bindings.enumerated()), id: \.offset) { _, binding in
-                HStack(spacing: 0) {
-                    Text(binding.key)
-                        .font(Typography.font(.body, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.agentTextFg.opacity(0.9))
-                        .frame(width: 140, alignment: .leading)
-
-                    Text(binding.description)
-                        .font(Typography.font(.body))
-                        .foregroundStyle(theme.agentTextFg.opacity(0.6))
-
-                    Spacer()
-                }
-            }
-        }
     }
 
     // MARK: - Follow output pill

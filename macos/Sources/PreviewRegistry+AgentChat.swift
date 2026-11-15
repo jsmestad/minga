@@ -24,9 +24,7 @@ extension PreviewRegistry {
             promptCursorCol: 52,
             promptMode: .insert,
             promptVisibleRows: 1,
-            promptCompletion: nil,
-            helpVisible: false,
-            helpGroups: []
+            promptCompletion: nil
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: PreviewFixtures.agentChatMessages())
 
@@ -48,9 +46,7 @@ extension PreviewRegistry {
             promptCursorCol: 0,
             promptMode: .normal,
             promptVisibleRows: 1,
-            promptCompletion: nil,
-            helpVisible: false,
-            helpGroups: []
+            promptCompletion: nil
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Refactor the buffer module to separate read and write concerns into distinct GenServer processes.")),
@@ -77,9 +73,7 @@ extension PreviewRegistry {
             promptCursorCol: 0,
             promptMode: .normal,
             promptVisibleRows: 1,
-            promptCompletion: nil,
-            helpVisible: false,
-            helpGroups: []
+            promptCompletion: nil
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Run the full test suite and fix any failures.")),
@@ -107,9 +101,7 @@ extension PreviewRegistry {
             promptCursorCol: 0,
             promptMode: .normal,
             promptVisibleRows: 1,
-            promptCompletion: nil,
-            helpVisible: false,
-            helpGroups: []
+            promptCompletion: nil
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Deploy the staging environment.")),
@@ -152,9 +144,7 @@ extension PreviewRegistry {
                     (name: "/model", description: "Switch the active model"),
                     (name: "/thinking", description: "Set thinking level"),
                 ]
-            ),
-            helpVisible: false,
-            helpGroups: []
+            )
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .system(text: "Agent session started.", isError: false)),
@@ -179,9 +169,7 @@ extension PreviewRegistry {
             promptCursorCol: 0,
             promptMode: .normal,
             promptVisibleRows: 1,
-            promptCompletion: nil,
-            helpVisible: false,
-            helpGroups: []
+            promptCompletion: nil
         )
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [
                 Wire.ChatMessage(beamId: 1, content: .user(text: "Add input validation to the user registration form.")),

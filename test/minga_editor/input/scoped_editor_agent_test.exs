@@ -6,6 +6,8 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
   import Minga.Test.ScopedInputHelpers
 
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.State.Tab
@@ -221,9 +223,44 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       assert new_state.workspace.agent_ui.view.help_visible
     end
 
-    test "Tab switches focus", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert new_state.workspace.agent_ui.view |> View.focus() == :file_viewer
+    test "Normal Tab opens retained Review without changing a focused draft", %{state: state} do
+      state = focus_prompt(state, "Retained draft")
+      review = Preview.set_diff(Preview.new(), DiffReview.new("checkout.ex", "before", "after"))
+
+      for {preview, focus} <- [{Preview.new(), :chat}, {review, :file_viewer}],
+          focused <- [false, true],
+          visible <- [false, true] do
+        ui =
+          state.workspace.agent_ui
+          |> UIState.replace_preview(preview)
+          |> UIState.set_input_focused(focused)
+
+        current =
+          state
+          |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(ui)
+          |> MingaEditor.Shell.Traditional.Workflow.install_agent_panel(%{
+            ui.panel
+            | visible: visible
+          })
+
+        result =
+          Enum.reduce_while(
+            MingaEditor.Input.surface_handlers(current),
+            {:passthrough, current},
+            fn handler, {_, routed} ->
+              case handler.handle_key(routed, 9, 0) do
+                {:handled, updated} -> {:halt, {:handled, updated}}
+                {:passthrough, updated} -> {:cont, {:passthrough, updated}}
+              end
+            end
+          )
+
+        assert {:handled, updated} = result
+        assert View.focus(updated.workspace.agent_ui.view) == focus
+
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(updated.workspace.agent_ui) ==
+                 "Retained draft"
+      end
     end
 
     test "i focuses input", %{state: state} do

@@ -154,7 +154,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_file_tree: 0x93,
       gui_file_tree_selection: 0x94,
       gui_cursor_animation: 0x95,
-      gui_focus_owner: 0xAA
+      gui_focus_owner: 0xAA,
+      gui_agent_help: 0xAB
     )
   end
 

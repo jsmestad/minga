@@ -9,6 +9,7 @@ defmodule MingaEditor.Agent.DiffReview do
   """
 
   alias Minga.Core.Diff
+  alias __MODULE__.DisplayLine
   alias Minga.Git
 
   @default_context_lines 3
@@ -225,13 +226,9 @@ defmodule MingaEditor.Agent.DiffReview do
   @doc """
   Builds the list of lines to display in unified diff format.
 
-  Returns a list of `{text, type, hunk_index_or_nil}` tuples where
-  `type` is `:context`, `:added`, `:removed`, or `:hunk_header`.
-  `hunk_index_or_nil` links display lines back to their hunk for
-  resolution marker rendering.
+  Returns typed display lines with source coordinates and hunk references. Baseline coordinates remain stable when agent edits move after-content; hunk references can be matched across revisions with `matching_hunks/2` before allocating render identities.
   """
-  @type diff_line ::
-          {String.t(), :context | :added | :removed | :hunk_header, non_neg_integer() | nil}
+  @type diff_line :: DisplayLine.t()
 
   @spec to_display_lines(t()) :: [diff_line()]
   @spec to_display_lines(t(), non_neg_integer()) :: [diff_line()]
@@ -240,6 +237,38 @@ defmodule MingaEditor.Agent.DiffReview do
     %__MODULE__{after_lines: after_lines, hunks: hunks} = review
     build_display(after_lines, hunks, context_lines)
   end
+
+  @doc "Matches unchanged hunks by baseline location and content, preserving duplicate occurrence order."
+  @spec matching_hunks(t(), t()) :: %{non_neg_integer() => non_neg_integer()}
+  def matching_hunks(%__MODULE__{path: path} = previous, %__MODULE__{path: path} = current) do
+    available =
+      previous.hunks
+      |> hunk_signatures(previous.after_lines)
+      |> Enum.with_index()
+      |> Enum.reduce(%{}, fn {signature, index}, queues ->
+        Map.update(queues, signature, [index], &[index | &1])
+      end)
+      |> Map.new(fn {signature, indices} -> {signature, Enum.reverse(indices)} end)
+
+    {matches, _available} =
+      current.hunks
+      |> hunk_signatures(current.after_lines)
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, available}, fn {signature, current_index}, {matches, queues} ->
+        case Map.get(queues, signature, []) do
+          [previous_index | remaining] ->
+            {Map.put(matches, current_index, previous_index),
+             Map.put(queues, signature, remaining)}
+
+          [] ->
+            {matches, queues}
+        end
+      end)
+
+    matches
+  end
+
+  def matching_hunks(%__MODULE__{}, %__MODULE__{}), do: %{}
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
@@ -494,7 +523,14 @@ defmodule MingaEditor.Agent.DiffReview do
     before_ctx_lines =
       Enum.slice(after_lines, before_ctx_start, hunk.start_line - before_ctx_start)
 
-    before_ctx = Enum.map(before_ctx_lines, fn line -> {line, :context, nil} end)
+    before_ctx =
+      before_ctx_lines
+      |> Enum.with_index(before_ctx_start)
+      |> Enum.map(fn {line, after_index} ->
+        baseline_index = hunk.old_start - (hunk.start_line - after_index)
+        DisplayLine.new({:baseline, baseline_index}, line, :context)
+      end)
+
     hunk_lines = render_hunk_lines(after_lines, hunk, hunk_idx)
 
     after_start = hunk.start_line + hunk.count
@@ -505,13 +541,24 @@ defmodule MingaEditor.Agent.DiffReview do
       |> cap_context_before_next_hunk(next_hunk)
 
     after_ctx_lines = Enum.slice(after_lines, after_start, after_end - after_start)
-    after_ctx = Enum.map(after_ctx_lines, fn line -> {line, :context, nil} end)
+
+    after_ctx =
+      after_ctx_lines
+      |> Enum.with_index(after_start)
+      |> Enum.map(fn {line, after_index} ->
+        baseline_index = hunk.old_start + hunk.old_count + after_index - after_start
+        DisplayLine.new({:baseline, baseline_index}, line, :context)
+      end)
 
     {added, removed} = hunk_counts(hunk)
 
     header =
-      {"@@ -#{hunk.old_start + 1},#{hunk.old_count} +#{hunk.start_line + 1},#{hunk.count} @@ (+#{added}, -#{removed})",
-       :hunk_header, hunk_idx}
+      DisplayLine.new(
+        {:hunk_header, hunk_idx},
+        "@@ -#{hunk.old_start + 1},#{hunk.old_count} +#{hunk.start_line + 1},#{hunk.count} @@ (+#{added}, -#{removed})",
+        :hunk_header,
+        hunk_idx
+      )
 
     {[header | before_ctx] ++ hunk_lines ++ after_ctx, after_end}
   end
@@ -526,25 +573,34 @@ defmodule MingaEditor.Agent.DiffReview do
           diff_line()
         ]
   defp render_hunk_lines(after_lines, %{type: :added} = hunk, hunk_idx) do
-    after_lines
-    |> Enum.slice(hunk.start_line, hunk.count)
-    |> Enum.map(fn line -> {line, :added, hunk_idx} end)
+    added_display_lines(after_lines, hunk, hunk_idx)
   end
 
   defp render_hunk_lines(_after, %{type: :deleted} = hunk, hunk_idx) do
-    hunk.old_lines
-    |> Enum.map(fn line -> {line, :removed, hunk_idx} end)
+    removed_display_lines(hunk, hunk_idx)
   end
 
   defp render_hunk_lines(after_lines, %{type: :modified} = hunk, hunk_idx) do
-    removed = Enum.map(hunk.old_lines, fn line -> {line, :removed, hunk_idx} end)
+    removed_display_lines(hunk, hunk_idx) ++ added_display_lines(after_lines, hunk, hunk_idx)
+  end
 
-    added =
-      after_lines
-      |> Enum.slice(hunk.start_line, hunk.count)
-      |> Enum.map(fn line -> {line, :added, hunk_idx} end)
+  @spec removed_display_lines(Diff.hunk(), non_neg_integer()) :: [diff_line()]
+  defp removed_display_lines(hunk, hunk_idx) do
+    hunk.old_lines
+    |> Enum.with_index(hunk.old_start)
+    |> Enum.map(fn {line, baseline_index} ->
+      DisplayLine.new({:baseline, baseline_index}, line, :removed, hunk_idx)
+    end)
+  end
 
-    removed ++ added
+  @spec added_display_lines([String.t()], Diff.hunk(), non_neg_integer()) :: [diff_line()]
+  defp added_display_lines(after_lines, hunk, hunk_idx) do
+    after_lines
+    |> Enum.slice(hunk.start_line, hunk.count)
+    |> Enum.with_index()
+    |> Enum.map(fn {line, offset} ->
+      DisplayLine.new({:added, hunk_idx, offset}, line, :added, hunk_idx)
+    end)
   end
 
   @spec hunk_counts(Diff.hunk()) :: {non_neg_integer(), non_neg_integer()}

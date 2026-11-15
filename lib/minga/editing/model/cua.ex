@@ -189,39 +189,55 @@ defmodule Minga.Editing.Model.CUA do
   # ── Arrow keys ───────────────────────────────────────────────────────────
 
   # Shift+arrows = extend selection
-  defp dispatch_key(state, @up, mods) when Bitwise.band(mods, @shift) != 0 do
+  defp dispatch_key(state, cp, mods)
+       when cp in [@up, 57_352] and Bitwise.band(mods, @shift) != 0 do
     {[{:extend_selection, :up}], maybe_start_selection(state)}
   end
 
-  defp dispatch_key(state, @down, mods) when Bitwise.band(mods, @shift) != 0 do
+  defp dispatch_key(state, cp, mods)
+       when cp in [@down, 57_353] and Bitwise.band(mods, @shift) != 0 do
     {[{:extend_selection, :down}], maybe_start_selection(state)}
   end
 
-  defp dispatch_key(state, @left, mods) when Bitwise.band(mods, @shift) != 0 do
+  defp dispatch_key(state, cp, mods)
+       when cp in [@left, 57_350] and Bitwise.band(mods, @shift) != 0 do
     {[{:extend_selection, :left}], maybe_start_selection(state)}
   end
 
-  defp dispatch_key(state, @right, mods) when Bitwise.band(mods, @shift) != 0 do
+  defp dispatch_key(state, cp, mods)
+       when cp in [@right, 57_351] and Bitwise.band(mods, @shift) != 0 do
     {[{:extend_selection, :right}], maybe_start_selection(state)}
   end
 
   # Plain arrows = movement (clear selection)
-  defp dispatch_key(state, @up, _mods), do: {[:move_up], clear_selection(state)}
-  defp dispatch_key(state, @down, _mods), do: {[:move_down], clear_selection(state)}
-  defp dispatch_key(state, @left, _mods), do: {[:move_left], clear_selection(state)}
-  defp dispatch_key(state, @right, _mods), do: {[:move_right], clear_selection(state)}
+  defp dispatch_key(state, cp, _mods) when cp in [@up, 57_352],
+    do: {[:move_up], clear_selection(state)}
+
+  defp dispatch_key(state, cp, _mods) when cp in [@down, 57_353],
+    do: {[:move_down], clear_selection(state)}
+
+  defp dispatch_key(state, cp, _mods) when cp in [@left, 57_350],
+    do: {[:move_left], clear_selection(state)}
+
+  defp dispatch_key(state, cp, _mods) when cp in [@right, 57_351],
+    do: {[:move_right], clear_selection(state)}
 
   # Home/End
-  defp dispatch_key(state, @home, mods) when Bitwise.band(mods, @shift) != 0 do
+  defp dispatch_key(state, cp, mods)
+       when cp in [@home, 57_360] and Bitwise.band(mods, @shift) != 0 do
     {[{:extend_selection, :line_start}], maybe_start_selection(state)}
   end
 
-  defp dispatch_key(state, @end_key, mods) when Bitwise.band(mods, @shift) != 0 do
+  defp dispatch_key(state, cp, mods)
+       when cp in [@end_key, 57_361] and Bitwise.band(mods, @shift) != 0 do
     {[{:extend_selection, :line_end}], maybe_start_selection(state)}
   end
 
-  defp dispatch_key(state, @home, _mods), do: {[:first_non_blank], clear_selection(state)}
-  defp dispatch_key(state, @end_key, _mods), do: {[:line_end], clear_selection(state)}
+  defp dispatch_key(state, cp, _mods) when cp in [@home, 57_360],
+    do: {[:first_non_blank], clear_selection(state)}
+
+  defp dispatch_key(state, cp, _mods) when cp in [@end_key, 57_361],
+    do: {[:line_end], clear_selection(state)}
 
   # ── Editing keys ─────────────────────────────────────────────────────────
 
@@ -237,11 +253,13 @@ defmodule Minga.Editing.Model.CUA do
   end
 
   # Forward delete
-  defp dispatch_key(%{selection: sel} = state, @forward_delete, _mods) when sel != nil do
+  defp dispatch_key(%{selection: sel} = state, cp, _mods)
+       when cp in [@forward_delete, 57_349] and sel != nil do
     {[:delete_visual_selection], clear_selection(state)}
   end
 
-  defp dispatch_key(state, @forward_delete, _mods), do: {[:delete_at], state}
+  defp dispatch_key(state, cp, _mods) when cp in [@forward_delete, 57_349],
+    do: {[:delete_at], state}
 
   # Enter
   defp dispatch_key(state, @enter, _mods) do
@@ -260,6 +278,12 @@ defmodule Minga.Editing.Model.CUA do
 
   # Ctrl+keys that should be ignored (let overlays handle them)
   defp dispatch_key(state, _cp, mods) when Bitwise.band(mods, @ctrl) != 0 do
+    {[], state}
+  end
+
+  # Unhandled functional keys never become private-use text.
+  defp dispatch_key(state, codepoint, _mods)
+       when codepoint in 57_344..57_454 or codepoint in 0xF700..0xF747 do
     {[], state}
   end
 

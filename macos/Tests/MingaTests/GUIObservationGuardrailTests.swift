@@ -28,6 +28,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Extensions/FrontendExtensionRuntime.swift#FrontendExtensionRuntimeRegistry": "extension registry observable state",
         "Sources/Views/Agent/AgentChatState.swift#AgentChatState": "protocol presentation owner",
         "Sources/Views/Agent/AgentContextBarState.swift#AgentContextBarState": "protocol presentation owner",
+        "Sources/Views/Agent/AgentHelpState.swift#AgentHelpState": "protocol presentation owner",
         "Sources/Views/EditorChrome/BottomPanelState.swift#BottomPanelState": "protocol presentation owner",
         "Sources/Views/EditorChrome/BreadcrumbBar.swift#BreadcrumbState": "protocol presentation owner",
         "Sources/Views/EditorChrome/EmptyStateState.swift#EmptyStateState": "protocol presentation owner",
@@ -68,6 +69,7 @@ struct GUIObservationGuardrailTests {
     private static let ignoredDeclarationAllowlist: [String: String] = [
         "Sources/Extensions/FrontendExtensionRuntime.swift: @ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder registry storage, not rendered state",
         "Sources/Extensions/FrontendExtensionRuntime.swift: @ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "view-builder registry storage, not rendered state",
+        "Sources/Views/Agent/AgentHelpState.swift: @ObservationIgnored let scrollAttachment = AgentHelpScrollAttachment()": "discardable mounted scroll attachment, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var holdTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var lastMessage = \"\"": "feedback timing cache; rendered fields remain observed",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var showTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",

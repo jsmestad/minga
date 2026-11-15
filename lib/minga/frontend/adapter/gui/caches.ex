@@ -24,6 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_completion_fp: fingerprint() | nil,
           last_signature_help_fp: fingerprint() | nil,
           last_agent_chat_fp: integer() | nil,
+          last_agent_help_fp: integer() | nil,
           last_empty_state_fp: integer() | nil,
           last_agent_transcript: AgentTranscriptSentState.t(),
           last_bottom_panel_fp: integer() | nil,
@@ -67,6 +68,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_completion_fp: nil,
             last_signature_help_fp: nil,
             last_agent_chat_fp: nil,
+            last_agent_help_fp: nil,
             last_empty_state_fp: nil,
             last_agent_transcript: %AgentTranscriptSentState{},
             last_bottom_panel_fp: nil,
@@ -93,6 +95,16 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
 
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Reports when a complete model removes a previously emitted pane."
+  @spec windows_removed?(t(), [Minga.RenderModel.Window.t()]) :: boolean()
+  def windows_removed?(%__MODULE__{last_window_content_fps: previous}, windows)
+      when map_size(previous) > 0 do
+    current = MapSet.new(windows, & &1.window_id)
+    Enum.any?(previous, fn {id, _fingerprint} -> not MapSet.member?(current, id) end)
+  end
+
+  def windows_removed?(%__MODULE__{}, _windows), do: false
 
   @doc "Records reference candidates while keeping partial resident payloads out of dense snapshot caches."
   @spec record_window_rows(t(), Minga.RenderModel.Window.t()) :: t()

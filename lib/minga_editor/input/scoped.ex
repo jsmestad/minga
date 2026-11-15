@@ -153,7 +153,7 @@ defmodule MingaEditor.Input.Scoped do
       if UIState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
         {:handled, AgentCommands.toggle_paste_expand(state)}
       else
-        resolve_agent_key(state, :insert, @tab, 0)
+        resolve_agent_key(state, Minga.Editing.binding_state(state), @tab, 0)
       end
     else
       if panel.input_focused do
@@ -273,9 +273,9 @@ defmodule MingaEditor.Input.Scoped do
          )}
 
       :not_found ->
-        # No scope binding. In insert mode or CUA mode, self-insert printable chars.
-        if vim_state in [:insert, :cua] and cp >= 32 and band(mods, @ctrl) == 0 and
-             band(mods, @alt) == 0 do
+        # Global Ctrl/Alt shortcuts retain their downstream handlers.
+        if vim_state in [:insert, :cua] and state.workspace.agent_ui.panel.input_focused and
+             cp >= 32 and band(mods, @ctrl ||| @alt) == 0 do
           handle_agent_self_insert(state, cp, mods)
         else
           # Not handled by scope. Pass through so AgentNav can route semantic transcript navigation.
@@ -290,11 +290,11 @@ defmodule MingaEditor.Input.Scoped do
 
   @spec handle_agent_self_insert(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()}
-  defp handle_agent_self_insert(state, ?@, _mods) do
+  defp handle_agent_self_insert(state, ?@, mods) when band(mods, @ctrl ||| @alt ||| 0x08) == 0 do
     {:handled, AgentCommands.scope_trigger_mention(state)}
   end
 
-  defp handle_agent_self_insert(state, ?/, _mods) do
+  defp handle_agent_self_insert(state, ?/, mods) when band(mods, @ctrl ||| @alt ||| 0x08) == 0 do
     if AgentSubStates.slash_command_token_at_cursor?(state) do
       {:handled, AgentCommands.scope_trigger_slash_completion(state)}
     else
@@ -303,9 +303,8 @@ defmodule MingaEditor.Input.Scoped do
     end
   end
 
-  defp handle_agent_self_insert(state, cp, _mods) do
-    char = <<cp::utf8>>
-    {:handled, Commands.execute(state, {:agent_self_insert, char})}
+  defp handle_agent_self_insert(state, cp, mods) do
+    {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
   end
 
   # Tool approval and diff review sub-state handlers moved to

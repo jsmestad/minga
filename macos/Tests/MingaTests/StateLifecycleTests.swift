@@ -510,7 +510,7 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: .thinking, model: "claude", thinkingLevel: "high", prompt: "fix bug",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptMode: .insert, promptVisibleRows: 1,
-                     promptCompletion: nil, helpVisible: false, helpGroups: [])
+                     promptCompletion: nil)
 
         #expect(state.visible == true)
         #expect(state.status == .thinking)
@@ -528,7 +528,7 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: .thinking, model: "claude", thinkingLevel: "medium", prompt: "test",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptMode: .insert, promptVisibleRows: 1,
-                     promptCompletion: nil, helpVisible: false, helpGroups: [])
+                     promptCompletion: nil)
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
 

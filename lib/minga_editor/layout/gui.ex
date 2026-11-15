@@ -1,38 +1,35 @@
 defmodule MingaEditor.Layout.GUI do
   @moduledoc """
-  GUI layout computation.
+  Shared layout for semantic frontends.
 
-  Computes screen rectangles for the Metal/SwiftUI frontend. The Metal
-  viewport is pure editor area. SwiftUI handles tab bar, file tree, breadcrumb,
-  and status bar outside the Metal view. The BEAM doesn't reserve rows or
-  columns for chrome that SwiftUI renders natively.
+  Native chrome sits outside the reported content grid, so subtracting it here would count it twice.
+  Terminal chrome shares the reported grid.
+  The terminal timeline has a fixed lifetime and row budget so background writes cannot displace the composer or footer controls.
   """
 
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.RenderPipeline.Input, as: RenderInput
+  alias MingaEditor.MinibufferData
+  alias MingaEditor.Window.Content
+
+  @timeline_rows 3
 
   @doc """
-  Computes GUI layout: no tab bar, no file tree columns, no agent panel.
+  Computes content, timeline and minibuffer rectangles from the reported row grid.
 
-  Row accounting for the minibuffer depends on what the frontend's reported
-  rows already exclude:
-
-  * Native GUI (`Capabilities.gui?/1`): the Metal viewport measures the content
-    area only. The status bar and minibuffer are native SwiftUI chrome rendered
-    outside the Metal surface, so the reported rows already exclude them.
-    Reserving a grid row here would double-book the minibuffer and drop a content
-    row (#2693), so the editor fills the full viewport and the minibuffer rect is
-    anchored just below the content grid for server-side cursor/focus routing.
-  * Terminal frontends (`:tui`, the default): the reported rows are the full
-    terminal grid, so the minibuffer genuinely consumes the last row and must be
-    reserved.
+  Native GUI rows already exclude native chrome, including the timeline.
+  Use them unchanged and anchor the virtual minibuffer below the grid for focus routing.
+  Terminal rows describe the full screen.
+  Reserve one status row, a second row for a visible minibuffer, and a fixed three-row Agent timeline while an Agent body is active.
+  File count never changes that reservation.
   """
   @spec compute(EditorState.t() | RenderInput.t()) :: Layout.t()
   def compute(state) do
     vp = terminal_viewport(state)
     terminal = {0, 0, vp.cols, vp.rows}
+    windows = windows(state)
 
     native_gui? = Capabilities.gui?(capabilities(state))
 
@@ -43,14 +40,18 @@ defmodule MingaEditor.Layout.GUI do
         # the minibuffer rect sits on the row directly below the content.
         {vp.rows, {vp.rows, 0, vp.cols, 1}}
       else
-        # Terminal grid: the minibuffer occupies the last real row.
-        {max(vp.rows - 1, 1), {vp.rows - 1, 0, vp.cols, 1}}
+        # Terminal chrome owns one status row and an additional row for a visible minibuffer.
+        footer_rows = if MinibufferData.visible?(state), do: 2, else: 1
+        {max(vp.rows - footer_rows, 1), {vp.rows - 1, 0, vp.cols, 1}}
       end
+
+    {editor_height, edit_timeline} =
+      reserve_timeline(editor_height, vp.cols, native_gui?, windows)
 
     editor_area = {0, 0, vp.cols, editor_height}
 
     # All windows are no-modeline; the global SwiftUI status bar handles status display.
-    windows = windows(state)
+    # Window content is laid out only in the rows left above dedicated chrome.
 
     {window_layouts, horizontal_separators} =
       if MingaEditor.State.Windows.split?(windows) do
@@ -68,9 +69,35 @@ defmodule MingaEditor.Layout.GUI do
       horizontal_separators: horizontal_separators,
       agent_panel: nil,
       status_bar: nil,
+      edit_timeline: edit_timeline,
       minibuffer: minibuffer
     }
   end
+
+  @spec reserve_timeline(non_neg_integer(), pos_integer(), boolean(), map()) ::
+          {non_neg_integer(), Layout.rect() | nil}
+  defp reserve_timeline(height, _cols, true, _windows), do: {height, nil}
+
+  defp reserve_timeline(height, cols, false, windows) do
+    case Map.get(windows.map, windows.active) do
+      %{content: content} ->
+        if Content.agent_body?(content) do
+          rows = min(@timeline_rows, max(height - 1, 0))
+          remaining = height - rows
+          rect = timeline_rect(remaining, cols, rows)
+          {remaining, rect}
+        else
+          {height, nil}
+        end
+
+      _ ->
+        {height, nil}
+    end
+  end
+
+  @spec timeline_rect(non_neg_integer(), pos_integer(), non_neg_integer()) :: Layout.rect() | nil
+  defp timeline_rect(_row, _cols, 0), do: nil
+  defp timeline_rect(row, cols, rows), do: {row, 0, cols, rows}
 
   @spec terminal_viewport(EditorState.t() | RenderInput.t()) :: MingaEditor.Viewport.t()
   defp terminal_viewport(%EditorState{frontend: %{terminal_viewport: viewport}}), do: viewport

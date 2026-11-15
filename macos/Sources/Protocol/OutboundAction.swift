@@ -7,6 +7,7 @@ public enum SemanticItemSurface: UInt8, Equatable, Sendable {
     case fileTree = 3
     case commandCompletion = 4
     case timeline = 5
+    case review = 6
 }
 
 /// A position in the immutable composed row that the frontend displayed.

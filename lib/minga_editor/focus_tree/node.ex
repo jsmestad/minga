@@ -37,6 +37,7 @@ defmodule MingaEditor.FocusTree.Node do
           | :signature_help
           | :float_popup
           | :agent_context
+          | :agent_help
           | :extension_panel
           | :observatory
           | :edit_timeline

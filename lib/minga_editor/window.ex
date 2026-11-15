@@ -138,6 +138,39 @@ defmodule MingaEditor.Window do
     |> set_document_symbols([])
   end
 
+  @doc "Changes an existing Agent pane without converting a human buffer or empty window."
+  @spec show_agent_body(t(), :chat | :review) :: t()
+  def show_agent_body(%__MODULE__{content: {:agent_chat, :semantic}} = window, :chat), do: window
+
+  def show_agent_body(%__MODULE__{content: {:agent_review, :semantic}} = window, :review),
+    do: window
+
+  def show_agent_body(%__MODULE__{content: {:agent_chat, :semantic}} = window, :review) do
+    %{
+      window
+      | content: Content.agent_review(),
+        accessibility_generation: new_accessibility_generation()
+    }
+    |> set_document_symbols([])
+  end
+
+  def show_agent_body(%__MODULE__{content: {:agent_review, :semantic}} = window, :chat) do
+    %{
+      window
+      | content: Content.agent_chat(),
+        accessibility_generation: new_accessibility_generation()
+    }
+    |> set_document_symbols([])
+  end
+
+  def show_agent_body(%__MODULE__{content: {:buffer, _buffer}} = window, body)
+      when body in [:chat, :review],
+      do: window
+
+  def show_agent_body(%__MODULE__{content: {:empty, :semantic}} = window, body)
+      when body in [:chat, :review],
+      do: window
+
   @doc "Creates a new window with the given id, buffer, viewport dimensions, and cursor position."
   @spec new(id(), pid(), pos_integer(), pos_integer(), Buffer.position()) :: t()
   def new(id, buffer, rows, cols, cursor)

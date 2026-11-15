@@ -27,6 +27,7 @@ type uiLayout struct {
 	header   uiRect
 	body     uiRect
 	footer   uiRect
+	timeline uiRect // persistent BEAM-authored chrome, never an overlay candidate
 	leftPane uiRect // file tree or sidebar; zero when neither is visible
 }
 
@@ -34,16 +35,26 @@ func (m Model) computeLayout() uiLayout {
 	width := max(m.width, 1)
 	height := max(m.height, 1)
 
-	headerHeight := len(m.headerLines())
-	footerHeight := len(m.footerLines())
-	bodyHeight := max(height-headerHeight-footerHeight, 1)
+	headerHeight := min(len(m.headerLines()), height)
+	footerHeight := min(len(m.footerLines()), height-headerHeight)
+	footerY := height - footerHeight
+	bodyBottom := footerY
+	var timeline uiRect
+	if _, visible := m.editTimeline(); visible {
+		if rect, placed := m.surfacePlacementFor(surfaceIDEditTimeline); placed && rect.Width > 0 && rect.Height > 0 {
+			timeline = uiRect{X: int(rect.Col), Y: int(rect.Row), Width: int(rect.Width), Height: int(rect.Height)}
+			bodyBottom = min(bodyBottom, timeline.Y)
+		}
+	}
+	bodyHeight := max(bodyBottom-headerHeight, 0)
 
 	leftPaneWidth := m.leftChromeWidth()
 
 	return uiLayout{
 		header:   uiRect{X: leftPaneWidth, Y: 0, Width: max(width-leftPaneWidth, 1), Height: headerHeight},
 		body:     uiRect{X: leftPaneWidth, Y: headerHeight, Width: max(width-leftPaneWidth, 1), Height: bodyHeight},
-		footer:   uiRect{X: 0, Y: headerHeight + bodyHeight, Width: width, Height: footerHeight},
+		footer:   uiRect{X: 0, Y: footerY, Width: width, Height: footerHeight},
+		timeline: timeline,
 		leftPane: uiRect{X: 0, Y: 0, Width: leftPaneWidth, Height: headerHeight + bodyHeight},
 	}
 }

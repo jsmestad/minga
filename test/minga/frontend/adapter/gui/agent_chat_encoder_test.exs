@@ -66,7 +66,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       end
 
       assert {cmd, _} = AgentChatEncoder.encode(%{base | status: :thinking}, caches)
-      assert <<@op_gui_agent_chat, 8::8, _::binary>> = cmd
+      assert section!(cmd, 0x01) == <<1, 1>>
     end
 
     test "re-encodes when the model changes" do
@@ -77,8 +77,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       {_, caches} = AgentChatEncoder.encode(hidden, caches)
       {cmd, _caches} = AgentChatEncoder.encode(visible, caches)
 
-      assert cmd != nil
-      assert <<@op_gui_agent_chat, 8::8, _::binary>> = cmd
+      assert section!(cmd, 0x02) == <<6::16, "claude">>
     end
 
     test "transitions from visible back to hidden" do
@@ -94,9 +93,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   end
 
   describe "header, model, prompt, thinking sections" do
-    test "visible chat emits 8 sections and omits retired messages section 0x06" do
+    test "visible chat omits independent Help and retired messages sections" do
       binary = encode(%AgentChat{visible?: true, resident_messages: [{1, {:user, "hi"}}]})
-      assert <<@op_gui_agent_chat, 8::8, _::binary>> = binary
+      assert <<@op_gui_agent_chat, 7::8, _::binary>> = binary
+      assert section!(binary, 0x05) == nil
       assert section!(binary, 0x06) == nil
     end
 
@@ -242,39 +242,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   describe "pending approval section" do
     test "always encodes as not visible" do
       assert section!(encode(%AgentChat{visible?: true}), 0x04) == <<0::8>>
-    end
-  end
-
-  describe "help overlay section" do
-    test "encodes help groups with titles and bindings" do
-      groups = [
-        {"Navigation", [{"j / k", "Scroll down / up"}, {"gg / G", "Top / bottom"}]},
-        {"Copy", [{"y", "Copy code block"}]}
-      ]
-
-      binary = encode(%AgentChat{visible?: true, help_visible?: true, help_groups: groups})
-      <<1::8, group_count::8, rest::binary>> = section!(binary, 0x05)
-      assert group_count == 2
-
-      <<nav_len::16, nav::binary-size(nav_len), nav_count::8, nav_rest::binary>> = rest
-      assert nav == "Navigation"
-      assert nav_count == 2
-
-      <<k1_len::8, k1::binary-size(k1_len), d1_len::16, d1::binary-size(d1_len), _::binary>> =
-        nav_rest
-
-      assert k1 == "j / k"
-      assert d1 == "Scroll down / up"
-    end
-
-    test "help_visible? false encodes as a single zero byte" do
-      binary = encode(%AgentChat{visible?: true, help_visible?: false, help_groups: []})
-      assert section!(binary, 0x05) == <<0x00>>
-    end
-
-    test "help_visible? true with no groups encodes as not visible" do
-      binary = encode(%AgentChat{visible?: true, help_visible?: true, help_groups: []})
-      assert section!(binary, 0x05) == <<0x00>>
     end
   end
 end

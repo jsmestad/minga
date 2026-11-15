@@ -59,7 +59,17 @@ Migration notice: the old built-in at-cursor, directional collapse/expand, messa
 
 ### Copy / Diff Review
 
-When a diff review is active (after the agent edits a file), these keys switch to diff review mode:
+Choose **Review** on a changed file to inspect it. Agent writes record changes without selecting another file or moving you out of the draft. The timeline keeps the same space before and after the first write, so incoming files do not move Send or the Review controls.
+
+For example, if you are reviewing `checkout.ex` when the agent changes `shipping.ex`, your selected file and reading position stay unchanged. If the agent changes `checkout.ex` again, the old review stays visible with a **Stale** label. Choose **Review latest** to load the new revision before accepting or rejecting hunks. **Back to chat** resumes the retained draft, including its editing mode and selection.
+
+These full-workspace captures use controlled file events with provider requests disabled.
+
+![Native Agent draft after background edits](images/agent-background-draft.png)
+
+![Native read-only Review awaiting an explicit refresh](images/agent-review-stale.png)
+
+While the current review is selected, these keys apply:
 
 | Key | Normal | Diff Review Active |
 |-----|--------|--------------------|
@@ -106,7 +116,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Switch focus between chat and file viewer |
+| `Tab` | In Normal mode, switch between chat and the retained Review, including from the focused draft |
 | `}` | Grow chat panel width (+5%) |
 | `{` | Shrink chat panel width (-5%) |
 | `=` | Reset panel split to default (65/35) |
@@ -151,11 +161,15 @@ Active when the input field is focused (after pressing `i`, `a`, or `Enter`).
 |-----|--------|
 | Printable chars | Type into input |
 | `Enter` | Submit prompt |
-| `Ctrl-c` | Submit (when text) / abort (when empty + streaming) |
-| `Esc` | Unfocus input (return to navigation) |
+| `Ctrl-c` | Abort an active turn; otherwise return to Normal mode |
+| `Esc` | Return to input Normal mode; press again to leave the input |
 | `Ctrl-d` | Scroll chat down half page |
 | `Ctrl-u` | Scroll chat up half page |
 | `SPC` | Types a space (not leader key) |
+| `Left` / `Right` | Move the draft cursor without leaving Insert mode |
+| `Up` / `Down` | Move within the draft or recall prompt history at its boundary |
+
+In Vim Insert mode, Shift+arrow keeps Vim movement semantics rather than starting a CUA selection. Press `Esc`, then `v`, to select with Vim motions. Arrow navigation never inserts the key's private-use codepoint into the draft, and returning from Review keeps the same draft and editing mode.
 
 ## File Viewer Navigation
 

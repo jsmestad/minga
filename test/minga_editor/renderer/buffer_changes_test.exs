@@ -219,7 +219,8 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     window_intent_fields =
       ~w(accessibility_generation authoritative_scroll_seq content cursor fold_map fold_ranges popup_meta scroll_detach_cursor scroll_echo_top scroll_velocity viewport)a
 
-    render_window_fields = [:id, :render_cache | window_intent_fields] |> Enum.sort()
+    render_window_fields =
+      [:id, :render_cache, :review_frame_rendered? | window_intent_fields] |> Enum.sort()
 
     assert Enum.all?(bounded.windows, fn {id, carrier} ->
              render_window = RenderWindow.materialize(id, carrier, WindowCache.reset())

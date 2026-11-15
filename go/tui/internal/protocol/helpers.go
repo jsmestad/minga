@@ -143,6 +143,8 @@ func opcodeName(opcode byte) string {
 		return "agent context"
 	case generated.OPGuiAgentChat:
 		return "agent chat"
+	case generated.OPGuiAgentHelp:
+		return "agent help"
 	case generated.OPGuiEditTimeline:
 		return "edit timeline"
 	case generated.OPGuiGutterSep:

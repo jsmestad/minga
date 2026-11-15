@@ -292,13 +292,21 @@ defmodule Minga.Integration.GUIProtocolTest do
             status: Map.get(d, :status, :idle),
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
-            prompt: Map.get(d, :prompt, ""),
-            help_visible?: Map.get(d, :help_visible, false),
-            help_groups: Map.get(d, :help_groups, [])
+            prompt: Map.get(d, :prompt, "")
           }
       end
 
     {binary, _caches} = AgentChatEncoder.encode(model, Caches.new())
+    binary
+  end
+
+  defp encode_gui_agent_help(model) do
+    {binary, _caches} =
+      Minga.Frontend.Adapter.GUI.AgentHelpEncoder.encode(
+        model,
+        Minga.Frontend.Adapter.GUI.Caches.new()
+      )
+
     binary
   end
 
@@ -498,28 +506,21 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selection_size"] == 3
     end
 
-    test "gui_agent_chat with help overlay round-trips", %{harness: harness} do
-      data = %{
-        visible: true,
-        status: :idle,
-        model: "claude",
-        prompt: "",
-        pending_approval: nil,
-        help_visible: true,
-        help_groups: [
+    test "gui_agent_help groups round-trip independently of chat", %{harness: harness} do
+      model = %Minga.RenderModel.UI.AgentHelp{
+        visible?: true,
+        groups: [
           {"Navigation", [{"j / k", "Scroll down / up"}, {"gg / G", "Top / bottom"}]},
           {"Copy", [{"y", "Copy code block"}]}
         ]
       }
 
-      cmd = encode_gui_agent_chat(data)
-      decoded = round_trip(harness, cmd, "gui_agent_chat")
+      cmd = encode_gui_agent_help(model)
+      decoded = round_trip(harness, cmd, "gui_agent_help")
 
-      assert decoded["type"] == "gui_agent_chat"
-      assert decoded["help_visible"] == true
-      assert Enum.count(decoded["help_groups"]) == 2
-
-      [nav, copy] = decoded["help_groups"]
+      assert decoded["type"] == "gui_agent_help"
+      assert decoded["visible"] == true
+      [nav, copy] = decoded["groups"]
       assert nav["title"] == "Navigation"
       assert Enum.count(nav["bindings"]) == 2
 
@@ -534,23 +535,13 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert hd(copy["bindings"])["key"] == "y"
     end
 
-    test "gui_agent_chat without help data round-trips with help_visible=false", %{
-      harness: harness
-    } do
-      data = %{
-        visible: true,
-        status: :idle,
-        model: "claude",
-        prompt: "",
-        pending_approval: nil
-      }
+    test "gui_agent_help hidden frame clears the Help presentation", %{harness: harness} do
+      cmd = encode_gui_agent_help(%Minga.RenderModel.UI.AgentHelp{})
+      decoded = round_trip(harness, cmd, "gui_agent_help")
 
-      cmd = encode_gui_agent_chat(data)
-      decoded = round_trip(harness, cmd, "gui_agent_chat")
-
-      assert decoded["type"] == "gui_agent_chat"
-      assert decoded["help_visible"] == false
-      assert decoded["help_groups"] == []
+      assert decoded["type"] == "gui_agent_help"
+      assert decoded["visible"] == false
+      assert decoded["groups"] == []
     end
   end
 

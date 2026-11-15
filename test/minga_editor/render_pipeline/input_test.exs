@@ -180,9 +180,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   end
 
   describe "EditorState.reset_frontend_render_state/1" do
-    test "resets frontend cursors and requests a keyframe without resetting receipt ordering", %{
-      state: state
-    } do
+    test "resets frontend cursors and fences pre-reset receipts without discarding message history",
+         %{
+           state: state
+         } do
       message_store =
         state.render.message_store
         |> MessageStore.append("first", :info, :editor)
@@ -208,7 +209,13 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.render.message_store.stream_instance == message_store.stream_instance
       assert Enum.map(result.render.message_store.entries, & &1.text) == ["first"]
       assert result.render.render_correlation.keyframe_pending?
-      assert result.render.render_correlation.latest_intent_revision == revision
+
+      assert MingaEditor.State.RenderCorrelation.classify_receipt(
+               result.render.render_correlation,
+               revision,
+               1
+             ) == {:stale, :superseded_intent}
+
       assert result.workspace == state.workspace
     end
   end

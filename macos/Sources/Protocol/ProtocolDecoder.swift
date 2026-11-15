@@ -95,7 +95,8 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32)
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup])
+    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String)
+    case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
     /// `trimFront` messages are first evicted from the store front, then over the remainder
@@ -1148,6 +1149,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var selection = StatusBarUpdate.SelectionInfo(mode: 0, size: 0)
         var workspace: StatusBarUpdate.WorkspaceInfo? = nil
         var pendingKeys = ""
+        var review: StatusBarUpdate.Review? = nil
 
         for _ in 0..<sectionCount {
             let section = try readSection16(data, at: pos, containingEnd: data.endIndex)
@@ -1283,6 +1285,19 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     pendingKeys = try decodeUTF8(data[(sStart + 2)..<(sStart + 2 + pkLen)]) ?? ""
                 }
 
+            case 0x10: // Review: path:string16, freshness:u8, generation:u32, item_id:string16
+                var reviewPos = sStart
+                let path = try readString16(data: data, pos: &reviewPos, end: section.end)
+                guard reviewPos + 5 <= section.end,
+                      let freshness = StatusBarUpdate.Review.Freshness(rawValue: data[reviewPos])
+                else { throw ProtocolDecodeError.malformed }
+                reviewPos += 1
+                let generation = try readU32(data, reviewPos)
+                reviewPos += 4
+                let itemID = try readString16(data: data, pos: &reviewPos, end: section.end)
+                guard reviewPos == section.end else { throw ProtocolDecodeError.malformed }
+                review = .init(path: path, freshness: freshness, generation: generation, itemID: itemID)
+
             default:
                 break // Skip unknown sections (forward compatibility)
             }
@@ -1366,7 +1381,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             modelineRightSegments: modelineRightSegments,
             selection: selection,
             workspace: workspace,
-            pendingKeys: pendingKeys
+            pendingKeys: pendingKeys,
+            review: review
         )
         return (.guiStatusBar(update), pos - offset)
 
@@ -1527,7 +1543,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let chatSectionCount = Int(data[rest])
         if chatSectionCount == 0 {
-            return (.guiAgentChat(visible: false, status: .idle, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .normal, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: []), 2)
+            return (.guiAgentChat(visible: false, status: .idle, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .normal, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: ""), 2)
         }
         var chatPos = rest + 1
         var chatVisible = false
@@ -1543,8 +1559,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var promptCompletion: Wire.PromptCompletion? = nil
         var pendingToolName: String? = nil
         var pendingToolSummary: String = ""
-        var helpVisible = false
-        var helpGroups: [Wire.HelpGroup] = []
 
         for _ in 0..<chatSectionCount {
             guard data.count >= chatPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1621,46 +1635,49 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     pendingToolSummary = try decodeUTF8(data[pp..<(pp + psLen)]) ?? ""
                 }
 
-            case 0x05: // Help: same format as before (visible(1) [group_count(1) ...])
-                guard csLen >= 1 else { break }
-                helpVisible = data[csStart] != 0
-                if helpVisible, csLen >= 2 {
-                    let groupCount = Int(data[csStart + 1])
-                    var hp = csStart + 2
-                    for _ in 0..<groupCount {
-                        guard hp + 2 <= csStart + csLen else { break }
-                        let tLen = Int(try readU16(data, hp)); hp += 2
-                        guard hp + tLen + 1 <= csStart + csLen else { break }
-                        let title = try decodeUTF8(data[hp..<(hp + tLen)]) ?? ""
-                        hp += tLen
-                        let bCount = Int(data[hp]); hp += 1
-                        var bindings: [(key: String, description: String)] = []
-                        for _ in 0..<bCount {
-                            guard hp + 1 <= csStart + csLen else { break }
-                            let kLen = Int(data[hp]); hp += 1
-                            guard hp + kLen + 2 <= csStart + csLen else { break }
-                            let key = try decodeUTF8(data[hp..<(hp + kLen)]) ?? ""
-                            hp += kLen
-                            let dLen = Int(try readU16(data, hp)); hp += 2
-                            guard hp + dLen <= csStart + csLen else { break }
-                            let desc = try decodeUTF8(data[hp..<(hp + dLen)]) ?? ""
-                            hp += dLen
-                            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                            bindings.append((key: key, description: desc))
-                        }
-                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                        helpGroups.append(Wire.HelpGroup(title: title, bindings: bindings))
-                    }
-                }
-
-
             default: break
             }
 
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary), chatPos - offset)
+
+    case .guiAgentHelp:
+        guard rest + 4 <= data.endIndex else { throw ProtocolDecodeError.malformed }
+        let payloadLength = Int(try readU32(data, rest))
+        var helpPos = rest + 4
+        let helpEnd = helpPos + payloadLength
+        guard helpEnd <= data.endIndex, payloadLength >= 2,
+              data[helpPos] == 1, data[helpPos + 1] <= 1
+        else { throw ProtocolDecodeError.malformed }
+        let visible = data[helpPos + 1] == 1
+        helpPos += 2
+        var groups: [Wire.HelpGroup] = []
+        if visible {
+            guard helpPos < helpEnd else { throw ProtocolDecodeError.malformed }
+            let groupCount = Int(data[helpPos])
+            helpPos += 1
+            try FrameDecodeAccounting.reserve(.arrayEntries, groupCount)
+            groups.reserveCapacity(groupCount)
+            for _ in 0..<groupCount {
+                let title = try readString16(data: data, pos: &helpPos, end: helpEnd)
+                guard helpPos < helpEnd else { throw ProtocolDecodeError.malformed }
+                let bindingCount = Int(data[helpPos])
+                helpPos += 1
+                try FrameDecodeAccounting.reserve(.arrayEntries, bindingCount)
+                var bindings: [(key: String, description: String)] = []
+                bindings.reserveCapacity(bindingCount)
+                for _ in 0..<bindingCount {
+                    let key = try readString8(data: data, pos: &helpPos, end: helpEnd)
+                    let description = try readString16(data: data, pos: &helpPos, end: helpEnd)
+                    bindings.append((key: key, description: description))
+                }
+                groups.append(.init(title: title, bindings: bindings))
+            }
+        }
+        guard helpPos == helpEnd else { throw ProtocolDecodeError.malformed }
+        return (.guiAgentHelp(visible: visible, groups: groups), 5 + payloadLength)
 
     case .guiAgentTranscript:
         // len32 framing: opcode(1) + payload_len(4) + payload (GUI_PROTOCOL.md 0x86).

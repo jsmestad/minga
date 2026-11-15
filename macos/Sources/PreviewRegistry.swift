@@ -49,7 +49,7 @@ enum PreviewRegistry {
             prompt: state.prompt, promptLineCount: state.promptLineCount,
             promptCursorLine: state.promptCursorLine, promptCursorCol: state.promptCursorCol,
             promptMode: state.promptMode, promptVisibleRows: state.promptVisibleRows,
-            promptCompletion: state.promptCompletion, helpVisible: state.helpVisible, helpGroups: state.helpGroups
+            promptCompletion: state.promptCompletion
         )
         guard let editor = previewEditorNSView(appState: appState, encoder: encoder) else {
             return AnyView(previewFailureView(message: "Canonical agent prompt renderer is unavailable."))
@@ -499,8 +499,7 @@ enum PreviewRegistry {
             visible: true, status: state.status, model: state.model, thinkingLevel: state.thinkingLevel,
             prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0,
             promptCursorCol: state.promptCursorCol, promptMode: state.promptMode, promptVisibleRows: 1,
-            promptCompletion: state.promptCompletion, pendingToolName: nil, pendingToolSummary: "",
-            helpVisible: state.helpVisible, helpGroups: []
+            promptCompletion: state.promptCompletion, pendingToolName: nil, pendingToolSummary: ""
         ))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
     }

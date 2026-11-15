@@ -32,6 +32,9 @@ defmodule MingaEditor.Mouse do
   alias Minga.Editing
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
+  alias Minga.Editing.Scroll
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.DisplayMap
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
@@ -572,6 +575,31 @@ defmodule MingaEditor.Mouse do
     apply_scroll_intent(state, window_id, delta_lines, direction)
   end
 
+  @doc "Commits an admitted Review scrollbar position through its Preview owner."
+  @spec scroll_review_to_line(state(), Window.t(), non_neg_integer()) :: state()
+  def scroll_review_to_line(
+        state,
+        %Window{content: {:agent_review, :semantic}} = window,
+        line
+      )
+      when is_integer(line) and line >= 0 do
+    preview = Preview.scroll_to_row(state.workspace.agent_ui.view.preview, line)
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        UIState.replace_preview(state.workspace.agent_ui, preview)
+      )
+
+    updated =
+      window
+      |> Window.set_viewport(Viewport.put_top(window.viewport, preview.scroll.offset))
+      |> Window.mark_scroll_echo(preview.scroll.offset)
+
+    windows = Windows.replace_window(state.workspace.windows, window.id, updated)
+    %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+  end
+
   # Shared entry point for wheel/trackpad scroll intent (#2661, corrected #2684),
   # used by both the smooth-trackpad accumulator (`handle_scroll_batch/4`) and the
   # discrete per-tick wheel path for inactive windows (`scroll_window_vertical/3`).
@@ -592,6 +620,14 @@ defmodule MingaEditor.Mouse do
   @spec apply_scroll_intent(state(), non_neg_integer(), integer(), :down | :up) :: state()
   defp apply_scroll_intent(state, window_id, delta_lines, _direction) do
     case Map.fetch(state.workspace.windows.map, window_id) do
+      {:ok, %Window{content: {:agent_review, :semantic}} = window} ->
+        scroll = state.workspace.agent_ui.view.preview.scroll
+
+        current =
+          Scroll.resolve(scroll, scroll.metrics.total_lines, scroll.metrics.visible_height)
+
+        scroll_review_to_line(state, window, max(current + delta_lines, 0))
+
       {:ok, %Window{content: {:buffer, buf}} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
         total_lines = Buffer.line_count(buf)
@@ -1130,7 +1166,15 @@ defmodule MingaEditor.Mouse do
          mods,
          click_count
        ) do
-    handle(state, row, col, button, mods, :press, click_count)
+    case Map.fetch(state.workspace.windows.map, win_id) do
+      {:ok, %Window{content: {:agent_review, :semantic}}}
+      when button in [:wheel_down, :wheel_up] ->
+        delta = if button == :wheel_down, do: scroll_lines(state), else: -scroll_lines(state)
+        apply_scroll_intent(state, win_id, delta, if(delta > 0, do: :down, else: :up))
+
+      _ ->
+        handle(state, row, col, button, mods, :press, click_count)
+    end
   end
 
   defp handle_buffer_scroll_at_window(state, win_id, _row, _col, :wheel_down, _mods, _click_count) do

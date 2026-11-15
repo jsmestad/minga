@@ -49,6 +49,96 @@ struct CommandDispatcherRoutingTests {
         return (dispatcher, gui)
     }
 
+    @Test("Independent Help commits while Chat is hidden without changing draft or focus")
+    @MainActor func independentHelpWhileChatHidden() throws {
+        let gui = GUIState()
+        let editor = NSView()
+        let policy = EditorFocusPolicy(editorView: editor, focusOwnerState: gui.focusOwnerState)
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui, applicationEffectSink: { effect in
+            if case .focusOwnerChanged(let owner) = effect {
+                policy.focusOwnerDidChange(owner)
+            }
+        })
+        gui.agentChatState.update(
+            visible: false, status: .idle, model: "test", thinkingLevel: "high",
+            prompt: "retained draft 👩‍💻", promptLineCount: 3, promptCursorLine: 1,
+            promptCursorCol: 5, promptMode: .insert, promptVisibleRows: 3, promptCompletion: nil
+        )
+        let promptVersion = gui.agentChatState.promptVersion
+        let focus = Wire.FocusOwner(responder: 0, surface: 7, windowID: 1, generation: 9)
+        let groups = [Wire.HelpGroup(title: "Review", bindings: [(key: "Tab", description: "Back to chat")])]
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiFocusOwner(focus))
+        dispatcher.dispatch(.guiAgentHelp(visible: true, groups: groups))
+        #expect(!gui.agentHelpState.visible)
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(gui.agentHelpState.visible)
+        #expect(gui.agentHelpState.groups.first?.title == "Review")
+        #expect(!gui.agentChatState.visible)
+        #expect(gui.agentChatState.prompt == "retained draft 👩‍💻")
+        #expect(gui.agentChatState.promptVersion == promptVersion)
+        #expect(gui.agentChatState.promptCursorLine == 1)
+        #expect(gui.agentChatState.promptCursorCol == 5)
+        #expect(gui.agentChatState.promptMode == .insert)
+        #expect(gui.agentChatState.promptVisibleRows == 3)
+        #expect(gui.focusOwnerState.decodedOwner == focus)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiAgentHelp(visible: false, groups: []))
+        #expect(gui.agentHelpState.visible)
+        dispatcher.dispatch(.commitFrame(frameSeq: 99, seq: 0))
+        #expect(gui.agentHelpState.visible)
+        #expect(gui.agentHelpState.groups.count == 1)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiAgentHelp(visible: false, groups: []))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(!gui.agentHelpState.visible)
+        #expect(gui.agentHelpState.groups.isEmpty)
+        #expect(gui.agentChatState.prompt == "retained draft 👩‍💻")
+        #expect(gui.agentChatState.promptVersion == promptVersion)
+    }
+
+    @Test("Chat hiding cannot dismiss independent Help and connection reset clears it")
+    @MainActor func helpLifetimeIndependentOfChat() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.applyForTesting(.guiAgentHelp(visible: true, groups: [
+            .init(title: "Help", bindings: [])
+        ]))
+        dispatcher.applyForTesting(.guiAgentChat(
+            visible: false, status: .idle, model: "", thinkingLevel: "", prompt: "",
+            promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
+            promptMode: .normal, promptVisibleRows: 1, promptCompletion: nil,
+            pendingToolName: nil, pendingToolSummary: ""
+        ))
+        #expect(gui.agentHelpState.visible)
+        #expect(gui.agentHelpState.groups.count == 1)
+        #expect(gui.editorInput.agentHelpState === gui.agentHelpState)
+        gui.resetProtocolConnection()
+        #expect(!gui.agentHelpState.visible)
+        #expect(gui.agentHelpState.groups.isEmpty)
+    }
+
+    @Test("Absent Review section and connection replacement reset committed Review state")
+    @MainActor func optionalReviewReset() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        // path='p', stale, generation=7, opaque item ID='i'
+        let reviewData = Data([OP_GUI_STATUS_BAR, 1, 0x10, 0, 11, 0, 1, 112, 1, 0, 0, 0, 7, 0, 1, 105])
+        let (reviewCommand, _) = try decodeCommand(data: reviewData, offset: 0)
+        let review = try #require(reviewCommand)
+        dispatcher.applyForTesting(review)
+        #expect(gui.statusBarState.review?.itemID == "i")
+        #expect(gui.statusBarState.review?.freshness == .stale)
+        let (ordinaryCommand, _) = try decodeCommand(data: Data([OP_GUI_STATUS_BAR, 0]), offset: 0)
+        dispatcher.applyForTesting(try #require(ordinaryCommand))
+        #expect(gui.statusBarState.review == nil)
+        dispatcher.applyForTesting(review)
+        gui.resetProtocolConnection()
+        #expect(gui.statusBarState.review == nil)
+    }
+
     // MARK: - Basic commands
 
     @Test("focus owner effect and policy mirror publish only on an accepted atomic commit")
@@ -1056,7 +1146,7 @@ struct CommandDispatcherRoutingTests {
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptMode: .insert, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
-                                           pendingToolSummary: "", helpVisible: false, helpGroups: []))
+                                           pendingToolSummary: ""))
 
         #expect(gui.agentChatState.visible == true)
         #expect(gui.agentChatState.model == "claude")
@@ -1073,7 +1163,7 @@ struct CommandDispatcherRoutingTests {
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptMode: .insert, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
-                                           pendingToolSummary: "", helpVisible: false, helpGroups: []))
+                                           pendingToolSummary: ""))
         dispatcher.applyForTesting(.guiAgentTranscript(mode: 0, epoch: 3, truncated: false, trimFront: 0, baseCount: 0, messages: [
             Wire.ChatMessage(beamId: 1, content: .user(text: "hello")),
             Wire.ChatMessage(beamId: 2, content: .assistant(text: "hi"))
@@ -1091,7 +1181,7 @@ struct CommandDispatcherRoutingTests {
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptMode: .normal, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
-                                           pendingToolSummary: "", helpVisible: false, helpGroups: []))
+                                           pendingToolSummary: ""))
 
         #expect(gui.agentChatState.visible == false)
         #expect(gui.agentChatState.messages.isEmpty)
@@ -3468,8 +3558,7 @@ struct CommandDispatcherStagingTests {
             visible: true, status: .idle, model: "prepared-model", thinkingLevel: "medium",
             prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
             promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil,
-            pendingToolName: nil, pendingToolSummary: "", helpVisible: false,
-            helpGroups: []
+            pendingToolName: nil, pendingToolSummary: ""
         ))
         #expect(notificationCount.withLock { $0 } == 0)
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
@@ -3564,8 +3653,7 @@ struct CommandDispatcherStagingTests {
             visible: true, status: .idle, model: "model", thinkingLevel: "medium",
             prompt: "", promptLineCount: 1, promptCursorLine: 0,
             promptCursorCol: 0, promptMode: .insert, promptVisibleRows: 1,
-            promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
-            helpVisible: false, helpGroups: []
+            promptCompletion: nil, pendingToolName: nil, pendingToolSummary: ""
         ))
         dispatcher.dispatch(.guiExtensionRuntime(runtime))
         dispatcher.dispatch(.guiCursorAnimation(enabled: false))
@@ -3764,8 +3852,7 @@ struct CommandDispatcherStagingTests {
             visible: true, status: .thinking, model: "would-publish", thinkingLevel: "high",
             prompt: "would-publish", promptLineCount: 1, promptCursorLine: 0,
             promptCursorCol: 0, promptMode: .normal, promptVisibleRows: 1,
-            promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
-            helpVisible: false, helpGroups: []
+            promptCompletion: nil, pendingToolName: nil, pendingToolSummary: ""
         ))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 

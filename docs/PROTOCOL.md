@@ -48,7 +48,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 31). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 31 adds exact source-presentation-targeted prompt fit and visual-row scrolling. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#gui-action-input-opcode-frontend--beam).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 32). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 32 separates Agent Help from Chat and adds source-bound Review controls. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#gui-action-input-opcode-frontend--beam).
 
 ---
 
@@ -842,7 +842,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 31). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 31 adds source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 32). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 
@@ -1014,7 +1014,7 @@ Total size: 7 + (40 + text_len) per edit.
 
 Semantic-capable frontends receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70. Many opcode and module names still use `GUI` because the Swift frontend was the first semantic client; treat that as historical naming. The product contract is Semantic UI for every capable frontend, including terminal clients. Capability negotiation decides whether a frontend receives and renders these models.
 
-See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of Semantic UI opcodes, `gui_action` input events, theme color slots, and the behavioral contract for semantic frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the identity flags (with safe mode), the indent section (`0x0A`), named modeline segment section (`0x0B`), selection section (`0x0C`), and Editor-authored operation feedback section (`0x0F`). The operation section is independent of ordinary status messages, and generated operation kind and semantic status values—not message punctuation—define its meaning. The opcode names remain stable for compatibility.
+See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of Semantic UI opcodes, `gui_action` input events, theme color slots, and the behavioral contract for semantic frontends. The sectioned `gui_status_bar` opcode (`0x76`) includes identity flags (with safe mode), indent section `0x0A`, named modeline segments `0x0B`, selection `0x0C`, Editor-authored operation feedback `0x0F` and optional read-only Review controls `0x10`. Operation feedback is independent of ordinary status messages and uses generated kind/status values, not message punctuation. Independent Agent Help uses len32 opcode `0xAB`, including when Chat is hidden.
 
 ---
 

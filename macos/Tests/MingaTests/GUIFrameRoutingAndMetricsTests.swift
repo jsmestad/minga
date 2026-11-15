@@ -75,6 +75,7 @@ struct GUIFrameRoutingTests {
             ("picker selection", .guiPickerSelection(generation: 1, selectedItemID: 2, selectedActionID: 3), .windowOverlay),
             ("sidebar", .guiFileTree(version: 1, treeFlags: 0, treeState: 0, selectedId: "", treeWidth: 0, rootPath: "", errorReason: "", entries: []), .shell),
             ("status", .guiStatusBar(status()), [.shell, .editor]),
+            ("independent agent help", .guiAgentHelp(visible: true, groups: []), .editor),
             ("bottom panel inset", .guiBottomPanel(visible: false, activeTabIndex: 0, heightPercent: 0, filterPreset: 0, tabs: [], entries: []), [.shell, .windowOverlay]),
             ("extension panels", .guiExtensionPanel([]), [.shell, .windowOverlay]),
             ("resync overlay", .protocolError(message: "mismatch"), .windowOverlay),

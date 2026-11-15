@@ -106,6 +106,128 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
     end
   end
 
+  test "returning from Review resumes the retained draft before the next character" do
+    state =
+      base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+      |> MingaEditor.Commands.Agent.scope_focus_input()
+      |> MingaEditor.Commands.Agent.input_paste("Retained draft")
+
+    ui =
+      state.workspace.agent_ui
+      |> MingaEditor.Agent.UIState.replace_preview(
+        Preview.set_diff(Preview.new(), DiffReview.new("checkout.ex", "before", "after"))
+      )
+      |> MingaEditor.Agent.UIState.set_focus(:file_viewer)
+
+    state =
+      state
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(ui)
+      |> MingaEditor.Commands.Agent.return_to_chat()
+
+    assert {:handled, state} = walk_surface_handlers(state, ?z, 0)
+
+    assert MingaEditor.Agent.PromptBuffer.input_text(state.workspace.agent_ui.panel) ==
+             "Retained draftz"
+  end
+
+  test "prompt arrows preserve text and route the next shifted character to the prompt" do
+    routes = [
+      {MingaEditor.Input.Scoped, false},
+      {MingaEditor.Input.AgentPanel, true},
+      {:stack, false},
+      {:stack, true}
+    ]
+
+    for {route, visible} <- routes, left <- [57_350, 0xF702], modifiers <- [0, 1] do
+      state =
+        base_state(
+          keymap_scope: :agent,
+          agentic_active: true,
+          input_focused: true,
+          panel_visible: visible
+        )
+        |> MingaEditor.Commands.Agent.scope_focus_input()
+        |> MingaEditor.Commands.Agent.input_paste("abcd")
+
+      real_buffer = state.workspace.buffers.active
+      real_before = {Minga.Buffer.content(real_buffer), Minga.Buffer.cursor(real_buffer)}
+      prompt = state.workspace.agent_ui.panel.prompt_buffer
+
+      handlers =
+        case route do
+          :stack -> MingaEditor.Input.surface_handlers(state)
+          module -> [module]
+        end
+
+      dispatch = fn state, cp, mods ->
+        Enum.reduce_while(handlers, {:passthrough, state}, fn handler, {_, current} ->
+          case handler.handle_key(current, cp, mods) do
+            {:handled, updated} -> {:halt, {:handled, updated}}
+            {:passthrough, updated} -> {:cont, {:passthrough, updated}}
+          end
+        end)
+      end
+
+      assert {:handled, state} = dispatch.(state, left, modifiers)
+      assert {:handled, state} = dispatch.(state, left, modifiers)
+      assert Minga.Buffer.content(prompt) == "abcd"
+      assert Minga.Buffer.cursor(prompt) == {0, 2}
+      assert Minga.Editing.mode(state) == :insert
+      refute Minga.Editing.selecting?(state)
+
+      assert {:handled, state} = dispatch.(state, ?X, 1)
+      assert Minga.Buffer.content(prompt) == "abXcd"
+      assert state.workspace.buffers.active == real_buffer
+      assert {Minga.Buffer.content(real_buffer), Minga.Buffer.cursor(real_buffer)} == real_before
+    end
+  end
+
+  test "CUA global save and quit remain reachable while a full-workspace draft is focused" do
+    events = Module.concat(__MODULE__, "ShortcutEvents#{System.unique_integer([:positive])}")
+    start_supervised!({Registry, keys: :duplicate, name: events}, id: events)
+    options = start_supervised!({Minga.Config.Options, name: nil, events_registry: events})
+    {:ok, true} = Minga.Config.Options.set(options, :confirm_quit, true)
+
+    for {key, notice} <- [
+          {?s, "No file name"},
+          {?q, "Modified buffers exist. Really quit? (y/n)"}
+        ] do
+      state =
+        base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+        |> MingaEditor.Commands.Agent.scope_focus_input()
+        |> MingaEditor.Commands.Agent.input_paste("Retained draft")
+
+      state = %{
+        state
+        | interaction:
+            MingaEditor.State.Interaction.new(editing_model: :cua, options_server: options)
+      }
+
+      real_buffer = state.workspace.buffers.active
+      Minga.Buffer.insert_text(real_buffer, "changed")
+
+      result =
+        Enum.reduce_while(
+          MingaEditor.Input.surface_handlers(state),
+          {:passthrough, state},
+          fn handler, {_, current} ->
+            case handler.handle_key(current, key, 0x02) do
+              {:handled, updated} -> {:halt, {:handled, updated}}
+              {:passthrough, updated} -> {:cont, {:passthrough, updated}}
+            end
+          end
+        )
+
+      assert {:handled, updated} = result
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(updated) =~ notice
+
+      assert MingaEditor.Agent.PromptBuffer.input_text(updated.workspace.agent_ui.panel) ==
+               "Retained draft"
+
+      assert updated.workspace.buffers.active == real_buffer
+    end
+  end
+
   describe "agent scope — mention completion sub-state" do
     setup do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)

@@ -20,19 +20,25 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.TreeNode
-  alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.Events, as: AgentEvents
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.FocusTree
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Input.Router
   alias MingaEditor.Layout
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Observatory.Data, as: ObservatoryData
+  alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State.Feedback
+  alias MingaEditor.State.Windows
   alias MingaEditor.UI.Notification
+  alias MingaEditor.Window
 
   defp with_notifications(state) do
     note =
@@ -74,30 +80,6 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
     state
     |> with_observatory()
     |> SidebarWorkflow.replace_observatory_data(ObservatoryData.visible(tree, []))
-  end
-
-  # Records `count` agent edits for the active buffer's path and wires the
-  # resulting timeline into the agent UI view, so edit_timeline becomes visible
-  # and content_height_edit_timeline counts a real entry list. The buffer is
-  # saved to a temp path so active_buffer_path/1 has a non-nil path to key on.
-  defp with_edit_timeline(state, count) when count >= 1 do
-    buf = state.workspace.buffers.active
-    path = Path.join(System.tmp_dir!(), "edit-timeline-#{System.unique_integer([:positive])}.ex")
-    :ok = BufferProcess.save_as(buf, path)
-    ExUnit.Callbacks.on_exit(fn -> File.rm(path) end)
-    resolved = BufferProcess.file_path(buf)
-
-    timeline =
-      Enum.reduce(1..count, EditTimeline.new(), fn i, acc ->
-        EditTimeline.record_edit(acc, resolved, "call-#{i}", "write_file", "before", "after #{i}")
-      end)
-
-    agent_ui = %{
-      state.workspace.agent_ui
-      | view: %{state.workspace.agent_ui.view | edit_timeline: timeline}
-    }
-
-    %{state | workspace: SessionState.set_agent_ui(state.workspace, agent_ui)}
   end
 
   describe "OverlayBand.rect/2" do
@@ -191,19 +173,6 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       assert SurfaceRegistry.rect_for(render_input, :observatory) == {row, 0, 80, height}
     end
 
-    test "the edit timeline band height is one header plus one row per entry" do
-      # The Go renderer draws an addressable row per timeline entry plus a header
-      # row, and marks a click zone over each entry row (#2335). The BEAM height must
-      # equal 1 + entry_count for the same clip-the-zones reason as observatory and
-      # notifications. With 2 entries the content height is 1 (header) + 2 = 3.
-      state = with_edit_timeline(base_state(rows: 24, cols: 80), 2)
-
-      {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :edit_timeline)
-
-      assert height == 3
-      assert row + height == 24
-    end
-
     test "pending approval alone places the agent context band" do
       state = with_agent_context(base_state(rows: 24, cols: 80))
 
@@ -219,6 +188,45 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       assert :agent_context in ids
       assert height > 0
       assert row + height == 24
+    end
+
+    test "full Agent bodies retain activity data without a compact context overlay covering their controls" do
+      for body <- [:chat, :review] do
+        state = with_agent_context(base_state(rows: 24, cols: 80))
+        id = state.workspace.windows.active
+        window = Window.new_agent_chat(id, 24, 80)
+        windows = Windows.replace_window(state.workspace.windows, id, window)
+
+        ui =
+          case body do
+            :chat ->
+              UIState.set_focus(state.workspace.agent_ui, :chat)
+
+            :review ->
+              state.workspace.agent_ui
+              |> UIState.replace_preview(
+                Preview.set_diff(Preview.new(), DiffReview.new("checkout.ex", "before", "after"))
+              )
+              |> UIState.set_focus(:file_viewer)
+          end
+
+        workspace =
+          state.workspace
+          |> SessionState.set_windows(windows)
+          |> SessionState.set_agent_ui(ui)
+
+        state = %{state | workspace: workspace}
+
+        expected_content =
+          if body == :chat, do: {:agent_chat, :semantic}, else: {:agent_review, :semantic}
+
+        assert state.workspace.windows.map[id].content == expected_content
+        assert AgentContextBuilder.build(Context.from_editor_state(state)).visible
+
+        for input <- [state, Input.from_editor_state(state)] do
+          assert SurfaceRegistry.rect_for(input, :agent_context) == nil
+        end
+      end
     end
 
     test "no footer overlay is placed when none is visible" do

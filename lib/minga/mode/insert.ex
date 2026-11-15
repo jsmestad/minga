@@ -25,7 +25,7 @@ defmodule Minga.Mode.Insert do
   @enter 13
   @tab 9
 
-  # Arrow key codepoints sent by libvaxis
+  # Canonical protocol arrow codepoints.
   @arrow_up 57_352
   @arrow_down 57_353
   @arrow_left 57_350
@@ -70,19 +70,19 @@ defmodule Minga.Mode.Insert do
   end
 
   # Arrow keys — allow cursor movement without leaving Insert mode
-  def handle_key({@arrow_up, _mods}, state) do
+  def handle_key({cp, _mods}, state) when cp in [@arrow_up, 0xF700] do
     {:execute, :move_up, state}
   end
 
-  def handle_key({@arrow_down, _mods}, state) do
+  def handle_key({cp, _mods}, state) when cp in [@arrow_down, 0xF701] do
     {:execute, :move_down, state}
   end
 
-  def handle_key({@arrow_left, _mods}, state) do
+  def handle_key({cp, _mods}, state) when cp in [@arrow_left, 0xF702] do
     {:execute, :move_left, state}
   end
 
-  def handle_key({@arrow_right, _mods}, state) do
+  def handle_key({cp, _mods}, state) when cp in [@arrow_right, 0xF703] do
     {:execute, :move_right, state}
   end
 
@@ -101,9 +101,15 @@ defmodule Minga.Mode.Insert do
 
   @spec handle_default(Mode.key(), Mode.state()) :: Mode.result()
 
-  # Printable Unicode characters (codepoints 32..0x10FFFF, no modifiers)
-  defp handle_default({codepoint, 0}, state)
-       when codepoint >= 32 and codepoint <= 0x10FFFF do
+  # Unbound Kitty and NSEvent functional keys are not private-use text.
+  defp handle_default({codepoint, _mods}, state)
+       when codepoint in 57_344..57_454 or codepoint in 0xF700..0xF747 do
+    {:continue, state}
+  end
+
+  # Shifted text already carries its intended Unicode codepoint.
+  defp handle_default({codepoint, modifiers}, state)
+       when codepoint >= 32 and codepoint <= 0x10FFFF and modifiers in [0, 1] do
     char = <<codepoint::utf8>>
     {:execute, {:insert_char, char}, mark_insert_changed(state)}
   rescue

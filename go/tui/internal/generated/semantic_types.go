@@ -491,6 +491,13 @@ type GuiStatusBarOperation struct {
 	ProgressTotal   uint32
 }
 
+type GuiStatusBarReview struct {
+	Path       string
+	Freshness  uint8
+	Generation uint32
+	ItemID     string
+}
+
 type GuiGutterWindow struct {
 	WindowID      uint16
 	ContentRow    uint16

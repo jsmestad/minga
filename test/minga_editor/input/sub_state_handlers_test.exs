@@ -29,8 +29,8 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.Input.ToolApproval
 
   defp base_state(opts) do
-    {:ok, buf} = BufferProcess.start_link(content: "hello world")
-    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
+    buf = start_supervised!({BufferProcess, content: "hello world"}, id: make_ref())
+    prompt_buf = start_supervised!({BufferProcess, content: ""}, id: make_ref())
 
     agent = %AgentState{
       pending_approval: Keyword.get(opts, :pending_approval, nil)
@@ -212,8 +212,10 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   # ══════════════════════════════════════════════════════════════════════════
 
   describe "DiffReview.handle_key/3" do
-    setup do
-      review = DiffReviewData.new("test.ex", "old line\n", "new line\n")
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      review = DiffReviewData.new(Path.join(dir, "test.ex"), "old line\n", "new line\n")
 
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
 
@@ -247,6 +249,24 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
     test "navigation keys resolve through scope trie", %{state: state} do
       result = DiffReview.handle_key(state, ?j, 0)
       assert elem(result, 0) in [:handled, :passthrough]
+    end
+
+    test "modified decisions, scope prefixes and navigation reach their owning handlers", %{
+      state: state
+    } do
+      for {cp, mods} <- [
+            {?y, 0x02},
+            {?x, 0x08},
+            {?Y, 0x04},
+            {?X, 0x08},
+            {?j, 0},
+            {?k, 0},
+            {?], 0},
+            {?g, 0},
+            {9, 0}
+          ] do
+        assert {:passthrough, ^state} = DiffReview.handle_key(state, cp, mods)
+      end
     end
 
     test "passes through when not in file_viewer focus" do

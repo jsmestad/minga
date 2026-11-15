@@ -15,8 +15,8 @@ defmodule MingaEditor.Input.AgentNavTest do
   @ctrl MingaEditor.Frontend.Protocol.mod_ctrl()
 
   defp make_state(opts) do
-    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
-    {:ok, file_buf} = BufferProcess.start_link(content: "file content")
+    prompt_buf = start_supervised!({BufferProcess, content: ""}, id: make_ref())
+    file_buf = start_supervised!({BufferProcess, content: "file content"}, id: make_ref())
 
     scroll =
       Scroll.new(Keyword.get(opts, :offset, 5))
@@ -26,13 +26,13 @@ defmodule MingaEditor.Input.AgentNavTest do
       %UIState{
         panel: %UIState.Panel{
           visible: true,
-          input_focused: Keyword.get(opts, :input_focused, false),
           scroll: scroll,
           prompt_buffer: prompt_buf
         }
       }
       |> UIState.activate(nil, nil)
       |> UIState.set_focus(Keyword.get(opts, :focus, :chat))
+      |> UIState.set_input_focused(Keyword.get(opts, :input_focused, false))
 
     window = Window.new_agent_chat(1, 24, 80)
 
@@ -113,6 +113,21 @@ defmodule MingaEditor.Input.AgentNavTest do
 
       {:handled, up_state} = AgentNav.handle_key(down_state, ?k, 0)
       assert up_state.workspace.agent_ui.view.preview.scroll.offset == 0
+    end
+
+    test "unclaimed viewer keys stop before buffer editing while chat and focused drafts still delegate" do
+      viewer = make_state(focus: :file_viewer)
+
+      for {cp, mods} <- [{?r, 0}, {?p, 0}, {?y, @ctrl}, {0x754C, 0}] do
+        assert {:handled, ^viewer} = AgentNav.handle_key(viewer, cp, mods)
+      end
+
+      for state <- [
+            make_state(focus: :chat),
+            make_state(focus: :file_viewer, input_focused: true)
+          ] do
+        assert {:passthrough, ^state} = AgentNav.handle_key(state, ?r, 0)
+      end
     end
   end
 end

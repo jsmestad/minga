@@ -35,7 +35,9 @@ func (m Model) overlayLayer() *lipgloss.Layer {
 	// renderers pad their output to the requested height with blank rows at the
 	// BOTTOM; the string-built renderers emit no padding. Trimming here makes the
 	// compositing uniform: every footer overlay is exactly its content tall (#2281).
-	lines = trimTrailingBlankLines(lines)
+	if winner.surfaceID != surfaceIDAgentHelp {
+		lines = trimTrailingBlankLines(lines)
+	}
 	// Cap the content to the band height so it can never paint outside the BEAM
 	// rect the hit-tester routes against. takeLines keeps the TOP rows (the title
 	// and the first items), the same rows the old footer-append showed.
@@ -109,6 +111,7 @@ const (
 	surfaceIDEditTimeline     uint16 = 24
 	surfaceIDNotifications    uint16 = 25
 	surfaceIDExtensionOverlay uint16 = 26
+	surfaceIDAgentHelp        uint16 = 27
 )
 
 // overlayCandidate is one floating surface that may occupy the single active
@@ -170,14 +173,12 @@ func (m Model) overlayCandidates() []overlayCandidate {
 	sig, sigOK := m.signatureHelp()
 	float, floatOK := m.floatPopup()
 	context, contextOK := m.agentContext()
-	// The full chat owns agent status presentation; its compact editor overlay must not cover the composer or Stop control.
-	contextOK = contextOK && !m.agentChatVisible()
 	bottom, bottomOK := m.bottomPanel()
 	ext, extOK := m.extensionPanel()
 	obs, obsOK := m.observatory()
-	timeline, timelineOK := m.editTimeline()
 	notes, notesOK := m.notifications()
 	overlay, overlayOK := m.extensionOverlay()
+	help, helpOK := m.agentHelp()
 
 	return []overlayCandidate{
 		m.candidate(surfaceIDCompletionMenu, completionOK && completion.Visible && len(completion.Items) > 0, func() []string { return m.renderCompletion(completion) }),
@@ -188,9 +189,9 @@ func (m Model) overlayCandidates() []overlayCandidate {
 		m.candidate(surfaceIDBottomPanel, bottomOK && bottom.Visible, func() []string { return m.renderBottomPanel(bottom) }),
 		m.candidate(surfaceIDExtensionPanel, extOK && visiblePanelCount(ext) > 0, func() []string { return m.renderExtensionPanels(ext) }),
 		m.candidate(surfaceIDObservatory, obsOK && obs.Visible, func() []string { return m.renderObservatory(obs) }),
-		m.candidate(surfaceIDEditTimeline, timelineOK && timeline.Visible, func() []string { return m.renderEditTimeline(timeline) }),
 		m.candidate(surfaceIDNotifications, notesOK && notes.Visible && len(notes.Items) > 0, func() []string { return m.renderNotifications(notes) }),
 		m.candidate(surfaceIDExtensionOverlay, overlayOK && len(overlay.Entries) > 0, func() []string { return m.renderExtensionOverlay(overlay) }),
+		m.candidate(surfaceIDAgentHelp, helpOK && help.Visible && !m.pickerVisible() && !m.whichKeyVisible(), func() []string { return m.renderAgentHelp(help) }),
 	}
 }
 
@@ -468,63 +469,118 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 	return takeLines(lines, height)
 }
 
-// renderEditTimeline draws the edit timeline as directly-styled addressable rows
-// rather than an opaque charm table so each entry row can carry a lipgloss zone
-// marker, mirroring renderObservatory and the macOS EditTimelineView. A click on
-// an entry row sends timeline_navigate(entry.index), the same semantic the macOS
-// circle tap sends and the destination the keyboard timeline_next_edit/
-// timeline_prev_edit commands land on (#2335). The currently-viewed entry is
-// highlighted, reproducing the charm table's selected-row style. The row shape is
-// unchanged: a 1-line header plus one line per entry, so the BEAM content-height
-// model (FooterOverlays.content_height_edit_timeline = 1 + entry_count) is exact.
-func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
-	height := m.maxOverlayHeight()
-	theme := m.palette()
-	sep := panelSeparatorLine(theme, m.width, theme.PopupSurface())
-	if len(timeline.Files) > 0 {
-		fileLines := m.renderEditTimelineFiles(timeline, theme)
-		return takeLines(append([]string{sep}, fileLines...), height)
+// timelineLayer paints the full persistent chrome allocation at its committed
+// origin. Unlike popups it has no shadow, trimming, or bottom alignment.
+func (m Model) timelineLayer() *lipgloss.Layer {
+	timeline, visible := m.editTimeline()
+	rect := m.layout.timeline
+	if !visible || rect.Width == 0 || rect.Height == 0 {
+		return nil
 	}
-	idxWidth := 4
-	ageWidth := 8
-	toolWidth := max(m.width-idxWidth-ageWidth, 18)
-
-	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: "󰋚 #", width: idxWidth},
-		{text: "Tool", width: toolWidth},
-		{text: "Age", width: ageWidth},
-	})
-	lines := []string{sep, header}
-	for _, entry := range timeline.Entries {
-		selected := uint16(entry.Index) == timeline.ViewingIndex
-		row := tableDataRow(theme, m.width, selected, []tableCell{
-			{text: fmt.Sprintf("%d", entry.Index), width: idxWidth},
-			{text: entry.ToolName, width: toolWidth},
-			{text: fmt.Sprintf("%d", entry.TimestampDelta), width: ageWidth},
-		})
-		lines = append(lines, m.zones.Mark(zoneIDTimelineEntry(timeline.Generation, entry.EntryID), row))
-	}
-	return takeLines(lines, height)
+	content := m.zones.ScanInto(strings.Join(m.renderEditTimeline(timeline), "\n"), rect.X, rect.Y)
+	return lipgloss.NewLayer(content).X(rect.X).Y(rect.Y).Z(2)
 }
 
-func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme palette) []string {
-	pathWidth := max(m.width-18, 16)
-	countWidth := 6
-	diffWidth := 12
-	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: "󰋚 File", width: pathWidth},
-		{text: "Edits", width: countWidth},
-		{text: "Diff", width: diffWidth},
+// renderEditTimeline keeps historical entry navigation separate from cumulative
+// file Review. Both retain their BEAM-offered identities.
+func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
+	width, height := m.layout.timeline.Width, m.layout.timeline.Height
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	theme := m.palette()
+	lines := make([]string, 0, height)
+	lines = append(lines, panelSeparatorLine(theme, width, theme.PopupSurface()))
+	if len(timeline.Files) > 0 || len(timeline.Entries) == 0 {
+		lines = append(lines, m.renderEditTimelineFiles(timeline, theme, width)...)
+	} else {
+		idxWidth, ageWidth := 4, 8
+		toolWidth := max(width-idxWidth-ageWidth, 1)
+		lines = append(lines, tableHeaderRow(theme, width, []tableCell{
+			{text: "󰋚 #", width: idxWidth},
+			{text: "Tool", width: toolWidth},
+			{text: "Age", width: ageWidth},
+		}))
+		for _, entry := range timeline.Entries[:min(len(timeline.Entries), m.timelineFileRows())] {
+			row := tableDataRow(theme, width, uint16(entry.Index) == timeline.ViewingIndex, []tableCell{
+				{text: fmt.Sprintf("%d", entry.Index), width: idxWidth},
+				{text: entry.ToolName, width: toolWidth},
+				{text: fmt.Sprintf("%d", entry.TimestampDelta), width: ageWidth},
+			})
+			lines = append(lines, m.zones.Mark(zoneIDTimelineEntry(timeline.Generation, entry.EntryID), row))
+		}
+	}
+	lines = takeLines(lines, height)
+	style := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
+	blank := style.Render(strings.Repeat(" ", width))
+	for len(lines) < height {
+		lines = append(lines, blank)
+	}
+	return lines
+}
+
+// One separator and one header share the authored chrome budget with file rows.
+func (m Model) timelineFileRows() int {
+	return max(m.layout.timeline.Height-2, 0)
+}
+
+func (m Model) timelineFileStart(timeline protocol.EditTimeline) int {
+	for index, file := range timeline.Files {
+		if file.Path == m.timelineFirstPath {
+			return min(index, max(len(timeline.Files)-m.timelineFileRows(), 0))
+		}
+	}
+	return 0
+}
+
+func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme palette, width int) []string {
+	header := tableHeaderRow(theme, width, []tableCell{
+		{text: fmt.Sprintf("Review files (%d)  [e prev  ]e next  wheel", len(timeline.Files)), width: width},
 	})
-	lines := []string{header}
-	for _, file := range timeline.Files {
+	rows := m.timelineFileRows()
+	start := m.timelineFileStart(timeline)
+	end := min(start+rows, len(timeline.Files))
+	lines := make([]string, 1, 1+end-start)
+	lines[0] = header
+	if len(timeline.Files) == 0 && rows > 0 {
+		style := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface())
+		lines = append(lines, renderPadded(style, "No changed files", width))
+	}
+	for _, file := range timeline.Files[start:end] {
 		selected := file.ReviewStatus == 1
-		row := tableDataRow(theme, m.width, selected, []tableCell{
-			{text: file.Path, width: pathWidth},
-			{text: fmt.Sprintf("%d", file.EntryCount), width: countWidth},
-			{text: fmt.Sprintf("+%d/-%d", file.LinesAdded, file.LinesRemoved), width: diffWidth},
-		})
-		lines = append(lines, row)
+		rowStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).ColorWhitespace(true)
+		actionStyle := rowStyle.Bold(true).Foreground(theme.Accent())
+		if selected {
+			rowStyle = rowStyle.Bold(true).Foreground(theme.PopupSelectionText()).Background(theme.PopupSelection())
+			actionStyle = rowStyle
+		}
+		label := actionStyle.Render(fit("[Review]", min(width, 8)))
+		if timeline.Generation != 0 {
+			label = m.zones.Mark(zoneIDTimelineReview(timeline.Generation, file.Path), label)
+		}
+		// Keep the action visible even in a narrow terminal.
+		// Wider terminals also retain edit counts and diff totals without wrapping the file path.
+		detailWidth := max(width-9, 0)
+		withStats := detailWidth >= 32
+		pathWidth := detailWidth
+		if withStats {
+			pathWidth -= 20
+		}
+		pathLabel := file.Path
+		if overflow := xansi.StringWidth(pathLabel) - pathWidth; overflow > 0 {
+			pathLabel = xansi.TruncateLeft(pathLabel, overflow+1, "…")
+		}
+		var detail string
+		if withStats {
+			detail = tableCellsText([]tableCell{
+				{text: pathLabel, width: detailWidth - 18},
+				{text: fmt.Sprintf("%d", file.EntryCount), width: 6},
+				{text: fmt.Sprintf("+%d/-%d", file.LinesAdded, file.LinesRemoved), width: 12},
+			})
+		} else {
+			detail = fit(pathLabel, detailWidth)
+		}
+		lines = append(lines, renderPadded(rowStyle, label+rowStyle.Render(" "+detail), width))
 	}
 	return lines
 }

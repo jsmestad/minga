@@ -144,9 +144,7 @@ func (m Model) editorTextTargetAt(screenX, screenY int, capturedWindowID uint16)
 		return editorTextTarget{}, false
 	}
 
-	if computeScrollbar(window, height).active {
-		width--
-	}
+	width, _, _ = windowRowComposition(window, width, height)
 	contentRowIndex := sourceRowIndex - m.presentationPayloadStart(window)
 	cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
 	gutterWidth := 0
@@ -172,6 +170,11 @@ func (m Model) editorTextOccluded(screenX, screenY int) bool {
 	if state, ok := m.emptyState(); ok && state.Visible {
 		return true
 	}
+	return m.layout.timeline.Contains(screenX, screenY) || m.floatingOverlayContains(screenX, screenY)
+}
+
+// The same higher-layer containment guards text and persistent chrome input.
+func (m Model) floatingOverlayContains(screenX, screenY int) bool {
 	if m.pickerVisible() || m.whichKeyVisible() {
 		return true
 	}

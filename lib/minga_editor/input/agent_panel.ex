@@ -64,10 +64,9 @@ defmodule MingaEditor.Input.AgentPanel do
   defp handle_panel_input(state, cp, mods) do
     binding_state = Minga.Editing.binding_state(state)
 
-    if binding_state == :cua or Minga.Editing.inserting?(state) do
-      # Resolve through the agent scope trie for the active binding state.
-      # CUA uses the :cua trie; vim insert uses the :insert trie. Both
-      # need self-insert fallback for printable chars.
+    if binding_state == :cua or Minga.Editing.inserting?(state) or (cp == 9 and mods == 0) do
+      # Resolve commands through the active agent binding state.
+      # Normal-mode Tab can navigate Review while the draft remains focused.
       key = {cp, mods}
 
       case Keymap.resolve_scoped_key(
@@ -104,11 +103,11 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @spec handle_panel_self_insert(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  defp handle_panel_self_insert(state, ?@, _mods) do
+  defp handle_panel_self_insert(state, ?@, mods) when Bitwise.band(mods, 0x0E) == 0 do
     AgentCommands.scope_trigger_mention(state)
   end
 
-  defp handle_panel_self_insert(state, ?/, _mods) do
+  defp handle_panel_self_insert(state, ?/, mods) when Bitwise.band(mods, 0x0E) == 0 do
     if AgentSubStates.slash_command_token_at_cursor?(state) do
       AgentCommands.scope_trigger_slash_completion(state)
     else
@@ -118,20 +117,10 @@ defmodule MingaEditor.Input.AgentPanel do
   end
 
   defp handle_panel_self_insert(state, cp, mods) do
-    case Minga.Keymap.Bindings.lookup(Minga.Keymap.CUADefaults.horizontal_nav_trie(), {cp, mods}) do
-      {:command, command} ->
-        execute_prompt_binding(state, command)
-
-      _not_horizontal_navigation ->
-        with_prompt_buffer(state, fn scoped ->
-          handler = MingaEditor.Input.editing_dispatch_handler(scoped)
-          {:handled, updated} = handler.handle_key(scoped, cp, mods)
-          updated
-        end)
-    end
+    dispatch_prompt_via_mode_fsm(state, cp, mods)
   end
 
-  @spec execute_prompt_binding(EditorState.t(), atom() | tuple()) :: EditorState.t()
+  @spec execute_prompt_binding(EditorState.t(), atom()) :: EditorState.t()
   defp execute_prompt_binding(state, command) when is_atom(command) do
     case Minga.Command.lookup(command) do
       {:ok, %Minga.Command{requires_buffer: true}} ->
@@ -142,14 +131,8 @@ defmodule MingaEditor.Input.AgentPanel do
     end
   end
 
-  defp execute_prompt_binding(state, command) when is_tuple(command),
-    do: with_prompt_buffer(state, &MingaEditor.KeyDispatch.dispatch_command(&1, command))
-
-  # Panel insert mode keys are resolved through the agent scope insert
-  # trie (see Minga.Keymap.Scope.Agent.insert_trie). This eliminates the
-  # 17 hardcoded function clauses that previously duplicated the trie
-  # bindings. Printable chars and @-mention fall through to
-  # handle_panel_self_insert above.
+  # The scope trie owns prompt commands, including Normal-mode Tab.
+  # Printable characters and @-mentions fall through to the active editing model.
 
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
   defp set_active_buffer_override(state, pid) do
@@ -220,15 +203,10 @@ defmodule MingaEditor.Input.AgentPanel do
   # ── Shared helpers ──────────────────────────────────────────────────────
 
   @doc """
-  Routes a key through the standard Mode FSM targeting the prompt buffer.
+  Routes a key through the active editing model against the prompt buffer.
 
-  Swaps the active buffer to the prompt buffer, runs the key through
-  the mode FSM (which handles all vim operations: motions, operators,
-  visual mode, text objects, undo/redo), then restores the original
-  active buffer.
-
-  If the Mode FSM transitions to insert mode, we leave the mode as
-  insert so that subsequent keys are handled by `handle_panel_insert`.
+  The existing scoped buffer override restores the real active buffer afterward.
+  The model owns navigation, selection semantics and mode transitions.
   """
   @spec dispatch_prompt_via_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
@@ -237,7 +215,11 @@ defmodule MingaEditor.Input.AgentPanel do
     prompt_pid = panel.prompt_buffer
 
     if is_pid(prompt_pid) do
-      with_prompt_buffer(state, &MingaEditor.do_handle_key(&1, cp, mods))
+      with_prompt_buffer(state, fn scoped ->
+        handler = MingaEditor.Input.editing_dispatch_handler(scoped)
+        {:handled, updated} = handler.handle_key(scoped, cp, mods)
+        updated
+      end)
     else
       # No prompt buffer, try scope bindings
       key = {cp, mods}

@@ -51,6 +51,8 @@ func TestKeyPacketPageNavigation(t *testing.T) {
 		code rune
 		want rune
 	}{
+		{"home", tea.KeyHome, 57360},
+		{"end", tea.KeyEnd, 57361},
 		{"page up", tea.KeyPgUp, pageUp},
 		{"page down", tea.KeyPgDown, pageDown},
 	} {

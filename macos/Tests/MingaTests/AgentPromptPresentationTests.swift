@@ -70,6 +70,18 @@ private struct PromptModeObservationProbe: View {
     }
 }
 
+@MainActor
+private struct HelpVisibilityObservationProbe: View {
+    let state: AgentHelpState
+    let changed: AsyncStream<Bool>.Continuation
+
+    var body: some View {
+        Color.clear.onChange(of: state.visible) { _, visible in
+            changed.yield(visible)
+        }
+    }
+}
+
 @Suite("Canonical multiline agent prompt", .serialized)
 @MainActor
 struct AgentPromptPresentationTests {
@@ -112,7 +124,7 @@ struct AgentPromptPresentationTests {
             visible: true, status: .idle, model: "test", thinkingLevel: "medium", prompt: "read-only metadata",
             promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .insert,
             promptVisibleRows: UInt8(content.paneGeometry?.viewport.rows ?? 1), promptCompletion: nil,
-            pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: []
+            pendingToolName: nil, pendingToolSummary: ""
         ))
         dispatcher.dispatch(.commitFrame(frameSeq: frame, seq: 0))
         let snapshot = try #require(dispatcher.committedEditorSnapshot)
@@ -237,8 +249,7 @@ struct AgentPromptPresentationTests {
         dispatcher.dispatch(.guiAgentChat(
             visible: true, status: .idle, model: "test", thinkingLevel: "medium", prompt: "rejected metadata",
             promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptMode: .insert,
-            promptVisibleRows: 8, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
-            helpVisible: false, helpGroups: []
+            promptVisibleRows: 8, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: ""
         ))
         dispatcher.dispatch(.guiGutter(data: Wire.WindowGutter(
             windowId: 42, contentRow: 0, contentCol: 0, contentHeight: 8, isActive: false,
@@ -403,7 +414,8 @@ struct AgentPromptPresentationTests {
         let font = FontManager(name: "Menlo", size: 13, scale: 1)
         dispatcher.fontManager = font
         let renderer = try #require(makeOffscreenRenderer(factories: offscreenNativeTestFactories(), fontManager: font))
-        let editor = EditorNSView(encoder: SpyEncoder(), dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: font)
+        let spy = SpyEncoder()
+        let editor = EditorNSView(encoder: spy, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: font)
         editorReference = editor
         editor.editorInput = gui.editorInput
         editor.statusBarState = gui.statusBarState
@@ -416,6 +428,9 @@ struct AgentPromptPresentationTests {
         let modeValues = AsyncStream.makeStream(of: PromptMode.self, bufferingPolicy: .bufferingNewest(8))
         var modes = modeValues.stream.makeAsyncIterator()
         defer { modeValues.continuation.finish() }
+        let helpValues = AsyncStream.makeStream(of: Bool.self, bufferingPolicy: .bufferingNewest(8))
+        var helpChanges = helpValues.stream.makeAsyncIterator()
+        defer { helpValues.continuation.finish() }
         let root = ContentView(
             gui: gui, encoder: { editor.encoder },
             editorGeometry: { EditorGeometry(editorNSView: editor) },
@@ -430,6 +445,7 @@ struct AgentPromptPresentationTests {
             apertureValues.continuation.yield(rect)
         }
         .background(PromptModeObservationProbe(state: gui.agentChatState, changed: modeValues.continuation))
+        .background(HelpVisibilityObservationProbe(state: gui.agentHelpState, changed: helpValues.continuation))
         let hostingView = NSHostingView(rootView: AnyView(root))
         let size = CGSize(width: 800, height: 600)
         hostingView.frame = CGRect(origin: .zero, size: size)
@@ -501,6 +517,126 @@ struct AgentPromptPresentationTests {
         #expect(abs(resized.rect.width - resizedReported.width) < 0.5)
         #expect(abs(resized.rect.height - resizedReported.height) < 0.5)
         #expect(aperture.convert(aperture.bounds, to: editor) == resized.rect)
+
+        try #require(window.makeFirstResponder(editor))
+        let retainedDraft = gui.agentChatState.prompt
+        let retainedMode = gui.agentChatState.promptMode
+        let retainedOwner = gui.focusOwnerState.decodedOwner
+        let retainedSelection = editor.selectedRange()
+        editor.setMarkedText(
+            "かな", selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        try #require(editor.hasMarkedText())
+        let retainedMarkedRange = editor.markedRange()
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiAgentHelp(visible: true, groups: [
+            .init(title: "Long Help", bindings: (0..<100).map { ("Key \($0)", "Binding \($0)") })
+        ]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        try #require(await helpChanges.next() == true)
+        hostingView.layoutSubtreeIfNeeded()
+        let attachment = gui.agentHelpState.scrollAttachment
+        let scroll = try #require(attachment.scrollView(in: window), "Production Help must bind its real native scroll view")
+        let initialBounds = scroll.contentView.bounds
+        let pageDown = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 1,
+            windowNumber: window.windowNumber, context: nil, characters: "",
+            charactersIgnoringModifiers: "", isARepeat: false, keyCode: 121
+        ))
+        var inputMethodKeys: [UInt16] = []
+        editor.inputMethodEventHandlerForTesting = { event in
+            inputMethodKeys.append(event.keyCode)
+            return true
+        }
+        let composingKeys = spy.keyPressCalls.count
+        editor.keyDown(with: pageDown)
+        #expect(inputMethodKeys == [121])
+        #expect(spy.keyPressCalls.count == composingKeys)
+        #expect(scroll.contentView.bounds == initialBounds)
+        #expect(editor.hasMarkedText())
+        #expect(editor.markedRange() == retainedMarkedRange)
+        #expect(window.firstResponder === editor)
+
+        editor.unmarkText()
+        editor.inputMethodEventHandlerForTesting = nil
+        let navigationKeys = spy.keyPressCalls.count
+        editor.keyDown(with: pageDown)
+        #expect(scroll.contentView.bounds.origin.y > initialBounds.origin.y)
+        #expect(spy.keyPressCalls.count == navigationKeys + 1)
+        #expect(spy.keyPressCalls.last?.codepoint == 57363)
+        #expect(window.firstResponder === editor)
+
+        let repeatPage = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 2,
+            windowNumber: window.windowNumber, context: nil, characters: "",
+            charactersIgnoringModifiers: "", isARepeat: true, keyCode: 121
+        ))
+        let firstPage = scroll.contentView.bounds.origin.y
+        editor.keyDown(with: repeatPage)
+        #expect(scroll.contentView.bounds.origin.y > firstPage)
+        #expect(spy.keyPressCalls.count == navigationKeys + 2)
+
+        let treeEntries: [Wire.FileTreeEntry] = (0..<2).map { (index: Int) -> Wire.FileTreeEntry in
+            Wire.FileTreeEntry(
+                pathHash: UInt32(index + 1), id: "/project/\(index)", path: "/project/\(index)",
+                isDir: false, isExpanded: false, isSelected: index == 0, isFocused: true,
+                isActive: false, isDirty: false, isEditing: false, isLastChild: index == 1,
+                depth: 0, gitStatus: 0, diagnosticErrorCount: 0, diagnosticWarningCount: 0,
+                diagnosticInfoCount: 0, diagnosticHintCount: 0, guides: [], icon: "",
+                iconColorR: 0, iconColorG: 0, iconColorB: 0,
+                name: "\(index)", relPath: "\(index)", editingType: 0xFF, editingText: ""
+            )
+        }
+        dispatcher.applyForTesting(.guiFileTree(
+            version: 2, treeFlags: 0x23, treeState: 3, selectedId: "/project/0",
+            treeWidth: 30, rootPath: "/project", errorReason: "", entries: treeEntries
+        ))
+        let down = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 3,
+            windowNumber: window.windowNumber, context: nil, characters: "",
+            charactersIgnoringModifiers: "", isARepeat: false, keyCode: 125
+        ))
+        let beforeDown = scroll.contentView.bounds.origin.y
+        editor.keyDown(with: down)
+        #expect(scroll.contentView.bounds.origin.y > beforeDown)
+        #expect(gui.fileTreeState.selectedId == "/project/0", "Help must not preview navigation beneath its modal")
+        #expect(spy.keyPressCalls.count == navigationKeys + 3)
+        #expect(spy.keyPressCalls.last?.codepoint == 57353)
+
+        var helpDescendants: [NSView] = [hostingView]
+        var originalProbe: AgentHelpScrollProbe.ProbeView?
+        while let view = helpDescendants.popLast() {
+            if let probe = view as? AgentHelpScrollProbe.ProbeView { originalProbe = probe }
+            helpDescendants.append(contentsOf: view.subviews)
+        }
+        let probe = try #require(originalProbe)
+        let replacement = NSView(frame: .zero)
+        try #require(scroll.documentView).addSubview(replacement)
+        attachment.attach(replacement)
+        attachment.detach(probe)
+        #expect(attachment.scrollView(in: window) === scroll)
+        replacement.removeFromSuperview()
+        #expect(attachment.scrollView(in: window) == nil)
+        attachment.attach(probe)
+        attachment.detach(replacement)
+        #expect(attachment.scrollView(in: window) === scroll)
+        #expect(attachment.scrollView(in: nil) == nil)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiAgentHelp(visible: false, groups: []))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        try #require(await helpChanges.next() == false)
+        hostingView.layoutSubtreeIfNeeded()
+        #expect(editor.window === window)
+        #expect(aperture.editor === editor)
+        #expect(aperture.convert(aperture.bounds, to: editor) == resized.rect)
+        #expect(window.firstResponder === editor)
+        #expect(editor.selectedRange() == retainedSelection)
+        #expect(gui.agentChatState.prompt == retainedDraft)
+        #expect(gui.agentChatState.promptMode == retainedMode)
+        #expect(gui.focusOwnerState.decodedOwner == retainedOwner)
 
         let removal = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         var removals = removal.stream.makeAsyncIterator()

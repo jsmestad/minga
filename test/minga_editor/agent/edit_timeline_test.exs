@@ -304,15 +304,16 @@ defmodule MingaEditor.Agent.EditTimelineTest do
   end
 
   describe "file_summaries/1" do
-    test "keeps single-file turns on the per-entry timeline" do
+    test "offers Review for a single changed file" do
       timeline =
         EditTimeline.new()
         |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "old\n", "new\n")
 
-      assert [] = EditTimeline.file_summaries(timeline)
+      assert [%{path: "lib/a.ex", entry_count: 1, lines_added: 1, lines_removed: 1}] =
+               EditTimeline.file_summaries(timeline)
     end
 
-    test "summarizes every touched file with diff counts and review status" do
+    test "keeps first-seen file order and does not infer review selection from history navigation" do
       timeline =
         EditTimeline.new()
         |> EditTimeline.record_edit("lib/b.ex", "tc1", "edit_file", "one\n", "one\ntwo\n")
@@ -321,17 +322,17 @@ defmodule MingaEditor.Agent.EditTimelineTest do
 
       assert [
                %{
-                 path: "lib/a.ex",
-                 entry_count: 1,
-                 lines_added: 1,
-                 lines_removed: 1,
-                 review_status: :reviewing
-               },
-               %{
                  path: "lib/b.ex",
                  entry_count: 1,
                  lines_added: 1,
                  lines_removed: 0,
+                 review_status: :pending
+               },
+               %{
+                 path: "lib/a.ex",
+                 entry_count: 1,
+                 lines_added: 1,
+                 lines_removed: 1,
                  review_status: :pending
                }
              ] = EditTimeline.file_summaries(timeline)

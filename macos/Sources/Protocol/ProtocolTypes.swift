@@ -1140,7 +1140,7 @@ public enum Wire {
         }
     }
 
-    /// A help group from gui_agent_chat, containing a category title and keybindings.
+    /// A group of independent gui_agent_help keybindings.
     public struct HelpGroup: Sendable {
         public let title: String
         public let bindings: [(key: String, description: String)]

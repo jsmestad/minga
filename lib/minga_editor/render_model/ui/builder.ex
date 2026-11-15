@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
+  alias MingaEditor.RenderModel.UI.AgentHelpBuilder
   alias MingaEditor.RenderModel.UI.BottomPanelBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.CompletionBuilder
@@ -69,6 +70,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       completion: CompletionBuilder.build(ctx),
       signature_help: SignatureHelpBuilder.build(ctx),
       agent_chat: AgentChatBuilder.build(ctx),
+      agent_help: AgentHelpBuilder.build(ctx),
       empty_state: EmptyStateBuilder.build(ctx),
       bottom_panel: bottom_panel,
       edit_timeline: EditTimelineBuilder.build(ctx),

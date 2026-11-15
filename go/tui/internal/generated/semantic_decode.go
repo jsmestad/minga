@@ -1609,6 +1609,34 @@ func DecodeGuiStatusBarOperation(data []byte, offset int, windowEnd int) (GuiSta
 	}, pos, nil
 }
 
+func DecodeGuiStatusBarReview(data []byte, offset int, windowEnd int) (GuiStatusBarReview, int, error) {
+	pos := offset
+	path, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiStatusBarReview{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "freshness"); err != nil {
+		return GuiStatusBarReview{}, offset, err
+	}
+	freshness := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+4, "generation"); err != nil {
+		return GuiStatusBarReview{}, offset, err
+	}
+	generation := decodeU32(data, pos)
+	pos += 4
+	itemID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiStatusBarReview{}, offset, err
+	}
+	return GuiStatusBarReview{
+		Path:       path,
+		Freshness:  freshness,
+		Generation: generation,
+		ItemID:     itemID,
+	}, pos, nil
+}
+
 // Section decoders for gui_surface_layout
 
 func DecodeGuiSurfaceLayoutPlacements(data []byte, offset int, windowEnd int) ([]SurfacePlacement, int, error) {

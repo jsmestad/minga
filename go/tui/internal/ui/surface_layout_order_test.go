@@ -242,13 +242,6 @@ func TestPromotedFooterOverlaysRenderAtPlacementRect(t *testing.T) {
 			needle:    "Editor",
 		},
 		{
-			name:      "edit timeline",
-			surfaceID: surfaceIDEditTimeline,
-			z:         170,
-			chrome:    map[byte]protocol.ChromePayload{generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{Visible: true, Entries: []protocol.TimelineEntry{{Index: 0, ToolName: "format", TimestampDelta: 0}}}}},
-			needle:    "format",
-		},
-		{
 			name:      "notifications",
 			surfaceID: surfaceIDNotifications,
 			z:         160,

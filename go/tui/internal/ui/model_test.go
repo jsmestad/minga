@@ -155,11 +155,11 @@ func TestGUIFocusOwnerDoesNotChangeTerminalPresentation(t *testing.T) {
 	}
 }
 
-func TestFloatingPickerRendersOverEditorAndSuppressesFooterOverlays(t *testing.T) {
+func TestFloatingPickerRendersOverEditorWithAuthoredHiddenMinibuffer(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiMinibuffer: {
-			Mini: protocol.Minibuffer{Visible: true, Prompt: ":", Input: "write"},
+			Mini: protocol.Minibuffer{Visible: false, Prompt: ":", Input: "write"},
 		},
 		generated.OPGuiCompletion: {
 			Complete: protocol.Completion{Visible: true, Items: []protocol.CompletionItem{{Label: "Enum.map"}}},
@@ -2602,7 +2602,8 @@ func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T
 		generated.OPGuiTabBar:     {Tabs: protocol.TabBar{ActiveIndex: 0, Tabs: []protocol.Tab{{ID: 1, Label: "Untitled-1", Active: true, Dirty: true}}}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "Hey this is a thing"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 24, Height: 1}}})
-	model.viewport.SetContent(model.content())
+	updated, _ := model.Update(port.PacketMsg{})
+	model = updated.(Model)
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
 	if len(lines) < 3 || !strings.Contains(lines[2], "Hey this is a thing") {
@@ -2940,44 +2941,45 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 			},
 		}},
 	}
-	// Edit timeline is registry-placed (#2281). Height 4 is the BEAM-derived value:
-	// FooterOverlays.content_height_edit_timeline = 1 (separator) + 1 (header) +
-	// entry_count = 1 + 1 + 2 = 4. Same takeLines/clip lockstep as observatory
-	// and notifications.
+	// Historical offers still use the committed chrome rectangle; this fixture
+	// authors two entry rows, while the mounted Agent workspace authors one.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 20, Col: 0, Width: 80, Height: 4}, Z: 170, HitKind: 8},
+		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 19, Col: 0, Width: 80, Height: 4}, Z: 170, HitKind: 8},
 	}
+	model.layout = model.computeLayout()
+	model.viewport.SetHeight(model.layout.body.Height)
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
 	// The presentation zone and action both carry the offered semantic identity.
 	entry := waitForZone(t, model, zoneIDTimelineEntry(23, "path:call-2"))
-	if entry.StartY < 20 || entry.StartY >= 24 {
-		t.Fatalf("timeline entry zone Y %d outside the band rows 20..23", entry.StartY)
+	if entry.StartY < 19 || entry.StartY >= 23 {
+		t.Fatalf("timeline entry zone Y %d outside the band rows 19..22", entry.StartY)
 	}
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.StartX + 1, Y: entry.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISemanticItemActivate(5, 1, 23, []byte("path:call-2"))) {
 		t.Fatalf("timeline row click should route semantic navigation, ok=%v packet=%v", ok, cmd)
 	}
 
-	// A click that misses every timeline zone falls through (ok=false) so the BEAM
-	// OverlaySink containment swallows it (AC 2 containment fallback).
+	// Clicks outside the dedicated chrome retain the ordinary pointer path.
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.EndX + 40, Y: entry.EndY + 30})); ok {
 		t.Fatalf("out-of-bounds timeline clicks should fall back to BEAM containment")
 	}
 }
 
-func TestOverlayLinesRenderEditTimelineFiles(t *testing.T) {
+func TestTimelineChromeRendersEditTimelineFiles(t *testing.T) {
 	model := New(60, 12, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
 		Visible:      true,
 		ViewingIndex: 0xFFFF,
 		Files:        []protocol.TimelineFile{{Path: "lib/a.ex", EntryCount: 2, LinesAdded: 10, LinesRemoved: 3, ReviewStatus: 1}},
 	}}}
-	model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDEditTimeline, Z: 170, HitKind: 8}}
+	model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 8, Width: 60, Height: 3}, Z: 170, HitKind: 8}}
+	model.layout = model.computeLayout()
 
-	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "lib/a.ex") || !strings.Contains(got, "+10/-3") {
-		t.Fatalf("edit timeline file summary overlay missing content: %q", got)
+	timeline, _ := model.editTimeline()
+	if got := strings.Join(model.renderEditTimeline(timeline), "\n"); !strings.Contains(got, "lib/a.ex") || !strings.Contains(got, "+10/-3") {
+		t.Fatalf("edit timeline file summary chrome missing content: %q", got)
 	}
 }
 

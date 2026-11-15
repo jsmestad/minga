@@ -14,6 +14,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   alias Minga.RenderModel.UI.StatusBar.Indent
   alias Minga.RenderModel.UI.StatusBar.Language
   alias Minga.RenderModel.UI.StatusBar.Operation
+  alias Minga.RenderModel.UI.StatusBar.Review
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
@@ -34,6 +35,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_workspace 0x0D
   @section_pending_keys 0x0E
   @section_operation 0x0F
+  @section_review 0x10
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
   def encode(%StatusBar{} = model, %Caches{} = caches), do: {encode_command(model), caches}
@@ -54,7 +56,8 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
          content_kind: content_kind,
          data: %Data{} = data,
          workspace: workspace,
-         operation: operation
+         operation: operation,
+         review: review
        }) do
     {selection_mode, selection_size} = encode_selection_info(data.selection)
     {error_count, warning_count, info_count, hint_count} = data.diagnostics.counts
@@ -141,6 +144,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       sections,
       workspace_sections(workspace),
       operation_sections(operation),
+      review_sections(review),
       [agent_section(content_kind, data.agent)]
     ])
   end
@@ -165,6 +169,25 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @spec content_kind_byte(StatusBar.content_kind()) :: 0 | 1
   defp content_kind_byte(:agent), do: 1
   defp content_kind_byte(:buffer), do: 0
+
+  @spec review_sections(Review.t() | nil) :: [binary()]
+  defp review_sections(nil), do: []
+
+  defp review_sections(%Review{} = review) do
+    payload =
+      Writer.new(@command)
+      |> Writer.string16(:review_path, review.path)
+      |> Writer.uint8(:review_freshness, review_freshness(review.freshness))
+      |> Writer.uint32(:review_generation, review.generation)
+      |> Writer.string16(:review_item_id, review.item_id)
+      |> Writer.finish()
+
+    [section(@section_review, payload)]
+  end
+
+  @spec review_freshness(:current | :stale) :: 0 | 1
+  defp review_freshness(:current), do: 0
+  defp review_freshness(:stale), do: 1
 
   @spec workspace_sections(Workspace.t() | nil) :: [binary()]
   defp workspace_sections(%Workspace{} = workspace),

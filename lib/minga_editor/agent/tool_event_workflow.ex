@@ -227,7 +227,9 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
   defp update_preview(state, fun) when is_function(fun, 1) do
     TraditionalWorkflow.install_agent_ui(
       state,
-      (fn ui -> UIState.replace_preview(ui, fun.(ui.view.preview)) end).(state.workspace.agent_ui)
+      (fn ui ->
+         UIState.replace_preview(ui, Preview.follow_tool_activity(ui.view.preview, fun))
+       end).(state.workspace.agent_ui)
     )
   end
 end

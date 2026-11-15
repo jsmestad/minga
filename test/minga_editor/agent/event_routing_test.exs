@@ -16,8 +16,15 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
+  alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.Input.Router
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaAgent.Event
   alias MingaAgent.Session
   alias MingaAgent.Test.ModelSelectionFixture
@@ -28,6 +35,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Remote
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -355,6 +363,281 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert state.workspace.agent_ui.view.compaction.execution == {:deferred, 95}
       assert state.workspace.agent_ui.view.compaction.threshold == :fresh
     end
+  end
+
+  describe "background writes through Events and input routing" do
+    test "the next character edits the human buffer, not the arriving diff" do
+      state = background_input_state(keymap_scope: :editor)
+      buffer = state.workspace.buffers.active
+      BufferProcess.move_to(buffer, {0, 6})
+      workspace = SessionState.transition_mode(state.workspace, :insert)
+      state = %{state | workspace: workspace}
+
+      state = Events.dispatch(state, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+      assert BufferProcess.cursor(buffer) == {0, 6}
+
+      state = Router.route_key(state, ?x, 0)
+
+      assert BufferProcess.content(buffer) == "hello xworld"
+      assert BufferProcess.cursor(buffer) == {0, 7}
+      assert PromptBuffer.prompt_text(state.workspace.agent_ui) == ""
+      assert_retained_review(state, "/tmp/agent-b.ex", "b0", "b1")
+    end
+
+    test "normal, working, waiting, failed and recovered writes keep typing in the draft" do
+      for status <- [:idle, :thinking, :tool_executing, :error, :idle] do
+        state =
+          background_input_state(
+            keymap_scope: :agent,
+            agentic_active: true,
+            panel_visible: true,
+            input_focused: true
+          )
+
+        prompt = state.workspace.agent_ui.panel.prompt_buffer
+        buffer = state.workspace.buffers.active
+        BufferProcess.insert_text(prompt, "draft ")
+        state = Events.dispatch(state, {:status_changed, status})
+        ui = UIState.scroll_down(state.workspace.agent_ui, 7)
+        state = TraditionalWorkflow.install_agent_ui(state, ui)
+
+        state =
+          Events.dispatch(state, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+
+        assert PromptBuffer.input_cursor(state.workspace.agent_ui) == {0, 6}
+        assert state.workspace.agent_ui.view.presentation.focus == :chat
+        assert state.workspace.agent_ui.panel.scroll == ui.panel.scroll
+        state = Router.route_key(state, ?x, 0)
+        assert PromptBuffer.prompt_text(state.workspace.agent_ui) == "draft x"
+        assert BufferProcess.content(buffer) == "hello world"
+        assert_retained_review(state, "/tmp/agent-b.ex", "b0", "b1")
+      end
+    end
+
+    test "another file's revisions leave the selected diff and its reading anchor intact" do
+      state =
+        background_input_state(
+          keymap_scope: :agent,
+          agentic_active: true
+        )
+        |> Events.dispatch({:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
+        |> select_retained_review("/tmp/agent-a.ex")
+
+      preview = state.workspace.agent_ui.view.preview |> Preview.scroll_down(4)
+      state = install_preview(state, preview)
+
+      state =
+        state
+        |> Events.dispatch({:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+        |> Events.dispatch({:file_changed, "/tmp/agent-b.ex", "b1", "b2", "b2", "edit"})
+
+      assert state.workspace.agent_ui.view.preview == preview
+      assert_retained_review(state, "/tmp/agent-a.ex", "a0", "a1")
+      assert_retained_review(state, "/tmp/agent-b.ex", "b0", "b2")
+
+      assert EditTimeline.content_at(
+               state.workspace.agent_ui.view.edit_timeline,
+               "/tmp/agent-b.ex",
+               0
+             ) ==
+               {:ok, "b1"}
+
+      # The next navigation key still belongs to the chat being read, not the diff.
+      offset = state.workspace.agent_ui.panel.scroll.offset
+      state = Router.route_key(state, ?j, 0)
+      assert state.workspace.agent_ui.panel.scroll.offset == offset + 1
+      assert state.workspace.agent_ui.view.preview == preview
+    end
+
+    test "a selected same-file revision invalidates stale decisions without redirecting input" do
+      state =
+        background_input_state(keymap_scope: :editor)
+        |> Events.dispatch({:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
+        |> select_retained_review("/tmp/agent-a.ex")
+
+      preview =
+        state.workspace.agent_ui.view.preview
+        |> Preview.update_diff(&DiffReview.accept_all/1)
+        |> Preview.scroll_down(4)
+
+      state = install_preview(state, preview)
+      workspace = SessionState.transition_mode(state.workspace, :insert)
+      state = %{state | workspace: workspace}
+
+      state = Events.dispatch(state, {:file_changed, "/tmp/agent-a.ex", "a1", "a2", "a2", "edit"})
+      updated = state.workspace.agent_ui.view.preview
+      assert Preview.diff_review(updated) == nil
+      assert updated.content == preview.content
+      assert updated.scroll == preview.scroll
+      assert updated.freshness == :stale
+      assert Preview.update_diff(updated, &DiffReview.reject_all/1) == updated
+      assert state.workspace.agent_ui.view.presentation.focus == :chat
+
+      state = Router.route_key(state, ?x, 0)
+      assert BufferProcess.content(state.workspace.buffers.active) == "xhello world"
+      assert_retained_review(state, "/tmp/agent-a.ex", "a0", "a2")
+    end
+
+    test "streaming a hundred changed files retains every edit while the human keeps typing" do
+      state = background_input_state(keymap_scope: :editor)
+      workspace = SessionState.transition_mode(state.workspace, :insert)
+      state = %{state | workspace: workspace}
+
+      preview =
+        Preview.new() |> Preview.set_file("/tmp/human.ex", "reading") |> Preview.scroll_down(9)
+
+      state = install_preview(state, preview)
+
+      state =
+        Enum.reduce(1..100, state, fn index, state ->
+          path = "/tmp/agent-burst-#{index}.ex"
+
+          state =
+            state
+            |> Events.dispatch_batch([{:text_delta, "stream #{index}"}])
+            |> Events.dispatch(
+              {:file_changed, path, "original #{index}", "first #{index}", "first-#{index}",
+               "edit"}
+            )
+            |> Events.dispatch(
+              {:file_changed, path, "first #{index}", "latest #{index}", "latest-#{index}",
+               "edit"}
+            )
+
+          assert state.workspace.agent_ui.view.presentation.focus == :chat
+          assert state.workspace.agent_ui.view.preview == preview
+          Router.route_key(state, ?x, 0)
+        end)
+
+      assert BufferProcess.content(state.workspace.buffers.active) ==
+               String.duplicate("x", 100) <> "hello world"
+
+      assert Activity.file_count(state.workspace.agent_ui.view.activity) == 100
+      timeline = state.workspace.agent_ui.view.edit_timeline
+      assert length(EditTimeline.file_summaries(timeline)) == 100
+
+      for index <- 1..100 do
+        path = "/tmp/agent-burst-#{index}.ex"
+        assert EditTimeline.entry_count(timeline, path) == 2
+        assert EditTimeline.content_at(timeline, path, 0) == {:ok, "first #{index}"}
+        assert EditTimeline.content_at(timeline, path, 1) == {:ok, "latest #{index}"}
+        assert_retained_review(state, path, "original #{index}", "latest #{index}")
+      end
+    end
+
+    test "a dirty remote buffer keeps the next character and retains the agent conflict for review" do
+      state = background_input_state(keymap_scope: :editor)
+      buffer = state.workspace.buffers.active
+      BufferProcess.insert_text(buffer, "human ")
+      cursor = BufferProcess.cursor(buffer)
+      remote = Remote.put_buffer(state.remote, "remote-server", "/tmp/agent-remote.ex", buffer)
+      workspace = SessionState.transition_mode(state.workspace, :insert)
+      state = %{state | remote: remote, workspace: workspace}
+
+      state =
+        Events.dispatch(
+          state,
+          {:file_changed, "/tmp/agent-remote.ex", "original", "agent edit", "remote", "edit"}
+        )
+
+      assert TraditionalState.modal(state.shell_runtime.state) == :none
+      assert BufferProcess.cursor(buffer) == cursor
+      assert Remote.buffer(state.remote, "remote-server", "/tmp/agent-remote.ex") == buffer
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) =~
+               "Review agent changes or keep editing"
+
+      assert_retained_review(state, "/tmp/agent-remote.ex", "original", "agent edit")
+
+      state = Router.route_key(state, ?x, 0)
+      assert BufferProcess.content(buffer) == "human xhello world"
+      assert BufferProcess.dirty?(buffer)
+      assert state.workspace.agent_ui.view.presentation.focus == :chat
+    end
+
+    test "approval arrival still defocuses the draft and intervening writes retain the approval" do
+      state =
+        background_input_state(
+          keymap_scope: :agent,
+          agentic_active: true,
+          panel_visible: true,
+          input_focused: true
+        )
+
+      approval = %{tool_call_id: "approval", name: "shell", args: %{"command" => "pwd"}}
+      state = Events.dispatch(state, {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
+      assert state.workspace.agent_ui.panel.input_focused
+      state = Events.dispatch(state, {:approval_pending, approval})
+      refute state.workspace.agent_ui.panel.input_focused
+
+      state = Events.dispatch(state, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+      refute state.workspace.agent_ui.panel.input_focused
+      assert TraditionalState.agent(state.shell_runtime.state).pending_approval == approval
+      assert_retained_review(state, "/tmp/agent-a.ex", "a0", "a1")
+      assert_retained_review(state, "/tmp/agent-b.ex", "b0", "b1")
+    end
+
+    test "a failed tracked remote reload logs its notice and still records the edit" do
+      :ok = Minga.Events.subscribe(:log_message)
+      on_exit(fn -> Minga.Events.unsubscribe(:log_message) end)
+      dead = spawn(fn -> :ok end)
+      monitor = Process.monitor(dead)
+      assert_receive {:DOWN, ^monitor, :process, ^dead, _reason}
+
+      state = background_input_state(keymap_scope: :editor)
+      remote = Remote.put_buffer(state.remote, "unavailable-server", "/tmp/agent-remote.ex", dead)
+      workspace = SessionState.transition_mode(state.workspace, :insert)
+      state = %{state | remote: remote, workspace: workspace}
+
+      state =
+        Events.dispatch(
+          state,
+          {:file_changed, "/tmp/agent-remote.ex", "old", "new", "remote", "edit"}
+        )
+
+      assert_receive {:minga_event, :log_message,
+                      %Minga.Events.LogMessageEvent{level: :error, text: notice}}
+
+      assert notice =~ "Failed to reload remote file /tmp/agent-remote.ex:"
+
+      state = Router.route_key(state, ?x, 0)
+      assert BufferProcess.content(state.workspace.buffers.active) == "xhello world"
+      assert_retained_review(state, "/tmp/agent-remote.ex", "old", "new")
+    end
+  end
+
+  # Materialize the retained review through its public consumer contract, without
+  # relying on background arrival to select it. Explicit Review UI is covered separately.
+  defp retained_review(state, path) do
+    timeline = state.workspace.agent_ui.view.edit_timeline
+    index = EditTimeline.entry_count(timeline, path) - 1
+    assert {:ok, content} = EditTimeline.content_at(timeline, path, index)
+    DiffReview.from_hunks(path, content, EditTimeline.cumulative_hunks(timeline, path))
+  end
+
+  defp assert_retained_review(state, path, before_content, after_content) do
+    review = retained_review(state, path)
+    assert %DiffReview{path: ^path} = review
+    assert DiffReview.original_lines(review) == String.split(before_content, "\n")
+    assert DiffReview.materialized_lines(review) == String.split(after_content, "\n")
+  end
+
+  defp select_retained_review(state, path) do
+    install_preview(state, Preview.set_diff(Preview.new(), retained_review(state, path)))
+  end
+
+  defp background_input_state(opts) do
+    state = Minga.Test.ScopedInputHelpers.base_state(opts)
+    # This suite drives the public input/event owners, not a live frontend.
+    # The generic input fixture's self() port cannot answer renderer calls.
+    %{state | frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil}}
+  end
+
+  defp install_preview(state, preview) do
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      UIState.replace_preview(state.workspace.agent_ui, preview)
+    )
   end
 
   describe "Agent.Events.dispatch/2 file association" do

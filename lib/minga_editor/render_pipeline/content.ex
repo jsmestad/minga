@@ -2,10 +2,8 @@ defmodule MingaEditor.RenderPipeline.Content do
   @moduledoc """
   Stage 4: Content.
 
-  Builds the semantic `RenderModel.Window` models for each editor window
-  (buffer windows and agent chat windows) and resolves each active window's
-  buffer cursor. Produces `WindowContent` carriers that the Compose stage
-  flattens into the frame's window list.
+  Builds the semantic `RenderModel.Window` models for buffer, agent chat, and read-only review windows and resolves each active window's buffer cursor.
+  Produces `WindowContent` carriers that the Compose stage flattens into the frame's window list.
   """
 
   alias MingaEditor.Agent.View.PromptRenderer
@@ -14,6 +12,8 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Agent.View.PromptProjection
   alias Minga.Core.Decorations
+  alias Minga.Core.WidthOracle.Monospace
+  alias Minga.Config
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
@@ -28,6 +28,9 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
   alias MingaEditor.RenderModel.Window.BuildResult
+  alias MingaEditor.RenderModel.Window.ReviewBuilder
+  alias MingaEditor.RenderModel.Window.ReviewLayout
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.WindowContent
   alias MingaEditor.Viewport
@@ -56,13 +59,10 @@ defmodule MingaEditor.RenderPipeline.Content do
   end
 
   @doc """
-  Builds the semantic window models for agent chat windows.
+  Builds semantic window models for agent chat and read-only review windows.
 
-  Finds windows with `{:agent_chat, _}` content in the layout, renders
-  the agent chat content into their rects, and returns `WindowContent`
-  carriers. Buffer windows are skipped (handled by `build_content/2`).
-
-  Returns an empty list if no agent chat windows exist.
+  Buffer windows are handled by `build_content/2`.
+  Returns an empty list when no agent workspace windows exist.
   """
   @spec build_agent_chat_content(state(), Layout.t()) ::
           {[WindowContent.t()], Cursor.t() | nil, state()}
@@ -391,6 +391,49 @@ defmodule MingaEditor.RenderPipeline.Content do
       )
 
       {frames, cursor, st}
+  end
+
+  defp maybe_render_agent_window(
+         %Window{content: {:agent_review, :semantic}},
+         _win_id,
+         %{content: {_row, _col, width, height}},
+         frames,
+         cursor,
+         st
+       )
+       when width == 0 or height == 0 do
+    {frames, cursor, st}
+  end
+
+  defp maybe_render_agent_window(
+         %Window{content: {:agent_review, :semantic}} = window,
+         win_id,
+         win_layout,
+         frames,
+         cursor,
+         st
+       ) do
+    {_row, _col, width, _height} = win_layout.content
+    frame = st.intent.frame
+    layout = ReviewLayout.new(width, %Monospace{}, frame.theme, Config.get(:tab_width))
+    scope = Runtime.review_scope(frame.shell, frame.shell_state)
+
+    result =
+      Telemetry.span([:minga, :render, :window_model_build], %{window_id: win_id}, fn ->
+        ReviewBuilder.build(window, st.workspace.agent_ui.view.preview, win_layout, layout, scope)
+      end)
+
+    case result do
+      {:ok, model, window} ->
+        content = WindowContent.new(model, [], nil)
+        {[content | frames], cursor, Input.record_render_window(st, win_id, window)}
+
+      :not_visible ->
+        {frames, cursor, st}
+
+      {:error, reason} ->
+        raise "Could not render read-only agent review: #{inspect(reason)}"
+    end
   end
 
   defp maybe_render_agent_window(_window, _win_id, _win_layout, frames, cursor, st) do

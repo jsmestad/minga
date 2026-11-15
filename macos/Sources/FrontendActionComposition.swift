@@ -28,6 +28,12 @@ public enum FrontendActionComposition {
         }
     }
 
+    public static func outbound(_ action: AgentHelpView.Action) -> OutboundAction {
+        switch action {
+        case .dismiss: .executeCommand(name: "agent_dismiss_help")
+        }
+    }
+
     public static func outbound(_ action: AgentContextBar.ReviewAction) -> OutboundAction {
         switch action {
         case .approve: .agentApprove
@@ -84,6 +90,7 @@ public enum FrontendActionComposition {
     public static func outbound(_ action: EditTimelineView.Action) -> OutboundAction {
         switch action {
         case .navigate(let generation, let entryID): .semanticItemActivate(surface: .timeline, intent: 1, generation: generation, itemID: Data(entryID.utf8))
+        case .reviewFile(let generation, let path): .semanticItemActivate(surface: .timeline, intent: 2, generation: generation, itemID: Data(path.utf8))
         }
     }
 
@@ -105,6 +112,10 @@ public enum FrontendActionComposition {
         switch action {
         case .executeCommand(let name): .executeCommand(name: name)
         case .togglePanel(let panel): .togglePanel(panel: panel)
+        case .reviewBack(let generation, let itemID):
+            .semanticItemActivate(surface: .review, intent: 1, generation: generation, itemID: Data(itemID.utf8))
+        case .reviewLatest(let generation, let itemID):
+            .semanticItemActivate(surface: .review, intent: 2, generation: generation, itemID: Data(itemID.utf8))
         }
     }
 

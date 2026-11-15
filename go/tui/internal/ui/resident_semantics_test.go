@@ -180,7 +180,7 @@ func TestResidentTextChangeRequiresMatchingSemanticCandidateAfterInitialization(
 		RowSplices: []protocol.WindowRowSplice{{StartIndex: 4, DeleteCount: 1, InsertRows: []protocol.WindowRow{replacement}}},
 	}}
 
-	model.staging = &frameStaging{commands: []protocol.Command{textDelta}}
+	model.staging = &frameStaging{base: 1, commands: []protocol.Command{textDelta}}
 	if _, failure := model.validateWindowReferences(); failure == nil || failure.reason != protocol.RejectInvalidRetainedRows {
 		t.Fatalf("resident text delta without A9 must reject: %+v", failure)
 	}
@@ -200,7 +200,7 @@ func TestResidentTextChangeRequiresMatchingSemanticCandidateAfterInitialization(
 			GuideReplacements: []protocol.ResidentGuideReplacement{{Start: 4, End: 5, Runs: []protocol.ResidentGuideRun{{Start: 4, End: 5, Level: 2}}}},
 		},
 	}}
-	model.staging = &frameStaging{commands: []protocol.Command{textDelta, semanticDelta}}
+	model.staging = &frameStaging{base: 1, commands: []protocol.Command{textDelta, semanticDelta}}
 	snapshot, failure := model.validateWindowReferences()
 	if failure != nil {
 		t.Fatalf("matching text and semantic candidates must validate: %+v", failure)

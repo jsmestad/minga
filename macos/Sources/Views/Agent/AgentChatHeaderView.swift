@@ -2,7 +2,6 @@ import SwiftUI
 
 public struct AgentChatHeaderView: View {
     public enum Action: Equatable, Sendable {
-        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
         case executeCommand(name: String)
     }
 
@@ -47,12 +46,11 @@ public struct AgentChatHeaderView: View {
                 .foregroundStyle(theme.agentMutedFg)
 
             Button {
-                // Send '?' to toggle help overlay
-                sendAction?(.keyPress(codepoint: 0x3F, modifiers: 0, sequence: 0))
+                sendAction?(.executeCommand(name: "agent_toggle_help"))
             } label: {
                 Image(systemName: "questionmark.circle")
                     .font(Typography.font(.emphasis))
-                    .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentMutedFg)
+                    .foregroundStyle(theme.agentMutedFg)
                     .padding(.horizontal, Spacing.xs)
                     .padding(.vertical, Spacing.xs)
                     .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))

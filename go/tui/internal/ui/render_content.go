@@ -209,11 +209,13 @@ func (m Model) windowRow(window protocol.WindowContent, index int) (protocol.Win
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
 	width, height := m.windowRenderDimensions(window, hasGutter, gutter)
-	// Scrollbar: reserve the rightmost column when total content exceeds the
-	// viewport height so the thumb indicator can be drawn there.
-	sb := computeScrollbar(window, height)
-	if sb.active {
-		width--
+	width, margin, sb := windowRowComposition(window, width, height)
+	blankMargin, marginPrefix := "", ""
+	if margin > 0 && !sb.active {
+		blankMargin = lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", margin))
+	}
+	if margin > 1 && sb.active {
+		marginPrefix = lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", margin-1))
 	}
 	// Composed-line cache (#2288): a row that arrived as a ref (unchanged
 	// content_hash) under an unchanged window render context reuses its
@@ -240,17 +242,17 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	}
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
 		m.renderWork.editorRowVisits++
+		trailing := blankMargin
+		if sb.active {
+			trailing = marginPrefix + m.renderScrollbarCell(rowIndex, sb)
+		}
 		sourceRowIndex := rowIndex + sourceStart
 		contentRowIndex := sourceRowIndex - overscanBefore
 		key, cacheable := m.lineCacheKeyFor(window, sourceRowIndex)
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
-				line := cached
-				if sb.active {
-					line += m.renderScrollbarCell(rowIndex, sb)
-				}
-				lines = append(lines, line)
+				lines = append(lines, cached+trailing)
 				continue
 			}
 		}
@@ -270,10 +272,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 			m.renderWork.rowsComposed++
 			builder.store(key, line)
 		}
-		if sb.active {
-			line += m.renderScrollbarCell(rowIndex, sb)
-		}
-		lines = append(lines, line)
+		lines = append(lines, line+trailing)
 	}
 	builder.commit()
 	return lines
@@ -413,6 +412,24 @@ func (m Model) windowRenderDimensions(window protocol.WindowContent, hasGutter b
 		height = body
 	}
 	return width, height
+}
+
+// windowRowComposition honors an authored trailing margin without reserving a second scrollbar cell.
+func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeight int) (width, margin int, sb scrollbarState) {
+	sb = computeScrollbar(window, viewportHeight)
+	if paneWidth <= 1 {
+		sb.active = false
+		return max(paneWidth, 1), 0, sb
+	}
+	if window.GeometrySet && window.Geometry.ContentRect.Width > 0 && window.Geometry.TextRect.Width > 0 {
+		contentRight := int(window.Geometry.ContentRect.Col) + int(window.Geometry.ContentRect.Width)
+		textRight := int(window.Geometry.TextRect.Col) + int(window.Geometry.TextRect.Width)
+		margin = min(max(contentRight-textRight, 0), paneWidth-1)
+	}
+	if margin == 0 && sb.active {
+		margin = 1
+	}
+	return paneWidth - margin, margin, sb
 }
 
 func presentationVisibleRows(window protocol.WindowContent) int {
