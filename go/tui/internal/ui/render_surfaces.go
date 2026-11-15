@@ -343,16 +343,17 @@ func (m Model) renderBottomPanelMessage(msg protocol.PanelMessage, pathWidth int
 	return lipgloss.NewStyle().Background(p.PopupSurface()).Width(width).Render(fitStyled(row, width))
 }
 
+// Messages use the protocol's debug, info, warning, and error severities, not job statuses.
 func bottomPanelLevelBadge(level byte) string {
 	switch level {
+	case 0:
+		return "DBG"
 	case 1:
-		return "WRN"
+		return "INF"
 	case 2:
-		return "ERR"
+		return "WRN"
 	case 3:
-		return "OK"
-	case 4:
-		return "RUN"
+		return "ERR"
 	default:
 		return "INF"
 	}
@@ -360,14 +361,14 @@ func bottomPanelLevelBadge(level byte) string {
 
 func bottomPanelLevelColor(p palette, level byte) color.Color {
 	switch level {
+	case 0:
+		return p.Muted()
 	case 1:
-		return p.Warning()
-	case 2:
-		return p.Error()
-	case 3:
-		return p.Hint()
-	case 4:
 		return p.Info()
+	case 2:
+		return p.Warning()
+	case 3:
+		return p.Error()
 	default:
 		return p.Info()
 	}
