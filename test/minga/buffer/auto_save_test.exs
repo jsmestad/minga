@@ -121,13 +121,15 @@ defmodule Minga.Buffer.AutoSaveTest do
   } do
     path = Path.join(dir, "externally-created.txt")
     pid = start_buffer(file_path: path)
-    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    assert {:ok, 0} = BufferProcess.set_option(pid, :auto_save_delay_ms, 0)
 
     Events.subscribe(:log_message)
 
     try do
       assert :ok = BufferProcess.insert_text(pid, "buffer")
       File.write!(path, "external")
+
+      assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
       assert_log_contains(
         "Auto-save skipped for #{Path.relative_to_cwd(path)}: file changed on disk"
@@ -144,13 +146,15 @@ defmodule Minga.Buffer.AutoSaveTest do
     path = Path.join(dir, "externally-modified.txt")
     File.write!(path, "hello")
     pid = start_buffer(file_path: path)
-    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    assert {:ok, 0} = BufferProcess.set_option(pid, :auto_save_delay_ms, 0)
 
     Events.subscribe(:log_message)
 
     try do
       assert :ok = BufferProcess.insert_text(pid, "!")
       File.write!(path, "HELLO")
+
+      assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
       assert_log_contains(
         "Auto-save skipped for #{Path.relative_to_cwd(path)}: file changed on disk"
@@ -169,13 +173,15 @@ defmodule Minga.Buffer.AutoSaveTest do
     path = Path.join(dir, "externally-deleted.txt")
     File.write!(path, "hello")
     pid = start_buffer(file_path: path)
-    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    assert {:ok, 0} = BufferProcess.set_option(pid, :auto_save_delay_ms, 0)
 
     Events.subscribe(:log_message)
 
     try do
       assert :ok = BufferProcess.insert_text(pid, "!")
       File.rm!(path)
+
+      assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
       assert_log_contains(
         "Auto-save skipped for #{Path.relative_to_cwd(path)}: file was deleted on disk"
