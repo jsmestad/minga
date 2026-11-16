@@ -936,6 +936,32 @@ Safety-critical ownership does not move to optional packs. Credentials, approval
 
 `MingaAgent.Session` is the sole writer of a session's lossless ReqLLM continuation and its separate display transcript. Native providers receive an immutable `MingaAgent.Session.Request` snapshot and return a versioned outcome; they do not own a second mutable conversation. `MingaAgent.SessionStore` persists the completed continuation boundary, display entries and their stable identities, branches, pins, usage, provider selection, and memory snapshot together. Display-only transformations such as collapsing thinking do not alter the next request.
 
+`MingaAgent.Session.Transcript` is the pure canonical display-source owner. Active
+order lives only in an Erlang `:array`; derived ID/tool occurrence indexes preserve
+source-order targeting (including all duplicate tool-call occurrences). Each entry
+carries creation, content and latest-change revisions. A `:gb_trees` index stores
+one latest-revision/ordinal key per live entry, with no old payload journal.
+Append, streamed-tail replacement and targeted updates use indexed paths.
+
+`Session.transcript_since/2` is one atomic source query. `:snapshot` returns an
+ordered `Transcript.Snapshot`; an equal cursor returns `:unchanged` without entry
+traversal; an older same-generation cursor returns `Transcript.Changes` containing
+only coalesced current affected entries in ordinal order. Creation revisions
+distinguish appends from existing-entry revisions. Pins, usage and timestamps
+carry separate change flags; collapse/preview changes do not advance content
+revisions. Discovery costs O(log M + K), ordering O(K log K), indexed fetches
+O(K log M), plus processing of changed payloads. Explicit snapshot/list queries
+for providers, persistence and frozen branches remain O(M).
+
+The Session runtime supplies a nonce to the pure constructor. Structural branch,
+compaction, restore/load and clear/reset transitions advance an exact generation
+and revision, including load into the same PID. Foreign, reset and future cursors
+return named reset outcomes with a replacement snapshot; malformed cursors are
+rejected. GenServer exits and timeouts propagate normally. Runtime cursors and
+indexes never enter durable serialization. Markdown, incremental editor projection,
+compact render submission and frontend encoding remain separate downstream owners;
+this source contract alone does not complete the producer-performance repair.
+
 Each branch snapshot retains both model messages and display-boundary identities. Switching branches restores both values, so later branches cannot inherit boundaries from another branch. Legacy display-only records remain unchanged until an explicit import; the importer reconstructs only portable user and assistant text, records `:legacy_reconstructed` provenance, and omits unavailable attachment data rather than fabricating it. Tool calls and system entries remain readable in the preserved display record but do not become model history.
 
 Tool recovery is a separate effect protocol, not a second conversation log. Persistent sessions checkpoint the exact assistant tool-call group before execution, save each call's admission before dispatch, and save the exact result before reporting completion. An admitted call without a saved result is indeterminate after restart and is never replayed automatically. Non-persistent sessions retain these checkpoints only in Session memory and have no restart guarantee. EventLog receipts remain audit evidence; they do not replace the Session-owned continuation.

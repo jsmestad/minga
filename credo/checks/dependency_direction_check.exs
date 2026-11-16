@@ -88,7 +88,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.UI.Picker.Item"
   ]
 
-  @doc "Layer 0 module prefixes. `.reach.exs` mirrors this list as its effects policy; `test/minga/credo/reach_policy_test.exs` fails when they drift."
+  @doc "Global Layer 0 module prefixes. `.reach.exs` mirrors these and separately names pure Agent contracts; `test/minga/credo/reach_policy_test.exs` guards both sets."
   @spec layer_0_prefixes() :: [String.t()]
   def layer_0_prefixes, do: @layer_0_prefixes
 
@@ -222,6 +222,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.Session.Prefix",
     "MingaAgent.Session.PrefixStore",
     "MingaAgent.Session.Request",
+    "MingaAgent.Session.Transcript",
     "MingaAgent.Redaction",
     "MingaAgent.RuntimeState",
     "MingaAgent.Subagent.Handle",

@@ -1,22 +1,17 @@
 defmodule MingaAgent.Session.Transcript do
   @moduledoc """
-  Owns the ordered, identified agent transcript and its branch snapshots.
+  Canonical ordered, identified agent transcript and frozen branch snapshots.
 
-  Every active message is carried by a `TranscriptEntry`, so message content and
-  identity cannot be reordered independently. Branches freeze those same entry
-  values. The identity high-water mark includes active and branched entries, so
-  truncation and branch switching never permit ID reuse.
+  Active order is indexed by `:array`; derived occurrence indexes target IDs and
+  tool calls. A latest-change tree retains one ordinal record per current entry,
+  never historical payloads. Append and targeted updates do not visit unchanged
+  history. Explicit message/branch/snapshot list boundaries remain O(M).
 
-  ## Transition contract
-
-  Total transitions return the next transcript directly. Rejectable branch
-  operations return `{:ok, next}` or `{:error, reason}`. All transitions are
-  pure: callers provide timestamps, and this module performs no persistence,
-  timer, broadcast, provider, or tool effects.
-
-  Compaction keeps the requested active entry IDs in their existing order and
-  preserves every branch snapshot and pin relationship unchanged. Retained
-  entries and every branch entry keep their IDs.
+  `since/2` atomically returns current entries, pins and source metadata. Equal
+  cursors enumerate nothing. Changed discovery is O(log M + K), followed by
+  O(K log K) ordering and indexed fetches, plus changed-payload processing.
+  Structural replacement advances an exact reset generation. Runtime supplies
+  the incarnation nonce; all transitions here are pure, including restore/reset.
   """
 
   alias MingaAgent.Branch
@@ -24,6 +19,10 @@ defmodule MingaAgent.Session.Transcript do
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
+  alias MingaAgent.Session.Transcript.Active
+  alias MingaAgent.Session.Transcript.Changes
+  alias MingaAgent.Session.Transcript.Cursor
+  alias MingaAgent.Session.Transcript.Snapshot
 
   @typedoc "The streaming message kind that may replace the active tail."
   @type stream_kind :: :assistant | :thinking
@@ -35,44 +34,69 @@ defmodule MingaAgent.Session.Transcript do
 
   @typedoc "Canonical transcript state owned by one Session process."
   @type t :: %__MODULE__{
-          entries: [TranscriptEntry.t()],
+          active: Active.t(),
+          incarnation: reference(),
+          generation: non_neg_integer(),
           next_id: pos_integer(),
           branches: [Branch.t()],
           usage: TurnUsage.t(),
           pinned_ids: MapSet.t(pos_integer()),
           revision: non_neg_integer(),
+          pins_revision: non_neg_integer(),
+          usage_revision: non_neg_integer(),
+          timestamp_revision: non_neg_integer(),
           last_changed_at: DateTime.t()
         }
 
   @enforce_keys [
-    :entries,
+    :active,
+    :incarnation,
+    :generation,
     :next_id,
     :branches,
     :usage,
     :pinned_ids,
     :revision,
+    :pins_revision,
+    :usage_revision,
+    :timestamp_revision,
     :last_changed_at
   ]
   defstruct @enforce_keys
 
-  @doc "Creates a live transcript with freshly allocated stable IDs."
-  @spec new([Message.t()], DateTime.t()) :: t()
-  def new(messages, %DateTime{} = changed_at) when is_list(messages) do
+  @type reset_reason :: Cursor.reset_reason()
+  @type query_result ::
+          {:snapshot, Snapshot.t()}
+          | {:unchanged, Cursor.t()}
+          | {:changes, Changes.t()}
+          | {:reset, reset_reason(), Snapshot.t()}
+          | {:error, :invalid_cursor}
+
+  @doc "Creates a transcript using an incarnation minted by the Session runtime."
+  @spec new([Message.t()], DateTime.t(), reference()) :: t()
+  def new(messages, %DateTime{} = changed_at, incarnation)
+      when is_list(messages) and is_reference(incarnation) do
     entries = identified(messages, 1)
 
     %__MODULE__{
-      entries: entries,
+      active: Active.new(entries, 0),
+      incarnation: incarnation,
+      generation: 0,
       next_id: Enum.count(entries) + 1,
       branches: [],
       usage: TurnUsage.new(),
       pinned_ids: MapSet.new(),
       revision: 0,
+      pins_revision: 0,
+      usage_revision: 0,
+      timestamp_revision: 0,
       last_changed_at: changed_at
     }
   end
 
-  @doc "Restores active and branched entries through the canonical identity allocator."
+  @doc "Restores identified snapshots, invalidating all prior cursors on this incarnation."
   @spec restore(
+          t(),
           [Message.t()],
           term(),
           [Branch.t() | restore_branch()],
@@ -81,6 +105,7 @@ defmodule MingaAgent.Session.Transcript do
           DateTime.t()
         ) :: t()
   def restore(
+        %__MODULE__{} = transcript,
         messages,
         message_ids,
         branches,
@@ -91,35 +116,101 @@ defmodule MingaAgent.Session.Transcript do
       when is_list(messages) and is_list(branches) do
     message_ids = restore_legacy_message_ids(messages, message_ids)
     branches = restore_legacy_branch_ids(branches)
-
-    {entries, next_id} =
-      normalize_messages(messages, message_ids, highest_candidate_id(message_ids, branches) + 1)
-
+    first_id = max(transcript.next_id, highest_candidate_id(message_ids, branches) + 1)
+    {entries, next_id} = normalize_messages(messages, message_ids, first_id)
     {branches, next_id} = normalize_branches(branches, next_id)
+    next = reset_active(transcript, entries)
 
-    %__MODULE__{
-      entries: entries,
-      next_id: next_id,
-      branches: branches,
-      usage: usage,
-      pinned_ids: pinned_ids,
-      revision: 0,
-      last_changed_at: changed_at
+    %{
+      next
+      | next_id: next_id,
+        branches: branches,
+        usage: usage,
+        pinned_ids: pinned_ids,
+        last_changed_at: changed_at,
+        pins_revision: next.revision,
+        usage_revision: next.revision,
+        timestamp_revision: next.revision
     }
+  end
+
+  @doc "Returns an exact runtime-only source cursor without traversing entries."
+  @spec cursor(t()) :: Cursor.t()
+  def cursor(%__MODULE__{} = transcript) do
+    Cursor.new(transcript.incarnation, transcript.generation, transcript.revision)
+  end
+
+  @doc """
+  Returns one atomic snapshot, coalesced current changes, or unchanged outcome.
+
+  Foreign, reset-generation and future cursors explicitly reset with a snapshot;
+  malformed cursors are rejected without enumerating entries. This pure query
+  does not catch runtime failures; Session preserves normal GenServer exits/timeouts.
+  """
+  @spec since(t(), :snapshot | Cursor.t() | term()) :: query_result()
+  def since(%__MODULE__{} = transcript, :snapshot), do: {:snapshot, snapshot(transcript)}
+
+  def since(%__MODULE__{} = transcript, previous) do
+    case Cursor.compare(
+           previous,
+           transcript.incarnation,
+           transcript.generation,
+           transcript.revision
+         ) do
+      {:unchanged, _cursor} = unchanged -> unchanged
+      {:changes_since, revision} -> {:changes, changes_since(transcript, revision)}
+      {:reset, reason} -> {:reset, reason, snapshot(transcript)}
+      {:error, :invalid_cursor} = error -> error
+    end
+  end
+
+  defp changes_since(transcript, revision) do
+    Changes.new(
+      cursor(transcript),
+      Active.changed_since(transcript.active, revision),
+      transcript.pinned_ids,
+      transcript.usage,
+      transcript.last_changed_at,
+      transcript.next_id,
+      Active.size(transcript.active),
+      %{
+        pins_changed?: transcript.pins_revision > revision,
+        usage_changed?: transcript.usage_revision > revision,
+        timestamp_changed?: transcript.timestamp_revision > revision
+      }
+    )
+  end
+
+  defp snapshot(transcript) do
+    Snapshot.new(
+      cursor(transcript),
+      Active.snapshot(transcript.active),
+      transcript.pinned_ids,
+      transcript.usage,
+      transcript.last_changed_at,
+      transcript.next_id,
+      Active.size(transcript.active)
+    )
   end
 
   @doc "Returns active messages in transcript order."
   @spec messages(t()) :: [Message.t()]
-  def messages(%__MODULE__{} = transcript), do: Enum.map(transcript.entries, & &1.message)
+  def messages(%__MODULE__{} = transcript),
+    do: Active.messages(transcript.active)
 
   @doc "Returns the active tail message, or nil for an empty transcript."
   @spec last_message(t()) :: Message.t() | nil
-  def last_message(%__MODULE__{} = transcript), do: last_entry_message(transcript.entries)
+  def last_message(%__MODULE__{} = transcript) do
+    case Active.at(transcript.active, -1) do
+      nil -> nil
+      entry -> entry.message
+    end
+  end
 
   @doc "Returns active stable-ID/message pairs in transcript order."
   @spec messages_with_ids(t()) :: [{pos_integer(), Message.t()}]
   def messages_with_ids(%__MODULE__{} = transcript) do
-    Enum.map(transcript.entries, &{&1.id, &1.message})
+    Active.messages_with_ids(transcript.active)
   end
 
   @doc "Returns the immutable branch snapshots."
@@ -142,108 +233,107 @@ defmodule MingaAgent.Session.Transcript do
   @spec last_changed_at(t()) :: DateTime.t()
   def last_changed_at(%__MODULE__{} = transcript), do: transcript.last_changed_at
 
-  @doc "Appends one newly identified message."
+  @doc "Appends one newly identified message without traversing retained entries."
   @spec append(t(), Message.t()) :: t()
-  def append(%__MODULE__{} = transcript, message) do
-    entry = TranscriptEntry.new(transcript.next_id, message)
+  def append(%__MODULE__{} = transcript, message), do: append_many(transcript, [message])
 
-    # Transcript entries stay in publication order and grow at human interaction speed.
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    entries = transcript.entries ++ [entry]
-
-    %{
-      transcript
-      | entries: entries,
-        next_id: transcript.next_id + 1,
-        revision: transcript.revision + 1
-    }
-  end
-
-  @doc "Appends a batch of messages and allocates one stable ID per message."
+  @doc "Appends a batch at one revision, allocating one stable ID per message."
   @spec append_many(t(), [Message.t()]) :: t()
   def append_many(%__MODULE__{} = transcript, []), do: transcript
 
   def append_many(%__MODULE__{} = transcript, messages) when is_list(messages) do
-    entries = identified(messages, transcript.next_id)
+    revision = transcript.revision + 1
 
-    %{
-      transcript
-      | entries: transcript.entries ++ entries,
-        next_id: transcript.next_id + Enum.count(entries),
-        revision: transcript.revision + 1
-    }
+    {active, next_id} =
+      Enum.reduce(messages, {transcript.active, transcript.next_id}, fn message, {active, id} ->
+        {Active.append(active, TranscriptEntry.new(id, message), revision), id + 1}
+      end)
+
+    %{transcript | active: active, next_id: next_id, revision: revision}
   end
 
-  @doc "Replaces or appends one streaming tail from a whole batch of chunks."
+  @doc "Replaces or appends the indexed streaming tail from a whole batch of chunks."
   @spec append_stream_tail(t(), stream_kind(), iodata()) :: t()
   def append_stream_tail(%__MODULE__{} = transcript, kind, chunks)
       when kind in [:assistant, :thinking] do
-    fragment = IO.iodata_to_binary(chunks)
-
-    case replace_stream_tail(transcript.entries, kind, fragment) do
-      {:ok, entries} -> %{transcript | entries: entries, revision: transcript.revision + 1}
-      :append -> append(transcript, stream_message(kind, fragment))
-    end
+    stream_tail(transcript, kind, IO.iodata_to_binary(chunks), last_message(transcript))
   end
+
+  defp stream_tail(transcript, :assistant, fragment, {:assistant, text}) do
+    update_at(transcript, -1, fn _ -> Message.assistant(text <> fragment) end)
+  end
+
+  defp stream_tail(transcript, :thinking, fragment, {:thinking, text, _collapsed}) do
+    update_at(transcript, -1, fn _ -> Message.thinking(text <> fragment) end)
+  end
+
+  defp stream_tail(transcript, kind, fragment, _tail),
+    do: append(transcript, stream_message(kind, fragment))
 
   @doc "Transforms every message while preserving entry identity and order."
   @spec transform_messages(t(), (Message.t() -> Message.t())) :: t()
   def transform_messages(%__MODULE__{} = transcript, transform) when is_function(transform, 1) do
-    entries = Enum.map(transcript.entries, &TranscriptEntry.replace(&1, transform.(&1.message)))
-    replace_entries_if_changed(transcript, entries)
+    active = Active.transform(transcript.active, transform, transcript.revision + 1)
+    install_active(transcript, active)
   end
 
-  @doc "Transforms one message by active transcript index while preserving its identity."
+  @doc "Transforms one indexed message while preserving its stable identity."
   @spec update_at(t(), integer(), (Message.t() -> Message.t())) :: t()
   def update_at(%__MODULE__{} = transcript, index, transform)
       when is_integer(index) and is_function(transform, 1) do
-    entries =
-      List.update_at(transcript.entries, index, fn entry ->
-        TranscriptEntry.replace(entry, transform.(entry.message))
-      end)
-
-    replace_entries_if_changed(transcript, entries)
+    active = Active.update_at(transcript.active, index, transform, transcript.revision + 1)
+    install_active(transcript, active)
   end
 
-  @doc "Toggles collapse for one collapsible active entry by stable transcript ID."
+  @doc "Toggles the first collapsible occurrence of a stable transcript ID."
   @spec toggle_message_collapse(t(), non_neg_integer()) :: t()
   def toggle_message_collapse(%__MODULE__{} = transcript, message_id)
       when is_integer(message_id) and message_id > 0 do
     index =
-      Enum.find_index(transcript.entries, fn
-        %TranscriptEntry{id: ^message_id, message: {:tool_call, %ToolCall{}}} -> true
-        %TranscriptEntry{id: ^message_id, message: {:thinking, _, _}} -> true
-        _ -> false
-      end)
+      transcript.active
+      |> Active.id_ordinals(message_id)
+      |> Enum.find(fn ordinal -> collapsible?(Active.at(transcript.active, ordinal).message) end)
 
-    case index do
-      nil ->
-        transcript
-
-      index ->
-        update_at(transcript, index, fn
-          {:tool_call, %ToolCall{} = tool_call} ->
-            {:tool_call, ToolCall.toggle_collapsed(tool_call)}
-
-          {:thinking, text, collapsed} ->
-            {:thinking, text, !collapsed}
-        end)
-    end
+    toggle_collapse_at(transcript, index)
   end
 
   def toggle_message_collapse(%__MODULE__{} = transcript, _message_id), do: transcript
 
-  @doc "Updates the matching tool-call entry while preserving its stable identity."
+  defp collapsible?({:tool_call, %ToolCall{}}), do: true
+  defp collapsible?({:thinking, _, _}), do: true
+  defp collapsible?(_message), do: false
+
+  defp toggle_collapse_at(transcript, nil), do: transcript
+
+  defp toggle_collapse_at(transcript, index) do
+    update_at(transcript, index, fn
+      {:tool_call, %ToolCall{} = tool_call} ->
+        {:tool_call, ToolCall.toggle_collapsed(tool_call)}
+
+      {:thinking, text, collapsed} ->
+        {:thinking, text, !collapsed}
+    end)
+  end
+
+  @doc "Updates every matching tool-call occurrence in source order at one revision."
   @spec update_tool_call(t(), String.t(), (ToolCall.t() -> ToolCall.t())) :: t()
   def update_tool_call(%__MODULE__{} = transcript, tool_call_id, update)
       when is_binary(tool_call_id) and is_function(update, 1) do
-    transform_messages(transcript, fn
-      {:tool_call, %ToolCall{id: ^tool_call_id} = tool_call} ->
-        {:tool_call, update.(tool_call)}
+    active =
+      Enum.reduce(
+        Active.tool_ordinals(transcript.active, tool_call_id),
+        transcript.active,
+        fn ordinal, active ->
+          Active.update_at(
+            active,
+            ordinal,
+            fn {:tool_call, tool} -> {:tool_call, update.(tool)} end,
+            transcript.revision + 1
+          )
+        end
+      )
 
-      other ->
-        other
-    end)
+    install_active(transcript, active)
   end
 
   @doc "Collapses every expanded thinking entry without changing identity."
@@ -258,11 +348,14 @@ defmodule MingaAgent.Session.Transcript do
   @doc "Adds one turn's usage to the transcript aggregate."
   @spec add_usage(t(), TurnUsage.t()) :: t()
   def add_usage(%__MODULE__{} = transcript, %TurnUsage{} = usage) do
-    %{
-      transcript
-      | usage: TurnUsage.add(transcript.usage, usage),
-        revision: transcript.revision + 1
-    }
+    replace_usage(transcript, TurnUsage.add(transcript.usage, usage))
+  end
+
+  defp replace_usage(%{usage: usage} = transcript, usage), do: transcript
+
+  defp replace_usage(transcript, usage) do
+    revision = transcript.revision + 1
+    %{transcript | usage: usage, revision: revision, usage_revision: revision}
   end
 
   @doc "Toggles a pin relationship for one stable transcript ID."
@@ -270,7 +363,8 @@ defmodule MingaAgent.Session.Transcript do
   def toggle_pin(%__MODULE__{} = transcript, message_id)
       when is_integer(message_id) and message_id > 0 do
     pinned_ids = toggle_member(transcript.pinned_ids, message_id)
-    %{transcript | pinned_ids: pinned_ids, revision: transcript.revision + 1}
+    revision = transcript.revision + 1
+    %{transcript | pinned_ids: pinned_ids, revision: revision, pins_revision: revision}
   end
 
   @doc "Creates a frozen branch snapshot and truncates the active transcript."
@@ -278,32 +372,20 @@ defmodule MingaAgent.Session.Transcript do
           {:ok, t(), Branch.t()} | {:error, String.t()}
   def branch_at(%__MODULE__{} = transcript, turn_index, %DateTime{} = created_at)
       when is_integer(turn_index) and turn_index >= 0 do
-    if turn_index >= Enum.count(transcript.entries) do
-      {:error,
-       "Turn index #{turn_index} is beyond the conversation length (#{Enum.count(transcript.entries)})"}
+    count = Active.size(transcript.active)
+
+    if turn_index >= count do
+      {:error, "Turn index #{turn_index} is beyond the conversation length (#{count})"}
     else
-      branch =
-        Branch.new(
-          "branch-#{Enum.count(transcript.branches) + 1}",
-          transcript.entries,
-          created_at
-        )
+      frozen = Active.freeze(transcript.active)
+      branch = Branch.new("branch-#{Enum.count(transcript.branches) + 1}", frozen, created_at)
+      entries = Enum.take(frozen, turn_index + 1)
 
-      entries = Enum.take(transcript.entries, turn_index + 1)
-
-      # Branches are immutable user-created checkpoints and remain in creation order.
+      # Branches are immutable user-created checkpoints in creation order.
       # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
       branches = transcript.branches ++ [branch]
-
-      next =
-        %{
-          transcript
-          | entries: entries,
-            branches: branches,
-            revision: transcript.revision + 1
-        }
-
-      {:ok, next, branch}
+      next = reset_active(transcript, entries)
+      {:ok, %{next | branches: branches}, branch}
     end
   end
 
@@ -321,23 +403,17 @@ defmodule MingaAgent.Session.Transcript do
         {:error, "Branch #{branch_index} not found. Use /branches to list."}
 
       %Branch{} = branch ->
-        entries = branch.entries
-
         available_ids =
           MapSet.new(
-            Enum.map(entries, & &1.id) ++
-              Enum.flat_map(transcript.branches, fn branch ->
-                Enum.map(branch.entries, & &1.id)
+            Enum.map(branch.entries, & &1.id) ++
+              Enum.flat_map(transcript.branches, fn frozen ->
+                Enum.map(frozen.entries, & &1.id)
               end)
           )
 
-        {:ok,
-         %{
-           transcript
-           | entries: entries,
-             pinned_ids: MapSet.intersection(transcript.pinned_ids, available_ids),
-             revision: transcript.revision + 1
-         }}
+        next = reset_active(transcript, branch.entries)
+        pins = MapSet.intersection(transcript.pinned_ids, available_ids)
+        {:ok, %{next | pinned_ids: pins, pins_revision: next.revision}}
     end
   end
 
@@ -349,12 +425,12 @@ defmodule MingaAgent.Session.Transcript do
   @spec compact(t(), [pos_integer()]) :: t()
   def compact(%__MODULE__{} = transcript, retained_ids) when is_list(retained_ids) do
     retained = MapSet.new(retained_ids)
-    entries = Enum.filter(transcript.entries, &MapSet.member?(retained, &1.id))
+    entries = Enum.filter(Active.freeze(transcript.active), &MapSet.member?(retained, &1.id))
 
-    if entries == transcript.entries do
+    if Enum.count(entries) == Active.size(transcript.active) do
       transcript
     else
-      %{transcript | entries: entries, revision: transcript.revision + 1}
+      reset_active(transcript, entries)
     end
   end
 
@@ -362,22 +438,30 @@ defmodule MingaAgent.Session.Transcript do
   @spec reset(t(), [Message.t()]) :: t()
   def reset(%__MODULE__{} = transcript, messages) when is_list(messages) do
     entries = identified(messages, 1)
+    next = reset_active(transcript, entries)
 
     %{
-      transcript
-      | entries: entries,
-        next_id: Enum.count(entries) + 1,
+      next
+      | next_id: Enum.count(entries) + 1,
         branches: [],
         usage: TurnUsage.new(),
         pinned_ids: MapSet.new(),
-        revision: transcript.revision + 1
+        pins_revision: next.revision,
+        usage_revision: next.revision
     }
   end
 
   @doc "Records the timestamp at which Session published transcript changes."
   @spec touch(t(), DateTime.t()) :: t()
   def touch(%__MODULE__{} = transcript, %DateTime{} = changed_at) do
-    %{transcript | last_changed_at: changed_at}
+    touch_at(transcript, changed_at)
+  end
+
+  defp touch_at(%{last_changed_at: changed_at} = transcript, changed_at), do: transcript
+
+  defp touch_at(transcript, changed_at) do
+    revision = transcript.revision + 1
+    %{transcript | last_changed_at: changed_at, revision: revision, timestamp_revision: revision}
   end
 
   @spec identified([Message.t()], pos_integer()) :: [TranscriptEntry.t()]
@@ -387,45 +471,21 @@ defmodule MingaAgent.Session.Transcript do
     |> Enum.map(fn {message, id} -> TranscriptEntry.new(id, message) end)
   end
 
-  @spec last_entry_message([TranscriptEntry.t()]) :: Message.t() | nil
-  defp last_entry_message([]), do: nil
-  defp last_entry_message([%TranscriptEntry{message: message}]), do: message
-  defp last_entry_message([_entry | rest]), do: last_entry_message(rest)
+  defp install_active(%{active: active} = transcript, active), do: transcript
 
-  @spec replace_stream_tail([TranscriptEntry.t()], stream_kind(), String.t()) ::
-          {:ok, [TranscriptEntry.t()]} | :append
-  defp replace_stream_tail([], _kind, _fragment), do: :append
-
-  defp replace_stream_tail(
-         [%TranscriptEntry{message: {:assistant, text}} = entry],
-         :assistant,
-         fragment
-       ) do
-    {:ok, [TranscriptEntry.replace(entry, Message.assistant(text <> fragment))]}
+  defp install_active(transcript, active) do
+    %{transcript | active: active, revision: transcript.revision + 1}
   end
 
-  defp replace_stream_tail(
-         [%TranscriptEntry{message: {:thinking, text, _collapsed}} = entry],
-         :thinking,
-         fragment
-       ) do
-    {:ok, [TranscriptEntry.replace(entry, Message.thinking(text <> fragment))]}
-  end
+  defp reset_active(transcript, entries) do
+    revision = transcript.revision + 1
 
-  defp replace_stream_tail([_entry], _kind, _fragment), do: :append
-
-  defp replace_stream_tail([entry | rest], kind, fragment) do
-    case replace_stream_tail(rest, kind, fragment) do
-      {:ok, updated} -> {:ok, [entry | updated]}
-      :append -> :append
-    end
-  end
-
-  @spec replace_entries_if_changed(t(), [TranscriptEntry.t()]) :: t()
-  defp replace_entries_if_changed(%{entries: entries} = transcript, entries), do: transcript
-
-  defp replace_entries_if_changed(transcript, entries) do
-    %{transcript | entries: entries, revision: transcript.revision + 1}
+    %{
+      transcript
+      | active: Active.new(entries, revision),
+        generation: transcript.generation + 1,
+        revision: revision
+    }
   end
 
   @spec stream_message(stream_kind(), String.t()) :: Message.t()
