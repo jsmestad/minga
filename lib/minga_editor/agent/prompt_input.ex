@@ -7,6 +7,7 @@ defmodule MingaEditor.Agent.PromptInput do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Mouse.Target.Text
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State
   alias MingaEditor.WindowFocus
@@ -92,6 +93,7 @@ defmodule MingaEditor.Agent.PromptInput do
     with true <- state.workspace.agent_ui.panel.prompt_buffer == buffer,
          {:ok, id} <- agent_window(state),
          {:ok, state} <- WindowFocus.focus_result(state, id) do
+      state = %{state | workspace: SessionState.set_keymap_scope(state.workspace, :agent)}
       ui = UIState.set_input_focused(state.workspace.agent_ui, true)
       {:ok, Workflow.install_agent_ui(state, ui)}
     else

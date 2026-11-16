@@ -6,11 +6,11 @@ defmodule MingaEditor.AgentLifecycle do
   caching, and tab label updates. These are called by the
   Editor during init, file open, and surface effect processing.
 
-  All functions are pure state transformations (state -> state) that
-  the Editor calls at the appropriate lifecycle points.
+  These orchestration workflows start or query session and prompt processes, then install state through its owners.
   """
 
   alias MingaEditor.Agent.MarkdownHighlight
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState.Panel
@@ -92,17 +92,16 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   @doc """
-  Starts the agent session if the agent pane is visible during init.
+  Starts the agent session and prepares its prompt when the agent pane is visible during init.
 
   Also loads auto-context if configured. Called once the port is ready.
   """
   @spec maybe_start_session(state()) :: state()
   def maybe_start_session(state) do
-    if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == nil and
-         LayoutPreset.has_agent_chat?(state) do
-      state = Commands.Agent.ensure_agent_session(state)
-      cli_flags = Minga.CLI.startup_flags()
-      maybe_load_auto_context(state, cli_flags)
+    if LayoutPreset.has_agent_chat?(state) do
+      state = start_session_if_needed(state)
+      ui = PromptBuffer.ensure(state.workspace.agent_ui)
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
     else
       state
     end
@@ -110,6 +109,18 @@ defmodule MingaEditor.AgentLifecycle do
     e ->
       Minga.Log.warning(:agent, "Failed to start agent session at boot: #{Exception.message(e)}")
       state
+  end
+
+  @spec start_session_if_needed(state()) :: state()
+  defp start_session_if_needed(state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
+      nil ->
+        state = Commands.Agent.ensure_agent_session(state)
+        maybe_load_auto_context(state, Minga.CLI.startup_flags())
+
+      _session ->
+        state
+    end
   end
 
   @doc """

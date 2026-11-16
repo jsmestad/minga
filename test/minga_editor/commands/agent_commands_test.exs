@@ -1431,6 +1431,25 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert %WorkspaceAgent{agent_ui: nil, session: session} = active_workspace.payload
       assert is_pid(session)
     end
+
+    test "an admitted agent workspace has a usable draft before its first focus" do
+      state = active_agent_workspace_state()
+      refute state.workspace.agent_ui.panel.input_focused
+      state = MingaEditor.AgentLifecycle.maybe_start_session(state)
+      prompt = state.workspace.agent_ui.panel.prompt_buffer
+      assert Minga.Buffer.content(prompt) == ""
+      assert state.workspace.editing.mode == :normal
+      refute state.workspace.agent_ui.panel.input_focused
+
+      Minga.Buffer.insert_text(prompt, "unfinished draft")
+      cursor = Minga.Buffer.cursor(prompt)
+      state = MingaEditor.AgentLifecycle.maybe_start_session(state)
+
+      assert Minga.Buffer.content(state.workspace.agent_ui.panel.prompt_buffer) ==
+               "unfinished draft"
+
+      assert Minga.Buffer.cursor(state.workspace.agent_ui.panel.prompt_buffer) == cursor
+    end
   end
 
   test "detach remote session command disconnects workspace payload and agent tab payload" do
