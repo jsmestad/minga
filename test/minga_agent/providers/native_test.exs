@@ -653,7 +653,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert "git_status" in tool_names_for.([git_status])
     end
 
-    test "find executes from the fallback working directory when no project is active", %{
+    test "find uses the owned fallback view when no project is active", %{
       tmp_dir: dir
     } do
       call_count = :counters.new(1, [:atomics])
@@ -687,6 +687,9 @@ defmodule MingaAgent.Providers.NativeTest do
           process_backend: RecordingProcessBackend
         )
 
+      view = Native.project_view(pid)
+      working_dir = ProjectView.working_dir(view)
+
       assert :ok = send_prompt(pid, "Find Elixir files")
       events = collect_run_events()
 
@@ -694,7 +697,8 @@ defmodule MingaAgent.Providers.NativeTest do
                Enum.find(events, &match?(%Event.ToolEnd{name: "find"}, &1))
 
       assert result =~ "find pattern=*.ex"
-      assert result =~ "path=#{File.cwd!()}"
+      assert result =~ "path=#{working_dir}"
+      assert result =~ ~s(filter_root: "#{File.cwd!()}")
     end
 
     test "provider compaction honors configured threshold", %{tmp_dir: dir} do
@@ -1592,13 +1596,6 @@ defmodule MingaAgent.Providers.NativeTest do
                {"tc_second", "read_file", %{"path" => "test.txt"}}
              ]
 
-      assert Enum.map([first_result, second_result], fn result ->
-               {result["role"], result["tool_call_id"], result["content"]}
-             end) == [
-               {"tool", "tc_first", "file contents"},
-               {"tool", "tc_second", "file contents"}
-             ]
-
       for result <- [first_result, second_result] do
         refute Map.has_key?(result["metadata"] || %{}, "output")
       end
@@ -1609,6 +1606,15 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.all?(durable_results, fn message ->
                match?(%MingaAgent.Tool.Output{reference: %{}}, message.metadata.output)
              end)
+
+      assert [first_durable, second_durable] = durable_results
+
+      assert Enum.map([first_result, second_result], fn result ->
+               {result["role"], result["tool_call_id"], result["content"]}
+             end) == [
+               {"tool", "tc_first", text_content(first_durable)},
+               {"tool", "tc_second", text_content(second_durable)}
+             ]
 
       assert Enum.any?(events, &match?(%Event.ThinkingDelta{delta: "checking the file"}, &1))
       assert Enum.count(events, &match?(%Event.ToolEnd{is_error: false}, &1)) == 2
