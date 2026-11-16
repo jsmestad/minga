@@ -73,19 +73,6 @@ defmodule Minga.Buffer.ForkTest do
       assert Fork.version(fork) == 1
     end
 
-    test "find_and_replace_batch applies multiple edits" do
-      parent = start_parent!("aaa bbb ccc")
-
-      {:ok, fork} = Fork.create(parent)
-      edits = [{"aaa", "AAA"}, {"ccc", "CCC"}]
-      {:ok, results} = GenServer.call(fork, {:find_and_replace_batch, edits, nil})
-
-      assert [{:ok, _}, {:ok, _}] = results
-      assert Fork.content(fork) == "AAA bbb CCC"
-      assert Fork.dirty?(fork)
-      assert Fork.version(fork) == 1
-    end
-
     test "find_and_replace with ambiguous match returns error" do
       parent = start_parent!("foo\nbar\nfoo")
 
@@ -114,31 +101,6 @@ defmodule Minga.Buffer.ForkTest do
       assert Fork.content(fork) == "line1\nchanged\nline3"
       assert Fork.dirty?(fork)
       assert Fork.version(fork) == 1
-    end
-
-    test "find_and_replace_batch honors boundaries per edit" do
-      parent = start_parent!("one\ntwo\nthree")
-
-      {:ok, fork} = Fork.create(parent)
-      edits = [{"one", "1"}, {"two", "2"}, {"three", "3"}]
-      {:ok, results} = GenServer.call(fork, {:find_and_replace_batch, edits, {1, 1}})
-
-      assert [{:error, _}, {:ok, "applied"}, {:error, _}] = results
-      assert Fork.content(fork) == "one\n2\nthree"
-      assert Fork.dirty?(fork)
-      assert Fork.version(fork) == 1
-    end
-
-    test "find_and_replace_batch with all failures does not mark dirty" do
-      parent = start_parent!("hello")
-
-      {:ok, fork} = Fork.create(parent)
-      edits = [{"missing1", "X"}, {"missing2", "Y"}]
-      {:ok, results} = GenServer.call(fork, {:find_and_replace_batch, edits, nil})
-
-      assert [{:error, _}, {:error, _}] = results
-      refute Fork.dirty?(fork)
-      assert Fork.version(fork) == 0
     end
 
     test "version increments on each edit operation" do

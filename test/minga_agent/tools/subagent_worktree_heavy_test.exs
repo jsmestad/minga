@@ -94,7 +94,12 @@ defmodule MingaAgent.Tools.SubagentWorktreeHeavyTest do
           [
             StreamChunk.tool_call(
               "write_file",
-              %{"path" => path, "content" => content},
+              %{
+                "path" => path,
+                "mode" => "create",
+                "content" => content,
+                "expected_revision" => "absent"
+              },
               %{id: "tc_write_file", index: 0}
             ),
             StreamChunk.meta(%{finish_reason: :tool_use})

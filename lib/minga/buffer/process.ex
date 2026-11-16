@@ -24,6 +24,7 @@ defmodule Minga.Buffer.Process do
     Cursor,
     CursorContext,
     Document,
+    FileMutation,
     InspectionSnapshot,
     Lines,
     Operation,
@@ -246,29 +247,46 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:find_and_replace, old_text, new_text, boundary})
   end
 
-  @typedoc "A find-and-replace edit pair for batch operations."
-  @type replace_edit :: {old_text :: String.t(), new_text :: String.t()}
-
-  @typedoc "Result of a single edit within a batch."
-  @type replace_result :: {:ok, String.t()} | {:error, String.t()}
+  @doc """
+  Checks the full source revision and prepares and commits a file mutation in
+  the owning callback. A successful batch is one agent undo entry; errors leave
+  content, version and undo history unchanged. Buffer creation and deletion
+  require the changeset lifecycle and are not supported here.
+  """
+  @spec conditional_mutate(
+          GenServer.server(),
+          FileMutation.expectation(),
+          FileMutation.operation(),
+          FileMutation.identity()
+        ) :: :ok | {:error, term()}
+  def conditional_mutate(server, expected, operation, identity) do
+    GenServer.call(server, {:conditional_mutate, expected, operation, identity}, :infinity)
+  end
 
   @doc """
-  Atomically applies multiple find-and-replace edits in a single `handle_call`.
-
-  Edits are applied sequentially: earlier edits affect the content that later
-  edits search against. Failed edits (not found, ambiguous) are reported but
-  don't block subsequent edits. A single undo entry is pushed for the entire
-  batch.
-
-  When `boundary` is provided, each edit is checked against the boundary and
-  rejected if the match falls outside the allowed line range.
-
-  Returns `{:ok, results}` where results is a list of per-edit outcomes.
+  Merges fork content against the current parent, optionally staging the raw fork
+  draft before installing the merge. Staging runs under parent ownership and
+  failure leaves the parent unchanged.
   """
-  @spec find_and_replace_batch(GenServer.server(), [replace_edit()], boundary()) ::
-          {:ok, [replace_result()]} | {:error, String.t()}
-  def find_and_replace_batch(server, edits, boundary \\ nil) when is_list(edits) do
-    GenServer.call(server, {:find_and_replace_batch, edits, boundary})
+  @spec merge_fork(
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          (String.t() -> :ok | {:conflict, term()} | {:error, term()}) | nil
+        ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
+  def merge_fork(server, ancestor, fork_content, staging \\ nil)
+      when is_nil(staging) or is_function(staging, 1) do
+    GenServer.call(server, {:merge_fork, ancestor, fork_content, staging}, :infinity)
+  end
+
+  @doc "Publishes deletion under parent ownership without discarding the open buffer's bytes."
+  @spec publish_fork_deletion(
+          GenServer.server(),
+          String.t(),
+          (-> :ok | {:conflict, term()} | {:error, term()})
+        ) :: :ok | {:conflict, term()} | {:error, term()}
+  def publish_fork_deletion(server, ancestor, publication) when is_function(publication, 0) do
+    GenServer.call(server, {:publish_fork_deletion, ancestor, publication}, :infinity)
   end
 
   @doc "Deletes the character before the cursor (backspace)."
@@ -1335,33 +1353,88 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:find_and_replace_batch, _edits, _boundary}, _from, %{read_only: true} = state) do
-    {:reply, {:error, "buffer is read-only"}, state}
+  def handle_call(
+        {:conditional_mutate, _expected, _operation, _identity},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:find_and_replace_batch, [], _boundary}, _from, state) do
-    {:reply, {:ok, []}, state}
+  def handle_call({:conditional_mutate, _expected, operation, _identity}, _from, state)
+      when operation == :delete or elem(operation, 0) == :create do
+    {:reply, {:error, :unsupported_operation}, state}
   end
 
-  def handle_call({:find_and_replace_batch, edits, boundary}, _from, state) do
-    {final_doc, results, patches} =
-      Replace.apply_batch_with_deltas(state.document, edits, boundary)
+  def handle_call({:conditional_mutate, expected, operation, identity}, _from, state) do
+    content = Document.content(state.document)
+    generation = mutation_generation(identity, state)
 
-    new_state =
-      case patches do
-        [] ->
-          state
+    case FileMutation.prepare({:ok, content}, generation, identity, expected, operation) do
+      {:ok, new_content} when is_binary(new_content) ->
+        {:reply, :ok, replace_content_preserving_cursor_state(state, new_content, :agent)}
 
-        [_patch | _rest] ->
-          apply_operation(
-            state,
-            {:batch, final_doc, patches},
-            EditSource.agent(self(), "unknown"),
-            {:batch, :agent, :clear}
-          )
-      end
+      {:error, _} = error ->
+        {:reply, error, state}
+    end
+  end
 
-    {:reply, {:ok, results}, new_state}
+  def handle_call(
+        {:merge_fork, _ancestor, _fork_content, _staging},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:merge_fork, ancestor, fork_content, staging}, _from, state) do
+    parent_content = Document.content(state.document)
+
+    case Minga.Core.Diff.merge3(
+           String.split(ancestor, "\n"),
+           String.split(fork_content, "\n"),
+           String.split(parent_content, "\n")
+         ) do
+      {:ok, lines} ->
+        case stage_fork_content(staging, fork_content) do
+          :ok ->
+            merged = Enum.join(lines, "\n")
+            new_state = replace_content_preserving_cursor_state(state, merged, :agent)
+            {:reply, {:ok, merged}, new_state}
+
+          {:error, _} = error ->
+            {:reply, error, state}
+
+          {:conflict, _} = conflict ->
+            {:reply, conflict, state}
+        end
+
+      {:conflict, _} = conflict ->
+        {:reply, conflict, state}
+    end
+  end
+
+  def handle_call(
+        {:publish_fork_deletion, _ancestor, _publication},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:publish_fork_deletion, ancestor, publication}, _from, state) do
+    if Document.content(state.document) == ancestor do
+      result =
+        try do
+          publication.()
+        catch
+          :exit, reason -> {:error, {:deletion_publication_failed, reason}}
+        end
+
+      {:reply, result, state}
+    else
+      {:reply, {:conflict, :parent_changed}, state}
+    end
   end
 
   def handle_call(:delete_before, _from, %{read_only: true} = state) do
@@ -2772,6 +2845,22 @@ defmodule Minga.Buffer.Process do
     seed_options(state.options_server, filetype)
     |> Map.merge(explicit_values)
   end
+
+  @spec stage_fork_content(
+          (String.t() -> :ok | {:conflict, term()} | {:error, term()}) | nil,
+          String.t()
+        ) :: :ok | {:conflict, term()} | {:error, term()}
+  defp stage_fork_content(nil, _fork_content), do: :ok
+
+  defp stage_fork_content(staging, fork_content) do
+    staging.(fork_content)
+  catch
+    :exit, reason -> {:error, {:fork_staging_failed, reason}}
+  end
+
+  @spec mutation_generation(FileMutation.identity(), state()) :: non_neg_integer() | nil
+  defp mutation_generation({:project_view, _source_id}, _state), do: nil
+  defp mutation_generation(_identity, state), do: BufState.version(state)
 
   @spec replace_content_state(state(), String.t(), BufState.edit_source()) :: state()
   defp replace_content_state(state, new_content, source) do

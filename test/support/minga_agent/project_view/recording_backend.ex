@@ -49,6 +49,18 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   end
 
   @impl true
+  @spec conditional_mutate(
+          ProjectView.t(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: {:error, :unsupported}
+  def conditional_mutate(%ProjectView{} = view, relative_path, expected, operation) do
+    record(view, {:conditional_mutate, relative_path, expected, operation})
+    {:error, :unsupported}
+  end
+
+  @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
     record(view, {:write_file, relative_path, content})

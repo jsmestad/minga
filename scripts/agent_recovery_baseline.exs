@@ -284,7 +284,7 @@ defmodule Minga.Scripts.AgentRecoveryBaseline do
     pidfile = Path.join(context.root, "append-process.json")
 
     command =
-      "exec python3 #{quote_shell(Path.join(context.fixture, "process_fixture.py"))} append #{quote_shell(pidfile)} completed.txt"
+      "exec python3 #{quote_shell(Path.join(context.fixture, "process_fixture.py"))} append #{quote_shell(pidfile)} #{quote_shell(Path.join(context.project, "completed.txt"))}"
 
     call = Fixture.tool("append-once", "shell", %{"command" => command})
     respond(first, call)
@@ -420,6 +420,8 @@ defmodule Minga.Scripts.AgentRecoveryBaseline do
     edit =
       Fixture.tool("prepared-edit", "write_file", %{
         "path" => "subject.txt",
+        "mode" => "replace",
+        "expected_revision" => MingaAgent.Tool.Output.Revision.token(original.revision),
         "content" => "agent\n"
       })
 

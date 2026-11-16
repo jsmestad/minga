@@ -13,6 +13,9 @@ defmodule MingaAgent.Changeset.Server do
   use GenServer, restart: :temporary
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.FileMutation
+  alias Minga.Buffer.Persistence.LocalWriter
+  alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Replace
   alias MingaAgent.Changeset.MergedEvent
   alias MingaAgent.Changeset.Overlay
@@ -25,12 +28,13 @@ defmodule MingaAgent.Changeset.Server do
           project_root: String.t(),
           overlay: Overlay.t(),
           modifications: %{String.t() => binary()},
-          originals: %{String.t() => binary()},
+          originals: %{String.t() => binary() | nil},
           deletions: MapSet.t(String.t()),
           history: %{String.t() => [binary() | :unmodified | :deleted]},
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer(),
-          revision: non_neg_integer()
+          revision: non_neg_integer(),
+          publication: {module(), keyword()}
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -55,7 +59,11 @@ defmodule MingaAgent.Changeset.Server do
           history: %{},
           budget: budget,
           attempts: 0,
-          revision: 0
+          revision: 0,
+          publication: {
+            Keyword.get(opts, :publication_file_system, SystemFileSystem),
+            Keyword.get(opts, :publication_opts, [])
+          }
         }
 
         {:ok, state}
@@ -121,6 +129,98 @@ defmodule MingaAgent.Changeset.Server do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call(
+        {:conditional_mutate, relative_path, expected, operation, identity},
+        _from,
+        state
+      ) do
+    with {:ok, path} <- normalize_path(state, relative_path),
+         source = mutation_source(state, path),
+         {:ok, prepared} <-
+           FileMutation.prepare(
+             source,
+             mutation_generation(state, identity),
+             identity,
+             expected,
+             operation
+           ),
+         :ok <- Overlay.commit_file(state.overlay, path, prepared) do
+      state =
+        state
+        |> remember_original(path, source)
+        |> push_history(path)
+        |> install_mutation(path, prepared)
+        |> bump_revision()
+
+      {:reply, :ok, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:capture_original, relative_path}, _from, state) do
+    with {:ok, path} <- normalize_path(state, relative_path) do
+      case File.read(Path.join(state.project_root, path)) do
+        {:ok, _} = source -> {:reply, :ok, remember_original(state, path, source)}
+        {:error, :enoent} = source -> {:reply, :ok, remember_original(state, path, source)}
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:stage_fork_content, relative_path, content}, _from, state) do
+    with {:ok, path} <- normalize_path(state, relative_path),
+         true <- Map.has_key?(state.originals, path),
+         :ok <- Overlay.commit_file(state.overlay, path, content) do
+      state =
+        state
+        |> push_history(path)
+        |> install_mutation(path, content)
+        |> bump_revision()
+
+      {:reply, :ok, state}
+    else
+      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:publish_deletion, relative_path}, _from, state) do
+    with {:ok, path} <- normalize_path(state, relative_path),
+         true <- Map.has_key?(state.originals, path) do
+      case plan_one_deletion(state, path) do
+        {{:ok, _, _} = result, action} ->
+          case apply_merge_action(action, state.publication) do
+            :ok ->
+              state = prune_successful_merge_result(result, state)
+              {:reply, :ok, bump_revision(state)}
+
+            {:error, reason} ->
+              {:reply, {:error, reason}, state}
+          end
+
+        {result, :noop} ->
+          {:reply, {:conflict, %{conflicts: [result], results: [result]}}, state}
+      end
+    else
+      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  rescue
+    error -> {:reply, {:error, Exception.message(error)}, state}
+  end
+
+  def handle_call({:materialize_command_deletion, relative_path}, _from, state) do
+    result =
+      with {:ok, path} <- normalize_path(state, relative_path) do
+        Overlay.commit_file(state.overlay, path, :deleted)
+      end
+
+    {:reply, result, state}
   end
 
   def handle_call({:undo, relative_path}, _from, state) do
@@ -207,7 +307,7 @@ defmodule MingaAgent.Changeset.Server do
   def handle_call(:summary, _from, state) do
     modified =
       Enum.map(state.modifications, fn {path, content} ->
-        kind = if Map.has_key?(state.originals, path), do: :modified, else: :new
+        kind = if is_binary(Map.get(state.originals, path)), do: :modified, else: :new
         %{path: path, kind: kind, size: byte_size(content)}
       end)
 
@@ -280,9 +380,9 @@ defmodule MingaAgent.Changeset.Server do
 
     # Apply every clean per-file plan, even on a partial conflict. Files that
     # merged cleanly are written and pruned so a later retry skips them.
-    :ok = apply_plans(plans)
+    results = apply_plans(plans, state.publication)
 
-    case conflict_details(plans) do
+    case merge_result_details(results) do
       nil ->
         Overlay.cleanup(state.overlay)
         broadcast_merged(state)
@@ -330,7 +430,8 @@ defmodule MingaAgent.Changeset.Server do
   # A per-file merge plan pairs the decision result tuple with the disk action
   # that `:merge` performs to realize it. `:preflight_merge` keeps the results
   # and discards the actions, so planning is fully write-free and reusable.
-  @typep merge_action :: {:write, String.t(), binary()} | {:rm, String.t()} | :noop
+  @typep merge_action ::
+           {:write | :create, String.t(), binary()} | {:rm, String.t()} | :noop
   @typep merge_plan :: {result :: tuple(), merge_action()}
 
   # Plans the full merge without touching disk. Returns one plan per file; the
@@ -355,8 +456,12 @@ defmodule MingaAgent.Changeset.Server do
   # `nil` when every file would merge cleanly.
   @spec conflict_details([merge_plan()]) :: map() | nil
   defp conflict_details(plans) do
-    all_results = results_from_plans(plans)
-    conflicts = Enum.filter(all_results, &match?({:conflict, _, _}, &1))
+    merge_result_details(results_from_plans(plans))
+  end
+
+  @spec merge_result_details([tuple()]) :: map() | nil
+  defp merge_result_details(all_results) do
+    conflicts = Enum.reject(all_results, &match?({:ok, _, _}, &1))
 
     if conflicts == [] do
       nil
@@ -371,19 +476,29 @@ defmodule MingaAgent.Changeset.Server do
   # Performs the disk writes for the clean plans. Only reached from `:merge`.
   # Conflict plans carry a `:noop` action, so partial merges write only the
   # files that merged cleanly and leave conflicting files on disk untouched.
-  @spec apply_plans([merge_plan()]) :: :ok
-  defp apply_plans(plans) do
-    Enum.each(plans, fn {_result, action} -> apply_merge_action(action) end)
+  @spec apply_plans([merge_plan()], {module(), keyword()}) :: [tuple()]
+  defp apply_plans(plans, publication) do
+    Enum.map(plans, fn {result, action} ->
+      case apply_merge_action(action, publication) do
+        :ok -> result
+        {:error, reason} -> {:error, elem(result, 1), reason}
+      end
+    end)
   end
 
-  @spec apply_merge_action(merge_action()) :: :ok
-  defp apply_merge_action({:write, real_path, content}) do
-    File.mkdir_p!(Path.dirname(real_path))
-    File.write!(real_path, content)
+  @spec apply_merge_action(merge_action(), {module(), keyword()}) :: :ok | {:error, term()}
+  defp apply_merge_action({:write, real_path, content}, {file_system, opts}) do
+    LocalWriter.write(real_path, content, :replace, file_system, opts)
   end
 
-  defp apply_merge_action({:rm, real_path}), do: File.rm!(real_path)
-  defp apply_merge_action(:noop), do: :ok
+  defp apply_merge_action({:create, real_path, content}, {file_system, opts}) do
+    LocalWriter.write(real_path, content, :exclusive_create, file_system, opts)
+  end
+
+  defp apply_merge_action({:rm, real_path}, {file_system, opts}),
+    do: file_system.remove(real_path, opts)
+
+  defp apply_merge_action(:noop, _publication), do: :ok
 
   @spec prune_successful_merge_results(state(), [tuple()]) :: state()
   defp prune_successful_merge_results(state, results) do
@@ -421,12 +536,16 @@ defmodule MingaAgent.Changeset.Server do
   @spec plan_strategy(String.t(), String.t(), binary() | nil, binary() | nil, binary()) ::
           merge_plan()
   defp plan_strategy(real_path, path, nil = _original, nil = _current_real, changeset_content) do
-    {{:ok, path, :created}, {:write, real_path, changeset_content}}
+    {{:ok, path, :created}, {:create, real_path, changeset_content}}
   end
 
   # New file but someone else also created it
   defp plan_strategy(_real_path, path, nil = _original, _current_real, _changeset_content) do
     {{:conflict, path, :both_created}, :noop}
+  end
+
+  defp plan_strategy(_real_path, path, _original, nil, _changeset_content) do
+    {{:conflict, path, :deleted_before_publish}, :noop}
   end
 
   # Real file unchanged since changeset was created: apply directly
@@ -468,6 +587,44 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  @spec mutation_generation(state(), FileMutation.identity()) :: non_neg_integer() | nil
+  defp mutation_generation(_state, {:project_view, _}), do: nil
+  defp mutation_generation(state, _identity), do: state.revision
+
+  @spec mutation_source(state(), String.t()) :: FileMutation.source()
+  defp mutation_source(state, path) do
+    case current_content(state, path) do
+      {:error, :deleted} -> {:error, :enoent}
+      source -> source
+    end
+  end
+
+  @spec remember_original(state(), String.t(), FileMutation.source()) :: state()
+  defp remember_original(state, path, {:ok, content}) do
+    %{state | originals: Map.put_new(state.originals, path, content)}
+  end
+
+  defp remember_original(state, path, {:error, _}) do
+    %{state | originals: Map.put_new(state.originals, path, nil)}
+  end
+
+  @spec install_mutation(state(), String.t(), binary() | :deleted) :: state()
+  defp install_mutation(state, path, :deleted) do
+    %{
+      state
+      | modifications: Map.delete(state.modifications, path),
+        deletions: MapSet.put(state.deletions, path)
+    }
+  end
+
+  defp install_mutation(state, path, content) do
+    %{
+      state
+      | modifications: Map.put(state.modifications, path, content),
+        deletions: MapSet.delete(state.deletions, path)
+    }
+  end
 
   @spec undo_path(String.t(), state()) :: {:reply, :ok | {:error, term()}, state()}
   defp undo_path(path, state) do

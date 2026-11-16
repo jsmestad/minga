@@ -75,6 +75,48 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, {:delete_file, relative_path})
   end
 
+  @doc "Validates a full-source revision and commits one complete file mutation atomically."
+  @spec conditional_mutate(
+          changeset(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation(),
+          Minga.Buffer.FileMutation.identity()
+        ) :: :ok | {:error, term()}
+  def conditional_mutate(cs, relative_path, expected, operation, identity)
+      when is_binary(relative_path) do
+    GenServer.call(
+      cs,
+      {:conditional_mutate, relative_path, expected, operation, identity},
+      :infinity
+    )
+  end
+
+  @doc "Retains the original disk bytes before a fork is selected for publication."
+  @spec capture_original(changeset(), String.t()) :: :ok | {:error, term()}
+  def capture_original(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:capture_original, relative_path})
+  end
+
+  @doc "Stages a sealed fork's raw draft against its retained disk baseline."
+  @spec stage_fork_content(changeset(), String.t(), binary()) :: :ok | {:error, term()}
+  def stage_fork_content(cs, relative_path, content)
+      when is_binary(relative_path) and is_binary(content) do
+    GenServer.call(cs, {:stage_fork_content, relative_path, content}, :infinity)
+  end
+
+  @doc "Publishes one retained deletion after checking its original disk baseline."
+  @spec publish_deletion(changeset(), String.t()) :: :ok | {:conflict, map()} | {:error, term()}
+  def publish_deletion(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:publish_deletion, relative_path}, :infinity)
+  end
+
+  @doc "Makes a fork tombstone visible to commands without publishing it to the project."
+  @spec materialize_command_deletion(changeset(), String.t()) :: :ok | {:error, term()}
+  def materialize_command_deletion(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:materialize_command_deletion, relative_path})
+  end
+
   @doc "Reads a file (changeset version if modified, otherwise from project)."
   @spec read_file(changeset(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(cs, relative_path) when is_binary(relative_path) do
@@ -151,7 +193,7 @@ defmodule MingaAgent.Changeset do
   """
   @spec merge(changeset()) :: :ok | {:conflict, map()} | {:error, term()}
   def merge(cs) do
-    GenServer.call(cs, :merge)
+    GenServer.call(cs, :merge, :infinity)
   end
 
   @doc "Discards one changed file from the changeset view."
@@ -221,7 +263,7 @@ defmodule MingaAgent.Changeset do
     end
   end
 
-  @doc false
+  @doc "Makes fork content visible to commands without changing the changeset's logical draft."
   @spec materialize_command_file(changeset(), String.t(), binary()) :: :ok | {:error, term()}
   def materialize_command_file(cs, relative_path, content)
       when is_binary(relative_path) and is_binary(content) do

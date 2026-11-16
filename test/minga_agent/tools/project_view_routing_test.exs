@@ -55,88 +55,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     %{root: root, working_dir: working_dir, tools: tools}
   end
 
-  test "file tools route through ProjectView and leave project root unchanged", %{
-    root: root,
-    working_dir: working_dir,
-    tools: tools
-  } do
-    assert {:ok, read_result} = call_tool(tools, "read_file", %{"path" => "lib/file.txt"})
-    assert read_result =~ "view text"
-
-    assert {:ok, _write_result} =
-             call_tool(tools, "write_file", %{"path" => "lib/new.txt", "content" => "new view"})
-
-    assert File.read!(Path.join(working_dir, "lib/new.txt")) == "new view"
-    refute File.exists?(Path.join(root, "lib/new.txt"))
-
-    assert {:ok, _edit_result} =
-             call_tool(tools, "edit_file", %{
-               "path" => "lib/file.txt",
-               "old_text" => "view",
-               "new_text" => "edited"
-             })
-
-    assert File.read!(Path.join(working_dir, "lib/file.txt")) == "edited text\n"
-    assert File.read!(Path.join(root, "lib/file.txt")) == "root text\n"
-
-    assert {:ok, _multi_result} =
-             call_tool(tools, "multi_edit_file", %{
-               "path" => "lib/file.txt",
-               "edits" => [%{"old_text" => "edited", "new_text" => "multi"}]
-             })
-
-    assert File.read!(Path.join(working_dir, "lib/file.txt")) == "multi text\n"
-
-    diff = """
-    @@ -1,1 +1,1 @@
-    -multi text
-    +diff text
-    """
-
-    assert {:ok, _diff_result} =
-             call_tool(tools, "apply_diff", %{"path" => "lib/file.txt", "diff" => diff})
-
-    assert File.read!(Path.join(working_dir, "lib/file.txt")) == "diff text\n"
-
-    assert {:ok, _delete_result} = call_tool(tools, "delete_file", %{"path" => "lib/new.txt"})
-    refute File.exists?(Path.join(working_dir, "lib/new.txt"))
-  end
-
-  test "multi_edit_file through ProjectView rejects empty old_text without writing", %{
-    root: root,
-    working_dir: working_dir,
-    tools: tools
-  } do
-    assert {:ok, result} =
-             call_tool(tools, "multi_edit_file", %{
-               "path" => "lib/file.txt",
-               "edits" => [%{"old_text" => "", "new_text" => "ignored"}]
-             })
-
-    assert result =~ "applied 0/1 edits"
-    assert result =~ "old_text is empty"
-    assert File.read!(Path.join(working_dir, "lib/file.txt")) == "view text\n"
-    assert File.read!(Path.join(root, "lib/file.txt")) == "root text\n"
-  end
-
-  test "multi_edit_file through ProjectView rejects ambiguous old_text without writing", %{
-    working_dir: working_dir,
-    tools: tools
-  } do
-    ambiguous_path = Path.join(working_dir, "lib/ambiguous.txt")
-    File.write!(ambiguous_path, "hello world hello world")
-
-    assert {:ok, result} =
-             call_tool(tools, "multi_edit_file", %{
-               "path" => "lib/ambiguous.txt",
-               "edits" => [%{"old_text" => "hello world", "new_text" => "goodbye"}]
-             })
-
-    assert result =~ "applied 0/1 edits"
-    assert result =~ "old_text found 2 times (ambiguous)"
-    assert File.read!(ambiguous_path) == "hello world hello world"
-  end
-
   test "discovery and shell tools use ProjectView working dir and env", %{
     tools: tools,
     working_dir: working_dir
@@ -243,21 +161,21 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     for {name, args, expected} <- [
           {"read_file", %{"path" => "lib/view_only.txt"}, :read_failed},
-          {"write_file", %{"path" => "lib/new.txt", "content" => "new"}, ":write_failed"},
+          {"write_file",
+           %{
+             "path" => "lib/new.txt",
+             "mode" => "create",
+             "content" => "new",
+             "expected_revision" => "absent"
+           }, ":write_failed"},
           {"edit_file",
-           %{"path" => "lib/edit_target.txt", "old_text" => "editable", "new_text" => "changed"},
-           ":edit_failed"},
-          {"delete_file", %{"path" => "lib/root_only.txt"}, ":delete_failed"},
-          {"multi_edit_file",
            %{
              "path" => "lib/edit_target.txt",
+             "expected_revision" => "revision",
              "edits" => [%{"old_text" => "editable", "new_text" => "changed"}]
-           }, ":read_failed"},
-          {"apply_diff",
-           %{
-             "path" => "lib/edit_target.txt",
-             "diff" => "@@ -1,1 +1,1 @@\n-editable root text\n+changed\n"
-           }, ":read_failed"},
+           }, ":edit_failed"},
+          {"delete_file", %{"path" => "lib/root_only.txt", "expected_revision" => "revision"},
+           ":delete_failed"},
           {"list_directory", %{"path" => "lib"}, ":list_failed"}
         ] do
       assert {:error, message} = call_tool(tools, name, args)
@@ -287,52 +205,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     refute File.exists?(Path.join(root, "lib/new.txt"))
   end
 
-  test "multi_edit_file through changeset applies exact edits and leaves real files unchanged",
-       %{tmp_dir: root} do
-    File.mkdir_p!(Path.join(root, "lib"))
-    target_path = Path.join(root, "lib/edit_target.txt")
-    File.write!(target_path, "one two one\n")
-
-    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = build_tools(project_root: root, changeset: changeset)
-
-    assert {:ok, result} =
-             call_tool(tools, "multi_edit_file", %{
-               "path" => "lib/edit_target.txt",
-               "edits" => [%{"old_text" => "one two", "new_text" => "ONE TWO"}]
-             })
-
-    assert result =~ "via changeset"
-    assert {:ok, changed} = Changeset.read_file(changeset, "lib/edit_target.txt")
-    assert changed == "ONE TWO one\n"
-    assert File.read!(target_path) == "one two one\n"
-  end
-
-  test "apply_diff through changeset applies unified diffs and leaves real files unchanged",
-       %{tmp_dir: root} do
-    File.mkdir_p!(Path.join(root, "lib"))
-    target_path = Path.join(root, "lib/diff_target.txt")
-    File.write!(target_path, "one\ntwo\n")
-
-    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = build_tools(project_root: root, changeset: changeset)
-
-    diff = """
-    @@ -1,2 +1,2 @@
-     one
-    -two
-    +TWO
-    """
-
-    assert {:ok, result} =
-             call_tool(tools, "apply_diff", %{"path" => "lib/diff_target.txt", "diff" => diff})
-
-    assert result =~ "via changeset"
-    assert {:ok, changed} = Changeset.read_file(changeset, "lib/diff_target.txt")
-    assert changed == "one\nTWO\n"
-    assert File.read!(target_path) == "one\ntwo\n"
-  end
-
   test "git_diff through changeset reports added modified and deleted overlay files",
        %{tmp_dir: root} do
     File.mkdir_p!(Path.join(root, "lib"))
@@ -347,26 +219,36 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/added.txt",
+               "mode" => "create",
+               "expected_revision" => "absent",
                "content" => "new line\n"
              })
 
-    assert write_result =~ "via changeset"
+    assert write_result =~ "atomic file mutation"
 
     assert {:ok, edit_result} =
              call_tool(tools, "edit_file", %{
                "path" => "lib/modified.txt",
-               "old_text" => "old",
-               "new_text" => "new"
+               "expected_revision" => full_revision(tools, "lib/modified.txt"),
+               "edits" => [%{"old_text" => "old", "new_text" => "new"}]
              })
 
-    assert edit_result =~ "via changeset"
-    assert {:ok, delete_result} = call_tool(tools, "delete_file", %{"path" => "lib/deleted.txt"})
-    assert delete_result =~ "via changeset"
+    assert edit_result =~ "atomic file mutation"
+
+    assert {:ok, delete_result} =
+             call_tool(tools, "delete_file", %{
+               "path" => "lib/deleted.txt",
+               "expected_revision" => full_revision(tools, "lib/deleted.txt")
+             })
+
+    assert delete_result =~ "atomic file mutation"
 
     for path <- [".env.local", ".npmrc", "node_modules/pkg/secret.txt", "ignored_dir/secret.txt"] do
       assert {:ok, _result} =
                call_tool(tools, "write_file", %{
                  "path" => path,
+                 "mode" => "create",
+                 "expected_revision" => "absent",
                  "content" => "hidden overlay token\n"
                })
     end
@@ -403,18 +285,31 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, _} =
              call_tool(tools, "write_file", %{
                "path" => "lib/file.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/file.txt"),
                "content" => "view text\n"
              })
 
     assert {:ok, _} =
-             call_tool(tools, "write_file", %{"path" => "lib/new.txt", "content" => "view new\n"})
+             call_tool(tools, "write_file", %{
+               "path" => "lib/new.txt",
+               "mode" => "create",
+               "content" => "view new\n",
+               "expected_revision" => "absent"
+             })
 
-    assert {:ok, _} = call_tool(tools, "delete_file", %{"path" => "lib/delete.txt"})
+    assert {:ok, _} =
+             call_tool(tools, "delete_file", %{
+               "path" => "lib/delete.txt",
+               "expected_revision" => full_revision(tools, "lib/delete.txt")
+             })
 
     for path <- [".env.local", ".npmrc", "node_modules/pkg/secret.txt", "ignored_dir/secret.txt"] do
       assert {:ok, _result} =
                call_tool(tools, "write_file", %{
                  "path" => path,
+                 "mode" => "create",
+                 "expected_revision" => "absent",
                  "content" => "hidden project view token\n"
                })
     end
@@ -458,10 +353,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
                "path" => "overlay_added.txt",
+               "mode" => "create",
+               "expected_revision" => "absent",
                "content" => "shared_secret_token\n"
              })
 
-    assert write_result =~ "via changeset"
+    assert write_result =~ "atomic file mutation"
     refute File.exists?(Path.join(root, "overlay_added.txt"))
 
     assert {:ok, result} = call_tool(tools, "list_directory", %{"path" => "."})
@@ -541,26 +438,32 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/fork_only.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/fork_only.txt"),
                "content" => "fork only draft\n"
              })
 
-    assert write_result =~ "via fork"
+    assert write_result =~ "atomic file mutation"
 
     assert {:ok, secret_result} =
              call_tool(tools, "write_file", %{
                "path" => ".env.local",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, ".env.local"),
                "content" => "hidden fork token\n"
              })
 
-    assert secret_result =~ "via fork"
+    assert secret_result =~ "atomic file mutation"
 
     assert {:ok, ignored_result} =
              call_tool(tools, "write_file", %{
                "path" => "node_modules/pkg/fork_secret.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "node_modules/pkg/fork_secret.txt"),
                "content" => "hidden nested fork token\n"
              })
 
-    assert ignored_result =~ "via fork"
+    assert ignored_result =~ "atomic file mutation"
 
     assert {:ok, diff_result} = call_tool(tools, "git_diff", %{})
     assert diff_result =~ "a/lib/fork_only.txt"
@@ -606,18 +509,24 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, _result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/paths.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/paths.txt"),
                "content" => "++ new/body kept\nplain\n"
              })
 
     assert {:ok, _result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/a/old/file.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/a/old/file.txt"),
                "content" => "new path\n"
              })
 
     assert {:ok, _result} =
              call_tool(tools, "write_file", %{
                "path" => "old/file with space.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "old/file with space.txt"),
                "content" => "new spaced path\n"
              })
 
@@ -672,7 +581,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, _result} =
-             call_tool(tools, "write_file", %{"path" => "big.txt", "content" => big_content})
+             call_tool(tools, "write_file", %{
+               "path" => "big.txt",
+               "mode" => "create",
+               "content" => big_content,
+               "expected_revision" => "absent"
+             })
 
     context = ToolRouter.context(nil, nil, changeset)
     assert {:error, message} = GitTools.diff(root, [max_output_bytes: 1_024], context)
@@ -692,7 +606,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, _result} =
-             call_tool(tools, "write_file", %{"path" => "big.txt", "content" => oversized})
+             call_tool(tools, "write_file", %{
+               "path" => "big.txt",
+               "mode" => "create",
+               "content" => oversized,
+               "expected_revision" => "absent"
+             })
 
     context = ToolRouter.context(nil, nil, changeset)
     assert {:error, message} = GitTools.diff(root, [max_input_bytes: 8], context)
@@ -722,10 +641,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/large_fork.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/large_fork.txt"),
                "content" => oversized
              })
 
-    assert write_result =~ "via fork"
+    assert write_result =~ "atomic file mutation"
     context = ToolRouter.context(nil, store, changeset)
     overlay_file = Path.join(Changeset.overlay_path(changeset), "lib/large_fork.txt")
 
@@ -753,10 +674,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/project_large_fork.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/project_large_fork.txt"),
                "content" => oversized
              })
 
-    assert write_result =~ "via ProjectView"
+    assert write_result =~ "atomic file mutation"
     context = ToolRouter.context(view, nil, nil)
 
     overlay_file =
@@ -788,10 +711,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
                "path" => "lib/forked.txt",
+               "mode" => "replace",
+               "expected_revision" => full_revision(tools, "lib/forked.txt"),
                "content" => "fork draft token\n"
              })
 
-    assert write_result =~ "via fork"
+    assert write_result =~ "atomic file mutation"
     assert File.read!(target_path) == "original text\n"
 
     assert {:ok, grep_result} =
@@ -831,7 +756,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     refute message =~ "REAL REPO DIFF"
   end
 
-  test "dead changeset multi_edit_file returns an unavailable error without mutating the project",
+  test "dead changeset edit_file returns an unavailable error without mutating the project",
        %{tmp_dir: root} do
     File.mkdir_p!(Path.join(root, "lib"))
     target_path = Path.join(root, "lib/edit_target.txt")
@@ -839,13 +764,15 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
     tools = build_tools(project_root: root, changeset: changeset)
+    revision = full_revision(tools, "lib/edit_target.txt")
     ref = Process.monitor(changeset)
     Process.exit(changeset, :kill)
     assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
 
     assert {:error, message} =
-             call_tool(tools, "multi_edit_file", %{
+             call_tool(tools, "edit_file", %{
                "path" => "lib/edit_target.txt",
+               "expected_revision" => revision,
                "edits" => [%{"old_text" => "one", "new_text" => "ONE"}]
              })
 
@@ -904,6 +831,13 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
       %{name: spec.name, callback: callback}
     end)
+  end
+
+  defp full_revision(tools, path) do
+    tool = Enum.find(tools, &(&1.name == "read_file"))
+    assert {:ok, %Output{} = output} = tool.callback.(%{"path" => path})
+    assert MingaAgent.Tool.Output.Revision.full_source?(output.revision)
+    MingaAgent.Tool.Output.Revision.token(output.revision)
   end
 
   defp call_tool(tools, name, args) do
