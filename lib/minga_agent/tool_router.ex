@@ -5,19 +5,7 @@ defmodule MingaAgent.ToolRouter do
   Routes file tool operations through ProjectView, buffer forks, and changesets.
 
   Tools call this module instead of directly doing filesystem I/O.
-  The routing decision tree for each file operation:
-
-  1. Is there a ProjectView?
-     YES: route through ProjectView so every tool sees workspace-local state.
-  2. Is there an open buffer for this path AND a fork store is active?
-     YES: route through Buffer.Fork (in-memory, instant, undo integration).
-  3. Is there an active changeset?
-     YES: route through Changeset overlay (filesystem-level isolation).
-  4. Neither: fall through to direct I/O (returns `:passthrough` for writes).
-
-  Buffer.Fork handles files the user has open in a buffer. Changeset
-  handles files that aren't open, or external tools that need a coherent
-  filesystem view. A session can use both simultaneously.
+  Reads select the session's ProjectView, existing fork, or changeset before a direct buffer or disk source. Mutations require an owned editable view and never return a filesystem passthrough. The selected buffer, fork, or changeset compares the full-source revision and commits the complete mutation in its serialized callback.
 
   This module is stateless. The fork store pid and changeset pid come
   from the caller (stored in session state, captured in tool closures).
@@ -71,13 +59,22 @@ defmodule MingaAgent.ToolRouter do
     end)
   end
 
-  def read_file(%Context{fork_store: fs} = ctx, path) when fs != nil do
-    with :ok <- fork_store_available(fs) do
-      case BufferForkStore.get(fs, path) do
-        nil -> read_file_changeset_or_passthrough(ctx, path)
-        fork_pid -> {:ok, Minga.Buffer.Fork.content(fork_pid)}
-      end
+  def read_file(%Context{fork_store: store} = context, path) when is_pid(store) do
+    case claim_owner(context, path) do
+      {:ok, {:fork, fork}} ->
+        Minga.Buffer.Fork.read_file(fork)
+
+      {:ok, {:changeset, changeset}} ->
+        Changeset.read_file(changeset, normalize_path(changeset, path))
+
+      :not_found ->
+        read_file_changeset_or_passthrough(context, path)
+
+      {:error, _} = error ->
+        error
     end
+  catch
+    :exit, reason -> {:error, {:source_unavailable, reason}}
   end
 
   def read_file(ctx, path), do: read_file_changeset_or_passthrough(ctx, path)
@@ -96,86 +93,97 @@ defmodule MingaAgent.ToolRouter do
     SourceCapture.capture(context, path, artifact_store, capture_key, opts)
   end
 
-  @doc """
-  Writes a file, routing through fork or changeset if active.
+  @doc "Pins a session path to one writer, preserving that claim if buffers open or owners die."
+  @spec claim_owner(context(), String.t()) ::
+          {:ok, BufferForkStore.owner()} | :not_found | {:error, term()}
+  def claim_owner(%Context{fork_store: store, changeset: changeset}, path) when is_pid(store) do
+    buffer =
+      case Minga.Buffer.pid_for_path(path) do
+        {:ok, pid} -> pid
+        :not_found -> nil
+      end
 
-  If a buffer is open for this path and a fork store exists, creates
-  a fork (lazily) and writes to it. Otherwise tries changeset.
-  Returns `:passthrough` if neither is active.
-  """
-  @spec write_file(context(), String.t(), binary()) :: :ok | :passthrough | {:error, term()}
-  def write_file(%Context{project_view: %ProjectView{} = view}, path, content) do
+    BufferForkStore.claim_owner(store, path, buffer, changeset)
+  catch
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
+  end
+
+  @doc "Commits one complete conditional file mutation at the selected content owner."
+  @spec conditional_mutate(
+          context(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  def conditional_mutate(%Context{project_view: %ProjectView{} = view}, path, expected, operation) do
     project_view_result(fn ->
-      ProjectView.write_file(view, project_view_relative_path(view, path), content)
+      ProjectView.conditional_mutate(
+        view,
+        project_view_relative_path(view, path),
+        expected,
+        operation
+      )
     end)
   end
 
-  def write_file(%Context{fork_store: fs} = ctx, path, content) when fs != nil do
-    case fork_store_available(fs) do
-      :ok ->
-        case try_fork_write(fs, path, content) do
-          {:ok, :forked} -> :ok
-          {:error, _} = error -> error
-          :no_buffer -> write_file_changeset(ctx, path, content)
-        end
+  def conditional_mutate(%Context{fork_store: store} = context, path, expected, operation)
+      when is_pid(store) do
+    case claim_owner(context, path) do
+      {:ok, {:fork, fork}} ->
+        Minga.Buffer.Fork.conditional_mutate(fork, expected, operation, {:fork, path})
+
+      {:ok, {:changeset, changeset}} ->
+        conditional_mutate_changeset(changeset, path, expected, operation)
+
+      :not_found ->
+        conditional_mutate_without_fork(context, path, expected, operation)
 
       {:error, _} = error ->
         error
     end
+  catch
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
   end
 
-  def write_file(ctx, path, content), do: write_file_changeset(ctx, path, content)
+  def conditional_mutate(%Context{} = context, path, expected, operation),
+    do: conditional_mutate_without_fork(context, path, expected, operation)
 
-  @doc """
-  Edits a file by find-and-replace, routing through fork or changeset.
-  """
-  @spec edit_file(context(), String.t(), String.t(), String.t()) ::
-          :ok | :passthrough | {:error, term()}
-  def edit_file(%Context{project_view: %ProjectView{} = view}, path, old_text, new_text) do
-    project_view_result(fn ->
-      ProjectView.edit_file(view, project_view_relative_path(view, path), old_text, new_text)
-    end)
+  @spec conditional_mutate_without_fork(
+          context(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  defp conditional_mutate_without_fork(%Context{changeset: changeset}, path, expected, operation)
+       when is_pid(changeset) do
+    conditional_mutate_changeset(changeset, path, expected, operation)
   end
 
-  def edit_file(%Context{fork_store: fs} = ctx, path, old_text, new_text) when fs != nil do
-    case fork_store_available(fs) do
-      :ok ->
-        case try_fork_edit(fs, path, old_text, new_text) do
-          {:ok, :forked} -> :ok
-          {:error, _} = err -> err
-          :no_buffer -> edit_file_changeset(ctx, path, old_text, new_text)
-        end
+  defp conditional_mutate_without_fork(%Context{}, path, expected, operation) do
+    case Minga.Buffer.pid_for_path(path) do
+      {:ok, buffer} ->
+        Minga.Buffer.conditional_mutate(buffer, expected, operation, {:buffer, path})
 
-      {:error, _} = error ->
-        error
+      :not_found ->
+        {:error, :editable_view_unavailable}
     end
+  catch
+    :exit, reason -> {:error, {:buffer_unavailable, reason}}
   end
 
-  def edit_file(ctx, path, old_text, new_text) do
-    edit_file_changeset(ctx, path, old_text, new_text)
-  end
-
-  @doc """
-  Deletes a file, routing through changeset if active.
-
-  Buffer forks don't support deletion (you can't delete an open buffer
-  through a fork). Falls through to changeset or passthrough.
-  """
-  @spec delete_file(context(), String.t()) :: :ok | :passthrough | {:error, term()}
-  def delete_file(%Context{project_view: %ProjectView{} = view}, path) do
-    project_view_result(fn ->
-      ProjectView.delete_file(view, project_view_relative_path(view, path))
-    end)
-  end
-
-  def delete_file(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
-    with :ok <- changeset_available(cs) do
-      relative = normalize_path(cs, path)
-      Changeset.delete_file(cs, relative)
+  @spec conditional_mutate_changeset(
+          pid(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  defp conditional_mutate_changeset(changeset, path, expected, operation) do
+    with {:ok, relative} <- normalize_changeset_path(changeset, path, false) do
+      Changeset.conditional_mutate(changeset, relative, expected, operation, {:changeset, path})
     end
+  catch
+    :exit, reason -> {:error, {:changeset_unavailable, reason}}
   end
-
-  def delete_file(_ctx, _path), do: :passthrough
 
   @doc """
   Lists a directory through ProjectView when available.
@@ -390,46 +398,6 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  # ── Private: fork operations ────────────────────────────────────────────────
-
-  @spec try_fork_write(pid(), String.t(), binary()) ::
-          {:ok, :forked} | {:error, term()} | :no_buffer
-  defp try_fork_write(fork_store, path, content) do
-    case Minga.Buffer.pid_for_path(path) do
-      {:ok, buf_pid} ->
-        {:ok, fork_pid} = BufferForkStore.get_or_create(fork_store, path, buf_pid)
-        # replace_content is a handle_call on the fork GenServer
-        Minga.Buffer.Fork.replace_content(fork_pid, content)
-        {:ok, :forked}
-
-      :not_found ->
-        :no_buffer
-    end
-  catch
-    :exit, reason -> {:error, {:fork_unavailable, reason}}
-  end
-
-  @spec try_fork_edit(pid(), String.t(), String.t(), String.t()) ::
-          {:ok, :forked} | {:error, term()} | :no_buffer
-  defp try_fork_edit(fork_store, path, old_text, new_text) do
-    case Minga.Buffer.pid_for_path(path) do
-      {:ok, buf_pid} ->
-        {:ok, fork_pid} = BufferForkStore.get_or_create(fork_store, path, buf_pid)
-
-        case Minga.Buffer.Fork.find_and_replace(fork_pid, old_text, new_text) do
-          {:ok, _msg} -> {:ok, :forked}
-          {:error, _} = err -> err
-        end
-
-      :not_found ->
-        :no_buffer
-    end
-  catch
-    :exit, reason -> {:error, {:fork_unavailable, reason}}
-  end
-
-  # ── Private: changeset fallback ─────────────────────────────────────────────
-
   @spec read_file_changeset_or_passthrough(context(), String.t()) ::
           {:ok, binary()} | {:error, term()} | :passthrough
   defp read_file_changeset_or_passthrough(%Context{changeset: cs}, path)
@@ -449,30 +417,6 @@ defmodule MingaAgent.ToolRouter do
   rescue
     _ -> File.read(path)
   end
-
-  @spec write_file_changeset(context(), String.t(), binary()) ::
-          :ok | :passthrough | {:error, term()}
-  defp write_file_changeset(%Context{changeset: cs}, path, content)
-       when cs != nil and is_pid(cs) do
-    with :ok <- changeset_available(cs) do
-      relative = normalize_path(cs, path)
-      Changeset.write_file(cs, relative, content)
-    end
-  end
-
-  defp write_file_changeset(_ctx, _path, _content), do: :passthrough
-
-  @spec edit_file_changeset(context(), String.t(), String.t(), String.t()) ::
-          :ok | :passthrough | {:error, term()}
-  defp edit_file_changeset(%Context{changeset: cs}, path, old_text, new_text)
-       when cs != nil and is_pid(cs) do
-    with :ok <- changeset_available(cs) do
-      relative = normalize_path(cs, path)
-      Changeset.edit_file(cs, relative, old_text, new_text)
-    end
-  end
-
-  defp edit_file_changeset(_ctx, _path, _old_text, _new_text), do: :passthrough
 
   @spec fork_store_available(pid()) :: :ok | {:error, {:fork_unavailable, term()}}
   defp fork_store_available(fork_store) do

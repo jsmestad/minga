@@ -12,10 +12,8 @@ defmodule MingaAgent.Tools do
   | Tool              | Description                                          |
   |-------------------|------------------------------------------------------|
   | `read_file`       | Read file contents (supports offset/limit for slices)|
-  | `write_file`      | Write content to a file (creates or overwrites)      |
-  | `edit_file`       | Replace exact text in a file                         |
-  | `multi_edit_file` | Apply multiple edits to one file in a single call    |
-  | `apply_diff`      | Apply a unified diff to one file                     |
+  | `write_file`      | Explicit revision-checked creation or replacement   |
+  | `edit_file`       | Atomic ordered exact replacements in one file       |
   | `delete_file`     | Delete a file                                        |
   | `list_directory`  | List files and directories at a path                 |
   | `find`            | Find files by name/glob pattern                      |
@@ -40,18 +38,13 @@ defmodule MingaAgent.Tools do
   | `fetch_output`    | Fetch an exact retained byte/item range              |
   """
 
-  alias Minga.Buffer.Document
-  alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
   alias MingaAgent.Tool.Context
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
-  alias MingaAgent.Tools.DeleteFile
   alias MingaAgent.Tools.DirectoryListing
-  alias MingaAgent.Tools.ApplyDiff
   alias MingaAgent.Tools.DiagnosticFeedback
-  alias MingaAgent.Tools.EditFile
   alias MingaAgent.Tools.FetchOutput
   alias MingaAgent.Tools.FetchUrl
   alias MingaAgent.Tools.Git, as: GitTools
@@ -64,12 +57,10 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.LspReferences
   alias MingaAgent.Tools.LspRename
   alias MingaAgent.Tools.LspWorkspaceSymbols
-  alias MingaAgent.Tools.MultiEditFile
   alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.ReadFile
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Subagent
-  alias MingaAgent.Tools.WriteFile
   alias Minga.Config
 
   @typedoc "Options passed to `all/1`."
@@ -86,7 +77,7 @@ defmodule MingaAgent.Tools do
           image_tool_result_delivery: Context.image_tool_result_delivery()
         ]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
+  @default_destructive_tools ~w(write_file edit_file delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
   @read_only_tools ~w(read_file memory_read fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
   @max_symlink_depth 40
@@ -139,8 +130,6 @@ defmodule MingaAgent.Tools do
       fetch_output(),
       write_file(),
       edit_file(),
-      multi_edit_file(),
-      apply_diff(),
       delete_file(),
       list_directory(),
       find(),
@@ -335,22 +324,17 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "write_file",
       description: """
-      Write content to a file. Creates the file if it doesn't exist, overwrites
-      if it does. Automatically creates parent directories.
+      Explicitly create or replace one file atomically. For mode=create, expected_revision must be \"absent\" and the target must not exist. For mode=replace, pass the exact full-source revision from read_file. A stale revision changes nothing. This is one-file atomicity, not a cross-file transaction. Changes remain in the session's owned view for existing review and undo.
       """,
       parameter_schema: %{
         "type" => "object",
         "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path to the file, relative to the project root"
-          },
-          "content" => %{
-            "type" => "string",
-            "description" => "The full content to write to the file"
-          }
+          "path" => %{"type" => "string", "description" => "Path relative to the project root"},
+          "mode" => %{"type" => "string", "enum" => ["create", "replace"]},
+          "content" => %{"type" => "string", "description" => "Complete new file content"},
+          "expected_revision" => revision_schema()
         },
-        "required" => ["path", "content"]
+        "required" => ["path", "mode", "content", "expected_revision"]
       },
       source: :builtin,
       category: :filesystem,
@@ -358,31 +342,9 @@ defmodule MingaAgent.Tools do
       capabilities: [:mutate_project],
       context_requirements: [:tool_context],
       build: fn context ->
-        root = context.project_root
-        router_ctx = context.router_context
-
         fn args ->
-          path = resolve_and_validate_path!(root, args["path"])
-
-          case ToolRouter.write_file(router_ctx, path, args["content"]) do
-            :passthrough ->
-              case WriteFile.execute(path, args["content"]) do
-                {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-                error -> error
-              end
-
-            :ok ->
-              {:ok,
-               maybe_append_diagnostics(
-                 path,
-                 append_workspace_context(
-                   router_ctx,
-                   "wrote #{byte_size(args["content"])} bytes to #{path} (via #{route_name(router_ctx)})"
-                 )
-               )}
-
-            {:error, reason} ->
-              {:error, inspect(reason)}
+          with {:ok, operation} <- write_operation(args) do
+            mutate_file(context, args, operation)
           end
         end
       end
@@ -394,107 +356,27 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "edit_file",
       description: """
-      Replace exact text in a file. The old_text must match exactly (including
-      whitespace and indentation). Use this for precise, surgical edits.
-      Read the file first to get the exact text to replace.
+      Apply an ordered batch of exact replacements to one file as one undoable change or none. Pass expected_revision from a full read_file result. Each nonempty old_text must occur exactly once in the sequential prepared content, including overlapping occurrences. Later edits see earlier changes but cannot touch earlier replacement bytes. Any stale, missing, ambiguous, overlapping, or invalid edit rejects the entire batch and reports the failing edit. No fuzzy matching. Atomicity is per file only; cross-file work reports separate outcomes.
       """,
       parameter_schema: %{
         "type" => "object",
         "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path to the file, relative to the project root"
-          },
-          "old_text" => %{
-            "type" => "string",
-            "description" => "The exact text to find and replace"
-          },
-          "new_text" => %{
-            "type" => "string",
-            "description" => "The replacement text"
-          }
-        },
-        "required" => ["path", "old_text", "new_text"]
-      },
-      source: :builtin,
-      category: :filesystem,
-      approval_level: :ask,
-      capabilities: [:mutate_project],
-      context_requirements: [:tool_context],
-      build: fn context ->
-        root = context.project_root
-        router_ctx = context.router_context
-
-        fn args ->
-          path = resolve_and_validate_path!(root, args["path"])
-
-          case ToolRouter.edit_file(
-                 router_ctx,
-                 path,
-                 args["old_text"],
-                 args["new_text"]
-               ) do
-            :passthrough ->
-              case EditFile.execute(path, args["old_text"], args["new_text"]) do
-                {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-                error -> error
-              end
-
-            :ok ->
-              {:ok,
-               maybe_append_diagnostics(
-                 path,
-                 append_workspace_context(
-                   router_ctx,
-                   "edited #{path} (via #{route_name(router_ctx)})"
-                 )
-               )}
-
-            {:error, reason} ->
-              {:error, inspect(reason)}
-          end
-        end
-      end
-    )
-  end
-
-  @spec multi_edit_file() :: Spec.t()
-  defp multi_edit_file do
-    Spec.new!(
-      name: "multi_edit_file",
-      description: """
-      Apply multiple edits to a single file in one call. Each edit is a
-      find-and-replace pair. More efficient than calling edit_file multiple
-      times on the same file. Edits are applied in order. Failed edits
-      (text not found, ambiguous) are reported but don't block other edits.
-      """,
-      parameter_schema: %{
-        "type" => "object",
-        "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path to the file, relative to the project root"
-          },
+          "path" => %{"type" => "string", "description" => "Path relative to the project root"},
+          "expected_revision" => revision_schema(),
           "edits" => %{
             "type" => "array",
-            "description" => "List of edits to apply in order",
+            "minItems" => 1,
             "items" => %{
               "type" => "object",
               "properties" => %{
-                "old_text" => %{
-                  "type" => "string",
-                  "description" => "The exact text to find"
-                },
-                "new_text" => %{
-                  "type" => "string",
-                  "description" => "The replacement text"
-                }
+                "old_text" => %{"type" => "string", "minLength" => 1},
+                "new_text" => %{"type" => "string"}
               },
               "required" => ["old_text", "new_text"]
             }
           }
         },
-        "required" => ["path", "edits"]
+        "required" => ["path", "expected_revision", "edits"]
       },
       source: :builtin,
       category: :filesystem,
@@ -502,71 +384,11 @@ defmodule MingaAgent.Tools do
       capabilities: [:mutate_project],
       context_requirements: [:tool_context],
       build: fn context ->
-        root = context.project_root
-        router_ctx = context.router_context
-
         fn args ->
-          path = resolve_and_validate_path!(root, args["path"])
-          edits = args["edits"] || []
+          edits =
+            Enum.map(args["edits"] || [], fn edit -> {edit["old_text"], edit["new_text"]} end)
 
-          if ToolRouter.routing_configured?(router_ctx) do
-            apply_multi_edit_via_router(router_ctx, path, edits)
-          else
-            case MultiEditFile.execute(path, edits) do
-              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-              error -> error
-            end
-          end
-        end
-      end
-    )
-  end
-
-  @spec apply_diff() :: Spec.t()
-  defp apply_diff do
-    Spec.new!(
-      name: "apply_diff",
-      description: """
-      Apply a unified diff to a single file. The diff must use standard
-      unified diff hunks (`@@ -start,count +start,count @@`) with context
-      lines. Context is validated against the current file content, with a
-      small fuzz window for hunks whose line numbers drifted by a few lines.
-      """,
-      parameter_schema: %{
-        "type" => "object",
-        "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path to the file, relative to the project root"
-          },
-          "diff" => %{
-            "type" => "string",
-            "description" => "Unified diff content to apply to the file"
-          }
-        },
-        "required" => ["path", "diff"]
-      },
-      source: :builtin,
-      category: :filesystem,
-      approval_level: :ask,
-      capabilities: [:mutate_project],
-      context_requirements: [:tool_context],
-      build: fn context ->
-        root = context.project_root
-        router_ctx = context.router_context
-
-        fn args ->
-          path = resolve_and_validate_path!(root, args["path"])
-          diff = args["diff"] || ""
-
-          if ToolRouter.routing_configured?(router_ctx) do
-            apply_diff_via_router(router_ctx, path, diff)
-          else
-            case ApplyDiff.execute(path, diff) do
-              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-              error -> error
-            end
-          end
+          mutate_file(context, args, {:edit, edits})
         end
       end
     )
@@ -576,48 +398,76 @@ defmodule MingaAgent.Tools do
   defp delete_file do
     Spec.new!(
       name: "delete_file",
-      description: """
-      Delete a file from the project. Destructive: requires approval.
-      """,
+      description:
+        "Delete one file only if expected_revision matches its full read_file revision. Destructive: requires ordinary approval. Stale revisions leave content unchanged. No cross-file transaction.",
       parameter_schema: %{
         "type" => "object",
         "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path to the file, relative to the project root"
-          }
+          "path" => %{"type" => "string", "description" => "Path relative to the project root"},
+          "expected_revision" => revision_schema()
         },
-        "required" => ["path"]
+        "required" => ["path", "expected_revision"]
       },
       source: :builtin,
       category: :filesystem,
       approval_level: :ask,
       capabilities: [:mutate_project],
       context_requirements: [:tool_context],
-      build: fn context ->
-        root = context.project_root
-        router_ctx = context.router_context
-
-        fn args ->
-          path = resolve_and_validate_path!(root, args["path"])
-
-          case ToolRouter.delete_file(router_ctx, path) do
-            :passthrough ->
-              DeleteFile.execute(path)
-
-            :ok ->
-              {:ok,
-               append_workspace_context(
-                 router_ctx,
-                 "deleted #{path} (via #{route_name(router_ctx)})"
-               )}
-
-            {:error, reason} ->
-              {:error, inspect(reason)}
-          end
-        end
-      end
+      build: fn context -> fn args -> mutate_file(context, args, :delete) end end
     )
+  end
+
+  @spec revision_schema() :: map()
+  defp revision_schema do
+    %{
+      "type" => "string",
+      "description" =>
+        "Exact revision token from a complete full-source read_file result; use \"absent\" only for creation"
+    }
+  end
+
+  @spec write_operation(map()) ::
+          {:ok, Minga.Buffer.FileMutation.operation()} | {:error, String.t()}
+  defp write_operation(%{"mode" => "create", "content" => content}), do: {:ok, {:create, content}}
+
+  defp write_operation(%{"mode" => "replace", "content" => content}),
+    do: {:ok, {:replace, content}}
+
+  defp write_operation(_args),
+    do:
+      {:error, "stale revision: explicit create/replace mode and expected_revision are required"}
+
+  @spec mutate_file(Context.t(), map(), Minga.Buffer.FileMutation.operation()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp mutate_file(context, args, operation) do
+    path = resolve_and_validate_path!(context.project_root, args["path"])
+
+    expected =
+      if args["expected_revision"] == "absent", do: :absent, else: args["expected_revision"]
+
+    case ToolRouter.conditional_mutate(context.router_context, path, expected, operation) do
+      :ok ->
+        {:ok,
+         maybe_append_diagnostics(
+           path,
+           append_workspace_context(
+             context.router_context,
+             "committed one atomic file mutation to #{path}"
+           )
+         )}
+
+      {:error, :stale_revision} ->
+        {:error, "stale revision for #{path}; read the file again"}
+
+      {:error, :revision_required} ->
+        {:error, "stale revision: expected_revision is required for #{path}"}
+
+      {:error, {:edit_failed, index, reason}} ->
+        {:error, "edit #{index} failed for #{path}: #{inspect(reason)}; no edits committed"}
+
+      {:error, reason} ->
+        {:error, "file mutation rejected for #{path}: #{inspect(reason)}"}
+    end
   end
 
   @spec list_directory() :: Spec.t()
@@ -1620,16 +1470,6 @@ defmodule MingaAgent.Tools do
     end
   end
 
-  @spec route_name(ToolRouter.context()) :: String.t()
-  defp route_name(router_ctx) do
-    route_name(ToolRouter.project_view?(router_ctx), router_ctx.fork_store)
-  end
-
-  @spec route_name(boolean(), pid() | nil) :: String.t()
-  defp route_name(true, _fork_store), do: "ProjectView"
-  defp route_name(false, fork_store) when fork_store != nil, do: "fork"
-  defp route_name(false, nil), do: "changeset"
-
   @spec format_project_view_entries(String.t(), [ProjectView.Backend.directory_entry()]) ::
           String.t()
   defp format_project_view_entries(path, entries) do
@@ -1846,153 +1686,5 @@ defmodule MingaAgent.Tools do
     end
 
     :ok
-  end
-
-  # Applies multiple edits to a file through the tool router by reading,
-  # applying each edit sequentially, then writing the result back.
-  @spec apply_diff_via_router(MingaAgent.ToolRouter.context(), String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp apply_diff_via_router(router_ctx, path, diff) do
-    case ToolRouter.read_file(router_ctx, path) do
-      {:ok, content} ->
-        commit_apply_diff(router_ctx, path, ApplyDiff.apply_to_content(content, diff))
-
-      {:error, reason} ->
-        {:error, "failed to read #{path}: #{inspect(reason)}"}
-    end
-  end
-
-  @spec commit_apply_diff(
-          ToolRouter.context(),
-          String.t(),
-          {:ok, ApplyDiff.apply_result()} | {:error, String.t()}
-        ) :: {:ok, String.t()} | {:error, String.t()}
-  defp commit_apply_diff(router_ctx, path, {:ok, %{content: final_content, hunks: hunk_count}}) do
-    case ToolRouter.write_file(router_ctx, path, final_content) do
-      :ok ->
-        msg =
-          append_workspace_context(
-            router_ctx,
-            "applied #{hunk_count} diff hunk(s) to #{path} (via #{route_name(router_ctx)})"
-          )
-
-        {:ok, maybe_append_diagnostics(path, msg)}
-
-      :passthrough ->
-        case WriteFile.execute(path, final_content) do
-          {:ok, _msg} ->
-            {:ok, maybe_append_diagnostics(path, "applied #{hunk_count} diff hunk(s) to #{path}")}
-
-          {:error, _message} = error ->
-            error
-        end
-
-      {:error, reason} ->
-        {:error, "failed to write #{path}: #{inspect(reason)}"}
-    end
-  end
-
-  defp commit_apply_diff(_router_ctx, _path, {:error, _message} = error), do: error
-
-  @spec apply_multi_edit_via_router(MingaAgent.ToolRouter.context(), String.t(), [map()]) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp apply_multi_edit_via_router(router_ctx, path, edits) do
-    case ToolRouter.read_file(router_ctx, path) do
-      {:ok, content} ->
-        {final_content, results} = reduce_edits(content, edits)
-        commit_multi_edits(router_ctx, path, edits, final_content, results)
-
-      {:error, reason} ->
-        {:error, "failed to read #{path}: #{inspect(reason)}"}
-    end
-  end
-
-  @spec reduce_edits(String.t(), [map()]) :: {String.t(), [{:ok | :error, String.t()}]}
-  defp reduce_edits(content, edits) do
-    edit_pairs =
-      Enum.map(edits, fn edit ->
-        {edit["old_text"] || "", edit["new_text"] || ""}
-      end)
-
-    {final_doc, results, _any_applied?} =
-      Replace.apply_batch(Document.new(content), edit_pairs, nil)
-
-    {Document.content(final_doc), results}
-  end
-
-  @spec commit_multi_edits(
-          ToolRouter.context(),
-          String.t(),
-          [map()],
-          String.t(),
-          [{:ok | :error, String.t()}]
-        ) :: {:ok, String.t()} | {:error, String.t()}
-  defp commit_multi_edits(router_ctx, path, edits, final_content, results) do
-    ok_count = Enum.count(results, &match?({:ok, _}, &1))
-
-    case ok_count do
-      0 ->
-        msg =
-          append_workspace_context(
-            router_ctx,
-            format_multi_edit_result(router_ctx, path, results, ok_count)
-          )
-
-        {:ok, maybe_append_diagnostics(path, msg)}
-
-      _ ->
-        commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count)
-    end
-  end
-
-  @spec commit_multi_edit_write(
-          ToolRouter.context(),
-          String.t(),
-          [map()],
-          String.t(),
-          [{:ok | :error, String.t()}],
-          non_neg_integer()
-        ) :: {:ok, String.t()} | {:error, String.t()}
-  defp commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count) do
-    case ToolRouter.write_file(router_ctx, path, final_content) do
-      :ok ->
-        msg =
-          append_workspace_context(
-            router_ctx,
-            format_multi_edit_result(router_ctx, path, results, ok_count)
-          )
-
-        {:ok, maybe_append_diagnostics(path, msg)}
-
-      :passthrough ->
-        case MultiEditFile.execute(path, edits) do
-          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-          {:error, _message} = error -> error
-        end
-
-      {:error, reason} ->
-        {:error, "failed to write #{path}: #{inspect(reason)}"}
-    end
-  end
-
-  @spec format_multi_edit_result(
-          ToolRouter.context(),
-          String.t(),
-          [{:ok | :error, String.t()}],
-          non_neg_integer()
-        ) :: String.t()
-  defp format_multi_edit_result(router_ctx, path, results, ok_count) do
-    base =
-      "applied #{ok_count}/#{Enum.count(results)} edits to #{path} (via #{route_name(router_ctx)})"
-
-    failed =
-      results
-      |> Enum.filter(&match?({:error, _}, &1))
-      |> Enum.map(fn {:error, text} -> String.slice(text, 0, 40) end)
-
-    case failed do
-      [] -> base
-      names -> base <> ". Failed: #{Enum.join(names, ", ")}"
-    end
   end
 end

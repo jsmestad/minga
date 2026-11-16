@@ -277,86 +277,94 @@ defmodule MingaAgent.ProjectViewTest do
 
     test "dead fork stores fail diff without losing overlay state", %{tmp_dir: dir} do
       seed_project(dir)
-      {dead_store, ref} = spawn_monitor(fn -> :ok end)
-      assert_receive {:DOWN, ^ref, :process, ^dead_store, :normal}
-      {:ok, view} = ProjectView.overlay(dir, fork_store: dead_store)
+      {:ok, store} = start_supervised(BufferForkStore)
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
 
       assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
+      stop_supervised!(BufferForkStore)
       assert {:error, {:fork_diff_failed, reason}} = ProjectView.diff(view)
       assert is_tuple(reason)
-      assert {:ok, "new"} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:error, _} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:ok, "new"} = MingaAgent.Changeset.read_file(view.ref.changeset, "lib/new.txt")
     end
 
     test "dead fork stores fail promote without losing overlay state", %{tmp_dir: dir} do
       seed_project(dir)
-      {dead_store, ref} = spawn_monitor(fn -> :ok end)
-      assert_receive {:DOWN, ^ref, :process, ^dead_store, :normal}
-      {:ok, view} = ProjectView.overlay(dir, fork_store: dead_store)
+      {:ok, store} = start_supervised(BufferForkStore)
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
 
       assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
+      stop_supervised!(BufferForkStore)
       assert {:error, {:fork_promote_failed, reason}} = ProjectView.promote(view, :project_root)
       assert is_tuple(reason)
-      assert {:ok, "new"} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:error, _} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:ok, "new"} = MingaAgent.Changeset.read_file(view.ref.changeset, "lib/new.txt")
       refute File.exists?(Path.join(dir, "lib/new.txt"))
     end
 
     test "dead fork stores fail discard without changing unrelated overlay state", %{tmp_dir: dir} do
       seed_project(dir)
-      {dead_store, ref} = spawn_monitor(fn -> :ok end)
-      assert_receive {:DOWN, ^ref, :process, ^dead_store, :normal}
-      {:ok, view} = ProjectView.overlay(dir, fork_store: dead_store)
+      {:ok, store} = start_supervised(BufferForkStore)
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
 
       assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
+      stop_supervised!(BufferForkStore)
 
       assert {:error, {:fork_discard_failed, reason}} =
                ProjectView.discard_file(view, "lib/untracked.txt")
 
       assert is_tuple(reason)
-      assert {:ok, "new"} = ProjectView.read_file(view, "lib/new.txt")
-      assert {:error, :enoent} = ProjectView.read_file(view, "lib/untracked.txt")
+      assert {:error, _} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:ok, "new"} = MingaAgent.Changeset.read_file(view.ref.changeset, "lib/new.txt")
+
+      assert {:error, :enoent} =
+               MingaAgent.Changeset.read_file(view.ref.changeset, "lib/untracked.txt")
     end
 
     test "dead fork stores fail tracked discard without erasing overlay state", %{tmp_dir: dir} do
       seed_project(dir)
-      {dead_store, ref} = spawn_monitor(fn -> :ok end)
-      assert_receive {:DOWN, ^ref, :process, ^dead_store, :normal}
-      {:ok, view} = ProjectView.overlay(dir, fork_store: dead_store)
+      {:ok, store} = start_supervised(BufferForkStore)
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
 
       assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
+      stop_supervised!(BufferForkStore)
 
       assert {:error, {:fork_discard_failed, reason}} =
                ProjectView.discard_file(view, "lib/new.txt")
 
       assert is_tuple(reason)
-      assert {:ok, "new"} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:error, _} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:ok, "new"} = MingaAgent.Changeset.read_file(view.ref.changeset, "lib/new.txt")
     end
 
     test "dead fork stores fail full discard without losing overlay state", %{tmp_dir: dir} do
       seed_project(dir)
-      {dead_store, ref} = spawn_monitor(fn -> :ok end)
-      assert_receive {:DOWN, ^ref, :process, ^dead_store, :normal}
-      {:ok, view} = ProjectView.overlay(dir, fork_store: dead_store)
+      {:ok, store} = start_supervised(BufferForkStore)
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
 
       assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
+      stop_supervised!(BufferForkStore)
       assert {:error, {:fork_discard_failed, reason}} = ProjectView.discard(view)
 
       assert is_tuple(reason)
-      assert {:ok, "new"} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:error, _} = ProjectView.read_file(view, "lib/new.txt")
+      assert {:ok, "new"} = MingaAgent.Changeset.read_file(view.ref.changeset, "lib/new.txt")
     end
 
     test "dead fork stores fail tracked discard without losing overlay state", %{tmp_dir: dir} do
       seed_project(dir)
-      {dead_store, ref} = spawn_monitor(fn -> :ok end)
-      assert_receive {:DOWN, ^ref, :process, ^dead_store, :normal}
-      {:ok, view} = ProjectView.overlay(dir, fork_store: dead_store)
+      {:ok, store} = start_supervised(BufferForkStore)
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
 
       assert :ok = ProjectView.write_file(view, "lib/a.txt", "draft")
+      stop_supervised!(BufferForkStore)
 
       assert {:error, {:fork_discard_failed, reason}} =
                ProjectView.discard_file(view, "lib/a.txt")
 
       assert is_tuple(reason)
-      assert {:ok, "draft"} = ProjectView.read_file(view, "lib/a.txt")
+      assert {:error, _} = ProjectView.read_file(view, "lib/a.txt")
+      assert {:ok, "draft"} = MingaAgent.Changeset.read_file(view.ref.changeset, "lib/a.txt")
     end
 
     test "dead changesets return tagged working directory and listing errors", %{tmp_dir: dir} do

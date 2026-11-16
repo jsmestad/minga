@@ -50,6 +50,21 @@ defmodule MingaAgent.ProjectView do
     end
   end
 
+  @doc "Commits one complete mutation only when the owning source still matches the revision."
+  @spec conditional_mutate(
+          t(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  def conditional_mutate(%__MODULE__{} = view, relative_path, expected, operation)
+      when is_binary(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path),
+         :ok <- reject_tombstone_suffix(path) do
+      call_backend(fn -> view.backend.conditional_mutate(view, path, expected, operation) end)
+    end
+  end
+
   @doc "Writes a file in the view."
   @spec write_file(t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%__MODULE__{} = view, relative_path, content)

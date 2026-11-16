@@ -856,8 +856,7 @@ defmodule Minga.Buffer.ProcessTest do
         {:user, "hello", fn pid -> BufferProcess.insert_char(pid, "X") end},
         {:agent, "hello world",
          fn pid -> BufferProcess.find_and_replace(pid, "hello", "goodbye") end},
-        {:agent, "hello world",
-         fn pid -> BufferProcess.find_and_replace_batch(pid, [{"hello", "goodbye"}]) end},
+        {:agent, "hello world", fn pid -> conditional_batch(pid, [{"hello", "goodbye"}]) end},
         {:lsp, "hello",
          fn pid -> BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}]) end}
       ]
@@ -903,11 +902,10 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.content(pid) == "alpha\none\ntwo\ngamma"
     end
 
-    test "find_and_replace_batch redo reapplies unicode replacements" do
+    test "conditional batch redo reapplies unicode replacements" do
       pid = start_supervised!({BufferProcess, content: "hello café world"})
 
-      assert {:ok, results} = BufferProcess.find_and_replace_batch(pid, [{"café", "茶"}])
-      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert :ok = conditional_batch(pid, [{"café", "茶"}])
       assert BufferProcess.content(pid) == "hello 茶 world"
 
       BufferProcess.undo(pid)
@@ -1721,69 +1719,6 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  describe "find_and_replace_batch/2" do
-    test "batch applies multiple edits and produces a single undo entry" do
-      {:ok, pid} = BufferProcess.start_link(content: "aaa bbb ccc")
-
-      assert {:ok, results} =
-               BufferProcess.find_and_replace_batch(pid, [{"aaa", "AAA"}, {"ccc", "CCC"}])
-
-      assert Enum.all?(results, &match?({:ok, _}, &1))
-      assert BufferProcess.content(pid) == "AAA bbb CCC"
-
-      BufferProcess.undo(pid)
-      assert BufferProcess.content(pid) == "aaa bbb ccc"
-    end
-
-    test "batch reports per-edit success and failure" do
-      {:ok, pid} = BufferProcess.start_link(content: "foo bar foo")
-
-      assert {:ok, results} =
-               BufferProcess.find_and_replace_batch(pid, [
-                 {"bar", "BAR"},
-                 {"nonexistent", "x"},
-                 {"foo", "FOO"}
-               ])
-
-      assert [{:ok, _}, {:error, _}, {:error, _}] = results
-      # bar→BAR succeeded, making "foo" appear twice (ambiguous for third edit)
-      assert BufferProcess.content(pid) == "foo BAR foo"
-    end
-
-    test "edits within a batch are applied sequentially" do
-      {:ok, pid} = BufferProcess.start_link(content: "foo bar baz")
-      # First edit makes "bar" ambiguous for the second
-      assert {:ok, results} =
-               BufferProcess.find_and_replace_batch(pid, [{"foo", "bar"}, {"bar", "qux"}])
-
-      assert [{:ok, _}, {:error, _}] = results
-      assert BufferProcess.content(pid) == "bar bar baz"
-    end
-
-    test "batch with all edits failing leaves buffer unchanged and clean" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello world")
-
-      assert {:ok, results} =
-               BufferProcess.find_and_replace_batch(pid, [{"nope", "x"}, {"nada", "y"}])
-
-      assert Enum.all?(results, &match?({:error, _}, &1))
-      assert BufferProcess.content(pid) == "hello world"
-      refute BufferProcess.dirty?(pid)
-    end
-
-    test "empty edit list is a no-op" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert {:ok, []} = BufferProcess.find_and_replace_batch(pid, [])
-      refute BufferProcess.dirty?(pid)
-    end
-
-    test "read-only buffer rejects batch" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert {:error, msg} = BufferProcess.find_and_replace_batch(pid, [{"hello", "world"}])
-      assert msg =~ "read-only"
-    end
-  end
-
   describe "pid_for_path/1" do
     test "returns :not_found for unknown or pathless buffers" do
       _pid = start_supervised!({BufferProcess, content: "scratch"})
@@ -1874,30 +1809,10 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  describe "find_and_replace_batch/3 with boundary" do
-    test "rejects individual edits outside boundary while applying valid ones" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2\nline3")
-
-      edits = [{"line1", "OK1"}, {"line0", "NOPE"}, {"line2", "OK2"}]
-      assert {:ok, results} = BufferProcess.find_and_replace_batch(pid, edits, {1, 2})
-
-      assert [{:ok, _}, {:error, _}, {:ok, _}] = results
-
-      content = BufferProcess.content(pid)
-      assert content =~ "OK1"
-      assert content =~ "OK2"
-      assert content =~ "line0"
-    end
-
-    test "all edits outside boundary leaves buffer unchanged" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2")
-
-      edits = [{"line0", "X"}, {"line2", "Y"}]
-      assert {:ok, results} = BufferProcess.find_and_replace_batch(pid, edits, {1, 1})
-
-      assert [{:error, _}, {:error, _}] = results
-      refute BufferProcess.dirty?(pid)
-      assert BufferProcess.content(pid) == "line0\nline1\nline2"
-    end
+  defp conditional_batch(pid, edits) do
+    {content, version} = BufferProcess.content_with_version(pid)
+    identity = {:buffer, "/conditional-batch-test"}
+    expected = Minga.Buffer.FileMutation.revision(content, version, identity)
+    BufferProcess.conditional_mutate(pid, expected, {:edit, edits}, identity)
   end
 end

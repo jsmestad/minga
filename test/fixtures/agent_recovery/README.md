@@ -40,8 +40,8 @@ Its one-second cancellation deadline is an expectation, not a successful skip or
 
 The delayed-response case observes Native's cancellation of the old transport consumer and successful completion of the replacement.
 It is not live-network evidence, a full request-ID adversarial matrix, or proof across application restart.
-The human-edit case deliberately exercises the advertised `write_file` tool, without adding a revision check in the driver.
-A missing production revision contract stays a failure owned by #3436.
+The human-edit case exercises the advertised `write_file` replacement and copies the production `read_file` revision into the prepared call.
+The owner, not the driver, must reject a stale revision. The original human-byte and explicit-conflict expectations are unchanged.
 The output expectation is full retention, not merely honest reporting of incomplete capture.
 A capture-byte limit that loses known output stays a failure owned by #3432.
 Process-tree cancellation belongs to #2843, with worker admission/scheduling owned by #2839.

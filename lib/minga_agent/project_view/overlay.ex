@@ -10,6 +10,7 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   @behaviour MingaAgent.ProjectView.Backend
 
+  alias Minga.Buffer.Fork
   alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
@@ -47,133 +48,120 @@ defmodule MingaAgent.ProjectView.Overlay do
   @impl true
   @spec read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%ProjectView{} = view, relative_path) do
-    case read_open_buffer(view, relative_path) do
-      {:ok, content} ->
-        {:ok, content}
-
-      :changeset ->
-        safe_changeset_call(fn -> Changeset.read_file(changeset(view), relative_path) end)
-
-      {:error, _} = error ->
-        error
+    with {:ok, source} <- resolve_source(view, relative_path) do
+      read_source(source)
     end
   end
 
   @impl true
   @spec resolve_source(ProjectView.t(), String.t()) :: {:ok, Source.t()} | {:error, term()}
   def resolve_source(%ProjectView{} = view, relative_path) do
-    case open_buffer_source(view, relative_path) do
-      :changeset ->
-        {:ok, Source.changeset(buffer_path(view, relative_path), changeset(view), relative_path)}
-
-      result ->
-        result
+    with :ok <- ensure_changeset_available(view),
+         {:ok, buffer} <- buffer_candidate(view, relative_path),
+         :ok <- capture_fork_baseline(view, relative_path, buffer),
+         {:ok, owner} <-
+           BufferForkStore.claim_owner(
+             fork_store(view),
+             buffer_path(view, relative_path),
+             buffer,
+             changeset(view)
+           ) do
+      {:ok, claimed_source(view, relative_path, owner)}
+    else
+      :not_found -> {:error, :source_unavailable}
+      {:error, _} = error -> error
     end
+  catch
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
+  end
+
+  @impl true
+  @spec conditional_mutate(
+          ProjectView.t(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  def conditional_mutate(%ProjectView{} = view, relative_path, expected, operation) do
+    with :ok <- ensure_changeset_available(view),
+         :ok <- fork_store_available(fork_store(view)),
+         {:ok, source} <- resolve_source(view, relative_path) do
+      mutate_source(source, expected, operation)
+    end
+  end
+
+  @spec mutate_source(
+          Source.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  defp mutate_source(%Source{source_id: id, owner: {:changeset, cs, path}}, expected, operation) do
+    Changeset.conditional_mutate(cs, path, expected, operation, {:project_view, id})
+  end
+
+  defp mutate_source(%Source{source_id: id, owner: {:fork, fork}}, expected, operation) do
+    Minga.Buffer.Fork.conditional_mutate(fork, expected, operation, {:project_view, id})
   end
 
   @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
-    case write_open_buffer(view, relative_path, content) do
-      :forked ->
-        :ok
-
-      :changeset ->
-        safe_changeset_call(fn ->
-          Changeset.write_file(changeset(view), relative_path, content)
-        end)
-
-      {:error, _} = error ->
-        error
+    with {:ok, source} <- resolve_source(view, relative_path) do
+      case source.owner do
+        {:fork, fork} -> Minga.Buffer.Fork.replace_content(fork, content)
+        {:changeset, cs, path} -> Changeset.write_file(cs, path, content)
+      end
     end
   end
 
   @impl true
   @spec edit_file(ProjectView.t(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def edit_file(%ProjectView{} = view, relative_path, old_text, new_text) do
-    case edit_open_buffer(view, relative_path, old_text, new_text) do
-      :forked ->
-        :ok
+    with {:ok, source} <- resolve_source(view, relative_path) do
+      case source.owner do
+        {:fork, fork} ->
+          case Minga.Buffer.Fork.find_and_replace(fork, old_text, new_text) do
+            {:ok, _message} -> :ok
+            {:error, _} = error -> error
+          end
 
-      :changeset ->
-        safe_changeset_call(fn ->
-          Changeset.edit_file(changeset(view), relative_path, old_text, new_text)
-        end)
-
-      {:error, _} = error ->
-        error
+        {:changeset, cs, path} ->
+          Changeset.edit_file(cs, path, old_text, new_text)
+      end
     end
   end
 
-  @spec read_open_buffer(ProjectView.t(), String.t()) ::
-          {:ok, binary()} | :changeset | {:error, term()}
-  defp read_open_buffer(%ProjectView{} = view, relative_path) do
-    case open_buffer_source(view, relative_path) do
-      {:ok, %Source{owner: {:buffer, pid}}} -> safe_buffer_content(pid)
-      {:ok, %Source{owner: {:fork, pid}}} -> {:ok, Minga.Buffer.Fork.content(pid)}
-      result -> result
-    end
-  catch
-    :exit, reason -> {:error, {:source_unavailable, reason}}
-  end
+  @spec read_source(Source.t()) :: {:ok, binary()} | {:error, term()}
+  defp read_source(%Source{owner: {:fork, fork}}), do: Minga.Buffer.Fork.read_file(fork)
 
-  @spec open_buffer_source(ProjectView.t(), String.t()) ::
-          {:ok, Source.t()} | :changeset | {:error, term()}
-  defp open_buffer_source(%ProjectView{} = view, relative_path) do
+  defp read_source(%Source{owner: {:changeset, cs, path}}),
+    do: safe_changeset_call(fn -> Changeset.read_file(cs, path) end)
+
+  @spec buffer_candidate(ProjectView.t(), String.t()) :: {:ok, pid() | nil} | {:error, term()}
+  defp buffer_candidate(view, relative_path) do
     case open_buffer_pid(view, relative_path) do
-      {:ok, pid} ->
-        path = buffer_path(view, relative_path)
-
-        case fork_store(view) do
-          nil -> {:ok, Source.buffer(path, pid)}
-          store -> resolve_fork_or_buffer(store, path, pid)
-        end
-
-      :not_found ->
-        :changeset
-
-      {:error, _reason} = error ->
-        error
+      {:ok, buffer} -> {:ok, buffer}
+      :not_found -> {:ok, nil}
+      {:error, _} = error -> error
     end
   end
 
-  @spec write_open_buffer(ProjectView.t(), String.t(), binary()) ::
-          :forked | :changeset | {:error, term()}
-  defp write_open_buffer(%ProjectView{} = view, relative_path, content) do
-    case open_buffer_pid(view, relative_path) do
-      {:ok, buf_pid} ->
-        case fork_store(view) do
-          nil -> :changeset
-          fork_store -> write_fork(fork_store, buffer_path(view, relative_path), buf_pid, content)
-        end
+  @spec capture_fork_baseline(ProjectView.t(), String.t(), pid() | nil) ::
+          :ok | {:error, term()}
+  defp capture_fork_baseline(_view, _relative_path, nil), do: :ok
 
-      :not_found ->
-        :changeset
-
-      {:error, _} = error ->
-        error
-    end
+  defp capture_fork_baseline(view, relative_path, _buffer) do
+    safe_changeset_call(fn -> Changeset.capture_original(changeset(view), relative_path) end)
   end
 
-  @spec edit_open_buffer(ProjectView.t(), String.t(), String.t(), String.t()) ::
-          :forked | :changeset | {:error, term()}
-  defp edit_open_buffer(%ProjectView{} = view, relative_path, old_text, new_text) do
-    case open_buffer_pid(view, relative_path) do
-      {:ok, buf_pid} ->
-        case fork_store(view) do
-          nil ->
-            :changeset
+  @spec claimed_source(ProjectView.t(), String.t(), {:fork, pid()} | {:changeset, pid()}) ::
+          Source.t()
+  defp claimed_source(view, relative_path, {:fork, fork}) do
+    Source.fork(buffer_path(view, relative_path), fork)
+  end
 
-          fork_store ->
-            edit_fork(fork_store, buffer_path(view, relative_path), buf_pid, old_text, new_text)
-        end
-
-      :not_found ->
-        :changeset
-
-      {:error, _} = error ->
-        error
-    end
+  defp claimed_source(view, relative_path, {:changeset, cs}) do
+    Source.changeset(buffer_path(view, relative_path), cs, relative_path)
   end
 
   @spec open_buffer_pid(ProjectView.t(), String.t()) ::
@@ -184,55 +172,9 @@ defmodule MingaAgent.ProjectView.Overlay do
     _ -> {:error, {:buffer_lookup_failed, relative_path}}
   end
 
-  @spec resolve_fork_or_buffer(pid(), String.t(), pid()) ::
-          {:ok, Source.t()} | {:error, term()}
-  defp resolve_fork_or_buffer(store, path, buffer) do
-    with :ok <- fork_store_available(store) do
-      case BufferForkStore.get(store, path) do
-        nil -> {:ok, Source.buffer(path, buffer)}
-        fork -> {:ok, Source.fork(path, fork)}
-      end
-    end
-  catch
-    :exit, reason -> {:error, {:fork_unavailable, reason}}
-  end
-
-  @spec write_fork(pid(), String.t(), pid(), binary()) :: :forked | {:error, term()}
-  defp write_fork(fork_store, path, buf_pid, content) do
-    with :ok <- fork_store_available(fork_store),
-         {:ok, fork_pid} <- BufferForkStore.get_or_create(fork_store, path, buf_pid) do
-      Minga.Buffer.Fork.replace_content(fork_pid, content)
-      :forked
-    end
-  catch
-    :exit, reason -> {:error, {:fork_unavailable, reason}}
-  end
-
-  @spec edit_fork(pid(), String.t(), pid(), String.t(), String.t()) :: :forked | {:error, term()}
-  defp edit_fork(fork_store, path, buf_pid, old_text, new_text) do
-    with :ok <- fork_store_available(fork_store),
-         {:ok, fork_pid} <- BufferForkStore.get_or_create(fork_store, path, buf_pid) do
-      case Minga.Buffer.Fork.find_and_replace(fork_pid, old_text, new_text) do
-        {:ok, _msg} -> :forked
-        {:error, _} = error -> error
-      end
-    end
-  catch
-    :exit, reason -> {:error, {:fork_unavailable, reason}}
-  end
-
   @spec buffer_path(ProjectView.t(), String.t()) :: String.t()
   defp buffer_path(%ProjectView{} = view, relative_path) do
     Path.join(view.project_root, relative_path)
-  end
-
-  @spec safe_buffer_content(pid()) :: {:ok, binary()} | {:error, term()}
-  defp safe_buffer_content(buf_pid) do
-    try do
-      {:ok, Minga.Buffer.content(buf_pid)}
-    catch
-      :exit, reason -> {:error, {:buffer_unavailable, reason}}
-    end
   end
 
   @spec ensure_fork_store(pid() | nil) :: {:ok, pid(), boolean()} | {:error, term()}
@@ -257,14 +199,32 @@ defmodule MingaAgent.ProjectView.Overlay do
   @impl true
   @spec delete_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%ProjectView{} = view, relative_path) do
-    safe_changeset_call(fn -> Changeset.delete_file(changeset(view), relative_path) end)
+    with {:ok, source} <- resolve_source(view, relative_path) do
+      case source.owner do
+        {:changeset, cs, path} ->
+          Changeset.delete_file(cs, path)
+
+        {:fork, fork} ->
+          with {:ok, content} <- Minga.Buffer.Fork.read_file(fork) do
+            expected =
+              Minga.Buffer.FileMutation.revision(content, nil, {:project_view, source.source_id})
+
+            mutate_source(source, expected, :delete)
+          end
+      end
+    end
   end
 
   @impl true
   @spec list_directory(ProjectView.t(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | {:error, term()}
   def list_directory(%ProjectView{} = view, relative_path) do
-    safe_changeset_call(fn -> Changeset.list_directory(changeset(view), relative_path) end)
+    with {:ok, entries} <-
+           safe_changeset_call(fn -> Changeset.list_directory(changeset(view), relative_path) end),
+         {:ok, drafts} <- fork_diff(view) do
+      deleted = MapSet.new(for %{path: path, kind: :deleted} <- drafts, do: path)
+      {:ok, Enum.reject(entries, &MapSet.member?(deleted, Path.join(relative_path, &1.name)))}
+    end
   end
 
   @impl true
@@ -304,8 +264,9 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec promote(ProjectView.t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%ProjectView{} = view, :project_root) do
     with :ok <- ensure_changeset_available(view),
-         :ok <- promote_forks(view) do
-      safe_changeset_call(fn -> Changeset.merge(changeset(view)) end)
+         {:ok, fork_results} <- promote_forks(view) do
+      merge_result = safe_changeset_call(fn -> Changeset.merge(changeset(view)) end)
+      combine_publication_results(fork_results, merge_result)
     end
   end
 
@@ -318,6 +279,26 @@ defmodule MingaAgent.ProjectView.Overlay do
   end
 
   def promote(%ProjectView{}, target), do: {:error, {:unsupported_target, target}}
+
+  @spec combine_publication_results([tuple()], :ok | {:conflict, map()} | {:error, term()}) ::
+          :ok | {:conflict, map()} | {:error, term()}
+  defp combine_publication_results(_fork_results, :ok), do: :ok
+
+  defp combine_publication_results(fork_results, {:conflict, details}) do
+    results =
+      (fork_results ++ details.results)
+      |> Map.new(fn result -> {elem(result, 1), result} end)
+      |> Map.values()
+      |> Enum.sort_by(&elem(&1, 1))
+
+    {:conflict, %{details | results: results, conflicts: publication_failures(results)}}
+  end
+
+  defp combine_publication_results([], {:error, _} = error), do: error
+
+  defp combine_publication_results(fork_results, {:error, reason}) do
+    {:conflict, %{results: fork_results, conflicts: [{:error, :changeset, reason}]}}
+  end
 
   @impl true
   @spec discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
@@ -407,7 +388,9 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec fork_store_dirty?(pid()) :: boolean()
   defp fork_store_dirty?(fork_store) when is_pid(fork_store) do
     try do
-      map_size(BufferForkStore.all(fork_store)) > 0
+      Enum.any?(BufferForkStore.all(fork_store), fn {_path, fork} ->
+        Minga.Buffer.Fork.dirty?(fork)
+      end)
     catch
       :exit, _ -> false
     end
@@ -434,20 +417,28 @@ defmodule MingaAgent.ProjectView.Overlay do
           |> BufferForkStore.all()
           |> Enum.reduce_while(:ok, fn {path, fork_pid}, :ok ->
             with {:ok, relative_path} <- fork_relative_path(view, path),
-                 :ok <-
-                   safe_changeset_call(fn ->
-                     Changeset.materialize_command_file(
-                       changeset(view),
-                       relative_path,
-                       Minga.Buffer.Fork.content(fork_pid)
-                     )
-                   end) do
+                 :ok <- materialize_fork(view, relative_path, fork_pid) do
               {:cont, :ok}
             else
               {:error, _} = error -> {:halt, error}
             end
           end)
         end
+    end
+  end
+
+  @spec materialize_fork(ProjectView.t(), String.t(), pid()) :: :ok | {:error, term()}
+  defp materialize_fork(view, relative_path, fork) do
+    case Minga.Buffer.Fork.read_file(fork) do
+      {:ok, content} ->
+        safe_changeset_call(fn ->
+          Changeset.materialize_command_file(changeset(view), relative_path, content)
+        end)
+
+      {:error, :enoent} ->
+        safe_changeset_call(fn ->
+          Changeset.materialize_command_deletion(changeset(view), relative_path)
+        end)
     end
   end
 
@@ -502,8 +493,11 @@ defmodule MingaAgent.ProjectView.Overlay do
         entries =
           store
           |> BufferForkStore.all()
-          |> Map.keys()
-          |> Enum.map(&%{path: Path.relative_to(&1, view.project_root), kind: :modified})
+          |> Enum.filter(fn {_path, fork} -> Minga.Buffer.Fork.dirty?(fork) end)
+          |> Enum.map(fn {path, fork} ->
+            kind = if Minga.Buffer.Fork.status(fork) == :deleted, do: :deleted, else: :modified
+            %{path: Path.relative_to(path, view.project_root), kind: kind}
+          end)
 
         {:ok, entries}
     end
@@ -511,71 +505,77 @@ defmodule MingaAgent.ProjectView.Overlay do
     :exit, reason -> {:error, {:fork_diff_failed, reason}}
   end
 
-  @spec materialize_merged_forks_for_merge(ProjectView.t(), [String.t()]) ::
-          :ok | {:error, term()}
-  defp materialize_merged_forks_for_merge(%ProjectView{} = view, paths) do
-    Enum.reduce_while(paths, :ok, fn path, :ok ->
-      with {:ok, relative_path} <- fork_relative_path(view, path),
-           {:ok, content} <- current_project_content(path),
-           :ok <-
-             safe_changeset_call(fn ->
-               Changeset.write_file(changeset(view), relative_path, content)
-             end) do
-        {:cont, :ok}
-      else
-        {:error, _} = error -> {:halt, error}
-      end
-    end)
-  end
-
-  @spec current_project_content(String.t()) :: {:ok, binary()} | {:error, term()}
-  defp current_project_content(path) do
-    case Minga.Buffer.pid_for_path(path) do
-      {:ok, buf_pid} -> safe_buffer_content(buf_pid)
-      :not_found -> File.read(path)
-    end
-  rescue
-    error -> {:error, error}
-  end
-
-  @spec promote_forks(ProjectView.t()) :: :ok | {:conflict, map()} | {:error, term()}
+  @spec promote_forks(ProjectView.t()) ::
+          {:ok, [tuple()]} | {:conflict, map()} | {:error, term()}
   defp promote_forks(%ProjectView{} = view) do
     case fork_store(view) do
       nil ->
-        :ok
+        {:ok, []}
 
       store ->
         case fork_store_available(store) do
           :ok ->
-            results = BufferForkStore.merge_all_keep_failed(store)
+            results =
+              store
+              |> BufferForkStore.all()
+              |> Enum.map(fn {path, fork} -> publish_fork(view, store, path, fork) end)
 
-            with :ok <- fork_merge_result(results) do
-              materialize_merged_forks_for_merge(view, successful_fork_paths(results))
+            case publication_failures(results) do
+              [] -> {:ok, results}
+              failures -> {:conflict, %{conflicts: failures, results: results}}
             end
 
-          {:error, reason} ->
+          {:error, {:fork_unavailable, reason}} ->
             {:error, {:fork_promote_failed, reason}}
         end
     end
+  end
+
+  @spec publish_fork(ProjectView.t(), pid(), String.t(), pid()) :: tuple()
+  defp publish_fork(view, store, path, fork) do
+    with {:ok, relative_path} <- fork_relative_path(view, path),
+         {:ok, kind} <- publish_fork_draft(view, relative_path, fork) do
+      case BufferForkStore.transfer_to_changeset(store, path, fork, changeset(view)) do
+        :ok -> {:ok, relative_path, kind}
+        {:error, reason} -> {:error, relative_path, {:owner_transfer_failed, kind, reason}}
+      end
+    else
+      {:conflict, reason} -> {:conflict, Path.relative_to(path, view.project_root), reason}
+      {:error, reason} -> {:error, Path.relative_to(path, view.project_root), reason}
+    end
   catch
-    :exit, reason -> {:error, {:fork_promote_failed, reason}}
+    :exit, reason ->
+      {:error, Path.relative_to(path, view.project_root), {:fork_promote_failed, reason}}
   end
 
-  @spec fork_merge_result([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
-          :ok | {:conflict, map()}
-  defp fork_merge_result(results) do
-    failures = Enum.reject(results, &match?({_path, :ok}, &1))
-    if failures == [], do: :ok, else: {:conflict, %{conflicts: failures, results: results}}
+  @spec publish_fork_draft(ProjectView.t(), String.t(), pid()) ::
+          {:ok, :staged | :unchanged | :deleted} | {:conflict, term()} | {:error, term()}
+  defp publish_fork_draft(view, relative_path, fork) do
+    case Fork.status(fork) do
+      :present ->
+        case Fork.publish(fork, fn raw_content ->
+               Changeset.stage_fork_content(changeset(view), relative_path, raw_content)
+             end) do
+          {:ok, _merged} ->
+            kind = if Fork.dirty?(fork), do: :staged, else: :unchanged
+            {:ok, kind}
+
+          result ->
+            result
+        end
+
+      :deleted ->
+        case Fork.publish_deletion(fork, fn ->
+               Changeset.publish_deletion(changeset(view), relative_path)
+             end) do
+          :ok -> {:ok, :deleted}
+          result -> result
+        end
+    end
   end
 
-  @spec successful_fork_paths([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
-          [String.t()]
-  defp successful_fork_paths(results) do
-    Enum.flat_map(results, fn
-      {path, :ok} -> [path]
-      {_path, _result} -> []
-    end)
-  end
+  @spec publication_failures([tuple()]) :: [tuple()]
+  defp publication_failures(results), do: Enum.reject(results, &match?({:ok, _, _}, &1))
 
   @spec discard_fork(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   defp discard_fork(%ProjectView{} = view, relative_path) do

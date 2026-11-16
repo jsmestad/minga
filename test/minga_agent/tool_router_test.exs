@@ -59,7 +59,7 @@ defmodule MingaAgent.ToolRouterTest do
       assert reason != nil
     end
 
-    test "falls through to buffer when no fork exists", %{store: store, path: path} do
+    test "reads the buffer into a session fork when none exists", %{store: store, path: path} do
       ctx = ToolRouter.context(store, nil)
 
       {:ok, content} = ToolRouter.read_file(ctx, path)
@@ -105,118 +105,194 @@ defmodule MingaAgent.ToolRouterTest do
     end
   end
 
-  describe "write_file/3 with fork store" do
-    test "creates fork lazily on first write", %{store: store, parent: parent, path: path} do
-      ctx = ToolRouter.context(store, nil)
-
-      assert nil == BufferForkStore.get(store, path)
-
-      assert :ok = ToolRouter.write_file(ctx, path, "new content\n")
-
-      fork_pid = BufferForkStore.get(store, path)
-      assert fork_pid != nil
-      assert Fork.content(fork_pid) == "new content\n"
-
-      assert Minga.Buffer.Process.content(parent) ==
-               "defmodule Foo do\n  def hello, do: :world\nend\n"
-    end
-
-    test "returns a tagged error when the fork store dies before a write", %{
+  describe "conditional_mutate/4" do
+    test "the routed read creates an isolated fork whose revision authorizes mutation", %{
       store: store,
       parent: parent,
       path: path
     } do
       ctx = ToolRouter.context(store, nil)
-      {:ok, fork_pid} = BufferForkStore.get_or_create(store, path, parent)
-      Fork.replace_content(fork_pid, "forked content\n")
-      Process.exit(store, :kill)
+      assert BufferForkStore.get(store, path) == nil
+      expected = revision(ctx, path)
+      fork = BufferForkStore.get(store, path)
+      assert is_pid(fork)
+      original = Minga.Buffer.content(parent)
 
-      assert {:error, {:fork_unavailable, reason}} =
-               ToolRouter.write_file(ctx, path, "new content\n")
-
-      assert reason != nil
-
-      assert Minga.Buffer.Process.content(parent) ==
-               "defmodule Foo do\n  def hello, do: :world\nend\n"
+      assert :ok = ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "new content\n"})
+      assert Fork.content(fork) == "new content\n"
+      assert Minga.Buffer.content(parent) == original
+      assert File.read!(path) == original
     end
 
-    test "falls through to passthrough when no buffer open", %{store: store} do
-      ctx = ToolRouter.context(store, nil)
-      assert :passthrough = ToolRouter.write_file(ctx, "/nonexistent/file.ex", "content")
-    end
-
-    test "returns passthrough with no routing active" do
-      ctx = ToolRouter.context(nil, nil)
-      assert :passthrough = ToolRouter.write_file(ctx, "/any/path.ex", "content")
-    end
-  end
-
-  describe "edit_file/4 with fork store" do
-    test "edits via fork when buffer is open", %{store: store, path: path} do
-      ctx = ToolRouter.context(store, nil)
-
-      assert :ok =
-               ToolRouter.edit_file(ctx, path, "def hello, do: :world", "def hello, do: :cosmos")
-
-      fork_pid = BufferForkStore.get(store, path)
-      assert fork_pid != nil
-      assert Fork.content(fork_pid) =~ "def hello, do: :cosmos"
-    end
-
-    test "returns a tagged error when the fork store dies before an edit", %{
+    test "commits the complete edit batch to the fork, never a prefix", %{
       store: store,
       path: path
     } do
       ctx = ToolRouter.context(store, nil)
-      Process.exit(store, :kill)
+      expected = revision(ctx, path)
+      fork = BufferForkStore.get(store, path)
+      original = Fork.content(fork)
+      version = Fork.version(fork)
 
-      assert {:error, {:fork_unavailable, reason}} =
-               ToolRouter.edit_file(ctx, path, "def hello, do: :world", "def hello, do: :cosmos")
+      assert {:error, {:edit_failed, 2, _}} =
+               ToolRouter.conditional_mutate(
+                 ctx,
+                 path,
+                 expected,
+                 {:edit,
+                  [
+                    {"defmodule Foo", "defmodule Bar"},
+                    {"missing", "replacement"}
+                  ]}
+               )
 
-      assert reason != nil
-      assert File.read!(path) =~ "def hello, do: :world"
+      assert Fork.content(fork) == original
+      assert Fork.version(fork) == version
+
+      assert :ok =
+               ToolRouter.conditional_mutate(
+                 ctx,
+                 path,
+                 expected,
+                 {:edit,
+                  [
+                    {"defmodule Foo", "defmodule Bar"},
+                    {":world", ":cosmos"}
+                  ]}
+               )
+
+      assert Fork.content(fork) =~ "defmodule Bar"
+      assert Fork.content(fork) =~ ":cosmos"
+      assert Fork.version(fork) == version + 1
     end
 
-    test "returns error when old_text not found", %{store: store, path: path} do
+    test "stale and missing revisions cannot modify a fork", %{store: store, path: path} do
       ctx = ToolRouter.context(store, nil)
-      assert {:error, _} = ToolRouter.edit_file(ctx, path, "nonexistent text", "replacement")
+      expected = revision(ctx, path)
+      assert :ok = ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "newer"})
+
+      assert {:error, :stale_revision} =
+               ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "stale"})
+
+      assert {:error, :revision_required} =
+               ToolRouter.conditional_mutate(ctx, path, nil, {:replace, "unchecked"})
+
+      assert Fork.content(BufferForkStore.get(store, path)) == "newer"
     end
 
-    test "falls through to passthrough when no buffer open", %{store: store} do
-      ctx = ToolRouter.context(store, nil)
-      assert :passthrough = ToolRouter.edit_file(ctx, "/nonexistent.ex", "old", "new")
-    end
-  end
-
-  describe "delete_file/2" do
-    test "returns passthrough when no changeset" do
-      ctx = ToolRouter.context(nil, nil)
-      assert :passthrough = ToolRouter.delete_file(ctx, "/any/path.ex")
-    end
-
-    test "returns tagged errors when a dead changeset is asked to write, edit, or delete", %{
+    test "a first mutation without a read cannot write the parent buffer", %{
+      store: store,
+      parent: parent,
       path: path
     } do
+      original = Minga.Buffer.content(parent)
+      ctx = ToolRouter.context(store, nil)
+      assert {:error, _} = ToolRouter.conditional_mutate(ctx, path, nil, {:replace, "unchecked"})
+      assert Minga.Buffer.content(parent) == original
+      assert File.read!(path) == original
+    end
+
+    test "opening a buffer cannot replace a changeset draft or resurrect its deletion", %{
+      store: store,
+      path: path
+    } do
+      root = Path.dirname(path)
+      changeset = start_supervised!({MingaAgent.Changeset.Server, project_root: root})
+      context = ToolRouter.context(store, changeset)
+
+      for {operation, index} <- Enum.with_index([{:replace, "draft"}, :delete]) do
+        target = Path.join(root, "opened-later-#{index}.txt")
+        File.write!(target, "original")
+        expected = revision(context, target)
+        assert :ok = ToolRouter.conditional_mutate(context, target, expected, operation)
+
+        buffer =
+          start_supervised!(
+            Supervisor.child_spec({Minga.Buffer.Process, file_path: target},
+              id: {:opened_later, index}
+            )
+          )
+
+        assert {:error, _} =
+                 ToolRouter.conditional_mutate(
+                   context,
+                   target,
+                   expected,
+                   {:replace, "stale overwrite"}
+                 )
+
+        expected_content =
+          case operation do
+            {:replace, content} -> {:ok, content}
+            :delete -> {:error, :deleted}
+          end
+
+        assert ToolRouter.read_file(context, target) == expected_content
+        assert Minga.Buffer.content(buffer) == "original"
+        assert File.read!(target) == "original"
+      end
+    end
+
+    test "a dead fork store never permits direct writes", %{store: store, path: path} do
+      ctx = ToolRouter.context(store, nil)
+      expected = revision(ctx, path)
+      ref = Process.monitor(store)
+      Process.exit(store, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^store, _}
+
+      assert {:error, {:fork_unavailable, _}} =
+               ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "new"})
+
+      assert File.read!(path) =~ "defmodule Foo"
+    end
+
+    test "no editable owner returns an error, not filesystem passthrough", %{path: path} do
+      unmanaged = Path.join(Path.dirname(path), "unmanaged.txt")
+      File.write!(unmanaged, "original")
+
+      for ctx <- [ToolRouter.context(nil, nil), ToolRouter.context(self(), nil)] do
+        assert {:error, _} =
+                 ToolRouter.conditional_mutate(ctx, unmanaged, :absent, {:create, "new"})
+      end
+
+      assert File.read!(unmanaged) == "original"
+    end
+
+    test "dead changesets reject replacement, edit, create, and deletion", %{path: path} do
       project_root = Path.dirname(Path.dirname(path))
-
-      {:ok, changeset} =
-        start_supervised({MingaAgent.Changeset.Server, project_root: project_root})
-
+      changeset = start_supervised!({MingaAgent.Changeset.Server, project_root: project_root})
       ctx = ToolRouter.context(nil, nil, changeset)
+      expected = revision(ctx, path)
       ref = Process.monitor(changeset)
       Process.exit(changeset, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _}
 
-      for {fun, args} <- [
-            {:write_file, [ctx, path, "new content\n"]},
-            {:edit_file, [ctx, path, "defmodule Foo", "defmodule Bar"]},
-            {:delete_file, [ctx, path]}
+      for {expectation, operation} <- [
+            {expected, {:replace, "new"}},
+            {expected, {:edit, [{"defmodule Foo", "defmodule Bar"}]}},
+            {:absent, {:create, "new"}},
+            {expected, :delete}
           ] do
-        assert {:error, {:changeset_unavailable, reason}} = apply(ToolRouter, fun, args)
-        assert reason != nil
+        assert {:error, {:changeset_unavailable, _}} =
+                 ToolRouter.conditional_mutate(ctx, path, expectation, operation)
       end
 
       assert File.read!(path) =~ "defmodule Foo"
+    end
+
+    test "ProjectView operation errors remain explicit", %{path: path} do
+      root = Path.dirname(Path.dirname(path))
+      {:ok, view} = UnavailableBackend.create(root, [])
+      ctx = ToolRouter.context(view, nil, nil)
+
+      assert {:error, :write_failed} =
+               ToolRouter.conditional_mutate(ctx, path, :absent, {:create, "new"})
+
+      assert {:error, :edit_failed} =
+               ToolRouter.conditional_mutate(ctx, path, "revision", {:edit, [{"old", "new"}]})
+
+      assert {:error, :delete_failed} =
+               ToolRouter.conditional_mutate(ctx, path, "revision", :delete)
     end
   end
 
@@ -232,14 +308,21 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(nil, nil, changeset)
       overlay_dir = MingaAgent.Changeset.overlay_path(changeset)
 
-      assert :ok = ToolRouter.write_file(ctx, path, "draft\n")
+      assert :ok =
+               ToolRouter.conditional_mutate(
+                 ctx,
+                 path,
+                 revision(ctx, path),
+                 {:replace, "draft\n"}
+               )
+
       assert {:ok, root_resolved} = ToolRouter.filesystem_path_result(ctx, ".")
       assert root_resolved == overlay_dir
       assert {:ok, resolved} = ToolRouter.filesystem_path_result(ctx, path)
       assert resolved == Path.join(overlay_dir, "lib/foo.ex")
       assert File.read!(resolved) == "draft\n"
 
-      assert :ok = ToolRouter.delete_file(ctx, path)
+      assert :ok = ToolRouter.conditional_mutate(ctx, path, revision(ctx, path), :delete)
       assert {:ok, deleted_resolved} = ToolRouter.filesystem_path_result(ctx, path)
       assert deleted_resolved == Path.join(overlay_dir, "lib/foo.ex")
       refute File.exists?(deleted_resolved)
@@ -253,8 +336,15 @@ defmodule MingaAgent.ToolRouterTest do
 
       ctx = ToolRouter.context(nil, nil, changeset)
 
-      assert :ok = ToolRouter.write_file(ctx, Path.join(project_root, "lib/new.txt"), "new\n")
-      assert :ok = ToolRouter.delete_file(ctx, path)
+      assert :ok =
+               ToolRouter.conditional_mutate(
+                 ctx,
+                 Path.join(project_root, "lib/new.txt"),
+                 :absent,
+                 {:create, "new\n"}
+               )
+
+      assert :ok = ToolRouter.conditional_mutate(ctx, path, revision(ctx, path), :delete)
 
       assert {:ok, entries} = ToolRouter.list_directory(ctx, Path.join(project_root, "lib"))
       assert %{name: "new.txt", type: :file} in entries
@@ -312,7 +402,14 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(store, changeset)
       original = File.read!(path)
 
-      assert :ok = ToolRouter.write_file(ctx, path, "fork draft needle\n")
+      assert :ok =
+               ToolRouter.conditional_mutate(
+                 ctx,
+                 path,
+                 revision(ctx, path),
+                 {:replace, "fork draft needle\n"}
+               )
+
       assert File.read!(path) == original
       assert {:ok, search} = ToolRouter.search_context(ctx, Path.join(project_root, "lib"))
       assert File.read!(Path.join(search.exec_path, "foo.ex")) == "fork draft needle\n"
@@ -432,7 +529,14 @@ defmodule MingaAgent.ToolRouterTest do
 
       ctx = ToolRouter.context(store, changeset)
       original = File.read!(path)
-      assert :ok = ToolRouter.write_file(ctx, path, "uncommitted fork draft\n")
+
+      assert :ok =
+               ToolRouter.conditional_mutate(
+                 ctx,
+                 path,
+                 revision(ctx, path),
+                 {:replace, "uncommitted fork draft\n"}
+               )
 
       resolved_path = ToolRouter.filesystem_path(ctx, path)
       assert ToolRouter.working_dir(ctx) == Path.dirname(Path.dirname(resolved_path))
@@ -558,5 +662,15 @@ defmodule MingaAgent.ToolRouterTest do
       BufferForkStore.get_or_create(store, path, parent)
       assert ToolRouter.has_forks?(ctx)
     end
+  end
+
+  defp revision(context, path) do
+    retained = MingaAgent.Test.RetainedContextFixture.new(Path.dirname(path), "router-revision")
+
+    assert {:ok, output} =
+             ToolRouter.capture_file(context, path, retained.artifact_store, retained.capture_key)
+
+    assert MingaAgent.Tool.Output.Revision.full_source?(output.revision)
+    MingaAgent.Tool.Output.Revision.token(output.revision)
   end
 end

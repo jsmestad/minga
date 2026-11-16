@@ -43,7 +43,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:agent_model` | string or `nil` | `nil` | Default model intent; resolves to one exact executable route before activation (see [Agent model selection](AGENT-MODEL-SELECTION.md)) |
 | `:agent_model_favorites` | list of strings | `[]` | Stable model-route IDs or named hosted `provider:model` IDs pinned to the top of the picker |
 | `:agent_tool_approval` | `:destructive`, `:all`, `:none` | `:destructive` | When to prompt before executing agent tools |
-| `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file", "shell", "git_stage", "git_commit", "rename"]` | Which tools are classified as destructive |
+| `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "delete_file", "shell", "git_stage", "git_commit", "rename"]` | Which tools are classified as destructive |
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
 | `:agent_session_idle_timeout_ms` | non-negative integer | `14_400_000` | Milliseconds before an idle detached remote agent session is reclaimed; `0` disables idle reclamation |
 | `:startup_view` | `:agent` or `:editor` | `:agent` | Which view to show on startup (see [Startup view](#startup-view) below) |
@@ -256,13 +256,13 @@ The `:agent_destructive_tools` option controls which tools are classified as des
 
 ```elixir
 # Default
-set :agent_destructive_tools, ["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file", "shell", "git_stage", "git_commit", "rename"]
+set :agent_destructive_tools, ["write_file", "edit_file", "delete_file", "shell", "git_stage", "git_commit", "rename"]
 
 # Trust file edits, only prompt for shell commands
 set :agent_destructive_tools, ["shell"]
 
 # Add a custom tool to the list
-set :agent_destructive_tools, ["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file", "shell", "git_stage", "git_commit", "rename", "deploy"]
+set :agent_destructive_tools, ["write_file", "edit_file", "delete_file", "shell", "git_stage", "git_commit", "rename", "deploy"]
 
 # Empty list with :destructive mode = no prompts for built-in tools
 set :agent_destructive_tools, []
@@ -1338,7 +1338,7 @@ set :font_ligatures, true
 set :startup_view, :agent           # boot into agentic view (default)
 set :agent_auto_context, true       # load CLI file as preview context (default)
 set :agent_tool_approval, :destructive
-set :agent_destructive_tools, ["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file", "shell", "git_stage", "git_commit", "rename"]
+set :agent_destructive_tools, ["write_file", "edit_file", "delete_file", "shell", "git_stage", "git_commit", "rename"]
 
 # ── Per-language ─────────────────────────────────────────────────────
 for_filetype :elixir, format_on_save: true, trim_trailing_whitespace: true, insert_final_newline: true

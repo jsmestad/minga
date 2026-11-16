@@ -2,22 +2,14 @@ defmodule Minga.Buffer.Replace do
   @moduledoc """
   Pure text replacement operations for buffer documents.
 
-  This module owns the domain semantics for agent-style find-and-replace edits: the expected text must identify exactly one replacement target, optional line boundaries are enforced against that target, and batch replacements apply sequentially while preserving per-edit results. `Buffer.Process` and `Buffer.Fork` wrap these pure operations with their own process, undo, version, and merge concerns.
+  This module owns single-target replacements with optional line boundaries.
+  Revision-checked agent batches use `Minga.Buffer.FileMutation` instead.
   """
 
-  alias Minga.Buffer.{Document, EditDelta, Position, UndoPatch}
+  alias Minga.Buffer.{Document, EditDelta, Position}
 
   @typedoc "An edit boundary as `{start_line, end_line}` (both inclusive, 0-indexed), or nil for unbounded."
   @type boundary :: {non_neg_integer(), non_neg_integer()} | nil
-
-  @typedoc "A find-and-replace edit pair for batch operations."
-  @type edit :: {old_text :: String.t(), new_text :: String.t()}
-
-  @typedoc "Result of a single replacement."
-  @type result :: {:ok, String.t()} | {:error, String.t()}
-
-  @typedoc "Result of applying a batch of replacement edits."
-  @type batch_result :: {Document.t(), [result()], any_applied? :: boolean()}
 
   @typedoc "Successful replacement with the edit delta that describes it."
   @type delta_result :: {:ok, Document.t(), EditDelta.t(), String.t()} | {:error, String.t()}
@@ -44,33 +36,6 @@ defmodule Minga.Buffer.Replace do
       new_doc = replace_match(content, match, new_text)
       {:ok, new_doc, replacement_delta(doc, new_doc, match, new_text), "applied"}
     end
-  end
-
-  @doc "Applies replacements sequentially and returns the final document plus per-edit results."
-  @spec apply_batch(Document.t(), [edit()], boundary()) :: batch_result()
-  def apply_batch(%Document{} = doc, edits, boundary \\ nil) when is_list(edits) do
-    {final_doc, results, _patches} = apply_batch_with_deltas(doc, edits, boundary)
-    {final_doc, results, Enum.any?(results, &match?({:ok, _}, &1))}
-  end
-
-  @doc "Applies replacements sequentially and returns the final document, per-edit results, and undo patches in newest-first order."
-  @spec apply_batch_with_deltas(Document.t(), [edit()], boundary()) ::
-          {Document.t(), [result()], [UndoPatch.t()]}
-  def apply_batch_with_deltas(%Document{} = doc, edits, boundary \\ nil) when is_list(edits) do
-    {final_doc, results_reversed, patches} =
-      Enum.reduce(edits, {doc, [], []}, fn {old_text, new_text},
-                                           {current_doc, results, patches} ->
-        case apply_with_delta(current_doc, old_text, new_text, boundary) do
-          {:ok, new_doc, delta, msg} ->
-            patch = UndoPatch.from_delta(delta, current_doc)
-            {new_doc, [{:ok, msg} | results], [patch | patches]}
-
-          {:error, _} = err ->
-            {current_doc, [err | results], patches}
-        end
-      end)
-
-    {final_doc, Enum.reverse(results_reversed), patches}
   end
 
   @spec find_replacement_target(String.t(), String.t()) ::
