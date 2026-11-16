@@ -186,8 +186,8 @@ defmodule MingaEditor.Commands.AgentSession do
           )
           |> rebuild_agent_from_tab(tab_id)
           |> AgentLifecycle.cache_messages(messages)
-          |> EventReplay.replay_active(events)
-          |> apply_remote_snapshot(snapshot)
+          |> EventReplay.replay_active(remote_pid, events)
+          |> apply_remote_snapshot(remote_pid, snapshot)
           |> then(&MingaEditor.WorkspaceWorkflow.persist_changes(state, &1))
 
         NoticeWorkflow.publish(
@@ -235,29 +235,21 @@ defmodule MingaEditor.Commands.AgentSession do
     SessionClient.send_prompt(session, prompt)
   end
 
-  @doc "Responds to a tool approval on a local or remote session, enforcing the remote broker boundary."
-  @spec respond_to_approval_pid(pid(), Session.approval_decision()) :: :ok | {:error, term()}
-  def respond_to_approval_pid(session, decision),
-    do: respond_to_approval_pid(session, nil, decision)
-
-  @doc "Responds to a stable tool approval id on a local or remote session."
-  @spec respond_to_approval_pid(pid(), String.t() | nil, Session.approval_decision()) ::
+  @doc "Resolves the exact displayed tool approval through the local or remote session boundary."
+  @spec respond_to_approval_pid(pid(), Session.approval_target(), Session.approval_decision()) ::
           :ok | {:error, term()}
-  def respond_to_approval_pid(session, _approval_id, decision)
+  def respond_to_approval_pid(session, %MingaAgent.ToolApproval.Target{} = target, decision)
       when is_pid(session) and node(session) == node() do
-    # Local session: the Editor is not the session's driver. With the #2289
-    # ingest coalescer, the foreground session is subscribed by the Ingest
-    # process (which becomes the driver), and even without it the Editor's own
-    # subscription does not make it the *caller* of this function. The gated
-    # `respond_to_approval_as` would return {:error, :not_driver} here, so we use
-    # the ungated single-process variant, mirroring how `send_prompt_pid` uses
-    # ungated `Session.send_prompt` for the local-node case. Remote sessions keep
-    # the driver-attach semantics below.
-    Session.respond_to_approval(session, decision)
+    # Foreground Ingest holds the driver subscription.
+    # Local Editor decisions use the trusted entry point, which validates the full target atomically.
+    Session.respond_to_approval(session, target, decision)
+  catch
+    :exit, reason -> {:error, {:session_unavailable, reason}}
   end
 
-  def respond_to_approval_pid(session, approval_id, decision) when is_pid(session) do
-    SessionClient.approve(session, approval_id, decision)
+  def respond_to_approval_pid(session, %MingaAgent.ToolApproval.Target{} = target, decision)
+      when is_pid(session) do
+    SessionClient.approve(session, target, decision)
   end
 
   @doc "Stops a session pid, routing remote pids to their owning node."
@@ -566,16 +558,17 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp rebuild_agent_from_tab(state, _tab_id), do: state
 
-  @spec apply_remote_snapshot(state(), Session.editor_snapshot()) :: state()
+  @spec apply_remote_snapshot(state(), pid(), Session.editor_snapshot()) :: state()
   defp apply_remote_snapshot(
          state,
+         session_pid,
          %{
            status: _status,
            pending_approval: _pending_approval,
            error: _error
          } = snapshot
        ) do
-    AgentLifecycle.apply_session_snapshot(state, snapshot)
+    AgentLifecycle.apply_session_snapshot(state, session_pid, snapshot)
   end
 
   @spec detach_remote_session(state(), pid()) :: state()

@@ -19,7 +19,7 @@ private struct ScrollViewHeightKey: PreferenceKey {
 
 public struct AgentChatView: View {
     public enum Action: Equatable, Sendable {
-        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+        case toolApproval(AgentApprovalCard.Action)
         case executeCommand(name: String)
         case agentToolToggle(messageID: UInt32)
         case chatScrolledAwayFromBottom
@@ -206,12 +206,8 @@ public struct AgentChatView: View {
             AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
-        case .approvalToolCall(_, let name, let summary, let toolCallId, let previewKind, let previewLines):
-            AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines, sendAction: childAction { action in
-                switch action {
-                case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
-                }
-            })
+        case .approvalToolCall(_, let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines):
+            AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, sessionId: sessionId, requestId: requestId, previewKind: previewKind, previewLines: previewLines, sendAction: childAction { .toolApproval($0) })
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):

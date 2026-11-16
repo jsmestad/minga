@@ -3121,11 +3121,13 @@ struct AgentTranscriptDecoderTests {
         return d
     }
 
-    private func approvalBody() -> Data {
+    private func approvalBody(toolCallId: String = "tc", sessionId: String = "session-a", requestId: String = "request-a") -> Data {
         var d = Data([0x09, 0])
         appendString16(&d, "edit")
         appendString16(&d, "needs ok")
-        appendString16(&d, "tc")
+        appendString16(&d, toolCallId)
+        appendString16(&d, sessionId)
+        appendString16(&d, requestId)
         d.append(2)
         appendU16(&d, 1)
         appendString16(&d, "mix test")
@@ -3165,10 +3167,74 @@ struct AgentTranscriptDecoderTests {
         guard case .styledToolCall("shell", "ran", 2, true, false, 1, 42, let resultLines, 3, let previewLines) = messages[4].content else { Issue.record("Expected styled tool"); return }
         #expect(resultLines[0][0].code)
         #expect(previewLines == ["scope"])
-        guard case .approvalToolCall("edit", "needs ok", "tc", 2, let approvalPreview) = messages[5].content else { Issue.record("Expected approval"); return }
+        guard case .approvalToolCall("edit", "needs ok", "tc", "session-a", "request-a", 2, let approvalPreview) = messages[5].content else { Issue.record("Expected approval"); return }
         #expect(approvalPreview == ["mix test"])
         guard case .assistantMarkdown(let blocks) = messages[6].content else { Issue.record("Expected markdown"); return }
         #expect(blocks[0].isComplete)
+    }
+
+    @Test("approval rejects every truncated body instead of accepting an ID-less payload")
+    func truncatedApprovalBodiesThrow() {
+        let body = approvalBody()
+        for length in 0..<body.count {
+            let data = buildFullReplace(epoch: 1, entries: [(id: 1, body: Data(body.prefix(length)))])
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: data, offset: 0)
+            }
+        }
+    }
+
+    @Test("protocol 31 approval body is not an identity-free protocol 32 approval")
+    func legacyApprovalBodyThrows() {
+        var body = Data([0x09, 0])
+        appendString16(&body, "edit")
+        appendString16(&body, "needs ok")
+        appendString16(&body, "tc")
+        body.append(2)
+        appendU16(&body, 1)
+        appendString16(&body, "mix test")
+        let data = buildFullReplace(epoch: 1, entries: [(id: 1, body: body)])
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("approval requires all three nonempty identities")
+    func emptyApprovalIdentityThrows() {
+        for body in [
+            approvalBody(toolCallId: ""),
+            approvalBody(sessionId: ""),
+            approvalBody(requestId: "")
+        ] {
+            let data = buildFullReplace(epoch: 1, entries: [(id: 1, body: body)])
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: data, offset: 0)
+            }
+        }
+    }
+
+    @Test("approval identity strings require valid UTF8")
+    func malformedApprovalIdentityThrows() {
+        for invalidIndex in 0..<3 {
+            var body = Data([0x09, 0])
+            appendString16(&body, "edit")
+            appendString16(&body, "needs ok")
+            for (index, identity) in ["tc", "session-a", "request-a"].enumerated() {
+                if index == invalidIndex {
+                    appendU16(&body, 1)
+                    body.append(0xFF)
+                } else {
+                    appendString16(&body, identity)
+                }
+            }
+            body.append(2)
+            appendU16(&body, 1)
+            appendString16(&body, "mix test")
+            let data = buildFullReplace(epoch: 1, entries: [(id: 1, body: body)])
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: data, offset: 0)
+            }
+        }
     }
 
     @Test("invalid UTF8 link URL throws malformed")

@@ -122,6 +122,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.Target
 
@@ -209,6 +210,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_semantic_item_activate Opcodes.gui_action_semantic_item_activate()
   @gui_action_agent_prompt_fit Opcodes.gui_action_agent_prompt_fit()
   @gui_action_agent_prompt_scroll Opcodes.gui_action_agent_prompt_scroll()
+  @gui_action_agent_tool_approval Opcodes.gui_action_agent_tool_approval()
 
   @search_flag_replace_mode 0x01
   @search_flag_case_sensitive 0x02
@@ -259,6 +261,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :file_tree_collapse_all
           | :file_tree_refresh
           | {:agent_tool_toggle, message_id :: non_neg_integer()}
+          | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, path :: String.t()}
           | {:git_unstage_file, path :: String.t()}
@@ -1037,7 +1040,27 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     decode_file_dialog_result(request_id, outcome, path_count, paths)
   end
 
+  def decode_gui_action(
+        @gui_action_agent_tool_approval,
+        <<session_length::16, session_id::binary-size(session_length), request_length::16,
+          request_id::binary-size(request_length), tool_length::16,
+          tool_call_id::binary-size(tool_length), decision::8>>
+      )
+      when session_length > 0 and request_length > 0 and tool_length > 0 do
+    with {:ok, decision} <- decode_approval_decision(decision) do
+      {:ok,
+       {:agent_tool_approval, ApprovalTarget.new(session_id, request_id, tool_call_id), decision}}
+    end
+  end
+
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_approval_decision(byte()) :: {:ok, MingaAgent.Session.approval_decision()} | :error
+  defp decode_approval_decision(1), do: {:ok, :approve}
+  defp decode_approval_decision(2), do: {:ok, :approve_session}
+  defp decode_approval_decision(3), do: {:ok, :approve_turn}
+  defp decode_approval_decision(4), do: {:ok, :reject}
+  defp decode_approval_decision(_unknown), do: :error
 
   @spec decode_semantic_surface(non_neg_integer()) :: {:ok, atom()} | :error
   defp decode_semantic_surface(1), do: {:ok, :completion}

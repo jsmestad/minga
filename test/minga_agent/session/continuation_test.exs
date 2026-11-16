@@ -422,4 +422,152 @@ defmodule MingaAgent.Session.ContinuationTest do
     assert Enum.at(next_request.messages, -4) === assistant
     assert Enum.at(next_request.messages, -3).metadata.minga_effect_status == :indeterminate
   end
+
+  test "tool ids cannot be reused across request groups, including after codec restore, but reset for a new request" do
+    assert {:ok, request, active} =
+             Continuation.begin_request(Continuation.new(), "request-groups", 7, "write files")
+
+    refute Continuation.tool_call_completed?(Continuation.new(), "call-a")
+
+    calls = [
+      %{
+        tool_call_id: "call-a",
+        name: "write_file",
+        arguments: %{"path" => "a", "content" => "first"}
+      },
+      %{
+        tool_call_id: "call-b",
+        name: "write_file",
+        arguments: %{"path" => "b", "content" => "second"}
+      }
+    ]
+
+    {completed, messages} =
+      Enum.reduce(calls, {active, request.messages}, fn call, {continuation, messages} ->
+        assistant = %Message{
+          role: :assistant,
+          tool_calls: [ToolCall.new(call.tool_call_id, call.name, JSON.encode!(call.arguments))]
+        }
+
+        group_messages = Enum.concat(messages, [assistant])
+
+        assert {:ok, checkpoint_id, checkpointed} =
+                 Continuation.checkpoint_tool_group(
+                   continuation,
+                   request.request_id,
+                   group_messages,
+                   [call]
+                 )
+
+        refute Continuation.tool_call_completed?(checkpointed, call.tool_call_id)
+
+        if call.tool_call_id == "call-b" do
+          assert Continuation.tool_call_completed?(checkpointed, "call-a")
+        end
+
+        assert {:ok, admitted} =
+                 Continuation.admit_tool_effect(
+                   checkpointed,
+                   request.request_id,
+                   checkpoint_id,
+                   call.tool_call_id,
+                   call.name,
+                   call.arguments
+                 )
+
+        refute Continuation.tool_call_completed?(admitted, call.tool_call_id)
+
+        result =
+          Context.tool_result_message(call.name, call.tool_call_id, "written", %{is_error: false})
+
+        assert {:ok, completed} =
+                 Continuation.complete_tool_effect(
+                   admitted,
+                   request.request_id,
+                   checkpoint_id,
+                   call.tool_call_id,
+                   result
+                 )
+
+        assert completed.active_request == request
+        assert Continuation.tool_call_completed?(completed, call.tool_call_id)
+        {completed, Enum.concat(group_messages, [result])}
+      end)
+
+    assert {:ok, restored} = completed |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+    assert restored.active_request == request
+    assert restored.tool_checkpoint == completed.tool_checkpoint
+
+    reused_call = %{
+      tool_call_id: "call-a",
+      name: "write_file",
+      arguments: %{"path" => "different", "content" => "not previously approved"}
+    }
+
+    reused_assistant = %Message{
+      role: :assistant,
+      tool_calls: [
+        ToolCall.new(
+          reused_call.tool_call_id,
+          reused_call.name,
+          JSON.encode!(reused_call.arguments)
+        )
+      ]
+    }
+
+    for continuation <- [completed, restored] do
+      assert Continuation.tool_call_completed?(continuation, "call-a")
+      assert Continuation.tool_call_completed?(continuation, "call-b")
+
+      assert {:error, :reused_tool_call_id} =
+               Continuation.checkpoint_tool_group(
+                 continuation,
+                 request.request_id,
+                 Enum.concat(messages, [reused_assistant]),
+                 [reused_call]
+               )
+    end
+
+    outcome = Outcome.new(request, Enum.concat(messages, [Context.assistant("done")]))
+    assert {:ok, finished} = Continuation.complete(restored, outcome, 9)
+    refute Continuation.tool_call_completed?(finished, "call-a")
+
+    assert {:ok, next_request, next_active} =
+             Continuation.begin_request(finished, "request-groups-next", 10, "write another file")
+
+    refute next_request.request_id == request.request_id
+    refute Continuation.tool_call_completed?(next_active, "call-a")
+
+    assert {:ok, next_checkpoint_id, next_checkpointed} =
+             Continuation.checkpoint_tool_group(
+               next_active,
+               next_request.request_id,
+               Enum.concat(next_request.messages, [reused_assistant]),
+               [reused_call]
+             )
+
+    refute Continuation.tool_call_completed?(next_checkpointed, "call-a")
+
+    assert {:ok, next_admitted} =
+             Continuation.admit_tool_effect(
+               next_checkpointed,
+               next_request.request_id,
+               next_checkpoint_id,
+               reused_call.tool_call_id,
+               reused_call.name,
+               reused_call.arguments
+             )
+
+    assert {:ok, next_completed} =
+             Continuation.complete_tool_effect(
+               next_admitted,
+               next_request.request_id,
+               next_checkpoint_id,
+               reused_call.tool_call_id,
+               Context.tool_result_message("write_file", "call-a", "written", %{is_error: false})
+             )
+
+    assert next_completed.active_request == next_request
+    assert Continuation.tool_call_completed?(next_completed, "call-a")
+  end
 end

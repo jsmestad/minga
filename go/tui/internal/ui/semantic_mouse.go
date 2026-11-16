@@ -287,10 +287,8 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		// Empty, separator, header, and summary cells never fall through to text.
 		return nil, true
 	}
-	if chat, ok := m.agentChat(); ok && chat.Visible {
-		if zone := m.zones.Get(zoneIDAgentHeaderHelp); zone != nil && zone.InBounds(msg) {
-			return protocol.EncodeGUIExecuteCommand("agent_toggle_help"), true
-		}
+	if packet, ok := m.agentDisplayedControlPacket(msg); ok {
+		return packet, true
 	}
 	if packet, ok := m.agentComposerControlPacket(msg); ok {
 		return packet, true

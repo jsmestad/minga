@@ -31,6 +31,14 @@ public enum TextPresentationState: UInt8, Equatable, Sendable {
     case discarded = 0
     case active = 1
 }
+/// Semantic tool-approval decisions; wire values belong to the generated protocol.
+public enum AgentApprovalDecision: Equatable, Sendable {
+    case approve
+    case approveSession
+    case approveTurn
+    case reject
+}
+
 
 /// Every event the native frontend can send to the BEAM.
 ///
@@ -90,6 +98,8 @@ public enum OutboundAction: Equatable, Sendable {
     case commandCut
     case panelDismiss
     case panelResize(heightPercent: UInt8)
+    /// Resolves only the immutable approval displayed by the originating control.
+    case agentToolApproval(sessionId: String, requestId: String, toolCallId: String, decision: AgentApprovalDecision)
     case agentToolToggle(messageID: UInt32)
     case executeCommand(name: String)
     case openFile(path: String)

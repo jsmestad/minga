@@ -231,6 +231,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.Tool.Output",
     "MingaAgent.Tool.Spec",
     "MingaAgent.ToolApproval.Preview",
+    "MingaAgent.ToolApproval.Public",
+    "MingaAgent.ToolApproval.Target",
     "MingaAgent.ToolCall",
     "MingaAgent.TranscriptEntry",
     "MingaAgent.TurnUsage",

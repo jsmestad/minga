@@ -91,7 +91,7 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
     # Seed visible editor rows in a separate scene, not hidden rows behind the agent workspace.
     # A2 changes ONLY the middle row in the same content epoch; its neighbors must survive without being resent.
     steps = [
-      step("workspace", 1, 0, workspace, @old_labels ++ ["Approval", "y approve"], @new_labels),
+      step("workspace", 1, 0, workspace, @old_labels ++ ["Approval", "[y]", "[n]", "[a]", "[t]"], @new_labels),
       step(
         "row-base",
         2,
@@ -121,7 +121,7 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
         5,
         0,
         replacement,
-        @new_labels ++ ["Approval", "y approve"],
+        @new_labels ++ ["Approval", "[y]", "[n]", "[a]", "[t]"],
         @old_labels ++ @neighbors ++ ["ROW_OLD", "ROW_NEW", "UNKNOWN_OK", "STATUS_ROWS"]
       )
     ]
@@ -173,6 +173,8 @@ defmodule Minga.Scripts.GoTUICaptureCorpus do
           %ApprovalView{
             name: "shell",
             tool_call_id: "capture-approval-#{epoch}",
+            session_id: "capture-session-#{epoch}",
+            request_id: "capture-request-#{epoch}",
             summary: "APPROVAL_#{suffix}",
             preview_kind: :command
           }}}

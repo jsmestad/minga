@@ -3,11 +3,16 @@ defmodule MingaAgent.SessionApprovalTest do
 
   # Allow aggregate durable-call completion time; this test asserts trust, not latency.
   @durable_workflow_timeout 30_000
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
 
   describe "tool approval" do
     test "ToolApproval event stores pending approval and broadcasts" do
-      session = start_subscribed_session()
-      assert :ok = Session.continue(session)
+      session =
+        start_subscribed_session(Minga.Test.SessionContinuationProvider, test_pid: self())
+
+      assert :ok = Session.send_prompt(session, "request an approval")
+      assert_receive {:continuation_request, request}, @event_timeout
 
       approval = %Event.ToolApproval{
         tool_call_id: "tc1",
@@ -19,16 +24,28 @@ defmodule MingaAgent.SessionApprovalTest do
       send_provider_event(session, approval)
 
       # Broadcast should arrive
-      assert_receive {:agent_event, _, {:approval_pending, data}}, @event_timeout
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending, %Public{target: %Target{} = target} = data}},
+                     @event_timeout
+
       assert data.name == "shell"
-      assert data.tool_call_id == "tc1"
+      assert target.tool_call_id == "tc1"
+      assert target.request_id == request.request_id
+      assert is_binary(target.session_id) and target.session_id != ""
+      assert data.args == %{"command" => "rm -rf /"}
       assert data.preview.kind == :command
       assert data.preview.summary == "rm -rf /"
+      assert Session.editor_snapshot(session).pending_approval == data
+      refute Map.has_key?(data, :tool_call_id)
       refute Map.has_key?(data, :reply_to)
     end
 
     test "stale approval requests cannot reactivate an idle session" do
       session = start_subscribed_session()
+      send_approval(session)
+      target = approval_target(session)
+      assert :ok = Session.abort(session)
+      assert_receive {:tool_approval_response, "tc1", :reject}, @event_timeout
 
       send_provider_event(session, %Event.ToolApproval{
         tool_call_id: "tc-stale",
@@ -50,7 +67,8 @@ defmodule MingaAgent.SessionApprovalTest do
       assert_receive {:tool_approval_response, "tc-trusted-stale", :reject}, @event_timeout
       refute_received {:agent_event, _, {:tool_auto_approved, "tc-trusted-stale", _, _}}
       assert Session.status(session) == :idle
-      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+      assert {:error, :stale_request} = Session.respond_to_approval(session, target, :approve)
+      assert Session.editor_snapshot(session).pending_approval == nil
     end
 
     test "respond_to_approval resolves each supported decision" do
@@ -62,11 +80,19 @@ defmodule MingaAgent.SessionApprovalTest do
           ] do
         session = start_subscribed_session()
         send_approval(session)
+        target = approval_target(session)
 
-        assert :ok = Session.respond_to_approval(session, decision)
+        assert :ok = Session.respond_to_approval(session, target, decision)
         assert_receive {:tool_approval_response, "tc1", ^execution_decision}, @event_timeout
-        assert_receive {:agent_event, _, {:approval_resolved, ^decision}}, @event_timeout
-        assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+
+        assert_receive {:agent_event, ^session, {:approval_resolved, ^target, ^decision}},
+                       @event_timeout
+
+        assert {:error, :no_pending_approval} =
+                 Session.respond_to_approval(session, target, :approve)
+
+        refute_received {:tool_approval_response, "tc1", _}
+        refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
 
         if decision == :reject do
           messages = Session.messages(session)
@@ -75,30 +101,115 @@ defmodule MingaAgent.SessionApprovalTest do
       end
     end
 
-    test "remote driver can resolve a pending approval by stable id" do
+    test "remote resolution requires driver authority and the complete pending target" do
       session = start_subscribed_session()
       driver = self()
       assert :ok = Session.subscribe(session, driver, role: :driver)
       send_approval(session)
+      target = approval_target(session)
+      other_tool = Target.new(target.session_id, target.request_id, "other-tc")
+
+      assert :ok = Session.unsubscribe(session, driver)
+      assert :ok = Session.subscribe(session, driver, role: :viewer)
+
+      assert {:error, :not_driver} =
+               Session.respond_to_approval_as(session, driver, target, :approve_session)
+
+      assert {:error, :not_driver} =
+               Session.respond_to_approval_as(session, driver, other_tool, :approve_session)
+
+      assert approval_target(session) == target
+      assert Session.list_tool_trust(session) == %{}
+      refute_received {:tool_approval_response, "tc1", _}
+      refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
+      assert :ok = Session.claim_driver(session, driver)
 
       assert {:error, :approval_not_found} =
-               Session.respond_to_approval_as(session, driver, "other-tc", :approve)
+               Session.respond_to_approval_as(session, driver, other_tool, :approve_session)
 
-      assert :ok = Session.respond_to_approval_as(session, driver, "tc1", :approve)
+      assert approval_target(session) == target
+      assert Session.list_tool_trust(session) == %{}
+      refute_received {:tool_approval_response, "tc1", _}
+      assert :ok = Session.respond_to_approval_as(session, driver, target, :approve)
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
-      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, @event_timeout
+
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :approve}},
+                     @event_timeout
+
+      assert {:error, :no_pending_approval} =
+               Session.respond_to_approval_as(session, driver, target, :approve_session)
+
+      assert Session.list_tool_trust(session) == %{}
+      refute_received {:tool_approval_response, "tc1", _}
+      refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
+    end
+
+    test "a new request reusing a tool id rejects stale targets without resolving or granting trust" do
+      session =
+        start_subscribed_session(Minga.Test.SessionContinuationProvider, test_pid: self())
+
+      send_approval(session)
+      assert_receive {:continuation_request, first_request}, @event_timeout
+      old_target = approval_target(session)
+      assert old_target.request_id == first_request.request_id
+      assert :ok = Session.respond_to_approval(session, old_target, :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^old_target, :approve}},
+                     @event_timeout
+
+      assert :ok = Session.abort(session)
+      send_approval(session)
+      assert_receive {:continuation_request, second_request}, @event_timeout
+      target = approval_target(session)
+      pending = Session.editor_snapshot(session).pending_approval
+      assert target.session_id == old_target.session_id
+      assert target.tool_call_id == old_target.tool_call_id
+      assert target.request_id == second_request.request_id
+      refute target.request_id == old_target.request_id
+
+      invalid_targets = [
+        {old_target, :stale_request},
+        {Target.new("other-session", target.request_id, target.tool_call_id), :stale_session},
+        {Target.new(target.session_id, target.request_id, "other-tool"), :approval_not_found}
+      ]
+
+      for {invalid_target, error} <- invalid_targets,
+          decision <- [:approve, :approve_session, :approve_turn, :reject] do
+        assert {:error, ^error} = Session.respond_to_approval(session, invalid_target, decision)
+        assert Session.editor_snapshot(session).pending_approval == pending
+        assert Session.list_tool_trust(session) == %{}
+        refute_received {:tool_approval_response, "tc1", _}
+        refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
+      end
+
+      assert :ok = Session.respond_to_approval(session, target, :reject)
+      assert_receive {:tool_approval_response, "tc1", :reject}, @event_timeout
+
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :reject}},
+                     @event_timeout
+
+      assert {:error, :no_pending_approval} =
+               Session.respond_to_approval(session, target, :approve_session)
+
+      assert Session.list_tool_trust(session) == %{}
+      refute_received {:tool_approval_response, "tc1", _}
+      refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
     end
 
     test "approve_session and approve_turn set the matching tool trust scope" do
       session = start_subscribed_session()
       send_approval(session)
-      assert :ok = Session.respond_to_approval(session, :approve_session)
+
+      assert :ok =
+               Session.respond_to_approval(session, approval_target(session), :approve_session)
+
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
       assert Session.list_tool_trust(session) == %{"shell:rm -rf /" => :session}
 
       session = start_subscribed_session()
       send_approval(session)
-      assert :ok = Session.respond_to_approval(session, :approve_turn)
+      assert :ok = Session.respond_to_approval(session, approval_target(session), :approve_turn)
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
       assert Session.list_tool_trust(session) == %{"shell:rm -rf /" => :turn}
     end
@@ -106,7 +217,10 @@ defmodule MingaAgent.SessionApprovalTest do
     test "approval session trust for shell is scoped to the approved command" do
       session = start_subscribed_session()
       send_approval(session)
-      assert :ok = Session.respond_to_approval(session, :approve_session)
+
+      assert :ok =
+               Session.respond_to_approval(session, approval_target(session), :approve_session)
+
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
 
       send_provider_event(session, %Event.ToolApproval{
@@ -129,7 +243,7 @@ defmodule MingaAgent.SessionApprovalTest do
       })
 
       assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
-      assert pending.tool_call_id == "tc_other"
+      assert %Public{target: %Target{tool_call_id: "tc_other"}} = pending
       refute_received {:tool_approval_response, "tc_other", :approve}
     end
 
@@ -145,7 +259,10 @@ defmodule MingaAgent.SessionApprovalTest do
       })
 
       assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
-      assert :ok = Session.respond_to_approval(session, :approve_session)
+
+      assert :ok =
+               Session.respond_to_approval(session, approval_target(session), :approve_session)
+
       assert_receive {:tool_approval_response, "tc_mcp", :approve}, @event_timeout
 
       trust = Session.list_tool_trust(session)
@@ -176,21 +293,24 @@ defmodule MingaAgent.SessionApprovalTest do
       })
 
       assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
-      assert pending.tool_call_id == "tc_mcp_other"
+      assert %Public{target: %Target{tool_call_id: "tc_mcp_other"}} = pending
       refute_received {:tool_approval_response, "tc_mcp_other", :approve}
     end
 
     test "bare approve sets no tool trust" do
       session = start_subscribed_session()
       send_approval(session)
-      assert :ok = Session.respond_to_approval(session, :approve)
+      assert :ok = Session.respond_to_approval(session, approval_target(session), :approve)
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
       assert Session.list_tool_trust(session) == %{}
     end
 
     test "trusted tool approvals are auto-approved without pending approval" do
       session = start_subscribed_session()
-      assert :ok = Session.continue(session)
+      send_approval(session)
+      target = approval_target(session)
+      assert :ok = Session.respond_to_approval(session, target, :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
       assert :ok = Session.set_tool_trust(session, "shell", :session)
 
       approval = %Event.ToolApproval{
@@ -210,7 +330,9 @@ defmodule MingaAgent.SessionApprovalTest do
       refute_received {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}}
 
       refute_received {:agent_event, _, {:approval_pending, _}}
-      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+
+      assert {:error, :no_pending_approval} =
+               Session.respond_to_approval(session, target, :approve)
     end
 
     test "trusted approval remains safe while another approval is pending" do
@@ -225,8 +347,11 @@ defmodule MingaAgent.SessionApprovalTest do
         reply_to: self()
       })
 
-      assert_receive {:agent_event, _, {:approval_pending, %{tool_call_id: "tc_pending"}}},
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending, %Public{target: %Target{tool_call_id: "tc_pending"}}}},
                      @event_timeout
+
+      target = approval_target(session)
 
       send_provider_event(session, %Event.ToolApproval{
         tool_call_id: "tc_auto",
@@ -240,7 +365,7 @@ defmodule MingaAgent.SessionApprovalTest do
       assert_receive {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}},
                      @event_timeout
 
-      assert :ok = Session.respond_to_approval(session, :reject)
+      assert :ok = Session.respond_to_approval(session, target, :reject)
       assert_receive {:tool_approval_response, "tc_pending", :reject}, @event_timeout
     end
 
@@ -456,22 +581,25 @@ defmodule MingaAgent.SessionApprovalTest do
 
       refute_received {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", _scope}}
 
-      receive do
-        {:agent_event, ^session, {:approval_pending, %{tool_call_id: "tc_2", name: "read_file"}}} ->
-          :ok
+      target =
+        receive do
+          {:agent_event, ^session,
+           {:approval_pending,
+            %Public{target: %Target{tool_call_id: "tc_2"} = target, name: "read_file"}}} ->
+            target
 
-        {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", scope}} ->
-          flunk("queued turn reused #{inspect(scope)} trust instead of requesting approval")
+          {:agent_event, ^session, {:tool_auto_approved, "tc_2", "read_file", scope}} ->
+            flunk("queued turn reused #{inspect(scope)} trust instead of requesting approval")
 
-        {:agent_event, ^session, {:error, message}} ->
-          flunk("queued turn failed before approval: #{message}")
-      after
-        @durable_workflow_timeout -> flunk("queued turn did not request approval for tc_2")
-      end
+          {:agent_event, ^session, {:error, message}} ->
+            flunk("queued turn failed before approval: #{message}")
+        after
+          @durable_workflow_timeout -> flunk("queued turn did not request approval for tc_2")
+        end
 
       assert Session.list_tool_trust(session) == %{}
 
-      assert :ok = Session.respond_to_approval(session, :approve)
+      assert :ok = Session.respond_to_approval(session, target, :approve)
 
       await_queued_turn_boundary(session, 3, "approved follow-up")
 
@@ -531,16 +659,31 @@ defmodule MingaAgent.SessionApprovalTest do
 
     test "respond_to_approval with no pending returns error" do
       session = start_subscribed_session()
-      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+      send_approval(session)
+      target = approval_target(session)
+      assert :ok = Session.respond_to_approval(session, target, :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+
+      assert {:error, :no_pending_approval} =
+               Session.respond_to_approval(session, target, :approve)
     end
 
     test "abort clears pending approval" do
       session = start_subscribed_session()
       send_approval(session)
+      target = approval_target(session)
 
       :ok = Session.abort(session)
 
-      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+      assert_receive {:tool_approval_response, "tc1", :reject}, @event_timeout
+
+      assert {:error, :stale_request} =
+               Session.respond_to_approval(session, target, :approve_session)
+
+      assert Session.editor_snapshot(session).pending_approval == nil
+      assert Session.list_tool_trust(session) == %{}
+      refute_received {:tool_approval_response, "tc1", _}
+      refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
     end
   end
 

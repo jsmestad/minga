@@ -133,25 +133,21 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
-  @doc "Responds to a tool approval as an attached driver."
-  @spec approve(String.t(), String.t(), pid(), Session.approval_decision()) ::
+  @doc "Resolves the exact displayed approval as an authorized attached driver."
+  @spec approve(
+          String.t(),
+          String.t(),
+          pid(),
+          Session.approval_target(),
+          Session.approval_decision()
+        ) ::
           :ok | {:error, term()}
-  def approve(session_id, token, client_pid, decision)
+  def approve(session_id, token, client_pid, %MingaAgent.ToolApproval.Target{} = target, decision)
       when is_binary(session_id) and is_binary(token) and is_pid(client_pid) and
-             decision in [:approve, :approve_session, :approve_turn, :reject] do
-    approve(session_id, token, client_pid, nil, decision)
-  end
-
-  @doc "Responds to a stable tool approval id as an attached driver."
-  @spec approve(String.t(), String.t(), pid(), String.t() | nil, Session.approval_decision()) ::
-          :ok | {:error, term()}
-  def approve(session_id, token, client_pid, approval_id, decision)
-      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) and
-             (is_binary(approval_id) or is_nil(approval_id)) and
              decision in [:approve, :approve_session, :approve_turn, :reject] do
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id) do
-      Session.respond_to_approval_as(pid, client_pid, approval_id, decision)
+      Session.respond_to_approval_as(pid, client_pid, target, decision)
     end
   end
 

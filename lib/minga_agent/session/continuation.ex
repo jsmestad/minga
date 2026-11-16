@@ -16,6 +16,8 @@ defmodule MingaAgent.Session.Continuation do
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
 
+  @typep tool_call_ids :: MapSet.t(String.t())
+
   @typedoc "Origin and continuation guarantee of the stored model history."
   @type provenance :: :lossless | :legacy_reconstructed
 
@@ -701,8 +703,8 @@ defmodule MingaAgent.Session.Continuation do
       )
       when is_list(messages) and is_list(calls) and calls != [] do
     with :ok <- validate_messages(messages),
-         :ok <- validate_checkpoint_calls(calls),
-         :ok <- validate_checkpoint_progression(continuation, messages) do
+         {:ok, call_ids} <- validate_checkpoint_calls(calls),
+         :ok <- validate_checkpoint_progression(continuation, messages, call_ids) do
       checkpoint_id = checkpoint_id(request_id, messages, calls)
 
       checkpoint = %{
@@ -804,6 +806,41 @@ defmodule MingaAgent.Session.Continuation do
         %Message{}
       ),
       do: {:error, :missing_tool_checkpoint}
+
+  @doc "Finds terminal calls in the active Request without treating historical results as current approvals."
+  @spec tool_call_completed?(t(), String.t()) :: boolean()
+  def tool_call_completed?(
+        %__MODULE__{
+          active_request: %Request{messages: initial},
+          tool_checkpoint: %{calls: calls, messages: messages}
+        },
+        tool_call_id
+      )
+      when is_binary(tool_call_id) do
+    case Enum.find(calls, &(&1.tool_call_id == tool_call_id)) do
+      %{status: {:completed, _result}} -> true
+      nil -> request_tool_result?(messages, initial, tool_call_id)
+      _pending_or_admitted -> false
+    end
+  end
+
+  def tool_call_completed?(
+        %__MODULE__{active_request: %Request{messages: initial}, messages: messages},
+        tool_call_id
+      )
+      when is_binary(tool_call_id),
+      do: request_tool_result?(messages, initial, tool_call_id)
+
+  def tool_call_completed?(%__MODULE__{}, tool_call_id) when is_binary(tool_call_id), do: false
+
+  @spec request_tool_result?([Message.t()], [Message.t()], String.t()) :: boolean()
+  defp request_tool_result?([_message | messages], [_initial | initial], tool_call_id),
+    do: request_tool_result?(messages, initial, tool_call_id)
+
+  defp request_tool_result?(messages, [], tool_call_id),
+    do: Enum.any?(messages, &match?(%Message{role: :tool, tool_call_id: ^tool_call_id}, &1))
+
+  defp request_tool_result?([], _initial, _tool_call_id), do: false
 
   @spec validate_tool_result_identity(checkpoint_call(), String.t(), Message.t()) ::
           :ok | {:error, :tool_result_identity_mismatch}
@@ -1052,27 +1089,25 @@ defmodule MingaAgent.Session.Continuation do
 
   defp validate_tool_checkpoint(_checkpoint), do: {:error, :invalid_tool_checkpoint}
 
-  @spec validate_checkpoint_calls([map()]) :: :ok | {:error, term()}
+  @spec validate_checkpoint_calls([map()]) :: {:ok, tool_call_ids()} | {:error, term()}
   defp validate_checkpoint_calls(calls) do
-    valid? =
-      Enum.all?(calls, fn
-        %{tool_call_id: id, name: name, arguments: arguments} ->
-          is_binary(id) and id != "" and is_binary(name) and name != "" and is_map(arguments)
+    Enum.reduce_while(calls, {:ok, MapSet.new()}, fn
+      %{tool_call_id: id, name: name, arguments: arguments}, {:ok, ids}
+      when is_binary(id) and id != "" and is_binary(name) and name != "" and is_map(arguments) ->
+        if MapSet.member?(ids, id) do
+          {:halt, {:error, :invalid_checkpoint_calls}}
+        else
+          {:cont, {:ok, MapSet.put(ids, id)}}
+        end
 
-        _call ->
-          false
-      end)
-
-    ids = Enum.map(calls, &Map.get(&1, :tool_call_id))
-
-    if valid? and Enum.uniq(ids) == ids,
-      do: :ok,
-      else: {:error, :invalid_checkpoint_calls}
+      _call, _ids ->
+        {:halt, {:error, :invalid_checkpoint_calls}}
+    end)
   end
 
   @spec validate_restored_checkpoint_calls([checkpoint_call()]) :: :ok | {:error, term()}
   defp validate_restored_checkpoint_calls(calls) do
-    with :ok <- validate_checkpoint_calls(calls) do
+    with {:ok, _call_ids} <- validate_checkpoint_calls(calls) do
       if Enum.all?(calls, &valid_restored_checkpoint_call?/1),
         do: :ok,
         else: {:error, :invalid_checkpoint_call_status}
@@ -1092,17 +1127,23 @@ defmodule MingaAgent.Session.Continuation do
 
   defp valid_restored_checkpoint_call?(_call), do: false
 
-  @spec validate_checkpoint_progression(t(), [Message.t()]) :: :ok | {:error, term()}
+  @spec validate_checkpoint_progression(t(), [Message.t()], tool_call_ids()) ::
+          :ok | {:error, term()}
   defp validate_checkpoint_progression(
          %__MODULE__{tool_checkpoint: nil, active_request: %Request{messages: request_messages}},
-         messages
+         messages,
+         _call_ids
        ) do
     validate_initial_request_prefix(messages, request_messages)
   end
 
   defp validate_checkpoint_progression(
-         %__MODULE__{tool_checkpoint: checkpoint},
-         messages
+         %__MODULE__{
+           tool_checkpoint: checkpoint,
+           active_request: %Request{messages: request_messages}
+         },
+         messages,
+         call_ids
        ) do
     completed_results =
       Enum.map(checkpoint.calls, fn
@@ -1113,9 +1154,53 @@ defmodule MingaAgent.Session.Continuation do
     if Enum.any?(completed_results, &is_nil/1) do
       {:error, :previous_tool_group_unresolved}
     else
-      validate_message_prefix(messages, checkpoint.messages ++ completed_results)
+      with {:ok, remaining} <-
+             consume_checkpoint_prefix(checkpoint.messages, messages, request_messages, call_ids) do
+        validate_message_prefix(remaining, completed_results)
+      end
     end
   end
+
+  # The admitted prefix can contain earlier requests' IDs; only its later messages belong to this request.
+  @spec consume_checkpoint_prefix(
+          [Message.t()],
+          [Message.t()],
+          [Message.t()],
+          tool_call_ids()
+        ) ::
+          {:ok, [Message.t()]} | {:error, :invalid_checkpoint_progression | :reused_tool_call_id}
+  defp consume_checkpoint_prefix(
+         [message | checkpoint_tail],
+         [message | messages_tail],
+         [_request_message | request_tail],
+         call_ids
+       ) do
+    consume_checkpoint_prefix(checkpoint_tail, messages_tail, request_tail, call_ids)
+  end
+
+  defp consume_checkpoint_prefix(
+         [message | checkpoint_tail],
+         [message | messages_tail],
+         [],
+         call_ids
+       ) do
+    case reuses_tool_call_id?(message, call_ids) do
+      true -> {:error, :reused_tool_call_id}
+      false -> consume_checkpoint_prefix(checkpoint_tail, messages_tail, [], call_ids)
+    end
+  end
+
+  defp consume_checkpoint_prefix([], messages, [], _call_ids), do: {:ok, messages}
+
+  defp consume_checkpoint_prefix(_checkpoint, _messages, _request, _call_ids),
+    do: {:error, :invalid_checkpoint_progression}
+
+  @spec reuses_tool_call_id?(Message.t(), tool_call_ids()) :: boolean()
+  defp reuses_tool_call_id?(%Message{role: :assistant, tool_calls: [_ | _] = calls}, call_ids) do
+    Enum.any?(calls, &MapSet.member?(call_ids, &1.id))
+  end
+
+  defp reuses_tool_call_id?(_message, _call_ids), do: false
 
   @spec validate_initial_request_prefix([Message.t()], [Message.t()]) :: :ok | {:error, term()}
 

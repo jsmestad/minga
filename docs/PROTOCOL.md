@@ -48,7 +48,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 32). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 32 separates Agent Help from Chat and adds source-bound Review controls. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#gui-action-input-opcode-frontend--beam).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 33). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 33 binds approval rows and decisions to their original session, admitted request, and tool call. Version 32 separates Agent Help from Chat and adds source-bound Review controls. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#gui-action-input-opcode-frontend--beam).
 
 ---
 
@@ -842,7 +842,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 32). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 33). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 

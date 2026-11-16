@@ -1338,7 +1338,7 @@ defmodule MingaEditor do
   end
 
   def handle_info(:agent_spinner_tick, state) do
-    state = dispatch_agent_event(state, :spinner_tick)
+    state = MingaEditor.Agent.SessionEventWorkflow.spinner_tick(state)
     {:noreply, state}
   end
 
@@ -1364,7 +1364,7 @@ defmodule MingaEditor do
   end
 
   def handle_info(:dismiss_toast, state) do
-    state = dispatch_agent_event(state, :dismiss_toast)
+    state = MingaEditor.Agent.SessionEventWorkflow.dismiss_toast(state)
 
     if UIState.toast_visible?(state.workspace.agent_ui) and state.frontend.backend != :headless do
       Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
@@ -1631,8 +1631,8 @@ defmodule MingaEditor do
     {:noreply, schedule_render(state, 16)}
   end
 
-  defp route_agent_event(state, _session_pid, event, :active_agent) do
-    state = dispatch_agent_event(state, event)
+  defp route_agent_event(state, session_pid, event, :active_agent) do
+    state = Events.dispatch(state, session_pid, event)
     {:noreply, state}
   end
 
@@ -1719,9 +1719,6 @@ defmodule MingaEditor do
       do: :active_agent,
       else: :background
   end
-
-  @spec dispatch_agent_event(EditorState.t(), term()) :: EditorState.t()
-  defp dispatch_agent_event(state, event), do: Events.dispatch(state, event)
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────
 

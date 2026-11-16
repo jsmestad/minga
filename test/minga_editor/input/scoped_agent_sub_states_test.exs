@@ -6,6 +6,11 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
 
   import Minga.Test.ScopedInputHelpers
 
+  alias MingaAgent.ToolApproval.Preview, as: ApprovalPreview
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
+  alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.View.Preview
 
@@ -13,27 +18,27 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
     setup do
       state = base_state(keymap_scope: :agent, agentic_active: true)
 
-      approval = %{
-        tool_call_id: "tc_123",
-        name: "write_file",
-        args: %{"path" => "/tmp/test.txt"}
-      }
+      approval =
+        PendingApproval.new(
+          self(),
+          Public.new(
+            Target.new("scoped-fixture", "admitted-request", "tc_123"),
+            "write_file",
+            %{"path" => "/tmp/test.txt"},
+            ApprovalPreview.new(:args, "", [])
+          )
+        )
 
       state =
         MingaEditor.Shell.Traditional.Workflow.install_agent_state(
           state,
-          (fn agent -> %{agent | pending_approval: approval} end).(
-            MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+          AgentState.set_pending_approval(
+            MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state),
+            approval
           )
         )
 
       {:ok, state: state}
-    end
-
-    test "approval decision keys are handled", %{state: state} do
-      for key <- [?y, ?a, ?t, ?n] do
-        assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
-      end
     end
 
     test "unrelated key passes through approval routing", %{state: state} do

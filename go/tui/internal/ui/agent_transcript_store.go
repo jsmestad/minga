@@ -399,6 +399,7 @@ func (p *transcriptPlan) commit() {
 // occurrence, so revisions and removals have exact additive resource effects.
 func transcriptPayloadBytes(message protocol.AgentChatMessage) uint64 {
 	total := uint64(len(message.Text)) + uint64(len(message.Name)) + uint64(len(message.Summary)) + uint64(len(message.Result))
+	total += uint64(len(message.ApprovalTarget.SessionID)) + uint64(len(message.ApprovalTarget.RequestID)) + uint64(len(message.ApprovalTarget.ToolCallID))
 	total += transcriptStyledBytes(message.StyledLines)
 	for _, block := range message.MarkdownBlocks {
 		total += transcriptStyledBytes(block.Lines) + uint64(len(block.Language)) + uint64(len(block.Label)) + uint64(len(block.TargetPath))

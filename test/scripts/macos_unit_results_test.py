@@ -5,6 +5,10 @@ import importlib.machinery
 import importlib.util
 import json
 import plistlib
+import runpy
+import shutil
+import signal
+import sys
 import tempfile
 import time
 import unittest
@@ -17,6 +21,22 @@ LOADER = importlib.machinery.SourceFileLoader("macos_unit", str(SCRIPT))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 native = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(native)
+GEOMETRY_FIXTURE_PATH = SCRIPT.parents[1] / "test/fixtures/native_approval_geometry_observer.py"
+GEOMETRY_FIXTURE = runpy.run_path(str(GEOMETRY_FIXTURE_PATH))["write_fixture"]
+
+
+def geometry_fixture(directory, width=220):
+    observer, host = directory / "observer", directory / "host"
+    context = (directory, "case-a", width, 4103, observer, host, 4104)
+    return GEOMETRY_FIXTURE(*context), context
+
+
+def geometry_process_fixture(directory):
+    observer, host = directory / "observer", directory / "MingaTestHost"
+    for destination in (observer, host):
+        shutil.copyfile(GEOMETRY_FIXTURE_PATH, destination)
+        destination.chmod(0o755)
+    return observer, host
 
 
 def summary(passed=2, failed=0):
@@ -79,6 +99,162 @@ class MacOSUnitResultsTest(unittest.TestCase):
         errors, pids = native.validate_action("focus-replay", summary(2), replay_tree(), log(), 0)
         self.assertEqual(errors, [])
         self.assertEqual(pids, [4102])
+
+    def test_geometry_accepts_external_names_frames_and_native_scale_images_at_all_widths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for width in native.GEOMETRY_WIDTHS:
+                case = Path(directory) / str(width)
+                case.mkdir()
+                value, context = geometry_fixture(case, width)
+                for button in value["buttons"]:
+                    button["title_attribute"] = "AXDescription"
+                errors, captured = native.validate_geometry_observation(value, *context)
+                self.assertEqual(errors, [])
+                self.assertTrue(captured)
+
+    def test_geometry_rejects_clipped_overlapping_disabled_or_unhittable_controls(self):
+        mutations = [
+            (("workspace", "width"), 221),
+            (("workspace", "width"), 1 << 8192),
+            (("buttons", 0, "frame", "width"), 80),
+            (("buttons", 0, "frame", "x"), float("nan")),
+            (("buttons", 1, "frame", "y"), 50),
+            (("buttons", 0, "enabled"), False),
+            (("buttons", 0, "press_capable"), False),
+            (("buttons", 0, "center_hits_exact_button"), False),
+            (("buttons", 0, "title"), "An unrelated button"),
+            (("buttons", 0, "title"), []),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            original, context = geometry_fixture(Path(directory))
+            for path, replacement in mutations:
+                with self.subTest(path=path):
+                    value = copy.deepcopy(original)
+                    subject = value
+                    for key in path[:-1]:
+                        subject = subject[key]
+                    subject[path[-1]] = replacement
+                    errors, captured = native.validate_geometry_observation(value, *context)
+                    self.assertTrue(any(error.startswith("assertion:") for error in errors))
+                    self.assertTrue(captured)
+            original["buttons"].pop()
+            errors, _ = native.validate_geometry_observation(original, *context)
+            self.assertTrue(any("all four" in error for error in errors))
+
+    def test_geometry_rejects_cross_run_identity_and_corrupt_captures(self):
+        mutations = [
+            (("run_id",), "previous-case"),
+            (("observer_pid",), 4102),
+            (("host", "window_id"), 100),
+            (("capture", "sha256"), "0" * 64),
+            (("capture", "decoded_pixel_width"), 221),
+            (("capture", "scale"), 1 << 8192),
+            (("capture", "scale"), 1e308),
+            (("capture", "ax_window_bounds", "x"), -1),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            original, context = geometry_fixture(Path(directory))
+            for path, replacement in mutations:
+                with self.subTest(path=path):
+                    value = copy.deepcopy(original)
+                    subject = value
+                    for key in path[:-1]:
+                        subject = subject[key]
+                    subject[path[-1]] = replacement
+                    errors, _ = native.validate_geometry_observation(value, *context)
+                    self.assertTrue(any(error.startswith("infrastructure:") for error in errors))
+            image = Path(directory) / "window.png"
+            image.write_bytes(b"corrupt")
+            errors, captured = native.validate_geometry_observation(original, *context)
+            self.assertTrue(any("PNG" in error for error in errors))
+            self.assertFalse(captured)
+            image.unlink()
+            errors, captured = native.validate_geometry_observation(original, *context)
+            self.assertTrue(any("PNG" in error for error in errors))
+            self.assertFalse(captured)
+
+    def test_containment_overflow_is_retained_as_invalid_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            value, context = geometry_fixture(Path(directory))
+            for key in ("point_bounds", "ax_window_bounds"):
+                value["capture"][key].update({"x": 1 << 1023, "width": 1 << 1023})
+            errors, captured = native.validate_geometry_observation(value, *context)
+            self.assertTrue(any("Invalid native capture bounds" in error for error in errors))
+            self.assertFalse(captured)
+
+    def test_positive_host_failure_is_reported_even_when_already_reaped(self):
+        with native.subprocess.Popen([sys.executable, "-c", "raise SystemExit(1)"], stdin=native.subprocess.DEVNULL, stdout=native.subprocess.DEVNULL, stderr=native.subprocess.STDOUT, start_new_session=True) as process:
+            self.assertEqual(process.wait(timeout=10), 1)
+            errors = []
+            native.stop_geometry_process(process, "host", errors, grace=0.1)
+            self.assertTrue(any("host exited unexpectedly" in error for error in errors))
+
+    def test_lifecycle_evidence_cannot_claim_stale_identity_or_unobserved_cleanup(self):
+        expected = {
+            "run_id": "case-a", "width": 220, "supervisor_pid": 4100,
+            "host": {"executable": "/host", "pid": 4104, "pgid": 4104, "status": "terminated_reaped", "return_code": 0},
+            "observer": {"executable": "/observer", "pid": 4103, "pgid": 4103, "status": "terminated_reaped", "return_code": 0},
+        }
+        launch = copy.deepcopy(expected)
+        launch["schema"] = "minga-approval-geometry-launch-v2"
+        for role in ("host", "observer"):
+            launch[role].update({"status": "launched", "return_code": None})
+        cleanup = {"schema": "minga-approval-geometry-cleanup-v1", **copy.deepcopy(expected), "descriptors_closed": True, "errors": []}
+        self.assertEqual(native.validate_geometry_lifecycle(launch, cleanup, expected), [])
+        for path, replacement in (
+            (("run_id",), "stale"), (("supervisor_pid",), 1),
+            (("host", "pid"), 4105), (("host", "status"), "not_launched"),
+            (("host", "return_code"), None), (("descriptors_closed",), False),
+            (("errors",), ["host could not be reaped"]),
+        ):
+            with self.subTest(path=path):
+                forged = copy.deepcopy(cleanup)
+                subject = forged
+                for key in path[:-1]:
+                    subject = subject[key]
+                subject[path[-1]] = replacement
+                self.assertTrue(native.validate_geometry_lifecycle(launch, forged, expected))
+
+    def test_early_observer_exit_still_kills_and_reaps_an_uncooperative_host(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            observer, host = geometry_process_fixture(base)
+            (base / "early-observer-exit").touch()
+            (base / "ignore-host-shutdown").touch()
+            receipt = {"run_id": "early-exit", "width": 220, "validation_errors": []}
+            native.run_geometry_case(base / "case", receipt, observer, host, lambda: None, timeout=10, grace=0.1)
+            self.assertFalse(receipt["success"])
+            self.assertTrue(receipt["cleanup_verified"])
+            self.assertEqual(receipt["cleanup"]["observer"]["return_code"], 7)
+            self.assertEqual(receipt["cleanup"]["host"]["return_code"], -signal.SIGKILL)
+
+    def test_cancellation_between_launches_reaps_the_host_without_starting_an_observer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            observer, host = geometry_process_fixture(base)
+            receipt = {"run_id": "between-launches", "width": 220, "validation_errors": []}
+            def cancelled():
+                return signal.SIGINT if receipt.get("launch", {}).get("host", {}).get("pid") is not None else None
+            native.run_geometry_case(base / "case", receipt, observer, host, cancelled, timeout=10, grace=0.1)
+            self.assertFalse(receipt["success"])
+            self.assertTrue(receipt["cleanup_verified"])
+            self.assertEqual(receipt["cleanup"]["host"]["status"], "terminated_reaped")
+            self.assertIs(type(receipt["cleanup"]["host"]["return_code"]), int)
+            self.assertEqual(receipt["cleanup"]["observer"]["status"], "not_launched")
+            self.assertIsNone(receipt["cleanup"]["observer"]["pid"])
+
+    def test_cancellation_escalates_and_reaps_an_observer_that_ignores_term(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            observer, host = geometry_process_fixture(base)
+            (base / "ignore-observer-term").touch()
+            receipt = {"run_id": "observer-escalation", "width": 220, "validation_errors": []}
+            cancelled = lambda: signal.SIGINT if (base / "observer-armed").exists() else None
+            native.run_geometry_case(base / "case", receipt, observer, host, cancelled, timeout=10, grace=0.1)
+            self.assertFalse(receipt["success"])
+            self.assertTrue(receipt["cleanup_verified"])
+            self.assertEqual(receipt["cleanup"]["observer"]["return_code"], -signal.SIGKILL)
+            self.assertEqual(receipt["cleanup"]["host"]["status"], "terminated_reaped")
 
     def test_missing_named_case_cannot_hide_behind_a_passing_summary(self):
         tests = replay_tree()
@@ -311,6 +487,7 @@ class MacOSUnitResultsTest(unittest.TestCase):
             {"name": "ordinary", "summary": summary(100), "tests": tree("RenderingTests", [case("caret()")]), "success": True},
             {"name": "focus-policy", "summary": summary(12), "tests": tree(native.POLICY, [case("lifecycleAppliesOnlyDecodedOwner()")]), "success": True},
             {"name": "focus-replay", "summary": summary(), "tests": replay_tree(), "success": True},
+            {"name": "approval-geometry", "summary": None, "tests": None, "success": True, **{key: list(native.GEOMETRY_WIDTHS) for key in ("attempted_widths", "observed_widths", "captured_widths", "passed_widths")}},
         ]
         original = copy.deepcopy(actions)
         with tempfile.TemporaryDirectory() as directory:
@@ -320,12 +497,22 @@ class MacOSUnitResultsTest(unittest.TestCase):
             self.assertEqual(result["total_passed_tests"], 114)
             self.assertEqual(result["total_failed_tests"], 0)
             self.assertEqual(json.loads((output / "results.json").read_text())["actions"], original)
+            for key in ("attempted_widths", "observed_widths", "captured_widths", "passed_widths"):
+                incomplete = copy.deepcopy(original)
+                incomplete[3][key].pop()
+                self.assertFalse(native.save_results(output, incomplete, time.monotonic())["success"])
+            invented = copy.deepcopy(original)
+            invented[3]["summary"] = summary(3)
+            result = native.save_results(output, invented, time.monotonic())
+            self.assertFalse(result["success"])
+            self.assertEqual(result["total_passed_tests"], 114)
             actions[2]["summary"] = None
             actions[2]["success"] = False
             result = native.save_results(output, actions, time.monotonic())
             self.assertFalse(result["success"])
             self.assertEqual(result["total_passed_tests"], 112)
             self.assertFalse(native.save_results(output, actions[:2], time.monotonic())["success"])
+            self.assertFalse(native.save_results(output, original[:3], time.monotonic())["success"])
 
 
 if __name__ == "__main__":

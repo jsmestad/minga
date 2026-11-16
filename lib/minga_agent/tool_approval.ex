@@ -10,6 +10,8 @@ defmodule MingaAgent.ToolApproval do
 
   alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
   alias MingaAgent.ToolRouter
 
   @typedoc "Structured preview kind for an approval card."
@@ -49,15 +51,13 @@ defmodule MingaAgent.ToolApproval do
     }
   end
 
-  @doc "Returns an editor-safe map without the private reply PID."
-  @spec public(t()) :: map()
-  def public(%__MODULE__{} = approval) do
-    %{
-      tool_call_id: approval.tool_call_id,
-      name: approval.name,
-      args: approval.args,
-      preview: approval.preview
-    }
+  @doc "Builds a complete editor-safe approval bound to the displayed target."
+  @spec public(t(), Target.t()) :: Public.t()
+  def public(
+        %__MODULE__{tool_call_id: tool_call_id} = approval,
+        %Target{tool_call_id: tool_call_id} = target
+      ) do
+    Public.new(target, approval.name, approval.args, approval.preview)
   end
 
   @doc "Builds the structured preview shown in inline approval cards."

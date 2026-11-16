@@ -21,17 +21,15 @@ defmodule MingaEditor.State.Agent do
   """
 
   alias MingaAgent.RuntimeState
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
+  alias MingaEditor.Agent.PendingApproval
 
   @typedoc "Agent status (delegated from RuntimeState)."
   @type status :: RuntimeState.status()
 
-  @typedoc "Public pending tool approval data cached for rendering."
-  @type approval :: %{
-          required(:tool_call_id) => String.t(),
-          required(:name) => String.t(),
-          required(:args) => map(),
-          optional(:preview) => MingaAgent.ToolApproval.preview()
-        }
+  @typedoc "A displayed approval and its originating Session attachment."
+  @type approval :: PendingApproval.t()
 
   @typedoc "Agent rendering cache."
   @type t :: %__MODULE__{
@@ -124,9 +122,9 @@ defmodule MingaEditor.State.Agent do
 
   # ── Tool approval ──────────────────────────────────────────────────────────
 
-  @doc "Sets a pending tool approval."
+  @doc "Installs a pending approval bound to its originating Session."
   @spec set_pending_approval(t(), approval()) :: t()
-  def set_pending_approval(%__MODULE__{} = agent, approval) when is_map(approval) do
+  def set_pending_approval(%__MODULE__{} = agent, %PendingApproval{} = approval) do
     %{agent | pending_approval: approval}
   end
 
@@ -136,28 +134,77 @@ defmodule MingaEditor.State.Agent do
     %{agent | pending_approval: nil}
   end
 
+  @doc "Returns the exact displayed approval attachment or a distinct refusal."
+  @spec approval_for(t(), ApprovalTarget.t()) ::
+          {:ok, approval()} | {:error, :approval_not_presented | :stale_attachment}
+  def approval_for(
+        %__MODULE__{
+          pending_approval: %PendingApproval{approval: %PublicApproval{target: target}} = approval
+        },
+        %ApprovalTarget{} = target
+      ),
+      do: {:ok, approval}
+
+  def approval_for(%__MODULE__{pending_approval: nil}, %ApprovalTarget{}),
+    do: {:error, :approval_not_presented}
+
+  def approval_for(%__MODULE__{}, %ApprovalTarget{}), do: {:error, :stale_attachment}
+
+  @doc "Clears only the approval still bound to the resolved target and Session."
+  @spec clear_approval(t(), ApprovalTarget.t(), pid()) :: t()
+  def clear_approval(
+        %__MODULE__{
+          pending_approval: %PendingApproval{
+            session_pid: session_pid,
+            approval: %PublicApproval{target: target}
+          }
+        } = agent,
+        %ApprovalTarget{} = target,
+        session_pid
+      )
+      when is_pid(session_pid),
+      do: %{agent | pending_approval: nil}
+
+  def clear_approval(%__MODULE__{} = agent, %ApprovalTarget{}, session_pid)
+      when is_pid(session_pid),
+      do: agent
+
   @doc "Applies the render-cache fields returned by an agent session snapshot."
   @spec apply_session_snapshot(
           t(),
+          pid(),
           status(),
-          approval() | nil,
+          PublicApproval.t() | nil,
           String.t() | nil,
           String.t() | nil
         ) :: t()
   def apply_session_snapshot(
         %__MODULE__{} = agent,
+        session_pid,
         status,
         pending_approval,
         error,
         active_tool_name
-      ) do
+      )
+      when is_pid(session_pid) do
     runtime =
       agent.runtime
       |> RuntimeState.set_status(status)
       |> apply_active_tool_name(status, active_tool_name)
 
-    %{agent | runtime: runtime, pending_approval: pending_approval, error: error}
+    %{
+      agent
+      | runtime: runtime,
+        pending_approval: bind_approval(session_pid, pending_approval),
+        error: error
+    }
   end
+
+  @spec bind_approval(pid(), PublicApproval.t() | nil) :: approval() | nil
+  defp bind_approval(_session_pid, nil), do: nil
+
+  defp bind_approval(session_pid, %PublicApproval{} = approval),
+    do: PendingApproval.new(session_pid, approval)
 
   @spec apply_active_tool_name(RuntimeState.t(), status(), String.t() | nil) :: RuntimeState.t()
   defp apply_active_tool_name(runtime, :tool_executing, active_tool_name) do

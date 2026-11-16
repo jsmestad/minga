@@ -589,7 +589,7 @@ struct AgentChatTranscriptTests {
             Wire.ChatMessage(beamId: 5, content: .thinking(text: "t", collapsed: true)),
             Wire.ChatMessage(beamId: 6, content: .toolCall(name: "read", summary: "s", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 2, result: "r", previewKind: 3, previewLines: ["lib.ex"])),
             Wire.ChatMessage(beamId: 7, content: .styledToolCall(name: "run", summary: "s2", status: 2, isError: true, collapsed: false, autoApprovedScope: 2, durationMs: 3, resultLines: [[run]], previewKind: 1, previewLines: ["-old", "+new"])),
-            Wire.ChatMessage(beamId: 8, content: .approvalToolCall(name: "edit", summary: "needs ok", toolCallId: "tc", previewKind: 2, previewLines: ["mix test"])),
+            Wire.ChatMessage(beamId: 8, content: .approvalToolCall(name: "edit", summary: "needs ok", toolCallId: "tc", sessionId: "session-a", requestId: "request-a", previewKind: 2, previewLines: ["mix test"])),
             Wire.ChatMessage(beamId: 9, content: .system(text: "sys", isError: true)),
             Wire.ChatMessage(beamId: 10, content: .usage(input: 1, output: 2, cacheRead: 3, cacheWrite: 4, costMicros: 5))
         ]
@@ -609,7 +609,7 @@ struct AgentChatTranscriptTests {
         guard case .styledToolCall(7, "run", "s2", 2, true, false, 2, 3, let resultLines, 1, let styledPreview) = state.messages[6] else { Issue.record("expected styled tool"); return }
         #expect(resultLines[0][0].underline)
         #expect(styledPreview == ["-old", "+new"])
-        guard case .approvalToolCall(8, "edit", "needs ok", "tc", 2, let approvalPreview) = state.messages[7] else { Issue.record("expected approval"); return }
+        guard case .approvalToolCall(8, "edit", "needs ok", "tc", "session-a", "request-a", 2, let approvalPreview) = state.messages[7] else { Issue.record("expected approval"); return }
         #expect(approvalPreview == ["mix test"])
         guard case .system(9, "sys", true) = state.messages[8] else { Issue.record("expected system"); return }
         guard case .usage(10, 1, 2, 3, 4, 5) = state.messages[9] else { Issue.record("expected usage"); return }

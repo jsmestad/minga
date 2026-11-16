@@ -2,6 +2,17 @@
 
 package generated
 
+// AgentApprovalDecision is a generated enum (repr u8).
+type AgentApprovalDecision uint8
+
+const (
+	AgentApprovalDecisionUnknown        AgentApprovalDecision = 0
+	AgentApprovalDecisionApprove        AgentApprovalDecision = 1
+	AgentApprovalDecisionApproveSession AgentApprovalDecision = 2
+	AgentApprovalDecisionApproveTurn    AgentApprovalDecision = 3
+	AgentApprovalDecisionReject         AgentApprovalDecision = 4
+)
+
 // FrameRejectionReason is a generated enum (repr u8).
 type FrameRejectionReason uint8
 

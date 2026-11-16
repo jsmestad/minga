@@ -281,13 +281,18 @@ defmodule Minga.RenderModel.UI.AgentChat do
     @type t :: %__MODULE__{
             name: String.t(),
             tool_call_id: String.t(),
+            session_id: String.t(),
+            request_id: String.t(),
             summary: String.t(),
             preview_kind: preview_kind(),
             preview_lines: [String.t()]
           }
 
+    @enforce_keys [:tool_call_id, :session_id, :request_id]
     defstruct name: "",
               tool_call_id: "",
+              session_id: nil,
+              request_id: nil,
               summary: "",
               preview_kind: :args,
               preview_lines: []

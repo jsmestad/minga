@@ -998,3 +998,62 @@ struct EncoderAgentPromptTests {
         #expect(encoder.send(.agentPromptFit(windowID: 65534, generation: 3, columns: 1, maxRows: 1)) == .accepted)
     }
 }
+
+@Suite("Encoder Binary: request-bound tool approval")
+struct EncoderAgentToolApprovalTests {
+    @Test("all decisions encode the immutable IDs in session request tool order")
+    func approvalLayout() throws {
+        let decisions: [(AgentApprovalDecision, UInt8)] = [
+            (.approve, 1), (.approveSession, 2), (.approveTurn, 3), (.reject, 4)
+        ]
+        for (decision, rawValue) in decisions {
+            let payload = captureFrame {
+                #expect($0.send(.agentToolApproval(sessionId: "session-λ", requestId: "request-二", toolCallId: "tool-é", decision: decision)) == .accepted)
+            }
+            try #require(payload.count >= 9)
+            #expect(payload[0] == 0x07)
+            #expect(payload[1] == 0x68)
+            let (sessionId, requestOffset) = readString16(payload, 2)
+            let (requestId, toolOffset) = readString16(payload, requestOffset)
+            let (toolCallId, decisionOffset) = readString16(payload, toolOffset)
+            #expect(sessionId == "session-λ")
+            #expect(requestId == "request-二")
+            #expect(toolCallId == "tool-é")
+            #expect(payload[decisionOffset] == rawValue)
+            #expect(decisionOffset + 1 == payload.count)
+        }
+    }
+
+    @Test("each oversized identity is rejected without clipping or emitting approval")
+    func oversizedIdentity() {
+        let oversized = String(repeating: "é", count: 32_768)
+        for invalidIndex in 0..<3 {
+            var identities = ["session-a", "request-a", "tool-a"]
+            identities[invalidIndex] = oversized
+            var result: OutboundActionResult?
+            let payload = captureFrame {
+                result = $0.send(.agentToolApproval(sessionId: identities[0], requestId: identities[1], toolCallId: identities[2], decision: .approve))
+            }
+            #expect(result == .rejected(.payloadTooLarge(limitBytes: 65_535, attemptedBytes: 65_536)))
+            #expect(payload.isEmpty)
+        }
+    }
+
+    @Test("missing identities are rejected and leave the encoder available")
+    func emptyIdentity() throws {
+        let pipe = Pipe()
+        let encoder = try ProtocolEncoder(output: pipe.fileHandleForWriting)
+        for invalidIndex in 0..<3 {
+            var identities = ["session-a", "request-a", "tool-a"]
+            identities[invalidIndex] = ""
+            guard case .rejected(.invalidPayload) = encoder.send(.agentToolApproval(
+                sessionId: identities[0], requestId: identities[1], toolCallId: identities[2], decision: .reject
+            )) else {
+                Issue.record("Identity-free approval entered the transport")
+                continue
+            }
+        }
+        #expect(encoder.send(.agentToolApproval(sessionId: "session-a", requestId: "request-a", toolCallId: "tool-a", decision: .reject)) == .accepted)
+        #expect(encoder.waitForPendingWritesForTesting())
+    }
+}

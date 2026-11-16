@@ -18,7 +18,7 @@ defmodule MingaEditor.Input.ToolApproval do
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(state, cp, _mods) do
+  def handle_key(state, cp, 0) do
     agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
     if is_map(agent.pending_approval) and not state.workspace.agent_ui.panel.input_focused do
@@ -27,6 +27,8 @@ defmodule MingaEditor.Input.ToolApproval do
       {:passthrough, state}
     end
   end
+
+  def handle_key(state, _cp, _mods), do: {:passthrough, state}
 
   @spec dispatch_approval(EditorState.t(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()

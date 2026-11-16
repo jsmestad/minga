@@ -273,6 +273,23 @@ Native-field AX replay requires application focus to equal the exact `field.cell
 Use `--output-dir PATH` to retain the actual result summaries, test trees, logs, and `.xcresult` bundles.
 Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
 
+The same entrypoint then builds `MingaApprovalGeometry`, a plain Swift observer, and the existing `MingaTestHost` production-card fixture.
+It does not use an XCTest UI runner, provisioning profile, or Apple account.
+Python alone launches and supervises both children through retained `Popen` handles, holds the host's stdin lifeline, and independently terminates and reaps each created process.
+The collector receives an explicit host PID, executable, readiness file, run ID, width, and evidence directory; it acquires observations but never claims cleanup.
+Python writes versioned launch/cleanup receipts from actual handles and wait return codes, never signals a PID read from JSON, and stops subsequent launches if lifecycle evidence or descriptor closure is incomplete.
+Cancellation is recorded during geometry rather than raised across child creation, so cleanup still services both children.
+The observer requires existing Accessibility and Screen Recording authorization; it never requests or changes permissions, and missing access fails the gate.
+For each 220, 320, and 760 point workspace, retain actual external AX button names, frames, enabled state, press capability, and a system-wide center hit that resolves to that exact button or its descendant.
+This is an AX hit-test oracle, not an assertion of XCUI `isHittable`.
+
+Capture only the exact owned host PID/window through ScreenCaptureKit at native scale, including compositor chrome.
+Keep compositor and AX window bounds separate; compositor borders need not appear in the AX frame.
+The capture must contain its AX window, and external AX observations must remain unchanged across capture.
+Retain the PNG, its ImageIO-decoded dimensions and byte hash, launch/readiness/cleanup receipts, and source/product manifests.
+Python applies the geometry and artifact assertions and requires all three observed, captured, and passed widths.
+These width counts remain separate from XCTest counts; missing, stale, corrupt, mismatched, or incomplete evidence fails rather than becoming a successful skip.
+
 The shared conformance corpus can also assert editor-surface pixels.
 `ConformanceTranscriptTests.Pixels` is serialized and renders the dispatcher's newly committed snapshot through the production Metal renderer, using the same offscreen factories/readback as the temporal suite.
 Fixtures use Menlo 13, scale 1; cell Y coordinates include committed line spacing.

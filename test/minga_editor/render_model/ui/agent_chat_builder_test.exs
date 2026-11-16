@@ -1,10 +1,14 @@
 defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaAgent.ToolCall
   alias Minga.Config.Options
   alias Minga.Editing.Scroll
@@ -16,12 +20,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
+  alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias MingaEditor.UI.Theme
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Appearance
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -360,6 +367,138 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     assert view.preview_lines == []
   end
 
+  test "build/1 projects a source-bound public approval without replacing its captured preview" do
+    session = fake_session_pid()
+    target = ApprovalTarget.new("session/会", "admitted-request/é", "tc/🛠")
+    args = %{"path" => "lib/app.ex", "old_text" => "old", "new_text" => "new"}
+    preview = Preview.new(:diff, "captured lib/app.ex", ["-captured old", "+captured new"])
+    approval = PublicApproval.new(target, "edit_file", args, preview)
+    pending = PendingApproval.new(session, approval)
+    agent = AgentState.set_pending_approval(%AgentState{}, pending)
+    tool_call = ToolCall.new(target.tool_call_id, approval.name, args)
+    other = ToolCall.new("unrelated", "read_file", %{"path" => "README.md"})
+    theme = Theme.Fallback.theme()
+
+    for styled_messages <- [nil, [%{styled_lines: [[{"cached output", 0xBBC2CF, 0, 0}]]}]] do
+      panel =
+        synced_panel([{:tool_call, tool_call}, {:tool_call, other}],
+          styled_messages: styled_messages,
+          styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(theme.syntax)
+        )
+
+      model = context(session, panel, agent: agent, theme: theme) |> AgentChatBuilder.build()
+
+      assert [
+               {1,
+                {:approval_tool_call,
+                 %ApprovalView{
+                   name: "edit_file",
+                   session_id: "session/会",
+                   request_id: "admitted-request/é",
+                   tool_call_id: "tc/🛠",
+                   summary: "captured lib/app.ex",
+                   preview_kind: :diff,
+                   preview_lines: ["-captured old", "+captured new"]
+                 }}},
+               {2, {:tool_call, %ToolCallView{name: "read_file", summary: "README.md"}}}
+               | _
+             ] = model.resident_messages
+    end
+  end
+
+  test "build/1 does not reactivate historical tool cards when a request reuses a tool ID" do
+    session = fake_session_pid()
+    target = ApprovalTarget.new("session-A", "new-admitted-request", "reused-tool-id")
+    args = %{"command" => "echo current"}
+    preview = Preview.new(:command, "echo current", ["echo current"])
+    approval = PublicApproval.new(target, "shell", args, preview)
+
+    agent =
+      AgentState.set_pending_approval(%AgentState{}, PendingApproval.new(session, approval))
+
+    completed =
+      ToolCall.new(target.tool_call_id, "shell", %{"command" => "echo old"})
+      |> ToolCall.complete("old output")
+
+    rejected =
+      ToolCall.new(target.tool_call_id, "shell", %{"command" => "echo denied"})
+      |> ToolCall.error("denied")
+
+    abandoned = ToolCall.new(target.tool_call_id, "shell", %{"command" => "echo abandoned"})
+
+    current = ToolCall.new(target.tool_call_id, "shell", args)
+    theme = Theme.Fallback.theme()
+
+    for styled_messages <- [nil, [nil, nil, nil, nil]] do
+      panel =
+        synced_panel(
+          [
+            {:tool_call, abandoned},
+            {:tool_call, completed},
+            {:tool_call, rejected},
+            {:tool_call, current}
+          ],
+          styled_messages: styled_messages,
+          styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(theme.syntax)
+        )
+
+      model = context(session, panel, agent: agent, theme: theme) |> AgentChatBuilder.build()
+
+      assert [
+               {1, {:tool_call, %ToolCallView{status: :running}}},
+               {2, {:tool_call, %ToolCallView{status: :complete, result: "old output"}}},
+               {3, {:tool_call, %ToolCallView{status: :error, result: "denied", is_error: true}}},
+               {4,
+                {:approval_tool_call,
+                 %ApprovalView{
+                   session_id: "session-A",
+                   request_id: "new-admitted-request",
+                   tool_call_id: "reused-tool-id",
+                   summary: "echo current"
+                 }}}
+               | _
+             ] = model.resident_messages
+    end
+  end
+
+  test "build/1 removes resolved controls without changing the tool card's stable message ID" do
+    session = fake_session_pid()
+    target = ApprovalTarget.new("session-A", "admitted-request", "tc-shell")
+    args = %{"command" => "echo hello"}
+    preview = Preview.new(:command, "echo hello", ["echo hello"])
+    approval = PublicApproval.new(target, "shell", args, preview)
+
+    agent =
+      AgentState.set_pending_approval(%AgentState{}, PendingApproval.new(session, approval))
+
+    tool_call = ToolCall.new(target.tool_call_id, "shell", args) |> ToolCall.set_preview(preview)
+    message = {:tool_call, tool_call}
+    panel = synced_panel([message], message_ids: [{42, message}])
+    pending = context(session, panel, agent: agent) |> AgentChatBuilder.build()
+
+    assert [{42, {:approval_tool_call, %ApprovalView{}}} | _] = pending.resident_messages
+
+    resolved_agent = AgentState.clear_approval(agent, target, session)
+
+    for resolved_tool <- [
+          tool_call,
+          ToolCall.complete(tool_call, "hello"),
+          ToolCall.error(tool_call, "denied")
+        ] do
+      message = {:tool_call, resolved_tool}
+      panel = synced_panel([message], message_ids: [{42, message}])
+      model = context(session, panel, agent: resolved_agent) |> AgentChatBuilder.build()
+
+      assert [{42, {:tool_call, %ToolCallView{} = view}} | _] = model.resident_messages
+      assert view.status == resolved_tool.status
+      assert view.result == resolved_tool.result
+      assert view.is_error == resolved_tool.is_error
+      assert view.preview_kind == :command
+      assert view.preview_lines == ["echo hello"]
+      refute Enum.any?(model.resident_messages, &match?({_, {:approval_tool_call, _}}, &1))
+    end
+  end
+
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}
   defp message_summary({id, {:system, text, _level}}), do: {id, :system, text}
   defp message_summary({id, {:user, text}}), do: {id, :user, text}
@@ -399,6 +538,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       |> SessionState.set_keymap_scope(:agent)
 
     shell = TraditionalState.install_tab_bar(state.shell_runtime.state, tab_bar)
+    agent = Keyword.get(opts, :agent, TraditionalState.agent(shell))
+    shell = TraditionalState.replace_agent(shell, agent)
 
     state = %{
       state

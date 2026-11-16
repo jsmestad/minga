@@ -1044,7 +1044,7 @@ Typed body payloads:
 0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
 0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
 0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
-0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
+0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + session_id_len(2) + session_id + request_id_len(2) + request_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
 ```
 
@@ -1264,6 +1264,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x65 | semantic_item_activate | surface(1) + intent(1) + generation(4) + item_id_len(2) + item_id | Activate an exact completion, picker, file-tree, command-completion, timeline or Review item |
 | 0x66 | agent_prompt_fit | window_id(2) + generation(8) + columns(2) + max_rows(2) | Report the maximum physical inner text allocation for committed prompt window 65534 |
 | 0x67 | agent_prompt_scroll | window_id(2) + generation(8) + delta_rows(4, signed) | Scroll the committed prompt by wrapped visual rows; positive is down |
+| 0x68 | agent_tool_approval | session_id(string16) + request_id(string16) + tool_call_id(string16) + decision(1) | Resolve only the displayed session's admitted request and pending tool call |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1284,6 +1285,8 @@ All targeted handling resolves the BEAM-issued identity before applying the acti
 The BEAM decoder constructs `%MingaEditor.Target{surface: surface, intent: intent, generation: generation, item_id: item_id}` for semantic activations. Handlers pass this value through resolution and application; they do not replace it with an index or reselect the subject from active editor state. EX9015 enforces this source contract without changing the wire format.
 
 Buffer-picker choices retain the buffer process identity, not its current list position. Removing an earlier buffer cannot redirect a queued selection or Kill action. Named file-tree mutations preserve the current selected path when their asynchronous refresh arrives, including a selection made while the refresh was pending.
+Approval decisions use `1 = approve once`, `2 = trust for session`, `3 = trust for this turn`, and `4 = deny`; `0` and unknown values are rejected. The admitted `Request.request_id`, not a display turn counter, is the request identity. The Session validates all three IDs and caller authority in one serialized resolution. Stale or unauthorized actions leave the current approval and draft intact.
+
 
 Protocol version 28 retires `file_tree_click` (0x03), `file_tree_toggle` (0x04), `completion_select` (0x05), `breadcrumb_click` (0x06), `panel_switch_tab` (0x09), `file_tree_new_file` (0x0D), `file_tree_new_folder` (0x0E), `minibuffer_select` (0x17), `file_tree_delete` (0x30), `file_tree_rename` (0x31), `file_tree_duplicate` (0x32), `file_tree_move` (0x33), `file_tree_open_in_split` (0x3D), and `timeline_navigate` (0x4F). These sub-opcodes reject all payloads. Breadcrumb and panel-tab actions had no behavior and have no replacement.
 

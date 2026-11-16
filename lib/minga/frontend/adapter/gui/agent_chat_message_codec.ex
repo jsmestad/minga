@@ -81,6 +81,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.string16(:tool_name, approval.name)
     |> Writer.string16(:summary, approval.summary || "")
     |> Writer.string16(:tool_call_id, approval.tool_call_id)
+    |> Writer.string16(:session_id, approval.session_id)
+    |> Writer.string16(:request_id, approval.request_id)
     |> Writer.uint8(:preview_kind, preview_kind_byte(approval.preview_kind))
     |> Writer.uint16(:preview_line_count, Enum.count(approval.preview_lines))
     |> Writer.append(Enum.map(approval.preview_lines, &encode_preview_line/1))

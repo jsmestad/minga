@@ -122,9 +122,13 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   test "approval decisions install session and turn trust before leaving approval wait" do
     for {decision, scope} <- [approve_session: :session, approve_turn: :turn] do
       waiting = state(:exec, :approval_waiting)
+      approval = TurnExecution.pending_approval(waiting)
 
-      assert {:ok, _approval, next} =
+      assert {:error, :no_pending_approval} =
                TurnExecution.resolve_approval(waiting, nil, decision)
+
+      assert {:ok, ^approval, next} =
+               TurnExecution.resolve_approval(waiting, approval.tool_call_id, decision)
 
       assert TurnExecution.trust_levels(next) == %{"shell:rm -rf /" => scope}
     end

@@ -367,8 +367,17 @@ func decodeApprovalMessage(msg AgentChatMessage, body []byte, offset int) (Agent
 	if !ok {
 		return msg, false
 	}
-	if toolCallID != "" {
-		msg.Result = toolCallID
+	sessionID, next, ok := readString16(body, next)
+	if !ok {
+		return msg, false
+	}
+	requestID, next, ok := readString16(body, next)
+	if !ok {
+		return msg, false
+	}
+	msg.ApprovalTarget = AgentApprovalTarget{SessionID: sessionID, RequestID: requestID, ToolCallID: toolCallID}
+	if len(body) < next+3 {
+		return msg, false
 	}
 	msg.Text = strings.TrimSpace(name + " " + summary)
 	return decodeToolPreview(msg, body, next)

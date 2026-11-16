@@ -44,9 +44,12 @@ defmodule Minga.DoneGateTest do
     bin = Path.join(dir, "bin")
     File.mkdir_p!(bin)
 
-    for command <- ~w(bash git awk tr mktemp date cat rm mkdir grep jq python3) do
+    for command <- ~w(bash git awk tr mktemp date cat rm mkdir grep jq) do
       File.ln_s!(System.find_executable(command), Path.join(bin, command))
     end
+
+    {python, 0} = System.cmd("python3", ["-c", "import sys; print(sys.executable)"])
+    File.ln_s!(String.trim(python), Path.join(bin, "python3"))
 
     executable!(dir, "elixir", "printf '%s\\n' '#{System.version()}'")
 
@@ -257,8 +260,9 @@ defmodule Minga.DoneGateTest do
     write!(ctx.dir, "macos/project.yml", "changed\n")
     {_output, 1} = gate(ctx, [{"HOSTED_BUILD_EXIT", "65"}])
     evidence = native_results(ctx.dir)
-    [ordinary, policy, replay] = evidence["actions"]
+    [ordinary, policy, replay, geometry] = evidence["actions"]
     assert ordinary["success"]
+    assert geometry["success"]
     assert policy["execution_identity"]["build"]["exit_code"] == 65
 
     for action <- [policy, replay] do
@@ -273,14 +277,40 @@ defmodule Minga.DoneGateTest do
   end
 
   defp install_swift!(dir) do
+    fixture = Path.join(dir, "bin/native-approval-geometry-fixture")
+    File.cp!(Path.join(@root, "test/fixtures/native_approval_geometry_observer.py"), fixture)
+    File.chmod!(fixture, 0o755)
+
+    for path <- [
+          "macos/Sources/AccountingFixture.swift",
+          "macos/TestSupport/AccountingFixture.swift",
+          "macos/.generated/AccountingFixture.swift",
+          "macos/project.yml",
+          "macos/Minga.xcodeproj/project.pbxproj"
+        ] do
+      write!(dir, path, "Synthetic native accounting fixture, not UI evidence.\n")
+    end
+
     executable!(dir, "xcodebuild", ~S"""
     python3 - "$@" <<'PY'
-    import json, os, plistlib, sys
+    import json, os, plistlib, shutil, sys
     from pathlib import Path
     args = sys.argv[1:]
     products = Path.cwd() / "DerivedData/Build/Products"
     host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
     bare = "TEST_HOST=" in args
+    if "MingaApprovalGeometry" in args and "-showBuildSettings" not in args:
+        observer = products / "Debug/minga-approval-geometry"
+        observer.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path.cwd().parent / "bin/native-approval-geometry-fixture", observer)
+        observer.chmod(0o755)
+        host.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path.cwd().parent / "bin/native-approval-geometry-fixture", host)
+        host.chmod(0o755)
+        framework = products / "Debug/MingaUI.framework"
+        framework.mkdir(exist_ok=True)
+        (framework / "AccountingFixture").touch()
+        sys.exit(0)
     if "-showBuildSettings" in args:
         if "build-for-testing" not in args:
             print(json.dumps([{"target":"Minga","action":"build","buildSettings":{}}]))

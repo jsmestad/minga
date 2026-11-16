@@ -46,20 +46,21 @@ defmodule MingaEditor.AgentLifecycle do
   def rebuild_agent_from_session(state, session_pid) when is_pid(session_pid) do
     case safe_editor_snapshot(session_pid) do
       nil -> MingaEditor.Shell.Traditional.Workflow.install_agent_tool_clear(state)
-      snapshot -> apply_session_snapshot(state, snapshot)
+      snapshot -> apply_session_snapshot(state, session_pid, snapshot)
     end
   end
 
   def rebuild_agent_from_session(state, %Tab{}), do: state
 
   @doc "Hydrates execution and resolved model facts without replaying activation effects."
-  @spec apply_session_snapshot(state(), AgentSession.editor_snapshot()) :: state()
-  def apply_session_snapshot(state, snapshot) do
+  @spec apply_session_snapshot(state(), pid(), AgentSession.editor_snapshot()) :: state()
+  def apply_session_snapshot(state, session_pid, snapshot) when is_pid(session_pid) do
     agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
     agent =
       AgentState.apply_session_snapshot(
         agent,
+        session_pid,
         Map.get(snapshot, :status, :idle),
         Map.get(snapshot, :pending_approval),
         Map.get(snapshot, :error),

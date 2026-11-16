@@ -34,6 +34,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
   alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
@@ -106,6 +108,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # ── Internal dispatch clauses ────────────────────────────────────────
 
   @spec dispatch_action(state(), Protocol.GUI.gui_action()) :: state()
+
+  defp dispatch_action(
+         state,
+         {:agent_tool_approval, %MingaAgent.ToolApproval.Target{} = target, decision}
+       ),
+       do: AgentSubStates.respond_to_tool_approval(state, target, decision)
 
   defp dispatch_action(state, {:agent_prompt_fit, window_id, generation, columns, rows}),
     do: MingaEditor.Agent.PromptInput.fit(state, window_id, generation, columns, rows)
@@ -495,6 +503,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:execute_command, "redo"}),
     do: execute_history_command(state, :redo)
+
+  # The header names its Agent surface even when another panel owns keyboard focus.
+  defp dispatch_action(state, {:execute_command, "agent_toggle_help"}),
+    do: AgentCommands.scope_toggle_help(state)
 
   defp dispatch_action(state, {:execute_command, name_str}) do
     command = String.to_existing_atom(name_str)
