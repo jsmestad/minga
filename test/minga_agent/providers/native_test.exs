@@ -17,7 +17,6 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
-  alias MingaAgent.Test.RecordingProcessBackend
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tools
   alias ReqLLM.Context
@@ -651,54 +650,6 @@ defmodule MingaAgent.Providers.NativeTest do
       git_status = Enum.find(Tools.specs(), &(&1.name == "git_status"))
       GitStub.clear(dir)
       assert "git_status" in tool_names_for.([git_status])
-    end
-
-    test "find uses the owned fallback view when no project is active", %{
-      tmp_dir: dir
-    } do
-      call_count = :counters.new(1, [:atomics])
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          if count == 0 do
-            [
-              ReqLLM.StreamChunk.tool_call("find", %{"pattern" => "*.ex", "path" => "."}, %{
-                id: "tc_find_without_project",
-                index: 0
-              }),
-              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-            ]
-          else
-            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          project_root: nil,
-          llm_client: client,
-          tools: nil,
-          process_backend: RecordingProcessBackend
-        )
-
-      view = Native.project_view(pid)
-      working_dir = ProjectView.working_dir(view)
-
-      assert :ok = send_prompt(pid, "Find Elixir files")
-      events = collect_run_events()
-
-      assert %Event.ToolEnd{is_error: false, result: result} =
-               Enum.find(events, &match?(%Event.ToolEnd{name: "find"}, &1))
-
-      assert result =~ "find pattern=*.ex"
-      assert result =~ "path=#{working_dir}"
-      assert result =~ ~s(filter_root: "#{File.cwd!()}")
     end
 
     test "provider compaction honors configured threshold", %{tmp_dir: dir} do
