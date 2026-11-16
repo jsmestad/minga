@@ -651,7 +651,7 @@ def run_approval_geometry(root, products, run, action):
     try:
         sources = [root / name for name in ("macos/Sources", "macos/TestSupport", "macos/.generated", "macos/project.yml", "macos/Minga.xcodeproj/project.pbxproj", "scripts/test_macos_unit")]
         before = geometry_manifest(sources)
-        command = ["xcodebuild", "build", "-project", "Minga.xcodeproj", "-scheme", "MingaApprovalGeometry", "-configuration", "Debug", "-derivedDataPath", str(root / "macos/DerivedData"), "CODE_SIGNING_ALLOWED=NO", "-destination", "platform=macOS"]
+        command = ["xcodebuild", "build", "-project", "Minga.xcodeproj", "-scheme", "MingaApprovalGeometry", "-configuration", "Debug", "-derivedDataPath", str(products.parent.parent), "CODE_SIGNING_ALLOWED=NO", "-destination", "platform=macOS"]
         action["command"], action["executed"] = command, True
         with log.open("w") as stream:
             action["exit_code"] = subprocess.run(command, cwd=root / "macos", stdout=stream, stderr=subprocess.STDOUT, check=False, timeout=300).returncode
@@ -823,7 +823,15 @@ def main():
         geometry = approval_geometry_action(run)
         actions.append(geometry)
         save_results(output, actions, started)
-        run_approval_geometry(root, products, run, geometry)
+        # A standalone host build must not replace the hosted products consumed by later replay.
+        geometry_products = root / "macos/DerivedData/ApprovalGeometry/Build/Products"
+        run_approval_geometry(root, geometry_products, run, geometry)
+        if actions[2]["success"]:
+            geometry["validation_errors"].extend(
+                f"infrastructure: geometry changed the hosted replay product: {error}"
+                for error in validate_build_identity(hosted_settings, products, True)
+            )
+            geometry["success"] = geometry["success"] and not geometry["validation_errors"]
         print(f"{'PASS' if geometry['success'] else 'FAIL'} approval-geometry: actual widths: {geometry['passed_widths']}\nGeometry log: {geometry['log']}")
         for error in geometry["validation_errors"]:
             print(error)

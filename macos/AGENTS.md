@@ -274,6 +274,8 @@ Use `--output-dir PATH` to retain the actual result summaries, test trees, logs,
 Replay coverage requires all seven named passed argument nodes; global xcresult counts represent logical functions, not parameterized executions.
 
 The same entrypoint then builds `MingaApprovalGeometry`, a plain Swift observer, and the existing `MingaTestHost` production-card fixture.
+Its standalone products use a separate `DerivedData/ApprovalGeometry` build tree inside the macOS directory, so normal app packaging cannot remove the hosted `PlugIns/MingaTests.xctest` needed by later recovery and conformance replay.
+The entrypoint rechecks previously qualified hosted products after geometry before reporting success.
 It does not use an XCTest UI runner, provisioning profile, or Apple account.
 Python alone launches and supervises both children through retained `Popen` handles, holds the host's stdin lifeline, and independently terminates and reaps each created process.
 The collector receives an explicit host PID, executable, readiness file, run ID, width, and evidence directory; it acquires observations but never claims cleanup.

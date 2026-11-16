@@ -276,6 +276,21 @@ defmodule Minga.DoneGateTest do
     refute evidence["success"]
   end
 
+  test "geometry leaves the hosted test bundle available for subsequent replay", ctx do
+    install_swift!(ctx.dir)
+    write!(ctx.dir, "macos/project.yml", "changed\n")
+    {_output, 0} = gate(ctx)
+
+    bundle =
+      Path.join(
+        ctx.dir,
+        "macos/DerivedData/Build/Products/Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest"
+      )
+
+    assert File.dir?(bundle)
+    assert native_results(ctx.dir)["success"]
+  end
+
   defp install_swift!(dir) do
     fixture = Path.join(dir, "bin/native-approval-geometry-fixture")
     File.cp!(Path.join(@root, "test/fixtures/native_approval_geometry_observer.py"), fixture)
@@ -296,10 +311,12 @@ defmodule Minga.DoneGateTest do
     import json, os, plistlib, shutil, sys
     from pathlib import Path
     args = sys.argv[1:]
-    products = Path.cwd() / "DerivedData/Build/Products"
+    derived = Path(args[args.index("-derivedDataPath") + 1]) if "-derivedDataPath" in args else Path.cwd() / "DerivedData"
+    products = derived / "Build/Products"
     host = products / "Debug/MingaTestHost.app/Contents/MacOS/MingaTestHost"
     bare = "TEST_HOST=" in args
     if "MingaApprovalGeometry" in args and "-showBuildSettings" not in args:
+        shutil.rmtree(host.parent.parent / "PlugIns", ignore_errors=True)
         observer = products / "Debug/minga-approval-geometry"
         observer.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(Path.cwd().parent / "bin/native-approval-geometry-fixture", observer)
@@ -319,10 +336,15 @@ defmodule Minga.DoneGateTest do
         print(json.dumps([{"target":"MingaTests","buildSettings":{"TEST_HOST":"" if bare else str(host),"BUNDLE_LOADER":"" if bare else str(host),"TARGET_BUILD_DIR":str(bundle.parent),"FULL_PRODUCT_NAME":bundle.name}}]))
         sys.exit(0)
     bundle = products / ("Debug/MingaTests.xctest" if bare else "Debug/MingaTestHost.app/Contents/PlugIns/MingaTests.xctest")
-    bundle.mkdir(parents=True, exist_ok=True)
-    if not bare:
-        host.parent.mkdir(parents=True, exist_ok=True)
-        host.touch()
+    if "test-without-building" in args:
+        if not bundle.is_dir() or not host.is_file():
+            print("Missing hosted test product")
+            sys.exit(70)
+    else:
+        bundle.mkdir(parents=True, exist_ok=True)
+        if not bare:
+            host.parent.mkdir(parents=True, exist_ok=True)
+            host.touch()
     if "build-for-testing" in args:
         status = int(os.environ.get("HOSTED_BUILD_EXIT", "0"))
         if status == 0:
