@@ -89,3 +89,32 @@ func BenchmarkTranscriptWarmUpdateView(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkTranscriptOwnerPrepare(b *testing.B) {
+	for _, count := range []int{100, 1000, 10000} {
+		for _, mode := range []string{"delta", "full_incoming"} {
+			b.Run(fmt.Sprintf("%s/%d", mode, count), func(b *testing.B) {
+				messages := make([]protocol.AgentChatMessage, count)
+				for index := range messages {
+					messages[index] = msg(uint32(index+1), "resident payload")
+				}
+				tr := testTranscriptWithMessages(messages)
+				frame := appendFrame(1, 1, uint32(count-2), msg(uint32(count), "tail"), msg(uint32(count+1), "new"))
+				if mode == "full_incoming" {
+					frame = replaceFrame(1, messages...)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				var changed int
+				for range b.N {
+					plan := tr.prepare()
+					if reason := plan.apply(frame); reason != transcriptApplied {
+						b.Fatal(reason)
+					}
+					changed = len(plan.cells)
+				}
+				b.ReportMetric(float64(changed), "changed_cells/op")
+			})
+		}
+	}
+}

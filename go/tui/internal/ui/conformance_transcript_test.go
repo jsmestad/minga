@@ -644,9 +644,9 @@ func applyConformanceTranscriptFrame(t *testing.T, model *Model, i int, step con
 		t.Fatalf("step %d (%s): truncated = %v, want %v", i, step.Note, store.truncated, want.Truncated)
 	}
 
-	ids := make([]uint32, len(store.messages))
-	for j := range store.messages {
-		ids[j] = store.messages[j].ID
+	ids := make([]uint32, store.len())
+	for j := range ids {
+		ids[j] = store.entry(j).message.ID
 	}
 	if len(ids) != want.Count {
 		t.Fatalf("step %d (%s): resident count = %d, want %d", i, step.Note, len(ids), want.Count)
@@ -685,7 +685,7 @@ func assertConformanceTranscriptPosition(t *testing.T, model *Model, i int, step
 
 func conformanceTranscriptBudget(model Model, step conformanceStep) int {
 	width := max(model.width-2, 1)
-	total := len(model.agentTranscriptAllLines(model.transcript.messages, width))
+	total := len(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width))
 	maxTop := 0
 	if step.Go != nil {
 		maxTop = step.Go.MaxTop
@@ -697,13 +697,13 @@ func conformanceTranscriptTopOffset(store *residentTranscript) int {
 	if store.pinned || store.anchor.slot == 0 {
 		return 0
 	}
-	index, found := store.bySlot[store.anchor.slot]
+	index, found := store.rank(store.anchor.slot)
 	if !found {
 		return 0
 	}
 	offset := store.anchor.row
 	for entry := 0; entry < index; entry++ {
-		offset += agentMessageRowCount(store.entries[entry].message) + 1
+		offset += agentMessageRowCount(store.entry(entry).message) + 1
 	}
 	return offset
 }

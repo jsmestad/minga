@@ -283,7 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if chat, ok := m.agentChat(); ok && component == "agent" {
-			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(), msg); handled {
+			if packet, handled := m.agent.handleKey(chat, m.transcript, msg); handled {
 				m.send(packet)
 				break
 			}
@@ -792,7 +792,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		}
 	}
 
-	transcriptCandidate, transcriptFailure := m.prepareTranscriptCandidate()
+	transcriptPlan, transcriptFailure := m.prepareTranscriptPlan()
 	if transcriptFailure != transcriptApplied {
 		return m.rejectStaging(
 			cmds,
@@ -834,6 +834,9 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		return m.rejectStaging(cmds, gutterFailure.reason, gutterFailure.description)
 	}
 
+	if transcriptPlan != nil {
+		transcriptPlan.commit()
+	}
 	if m.staging.base == 0 {
 		m.retireMissingWindows(windowSnapshot.windows)
 		m.lineCache.reset()
@@ -851,9 +854,6 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	// keyframe clears, and structural replacements publish atomically.
 	m.gutters = gutterCandidate
 	m.residentSemantics = windowSnapshot.semantics
-	if transcriptCandidate != nil {
-		m.transcript = transcriptCandidate
-	}
 	m.queueCommittedTextPresentations(nextTextPresentations, unusedTextPresentations)
 	m.lastCommittedSeq = seq
 	m.lastCommittedGeneration = generation
@@ -872,23 +872,22 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	return cmds
 }
 
-// prepareTranscriptCandidate folds every transcript command in arrival order
-// into one detached candidate. It performs no live writes, so any failure can
-// reject the complete frame before keyframe cache reset or mutation replay.
-func (m *Model) prepareTranscriptCandidate() (*residentTranscript, transcriptDropReason) {
-	var candidate *residentTranscript
+// prepareTranscriptPlan simulates every transcript command in arrival order.
+// Its overlay contains only affected entries; all resident pages stay read-only.
+func (m *Model) prepareTranscriptPlan() (*transcriptPlan, transcriptDropReason) {
+	var plan *transcriptPlan
 	for _, command := range m.staging.commands {
 		if command.Kind != protocol.CommandChrome || command.Chrome.Opcode != generated.OPGuiAgentTranscript {
 			continue
 		}
-		if candidate == nil {
-			candidate = m.transcript.detachedCandidate()
+		if plan == nil {
+			plan = m.transcript.prepare()
 		}
-		if reason := candidate.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
+		if reason := plan.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
 			return nil, reason
 		}
 	}
-	return candidate, transcriptApplied
+	return plan, transcriptApplied
 }
 
 // invalidateStaging discards any open transaction and emits one typed
@@ -1198,6 +1197,11 @@ func (m *Model) applyMutation(command protocol.Command) {
 	case protocol.CommandExtensionRuntime:
 		m.applyExtensionRuntime(command.ExtensionRuntime)
 	case protocol.CommandChrome:
+		// Transcript commands were consumed by the sole resident owner after
+		// validation. Never replay or retain their decoded payload in chrome.
+		if command.Chrome.Opcode == generated.OPGuiAgentTranscript {
+			return
+		}
 		if command.Chrome.Opcode == generated.OPGuiAgentHelp {
 			previous, _ := m.agentHelp()
 			if !command.Chrome.AgentHelp.Visible || !previous.Visible {
@@ -1522,22 +1526,12 @@ func (m *Model) toggleHUD(msg tea.KeyPressMsg) bool {
 	return false
 }
 
-func latestToolMessageID(messages []protocol.AgentChatMessage) (uint32, bool) {
-	for index := len(messages) - 1; index >= 0; index-- {
-		msg := messages[index]
-		if (msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.ID > 0 {
-			return msg.ID, true
-		}
-	}
-	return 0, false
+func latestToolMessageID(messages *residentTranscript) (uint32, bool) {
+	message, found := messages.latest(transcriptSummaryTool)
+	return message.ID, found
 }
 
-func latestThinkingMessageID(messages []protocol.AgentChatMessage) (uint32, bool) {
-	for index := len(messages) - 1; index >= 0; index-- {
-		msg := messages[index]
-		if msg.Kind == agentKindThinking && msg.ID > 0 {
-			return msg.ID, true
-		}
-	}
-	return 0, false
+func latestThinkingMessageID(messages *residentTranscript) (uint32, bool) {
+	message, found := messages.latest(transcriptSummaryThinking)
+	return message.ID, found
 }

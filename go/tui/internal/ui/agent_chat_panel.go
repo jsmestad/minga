@@ -38,7 +38,7 @@ func (a *agentPanel) spinner() string {
 // handleKey handles the Ctrl+Alt+X/Z collapse toggles. The stable message ID is
 // resolved against `messages` (the resident transcript, #2654) because it echoes
 // the BEAM-owned transcript IDs and remains valid after resident front trimming.
-func (a *agentPanel) handleKey(chat protocol.AgentChat, messages []protocol.AgentChatMessage, msg tea.KeyPressMsg) ([]byte, bool) {
+func (a *agentPanel) handleKey(chat protocol.AgentChat, messages *residentTranscript, msg tea.KeyPressMsg) ([]byte, bool) {
 	if !chat.Visible {
 		return nil, false
 	}
@@ -119,7 +119,7 @@ func (m Model) insetAgentLine(line string, width int) string {
 
 func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
 	limit = max(limit, 1)
-	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(m.agentTranscriptMessages()) == 0
+	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && m.transcript.len() == 0
 	if limit <= 2 {
 		return m.renderAgentMainColumn(chat, width, limit, empty)
 	}
@@ -159,7 +159,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	lines := make([]string, 0, budget)
 	composer := m.renderAgentComposerWithLimit(chat, width, budget)
 	_, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget)
-	messageCount := len(m.agentTranscriptMessages())
+	messageCount := m.transcript.len()
 	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
 	if chat.Pending != "" && len(lines) < contentBudget {
 		lines = append(lines, m.renderAgentNotice("◆ approval", chat.Pending, width))
@@ -249,7 +249,7 @@ func (m Model) renderAgentEarlierMessagesHidden(width int) string {
 
 func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
 	p := m.palette()
-	messageCount := len(m.agentTranscriptMessages())
+	messageCount := m.transcript.len()
 	label := "messages"
 	if messageCount == 1 {
 		label = "message"
@@ -362,7 +362,7 @@ func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, ri
 }
 
 func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget int) []string {
-	messages := m.agentTranscriptMessages()
+	messages := m.transcript
 	provider, model := splitAgentModelName(chat.ModelName)
 	lines := []string{m.renderAgentDetailFrame("top", "◇ Session", width)}
 	lines = append(lines, m.renderAgentDetailRow("Provider", nonEmpty(provider, "unknown"), width))
@@ -371,7 +371,7 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 	if chat.ThinkingLevel != "" {
 		lines = append(lines, m.renderAgentDetailRow("Thinking", chat.ThinkingLevel, width))
 	}
-	lines = append(lines, m.renderAgentDetailRow("Messages", fmt.Sprintf("%d", len(messages)), width))
+	lines = append(lines, m.renderAgentDetailRow("Messages", fmt.Sprintf("%d", messages.len()), width))
 
 	toolCount, runningTools, erroredTools := agentToolCounts(messages)
 	if toolCount > 0 {
@@ -455,36 +455,16 @@ func (m Model) renderAgentDetailContentLine(content string, width int) string {
 	return border.Render("│") + body + border.Render("│")
 }
 
-func agentToolCounts(messages []protocol.AgentChatMessage) (int, int, int) {
-	toolCount := 0
-	runningTools := 0
-	erroredTools := 0
-	for _, msg := range messages {
-		if msg.Kind != agentKindTool && msg.Kind != agentKindStyledTool && msg.Kind != agentKindApprovalTool {
-			continue
-		}
-		toolCount++
-		if msg.Status == 0 {
-			runningTools++
-		}
-		if msg.Status == 2 || msg.IsError {
-			erroredTools++
-		}
+func agentToolCounts(messages *residentTranscript) (int, int, int) {
+	if messages == nil {
+		return 0, 0, 0
 	}
-	return toolCount, runningTools, erroredTools
+	return messages.toolCounts[0], messages.toolCounts[1], messages.toolCounts[2]
 }
 
-func lastAgentError(messages []protocol.AgentChatMessage) string {
-	for index := len(messages) - 1; index >= 0; index-- {
-		msg := messages[index]
-		if msg.Kind == agentKindSystem && msg.Status == 1 && msg.Text != "" {
-			return msg.Text
-		}
-		if msg.IsError && msg.Text != "" {
-			return msg.Text
-		}
-	}
-	return ""
+func lastAgentError(messages *residentTranscript) string {
+	message, _ := messages.latest(transcriptSummaryError)
+	return message.Text
 }
 
 func splitAgentModelName(value string) (string, string) {
@@ -495,13 +475,9 @@ func splitAgentModelName(value string) (string, string) {
 	return "", strings.TrimSpace(value)
 }
 
-func lastAgentUsage(messages []protocol.AgentChatMessage) (protocol.AgentUsage, bool) {
-	for index := len(messages) - 1; index >= 0; index-- {
-		if messages[index].Kind == agentKindUsage {
-			return messages[index].Usage, true
-		}
-	}
-	return protocol.AgentUsage{}, false
+func lastAgentUsage(messages *residentTranscript) (protocol.AgentUsage, bool) {
+	message, found := messages.latest(transcriptSummaryUsage)
+	return message.Usage, found
 }
 
 func nonEmpty(value string, fallback string) string {
@@ -561,15 +537,6 @@ func (m Model) renderAgentNotice(label string, text string, width int) string {
 	textStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(p.SurfaceAlt())
 	line := labelStyle.Render(label) + textStyle.Render("  "+text)
 	return lipgloss.NewStyle().Background(p.SurfaceAlt()).Width(width).Render(fitStyled(line, width))
-}
-
-// agentTranscriptMessages is the transcript rendering source: the resident 0x86
-// store (#2654).
-func (m Model) agentTranscriptMessages() []protocol.AgentChatMessage {
-	if m.transcript != nil && m.transcript.hasEpoch {
-		return m.transcript.messages
-	}
-	return nil
 }
 
 // renderAgentResidentTranscript renders the visible transcript window from the
