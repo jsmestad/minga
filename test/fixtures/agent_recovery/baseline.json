@@ -1,0 +1,303 @@
+{
+  "environment": {
+    "erlang": "Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:4:4] [ds:4:4:10] [async-threads:1] [jit:ns]\n",
+    "os": "Linux 7.3.4-ogc6.1.fc45.x86_64 x86_64 GNU/Linux\n",
+    "elixir": "1.20.5",
+    "build": "MIX_ENV=dev; normal BEAM compilation, not a shipping release",
+    "otp_version": "29.1.2",
+    "corpus_version": "0.1",
+    "runtime_revision": "203a58731f9a57bd5645b67ff13a324d02766fed",
+    "evidence_kind": "deterministic external provider fixture; NON-LIVE-MODEL",
+    "route": "openai:gpt-6.1-sol / Codex OAuth; in-process llm_client, no HTTP",
+    "credential_mode": "synthetic OAuth fixture, not a real account or credential",
+    "live_model_tokens": null,
+    "live_model_cost": null,
+    "live_provider_requests": 0,
+    "dependency_lock_sha256": "6d8c5286db09adc315173aa41074080278fbae381b37b4d17af78cf35bcc04a5",
+    "fixtures": {
+      "scripts/agent_recovery_baseline": "518439f4e5ab70eae68ef6b6487d4fe730737026357cf4bc4763eb48f3b850a9",
+      "scripts/agent_recovery_baseline.exs": "d71f346305e20fb819bf31591b694797433cff605d506779e47084622fd195a6",
+      "scripts/agent_recovery_provider.exs": "94ea27d1db18010048f53506822dd42a2b69e5767790c55770e7f4018cd31187",
+      "test/fixtures/agent_recovery/output_fixture.py": "07ea08cc90a8f6ba6cab39533f1f05904edc7436ac9a34b8a43a3a1fb7c98d4d",
+      "test/fixtures/agent_recovery/process_fixture.py": "eca6ef447cbcc13041006d39f5d93f9160c670110e6eb557ab788992cc71f6e3",
+      "test/support/minga_agent/model_selection_fixture.ex": "72ba1104c49664cbbe6d6ee7320c0c8eb071ad41f0af206843fae7c0786a500d"
+    }
+  },
+  "scenarios": [
+    {
+      "status": "FAIL",
+      "actual": {
+        "observation": {
+          "event": "observed",
+          "identity_sample": "registration; survival measured by pidfd",
+          "interventions": [
+            "released surviving child through fixture barrier after cancellation",
+            "SIGKILL owned pid 42377 via pidfd",
+            "SIGKILL owned pid 42378 via pidfd"
+          ],
+          "late_effect": true,
+          "survivors": [
+            {
+              "parent": 42069,
+              "pid": 42377,
+              "start": "239269",
+              "state": "S"
+            },
+            {
+              "parent": 42377,
+              "pid": 42378,
+              "start": "239272",
+              "state": "S"
+            }
+          ],
+          "survivors_after_cleanup": []
+        },
+        "sentinel_written": true
+      },
+      "expected": "All owned shell descendants stop within 1000ms of abort; no late-effect.txt.",
+      "live_model_tokens": null,
+      "live_model_cost": null,
+      "scenario": "cancel_descendants",
+      "surviving_owned_processes": [
+        {
+          "parent": 42069,
+          "pid": 42377,
+          "start": "239269",
+          "state": "S"
+        },
+        {
+          "parent": 42377,
+          "pid": 42378,
+          "start": "239272",
+          "state": "S"
+        }
+      ],
+      "surviving_owned_processes_after_cleanup": [],
+      "prohibited_effects": [
+        "live owned descendants after cancellation deadline",
+        "post-cancel sentinel write"
+      ],
+      "canonical_owners": [
+        "#2843 Shell process-tree lifecycle",
+        "#2839 effect-worker cancellation"
+      ],
+      "interventions": [
+        "released surviving child through fixture barrier after cancellation",
+        "SIGKILL owned pid 42377 via pidfd",
+        "SIGKILL owned pid 42378 via pidfd"
+      ],
+      "elapsed_ms": 3904.444,
+      "provider_requests": 1,
+      "artifact_bytes": 56622,
+      "repository_files": {
+        "late-effect.txt": {
+          "bytes": 31,
+          "sha256": "970bb2179bb7d9093faf9751659203c853a5ac722bd0d06be1e6fd8b60d67e83"
+        },
+        "subject.txt": {
+          "bytes": 9,
+          "sha256": "25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218"
+        }
+      },
+      "accepted_completion": false
+    },
+    {
+      "status": "PASS",
+      "actual": {
+        "replacement_finished": true,
+        "completed_effect_bytes": "once\n",
+        "stale_text_installed": false,
+        "cancelled_consumer_terminated": true,
+        "process_observation": {
+          "identity": {
+            "parent": 42069,
+            "pid": 42388,
+            "start": "239380",
+            "state": "R"
+          },
+          "interventions": [],
+          "observation": "pid absent",
+          "survivors": [],
+          "survivors_after_cleanup": []
+        }
+      },
+      "expected": "completed.txt contains exactly once\\n; replacement completes without stale text or duplicate effects.",
+      "live_model_tokens": null,
+      "live_model_cost": null,
+      "scenario": "delayed_response",
+      "surviving_owned_processes": [],
+      "surviving_owned_processes_after_cleanup": [],
+      "prohibited_effects": [
+        "second append",
+        "stale response enters replacement continuation"
+      ],
+      "canonical_owners": [
+        "#3428 Session/Native request lifecycle"
+      ],
+      "interventions": [],
+      "elapsed_ms": 122.987,
+      "provider_requests": 3,
+      "artifact_bytes": 63332,
+      "repository_files": {
+        "completed.txt": {
+          "bytes": 5,
+          "sha256": "ad06e72726f6d8ff00228160453949c1ceb89571c99332e4815f9edce2acad07"
+        },
+        "subject.txt": {
+          "bytes": 9,
+          "sha256": "25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218"
+        }
+      },
+      "accepted_completion": true
+    },
+    {
+      "status": "FAIL",
+      "actual": {
+        "capture": "{:incomplete, :capture_byte_limit}",
+        "process_observation": {
+          "identity": {
+            "parent": 42069,
+            "pid": 42399,
+            "start": "239393",
+            "state": "R"
+          },
+          "interventions": [],
+          "observation": "pid absent",
+          "survivors": [],
+          "survivors_after_cleanup": []
+        },
+        "expected_bytes": 135168,
+        "expected_sha256": "eaa4d3845aacc50b2183d297f70a5f917c717ae06961fabff337ace060ac5219",
+        "displayed_bytes": 51200,
+        "presentation": ":complete",
+        "retained_bytes": 51200,
+        "retained_sha256": "28a204518c48b5735139bc4bed92bc0f0b04ecf04b0583a0f778b9018c611251",
+        "recovered_bytes": 51200,
+        "recovered_sha256": "28a204518c48b5735139bc4bed92bc0f0b04ecf04b0583a0f778b9018c611251",
+        "complete_byte_match": false
+      },
+      "expected": "Displayed output is shortened; fetch_output recovers all 135168 known bytes with identical SHA-256.",
+      "live_model_tokens": null,
+      "live_model_cost": null,
+      "scenario": "retained_output",
+      "surviving_owned_processes": [],
+      "surviving_owned_processes_after_cleanup": [],
+      "prohibited_effects": [
+        "missing retained bytes",
+        "source replay instead of retained retrieval",
+        "false complete capture"
+      ],
+      "canonical_owners": [
+        "#3432 retained shell output"
+      ],
+      "interventions": [],
+      "elapsed_ms": 154.025,
+      "provider_requests": 3,
+      "artifact_bytes": 941814,
+      "repository_files": {
+        "subject.txt": {
+          "bytes": 9,
+          "sha256": "25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218"
+        }
+      },
+      "accepted_completion": false
+    },
+    {
+      "status": "FAIL",
+      "actual": {
+        "process_observation": "No external command workload: read_file and write_file only; Session shutdown is monitored.",
+        "disk_bytes": "agent\n",
+        "buffer_bytes": "agent\n",
+        "conflict_reported": false,
+        "tool_status": ":complete",
+        "tool_result": "wrote 6 bytes to $SANDBOX/human_edit/project/subject.txt\n\n(No LSP diagnostics available for this file.)"
+      },
+      "expected": "subject.txt and any buffer preserve human\\n; stale whole-file edit reports a conflict.",
+      "live_model_tokens": null,
+      "live_model_cost": null,
+      "scenario": "human_edit",
+      "surviving_owned_processes": [],
+      "surviving_owned_processes_after_cleanup": [],
+      "prohibited_effects": [
+        "human disk or buffer bytes overwritten",
+        "silent success for stale edit"
+      ],
+      "canonical_owners": [
+        "#3436 revision-checked mutation"
+      ],
+      "interventions": [
+        "human wrote subject.txt after response preparation and before tool dispatch"
+      ],
+      "elapsed_ms": 83.279,
+      "provider_requests": 3,
+      "artifact_bytes": 65101,
+      "repository_files": {
+        "subject.txt": {
+          "bytes": 6,
+          "sha256": "d20bc21bb3c7736d8d03ade3ddb4c68b665cdfbca6f6df0f7fdd192f37f59060"
+        }
+      },
+      "accepted_completion": false
+    }
+  ],
+  "validation": {
+    "production_base": "203a58731f9a57bd5645b67ff13a324d02766fed",
+    "source_sha256": {
+      "scripts/agent_recovery_baseline": "518439f4e5ab70eae68ef6b6487d4fe730737026357cf4bc4763eb48f3b850a9",
+      "scripts/agent_recovery_baseline.exs": "d71f346305e20fb819bf31591b694797433cff605d506779e47084622fd195a6",
+      "scripts/agent_recovery_provider.exs": "94ea27d1db18010048f53506822dd42a2b69e5767790c55770e7f4018cd31187",
+      "test/fixtures/agent_recovery/process_fixture.py": "eca6ef447cbcc13041006d39f5d93f9160c670110e6eb557ab788992cc71f6e3",
+      "test/fixtures/agent_recovery/output_fixture.py": "07ea08cc90a8f6ba6cab39533f1f05904edc7436ac9a34b8a43a3a1fb7c98d4d",
+      "test/minga/buffer/auto_save_test.exs": "2cdee1a2f87a717127e8f0dbf908e29e42519de307af1b1036b156c1f23a704c"
+    },
+    "focused_autosave": {
+      "command": "MIX_ARCHIVES=\"$HOME/.mix/archives\" mix test.debug test/minga/buffer/auto_save_test.exs",
+      "passed": 8,
+      "seed": 777798,
+      "elapsed_seconds": 1.5
+    },
+    "corpus": {
+      "command": "bash scripts/agent_recovery_baseline",
+      "evidence": "baseline-05/results.json",
+      "exit_status": 1,
+      "completed_scenarios": 4,
+      "production_failures": 3,
+      "driver_errors": 0
+    },
+    "repository_gate": {
+      "command": "MIX_ARCHIVES=\"$HOME/.mix/archives\" make done",
+      "exit_status": 0,
+      "elapsed_seconds": 143.82,
+      "log": "gate-04-passed.log",
+      "swift": "not applicable: no macOS-relevant files changed"
+    },
+    "supplemental_checks": [
+      "bash -n launcher",
+      "Python fixture parse",
+      "observer EOF produces failure, kills both owned workers, no sentinel",
+      "missing archive fails with retained prerequisite diagnostic",
+      "invalid inherited Git environment discarded"
+    ]
+  },
+  "raw_evidence": {
+    "url": "https://gist.githubusercontent.com/breznknecht/9eeafac975ba8a4a13676ab37857f8ca/raw/64bcbe9afc66560dc755d68a9305677c06fad8cc/recovery-evidence.tar.gz.b64",
+    "format": "base64-encoded gzip tar archive",
+    "sha256": "b26f22873012a10eb228c23d7b4fd326be8cf13fe8607b7d2914ed9c0927e1e7",
+    "archive_bytes": 116560,
+    "file_count": 231,
+    "path_root": "2026-11-16/",
+    "attempts": [
+      "attempt-01-missing-hex",
+      "attempt-02-observer-owner-bug",
+      "attempt-03-unqualified-route",
+      "attempt-04-prerequisite-probe",
+      "baseline-01",
+      "baseline-02-pre-cleanup-hardening",
+      "baseline-03",
+      "baseline-04-discovery-warning",
+      "baseline-05",
+      "observer-eof-cleanup.json",
+      "validation"
+    ]
+  }
+}
