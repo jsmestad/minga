@@ -227,7 +227,7 @@ func TestConformanceGoSkipReasons(t *testing.T) {
 func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 	t.Helper()
 	out := make(chan []byte, 1024)
-	model := New(80, 24, out, nil)
+	model := New(80, 24, out)
 	var lastStatus []byte
 	var pendingWheel *conformanceStep
 
@@ -235,7 +235,7 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 		switch step.Kind {
 		case "framed":
 			if step.ResetFrontend {
-				model = New(80, 24, out, nil)
+				model = New(80, 24, out)
 				pendingWheel = nil
 				lastStatus = nil
 				drainOutboundPackets(out)

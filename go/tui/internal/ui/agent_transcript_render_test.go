@@ -22,7 +22,7 @@ func visibleAgentChat() protocol.AgentChat {
 
 func residentModel(t *testing.T, count int) Model {
 	t.Helper()
-	model := New(80, 30, nil, nil)
+	model := New(80, 30, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiAgentChat: {AgentChat: visibleAgentChat()},
 	}

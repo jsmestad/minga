@@ -17,7 +17,7 @@ func transcriptBenchmarkModel(tb testing.TB, count int) Model {
 
 func transcriptBenchmarkModelAtPosition(tb testing.TB, count int, scrolled bool) Model {
 	tb.Helper()
-	model := New(80, 30, nil, nil)
+	model := New(80, 30, nil)
 	messages := make([]protocol.AgentChatMessage, count)
 	for index := range messages {
 		messages[index] = protocol.AgentChatMessage{

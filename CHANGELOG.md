@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- The Go TUI preserves every step in a finite wheel burst, including direction changes and source-bound composer scrolling, without waiting for another input event. Pointer-motion throttling, modifiers and surface routing are unchanged.
 - Background Agent writes preserve the selected Review and retained draft. Selected-file updates freeze the last-good review as stale until explicit refresh; unrelated paths do not replace it. Changed files stay in a fixed timeline without moving the composer or footer controls. Back resumes draft input, and shared source-bound Refresh and independent Help remain available in both frontends. Read-only Review wrapping preserves boundary characters beside scrollbar indicators, and narrow terminal file labels keep the filename visible.
 - Composer keys now reach the active editing model against the retained prompt. Canonical and native arrow encodings no longer insert private-use key glyphs, shifted Unicode text remains intact, and Normal-mode Tab can reach retained Review while the draft stays focused.
 - Release preparation produces the complete five-build candidate as immutable GitHub Actions artifacts, with final-byte checksums, provenance and a separate read-only verification rehearsal. It does not create a tag or GitHub Release, update the Homebrew tap, or push changelog changes to main.

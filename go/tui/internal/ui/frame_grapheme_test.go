@@ -21,7 +21,7 @@ func TestFrameCompositionPreservesCompleteGraphemes(t *testing.T) {
 		{name: "style between base and mark", content: "ae\x1b[31m\u0301\x1b[0mz", want: "ae\u0301z", cluster: "e\u0301"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			model := New(30, 4, nil, nil)
+			model := New(30, 4, nil)
 			rendered := model.composeFrame(test.content)
 			if stripped := ansi.Strip(rendered); !strings.Contains(stripped, test.want) {
 				t.Fatalf("shared frame compositor changed source text: got %q, want %q", stripped, test.want)

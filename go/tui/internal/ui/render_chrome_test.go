@@ -36,7 +36,7 @@ func TestRenderStatusMessageSanitizesTerminalText(t *testing.T) {
 
 			for _, source := range []string{"notice", "operation"} {
 				t.Run(source, func(t *testing.T) {
-					model := New(120, 8, nil, nil)
+					model := New(120, 8, nil)
 					foreground := model.palette().Warning()
 					statusMessage := tt.payload
 					wantText := tt.want
@@ -69,7 +69,7 @@ func TestRenderStatusMessageSanitizesTerminalText(t *testing.T) {
 }
 
 func TestRenderStatusMessagePrefersNewNoticeOverRetainedTerminalOperation(t *testing.T) {
-	model := New(80, 8, nil, nil)
+	model := New(80, 8, nil)
 	palette := model.palette()
 
 	for _, tt := range []struct {
@@ -96,7 +96,7 @@ func TestRenderStatusMessagePrefersNewNoticeOverRetainedTerminalOperation(t *tes
 }
 
 func TestRenderStatusMessageUsesSemanticPaletteRoles(t *testing.T) {
-	model := New(80, 8, nil, nil)
+	model := New(80, 8, nil)
 	palette := model.palette()
 	tests := []struct {
 		name       string

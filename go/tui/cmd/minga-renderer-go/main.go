@@ -38,7 +38,7 @@ func run() error {
 	out := make(chan []byte, 128)
 
 	filter := ui.NewInputFilter()
-	model := ui.NewWithTransport(width, height, out, done, filter)
+	model := ui.NewWithTransport(width, height, out, done)
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(tty), tea.WithFilter(filter.Filter))

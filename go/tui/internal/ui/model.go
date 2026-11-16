@@ -140,7 +140,6 @@ type Model struct {
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
 	surfacePlacements []generated.SurfacePlacement
 	localPresentation localPresentation
-	inputFilter       *InputFilter
 	// transcript is the resident agent-chat transcript store (#2654). It folds
 	// gui_agent_transcript (0x86) frames and owns the local message anchor + pin
 	// flag so j/k/wheel repaint the transcript same-frame from local data. It is
@@ -178,11 +177,11 @@ type frameStaging struct {
 	commands []protocol.Command
 }
 
-func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
-	return NewWithTransport(width, height, out, nil, filter)
+func New(width, height uint16, out chan<- []byte) Model {
+	return NewWithTransport(width, height, out, nil)
 }
 
-func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}, filter *InputFilter) Model {
+func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
 		width:                          int(width),
@@ -206,7 +205,6 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		localPresentation:              newLocalPresentation(),
 		textPresentations:              map[uint16]uint64{},
 		pendingTextPresentationDiscard: map[textPresentationRef]struct{}{},
-		inputFilter:                    filter,
 		transcript:                     newResidentTranscript(),
 		transcriptRenderer:             newAgentTranscriptRenderer(),
 		now:                            time.Now,
@@ -330,7 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
-			delta := m.drainScrollDelta(msg)
+			delta := wheelDeltaSign(msg.Mouse().Button)
 			if m.sendAgentPromptScroll(msg, delta) {
 				break
 			}
@@ -1460,14 +1458,6 @@ func (m Model) bodyHeight() int {
 
 func (m Model) maxOverlayHeight() int {
 	return min(max(m.height/3, 4), 12)
-}
-
-func (m *Model) drainScrollDelta(msg tea.MouseMsg) int {
-	if m.inputFilter != nil {
-		delta, _ := m.inputFilter.DrainCoalesced()
-		return delta
-	}
-	return wheelDeltaSign(msg.Mouse().Button)
 }
 
 func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {

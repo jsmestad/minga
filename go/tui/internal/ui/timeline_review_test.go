@@ -16,7 +16,7 @@ import (
 )
 
 func timelineReviewModel(files []protocol.TimelineFile) Model {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
 			Visible: true, Generation: 37, ViewingIndex: 0xFFFF, Files: files,
@@ -271,7 +271,7 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 			t.Run(fmt.Sprintf("%dx%d/%s/minibuffer=%t", size[0], size[1], mode, state.mini), func(t *testing.T) {
 				width, height := size[0], size[1]
 				out := make(chan []byte, 128)
-				model := New(width, height, out, nil)
+				model := New(width, height, out)
 				chat := protocol.AgentChat{Visible: true, Prompt: "METADATA_NOT_DRAFT", PromptVisibleRows: 1, InputFocused: true}
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft stays"), 0, 2, 0, 0, protocol.Selection{}), 800)
 				review := protocol.StatusReview{Path: "/project/review.ex", Freshness: protocol.ReviewStale, Generation: 43, ItemID: "opaque:+/% review"}

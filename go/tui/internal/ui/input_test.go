@@ -116,7 +116,7 @@ func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
 		{name: "shift wheel up", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift}), want: 0x43},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := New(80, 24, nil, nil).mousePacket(tc.msg)
+			packet, ok := New(80, 24, nil).mousePacket(tc.msg)
 			if !ok {
 				t.Fatal("wheel should encode a mouse packet")
 			}
@@ -151,7 +151,7 @@ func TestMousePacketDistinguishesDragFromMotion(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := New(80, 24, nil, nil).mousePacket(tc.msg)
+			packet, ok := New(80, 24, nil).mousePacket(tc.msg)
 			if !ok {
 				t.Fatal("motion should encode a mouse packet")
 			}
@@ -180,7 +180,7 @@ func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mouse := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: tc.text})).(tea.MouseMsg)
-			packet, ok := New(80, 24, nil, nil).mousePacket(mouse)
+			packet, ok := New(80, 24, nil).mousePacket(mouse)
 			if !ok {
 				t.Fatal("SGR motion tail should encode a mouse packet")
 			}
@@ -193,7 +193,7 @@ func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
 
 func TestTerminalInputPreservesShiftWheelSGRMouseTail(t *testing.T) {
 	mouse := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"})).(tea.MouseMsg)
-	packet, ok := New(80, 24, nil, nil).mousePacket(mouse)
+	packet, ok := New(80, 24, nil).mousePacket(mouse)
 	if !ok {
 		t.Fatal("SGR shift wheel tail should encode a mouse packet")
 	}
@@ -251,7 +251,7 @@ func tabBarModel(headerRows int) Model {
 	if headerRows < 1 {
 		panic("tabBarModel: tab bar is always at least one row")
 	}
-	model := New(120, 24, nil, nil)
+	model := New(120, 24, nil)
 	chrome := map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "main.ex", Active: true}}},
@@ -290,7 +290,7 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 			// Pin the translation arithmetic directly against the cached offset so
 			// the rule is independent of whether headerLines can ever collapse to
 			// zero rows (it cannot today: there is always a title fallback).
-			model := New(120, 24, nil, nil)
+			model := New(120, 24, nil)
 			model.layout.header.Height = tc.offset
 			msg := tea.MouseClickMsg(tea.Mouse{X: 7, Y: tc.terminalY, Button: tea.MouseLeft})
 			packet, ok := model.mousePacket(msg)
@@ -399,7 +399,7 @@ func TestMousePacketTranslatesDragSequence(t *testing.T) {
 // suppressed, since the BEAM treats a wheel as a viewport scroll with no buffer
 // hit-test (ticket #2256).
 func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -425,7 +425,7 @@ func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
 }
 
 func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
