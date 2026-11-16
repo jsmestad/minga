@@ -1666,7 +1666,7 @@ func TestAgentChatShortcutTogglesLatestToolBlockIgnoresZeroID(t *testing.T) {
 		{ID: 0, Kind: agentKindTool, Name: "read_file", Collapsed: true},
 	}
 
-	packet, handled := panel.handleKey(chat, messages, tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
+	packet, handled := panel.handleKey(chat, testTranscriptWithMessages(messages), tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt}))
 	if handled || packet != nil {
 		t.Fatalf("ctrl+alt+x should not send a toggle for zero ID tool block, handled=%v packet=%v", handled, packet)
 	}

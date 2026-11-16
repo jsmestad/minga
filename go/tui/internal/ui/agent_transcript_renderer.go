@@ -107,7 +107,7 @@ func (r *agentTranscriptRenderer) messageHeight(m Model, entry *transcriptEntry,
 func (r *agentTranscriptRenderer) render(m Model, transcript *residentTranscript, budget int, width int) []string {
 	r.begin(width, m.paletteFingerprint(), budget)
 	defer r.finish()
-	if transcript == nil || budget <= 0 || len(transcript.entries) == 0 {
+	if transcript == nil || budget <= 0 || transcript.len() == 0 {
 		if transcript != nil {
 			transcript.discardPendingScroll()
 		}
@@ -211,7 +211,7 @@ func (r *agentTranscriptRenderer) allFits(m Model, transcript *residentTranscrip
 	if transcript.truncated {
 		effectiveBudget--
 	}
-	if effectiveBudget <= 0 || len(transcript.entries)*2-1 > effectiveBudget {
+	if effectiveBudget <= 0 || transcript.len()*2-1 > effectiveBudget {
 		return false
 	}
 	_, allFits := r.tailStart(m, transcript, effectiveBudget, width)
@@ -219,21 +219,21 @@ func (r *agentTranscriptRenderer) allFits(m Model, transcript *residentTranscrip
 }
 
 func (r *agentTranscriptRenderer) endPosition(m Model, transcript *residentTranscript, width int) transcriptPosition {
-	last := len(transcript.entries) - 1
-	height := r.messageHeight(m, &transcript.entries[last], width)
+	last := transcript.len() - 1
+	height := r.messageHeight(m, transcript.entry(last), width)
 	return transcriptPosition{index: last, row: height}
 }
 
 func (r *agentTranscriptRenderer) blockHeight(m Model, transcript *residentTranscript, index int, width int) int {
-	height := r.messageHeight(m, &transcript.entries[index], width)
-	if index < len(transcript.entries)-1 {
+	height := r.messageHeight(m, transcript.entry(index), width)
+	if index < transcript.len()-1 {
 		height++
 	}
 	return height
 }
 
 func (r *agentTranscriptRenderer) positionForAnchor(m Model, transcript *residentTranscript, width int) transcriptPosition {
-	index, found := transcript.bySlot[transcript.anchor.slot]
+	index, found := transcript.rank(transcript.anchor.slot)
 	if !found {
 		return transcriptPosition{}
 	}
@@ -242,11 +242,11 @@ func (r *agentTranscriptRenderer) positionForAnchor(m Model, transcript *residen
 }
 
 func (r *agentTranscriptRenderer) anchorFor(transcript *residentTranscript, position transcriptPosition) transcriptAnchor {
-	if len(transcript.entries) == 0 {
+	if transcript.len() == 0 {
 		return transcriptAnchor{}
 	}
-	position.index = clampInt(position.index, 0, len(transcript.entries)-1)
-	return transcriptAnchor{slot: transcript.entries[position.index].slot, row: max(position.row, 0)}
+	position.index = clampInt(position.index, 0, transcript.len()-1)
+	return transcriptAnchor{slot: transcript.entry(position.index).slot, row: max(position.row, 0)}
 }
 
 func (r *agentTranscriptRenderer) moveBackward(m Model, transcript *residentTranscript, position transcriptPosition, rows int, width int) transcriptPosition {
@@ -274,7 +274,7 @@ func (r *agentTranscriptRenderer) moveForward(m Model, transcript *residentTrans
 			return position
 		}
 		rows -= remaining
-		if position.index == len(transcript.entries)-1 {
+		if position.index == transcript.len()-1 {
 			return transcriptPosition{index: position.index, row: blockHeight}
 		}
 		position.index++
@@ -292,8 +292,8 @@ func (r *agentTranscriptRenderer) renderForward(m Model, transcript *residentTra
 		return nil
 	}
 	lines := make([]string, 0, limit)
-	for position.index < len(transcript.entries) && len(lines) < limit {
-		entry := &transcript.entries[position.index]
+	for position.index < transcript.len() && len(lines) < limit {
+		entry := transcript.entry(position.index)
 		height := r.messageHeight(m, entry, width)
 		if position.row < height {
 			count := min(limit-len(lines), height-position.row)
@@ -301,7 +301,7 @@ func (r *agentTranscriptRenderer) renderForward(m Model, transcript *residentTra
 			position.row += count
 			continue
 		}
-		if position.index < len(transcript.entries)-1 && position.row == height {
+		if position.index < transcript.len()-1 && position.row == height {
 			lines = append(lines, m.renderAgentTranscriptSeparator(width))
 			position.row++
 			continue

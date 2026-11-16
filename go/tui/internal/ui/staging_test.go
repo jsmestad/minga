@@ -251,7 +251,7 @@ func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates
 
 	model.transcript.truncated = true
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot, row: 1}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot, row: 1}
 	model.transcript.pendingScroll = -3
 	model.transcript.pinTransition = pinScrolledAway
 	beforeTheme := model.chrome[generated.OPGuiTheme].Theme.Colors[themeEditorBG]
@@ -293,7 +293,7 @@ func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates
 	if got := model.chrome[generated.OPGuiTheme].Theme.Colors[themeEditorBG]; got != beforeTheme {
 		t.Fatalf("invalid transcript published sibling chrome %#x", got)
 	}
-	if model.transcript.epoch != 1 || len(model.transcript.messages) != 1 || model.transcript.messages[0].ID != 1 || !model.transcript.truncated || model.transcript.pinned || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -3 || model.transcript.pinTransition != pinScrolledAway {
+	if model.transcript.epoch != 1 || model.transcript.len() != 1 || model.transcript.entry(0).message.ID != 1 || !model.transcript.truncated || model.transcript.pinned || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -3 || model.transcript.pinTransition != pinScrolledAway {
 		t.Fatalf("invalid transcript changed live transcript state: %+v", model.transcript)
 	}
 
@@ -307,7 +307,7 @@ func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates
 	if model.resyncPending {
 		t.Fatal("recovery keyframe did not clear pending resync")
 	}
-	if model.lastCommittedSeq != 3 || model.windows[1].Rows[0].Text != "recovered" || model.transcript.epoch != 2 || model.transcript.messages[0].ID != 9 || !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
+	if model.lastCommittedSeq != 3 || model.windows[1].Rows[0].Text != "recovered" || model.transcript.epoch != 2 || model.transcript.entry(0).message.ID != 9 || !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
 		t.Fatalf("recovery keyframe did not publish complete state: seq=%d window=%q transcript=%+v", model.lastCommittedSeq, model.windows[1].Rows[0].Text, model.transcript)
 	}
 }
@@ -323,7 +323,7 @@ func TestMultipleTranscriptCommandsFoldInOrderAndPublishOnce(t *testing.T) {
 		commitFrame(1),
 	)
 
-	if got, want := ids(model.transcript.messages), []uint32{1, 2, 3}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+	if got, want := ids(testTranscriptMessages(model.transcript)), []uint32{1, 2, 3}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("ordered transcript fold = %v, want %v", got, want)
 	}
 }
@@ -351,7 +351,7 @@ func TestTranscriptPreparationRejectsEveryInvalidTransition(t *testing.T) {
 			model.applyCommands(seedCommands)
 			drainOutboundPackets(out)
 
-			before := model.transcript.detachedCandidate()
+			before := testTranscriptSnapshot(model.transcript)
 			model.applyCommands([]protocol.Command{beginFrame(2, 1), transcriptCommand(tt.bad), commitFrame(2)})
 
 			if model.lastCommittedSeq != 1 || !reflect.DeepEqual(model.transcript, before) {
@@ -386,7 +386,7 @@ func TestSameEpochFullReplacementPreservesReadingPosition(t *testing.T) {
 		commitFrame(1),
 	})
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot, row: 1}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot, row: 1}
 	model.transcript.pendingScroll = -2
 
 	model.applyCommands([]protocol.Command{
@@ -395,10 +395,10 @@ func TestSameEpochFullReplacementPreservesReadingPosition(t *testing.T) {
 		commitFrame(2),
 	})
 
-	if model.transcript.pinned || model.transcript.anchor.slot != model.transcript.entries[0].slot || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -2 {
+	if model.transcript.pinned || model.transcript.anchor.slot != model.transcript.entry(0).slot || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -2 {
 		t.Fatalf("same-epoch replacement reset reading position: %+v", model.transcript)
 	}
-	if got := ids(model.transcript.messages); len(got) != 1 || got[0] != 3 {
+	if got := ids(testTranscriptMessages(model.transcript)); len(got) != 1 || got[0] != 3 {
 		t.Fatalf("same-epoch replacement messages = %v, want [3]", got)
 	}
 }

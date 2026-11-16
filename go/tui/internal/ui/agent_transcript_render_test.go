@@ -288,7 +288,7 @@ func TestAgentTranscriptTruncationAffordanceOnlyAtResidentTop(t *testing.T) {
 	model := residentModel(t, 20)
 	model.transcript.truncated = true
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 	width := 50
 	budget := 8
 
@@ -307,7 +307,7 @@ func TestAgentTranscriptTruncationAffordanceOnlyAtResidentTop(t *testing.T) {
 	}
 
 	model.transcript.truncated = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 	rows = model.transcriptRenderer.render(model, model.transcript, budget, width)
 	if got := ansi.Strip(strings.Join(rows, "\n")); strings.Contains(got, "earlier messages hidden") {
 		t.Fatalf("complete transcript should not show truncation affordance: %q", got)
@@ -354,7 +354,7 @@ func TestReplacementPinIntentReportingThroughUpdate(t *testing.T) {
 			name: "all resident rows fit after shrink",
 			prepare: func(model *Model) {
 				model.transcript.pinned = false
-				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 			},
 			frame: func(Model) protocol.AgentTranscript {
 				return replaceFrame(1, msg(100, "only"))
@@ -366,7 +366,7 @@ func TestReplacementPinIntentReportingThroughUpdate(t *testing.T) {
 			name: "resident rows exactly fill viewport after shrink",
 			prepare: func(model *Model) {
 				model.transcript.pinned = false
-				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 			},
 			frame: func(model Model) protocol.AgentTranscript {
 				budget := model.agentTranscriptPageSize()
@@ -395,10 +395,10 @@ func TestReplacementPinIntentReportingThroughUpdate(t *testing.T) {
 			name: "removed near-tail anchor clamps to bottom",
 			prepare: func(model *Model) {
 				model.transcript.pinned = false
-				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[90].slot}
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(90).slot}
 			},
 			frame: func(model Model) protocol.AgentTranscript {
-				messages := append([]protocol.AgentChatMessage(nil), model.transcript.messages[:80]...)
+				messages := testTranscriptMessages(model.transcript)[:80]
 				return replaceFrame(1, messages...)
 			},
 			wantReturned: 1,
@@ -408,10 +408,10 @@ func TestReplacementPinIntentReportingThroughUpdate(t *testing.T) {
 			name: "same-epoch replacement retains stable anchor",
 			prepare: func(model *Model) {
 				model.transcript.pinned = false
-				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[40].slot, row: 1}
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(40).slot, row: 1}
 			},
 			frame: func(model Model) protocol.AgentTranscript {
-				messages := append([]protocol.AgentChatMessage(nil), model.transcript.messages...)
+				messages := testTranscriptMessages(model.transcript)
 				messages[len(messages)-1].Text = "streamed tail revision"
 				return replaceFrame(1, messages...)
 			},
@@ -422,7 +422,7 @@ func TestReplacementPinIntentReportingThroughUpdate(t *testing.T) {
 			name: "epoch flip re-pins without local intent",
 			prepare: func(model *Model) {
 				model.transcript.pinned = false
-				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[40].slot, row: 1}
+				model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(40).slot, row: 1}
 				model.transcript.pinTransition = pinScrolledAway
 			},
 			frame: func(Model) protocol.AgentTranscript {
@@ -472,7 +472,7 @@ func TestAgentToggleUsesStableMessageID(t *testing.T) {
 	}
 	press := tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl | tea.ModAlt})
 
-	packet, handled := panel.handleKey(chat, resident, press)
+	packet, handled := panel.handleKey(chat, testTranscriptWithMessages(resident), press)
 	if !handled {
 		t.Fatalf("Ctrl+Alt+X should be handled when a tool message exists")
 	}
@@ -520,17 +520,17 @@ func TestBoundedTranscriptMatchesAllLinesOracle(t *testing.T) {
 	width := max(model.width-2, 1)
 	budget := 17
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 
 	got := model.transcriptRenderer.render(model, model.transcript, budget, width)
-	want := windowTopAnchored(model.agentTranscriptAllLines(model.transcript.messages, width), budget, 0)
+	want := windowTopAnchored(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width), budget, 0)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("bounded top window differs from oracle\ngot=%q\nwant=%q", got, want)
 	}
 
 	model.transcript.pinToBottom()
 	got = model.transcriptRenderer.render(model, model.transcript, budget, width)
-	want = windowBottom(model.agentTranscriptAllLines(model.transcript.messages, width), budget)
+	want = windowBottom(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width), budget)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("bounded bottom window differs from oracle\ngot=%q\nwant=%q", got, want)
 	}
@@ -543,7 +543,7 @@ func TestWarmTranscriptWorkIsIndependentOfResidentCount(t *testing.T) {
 		width := max(model.width-2, 1)
 		budget := 20
 		model.transcript.pinned = false
-		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[40].slot}
+		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(40).slot}
 		model.transcriptRenderer.render(model, model.transcript, budget, width)
 		model.transcriptRenderer.render(model, model.transcript, budget, width)
 		work := model.transcriptRenderer.work
@@ -580,7 +580,7 @@ func TestOffscreenStreamingPreservesAnchorAndReusesVisibleChunks(t *testing.T) {
 	width := max(model.width-2, 1)
 	budget := 20
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[10].slot, row: 1}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(10).slot, row: 1}
 	model.transcriptRenderer.render(model, model.transcript, budget, width)
 	anchor := model.transcript.anchor
 
@@ -597,7 +597,7 @@ func TestOffscreenStreamingPreservesAnchorAndReusesVisibleChunks(t *testing.T) {
 	if !model.transcript.hasAnimatedMessages() {
 		t.Fatal("offscreen animated message was not tracked incrementally")
 	}
-	all := model.agentTranscriptAllLines(model.transcript.messages, width)
+	all := model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width)
 	offset := 10*3 + 1
 	want := windowTopAnchored(all, budget, offset)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -614,12 +614,12 @@ func TestVisibleStreamingCollapseWidthThemeAndAnimationStayExact(t *testing.T) {
 	}
 	model.transcript.apply(replaceFrame(1, messages...))
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 
 	assertExact := func(width int) {
 		t.Helper()
 		got := model.transcriptRenderer.render(model, model.transcript, 30, width)
-		want := windowTopAnchored(model.agentTranscriptAllLines(model.transcript.messages, width), 30, 0)
+		want := windowTopAnchored(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width), 30, 0)
 		if strings.Join(got, "\n") != strings.Join(want, "\n") {
 			t.Fatalf("bounded output differs at width %d", width)
 		}
@@ -655,12 +655,12 @@ func TestLargeMessageStylesOnlyBoundedRowChunks(t *testing.T) {
 	message := protocol.AgentChatMessage{ID: 1, Kind: agentKindAssistantMarkdown, MarkdownBlocks: []protocol.AgentMarkdownBlock{{Kind: 0x07, Label: "Huge", Flags: 1, Lines: lines}}}
 	model.transcript.apply(replaceFrame(1, message))
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot, row: 5_000}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot, row: 5_000}
 	width := 70
 	budget := 20
 
 	got := model.transcriptRenderer.render(model, model.transcript, budget, width)
-	all := model.agentTranscriptAllLines(model.transcript.messages, width)
+	all := model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width)
 	want := windowTopAnchored(all, budget, 5_000)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatal("large-message row-range output differs from oracle")
@@ -674,7 +674,7 @@ func TestLargeMessageStylesOnlyBoundedRowChunks(t *testing.T) {
 func TestTranscriptCacheEvictsAsViewportMoves(t *testing.T) {
 	model := residentModel(t, 300)
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 	width := 60
 	budget := 8
 	seenEviction := false
@@ -698,10 +698,10 @@ func TestContentShrinkClampsAnchorAndReportsReturn(t *testing.T) {
 		width := 50
 		budget := 5
 		model.transcript.pinned = false
-		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[9].slot}
+		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(9).slot}
 
 		got := model.transcriptRenderer.render(model, model.transcript, budget, width)
-		want := windowBottom(model.agentTranscriptAllLines(model.transcript.messages, width), budget)
+		want := windowBottom(model.agentTranscriptAllLines(testTranscriptMessages(model.transcript), width), budget)
 		if !model.transcript.pinned || strings.Join(got, "\n") != strings.Join(want, "\n") {
 			t.Fatalf("underfilled anchor did not clamp and re-pin: pinned=%v", model.transcript.pinned)
 		}
@@ -715,7 +715,7 @@ func TestContentShrinkClampsAnchorAndReportsReturn(t *testing.T) {
 		width := 50
 		budget := 5
 		model.transcript.pinned = false
-		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot}
+		model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot}
 		model.transcript.apply(replaceFrame(1, msg(10, "only")))
 		model.transcriptRenderer.render(model, model.transcript, budget, width)
 		if !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {

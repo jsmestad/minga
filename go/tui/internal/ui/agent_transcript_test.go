@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"maps"
+	"reflect"
 	"testing"
 
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
@@ -38,7 +40,7 @@ func TestResidentTranscriptFullReplace(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 
-	if got, want := ids(tr.messages), []uint32{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
 	if !tr.hasEpoch || tr.epoch != 1 {
@@ -49,26 +51,24 @@ func TestResidentTranscriptFullReplace(t *testing.T) {
 	}
 }
 
-func TestResidentTranscriptDetachedCandidateDoesNotShareMutableSlice(t *testing.T) {
+func TestResidentTranscriptPreparationDoesNotMutateOwner(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 	tr.pinned = false
-	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
+	tr.anchor = transcriptAnchor{slot: tr.entry(0).slot, row: 1}
 	tr.pendingScroll = -2
 	tr.pinTransition = pinScrolledAway
-
-	candidate := tr.detachedCandidate()
-	candidate.messages[0] = msg(9, "changed")
-	candidate.anchor.row = 0
-
-	if tr.messages[0].ID != 1 || tr.messages[0].Text != "a" {
-		t.Fatalf("candidate mutated live messages: %+v", tr.messages)
+	before := testTranscriptSnapshot(tr)
+	plan := tr.prepare()
+	if reason := plan.apply(appendFrame(1, 0, 1, msg(9, "changed"))); reason != transcriptApplied {
+		t.Fatal(reason)
 	}
-	if tr.anchor.row != 1 {
-		t.Fatalf("candidate mutated live anchor: %+v", tr.anchor)
+	if !reflect.DeepEqual(tr, before) {
+		t.Fatal("preparing a valid command changed the resident owner")
 	}
-	if candidate.epoch != tr.epoch || candidate.pinned != tr.pinned || candidate.pendingScroll != tr.pendingScroll || candidate.pinTransition != tr.pinTransition {
-		t.Fatalf("candidate did not preserve transcript-owned state: live=%+v candidate=%+v", tr, candidate)
+	plan.commit()
+	if tr.entry(0).message.Text != "a" || tr.entry(1).message.Text != "changed" || tr.anchor.row != 1 || tr.pendingScroll != -2 {
+		t.Fatalf("commit lost prepared data or reading state: %+v", tr)
 	}
 }
 
@@ -77,11 +77,11 @@ func TestResidentTranscriptAppendUpsertsSuffix(t *testing.T) {
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 	tr.apply(appendFrame(1, 0, 2, msg(3, "c")))
 
-	if got, want := ids(tr.messages), []uint32{1, 2, 3}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{1, 2, 3}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
-	if tr.messages[2].Text != "c" {
-		t.Fatalf("appended text = %q", tr.messages[2].Text)
+	if tr.entry(2).message.Text != "c" {
+		t.Fatalf("appended text = %q", tr.entry(2).message.Text)
 	}
 }
 
@@ -91,11 +91,11 @@ func TestResidentTranscriptAppendPatchesStreamingTail(t *testing.T) {
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "partial")))
 	tr.apply(appendFrame(1, 0, 1, msg(2, "partial complete")))
 
-	if got, want := ids(tr.messages), []uint32{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{1, 2}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
-	if tr.messages[1].Text != "partial complete" {
-		t.Fatalf("streaming tail not patched: %q", tr.messages[1].Text)
+	if tr.entry(1).message.Text != "partial complete" {
+		t.Fatalf("streaming tail not patched: %q", tr.entry(1).message.Text)
 	}
 }
 
@@ -107,11 +107,11 @@ func TestResidentTranscriptAppendEvictsFrontViaTrimFront(t *testing.T) {
 	// Evict m1,m2 from the front; keep m3,m4 unchanged; re-send m5 (patched).
 	tr.apply(appendFrame(1, 2, 2, msg(5, "e patched")))
 
-	if got, want := ids(tr.messages), []uint32{3, 4, 5}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{3, 4, 5}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
-	if tr.messages[2].Text != "e patched" {
-		t.Fatalf("re-sent tail not patched: %q", tr.messages[2].Text)
+	if tr.entry(2).message.Text != "e patched" {
+		t.Fatalf("re-sent tail not patched: %q", tr.entry(2).message.Text)
 	}
 }
 
@@ -123,11 +123,11 @@ func TestResidentTranscriptAppendUpsertPatchesWithinKeptPrefix(t *testing.T) {
 	// trim 1 (evict m1); keep m2,m3,m4; upsert m4 (id in kept prefix → patch).
 	tr.apply(appendFrame(1, 1, 3, msg(4, "d patched")))
 
-	if got, want := ids(tr.messages), []uint32{2, 3, 4}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{2, 3, 4}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
-	if tr.messages[2].Text != "d patched" {
-		t.Fatalf("upsert should patch in place: %q", tr.messages[2].Text)
+	if tr.entry(2).message.Text != "d patched" {
+		t.Fatalf("upsert should patch in place: %q", tr.entry(2).message.Text)
 	}
 }
 
@@ -143,11 +143,11 @@ func TestResidentTranscriptEpochFlipReplaces(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a"), msg(2, "b")))
 	tr.pinned = false
-	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
+	tr.anchor = transcriptAnchor{slot: tr.entry(0).slot, row: 1}
 	tr.pinTransition = pinScrolledAway
 	tr.apply(replaceFrame(2, msg(9, "fresh")))
 
-	if got, want := ids(tr.messages), []uint32{9}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{9}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
 	if tr.epoch != 2 {
@@ -170,7 +170,7 @@ func TestResidentTranscriptAppendDesyncDropped(t *testing.T) {
 		t.Fatalf("expected desync drop reason, got %q", reason)
 	}
 
-	if got, want := ids(tr.messages), []uint32{1}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{1}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("desync append should be dropped, got %v", got)
 	}
 }
@@ -182,7 +182,7 @@ func TestResidentTranscriptAppendEpochMismatchDropped(t *testing.T) {
 		t.Fatalf("expected epoch drop reason, got %q", reason)
 	}
 
-	if got, want := ids(tr.messages), []uint32{1}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := ids(testTranscriptMessages(tr)), []uint32{1}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("epoch-mismatch append should be dropped, got %v", got)
 	}
 }
@@ -197,8 +197,8 @@ func TestResidentTranscriptAppendBeforeSeedDropped(t *testing.T) {
 		t.Fatalf("expected before-seed drop reason, got %q", reason)
 	}
 
-	if len(tr.messages) != 0 {
-		t.Fatalf("pre-seed append should not populate the store, got %d messages", len(tr.messages))
+	if tr.len() != 0 {
+		t.Fatalf("pre-seed append should not populate the store, got %d messages", tr.len())
 	}
 	if tr.hasEpoch {
 		t.Fatalf("pre-seed append should not adopt an epoch")
@@ -209,9 +209,9 @@ func TestResidentTranscriptAssignsDistinctSlotsForDuplicateAndZeroIDs(t *testing
 	tr := newResidentTranscript()
 	frame := replaceFrame(1, msg(0, "zero"), msg(0, "zero"), msg(7, "first"), msg(7, "duplicate"))
 	tr.apply(frame)
-	before := make([]uint64, len(tr.entries))
+	before := make([]uint64, tr.len())
 	seen := map[uint64]bool{}
-	for index, entry := range tr.entries {
+	for index, entry := range testTranscriptEntries(tr) {
 		before[index] = entry.slot
 		if seen[entry.slot] {
 			t.Fatalf("slot %d reused for distinct messages", entry.slot)
@@ -220,26 +220,26 @@ func TestResidentTranscriptAssignsDistinctSlotsForDuplicateAndZeroIDs(t *testing
 	}
 
 	tr.apply(frame)
-	for index, entry := range tr.entries {
+	for index, entry := range testTranscriptEntries(tr) {
 		if entry.slot != before[index] {
 			t.Fatalf("unchanged duplicate/zero message %d changed slot from %d to %d", index, before[index], entry.slot)
 		}
 	}
 
 	tr.apply(appendFrame(1, 0, 4, msg(7, "patched first")))
-	if tr.entries[2].slot != before[2] || tr.entries[3].slot != before[3] {
-		t.Fatalf("duplicate ID patch collapsed local identities: %+v", tr.entries)
+	if tr.entry(2).slot != before[2] || tr.entry(3).slot != before[3] {
+		t.Fatalf("duplicate ID patch collapsed local identities: %+v", testTranscriptEntries(tr))
 	}
-	if tr.messages[2].Text != "patched first" || tr.messages[3].Text != "duplicate" {
-		t.Fatalf("duplicate ID patch changed wrong messages: %+v", tr.messages)
+	if tr.entry(2).message.Text != "patched first" || tr.entry(3).message.Text != "duplicate" {
+		t.Fatalf("duplicate ID patch changed wrong messages: %+v", testTranscriptMessages(tr))
 	}
 }
 
 func TestResidentTranscriptReplacementReservesExactDuplicateIDOccurrences(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(7, "A"), msg(7, "B"), msg(7, "C")))
-	anchorSlot := tr.entries[1].slot
-	cSlot := tr.entries[2].slot
+	anchorSlot := tr.entry(1).slot
+	cSlot := tr.entry(2).slot
 	tr.pinned = false
 	tr.anchor = transcriptAnchor{slot: anchorSlot, row: 1}
 
@@ -248,8 +248,8 @@ func TestResidentTranscriptReplacementReservesExactDuplicateIDOccurrences(t *tes
 	if tr.anchor != (transcriptAnchor{slot: anchorSlot, row: 1}) {
 		t.Fatalf("duplicate compaction moved anchor from B: %+v", tr.anchor)
 	}
-	if tr.entries[0].slot != anchorSlot || tr.entries[1].slot != cSlot {
-		t.Fatalf("duplicate compaction reassigned exact occurrences: %+v", tr.entries)
+	if tr.entry(0).slot != anchorSlot || tr.entry(1).slot != cSlot {
+		t.Fatalf("duplicate compaction reassigned exact occurrences: %+v", testTranscriptEntries(tr))
 	}
 }
 
@@ -269,10 +269,10 @@ func TestResidentTranscriptLargeZeroIDReplacementUsesLinearExactIndex(t *testing
 	}
 	tr.apply(replaceFrame(1, replacement...))
 
-	if len(tr.entries) != count {
-		t.Fatalf("replacement entry count = %d, want %d", len(tr.entries), count)
+	if tr.len() != count {
+		t.Fatalf("replacement entry count = %d, want %d", tr.len(), count)
 	}
-	for index, entry := range tr.entries {
+	for index, entry := range testTranscriptEntries(tr) {
 		if entry.slot <= lastOriginalSlot {
 			t.Fatalf("unmatched zero-ID entry %d reused old slot %d", index, entry.slot)
 		}
@@ -284,8 +284,8 @@ func TestResidentTranscriptReconcilesMissingAnchorToSuccessorThenPredecessor(t *
 		tr := newResidentTranscript()
 		tr.apply(replaceFrame(1, msg(1, "one"), msg(2, "two"), msg(3, "three")))
 		tr.pinned = false
-		tr.anchor = transcriptAnchor{slot: tr.entries[1].slot, row: 1}
-		successor := tr.entries[2].slot
+		tr.anchor = transcriptAnchor{slot: tr.entry(1).slot, row: 1}
+		successor := tr.entry(2).slot
 		tr.apply(replaceFrame(1, msg(1, "one"), msg(3, "three")))
 		if tr.pinned || tr.anchor != (transcriptAnchor{slot: successor}) {
 			t.Fatalf("missing anchor did not select retained successor: %+v", tr)
@@ -296,8 +296,8 @@ func TestResidentTranscriptReconcilesMissingAnchorToSuccessorThenPredecessor(t *
 		tr := newResidentTranscript()
 		tr.apply(replaceFrame(1, msg(1, "one"), msg(2, "two"), msg(3, "three")))
 		tr.pinned = false
-		tr.anchor = transcriptAnchor{slot: tr.entries[2].slot, row: 7}
-		predecessor := tr.entries[0].slot
+		tr.anchor = transcriptAnchor{slot: tr.entry(2).slot, row: 7}
+		predecessor := tr.entry(0).slot
 		tr.apply(replaceFrame(1, msg(1, "one")))
 		if tr.pinned || tr.anchor.slot != predecessor || tr.anchor.row != 7 {
 			t.Fatalf("missing anchor did not select retained predecessor and preserve row for later clamp: %+v", tr)
@@ -309,7 +309,7 @@ func TestResidentTranscriptTrimAndSuffixReplacementPreserveAnchor(t *testing.T) 
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "one"), msg(2, "two"), msg(3, "three"), msg(4, "four")))
 	tr.pinned = false
-	tr.anchor = transcriptAnchor{slot: tr.entries[2].slot, row: 1}
+	tr.anchor = transcriptAnchor{slot: tr.entry(2).slot, row: 1}
 	anchor := tr.anchor
 
 	tr.apply(appendFrame(1, 1, 2, msg(4, "four streaming"), msg(5, "five")))
@@ -322,7 +322,7 @@ func TestResidentTranscriptEmptyReplacementPins(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "one")))
 	tr.pinned = false
-	tr.anchor = transcriptAnchor{slot: tr.entries[0].slot, row: 1}
+	tr.anchor = transcriptAnchor{slot: tr.entry(0).slot, row: 1}
 	tr.apply(replaceFrame(1))
 	if !tr.pinned || tr.anchor != (transcriptAnchor{}) {
 		t.Fatalf("empty transcript did not pin: %+v", tr)
@@ -364,4 +364,47 @@ func TestWindowBottom(t *testing.T) {
 	if all := windowBottom(lineSeq(3), 5); len(all) != 3 {
 		t.Fatalf("short transcript should return all lines, got %v", all)
 	}
+}
+
+// Full snapshots are test oracles only. Production readers access owned pages
+// directly and never materialize a second installed message/entry slice.
+func testTranscriptMessages(tr *residentTranscript) []protocol.AgentChatMessage {
+	messages := make([]protocol.AgentChatMessage, tr.len())
+	for index := range messages {
+		messages[index] = tr.entry(index).message
+	}
+	return messages
+}
+
+func testTranscriptEntries(tr *residentTranscript) []transcriptEntry {
+	entries := make([]transcriptEntry, tr.len())
+	for index := range entries {
+		entries[index] = *tr.entry(index)
+	}
+	return entries
+}
+
+func testTranscriptSnapshot(tr *residentTranscript) *residentTranscript {
+	copy := *tr
+	copy.pages = make(map[uint64]*transcriptPage, len(tr.pages))
+	for number, page := range tr.pages {
+		value := *page
+		copy.pages[number] = &value
+	}
+	copy.bySlot = maps.Clone(tr.bySlot)
+	copy.byID = maps.Clone(tr.byID)
+	for kind, summary := range tr.summaries {
+		copy.summaries[kind].ordinals = append([]uint64(nil), summary.ordinals...)
+		if summary.ordinals != nil && len(summary.ordinals) == 0 {
+			copy.summaries[kind].ordinals = []uint64{}
+		}
+		copy.summaries[kind].positions = maps.Clone(summary.positions)
+	}
+	return &copy
+}
+
+func testTranscriptWithMessages(messages []protocol.AgentChatMessage) *residentTranscript {
+	tr := newResidentTranscript()
+	tr.apply(replaceFrame(1, messages...))
+	return tr
 }
