@@ -53,7 +53,7 @@ func returningUserEmptyState() protocol.EmptyState {
 }
 
 func modelWithEmptyState(width, height uint16, state protocol.EmptyState) Model {
-	model := New(width, height, nil, nil)
+	model := New(width, height, nil)
 	model.chrome[generated.OPGuiEmptyState] = protocol.ChromePayload{Opcode: generated.OPGuiEmptyState, EmptyState: state}
 	model.layout = model.computeLayout()
 	model.viewport.SetWidth(model.layout.body.Width)
@@ -148,7 +148,7 @@ func TestRenderEmptyStateMinimalUnderTwelveRows(t *testing.T) {
 
 func TestEmptyStateLocalFocusEchoOnJ(t *testing.T) {
 	out := make(chan []byte, 4)
-	model := New(80, 30, out, nil)
+	model := New(80, 30, out)
 	model.chrome[generated.OPGuiEmptyState] = protocol.ChromePayload{Opcode: generated.OPGuiEmptyState, EmptyState: returningUserEmptyState()}
 	model.applyMutation(focusOwnerCommand(0, 13))
 
@@ -166,7 +166,7 @@ func TestEmptyStateLocalFocusEchoOnJ(t *testing.T) {
 }
 
 func TestEmptyStateLocalFocusEchoClearsOnFrame(t *testing.T) {
-	model := New(80, 30, nil, nil)
+	model := New(80, 30, nil)
 	model.chrome[generated.OPGuiEmptyState] = protocol.ChromePayload{Opcode: generated.OPGuiEmptyState, EmptyState: returningUserEmptyState()}
 	idx := 1
 	model.localPresentation.previewEmptyStateIndex = &idx

@@ -19,7 +19,7 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 			for _, fragmented := range []bool{false, true} {
 				t.Run(fmt.Sprintf("width%d/status%d/fragmented%t", width, status, fragmented), func(t *testing.T) {
 					out := make(chan []byte, 64)
-					model := New(80, 24, out, nil)
+					model := New(80, 24, out)
 					draft := strings.Repeat("d", 555) + "\n" + strings.Repeat("t", 556)
 					chat := protocol.AgentChat{Visible: true, Status: status, Prompt: draft, PromptVisibleRows: 8, PromptVimMode: 0, InputFocused: false}
 					rows := promptRows("row-one", "row-two", "row-three", "row-four", "row-five", "row-six", "row-seven", "row-eight")

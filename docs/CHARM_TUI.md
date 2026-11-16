@@ -51,6 +51,8 @@ The TUI resolves text clicks and drags from the committed row store, terminal gr
 
 The input model activates the final committed text presentation for each Bubble Tea update and discards presentations it can no longer use. These lifecycle messages stay ordered with pointer input. Drag capture stays with the originating editor pane until release, including release after a stale or missing target. Chrome and overlays retain their input precedence. See [the input ownership contract](ARCHITECTURE.md#the-input-rule) and [the wire format](PROTOCOL.md#0x1e-editor_text_event).
 
+A finite wheel burst must finish without another input event. The input filter forwards each normalized wheel event to `Model.Update` with its coordinates and modifiers intact; the model reads the signed delta from that event, not shared filter state. The filter never holds wheel input for a later event. Pointer motion remains rate-limited.
+
 ## Capture actual terminal output
 
 Use the production capture when a renderer change looks correct in a model test but leaves stale cells or loses updates in a terminal. `scripts/go_tui_capture.py` launches the supplied production binary with a real PTY, sends committed protocol frames through separate pipes, and reconstructs the emitted ANSI stream into terminal cells. It does not call `Model.View` in place of running the renderer.

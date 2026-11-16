@@ -155,7 +155,7 @@ func TestCommittedPromptRowsReachProductionComposerWithoutReflow(t *testing.T) {
 		{"expanded paste pill", []string{"[Pasted 14 lines]", "expanded first", "expanded last"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			model := New(90, 24, nil, nil)
+			model := New(90, 24, nil)
 			chat := protocol.AgentChat{Visible: true, Prompt: "RAW_METADATA_MUST_NOT_RENDER", PromptVisibleRows: byte(len(test.rows)), InputFocused: true}
 			rows := promptRows(test.rows...)
 			if test.name == "explicit blank and trailing newline" {
@@ -191,7 +191,7 @@ func TestComposerGrowthReservesControlsAndReportsMaximumCapacity(t *testing.T) {
 		for _, height := range []int{3, 4, 6, 8, 12, 24} {
 			for visible := 1; visible <= 10; visible++ {
 				t.Run(fmt.Sprintf("%dx%d/%d", width, height, visible), func(t *testing.T) {
-					model := New(uint16(width), uint16(height), nil, nil)
+					model := New(uint16(width), uint16(height), nil)
 					texts := make([]string, visible)
 					for i := range texts {
 						texts[i] = fmt.Sprintf("r%d", i)
@@ -233,7 +233,7 @@ func TestComposerGrowthReservesControlsAndReportsMaximumCapacity(t *testing.T) {
 }
 
 func TestPromptUnicodeSelectionAndPointerUseCommittedSourceRows(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	rows := promptRows("hidden first wrap", "a界e\u0301😀z", "selected tail", "")
 	selection := protocol.Selection{Type: 1, StartRow: 0, StartCol: 1, EndRow: 1, EndCol: 4}
 	chat := protocol.AgentChat{Visible: true, Prompt: "raw", PromptVisibleRows: 3, InputFocused: true}
@@ -260,7 +260,7 @@ func TestPromptUnicodeSelectionAndPointerUseCommittedSourceRows(t *testing.T) {
 
 func TestPromptWheelUsesSourceGenerationWithoutLocalCaretOrTranscriptScroll(t *testing.T) {
 	out := make(chan []byte, 64)
-	model := New(80, 18, out, nil)
+	model := New(80, 18, out)
 	chat := protocol.AgentChat{Visible: true, Prompt: "raw", PromptVisibleRows: 2, InputFocused: true}
 	rows := promptRows("first", "second", "third")
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 1, 3, 0, 0, protocol.Selection{}), 0x123456789)
@@ -283,7 +283,7 @@ func TestPromptWheelUsesSourceGenerationWithoutLocalCaretOrTranscriptScroll(t *t
 
 func TestPromptFitTracksResizeAndCommittedPresentationNotContentEpoch(t *testing.T) {
 	out := make(chan []byte, 64)
-	model := New(120, 24, out, nil)
+	model := New(120, 24, out)
 	chat := protocol.AgentChat{Visible: true, Prompt: "raw", PromptVisibleRows: 1}
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("one"), 0, 1, 0, 0, protocol.Selection{}), 0x123456789)
 	p, _ := model.agentPromptPlacement()
@@ -310,7 +310,7 @@ func TestPromptFitTracksResizeAndCommittedPresentationNotContentEpoch(t *testing
 func TestPromptControlsUseCommandsAndNewlineRemainsKeyInput(t *testing.T) {
 	for _, status := range []byte{0, 1, 2} {
 		out := make(chan []byte, 64)
-		model := New(12, 6, out, nil)
+		model := New(12, 6, out)
 		chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "raw", PromptVisibleRows: 8, InputFocused: true}
 		model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("one", "two", "three"), 0, 0, 0, 0, protocol.Selection{}), 700)
 		p, _ := model.agentPromptPlacement()
@@ -334,7 +334,7 @@ func TestPromptControlsUseCommandsAndNewlineRemainsKeyInput(t *testing.T) {
 }
 
 func TestPromptOverflowAndReverseCursorMovementFollowCommittedViewport(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	texts := make([]string, 16)
 	for i := range texts {
 		texts[i] = fmt.Sprintf("visual-row-%02d", i)
@@ -361,7 +361,7 @@ func TestPromptOverflowAndReverseCursorMovementFollowCommittedViewport(t *testin
 }
 
 func TestPromptExactWidthCaretUsesCanonicalEmptyContinuation(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: 2}
 	model.chrome[generated.OPGuiAgentChat] = protocol.ChromePayload{AgentChat: chat}
 	p, _ := model.agentPromptPlacement()
@@ -379,7 +379,7 @@ func TestPromptExactWidthCaretUsesCanonicalEmptyContinuation(t *testing.T) {
 }
 
 func TestPromptPastePillRetainsCanonicalSpanStyling(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: 1}
 	rows := promptRows("[Pasted 14 lines]")
 	rows[0].Spans = []protocol.Span{{StartCol: 0, EndCol: 17, FG: 0x12ab34, BG: 0x345678, Attrs: 1}}
@@ -393,7 +393,7 @@ func TestPromptPastePillRetainsCanonicalSpanStyling(t *testing.T) {
 }
 
 func TestPromptDragCaptureKeepsSourceAtEdgesAndReleasesStaleTargets(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: 2}
 	rows := promptRows("one", "two")
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 0, 0, 0, 0, protocol.Selection{}), 814)
@@ -415,7 +415,7 @@ func TestPromptDragCaptureKeepsSourceAtEdgesAndReleasesStaleTargets(t *testing.T
 
 func TestPromptFitUsesActualSidebarAndDetailsAllocation(t *testing.T) {
 	out := make(chan []byte, 64)
-	model := New(160, 24, out, nil)
+	model := New(160, 24, out)
 	model.chrome[generated.OPGuiFileTree] = protocol.ChromePayload{Tree: protocol.FileTree{Visible: true, Width: 24}}
 	chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: 1}
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("one"), 0, 0, 0, 0, protocol.Selection{}), 815)
@@ -435,7 +435,7 @@ func TestPromptFitUsesActualSidebarAndDetailsAllocation(t *testing.T) {
 
 func TestInvalidPromptFrameCannotPublishRowsOrSourceIdentity(t *testing.T) {
 	out := make(chan []byte, 64)
-	model := New(80, 20, out, nil)
+	model := New(80, 20, out)
 	chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: 1}
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("committed"), 0, 0, 0, 0, protocol.Selection{}), 816)
 	previous := model.content()
@@ -463,7 +463,7 @@ func TestInvalidPromptFrameCannotPublishRowsOrSourceIdentity(t *testing.T) {
 }
 
 func TestChatDoesNotRouteTranscriptWheelThroughHiddenSemanticCanvas(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: 1}
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("one"), 0, 0, 0, 0, protocol.Selection{}), 817)
 	model.putWindow(textMouseWindow(7, 0, "hidden editor", 700))
@@ -477,7 +477,7 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 		for _, status := range []byte{0, 1, 2, 3} {
 			t.Run(fmt.Sprintf("width%d/status%d", width, status), func(t *testing.T) {
 				out := make(chan []byte, 64)
-				model := New(width, 16, out, nil)
+				model := New(width, 16, out)
 				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1, InputFocused: true}
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 818)
 				p, _ := model.agentPromptPlacement()
@@ -545,7 +545,7 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 			for _, status := range []byte{0, 1, 2} {
 				t.Run(fmt.Sprintf("mode%d/focused%t/status%d", mode, focused, status), func(t *testing.T) {
 					out := make(chan []byte, 64)
-					model := New(80, 20, out, nil)
+					model := New(80, 20, out)
 					chat := protocol.AgentChat{
 						Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1,
 						PromptVimMode: mode, InputFocused: focused,
@@ -639,7 +639,7 @@ func TestCommittedPromptSelectionUsesExclusiveDisplayEndpoints(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			model := New(80, 20, nil, nil)
+			model := New(80, 20, nil)
 			chat := protocol.AgentChat{Visible: true, Prompt: "metadata", PromptVisibleRows: byte(len(test.rows)), PromptVimMode: 2, InputFocused: true}
 			// Core advances inclusive source endpoints before publishing these exclusive display-cell ranges; the frontend must not advance again.
 			model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows(test.rows...), 0, 0, 0, 0, test.selection), 820)

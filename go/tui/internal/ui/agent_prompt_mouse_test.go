@@ -49,7 +49,7 @@ func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
 		for _, focused := range []bool{false, true} {
 			t.Run(fmt.Sprintf("status%d/focused%t", status, focused), func(t *testing.T) {
 				out := make(chan []byte, 64)
-				model := New(80, 24, out, nil)
+				model := New(80, 24, out)
 				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: strings.Repeat("draft ", 100), PromptVisibleRows: 8, PromptVimMode: 0, InputFocused: focused}
 				rows := promptRows("visible row one", "visible row two", "visible row three", "visible row four", "visible row five", "visible row six", "visible row seven", "visible row eight")
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 7, 5, 0, 0, protocol.Selection{}), 821)
@@ -128,7 +128,7 @@ func TestWorkingAgentContextCannotCoverRenderedStop(t *testing.T) {
 		for _, visibleRows := range []byte{1, 8} {
 			t.Run(fmt.Sprintf("width%d/rows%d", width, visibleRows), func(t *testing.T) {
 				out := make(chan []byte, 64)
-				model := New(width, 24, out, nil)
+				model := New(width, 24, out)
 				chat := protocol.AgentChat{Visible: true, Status: 1, Prompt: "draft", PromptVisibleRows: visibleRows, InputFocused: true}
 				rows := promptRows("row one", "row two", "row three", "row four", "row five", "row six", "row seven", "row eight")
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows[:visibleRows], 0, 0, 0, 0, protocol.Selection{}), 823)
@@ -156,7 +156,7 @@ func TestWorkingAgentContextCannotCoverRenderedStop(t *testing.T) {
 					t.Fatalf("visible Stop did not abort: %x", packets)
 				}
 
-				editor := New(width, 24, nil, nil)
+				editor := New(width, 24, nil)
 				updated, _ = editor.Update(port.PacketMsg{Commands: frame(context, placement)})
 				editor = updated.(Model)
 				if editor.overlayLayer() == nil || !strings.Contains(editor.View().Content, "Agent context") {
@@ -167,32 +167,36 @@ func TestWorkingAgentContextCannotCoverRenderedStop(t *testing.T) {
 	}
 }
 
-func TestFragmentedPromptWheelPassesThroughInputFilterBeforeSourceDispatch(t *testing.T) {
+func TestFragmentedPromptWheelBurstPassesThroughFilterBeforeSourceDispatch(t *testing.T) {
 	out := make(chan []byte, 64)
 	filter := NewInputFilter()
-	model := New(80, 24, out, filter)
+	model := New(80, 24, out)
 	chat := protocol.AgentChat{Visible: true, Prompt: "draft", PromptVisibleRows: 8, InputFocused: true}
 	rows := promptRows("row-one", "row-two", "row-three", "row-four", "row-five", "row-six", "row-seven", "row-eight")
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 7, 0, 0, 0, protocol.Selection{}), 824)
 	x, y := renderedComposerControl(t, model, "row-one")
 	drainOutboundPackets(out)
 	tail := tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: fmt.Sprintf("<65;%d;%dM", x+1, y+1)})
-	message := filter.Filter(model, tail)
-	if _, ok := message.(tea.MouseWheelMsg); !ok {
-		t.Fatalf("filter did not normalize SGR wheel before coalescing: %T", message)
+	for range 4 {
+		message := filter.Filter(model, tail)
+		updated, _ := model.Update(message)
+		model = updated.(Model)
 	}
-	updated, _ := model.Update(message)
-	model = updated.(Model)
 	packets := drainOutboundPackets(out)
 	want := protocol.EncodeGUIAgentPromptScroll(protocol.AgentPromptScroll{WindowID: protocol.AgentPromptWindowID, Generation: 824, DeltaRows: 1})
-	if len(packets) != 1 || !bytes.Equal(packets[0], want) {
-		t.Fatalf("filtered SGR wheel lost source lease or coalesced delta: %x", packets)
+	if len(packets) != 4 {
+		t.Fatalf("finite fragmented wheel burst emitted %d source scroll intents, want four: %x", len(packets), packets)
+	}
+	for _, packet := range packets {
+		if !bytes.Equal(packet, want) {
+			t.Fatalf("filtered SGR wheel lost its source lease or signed delta: %x", packets)
+		}
 	}
 }
 
 func TestInteriorFullWidthPromptCaretFollowsTheLastRenderedGrapheme(t *testing.T) {
 	out := make(chan []byte, 64)
-	model := New(80, 24, out, nil)
+	model := New(80, 24, out)
 	chat := protocol.AgentChat{Visible: true, Prompt: "initial\nnext", PromptVisibleRows: 2, InputFocused: true}
 	rows := promptRows("initial", "next")
 	rows[1].BufferLine = 1

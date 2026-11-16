@@ -10,7 +10,7 @@ import (
 
 func TestCommitEmitsAppliedOnlyAfterCompletePublication(t *testing.T) {
 	out := make(chan []byte, 16)
-	m := New(40, 8, out, nil)
+	m := New(40, 8, out)
 	m = applyTo(t, m, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(1))
 	packets := drainOutboundPackets(out)
 	if len(packets) == 0 {
@@ -27,7 +27,7 @@ func TestCommitEmitsAppliedOnlyAfterCompletePublication(t *testing.T) {
 
 func TestRejectedTransactionEmitsOnlyTypedRejectionAndDoesNotPublish(t *testing.T) {
 	out := make(chan []byte, 16)
-	m := New(40, 8, out, nil)
+	m := New(40, 8, out)
 	beforeWindows := len(m.windows)
 	beforeCommitted := m.lastCommittedSeq
 	m = applyTo(t, m, beginFrame(9, 4), commitFrame(9))
@@ -47,7 +47,7 @@ func TestRejectedTransactionEmitsOnlyTypedRejectionAndDoesNotPublish(t *testing.
 
 func TestTerminalResourcePolicyRejectionPreservesLastGoodAndEmitsOnce(t *testing.T) {
 	out := make(chan []byte, 16)
-	m := New(40, 8, out, nil)
+	m := New(40, 8, out)
 	m = applyTo(t, m, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline"), commitFrame(1))
 	drainOutboundPackets(out)
 
@@ -74,7 +74,7 @@ func TestTerminalResourcePolicyRejectionPreservesLastGoodAndEmitsOnce(t *testing
 
 func TestWrongWindowEpochRejectsTransactionWithoutPartialApply(t *testing.T) {
 	out := make(chan []byte, 16)
-	m := New(40, 8, out, nil)
+	m := New(40, 8, out)
 	m = applyTo(t, m, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline"), commitFrame(1))
 	drainOutboundPackets(out)
 
@@ -97,7 +97,7 @@ func TestWrongWindowEpochRejectsTransactionWithoutPartialApply(t *testing.T) {
 
 func TestWindowReferenceMissReportsTargetWithoutPublishingSiblingState(t *testing.T) {
 	out := make(chan []byte, 16)
-	m := New(40, 8, out, nil)
+	m := New(40, 8, out)
 	m = applyTo(t, m, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline"), commitFrame(1))
 	drainOutboundPackets(out)
 

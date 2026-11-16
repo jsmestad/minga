@@ -66,7 +66,7 @@ func TestRunSessionReturnsWriterFailureAndStopsWorkers(t *testing.T) {
 	out <- []byte("packet")
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done, nil)
+	model := ui.NewWithTransport(80, 24, out, done)
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
 
 	err := runSession(program, reader, errorWriter{err: wantErr}, out, done, stop)
@@ -85,7 +85,7 @@ func TestRunSessionReturnsReaderFailureAndStopsWorkers(t *testing.T) {
 	out := make(chan []byte, 1)
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done, nil)
+	model := ui.NewWithTransport(80, 24, out, done)
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
 
 	err := runSession(program, &errorReadCloser{err: wantErr}, io.Discard, out, done, stop)
@@ -103,7 +103,7 @@ func TestRunSessionTreatsReaderEOFAsNormalTermination(t *testing.T) {
 	out := make(chan []byte, 1)
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done, nil)
+	model := ui.NewWithTransport(80, 24, out, done)
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
 
 	if err := runSession(program, io.NopCloser(bytes.NewReader(nil)), io.Discard, out, done, stop); err != nil {
@@ -125,7 +125,7 @@ func TestRunSessionConcurrentFailuresReturnOneTerminalCause(t *testing.T) {
 	out <- []byte("packet")
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done, nil)
+	model := ui.NewWithTransport(80, 24, out, done)
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
 	result := make(chan error, 1)
 	go func() {
@@ -150,7 +150,7 @@ func TestRunSessionReaderFailureUnblocksProducerBehindFullQueue(t *testing.T) {
 	out <- []byte("being written")
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done, nil)
+	model := ui.NewWithTransport(80, 24, out, done)
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
 	sessionResult := make(chan error, 1)
 	go func() {
@@ -238,7 +238,7 @@ func TestRunSessionRestoresPTYAfterWriterFailure(t *testing.T) {
 	out := make(chan []byte, 1)
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done, nil)
+	model := ui.NewWithTransport(80, 24, out, done)
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(tty))
 	wantErr := errors.New("output failed after raw mode")
 

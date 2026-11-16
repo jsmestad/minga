@@ -23,7 +23,7 @@ func TestSendRejectsAfterTransportTermination(t *testing.T) {
 	out := make(chan []byte, 1)
 	done := make(chan struct{})
 	close(done)
-	model := NewWithTransport(80, 24, out, done, nil)
+	model := NewWithTransport(80, 24, out, done)
 
 	if model.send([]byte("rejected")) {
 		t.Fatal("send reported queue admission after transport termination")
@@ -37,7 +37,7 @@ func TestBlockedSendUnwindsWhenTransportTerminates(t *testing.T) {
 	out := make(chan []byte, 1)
 	out <- []byte("existing")
 	done := make(chan struct{})
-	model := NewWithTransport(80, 24, out, done, nil)
+	model := NewWithTransport(80, 24, out, done)
 	started := make(chan struct{})
 	result := make(chan bool, 1)
 
@@ -118,7 +118,7 @@ func frame(commands ...protocol.Command) []protocol.Command {
 }
 
 func TestGUIFocusOwnerDoesNotChangeTerminalPresentation(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	_ = model.applyCommands(frame(protocol.Command{
 		Kind: protocol.CommandWindowContent,
 		Window: protocol.WindowContent{
@@ -156,7 +156,7 @@ func TestGUIFocusOwnerDoesNotChangeTerminalPresentation(t *testing.T) {
 }
 
 func TestFloatingPickerRendersOverEditorWithAuthoredHiddenMinibuffer(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiMinibuffer: {
 			Mini: protocol.Minibuffer{Visible: false, Prompt: ":", Input: "write"},
@@ -184,7 +184,7 @@ func TestFloatingPickerRendersOverEditorWithAuthoredHiddenMinibuffer(t *testing.
 }
 
 func TestWorkspaceRowRendersAsQuietNavigation(t *testing.T) {
-	model := New(100, 20, nil, nil)
+	model := New(100, 20, nil)
 	row := ansi.Strip(model.renderWorkspaces(protocol.WorkspaceBar{Spaces: []protocol.Workspace{
 		{Label: "Files", Icon: "", TabCount: 1},
 		{Label: "Agent", Icon: "󰚩", TabCount: 1, Active: true},
@@ -201,7 +201,7 @@ func TestWorkspaceRowRendersAsQuietNavigation(t *testing.T) {
 }
 
 func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	view := model.View()
 	if view.BackgroundColor == nil {
 		t.Fatal("view should set a background color so Bubble Tea paints transparent cells")
@@ -217,7 +217,7 @@ func TestViewCarriesFullWindowBackgroundColor(t *testing.T) {
 }
 
 func TestWhichKeyRendersCompactFloatingPopup(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiWhichKey: {
 			Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Page: 0, PageCount: 2, Bindings: []protocol.WhichKeyBinding{{Key: "/", Description: "Search project"}, {Key: "1", Description: "Tab 1"}, {Key: "2", Description: "Tab 2"}}},
@@ -239,7 +239,7 @@ func TestWhichKeyRendersCompactFloatingPopup(t *testing.T) {
 }
 
 func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
-	model := New(160, 24, nil, nil)
+	model := New(160, 24, nil)
 	bindings := []protocol.WhichKeyBinding{
 		{Key: "f", Description: "+file"},
 		{Key: "g", Description: "+git"},
@@ -268,7 +268,7 @@ func TestWhichKeyStylesGroupsAndLimitsColumnCount(t *testing.T) {
 }
 
 func TestExtensionRuntimeEnvelopeIsStoredAndSurfacedInFooter(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	updated, _ := model.Update(port.PacketMsg{Commands: frame(
 		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{
 			ExtensionID: "acme.lint",
@@ -293,7 +293,7 @@ func TestExtensionRuntimeEnvelopeIsStoredAndSurfacedInFooter(t *testing.T) {
 }
 
 func TestExtensionRuntimeLatestEnvelopeWinsAndIdsAreSortedDeterministically(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	updated, _ := model.Update(port.PacketMsg{Commands: frame(
 		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "zeta", Channel: "a", Payload: []byte{0x01}}},
 		protocol.Command{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "alpha", Channel: "b", Payload: []byte{0x02}}},
@@ -310,7 +310,7 @@ func TestExtensionRuntimeLatestEnvelopeWinsAndIdsAreSortedDeterministically(t *t
 }
 
 func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
 		{Kind: protocol.CommandExtensionRuntime, ExtensionRuntime: protocol.ExtensionRuntimePayload{ExtensionID: "", Channel: "pane", Payload: []byte{0x01}}},
 	}})
@@ -322,7 +322,7 @@ func TestExtensionRuntimeIgnoresEmptyExtensionID(t *testing.T) {
 
 func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
 	out := make(chan []byte, 4)
-	model := New(80, 24, out, nil)
+	model := New(80, 24, out)
 	// Seed normal content so the test proves the error surface takes precedence
 	// over it rather than only rendering on a blank model.
 	updated, _ := model.Update(port.PacketMsg{Commands: frame(
@@ -380,7 +380,7 @@ func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
 }
 
 func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {
 			Status: protocol.StatusBar{
@@ -398,7 +398,7 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 }
 
 func TestOperationOnlyStatusIsDiscoverableAfterCommittedFrame(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.now = func() time.Time { return feedbackTestStart }
 	operation := testOperation(42, generated.OperationStatusPending, "Formatting")
 	statusCommand := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
@@ -428,7 +428,7 @@ func TestOperationOnlyStatusIsDiscoverableAfterCommittedFrame(t *testing.T) {
 }
 
 func TestOperationFeedbackUsesOneOutstandingChromeTickAndTickTimestamp(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.now = func() time.Time { return feedbackTestStart }
 	operation := testOperation(1, generated.OperationStatusRunning, "Formatting")
 	updated, firstTick := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
@@ -462,7 +462,7 @@ func TestOperationFeedbackUsesOneOutstandingChromeTickAndTickTimestamp(t *testin
 }
 
 func TestOperationFeedbackFinalTickDrainsWithoutRearming(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.now = func() time.Time { return feedbackTestStart }
 	operation := testOperation(1, generated.OperationStatusCanceled, "Canceled")
 	updated, scheduled := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
@@ -482,7 +482,7 @@ func TestOperationFeedbackFinalTickDrainsWithoutRearming(t *testing.T) {
 }
 
 func TestChromeTickCoexistsWithPickerLoadingWithoutDuplication(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.now = func() time.Time { return feedbackTestStart }
 	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: protocol.Picker{LoadStatus: 1}}
 
@@ -512,7 +512,7 @@ func TestChromeTickCoexistsWithPickerLoadingWithoutDuplication(t *testing.T) {
 }
 
 func TestTypedFeedbackNarrowWidthKeepsDecorationAndPlainEllipsisStaysPlain(t *testing.T) {
-	model := New(20, 8, nil, nil)
+	model := New(20, 8, nil)
 	operation := testOperation(1, generated.OperationStatusError, "A very long formatting failure")
 	model.feedback.transition(&operation, feedbackTestStart)
 	status := protocol.StatusBar{
@@ -542,7 +542,7 @@ func TestTypedFeedbackNarrowWidthKeepsDecorationAndPlainEllipsisStaysPlain(t *te
 }
 
 func TestModeSegmentRendersColoredPillBadge(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	updated, _ := model.Update(port.PacketMsg{Commands: frame(
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
 			Opcode: generated.OPGuiStatusBar,
@@ -572,7 +572,7 @@ func TestModeSegmentRendersColoredPillBadge(t *testing.T) {
 }
 
 func TestModeColorsMatchViMode(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	theme := model.palette()
 
 	assertColor := func(label string, got, want color.Color) {
@@ -598,7 +598,7 @@ func TestModeColorsMatchViMode(t *testing.T) {
 }
 
 func TestInfoSegmentUsesModelineInfoPalette(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {
 			Status: protocol.StatusBar{
@@ -615,7 +615,7 @@ func TestInfoSegmentUsesModelineInfoPalette(t *testing.T) {
 }
 
 func TestFooterRendersModeIconBeforeModeText(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {
 			Status: protocol.StatusBar{
@@ -631,7 +631,7 @@ func TestFooterRendersModeIconBeforeModeText(t *testing.T) {
 }
 
 func TestFooterRendersFileIconBeforeFilename(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {
 			Status: protocol.StatusBar{
@@ -652,7 +652,7 @@ func TestFooterRendersFileIconBeforeFilename(t *testing.T) {
 }
 
 func TestFooterFallbackRendersFileIcon(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {
 			Status: protocol.StatusBar{
@@ -676,7 +676,7 @@ func TestFooterFallbackRendersFileIcon(t *testing.T) {
 }
 
 func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
-	model := New(120, 24, nil, nil)
+	model := New(120, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "main.ex", Active: true}}},
@@ -693,7 +693,7 @@ func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 }
 
 func TestHeaderTruncatesLongTabLabels(t *testing.T) {
-	model := New(120, 24, nil, nil)
+	model := New(120, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "signature_help_builder_test.exs", Active: true}}},
@@ -707,7 +707,7 @@ func TestHeaderTruncatesLongTabLabels(t *testing.T) {
 }
 
 func TestHeaderHidesBreadcrumbsAtNarrowWidth(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{Icon: "󰈙", Label: "main.ex", Active: true}}},
@@ -724,7 +724,7 @@ func TestHeaderHidesBreadcrumbsAtNarrowWidth(t *testing.T) {
 }
 
 func TestPickerPreviewRendersWithPicker(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiPicker: {
 			Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}},
@@ -746,7 +746,7 @@ func TestPickerPreviewRendersWithPicker(t *testing.T) {
 }
 
 func TestFloatingPickerCoversEditorContentBelow(t *testing.T) {
-	model := New(120, 30, nil, nil)
+	model := New(120, 30, nil)
 	picker := protocol.Picker{
 		Visible: true,
 		Title:   "Find File",
@@ -800,7 +800,7 @@ func TestFloatingPickerCoversEditorContentBelow(t *testing.T) {
 }
 
 func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	rows := model.renderPickerList("Agent Model", protocol.Picker{
 		Visible:  true,
 		Selected: 1,
@@ -819,7 +819,7 @@ func TestPickerSelectedRowHasVisibleMarker(t *testing.T) {
 }
 
 func TestPickerSelectedRowUsesSelectionColors(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	rows := model.renderPickerList("Buffers", protocol.Picker{
 		Visible:  true,
 		Selected: 0,
@@ -835,7 +835,7 @@ func TestPickerSelectedRowUsesSelectionColors(t *testing.T) {
 }
 
 func TestPickerPreviewDefaultsToPopupTextAndSurface(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	rendered := model.renderPickerPreview(protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "plain preview"}}}}}, 3, 40)
 	joined := strings.Join(rendered, "\n")
 	if !strings.Contains(joined, "38;2;255;255;255") {
@@ -847,7 +847,7 @@ func TestPickerPreviewDefaultsToPopupTextAndSurface(t *testing.T) {
 }
 
 func TestPickerOverlayIsBounded(t *testing.T) {
-	model := New(100, 24, nil, nil)
+	model := New(100, 24, nil)
 	items := make([]protocol.PickerItem, 20)
 	lines := make([]protocol.PreviewLine, 20)
 	for i := range items {
@@ -864,7 +864,7 @@ func TestPickerOverlayIsBounded(t *testing.T) {
 }
 
 func TestWidePickerPreviewRendersBesideList(t *testing.T) {
-	model := New(120, 30, nil, nil)
+	model := New(120, 30, nil)
 	rendered := model.renderPicker(
 		protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "test-advisor.md", Description: ".pi/agents"}, {Label: "minga-parallel.md", Description: ".pi/prompts"}}},
 		protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "def main"}}}}},
@@ -884,7 +884,7 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 }
 
 func TestHiddenWindowCursorDoesNotOverrideVisibleWindowCursor(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
 	model.putWindow(protocol.WindowContent{ID: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
@@ -894,7 +894,7 @@ func TestHiddenWindowCursorDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 }
 
 func TestHiddenWindowDeltaDoesNotOverrideVisibleWindowCursor(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
 	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
@@ -906,7 +906,7 @@ func TestHiddenWindowDeltaDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 }
 
 func TestVisibleToHiddenWindowDeltaRestoresRemainingVisibleCursor(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
 	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
@@ -918,7 +918,7 @@ func TestVisibleToHiddenWindowDeltaRestoresRemainingVisibleCursor(t *testing.T) 
 }
 
 func TestHiddenToVisibleWindowDeltaUpdatesCursor(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
 	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
@@ -935,7 +935,7 @@ func TestHiddenToVisibleWindowDeltaUpdatesCursor(t *testing.T) {
 // reappears and the highlight comes back. Text is identical either way; only
 // styling changes.
 func TestOffViewportCursorHidesCursorlineHighlight(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	rows := []protocol.WindowRow{{Text: "cursor line"}}
 
 	onScreen := protocol.WindowContent{ID: 1, Rows: rows, Cursorline: protocol.Cursorline{Visible: true, Row: 0, BG: 0x223344}}
@@ -956,7 +956,7 @@ func TestOffViewportCursorHidesCursorlineHighlight(t *testing.T) {
 }
 
 func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 2,
@@ -986,7 +986,7 @@ func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 }
 
 func TestInvalidFullReplaceWithDecreasingBufferLinesPreservesCommittedState(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	_ = model.applyCommands(frame(protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
 		ID: 7,
 		Rows: []protocol.WindowRow{
@@ -1014,7 +1014,7 @@ func TestInvalidFullReplaceWithDecreasingBufferLinesPreservesCommittedState(t *t
 }
 
 func TestApplyWindowDeltaInvalidatesMissingRetainedRowRef(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 2, Rows: []protocol.WindowRow{{ID: 1, ContentHash: 11, Text: "old one"}}})
 	model.putWindow(protocol.WindowContent{ID: 8, ContentEpoch: 3, Rows: []protocol.WindowRow{{Text: "other"}}})
 
@@ -1029,7 +1029,7 @@ func TestApplyWindowDeltaInvalidatesMissingRetainedRowRef(t *testing.T) {
 }
 
 func TestApplyWindowDeltaInvalidatesHashMismatchedRetainedRowRef(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 2, Rows: []protocol.WindowRow{{ID: 1, ContentHash: 11, Text: "old one"}}})
 	model.putWindow(protocol.WindowContent{ID: 8, ContentEpoch: 3, Rows: []protocol.WindowRow{{Text: "other"}}})
 
@@ -1044,7 +1044,7 @@ func TestApplyWindowDeltaInvalidatesHashMismatchedRetainedRowRef(t *testing.T) {
 }
 
 func TestApplyWindowDeltaPreservesOverlayScrollPresentation(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -1080,7 +1080,7 @@ func TestApplyWindowDeltaPreservesOverlayScrollPresentation(t *testing.T) {
 }
 
 func TestApplyWindowDeltaClearsStaleScrollPresentationFromSectionedDelta(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	baseline := protocol.ScrollPresentation{WindowID: 7, AnchorTop: 10, AnchorLeft: 2, VisibleStartLine: 10, VisibleEndLine: 20, ContentEpoch: 9, LayoutGeneration: 11}
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollSet: true, Scroll: baseline})
 
@@ -1110,7 +1110,7 @@ func TestApplyWindowDeltaClearsStaleScrollPresentationFromSectionedDelta(t *test
 }
 
 func TestApplyWindowDeltaAppliesMatchingScrollPresentation(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -1140,7 +1140,7 @@ func TestApplyWindowDeltaAppliesMatchingScrollPresentation(t *testing.T) {
 }
 
 func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.cursorShape = 1
 	if got := model.cursorStyleSequence(); got != "\x1b[6 q" {
 		t.Fatalf("beam cursor sequence = %q", got)
@@ -1152,7 +1152,7 @@ func TestCursorShapeSequenceTracksProtocolShape(t *testing.T) {
 }
 
 func TestThemeCommandUpdatesModelPalette(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	_ = model.applyCommands(frame(testThemeCommand()))
 
 	if got := model.activePalette.colors[themeEditorBG]; got != 0x1E1F2A {
@@ -1188,7 +1188,7 @@ func TestBootstrapPaletteIsThemeAgnostic(t *testing.T) {
 }
 
 func TestKeyframeWithoutThemeShowsProtocolError(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	_ = model.applyCommands([]protocol.Command{
 		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
 		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "unthemed"}}}},
@@ -1204,7 +1204,7 @@ func TestKeyframeWithoutThemeShowsProtocolError(t *testing.T) {
 }
 
 func TestKeyframeWithEmptyThemeShowsProtocolError(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	_ = model.applyCommands([]protocol.Command{
 		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
 		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{}}}},
@@ -1224,7 +1224,7 @@ func TestKeyframeWithEmptyThemeShowsProtocolError(t *testing.T) {
 }
 
 func TestKeyframeWithIncompleteThemeShowsProtocolError(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	_ = model.applyCommands([]protocol.Command{
 		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
 		{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiTheme, Theme: protocol.Theme{Colors: map[byte]uint32{themeEditorBG: 0x1E1F2A, themeEditorFG: 0xC7D0E8}}}},
@@ -1244,7 +1244,7 @@ func TestKeyframeWithIncompleteThemeShowsProtocolError(t *testing.T) {
 }
 
 func TestDeltaFrameWithEmptyThemeShowsProtocolError(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	_ = model.applyCommands(frame(
 		protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "baseline"}}}},
 	))
@@ -1272,7 +1272,7 @@ func TestDeltaFrameWithEmptyThemeShowsProtocolError(t *testing.T) {
 }
 
 func TestDeltaFrameWithPartialThemeShowsProtocolError(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	_ = model.applyCommands(frame(
 		protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "baseline"}}}},
 	))
@@ -1322,7 +1322,7 @@ func TestPaletteUsesSemanticTreeAndPopupSlots(t *testing.T) {
 }
 
 func TestSemanticWindowUsesThemeForSelectionOverlay(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{themeSelectionBG: 0x112233}})
 	style := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Selection: protocol.Selection{Type: 1, StartRow: 0, StartCol: 1, EndRow: 0, EndCol: 3}}, 0, 1)
 
@@ -1332,7 +1332,7 @@ func TestSemanticWindowUsesThemeForSelectionOverlay(t *testing.T) {
 }
 
 func TestSemanticWindowUsesKindSpecificDocumentHighlightTheme(t *testing.T) {
-	model := New(20, 4, nil, nil)
+	model := New(20, 4, nil)
 	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{themeHighlightReadBG: 0x223344, themeHighlightWriteBG: 0x334455, themeSelectionBG: 0x445566}})
 	readStyle := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Highlights: []protocol.DocumentHighlight{{Kind: 2, StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1}}}, 0, 0)
 	writeStyle := model.applyWindowOverlays(lipgloss.NewStyle(), protocol.WindowContent{Highlights: []protocol.DocumentHighlight{{Kind: 3, StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1}}}, 0, 0)
@@ -1344,7 +1344,7 @@ func TestSemanticWindowUsesKindSpecificDocumentHighlightTheme(t *testing.T) {
 }
 
 func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	model.gutters = map[uint16]protocol.Gutter{
 		7: {
 			WindowID:        7,
@@ -1386,7 +1386,7 @@ func TestSemanticWindowRendersGutterCursorlineTildesAndModeline(t *testing.T) {
 }
 
 func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
-	model := New(120, 34, nil, nil)
+	model := New(120, 34, nil)
 	chat := protocol.AgentChat{
 		Visible:           true,
 		Status:            2,
@@ -1413,7 +1413,7 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 }
 
 func TestAgentChatAssistantMarkdownCodeCardPreservesBlankLinesAndTruncates(t *testing.T) {
-	model := New(40, 16, nil, nil)
+	model := New(40, 16, nil)
 	msg := markdownCodeCardMessage()
 
 	view := ansi.Strip(strings.Join(model.renderAgentAssistantMessage(msg, 40), "\n"))
@@ -1429,7 +1429,7 @@ func TestAgentChatAssistantMarkdownCodeCardPreservesBlankLinesAndTruncates(t *te
 }
 
 func TestAgentChatRenderMessageRoutesAssistantMarkdownCodeCards(t *testing.T) {
-	model := New(40, 16, nil, nil)
+	model := New(40, 16, nil)
 	msg := markdownCodeCardMessage()
 
 	view := ansi.Strip(strings.Join(model.renderAgentMessage(msg, 40), "\n"))
@@ -1458,7 +1458,7 @@ func markdownCodeCardMessage() protocol.AgentChatMessage {
 }
 
 func TestAgentChatAssistantStyledLinesPreserveCodeIndentationAndOverflow(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	styledLines := []protocol.AgentStyledLine{
 		{{Text: "Here is code", FG: 0xBBC2CF}},
 		{{Text: "  def hello do", FG: 0x98BE65, BG: 0x21242B, Flags: 0x10}},
@@ -1479,7 +1479,7 @@ func TestAgentChatAssistantStyledLinesPreserveCodeIndentationAndOverflow(t *test
 }
 
 func TestAgentChatAssistantStyledCodeLineShowsLongLineIndicator(t *testing.T) {
-	model := New(36, 16, nil, nil)
+	model := New(36, 16, nil)
 	msg := protocol.AgentChatMessage{
 		Kind: agentKindStyled,
 		StyledLines: []protocol.AgentStyledLine{
@@ -1494,7 +1494,7 @@ func TestAgentChatAssistantStyledCodeLineShowsLongLineIndicator(t *testing.T) {
 }
 
 func TestAgentChatAssistantStyledCodeLineShowsIndicatorAcrossSplitRuns(t *testing.T) {
-	model := New(36, 16, nil, nil)
+	model := New(36, 16, nil)
 	msg := protocol.AgentChatMessage{
 		Kind: agentKindStyled,
 		StyledLines: []protocol.AgentStyledLine{
@@ -1509,7 +1509,7 @@ func TestAgentChatAssistantStyledCodeLineShowsIndicatorAcrossSplitRuns(t *testin
 }
 
 func TestAgentChatAssistantMixedProseAndInlineCodeOmitsCodeIndicator(t *testing.T) {
-	model := New(36, 16, nil, nil)
+	model := New(36, 16, nil)
 	msg := protocol.AgentChatMessage{
 		Kind: agentKindStyled,
 		StyledLines: []protocol.AgentStyledLine{
@@ -1524,7 +1524,7 @@ func TestAgentChatAssistantMixedProseAndInlineCodeOmitsCodeIndicator(t *testing.
 }
 
 func TestAgentChatThinkingRendersMultipleLinesWhenExpanded(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:      agentKindThinking,
 		Text:      "first line\nsecond line\nthird line\nfourth line\nfifth line\nsixth line",
@@ -1543,7 +1543,7 @@ func TestAgentChatThinkingRendersMultipleLinesWhenExpanded(t *testing.T) {
 }
 
 func TestAgentChatThinkingCollapsedRemainsSingleLine(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:      agentKindThinking,
 		Text:      "first line\nsecond line",
@@ -1560,7 +1560,7 @@ func TestAgentChatThinkingCollapsedRemainsSingleLine(t *testing.T) {
 }
 
 func TestAgentChatToolExpandedRendersMultipleResultLines(t *testing.T) {
-	model := New(96, 24, nil, nil)
+	model := New(96, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:      agentKindTool,
 		Name:      "grep",
@@ -1579,7 +1579,7 @@ func TestAgentChatToolExpandedRendersMultipleResultLines(t *testing.T) {
 }
 
 func TestAgentChatToolCollapsedShowsExpansionHint(t *testing.T) {
-	model := New(96, 24, nil, nil)
+	model := New(96, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:      agentKindTool,
 		Name:      "read_file",
@@ -1599,7 +1599,7 @@ func TestAgentChatToolCollapsedShowsExpansionHint(t *testing.T) {
 }
 
 func TestAgentChatToolRendersInlineDiffPreview(t *testing.T) {
-	model := New(96, 24, nil, nil)
+	model := New(96, 24, nil)
 	msg := protocol.AgentChatMessage{
 		Kind:         agentKindTool,
 		Name:         "edit_file",
@@ -1620,7 +1620,7 @@ func TestAgentChatToolRendersInlineDiffPreview(t *testing.T) {
 
 func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(80, 24, out, nil)
+	model := New(80, 24, out)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible: true,
 	}}}
@@ -1640,7 +1640,7 @@ func TestAgentChatShortcutTogglesLatestThinkingBlock(t *testing.T) {
 
 func TestAgentChatShortcutTogglesLatestToolBlock(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(80, 24, out, nil)
+	model := New(80, 24, out)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible: true,
 	}}}
@@ -1673,7 +1673,7 @@ func TestAgentChatShortcutTogglesLatestToolBlockIgnoresZeroID(t *testing.T) {
 }
 
 func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.agent.animationFrame = 0
 	first := ansi.Strip(model.renderAgentStatusBadge(1))
 	model.agent.animationFrame = 1
@@ -1689,7 +1689,7 @@ func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
 }
 
 func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
-	model := New(120, 24, nil, nil)
+	model := New(120, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{
 		Visible:       true,
 		Status:        0,
@@ -1728,7 +1728,7 @@ func TestAgentChatVisibleRendersAsMainBody(t *testing.T) {
 func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 	// Every overlay surface is registry-placed now (#2281): a surface renders only
 	// when the BEAM emits its placement, so each case provides one.
-	model := New(60, 12, nil, nil)
+	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 3, CanApprove: true, Progress: protocol.AgentProgress{ActiveAction: "Running shell", ToolCount: 2, FileCount: 1, ReviewHint: "Review: approve or reject changes"}, Todos: []protocol.AgentTodo{{Status: 1, Description: "Inspect files"}}}}}
 	model.surfacePlacements = []generated.SurfacePlacement{
 		{SurfaceID: surfaceIDAgentContext, Z: 260, HitKind: 8},
@@ -1740,7 +1740,7 @@ func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 }
 
 func TestSplitSeparatorsRenderOnContent(t *testing.T) {
-	model := New(24, 6, nil, nil)
+	model := New(24, 6, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Verticals: []protocol.VerticalSeparator{{Col: 2, StartRow: 1, EndRow: 1}}}}}
 	lines := model.withSplitSeparators([]string{"\x1b[1mabcd\x1b[0m", "efgh"})
 	if !strings.Contains(lines[0], "│") {
@@ -1752,7 +1752,7 @@ func TestSplitSeparatorsRenderOnContent(t *testing.T) {
 }
 
 func TestSplitSeparatorsRenderOnBlankRow(t *testing.T) {
-	model := New(24, 6, nil, nil)
+	model := New(24, 6, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Horizontals: []protocol.HorizontalSeparator{{Row: 1, Col: 0, Width: 16, Filename: "main.ex"}}}}}
 	lines := model.withSplitSeparators([]string{"", ""})
 	if !strings.Contains(ansi.Strip(lines[0]), "main.ex") || !strings.Contains(ansi.Strip(lines[0]), "─") {
@@ -1761,7 +1761,7 @@ func TestSplitSeparatorsRenderOnBlankRow(t *testing.T) {
 }
 
 func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
-	model := New(80, 6, nil, nil)
+	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}},
@@ -1787,7 +1787,7 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 }
 
 func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24, fileTreeRowGuides{})
 	if count := strings.Count(rendered, "48;2;51;51;51"); count < 4 {
 		t.Fatalf("selected file-tree row should carry selection background across marker, icon, label, and fill, count=%d row=%q", count, rendered)
@@ -1798,7 +1798,7 @@ func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 }
 
 func TestFileTreeDirtyRowUsesGitModifiedColor(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true}, 30, fileTreeRowGuides{})
 	// TreeGitModified bootstrap color is 0xE5C07B = rgb(229,192,123).
 	// The dirty indicator and filename should use this instead of the
@@ -1812,7 +1812,7 @@ func TestFileTreeDirtyRowUsesGitModifiedColor(t *testing.T) {
 }
 
 func TestFileTreeDirtySelectedRowKeepsSelectionColors(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true, Selected: true}, 30, fileTreeRowGuides{})
 	// TreeSelectionText bootstrap color is 0xFFFFFF = rgb(255,255,255).
 	// Dirty+selected rows should use selection text, not git-modified for the name.
@@ -1822,7 +1822,7 @@ func TestFileTreeDirtySelectedRowKeepsSelectionColors(t *testing.T) {
 }
 
 func TestFileTreeMatchHighlightAccentsMatchedCharacters(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	_ = model.applyCommands(frame(testThemeCommand()))
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{
 		Name:           "main.go",
@@ -1841,7 +1841,7 @@ func TestFileTreeMatchHighlightAccentsMatchedCharacters(t *testing.T) {
 }
 
 func TestFileTreeMatchHighlightSkippedWhenNoPositions(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	_ = model.applyCommands(frame(testThemeCommand()))
 	withMatch := model.renderFileTreeRow(protocol.FileTreeRow{
 		Name:           "main.go",
@@ -1863,7 +1863,7 @@ func TestFileTreeMatchHighlightSkippedWhenNoPositions(t *testing.T) {
 }
 
 func TestFileTreeMatchHighlightPreservesRowWidth(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	_ = model.applyCommands(frame(testThemeCommand()))
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{
 		Name:           "config.toml",
@@ -1888,7 +1888,7 @@ func TestFileTreeWidthRespectsProtocolGeometryAndSafetyClamp(t *testing.T) {
 }
 
 func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
-	model := New(80, 6, nil, nil)
+	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Status: 2, Width: 18, Root: "/repo"}}}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
@@ -1907,7 +1907,7 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 }
 
 func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
-	model := New(80, 6, nil, nil)
+	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
@@ -1923,7 +1923,7 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 }
 
 func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
-	model := New(90, 8, nil, nil)
+	model := New(90, 8, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
 	model.layout = model.computeLayout()
@@ -1943,7 +1943,7 @@ func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
 }
 
 func TestApplyWindowDeltaAppliesScrollLeftSetAndCropsRendering(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 0, Rows: []protocol.WindowRow{{Text: "abcdef"}}})
 
 	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeftSet: true, ScrollLeft: 2})
@@ -1967,7 +1967,7 @@ func stripRenderedLines(lines []string) []string {
 }
 
 func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2013,7 +2013,7 @@ func TestPresentationScrollConsumesProducerResetAtCommit(t *testing.T) {
 		t.Fatalf("producer fixture must carry reset_required: %+v", window.Scroll)
 	}
 
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.putWindow(window)
 	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{
 		Button: tea.MouseWheelDown,
@@ -2045,7 +2045,7 @@ func TestPresentationScrollResidentReachesDocumentBottom(t *testing.T) {
 		rows[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), BufferLine: uint32(i), Text: fmt.Sprintf("line %d", i)}
 	}
 
-	model := New(20, 14, nil, nil)
+	model := New(20, 14, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2089,7 +2089,7 @@ func TestPresentationScrollResidentReachesDocumentBottom(t *testing.T) {
 func TestPresentationScrollWindowedClampsAtOverscanEdge(t *testing.T) {
 	const visibleRows = 2
 
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2144,7 +2144,7 @@ func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
 		rows[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), BufferLine: uint32(i), Text: fmt.Sprintf("line %d", i)}
 	}
 
-	model := New(20, 14, nil, nil)
+	model := New(20, 14, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2229,7 +2229,7 @@ func TestWindowCoversDocumentBoundaries(t *testing.T) {
 }
 
 func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.gutters = map[uint16]protocol.Gutter{
 		7: {
 			WindowID:        7,
@@ -2276,7 +2276,7 @@ func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
 }
 
 func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2321,7 +2321,7 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 }
 
 func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2345,7 +2345,7 @@ func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
 }
 
 func TestPresentationScrollHorizontalOffsetInvalidatesCachedRows(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2369,7 +2369,7 @@ func TestPresentationScrollHorizontalOffsetInvalidatesCachedRows(t *testing.T) {
 }
 
 func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2395,7 +2395,7 @@ func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T)
 }
 
 func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -2416,7 +2416,7 @@ func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
 }
 
 func TestLegacyCursorlineAppliesToCellFallback(t *testing.T) {
-	model := New(10, 4, nil, nil)
+	model := New(10, 4, nil)
 	model.cursorlineChrome = protocol.CursorlineChrome{Visible: true, Row: 0, BG: 0x112233}
 	lines := model.withLegacyCursorline([]string{"hello     "})
 	if len(lines) != 1 || ansi.Strip(lines[0]) == "" {
@@ -2425,7 +2425,7 @@ func TestLegacyCursorlineAppliesToCellFallback(t *testing.T) {
 }
 
 func TestApplyCommandsStoresIndentGuidesByWindow(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	_ = model.applyCommands(frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiIndentGuides, IndentGuides: protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}, IndentLevels: []byte{2}}}}))
 
 	guides, ok := model.indentGuides[7]
@@ -2435,7 +2435,7 @@ func TestApplyCommandsStoresIndentGuidesByWindow(t *testing.T) {
 }
 
 func TestFileTreeSelectionUpdatesExistingTree(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Generation: 7, Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b"}}}}}
 	model.applyFileTreeSelection(protocol.FileTreeSelection{Generation: 7, Focused: true, SelectedID: "b"})
 
@@ -2448,7 +2448,7 @@ func TestFileTreeSelectionUpdatesExistingTree(t *testing.T) {
 func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) {
 	t.Run("j advances locally while still forwarding to BEAM", func(t *testing.T) {
 		out := make(chan []byte, 1)
-		model := New(30, 6, out, nil)
+		model := New(30, 6, out)
 		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
 		model.applyMutation(focusOwnerCommand(0, 1))
 
@@ -2466,7 +2466,7 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 
 	t.Run("up arrow retreats locally while still forwarding to BEAM", func(t *testing.T) {
 		out := make(chan []byte, 1)
-		model := New(30, 6, out, nil)
+		model := New(30, 6, out)
 		model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "b", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a"}, {ID: "b", Name: "b", Selected: true, Focused: true}}}}}
 		model.applyMutation(focusOwnerCommand(0, 1))
 
@@ -2485,7 +2485,7 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 
 func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(30, 6, out, nil)
+	model := New(30, 6, out)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Focused: true, Generation: 7, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}}}
 	model.applyMutation(focusOwnerCommand(0, 1))
 
@@ -2516,7 +2516,7 @@ func TestCommittedOverlayOwnerSuppressesFileTreeNavigation(t *testing.T) {
 	} {
 		t.Run(tc.name+" suppresses local navigation", func(t *testing.T) {
 			out := make(chan []byte, 1)
-			model := New(30, 6, out, nil)
+			model := New(30, 6, out)
 			model.chrome = tc.overlay
 			model.applyMutation(tc.owner)
 
@@ -2539,7 +2539,7 @@ func TestCommittedOverlayOwnerSuppressesFileTreeNavigation(t *testing.T) {
 }
 
 func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	_ = model.applyCommands(frame(
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 0}}}}},
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiGutter, WindowGutter: protocol.Gutter{WindowID: 2, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 9}}}}},
@@ -2553,7 +2553,7 @@ func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
 }
 
 func TestSemanticWindowsUsePerWindowHeights(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	model.gutters = map[uint16]protocol.Gutter{
 		1: {WindowID: 1, ContentHeight: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 0}}},
 		2: {WindowID: 2, ContentHeight: 1, LineNumberWidth: 3, Entries: []protocol.GutterEntry{{BufferLine: 10}}},
@@ -2569,7 +2569,7 @@ func TestSemanticWindowsUsePerWindowHeights(t *testing.T) {
 }
 
 func TestSemanticWindowsUsePaneGeometryRects(t *testing.T) {
-	model := New(24, 6, nil, nil)
+	model := New(24, 6, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "left"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 1}}})
 	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "right"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 12, Width: 10, Height: 1}}})
 
@@ -2584,7 +2584,7 @@ func TestSemanticWindowsUsePaneGeometryRects(t *testing.T) {
 }
 
 func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
-	model := New(24, 6, nil, nil)
+	model := New(24, 6, nil)
 	model.title = "Header"
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
@@ -2596,7 +2596,7 @@ func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
 }
 
 func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T) {
-	model := New(80, 8, nil, nil)
+	model := New(80, 8, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiWorkspaces: {Spaces: protocol.WorkspaceBar{Spaces: []protocol.Workspace{{ID: 1, Label: "Files", Icon: "folder", Active: true, TabCount: 1}, {ID: 2, Label: "Tests", Icon: "beaker"}}}},
 		generated.OPGuiTabBar:     {Tabs: protocol.TabBar{ActiveIndex: 0, Tabs: []protocol.Tab{{ID: 1, Label: "Untitled-1", Active: true, Dirty: true}}}},
@@ -2612,7 +2612,7 @@ func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T
 }
 
 func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
-	model := New(80, 6, nil, nil)
+	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
@@ -2628,7 +2628,7 @@ func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
 }
 
 func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
-	model := New(80, 6, nil, nil)
+	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, Items: []protocol.Sidebar{{ID: "files", DisplayName: "Files", SemanticKind: "file_tree", PreferredWidth: 18, Visible: true}}}}}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
@@ -2648,7 +2648,7 @@ func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
 }
 
 func TestSemanticRowsRespectScrollLeftAndIndentGuides(t *testing.T) {
-	model := New(12, 6, nil, nil)
+	model := New(12, 6, nil)
 	model.indentGuides[7] = protocol.IndentGuides{WindowID: 7, TabWidth: 2, GuideCols: []uint16{2}}
 	window := protocol.WindowContent{ID: 7, ScrollLeft: 2, Rows: []protocol.WindowRow{{Text: "    x"}}}
 
@@ -2659,7 +2659,7 @@ func TestSemanticRowsRespectScrollLeftAndIndentGuides(t *testing.T) {
 }
 
 func TestOverlayDeltaPreservesExistingScrollLeft(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 4, Rows: []protocol.WindowRow{{Text: "hello"}}})
 
 	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 9, CursorRow: 1, CursorCol: 2, CursorShape: 1, Cursorline: protocol.Cursorline{Visible: true, Row: 0, BG: 0x123456}})
@@ -2671,7 +2671,7 @@ func TestOverlayDeltaPreservesExistingScrollLeft(t *testing.T) {
 }
 
 func TestDeltaForMissingWindowIsIgnored(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.applyWindowDelta(protocol.WindowContent{ID: 99, ContentEpoch: 1, CursorRow: 1, CursorCol: 2, CursorShape: 1})
 
 	if len(model.windows) != 0 {
@@ -2680,7 +2680,7 @@ func TestDeltaForMissingWindowIsIgnored(t *testing.T) {
 }
 
 func TestStaleContentEpochDeltaIsIgnored(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{ID: 7, ContentEpoch: 9, ScrollLeft: 4, CursorRow: 3, CursorCol: 4, CursorShape: 1, Rows: []protocol.WindowRow{{Text: "hello"}}})
 
 	model.applyWindowDelta(protocol.WindowContent{ID: 7, ContentEpoch: 8, CursorRow: 1, CursorCol: 2, CursorShape: 2, ScrollLeft: 0, Rows: []protocol.WindowRow{{Text: "changed"}}})
@@ -2692,7 +2692,7 @@ func TestStaleContentEpochDeltaIsIgnored(t *testing.T) {
 }
 
 func TestSemanticDeltaClearsStaleOverlaysAndCursorline(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:             7,
 		ContentEpoch:   4,
@@ -2725,7 +2725,7 @@ func TestSemanticDeltaClearsStaleOverlaysAndCursorline(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
-	model := New(60, 12, nil, nil)
+	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {Status: protocol.StatusBar{Left: []protocol.StatusSegment{{Text: " save ", Command: "save"}}, Right: []protocol.StatusSegment{{Text: " quit", Command: "quit"}}}},
 		generated.OPGuiTabBar:    {Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 41, Icon: "󰈙", Label: "one.ex"}, {ID: 42, Icon: "󰈙", Label: "two.ex", Active: true}}}},
@@ -2762,7 +2762,7 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 }
 
 func TestSemanticMouseBodyClickFallsThrough(t *testing.T) {
-	model := New(60, 12, nil, nil)
+	model := New(60, 12, nil)
 	model.layout = model.computeLayout()
 
 	bodyX := model.layout.body.X + 1
@@ -2773,7 +2773,7 @@ func TestSemanticMouseBodyClickFallsThrough(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
-	model := New(60, 16, nil, nil)
+	model := New(60, 16, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiCompletion: {Complete: protocol.Completion{Visible: true, Generation: 11, Selected: 0, SelectedID: "alpha", Items: []protocol.CompletionItem{
 			{ID: "alpha", Label: "alpha", Detail: "fn"},
@@ -2800,7 +2800,7 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
-	model := New(60, 24, nil, nil)
+	model := New(60, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiNotifications: {Notifications: protocol.Notifications{
 			Visible: true,
@@ -2857,7 +2857,7 @@ func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
 }
 
 func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
-	model := New(60, 24, nil, nil)
+	model := New(60, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiNotifications: {Notifications: protocol.Notifications{
 			Visible: true,
@@ -2884,7 +2884,7 @@ func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesObservatoryNodeZones(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiObservatory: {Observatory: protocol.Observatory{
 			Visible: true,
@@ -2929,7 +2929,7 @@ func TestSemanticMouseRoutesObservatoryNodeZones(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
 			Visible:      true,
@@ -2968,7 +2968,7 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 }
 
 func TestTimelineChromeRendersEditTimelineFiles(t *testing.T) {
-	model := New(60, 12, nil, nil)
+	model := New(60, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
 		Visible:      true,
 		ViewingIndex: 0xFFFF,
@@ -2984,7 +2984,7 @@ func TestTimelineChromeRendersEditTimelineFiles(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesFloatPopupDismissOutsideBox(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFloatPopup: {Float: protocol.FloatPopup{
 			Visible: true,
@@ -3030,7 +3030,7 @@ func TestSemanticMouseRoutesFloatPopupDismissOutsideBox(t *testing.T) {
 }
 
 func TestFloatPopupDismissAbsentWhenContentFillsBand(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	// Enough lines to fill the whole band: there is no phantom region, so no
 	// outside-the-box-but-in-band click exists and nothing dismisses through this
 	// path (the user dismisses via keyboard or a click outside the band).
@@ -3057,7 +3057,7 @@ func TestFloatPopupDismissAbsentWhenContentFillsBand(t *testing.T) {
 }
 
 func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
-	model := New(60, 24, nil, nil)
+	model := New(60, 24, nil)
 	completion := protocol.Completion{
 		Visible:       true,
 		Selected:      0,
@@ -3075,7 +3075,7 @@ func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
 }
 
 func TestCompletionWithoutDocumentationRendersNoPreviewPane(t *testing.T) {
-	model := New(60, 24, nil, nil)
+	model := New(60, 24, nil)
 	withDoc := model.renderCompletion(protocol.Completion{
 		Visible:       true,
 		Items:         []protocol.CompletionItem{{Label: "map", Detail: "Enum.map/2"}},
@@ -3105,7 +3105,7 @@ func TestCompletionWithoutDocumentationRendersNoPreviewPane(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
-	model := New(80, 6, nil, nil)
+	model := New(80, 6, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, ActiveID: "files", Items: []protocol.Sidebar{
 			{ID: "files", DisplayName: "Files", SemanticKind: "file_tree", PreferredWidth: 18, Visible: true},
@@ -3134,7 +3134,7 @@ func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
 }
 
 func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
-	model := New(60, 16, nil, nil)
+	model := New(60, 16, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}}}},
 		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Visible: true, Name: "Open documentation"}},
@@ -3155,7 +3155,7 @@ func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 }
 
 func TestBottomPanelMessageUsesProtocolSeverity(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	p := palette{colors: map[byte]uint32{
 		themeTabInactiveFG:   0x111111,
 		themeDiagnosticInfo:  0x222222,
@@ -3202,7 +3202,7 @@ func TestBottomPanelShowsLatestMessagesByDefault(t *testing.T) {
 }
 
 func TestBottomPanelHeightUsesSemanticPercent(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	panel := protocol.BottomPanel{Visible: true, HeightPercent: 50}
 
 	if got := model.bottomPanelHeight(panel); got != 10 {
@@ -3322,7 +3322,7 @@ func TestBottomPanelHideReopenKeepsSameStreamMessages(t *testing.T) {
 }
 
 func bottomPanelTestModel(messageCount int, out chan<- []byte) (Model, protocol.BottomPanel) {
-	model := New(80, 12, out, nil)
+	model := New(80, 12, out)
 	messages := make([]protocol.PanelMessage, 0, messageCount)
 	for i := 0; i < messageCount; i++ {
 		messages = append(messages, protocol.PanelMessage{ID: uint32(i + 1), Level: 1, Text: fmt.Sprintf("msg-%d", i)})
@@ -3370,7 +3370,7 @@ func completionChrome(items int, selected uint16) protocol.ChromePayload {
 
 func TestCompletionLocalNavigationCtrlNAdvancesPreview(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(30, 10, out, nil)
+	model := New(30, 10, out)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 0)
 	model.applyMutation(focusOwnerCommand(0, 9))
 
@@ -3388,7 +3388,7 @@ func TestCompletionLocalNavigationCtrlNAdvancesPreview(t *testing.T) {
 
 func TestCompletionLocalPreviewEnterActivatesExactIdentity(t *testing.T) {
 	out := make(chan []byte, 2)
-	model := New(30, 10, out, nil)
+	model := New(30, 10, out)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(3, 0)
 	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "completion-2")
 	model.applyMutation(focusOwnerCommand(0, 9))
@@ -3405,7 +3405,7 @@ func TestCompletionLocalPreviewEnterActivatesExactIdentity(t *testing.T) {
 
 func TestCompletionLocalNavigationCtrlPRetreatsPreview(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(30, 10, out, nil)
+	model := New(30, 10, out)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 3)
 	model.applyMutation(focusOwnerCommand(0, 9))
 
@@ -3419,7 +3419,7 @@ func TestCompletionLocalNavigationCtrlPRetreatsPreview(t *testing.T) {
 
 func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 	t.Run("clamps at bottom", func(t *testing.T) {
-		model := New(30, 10, nil, nil)
+		model := New(30, 10, nil)
 		model.chrome[generated.OPGuiCompletion] = completionChrome(3, 2)
 		model.applyMutation(focusOwnerCommand(0, 9))
 
@@ -3432,7 +3432,7 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 	})
 
 	t.Run("clamps at top", func(t *testing.T) {
-		model := New(30, 10, nil, nil)
+		model := New(30, 10, nil)
 		model.chrome[generated.OPGuiCompletion] = completionChrome(3, 0)
 		model.applyMutation(focusOwnerCommand(0, 9))
 
@@ -3446,7 +3446,7 @@ func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
 }
 
 func TestCompletionLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 1)
 	model.applyMutation(focusOwnerCommand(0, 9))
 
@@ -3459,7 +3459,7 @@ func TestCompletionLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 }
 
 func TestCompletionLocalNavigationIgnoredWhenPopupHidden(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: false, Items: []protocol.CompletionItem{{Kind: 1, Label: "x"}}}}
 	model.applyMutation(focusOwnerCommand(0, 9))
 
@@ -3472,7 +3472,7 @@ func TestCompletionLocalNavigationIgnoredWhenPopupHidden(t *testing.T) {
 }
 
 func TestCompletionEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	completion := protocol.Completion{Visible: true, Generation: 7, Selected: 1, SelectedID: "b", Items: []protocol.CompletionItem{{ID: "a", Kind: 1, Label: "a"}, {ID: "b", Kind: 1, Label: "b"}, {ID: "c", Kind: 1, Label: "c"}}}
 
 	if got := model.effectiveCompletionIndex(completion); got != 1 {
@@ -3486,7 +3486,7 @@ func TestCompletionEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
 }
 
 func TestCompletionReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "completion-2")
 	payload := completionChrome(3, 1)
 	payload.Complete.Items[0], payload.Complete.Items[2] = payload.Complete.Items[2], payload.Complete.Items[0]
@@ -3501,7 +3501,7 @@ func TestCompletionReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing
 }
 
 func TestCompletionTwoIndexRenderingSplit(t *testing.T) {
-	model := New(80, 20, nil, nil)
+	model := New(80, 20, nil)
 	model.activePalette = paletteFromTheme(testThemeCommand().Chrome.Theme)
 	model.themeApplied = true
 	items := []protocol.CompletionItem{{ID: "foo", Kind: 1, Label: "foo"}, {ID: "bar", Kind: 1, Label: "bar"}, {ID: "baz", Kind: 1, Label: "baz"}}
@@ -3530,7 +3530,7 @@ func pickerChrome(items int, selected uint16) protocol.ChromePayload {
 
 func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(30, 10, out, nil)
+	model := New(30, 10, out)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 0)
 	model.applyMutation(focusOwnerCommand(1, 8))
 
@@ -3548,7 +3548,7 @@ func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
 
 func TestPickerLocalNavigationKRetreatsPreview(t *testing.T) {
 	out := make(chan []byte, 1)
-	model := New(30, 10, out, nil)
+	model := New(30, 10, out)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 3)
 	model.applyMutation(focusOwnerCommand(1, 8))
 
@@ -3562,7 +3562,7 @@ func TestPickerLocalNavigationKRetreatsPreview(t *testing.T) {
 
 func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 	t.Run("clamps at bottom", func(t *testing.T) {
-		model := New(30, 10, nil, nil)
+		model := New(30, 10, nil)
 		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 2)
 		model.applyMutation(focusOwnerCommand(1, 8))
 
@@ -3575,7 +3575,7 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 	})
 
 	t.Run("clamps at top", func(t *testing.T) {
-		model := New(30, 10, nil, nil)
+		model := New(30, 10, nil)
 		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 0)
 		model.applyMutation(focusOwnerCommand(1, 8))
 
@@ -3589,7 +3589,7 @@ func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
 }
 
 func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 1)
 	model.applyMutation(focusOwnerCommand(1, 8))
 
@@ -3602,7 +3602,7 @@ func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
 }
 
 func TestPickerLocalNavigationIgnoredWhenHidden(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: false, Items: []protocol.PickerItem{{Label: "x"}}}}
 	model.applyMutation(focusOwnerCommand(1, 8))
 
@@ -3615,7 +3615,7 @@ func TestPickerLocalNavigationIgnoredWhenHidden(t *testing.T) {
 }
 
 func TestPickerEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	picker := protocol.Picker{Visible: true, Generation: 7, Selected: 1, SelectedID: 2, Items: []protocol.PickerItem{{ActivationID: 1, Label: "a"}, {ActivationID: 2, Label: "b"}, {ActivationID: 3, Label: "c"}}}
 
 	if got := model.effectivePickerIndex(picker); got != 1 {
@@ -3629,7 +3629,7 @@ func TestPickerEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
 }
 
 func TestPickerReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing.T) {
-	model := New(30, 10, nil, nil)
+	model := New(30, 10, nil)
 	model.localPresentation.setIdentityPreview(presentationPicker, 7, "3")
 	payload := pickerChrome(3, 1)
 	payload.Picker.Items[0], payload.Picker.Items[2] = payload.Picker.Items[2], payload.Picker.Items[0]
