@@ -87,6 +87,39 @@ defmodule MingaEditor.Agent.PromptInputTest do
     assert Buffer.cursor(regular) == {0, 0}
   end
 
+  test "both prompt focus paths reclaim agent keybindings without replacing the draft" do
+    for focus_path <- [:pointer, :presentation] do
+      {state, regular} = prompt_state("draft")
+      Buffer.move_to(state.workspace.agent_ui.panel.prompt_buffer, {0, 0})
+
+      workspace =
+        state.workspace
+        |> SessionState.set_keymap_scope(:file_tree)
+        |> SessionState.transition_mode(:normal)
+
+      {state, _output, model, _lease, registry} = present(%{state | workspace: workspace}, 8, 101)
+
+      state =
+        case focus_path do
+          :pointer ->
+            pointer = event(model, 0, hd(model.rows).row_id, 0)
+            assert {:ok, target} = Reader.resolve(TextPresentations.reader(registry), pointer)
+            Mouse.handle_text_event(state, pointer, target)
+
+          :presentation ->
+            PromptInput.focus_presentation(state, 65_534, 101)
+        end
+
+      assert state.workspace.keymap_scope == :agent
+      assert state.workspace.editing.mode == :normal
+      assert PromptBuffer.input_text(state.workspace.agent_ui) == "draft"
+      state = MingaEditor.Input.Router.route_key(state, ?i, 0)
+      state = MingaEditor.Input.Router.route_key(state, ?X, 0)
+      assert PromptBuffer.input_text(state.workspace.agent_ui) == "Xdraft"
+      assert Buffer.content(regular) == "regular source"
+    end
+  end
+
   test "initial physical fit admits the published owner lease before text activation without admitting scroll or text" do
     {state, _regular} = prompt_state("long enough to wrap")
 

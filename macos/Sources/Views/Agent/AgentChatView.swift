@@ -59,8 +59,8 @@ public struct AgentChatView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
             // Messages: bottom-anchored so few messages cluster near the
             // prompt input rather than leaving a void below them.
-            ZStack {
-                ScrollViewReader { proxy in
+            ScrollViewReader { proxy in
+                ZStack {
                     ScrollView(.vertical) {
                         LazyVStack(spacing: Spacing.lg) {
                             if state.transcriptTruncated {
@@ -107,8 +107,8 @@ public struct AgentChatView: View {
                             scrollToBottom(proxy: proxy)
                         }
                     }
-                    // "Follow output" pill when user scrolled up during streaming
-                    if userHasScrolledUp && state.isThinking {
+                    // Keep the latest-output action available after generation finishes.
+                    if userHasScrolledUp {
                         VStack {
                             Spacer()
                             Button {

@@ -228,6 +228,17 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 - **Xcode 16+** for building
 - Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen` (pass the installation directory as its argument), then build via `xcodegen generate && xcodebuild -project Minga.xcodeproj -scheme Minga build`.
 
+## Agent Chat Workflow Regression Checks
+
+A model-only scene cannot prove that the BEAM admitted the composer or that composer focus restores its keybindings after sidebar use. Run these checks in the ordinary native workspace. Use an existing completed conversation for scrolling; no new provider request is required.
+
+1. Start in an Agent workspace without clicking the composer. Check that the model controls, transcript, empty composer and disabled Send button are present before the first focus action.
+2. Open a completed conversation longer than the viewport and type an unfinished draft with combining accents and wide characters. Open File Tree, click the composer, enter Insert mode if necessary, and append one character. Check that the character enters the draft rather than a sidebar command and that the original draft remains intact.
+3. While the turn is idle, wheel away from the latest message. Check that Follow output is visible and enabled above the composer without shrinking the transcript viewport or leaving its lower half blank. Activate it and check that the latest message returns without changing the draft, caret or editing mode.
+4. Repeat the scrolling check with the sidebar closed and with it open so the draft wraps. Use Toggle file tree in the status bar to close the sidebar; selecting the File Tree activity item focuses an already visible sidebar instead of hiding it. Check that Send remains visible and the draft can still be edited.
+
+Retain full-window screenshots and external system accessibility observations for the visible controls and text. In-process traversal of SwiftUI accessibility objects is not a substitute for this workflow check. Record startup, focus, scrolling and draft preservation separately from streaming or performance qualification.
+
 ## Coding Standards
 
 ### Swift
