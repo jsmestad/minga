@@ -996,6 +996,9 @@ struct EncoderAgentPromptTests {
             }
         }
         #expect(encoder.send(.agentPromptFit(windowID: 65534, generation: 3, columns: 1, maxRows: 1)) == .accepted)
+        withExtendedLifetime(pipe) {
+            #expect(encoder.waitForPendingWritesForTesting())
+        }
     }
 }
 
