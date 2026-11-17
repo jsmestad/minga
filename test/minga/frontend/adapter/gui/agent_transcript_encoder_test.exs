@@ -265,6 +265,32 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
                _::binary>> = Codec.encode_message_body({:assistant_markdown, [block]})
     end
 
+    test "plain and styled tool messages retain each committed outcome independently of the error flag" do
+      for {status, status_byte} <- [
+            running: 0,
+            complete: 1,
+            error: 2,
+            denied: 3,
+            cancelled: 4,
+            approval_expired: 5
+          ] do
+        tool = %ToolCallView{
+          name: "shell",
+          summary: "printf",
+          result: "The original result explanation",
+          status: status,
+          is_error: true
+        }
+
+        for {body, kind} <- [
+              {{:tool_call, tool}, 0x04},
+              {{:styled_tool_call, tool, []}, 0x08}
+            ] do
+          assert <<^kind, ^status_byte, 1, _rest::binary>> = Codec.encode_message_body(body)
+        end
+      end
+    end
+
     test "direct codec reports exact EncodingError fields for retained bounds" do
       assert %{command: :gui_agent_chat_message, field: :run_flags, actual: 256, min: 0, max: 255} =
                assert_raise(EncodingError, fn ->

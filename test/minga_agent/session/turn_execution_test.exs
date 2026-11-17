@@ -23,6 +23,13 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       execution = state(:exec, phase)
       assert TurnExecution.phase(execution) == phase
       assert TurnExecution.status(execution) == Map.fetch!(expected_exec_statuses, phase)
+
+      assert TurnExecution.display_status(execution) ==
+               if(phase == :approval_waiting,
+                 do: :approval_waiting,
+                 else: TurnExecution.status(execution)
+               )
+
       assert TurnExecution.active?(execution) == phase in active_phases()
       assert TurnExecution.error(execution) == if(phase == :failure, do: "boom", else: nil)
       assert TurnExecution.pending_approval(execution) != nil == (phase == :approval_waiting)
@@ -33,7 +40,25 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       plan = state(:plan, phase)
       assert TurnExecution.mode(plan) == :plan
       assert TurnExecution.status(plan) == :plan
+
+      assert TurnExecution.display_status(plan) ==
+               if(phase == :approval_waiting, do: :approval_waiting, else: :plan)
+
       assert TurnExecution.phase(plan) == phase
+    end
+  end
+
+  test "value projection uses the exact public approval and preserves raw statuses otherwise" do
+    public = %MingaAgent.ToolApproval.Public{
+      target: MingaAgent.ToolApproval.Target.new("session", "request", "tool"),
+      name: "shell",
+      args: %{},
+      preview: MingaAgent.ToolApproval.Preview.new(:command, "pwd", ["pwd"])
+    }
+
+    for raw <- [nil, :idle, :plan, :thinking, :tool_executing, :error] do
+      assert TurnExecution.display_status(raw, public) == :approval_waiting
+      assert TurnExecution.display_status(raw, nil) == raw
     end
   end
 
@@ -460,6 +485,7 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     failed_event = %Event.ToolEnd{
       tool_call_id: "tool-1",
       name: "shell",
+      outcome: :error,
       result: "command failed",
       is_error: true
     }
@@ -559,7 +585,13 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   end
 
   defp tool_end(id, name) do
-    %Event.ToolEnd{tool_call_id: id, name: name, result: "ok", is_error: false}
+    %Event.ToolEnd{
+      tool_call_id: id,
+      name: name,
+      outcome: :complete,
+      result: "ok",
+      is_error: false
+    }
   end
 
   defp active_phases,

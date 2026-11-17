@@ -130,22 +130,23 @@ defmodule MingaEditor.State.EventRoutingTest do
   end
 
   describe "Agent tab status" do
-    test "status_changed syncs agent_status on the agent tab" do
+    test "derived display status updates the agent tab across every lifecycle state" do
       %{state: state, session: session} = make_state()
 
-      new_state = AgentEvents.dispatch(state, session, {:status_changed, :thinking})
-
-      agent_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
-      assert agent_tab.payload.agent_status == :thinking
+      for status <- [:idle, :thinking, :tool_executing, :plan, :approval_waiting, :error] do
+        updated = AgentEvents.dispatch(state, session, {:display_status_changed, status})
+        agent_tab = TabBar.active(updated.shell_runtime.state.tab_bar)
+        assert agent_tab.payload.agent_status == status
+      end
     end
 
-    test "status_changed to :idle updates tab status" do
+    test "raw execution status does not overwrite an approval-waiting tab" do
       %{state: state, session: session} = make_state()
+      waiting = AgentEvents.dispatch(state, session, {:display_status_changed, :approval_waiting})
+      updated = AgentEvents.dispatch(waiting, session, {:status_changed, :thinking})
 
-      new_state = AgentEvents.dispatch(state, session, {:status_changed, :idle})
-
-      agent_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
-      assert agent_tab.payload.agent_status == :idle
+      agent_tab = TabBar.active(updated.shell_runtime.state.tab_bar)
+      assert agent_tab.payload.agent_status == :approval_waiting
     end
   end
 end

@@ -13,7 +13,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", outcome: :complete, result: "output"}
       )
 
       # GenServer.call after send ensures all handle_info have run
@@ -49,7 +49,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "first"}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", outcome: :complete, result: "first"}
       )
 
       send_provider_event(
@@ -59,7 +59,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc2", name: "grep", result: "second"}
+        %Event.ToolEnd{tool_call_id: "tc2", name: "grep", outcome: :complete, result: "second"}
       )
 
       pairs_before = Session.messages_with_ids(session)
@@ -128,7 +128,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", outcome: :complete, result: "done"}
       )
 
       messages = Session.messages(session)
@@ -175,7 +175,12 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "write_file", result: "wrote file"}
+        %Event.ToolEnd{
+          tool_call_id: "tc1",
+          name: "write_file",
+          outcome: :complete,
+          result: "wrote file"
+        }
       )
 
       send_provider_event(
@@ -269,7 +274,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", outcome: :complete, result: "ok"}
       )
 
       # End the turn so thinking blocks collapse
@@ -408,7 +413,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", outcome: :complete, result: "done"}
       )
 
       pairs_end = Session.messages_with_ids(session)
@@ -428,7 +433,7 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}
+        %Event.ToolEnd{tool_call_id: "tc1", name: "bash", outcome: :complete, result: "ok"}
       )
 
       pairs_before = Session.messages_with_ids(session)

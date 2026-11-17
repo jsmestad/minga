@@ -474,7 +474,7 @@ func TestChatDoesNotRouteTranscriptWheelThroughHiddenSemanticCanvas(t *testing.T
 
 func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 	for _, width := range []uint16{1, 3, 4, 6, 12, 40, 80, 120} {
-		for _, status := range []byte{0, 1, 2, 3} {
+		for _, status := range []byte{0, 1, 2, 3, 4, 5} {
 			t.Run(fmt.Sprintf("width%d/status%d", width, status), func(t *testing.T) {
 				out := make(chan []byte, 64)
 				model := New(width, 16, out)
@@ -483,7 +483,7 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 				p, _ := model.agentPromptPlacement()
 				label := "Send"
 				command := "agent_submit_or_newline"
-				if status == 1 || status == 2 {
+				if status == 1 || status == 2 || status == 5 {
 					label = "Stop"
 					command = "agent_abort"
 				}

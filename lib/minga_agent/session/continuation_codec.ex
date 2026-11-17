@@ -54,6 +54,13 @@ defmodule MingaAgent.Session.ContinuationCodec do
                     :unknown,
                     :provider_owned,
                     :provider,
+                    :tool_outcome,
+                    :tool_outcome_reason,
+                    :complete,
+                    :denied,
+                    :cancelled,
+                    :error,
+                    :approval_timeout,
                     :codex_responses_exact_prefix_v1
                   ],
                   &{Atom.to_string(&1), &1}

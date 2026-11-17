@@ -232,6 +232,7 @@ public final class StatusBarState {
         case .executingTool: return "executing"
         case .error: return "error"
         case .planning: return "plan"
+        case .approvalWaiting: return "Awaiting approval"
         case .unknown: return "unknown"
         }
     }

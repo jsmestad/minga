@@ -12,6 +12,89 @@ defmodule MingaAgent.Session.ContinuationTest do
   alias ReqLLM.Message.ReasoningDetails
   alias ReqLLM.ToolCall
 
+  test "Stop cancels only an exact pending call and never overwrites admission or saved truth" do
+    {:ok, request, continuation} =
+      Continuation.begin_request(Continuation.new(), "stop-request", 1, "inspect")
+
+    assistant = Context.assistant("", tool_calls: [ToolCall.new("call", "shell", "{}")])
+
+    {:ok, checkpoint_id, pending} =
+      Continuation.checkpoint_tool_group(
+        continuation,
+        request.request_id,
+        request.messages ++ [assistant],
+        [%{tool_call_id: "call", name: "shell", arguments: %{}}]
+      )
+
+    {:ok, admitted} =
+      Continuation.admit_tool_effect(
+        pending,
+        request.request_id,
+        checkpoint_id,
+        "call",
+        "shell",
+        %{}
+      )
+
+    saved =
+      Context.tool_result_message("shell", "call", "expired", %{
+        tool_outcome: :error,
+        tool_outcome_reason: :approval_timeout,
+        is_error: true
+      })
+
+    {:ok, completed} =
+      Continuation.complete_tool_effect(pending, request.request_id, checkpoint_id, "call", saved)
+
+    assert {:ok, cancelled} =
+             Continuation.cancel_unadmitted_tool(
+               pending,
+               request.request_id,
+               checkpoint_id,
+               "call"
+             )
+
+    [%{status: {:completed, cancellation}}] = cancelled.tool_checkpoint.calls
+    assert cancellation.metadata.tool_outcome == :cancelled
+    assert cancellation.metadata.is_error
+    assert cancellation.metadata.minga_effect_status == :not_executed
+
+    assert {:error, :effect_already_admitted} =
+             Continuation.cancel_unadmitted_tool(
+               admitted,
+               request.request_id,
+               checkpoint_id,
+               "call"
+             )
+
+    assert {:already_completed, ^saved} =
+             Continuation.cancel_unadmitted_tool(
+               completed,
+               request.request_id,
+               checkpoint_id,
+               "call"
+             )
+
+    assert {:error, :stale_checkpoint} =
+             Continuation.cancel_unadmitted_tool(pending, "stale", checkpoint_id, "call")
+
+    assert {:error, :unknown_tool_call} =
+             Continuation.cancel_unadmitted_tool(
+               pending,
+               request.request_id,
+               checkpoint_id,
+               "other"
+             )
+
+    assert {:error, :stale_checkpoint} =
+             Continuation.cancel_unadmitted_tool(
+               Continuation.new(),
+               request.request_id,
+               checkpoint_id,
+               "call"
+             )
+  end
+
   test "codec preserves attachments, provider-native blocks, tool groups, and reasoning signatures" do
     reasoning = %ReasoningDetails{
       text: "private reasoning",
@@ -47,7 +130,10 @@ defmodule MingaAgent.Session.ContinuationTest do
         tool_calls: [tool_call],
         reasoning_details: [reasoning]
       },
-      Context.tool_result_message("read_file", "call-1", "contents", %{is_error: false})
+      Context.tool_result_message("read_file", "call-1", "contents", %{
+        is_error: false,
+        tool_outcome: :complete
+      })
     ]
 
     branch = %{messages: messages, boundaries: []}
@@ -341,10 +427,16 @@ defmodule MingaAgent.Session.ContinuationTest do
              )
 
     read_result =
-      Context.tool_result_message("read_file", "call-2", "b", %{is_error: false})
+      Context.tool_result_message("read_file", "call-2", "b", %{
+        is_error: false,
+        tool_outcome: :complete
+      })
 
     wrong_result =
-      Context.tool_result_message("write_file", "wrong-id", "b", %{is_error: false})
+      Context.tool_result_message("write_file", "wrong-id", "b", %{
+        is_error: false,
+        tool_outcome: :complete
+      })
 
     assert {:error, :tool_result_identity_mismatch} =
              Continuation.complete_tool_effect(
@@ -383,6 +475,7 @@ defmodule MingaAgent.Session.ContinuationTest do
         "Tool effect outcome is indeterminate after interruption. The call was not rerun.",
         %{
           is_error: true,
+          tool_outcome: :error,
           minga_effect_status: :indeterminate,
           output: retained_output
         }
@@ -478,7 +571,10 @@ defmodule MingaAgent.Session.ContinuationTest do
         refute Continuation.tool_call_completed?(admitted, call.tool_call_id)
 
         result =
-          Context.tool_result_message(call.name, call.tool_call_id, "written", %{is_error: false})
+          Context.tool_result_message(call.name, call.tool_call_id, "written", %{
+            is_error: false,
+            tool_outcome: :complete
+          })
 
         assert {:ok, completed} =
                  Continuation.complete_tool_effect(
@@ -564,7 +660,10 @@ defmodule MingaAgent.Session.ContinuationTest do
                next_request.request_id,
                next_checkpoint_id,
                reused_call.tool_call_id,
-               Context.tool_result_message("write_file", "call-a", "written", %{is_error: false})
+               Context.tool_result_message("write_file", "call-a", "written", %{
+                 is_error: false,
+                 tool_outcome: :complete
+               })
              )
 
     assert next_completed.active_request == next_request

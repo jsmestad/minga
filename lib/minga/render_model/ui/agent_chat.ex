@@ -227,12 +227,12 @@ defmodule Minga.RenderModel.UI.AgentChat do
     The editor builder converts the agent's tool-call struct into this core view
     so the GUI encoder never touches the agent struct: `summary` is already the
     resolved one-line summary string, `status` is a core atom
-    (`:running | :complete | :error`), and `auto_approved_scope` is a core atom
+    (`:running | :complete | :error | :denied | :cancelled | :approval_expired`), and `auto_approved_scope` is a core atom
     (`:session | :turn | nil`).
     """
 
-    @typedoc "Resolved tool-call execution status."
-    @type status :: :running | :complete | :error
+    @typedoc "Resolved tool-call outcome, including an explicitly expired approval."
+    @type status :: :running | :complete | :error | :denied | :cancelled | :approval_expired
 
     @typedoc "Resolved scope that auto-approved this tool call."
     @type auto_approved_scope :: :session | :turn | nil

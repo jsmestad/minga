@@ -2,7 +2,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   @moduledoc """
   Applies agent status and context-pressure events.
 
-  The workflow keeps shell status, tab status, activity, spinner, and compaction state synchronized before rendering. Compaction scheduling remains attached to the active session and runs only after the render request is installed.
+  Raw status drives execution activity, spinner and compaction. Calculated display status updates workspace caches by the originating Session. Compaction runs after the render request is installed.
   """
 
   alias MingaEditor.Agent.Activity
@@ -29,6 +29,24 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     apply_compaction_action(state, compaction_action)
   end
 
+  @doc "Updates presentation caches without changing execution status."
+  @spec display_status_changed(EditorState.t(), pid(), Tab.agent_status()) :: EditorState.t()
+  def display_status_changed(%EditorState{} = state, session, status) when is_pid(session) do
+    state = sync_shell_agent_status(state, session, status)
+    state = update_tab_agent_status(state, status, session, traditional_tab_bar(state))
+
+    state
+    |> apply_spinner_status(status)
+    |> MingaEditor.schedule_render(16)
+  end
+
+  @doc "Projects replayed raw status using the current live approval attachment."
+  @spec replay_status_changed(EditorState.t(), pid(), Tab.agent_status()) :: EditorState.t()
+  def replay_status_changed(%EditorState{} = state, session, status) when is_pid(session) do
+    state = status_changed(state, status)
+    display_status_changed(state, session, project_display_status(state, status))
+  end
+
   @doc "Records context usage and applies or defers automatic compaction."
   @spec context_usage(EditorState.t(), non_neg_integer(), non_neg_integer() | nil) ::
           EditorState.t()
@@ -52,8 +70,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     state = TraditionalWorkflow.install_agent_status(state, status)
     state = update_turn_activity(state, status)
     state = update_spinner(state, status)
-    state = sync_tab_agent_status(state, status)
-    state = sync_active_shell_agent_status(state, status)
+    state = Workflow.ensure_available(state)
     apply_status_compaction(state, status)
   end
 
@@ -67,10 +84,24 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   defp update_turn_activity(state, _status), do: state
 
   @spec update_spinner(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp update_spinner(state, status) when status in [:thinking, :tool_executing],
+  defp update_spinner(state, status),
+    do: apply_spinner_status(state, project_display_status(state, status))
+
+  @spec project_display_status(EditorState.t(), Tab.agent_status()) :: Tab.agent_status()
+  defp project_display_status(
+         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}},
+         _fallback
+       ),
+       do: MingaEditor.State.Agent.display_status(TraditionalState.agent(shell_state))
+
+  defp project_display_status(_state, fallback), do: fallback
+
+  @spec apply_spinner_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
+  defp apply_spinner_status(state, status) when status in [:thinking, :tool_executing],
     do: TraditionalWorkflow.install_agent_spinner_start(state)
 
-  defp update_spinner(state, _status), do: TraditionalWorkflow.install_agent_spinner_stop(state)
+  defp apply_spinner_status(state, _status),
+    do: TraditionalWorkflow.install_agent_spinner_stop(state)
 
   @spec apply_status_compaction(EditorState.t(), Tab.agent_status()) ::
           {EditorState.t(), compaction_action()}
@@ -184,17 +215,8 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     )
   end
 
-  @spec sync_active_shell_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_active_shell_agent_status(state, status) do
-    state = Workflow.ensure_available(state)
-    session = Runtime.active_session(state.shell_runtime)
-    sync_shell_agent_status(state, session, status)
-  end
-
-  @spec sync_shell_agent_status(EditorState.t(), pid() | nil, Tab.agent_status()) ::
+  @spec sync_shell_agent_status(EditorState.t(), pid(), Tab.agent_status()) ::
           EditorState.t()
-  defp sync_shell_agent_status(state, session, _status) when not is_pid(session), do: state
-
   defp sync_shell_agent_status(state, session, status) do
     runtime =
       Runtime.sync_agent_status(
@@ -207,23 +229,13 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     %{state | shell_runtime: runtime}
   end
 
-  @spec sync_tab_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_tab_agent_status(state, status) do
-    tab_bar = traditional_tab_bar(state)
-    session = Runtime.active_session(state.shell_runtime)
-    update_tab_agent_status(state, status, session, tab_bar)
-  end
-
   @spec update_tab_agent_status(
           EditorState.t(),
           Tab.agent_status(),
-          pid() | nil,
+          pid(),
           TabBar.t() | nil
         ) :: EditorState.t()
   defp update_tab_agent_status(state, _status, _session, nil), do: state
-
-  defp update_tab_agent_status(state, _status, session, _tab_bar) when not is_pid(session),
-    do: state
 
   defp update_tab_agent_status(state, status, session, tab_bar) do
     tab_bar =

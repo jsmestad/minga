@@ -110,6 +110,7 @@ defmodule Minga.Test.SessionContinuationProvider do
           %Event.ToolEnd{
             tool_call_id: "display-tool-call",
             name: "read_file",
+            outcome: :complete,
             result: "visible tool result",
             is_error: false
           }

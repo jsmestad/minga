@@ -5,7 +5,7 @@ defmodule MingaEditor.StatusBar.Data.Agent do
 
   @type t :: %__MODULE__{
           model_name: String.t(),
-          session_status: AgentState.status(),
+          session_status: AgentState.display_status(),
           message_count: non_neg_integer()
         }
 

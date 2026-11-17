@@ -382,7 +382,7 @@ defmodule MingaEditor.Shell.Traditional do
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
         session_pid,
-        {:status_changed, status}
+        {:display_status_changed, status}
       ) do
     tb =
       case TabBar.find_workspace_by_session(tb, session_pid) do
@@ -390,6 +390,15 @@ defmodule MingaEditor.Shell.Traditional do
         nil -> tb
       end
 
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
+  end
+
+  def on_agent_event(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        session_pid,
+        {:status_changed, status}
+      ) do
     # Set attention flag when agent needs user input
     tb =
       if status in [:idle, :error] do
@@ -502,7 +511,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   @spec restarted_session_status(pid()) :: Tab.agent_status()
   defp restarted_session_status(new_pid) do
-    %{status: status} = MingaAgent.Session.editor_snapshot(new_pid)
+    %{display_status: status} = MingaAgent.Session.editor_snapshot(new_pid)
     status
   catch
     :exit, _reason -> nil

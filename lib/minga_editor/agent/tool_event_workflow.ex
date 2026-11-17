@@ -13,6 +13,9 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.Session
 
+  @typep tool_end :: MingaAgent.Event.ToolEnd.t()
+  @typep tool_completion :: {EditorState.t(), pid() | nil, tool_end()}
+
   @doc "Applies a tool-start event and schedules the resulting preview render."
   @spec started(EditorState.t(), String.t(), String.t(), map()) :: EditorState.t()
   def started(%EditorState{} = state, _tool_call_id, name, args), do: started(state, name, args)
@@ -33,18 +36,14 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
     |> MingaEditor.schedule_render(50)
   end
 
-  @doc "Applies a tool-end event and schedules a render when its preview changed."
-  @spec ended(EditorState.t(), String.t(), String.t(), String.t(), atom()) :: EditorState.t()
-  def ended(%EditorState{} = state, _tool_call_id, name, result, status),
-    do: ended(state, name, result, status)
-
-  @doc "Applies a tool-end event without a tool-call identity."
-  @spec ended(EditorState.t(), String.t(), String.t(), atom()) :: EditorState.t()
-  def ended(%EditorState{} = state, name, result, status) do
-    case transition_ended(state, name, result, status) do
-      {:render, state} -> MingaEditor.schedule_render(state, 16)
-      {:no_render, state} -> state
-    end
+  @doc "Applies a committed tool outcome from its originating Session."
+  @spec ended(EditorState.t(), pid() | nil, tool_end()) :: EditorState.t()
+  def ended(%EditorState{} = state, session, %MingaAgent.Event.ToolEnd{} = event) do
+    {state, session, event}
+    |> finish_tool_activity()
+    |> sync_completed_tool()
+    |> finish_tool_preview()
+    |> MingaEditor.schedule_render(16)
   end
 
   @doc "Clears interrupted tool activity and schedules the preview render."
@@ -112,62 +111,58 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
 
   defp transition_updated(state, _name, _partial), do: state
 
-  @spec transition_ended(EditorState.t(), String.t(), String.t(), atom()) ::
-          {:render | :no_render, EditorState.t()}
-  defp transition_ended(state, "shell", result, status) do
-    state =
-      state
-      |> update_activity(&Activity.finish_tool/1)
-      |> sync_active_tool_name(nil)
-      |> update_preview(&Preview.finish_shell(&1, result, shell_status(status)))
-
-    {:render, state}
+  @spec finish_tool_activity(tool_completion()) :: tool_completion()
+  defp finish_tool_activity({state, session, event}) do
+    {update_activity(state, &Activity.finish_tool/1), session, event}
   end
 
-  defp transition_ended(state, "read_file", result, _status) do
-    state =
-      state
-      |> update_activity(&Activity.finish_tool/1)
-      |> sync_active_tool_name(nil)
+  @spec sync_completed_tool(tool_completion()) :: tool_completion()
+  defp sync_completed_tool({state, session, event}) do
+    {sync_tool_name(state, session, nil), session, event}
+  end
 
+  @spec finish_tool_preview(tool_completion()) :: EditorState.t()
+  defp finish_tool_preview(
+         {state, _session, %MingaAgent.Event.ToolEnd{name: "shell", result: result} = event}
+       ) do
+    update_preview(state, &Preview.finish_shell(&1, result, shell_status(event)))
+  end
+
+  defp finish_tool_preview(
+         {state, _session,
+          %MingaAgent.Event.ToolEnd{name: "read_file", outcome: :complete, result: result}}
+       ) do
     case state.workspace.agent_ui.view.preview.content do
-      {:file, path, _content} ->
-        {:render, update_preview(state, &Preview.set_file(&1, path, result))}
-
-      _other ->
-        {:no_render, state}
+      {:file, path, _content} -> update_preview(state, &Preview.set_file(&1, path, result))
+      _other -> state
     end
   end
 
-  defp transition_ended(state, "list_directory", result, _status) do
-    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
-
-    state =
-      state
-      |> update_activity(&Activity.finish_tool/1)
-      |> sync_active_tool_name(nil)
-
+  defp finish_tool_preview(
+         {state, _session,
+          %MingaAgent.Event.ToolEnd{name: "list_directory", outcome: :complete, result: result}}
+       ) do
     case state.workspace.agent_ui.view.preview.content do
       {:directory, path, _entries} ->
-        {:render, update_preview(state, &Preview.set_directory(&1, path, entries))}
+        entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+        update_preview(state, &Preview.set_directory(&1, path, entries))
 
       _other ->
-        {:no_render, state}
+        state
     end
   end
 
-  defp transition_ended(state, _name, _result, _status) do
-    state =
-      state
-      |> update_activity(&Activity.finish_tool/1)
-      |> sync_active_tool_name(nil)
+  defp finish_tool_preview({state, _session, %MingaAgent.Event.ToolEnd{}}), do: state
 
-    {:render, state}
-  end
+  @spec shell_status(tool_end()) :: Preview.shell_status()
+  defp shell_status(%MingaAgent.Event.ToolEnd{outcome: :error, reason: :approval_timeout}),
+    do: :approval_expired
 
-  @spec shell_status(atom()) :: :done | :error
-  defp shell_status(:error), do: :error
-  defp shell_status(_status), do: :done
+  defp shell_status(%MingaAgent.Event.ToolEnd{outcome: :complete}), do: :done
+
+  defp shell_status(%MingaAgent.Event.ToolEnd{outcome: outcome})
+       when outcome in [:error, :denied, :cancelled],
+       do: outcome
 
   @spec transition_interrupted(EditorState.t()) :: EditorState.t()
   defp transition_interrupted(state) do
@@ -179,14 +174,16 @@ defmodule MingaEditor.Agent.ToolEventWorkflow do
 
   @spec sync_active_tool_name(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp sync_active_tool_name(state, fallback_name) do
-    case Runtime.active_session(state.shell_runtime) do
-      pid when is_pid(pid) ->
-        install_active_tool_name(state, session_active_tool_name(pid), fallback_name)
-
-      _session ->
-        apply_active_tool_name_fallback(state, fallback_name)
-    end
+    sync_tool_name(state, Runtime.active_session(state.shell_runtime), fallback_name)
   end
+
+  @spec sync_tool_name(EditorState.t(), pid() | nil, String.t() | nil) :: EditorState.t()
+  defp sync_tool_name(state, session, fallback_name) when is_pid(session) do
+    install_active_tool_name(state, session_active_tool_name(session), fallback_name)
+  end
+
+  defp sync_tool_name(state, _session, fallback_name),
+    do: apply_active_tool_name_fallback(state, fallback_name)
 
   @spec install_active_tool_name(
           EditorState.t(),

@@ -36,6 +36,9 @@ defmodule MingaAgent.SessionApprovalTest do
       assert data.preview.kind == :command
       assert data.preview.summary == "rm -rf /"
       assert Session.editor_snapshot(session).pending_approval == data
+      assert Session.editor_snapshot(session).display_status == :approval_waiting
+      assert_receive {:agent_event, ^session, {:display_status_changed, :approval_waiting}}
+      refute_received {:agent_event, ^session, {:display_status_changed, :approval_waiting}}
       refute Map.has_key?(data, :tool_call_id)
       refute Map.has_key?(data, :reply_to)
     end
@@ -99,6 +102,59 @@ defmodule MingaAgent.SessionApprovalTest do
           assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
         end
       end
+    end
+
+    test "explicit denial updates the current call before retiring controls and ignores late partials" do
+      session = start_subscribed_session()
+      assert :ok = Session.continue(session)
+
+      send_provider_event(session, %Event.ToolStart{tool_call_id: "tc1", name: "shell", args: %{}})
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "shell",
+        args: %{},
+        reply_to: self()
+      })
+
+      target = approval_target(session)
+      assert :ok = Session.respond_to_approval(session, target, :reject)
+      assert Session.editor_snapshot(session).pending_approval == nil
+      assert Session.editor_snapshot(session).display_status == Session.status(session)
+
+      assert {:tool_call, %{status: :denied, result: "Tool rejected by user", duration_ms: nil}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      send_provider_event(session, %Event.ToolUpdate{
+        tool_call_id: "tc1",
+        name: "shell",
+        partial_result: "late"
+      })
+
+      assert {:tool_call, %{status: :denied, result: "Tool rejected by user"}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      refute_received {:agent_event, ^session, {:tool_update, "tc1", _, _}}
+
+      send_provider_event(session, %Event.ToolEnd{
+        tool_call_id: "tc1",
+        name: "shell",
+        outcome: :error,
+        is_error: true,
+        result: "conflict"
+      })
+
+      refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{}}}
+
+      send_provider_event(session, %Event.ToolEnd{
+        tool_call_id: "tc1",
+        name: "shell",
+        outcome: :denied,
+        is_error: true,
+        result: "Tool rejected by user"
+      })
+
+      assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{outcome: :denied}}}
     end
 
     test "remote resolution requires driver authority and the complete pending target" do
@@ -405,6 +461,7 @@ defmodule MingaAgent.SessionApprovalTest do
       send_provider_event(session, %Event.ToolEnd{
         tool_call_id: "tc_auto",
         name: "shell",
+        outcome: :complete,
         result: "done",
         is_error: false
       })
@@ -677,6 +734,9 @@ defmodule MingaAgent.SessionApprovalTest do
 
       assert_receive {:tool_approval_response, "tc1", :reject}, @event_timeout
 
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :interrupted}},
+                     @event_timeout
+
       assert {:error, :stale_request} =
                Session.respond_to_approval(session, target, :approve_session)
 
@@ -685,6 +745,133 @@ defmodule MingaAgent.SessionApprovalTest do
       refute_received {:tool_approval_response, "tc1", _}
       refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
     end
+  end
+
+  describe "non-Stop approval retirement" do
+    for {operation, status, stale_reason} <- [
+          {:plan, :plan, :no_pending_approval},
+          {:provider_death, :error, :stale_request},
+          {:completion, :idle, :stale_request},
+          {:incomplete_completion, :error, :stale_request},
+          {:reset, :idle, :stale_session},
+          {:restore, :idle, :stale_session}
+        ] do
+      @tag :tmp_dir
+      test "#{operation} retires only an admitted original approval once", %{tmp_dir: dir} do
+        operation = unquote(operation)
+        expected_status = unquote(status)
+        stale_reason = unquote(stale_reason)
+
+        for waiting? <- [false, true] do
+          session =
+            start_test_session(
+              provider: Minga.Test.SessionContinuationProvider,
+              provider_opts: [test_pid: self()],
+              session_store_dir: dir,
+              provider_restart_backoff_base_ms: 30_000,
+              provider_restart_backoff_max_ms: 30_000
+            )
+
+          assert :ok = Session.subscribe(session)
+          assert :ok = Session.send_prompt(session, "inspect")
+          assert_receive {:continuation_request, request}, @event_timeout
+          send_provider_event(session, %Event.AgentStart{})
+          original_id = Session.session_id(session)
+          target = Target.new(original_id, request.request_id, "interrupted-call")
+          restored_id = "restore-#{original_id}"
+
+          if unquote(operation == :restore) do
+            assert :ok =
+                     SessionStore.save(
+                       %{
+                         id: restored_id,
+                         timestamp: "2026-01-01T00:00:00Z",
+                         model_name: "test-model",
+                         provider_name: "test",
+                         messages: [{:user, "restored"}],
+                         continuation: MingaAgent.Session.Continuation.new(),
+                         usage: %MingaAgent.TurnUsage{}
+                       },
+                       dir
+                     )
+          end
+
+          if waiting? do
+            send_provider_event(session, %Event.ToolApproval{
+              tool_call_id: "interrupted-call",
+              name: "shell",
+              args: %{"command" => "pwd"},
+              reply_to: self()
+            })
+
+            assert_receive {:agent_event, ^session,
+                            {:approval_pending, %Public{target: ^target} = public}},
+                           @event_timeout
+
+            assert Session.editor_snapshot(session).pending_approval === public
+            assert Session.editor_snapshot(session).display_status == :approval_waiting
+          end
+
+          assert :ok = interrupt_via(operation, session, request, restored_id)
+
+          if waiting? do
+            assert_receive {:tool_approval_response, "interrupted-call", :reject}, @event_timeout
+
+            assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :interrupted}},
+                           @event_timeout
+
+            assert {:error, ^stale_reason} =
+                     Session.respond_to_approval(session, target, :approve_session)
+          end
+
+          snapshot = Session.editor_snapshot(session)
+          assert snapshot.pending_approval == nil
+          assert snapshot.status == expected_status
+          assert snapshot.display_status == expected_status
+          assert Session.list_tool_trust(session) == %{}
+          refute_received {:tool_approval_response, "interrupted-call", _decision}
+          refute_received {:agent_event, ^session, {:approval_resolved, _target, _resolution}}
+          refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{}}}
+
+          if unquote(operation == :provider_death) do
+            assert :ok = Session.abort(session)
+          else
+            assert :ok = interrupt_via(operation, session, request, restored_id)
+          end
+
+          refute_received {:tool_approval_response, "interrupted-call", _decision}
+          refute_received {:agent_event, ^session, {:approval_resolved, _target, _resolution}}
+          assert Session.editor_snapshot(session).pending_approval == nil
+          assert Session.list_tool_trust(session) == %{}
+        end
+      end
+    end
+  end
+
+  defp interrupt_via(:plan, session, _request, _record), do: Session.enter_plan(session)
+  defp interrupt_via(:reset, session, _request, _record), do: Session.new_session(session)
+
+  defp interrupt_via(:restore, session, _request, record),
+    do: Session.load_session(session, record)
+
+  defp interrupt_via(:completion, session, request, _record) do
+    outcome =
+      MingaAgent.Session.Outcome.new(
+        request,
+        request.messages ++ [ReqLLM.Context.assistant("finished")]
+      )
+
+    send_provider_event(session, %Event.AgentEnd{outcome: outcome})
+  end
+
+  defp interrupt_via(:incomplete_completion, session, _request, _record) do
+    send_provider_event(session, %Event.AgentEnd{})
+  end
+
+  defp interrupt_via(:provider_death, session, _request, _record) do
+    Process.exit(Session.get_provider(session), :kill)
+    assert_receive {:agent_event, ^session, {:status_changed, :error}}, @event_timeout
+    :ok
   end
 
   @spec await_queued_turn_boundary(GenServer.server(), non_neg_integer(), String.t()) ::

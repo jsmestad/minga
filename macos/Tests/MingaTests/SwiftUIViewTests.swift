@@ -1970,3 +1970,51 @@ enum ViewInspectorQuery {
     /// Finds all Text views in the hierarchy.
     static let text = ViewType.Text.self
 }
+
+@Suite("Committed agent tool outcomes")
+@MainActor
+struct AgentToolOutcomeViewTests {
+    @Test("Plain and styled cards prefer the outcome byte over compatibility isError",
+          arguments: [UInt8(0), 1, 2, 3, 4, 5], [false, true])
+    func badges(status: UInt8, styled: Bool) throws {
+        let labels = ["running", "done", "error", "Denied", "Cancelled", "Expired"]
+        let explanation = "Approval expired before execution"
+        let run = Wire.StyledTextRun(text: explanation, fgR: 255, fgG: 255, fgB: 255,
+                                    bgR: 0, bgG: 0, bgB: 0, bold: false, italic: false, underline: false)
+        for isError in [false, true] {
+            let card = AgentToolCallCard(
+                messageID: 1, name: "shell", summary: "echo example", status: status,
+                isError: isError, collapsed: false, autoApprovedScope: 0, durationMs: 233_900,
+                result: styled ? nil : explanation, resultLines: styled ? [[run]] : nil,
+                previewLines: ["echo example"], sendAction: nil,
+                styledLineView: { runs, _, _ in AnyView(Text(runs.map(\.text).joined())) }
+            ).environment(\.themeColors, ThemeColors())
+            let body = try card.inspect()
+            let strings = body.findAll(ViewType.Text.self).compactMap { try? $0.string() }
+            #expect(strings.contains(labels[Int(status)]))
+            #expect(strings.contains(explanation))
+            #expect(strings.contains("echo example"))
+            #expect(body.findAll(ViewType.ProgressView.self).count == (status == 0 ? 1 : 0))
+            if status != 2 {
+                #expect(!strings.contains("error"))
+            }
+            if status == 3 || status == 5 {
+                #expect(!strings.contains("233.9s"))
+            }
+            let header = try #require(body.findAll(ViewType.HStack.self).first {
+                (try? $0.accessibilityLabel().string()) == "shell: \(labels[Int(status)]). echo example"
+            })
+            #expect(try header.accessibilityLabel().string().contains(labels[Int(status)]))
+        }
+    }
+
+    @Test("Waiting header announces approval instead of executing and has no progress spinner")
+    func waitingHeader() throws {
+        let state = AgentChatState(status: .approvalWaiting, model: "test")
+        let header = AgentChatHeaderView(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+        let body = try header.inspect()
+        #expect(body.findAll(ViewType.Text.self).contains { (try? $0.string()) == "Awaiting approval" })
+        #expect(body.findAll(ViewType.ProgressView.self).isEmpty)
+    }
+}

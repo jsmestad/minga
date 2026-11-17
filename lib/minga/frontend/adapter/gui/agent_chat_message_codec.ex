@@ -263,10 +263,13 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
   defp preview_kind_byte(:target), do: 3
   defp preview_kind_byte(_), do: 0
 
-  @spec tool_call_status_byte(ToolCallView.status()) :: 0 | 1 | 2
+  @spec tool_call_status_byte(ToolCallView.status()) :: 0..5
   defp tool_call_status_byte(:running), do: 0
   defp tool_call_status_byte(:complete), do: 1
   defp tool_call_status_byte(:error), do: 2
+  defp tool_call_status_byte(:denied), do: 3
+  defp tool_call_status_byte(:cancelled), do: 4
+  defp tool_call_status_byte(:approval_expired), do: 5
 
   @spec auto_approved_scope_byte(ToolCallView.auto_approved_scope()) :: 0 | 1 | 2
   defp auto_approved_scope_byte(:session), do: 1

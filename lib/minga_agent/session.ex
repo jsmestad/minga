@@ -302,6 +302,7 @@ defmodule MingaAgent.Session do
   @typedoc "Snapshot of session state needed by the editor for rendering."
   @type editor_snapshot :: %{
           status: status(),
+          display_status: TurnExecution.display_status(),
           pending_approval: PublicApproval.t() | nil,
           error: String.t() | nil,
           active_tool_name: String.t() | nil,
@@ -339,6 +340,8 @@ defmodule MingaAgent.Session do
   @type approval_error ::
           :stale_session | :stale_request | :approval_not_found | :no_pending_approval
   @typep approval_resolution :: {state(), ToolApproval.t(), approval_decision()}
+  @typep approval_retirement ::
+           {state(), ToolApproval.t(), approval_decision() | :approval_timeout | :interrupted}
 
   @spec respond_to_approval(GenServer.server(), approval_target(), approval_decision()) ::
           :ok | {:error, approval_error()}
@@ -1099,6 +1102,7 @@ defmodule MingaAgent.Session do
   def handle_call(:editor_snapshot, _from, state) do
     snapshot = %{
       status: TurnExecution.status(state.turn_execution),
+      display_status: TurnExecution.display_status(state.turn_execution),
       pending_approval:
         public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
       error: TurnExecution.error(state.turn_execution),
@@ -1653,6 +1657,7 @@ defmodule MingaAgent.Session do
       )
       when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) do
     with :ok <- invocation_storage_outcome(state, {request_id, checkpoint_id, tool_call_id}),
+         {:ok, _outcome, _reason} <- ToolCall.saved_outcome(result_message.metadata),
          {:ok, continuation} <-
            Continuation.complete_tool_effect(
              state.continuation,
@@ -1661,10 +1666,15 @@ defmodule MingaAgent.Session do
              tool_call_id,
              result_message
            ) do
-      state = retire_completed_approval(state, request_id, tool_call_id)
+      candidate =
+        %{state | continuation: continuation}
+        |> install_saved_tool_result(tool_call_id, result_message)
 
-      case commit_effect_snapshot(state, %{state | continuation: continuation}) do
+      case commit_effect_snapshot(state, candidate) do
         {:ok, committed} ->
+          committed =
+            retire_completed_approval(committed, request_id, tool_call_id, result_message, :saved)
+
           entries =
             Map.delete(
               committed.tool_authority.invocations,
@@ -1679,8 +1689,10 @@ defmodule MingaAgent.Session do
             mark_tool_outcome_persistence_failed(
               state,
               {request_id, checkpoint_id, tool_call_id},
-              reason
+              reason,
+              result_message
             )
+            |> retire_completed_approval(request_id, tool_call_id, result_message, :uncertain)
 
           {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, failed}
       end
@@ -1700,37 +1712,87 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec mark_tool_outcome_persistence_failed(state(), tuple(), term()) :: state()
-  defp mark_tool_outcome_persistence_failed(state, key, reason) do
-    case Map.fetch(state.tool_authority.invocations, key) do
-      {:ok, entry} ->
-        entries =
-          Map.put(state.tool_authority.invocations, key, %{
-            entry
-            | failure: {:tool_outcome_persistence_failed, reason}
-          })
+  @spec mark_tool_outcome_persistence_failed(state(), tuple(), term(), ReqLLM.Message.t()) ::
+          state()
+  defp mark_tool_outcome_persistence_failed(
+         state,
+         {_request, _checkpoint, id} = key,
+         reason,
+         result
+       ) do
+    state =
+      case Map.fetch(state.tool_authority.invocations, key) do
+        {:ok, entry} ->
+          entries =
+            Map.put(state.tool_authority.invocations, key, %{
+              entry
+              | failure: {:tool_outcome_persistence_failed, reason}
+            })
 
-        %{state | tool_authority: %{state.tool_authority | invocations: entries}}
+          %{state | tool_authority: %{state.tool_authority | invocations: entries}}
 
-      :error ->
-        state
-    end
+        :error ->
+          state
+      end
+
+    transcript =
+      Transcript.update_tool_call(state.transcript, id, fn tool ->
+        output = Map.get(result.metadata, :output) || tool.output
+        explanation = uncertain_tool_result_text(tool.result, result_message_text(result))
+        ToolCall.result_persistence_failed(tool, explanation, output)
+      end)
+
+    %{state | transcript: transcript}
   end
 
-  @spec retire_completed_approval(state(), String.t(), String.t()) :: state()
+  defp uncertain_tool_result_text("", returned),
+    do: "Tool result persistence is uncertain; no durable outcome is confirmed.\n\n" <> returned
+
+  defp uncertain_tool_result_text(partial, returned),
+    do:
+      "Tool result persistence is uncertain; no durable outcome is confirmed.\n\n" <>
+        partial <> "\n\nReturned result:\n" <> returned
+
+  @spec install_saved_tool_result(state(), String.t(), ReqLLM.Message.t()) :: state()
+  defp install_saved_tool_result(state, tool_call_id, result_message) do
+    transcript =
+      Transcript.update_tool_call(state.transcript, tool_call_id, fn tool ->
+        {:tool_call, reconciled} =
+          reconcile_transcript_tool_call(tool, %{
+            status: :completed,
+            result_message: result_message
+          })
+
+        reconciled
+      end)
+
+    %{state | transcript: transcript}
+  end
+
+  @spec retire_completed_approval(
+          state(),
+          String.t(),
+          String.t(),
+          ReqLLM.Message.t(),
+          :saved | :uncertain
+        ) :: state()
   defp retire_completed_approval(
-         %{continuation: %Continuation{active_request: %Request{request_id: request_id}}} =
-           state,
+         %{continuation: %Continuation{active_request: %Request{request_id: request_id}}} = state,
          request_id,
-         tool_call_id
+         tool_call_id,
+         result_message,
+         durability
        ) do
     case TurnExecution.resolve_approval(state.turn_execution, tool_call_id, :reject) do
       {:ok, approval, execution} ->
+        resolution = approval_retirement_reason(result_message.metadata, durability)
+
         state =
-          {state, approval, :reject}
+          {state, approval, resolution}
           |> record_approval_resolution()
           |> broadcast_approval_retirement()
           |> notify_messages_changed()
+          |> announce_display_status(execution)
 
         %{state | turn_execution: execution}
 
@@ -1739,12 +1801,20 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp retire_completed_approval(state, _request_id, _tool_call_id), do: state
+  defp retire_completed_approval(state, _request_id, _tool_call_id, _message, _durability),
+    do: state
 
-  @spec broadcast_approval_retirement(approval_resolution()) :: state()
-  defp broadcast_approval_retirement({state, approval, :reject}) do
+  defp approval_retirement_reason(%{tool_outcome_reason: :approval_timeout}, _durability),
+    do: :approval_timeout
+
+  defp approval_retirement_reason(_metadata, :uncertain), do: :interrupted
+  defp approval_retirement_reason(%{tool_outcome: :denied}, :saved), do: :reject
+  defp approval_retirement_reason(_metadata, :saved), do: :interrupted
+
+  @spec broadcast_approval_retirement(approval_retirement()) :: state()
+  defp broadcast_approval_retirement({state, approval, resolution}) do
     %PublicApproval{target: target} = public_pending_approval(approval, state)
-    broadcast(state, {:approval_resolved, target, :reject})
+    broadcast(state, {:approval_resolved, target, resolution})
   end
 
   @spec record_tool_storage_failure(state(), Invocation.t(), pid(), term()) ::
@@ -2077,8 +2147,8 @@ defmodule MingaAgent.Session do
   defp validate_invocation_approval(%{requirement: :ready}, :ready, _stamp), do: :ok
   defp validate_invocation_approval(_entry, _requirement, _stamp), do: {:error, :approval_changed}
 
-  @spec approve_prepared_invocation(state(), ToolApproval.t(), approval_decision()) :: state()
-  defp approve_prepared_invocation(state, approval, decision) do
+  @spec approve_prepared_invocation(approval_resolution()) :: approval_resolution()
+  defp approve_prepared_invocation({state, approval, decision}) do
     entries =
       Map.new(state.tool_authority.invocations, fn {key, entry} ->
         case entry do
@@ -2096,7 +2166,23 @@ defmodule MingaAgent.Session do
         end
       end)
 
-    %{state | tool_authority: %{state.tool_authority | invocations: entries}}
+    {%{state | tool_authority: %{state.tool_authority | invocations: entries}}, approval,
+     decision}
+  end
+
+  @spec begin_approved_tool_execution(approval_resolution()) :: approval_resolution()
+  defp begin_approved_tool_execution({_state, _approval, :reject} = resolution), do: resolution
+
+  defp begin_approved_tool_execution({state, approval, decision})
+       when decision in [:approve, :approve_session, :approve_turn] do
+    transcript =
+      Transcript.update_tool_call(
+        state.transcript,
+        approval.tool_call_id,
+        &ToolCall.approve_execution/1
+      )
+
+    {%{state | transcript: transcript}, approval, decision}
   end
 
   @spec revise_tool_policy(state(), TurnExecution.t()) :: state()
@@ -2258,6 +2344,9 @@ defmodule MingaAgent.Session do
 
   @spec reset_new_session(state(), String.t()) :: state()
   defp reset_new_session(state, session_id) do
+    source_execution = state.turn_execution
+    state = interrupt_execution_approval(state, source_execution)
+
     if ProviderLifecycle.pid(state.provider) do
       state.provider.module.new_session(ProviderLifecycle.pid(state.provider))
     end
@@ -2271,7 +2360,6 @@ defmodule MingaAgent.Session do
     timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
 
     state = cancel_save_timer(state)
-    source_execution = state.turn_execution
     execution = TurnExecution.reset(source_execution)
     state = %{state | session_id: session_id, created_at: now}
 
@@ -2293,10 +2381,7 @@ defmodule MingaAgent.Session do
       background_subagent: state.background_subagent
     })
 
-    state =
-      state
-      |> reject_execution_approval(source_execution)
-      |> announce_turn_status(execution)
+    state = announce_turn_status(state, execution)
 
     state = Map.put(state, :turn_execution, execution)
 
@@ -2475,7 +2560,8 @@ defmodule MingaAgent.Session do
           candidate,
           persistence,
           recovered_turn?,
-          previous_durable_revision
+          previous_durable_revision,
+          TurnExecution.display_status(state.turn_execution)
         )
 
       {:error, reason} ->
@@ -2488,10 +2574,28 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec finish_successful_save(state(), Persistence.t(), boolean(), non_neg_integer()) ::
-          {:noreply, state()}
-  defp finish_successful_save(candidate, persistence, recovered_turn?, previous_durable_revision) do
+  @spec finish_successful_save(
+          state(),
+          Persistence.t(),
+          boolean(),
+          non_neg_integer(),
+          TurnExecution.display_status()
+        ) :: {:noreply, state()}
+  defp finish_successful_save(
+         candidate,
+         persistence,
+         recovered_turn?,
+         previous_durable_revision,
+         previous_display_status
+       ) do
     state = %{candidate | persistence: Persistence.saved(persistence)}
+
+    state =
+      announce_display_status_change(
+        state,
+        previous_display_status,
+        TurnExecution.display_status(state.turn_execution)
+      )
 
     state =
       if recovered_turn? do
@@ -2545,8 +2649,10 @@ defmodule MingaAgent.Session do
   end
 
   @spec finish_continue(state(), TurnExecution.t() | nil, term()) :: state()
-  defp finish_continue(state, %TurnExecution{} = execution, :ok),
-    do: %{state | turn_execution: execution}
+  defp finish_continue(state, %TurnExecution{} = execution, :ok) do
+    state = announce_display_status(state, execution)
+    %{state | turn_execution: execution}
+  end
 
   defp finish_continue(state, _proposed_execution, _result), do: state
 
@@ -2557,7 +2663,8 @@ defmodule MingaAgent.Session do
 
     state =
       state
-      |> reject_execution_approval(source_execution)
+      |> cancel_waiting_tool(source_execution)
+      |> interrupt_execution_approval(source_execution)
       |> abort_provider()
       |> abort_active_tools(source_execution, false)
       |> cancel_provider_request()
@@ -2576,10 +2683,11 @@ defmodule MingaAgent.Session do
 
     state =
       state
-      |> reject_execution_approval(source_execution)
+      |> interrupt_execution_approval(source_execution)
       |> append_system_message(plan_mode_message(), :info)
       |> notify_messages_changed()
       |> broadcast({:status_changed, :plan})
+      |> announce_display_status(execution)
       |> maybe_schedule_idle_gc(execution)
 
     revise_tool_policy(state, execution)
@@ -2611,7 +2719,7 @@ defmodule MingaAgent.Session do
       {:ok, completing} ->
         state =
           state
-          |> reject_execution_approval(source_execution)
+          |> interrupt_execution_approval(source_execution)
           |> collapse_transcript_thinking()
           |> apply_turn_usage(usage)
 
@@ -2649,6 +2757,7 @@ defmodule MingaAgent.Session do
     execution = TurnExecution.fail(completing, message)
 
     state
+    |> mark_unsaved_active_tools()
     |> notify(:error, message)
     |> announce_turn_status(execution)
     |> append_error_message_once(message)
@@ -2656,6 +2765,25 @@ defmodule MingaAgent.Session do
     |> broadcast({:error, message})
     |> Map.put(:turn_execution, execution)
   end
+
+  @spec mark_unsaved_active_tools(state()) :: state()
+  defp mark_unsaved_active_tools(state) do
+    transcript =
+      Enum.reduce(TurnExecution.active_tools(state.turn_execution), state.transcript, fn
+        {id, _name}, transcript ->
+          Transcript.update_tool_call(transcript, id, fn tool ->
+            ToolCall.error(tool, indeterminate_tool_text(tool.result), tool.output)
+          end)
+      end)
+
+    %{state | transcript: transcript}
+  end
+
+  defp indeterminate_tool_text(""),
+    do: "Outcome indeterminate after interruption; the tool was not rerun."
+
+  defp indeterminate_tool_text(partial),
+    do: "Outcome indeterminate after interruption; the tool was not rerun.\n\n" <> partial
 
   @spec apply_provider_outcome(state(), Outcome.t() | nil) ::
           {state(), :accepted | {:interrupted, String.t()} | {:rejected, String.t()}}
@@ -2772,48 +2900,46 @@ defmodule MingaAgent.Session do
 
   @spec reconcile_transcript_tool_calls(state(), [map()]) :: state()
   defp reconcile_transcript_tool_calls(state, reconciliation) do
-    statuses = Map.new(reconciliation, &{&1.tool_call_id, &1})
-
     transcript =
-      Transcript.transform_messages(state.transcript, fn
-        {:tool_call, %ToolCall{id: id} = tool_call} ->
-          reconcile_transcript_tool_call(tool_call, Map.get(statuses, id))
-
-        message ->
-          message
+      Enum.reduce(reconciliation, state.transcript, fn result, transcript ->
+        Transcript.update_tool_call(transcript, result.tool_call_id, fn tool_call ->
+          {:tool_call, reconciled} = reconcile_transcript_tool_call(tool_call, result)
+          reconciled
+        end)
       end)
 
     %{state | transcript: transcript}
   end
 
   @spec reconcile_transcript_tool_call(ToolCall.t(), map() | nil) :: Message.t()
-  defp reconcile_transcript_tool_call(tool_call, %{status: :indeterminate} = reconciliation) do
-    {:tool_call,
-     ToolCall.error(
-       tool_call,
-       "Outcome indeterminate after interruption; the tool was not rerun.",
-       Map.get(reconciliation, :output)
-     )}
-  end
-
-  defp reconcile_transcript_tool_call(tool_call, %{status: :not_executed}) do
-    {:tool_call,
-     ToolCall.error(tool_call, "Not executed because durable effect admission did not occur.")}
-  end
-
   defp reconcile_transcript_tool_call(
          tool_call,
          %{
-           status: :completed,
+           status: status,
            result_message: %ReqLLM.Message{metadata: metadata} = result_message
          }
-       ) do
+       )
+       when status in [:completed, :indeterminate, :not_executed] do
     result = result_message_text(result_message)
     output = Map.get(metadata || %{}, :output)
 
-    if Map.get(metadata || %{}, :is_error, false),
-      do: {:tool_call, ToolCall.error(tool_call, result, output)},
-      else: {:tool_call, ToolCall.complete(tool_call, result, output)}
+    result =
+      if status != :completed and output == nil and tool_call.result != "" do
+        result <> "\n\nPrevious tool result:\n" <> tool_call.result
+      else
+        result
+      end
+
+    case ToolCall.saved_outcome(metadata || %{}) do
+      {:ok, :error, nil} when status == :not_executed ->
+        {:tool_call, ToolCall.reconcile_not_executed(tool_call, result, output)}
+
+      {:ok, outcome, reason} ->
+        {:tool_call, ToolCall.reconcile(tool_call, outcome, reason, result, output)}
+
+      {:error, :invalid_tool_outcome} ->
+        {:tool_call, ToolCall.reconcile(tool_call, :error, nil, result, output)}
+    end
   end
 
   defp reconcile_transcript_tool_call(tool_call, _unrelated), do: {:tool_call, tool_call}
@@ -3019,7 +3145,7 @@ defmodule MingaAgent.Session do
 
     state =
       state
-      |> reject_execution_approval(source_execution)
+      |> interrupt_execution_approval(source_execution)
       |> abort_active_tools(source_execution, true)
       |> announce_turn_status(execution)
 
@@ -3033,18 +3159,22 @@ defmodule MingaAgent.Session do
     state =
       if TurnExecution.active?(source_execution) do
         state
-        |> reject_execution_approval(source_execution)
+        |> interrupt_execution_approval(source_execution)
         |> abort_provider()
         |> abort_active_tools(source_execution, true)
       else
         state
       end
 
+    state = announce_display_status(state, execution)
+
     %{state | turn_execution: execution}
   end
 
   @spec announce_turn_status(state(), TurnExecution.t()) :: state()
   defp announce_turn_status(state, execution) do
+    state = announce_display_status(state, execution)
+
     case TurnExecution.mode(execution) do
       :exec ->
         state
@@ -3056,15 +3186,101 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec reject_execution_approval(state(), TurnExecution.t()) :: state()
-  defp reject_execution_approval(state, execution) do
-    reject_pending_approval(TurnExecution.pending_approval(execution))
-    state
+  @spec announce_display_status(state(), TurnExecution.t()) :: state()
+  defp announce_display_status(state, execution) do
+    previous = TurnExecution.display_status(state.turn_execution)
+    next = TurnExecution.display_status(execution)
+    announce_display_status_change(state, previous, next)
+  end
+
+  @spec announce_display_status_change(
+          state(),
+          TurnExecution.display_status(),
+          TurnExecution.display_status()
+        ) :: state()
+  defp announce_display_status_change(state, status, status), do: state
+
+  defp announce_display_status_change(state, _previous, next),
+    do: broadcast(state, {:display_status_changed, next})
+
+  @spec cancel_waiting_tool(state(), TurnExecution.t()) :: state()
+  defp cancel_waiting_tool(state, execution) do
+    case TurnExecution.pending_approval(execution) do
+      %ToolApproval{tool_call_id: id} = approval ->
+        case cancel_waiting_checkpoint(state, approval) do
+          {:ok, candidate} ->
+            transcript =
+              Transcript.update_tool_call(
+                candidate.transcript,
+                id,
+                &ToolCall.cancel(&1, "Cancelled before approval")
+              )
+
+            %{candidate | transcript: transcript}
+
+          {:already_completed, result} ->
+            install_saved_tool_result(state, id, result)
+
+          {:error, reason} ->
+            append_system_message(
+              state,
+              "Stop could not establish tool non-execution: #{inspect(reason)}",
+              :error
+            )
+        end
+
+      nil ->
+        state
+    end
+  end
+
+  @spec cancel_waiting_checkpoint(state(), ToolApproval.t()) ::
+          {:ok, state()} | {:already_completed, ReqLLM.Message.t()} | {:error, term()}
+  defp cancel_waiting_checkpoint(
+         %{continuation: %Continuation{tool_checkpoint: nil}} = state,
+         _approval
+       ),
+       do: {:ok, state}
+
+  defp cancel_waiting_checkpoint(
+         %{
+           continuation: %Continuation{
+             active_request: %Request{} = request,
+             tool_checkpoint: checkpoint
+           }
+         } = state,
+         approval
+       ) do
+    case Continuation.cancel_unadmitted_tool(
+           state.continuation,
+           request.request_id,
+           checkpoint.checkpoint_id,
+           approval.tool_call_id
+         ) do
+      {:ok, continuation} -> {:ok, %{state | continuation: continuation}}
+      {:already_completed, _result} = saved -> saved
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp cancel_waiting_checkpoint(_state, _approval), do: {:error, :stale_request}
+
+  @spec interrupt_execution_approval(state(), TurnExecution.t()) :: state()
+  defp interrupt_execution_approval(state, execution) do
+    case TurnExecution.pending_approval(execution) do
+      %ToolApproval{} = approval ->
+        {state, approval, :interrupted}
+        |> reject_pending_approval()
+        |> record_approval_resolution()
+        |> broadcast_approval_retirement()
+
+      nil ->
+        state
+    end
   end
 
   @spec send_approval_response(approval_resolution()) :: approval_resolution()
   defp send_approval_response({state, approval, decision}) do
-    state = approve_prepared_invocation(state, approval, decision)
     send_approval_response(approval, decision)
     {state, approval, decision}
   end
@@ -3079,7 +3295,7 @@ defmodule MingaAgent.Session do
     :ok
   end
 
-  @spec record_approval_resolution(approval_resolution()) :: approval_resolution()
+  @spec record_approval_resolution(approval_retirement()) :: approval_retirement()
   defp record_approval_resolution({state, approval, decision} = resolution) do
     record_critical_event(state, :approval_resolved, %{
       approval_id: approval.tool_call_id,
@@ -3095,8 +3311,13 @@ defmodule MingaAgent.Session do
 
   @spec maybe_append_approval_rejection(approval_resolution()) :: state()
   defp maybe_append_approval_rejection({state, approval, :reject}) do
-    append_system_message(
-      state,
+    transcript =
+      Transcript.update_tool_call(state.transcript, approval.tool_call_id, fn tool ->
+        ToolCall.deny(tool, "Tool rejected by user")
+      end)
+
+    %{state | transcript: transcript}
+    |> append_system_message(
       "Denied #{approval.name}: the tool was refused and the agent was notified.",
       :info
     )
@@ -3130,32 +3351,47 @@ defmodule MingaAgent.Session do
     |> notify_messages_changed()
   end
 
-  @spec finish_tool(state(), Event.ToolEnd.t()) :: state()
-  defp finish_tool(state, event) do
+  @spec finish_tool(state(), Event.ToolEnd.t(), ToolCall.t()) :: state()
+  defp finish_tool(state, event, completed_tool) do
     transcript =
-      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
-        if event.is_error do
-          ToolCall.error(tool_call, event.result, event.output)
-        else
-          ToolCall.complete(tool_call, event.result, event.output)
-        end
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn _tool_call ->
+        completed_tool
       end)
 
     state = %{state | transcript: transcript}
-    status = if event.is_error, do: :error, else: :done
+    status = event.outcome
 
     record_critical_event(state, :tool_call_finished, %{
       tool_call_id: event.tool_call_id,
       name: event.name,
       result: event.result,
       output: encode_output(event.output),
-      status: status
+      status: status,
+      reason: event.reason
     })
 
     state
-    |> broadcast({:tool_ended, event.name, event.result, status})
+    |> broadcast({:tool_ended, event})
     |> notify_messages_changed()
   end
+
+  defp record_tool_terminal(tool, %Event.ToolEnd{outcome: :complete} = event),
+    do: ToolCall.complete(tool, event.result, event.output)
+
+  defp record_tool_terminal(tool, %Event.ToolEnd{outcome: :denied} = event),
+    do: ToolCall.deny(tool, event.result, event.output)
+
+  defp record_tool_terminal(tool, %Event.ToolEnd{outcome: :cancelled} = event),
+    do: ToolCall.cancel(tool, event.result, event.output)
+
+  defp record_tool_terminal(
+         tool,
+         %Event.ToolEnd{outcome: :error, reason: :approval_timeout} = event
+       ),
+       do: ToolCall.expire_approval(tool, event.result, event.output)
+
+  defp record_tool_terminal(tool, %Event.ToolEnd{outcome: :error, reason: nil} = event),
+    do: ToolCall.error(tool, event.result, event.output)
 
   @spec encode_output(Output.t() | nil) :: map() | nil
   defp encode_output(nil), do: nil
@@ -3196,9 +3432,9 @@ defmodule MingaAgent.Session do
 
       [_tool | _rest] ->
         transcript =
-          Transcript.transform_messages(state.transcript, fn
-            {:tool_call, %ToolCall{} = tool_call} -> {:tool_call, ToolCall.abort(tool_call)}
-            other -> other
+          Enum.reduce(TurnExecution.active_tools(execution), state.transcript, fn {id, _name},
+                                                                                  transcript ->
+            Transcript.update_tool_call(transcript, id, &ToolCall.abort/1)
           end)
 
         state = %{state | transcript: transcript}
@@ -3236,6 +3472,7 @@ defmodule MingaAgent.Session do
                request
              ) do
           :ok ->
+            request_state = announce_display_status(request_state, execution)
             %{request_state | turn_execution: execution}
 
           {:error, reason} ->
@@ -3269,11 +3506,14 @@ defmodule MingaAgent.Session do
            TurnExecution.resolve_approval(state.turn_execution, approval_id, decision) do
       state =
         {state, approval, decision}
+        |> approve_prepared_invocation()
+        |> begin_approved_tool_execution()
         |> send_approval_response()
         |> record_approval_resolution()
         |> maybe_append_approval_rejection()
         |> notify_messages_changed()
         |> broadcast({:approval_resolved, target, decision})
+        |> announce_display_status(execution)
 
       {:reply, :ok, %{state | turn_execution: execution}}
     else
@@ -3434,6 +3674,7 @@ defmodule MingaAgent.Session do
            request
          ) do
       :ok ->
+        request_state = announce_display_status(request_state, execution)
         {:reply, :ok, %{request_state | turn_execution: execution}}
 
       {:error, reason} ->
@@ -3574,12 +3815,11 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolEnd{} = event, state) do
-    case TurnExecution.tool_completed(state.turn_execution, event) do
-      {:ok, execution} ->
-        state = finish_tool(state, event)
-        %{state | turn_execution: execution}
+    case Transcript.current_tool_call(state.transcript, event.tool_call_id) do
+      %ToolCall{} = tool ->
+        complete_provider_tool(state, event, record_tool_terminal(tool, event))
 
-      {:error, :tool_not_active} ->
+      nil ->
         state
     end
   end
@@ -3595,6 +3835,26 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.Error{} = event, state) do
     report_turn_error(state, humanize_error(event, state))
   end
+
+  @spec complete_provider_tool(state(), Event.ToolEnd.t(), ToolCall.t()) :: state()
+  defp complete_provider_tool(
+         state,
+         %Event.ToolEnd{outcome: outcome, reason: reason, result: result, output: output} = event,
+         %ToolCall{status: outcome, terminal_reason: reason, result: result, output: output} =
+           tool
+       ) do
+    case TurnExecution.tool_completed(state.turn_execution, event) do
+      {:ok, execution} ->
+        state = finish_tool(state, event, tool)
+        state = announce_display_status(state, execution)
+        %{state | turn_execution: execution}
+
+      {:error, :tool_not_active} ->
+        state
+    end
+  end
+
+  defp complete_provider_tool(state, _conflicting_event, _unchanged_tool), do: state
 
   defp reject_stale_tool_approval(%Event.ToolApproval{} = event, state) do
     reject_pending_approval(event)
@@ -3619,13 +3879,17 @@ defmodule MingaAgent.Session do
 
   @spec handle_tool_update(Event.ToolUpdate.t(), state()) :: state()
   defp handle_tool_update(event, state) do
-    state
-    |> Map.update!(:transcript, fn transcript ->
-      Transcript.update_tool_call(transcript, event.tool_call_id, fn tool_call ->
+    transcript =
+      Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
         ToolCall.update_partial(tool_call, event.partial_result)
       end)
-    end)
-    |> broadcast({:tool_update, event.tool_call_id, event.name, event.partial_result})
+
+    if Transcript.revision(transcript) == Transcript.revision(state.transcript) do
+      state
+    else
+      %{state | transcript: transcript}
+      |> broadcast({:tool_update, event.tool_call_id, event.name, event.partial_result})
+    end
   end
 
   @spec append_error_message_once(state(), String.t()) :: state()
@@ -3661,6 +3925,7 @@ defmodule MingaAgent.Session do
           state
           |> notify(:approval, "Approval needed: #{approval.name}")
           |> broadcast({:approval_pending, public_pending_approval(approval, state)})
+          |> announce_display_status(execution)
 
         %{state | turn_execution: execution}
 
@@ -3674,8 +3939,12 @@ defmodule MingaAgent.Session do
   defp auto_approve_tool(event, state, scope) do
     case TurnExecution.auto_approve(state.turn_execution, event, scope) do
       {:approved, approval, execution} ->
-        state = approve_prepared_invocation(state, approval, :approve)
-        send_approval_response(approval, :approve)
+        {state, _approval, _decision} =
+          {state, approval, :approve}
+          |> approve_prepared_invocation()
+          |> begin_approved_tool_execution()
+          |> send_approval_response()
+
         state = mark_tool_auto_approved(state, event, scope)
         %{state | turn_execution: execution}
 
@@ -3779,8 +4048,15 @@ defmodule MingaAgent.Session do
 
   # ── Status management ──────────────────────────────────────────────────────
 
-  @spec reject_pending_approval(pending_approval() | Event.tool_approval() | nil) :: :ok
-  defp reject_pending_approval(nil), do: :ok
+  @spec reject_pending_approval(
+          pending_approval()
+          | Event.tool_approval()
+          | {state(), ToolApproval.t(), :interrupted}
+        ) :: :ok | {state(), ToolApproval.t(), :interrupted}
+  defp reject_pending_approval({_state, approval, :interrupted} = context) do
+    reject_pending_approval(approval)
+    context
+  end
 
   defp reject_pending_approval(%{tool_call_id: tool_call_id, reply_to: reply_to}) do
     send(reply_to, {:tool_approval_response, tool_call_id, :reject})
@@ -4236,7 +4512,7 @@ defmodule MingaAgent.Session do
       {:tool_call_updated,
        %{tool_call_id: tool_call_id, name: name, partial_result: partial_result}}
 
-  defp event_log_entry({:tool_ended, _name, _result, _status}), do: nil
+  defp event_log_entry({:tool_ended, %Event.ToolEnd{}}), do: nil
 
   defp event_log_entry(
          {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
@@ -5100,8 +5376,12 @@ defmodule MingaAgent.Session do
     state = %{state | provider: lifecycle}
 
     case TurnExecution.recover(state.turn_execution) do
-      {:changed, execution} -> %{state | turn_execution: execution}
-      :unchanged -> state
+      {:changed, execution} ->
+        state = announce_display_status(state, execution)
+        %{state | turn_execution: execution}
+
+      :unchanged ->
+        state
     end
   end
 
@@ -5240,8 +5520,12 @@ defmodule MingaAgent.Session do
   @spec clear_provider_start_error(state()) :: state()
   defp clear_provider_start_error(state) do
     case TurnExecution.recover(state.turn_execution) do
-      {:changed, execution} -> %{state | turn_execution: execution}
-      :unchanged -> state
+      {:changed, execution} ->
+        state = announce_display_status(state, execution)
+        %{state | turn_execution: execution}
+
+      :unchanged ->
+        state
     end
   end
 
@@ -5264,8 +5548,8 @@ defmodule MingaAgent.Session do
     state =
       state
       |> Map.put(:provider, lifecycle)
-      |> recover_interrupted_request()
       |> mark_provider_failed("Agent provider crashed")
+      |> recover_interrupted_request()
 
     state = maybe_schedule_provider_restart(state, reason)
     broadcast(state, {:error, TurnExecution.error(state.turn_execution)})

@@ -8,6 +8,7 @@ defmodule MingaAgent.Session.TurnExecution do
   alias MingaAgent.EditBoundary
   alias MingaAgent.Event
   alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
 
   @typedoc "Execution mode, independent of whether a provider turn is active."
   @type mode :: :exec | :plan
@@ -39,6 +40,7 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @typedoc "Public status retained at the Session API boundary."
   @type status :: :idle | :plan | :thinking | :tool_executing | :error
+  @type display_status :: status() | :approval_waiting
 
   @typedoc "Supported approval response."
   @type approval_decision :: :approve | :approve_session | :approve_turn | :reject
@@ -101,6 +103,18 @@ defmodule MingaAgent.Session.TurnExecution do
     do: activity_status(activity)
 
   def status(%__MODULE__{phase: {:failure, _message}}), do: :error
+
+  @doc "Projects authoritative approval waiting without changing execution status."
+  @spec display_status(t()) :: display_status()
+  def display_status(%__MODULE__{phase: {:active, _activity, %ToolApproval{}, _error}}),
+    do: :approval_waiting
+
+  def display_status(%__MODULE__{} = execution), do: status(execution)
+
+  @doc "Projects foreground values, preserving an absent runtime, without querying a Session."
+  @spec display_status(status() | nil, PublicApproval.t() | nil) :: display_status() | nil
+  def display_status(_raw_status, %PublicApproval{}), do: :approval_waiting
+  def display_status(raw_status, nil), do: raw_status
 
   @doc "Returns true while provider work belongs to the current turn."
   @spec active?(t()) :: boolean()

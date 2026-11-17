@@ -56,7 +56,8 @@ defmodule MingaAgent.Session.Transcript.Entry do
 
   defp same_content?({:tool_call, %ToolCall{} = old}, {:tool_call, %ToolCall{} = new}) do
     old.id == new.id and old.name == new.name and old.args == new.args and
-      old.status == new.status and old.result == new.result and old.output == new.output and
+      old.status == new.status and old.terminal_reason == new.terminal_reason and
+      old.result == new.result and old.output == new.output and
       old.is_error == new.is_error and old.auto_approved_scope == new.auto_approved_scope and
       old.started_at == new.started_at and old.duration_ms == new.duration_ms
   end
