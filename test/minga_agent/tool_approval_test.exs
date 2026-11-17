@@ -80,50 +80,47 @@ defmodule MingaAgent.ToolApprovalTest do
       assert Enum.all?(preview.lines, &(String.length(&1) <= 300))
     end
 
-    test "builds diff preview for edit_file tools" do
+    test "previews every exact edit in the ordered batch" do
       preview =
         ToolApproval.build_preview("edit_file", %{
           "path" => "lib/a.ex",
-          "old_text" => "old",
-          "new_text" => "new"
-        })
-
-      assert preview.kind == :diff
-      assert preview.summary == "lib/a.ex"
-      assert "file: lib/a.ex" in preview.lines
-      assert "-old" in preview.lines
-      assert "+new" in preview.lines
-    end
-
-    test "builds diff preview for multi_edit_file tools" do
-      preview =
-        ToolApproval.build_preview("multi_edit_file", %{
-          "path" => "lib/a.ex",
+          "expected_revision" => "revision",
           "edits" => [
             %{"old_text" => "old", "new_text" => "new"},
-            %{"find" => "before", "replace" => "after"}
+            %{"old_text" => "before", "new_text" => "after"}
           ]
         })
 
       assert preview.kind == :diff
       assert preview.summary == "lib/a.ex"
-      assert "-old" in preview.lines
-      assert "+new" in preview.lines
-      assert "-before" in preview.lines
-      assert "+after" in preview.lines
+      assert preview.lines == ["file: lib/a.ex", "-old", "+new", "-before", "+after"]
     end
 
-    test "builds diff preview for apply_diff tools" do
+    test "normalizes atom keys inside edit batches" do
       preview =
-        ToolApproval.build_preview("apply_diff", %{
-          "path" => "lib/a.ex",
-          "diff" => "@@ -1,1 +1,1 @@\n-old\n+new\n"
+        ToolApproval.build_preview("edit_file", %{
+          path: "lib/a.ex",
+          edits: [%{old_text: "old", new_text: "new"}]
+        })
+
+      assert preview.lines == ["file: lib/a.ex", "-old", "+new"]
+    end
+
+    test "completed edit cards preserve the batch preview without filesystem reads" do
+      preview =
+        ToolApproval.build_transcript_preview("edit_file", %{
+          "path" => "/nonexistent/file.ex",
+          "edits" => [%{"old_text" => "old", "new_text" => "new"}]
         })
 
       assert preview.kind == :diff
-      assert preview.summary == "lib/a.ex"
-      assert "-old" in preview.lines
-      assert "+new" in preview.lines
+      assert preview.lines == ["file: /nonexistent/file.ex", "-old", "+new"]
+    end
+
+    test "removed tool names have no special diff preview" do
+      for name <- ["multi_edit_file", "apply_diff"] do
+        assert ToolApproval.build_preview(name, %{"path" => "lib/a.ex"}).kind == :args
+      end
     end
 
     test "builds target preview for git_stage tools" do

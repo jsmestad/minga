@@ -274,8 +274,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     tool_call =
       ToolCall.new("tc-1", "edit_file", %{
         "path" => "lib/app.ex",
-        "old_text" => "old",
-        "new_text" => "new"
+        "expected_revision" => "read-revision",
+        "edits" => [%{"old_text" => "old", "new_text" => "new"}]
       })
 
     panel = synced_panel([{:tool_call, tool_call}], styled_messages: [nil])

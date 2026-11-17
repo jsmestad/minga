@@ -1,5 +1,5 @@
 defmodule MingaAgent.Session.PrefixAuthorizationTest do
-  # Advice and project discovery use shared owners; the approved shell spawns an OS process.
+  # Advice, project discovery and scoped cwd use shared owners; the approved shell spawns an OS process.
   use ExUnit.Case, async: false
 
   alias Minga.Config.Advice
@@ -855,28 +855,33 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     # Close that owner explicitly instead of inheriting another scenario's workspace.
     assert :ok = Minga.Project.close()
     assert Minga.Project.root() == nil
-    working_directory = File.cwd!()
+    working_directory = Path.join(context.dir, "no-project-cwd")
+    File.mkdir_p!(working_directory)
+    expected = "approval working-directory fixture"
+    File.write!(Path.join(working_directory, "cwd-proof.txt"), expected)
 
     assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, ["shell"])
 
-    session =
-      start_session(context,
-        tool_calls: [{"shell", %{"command" => "pwd"}, "prefix-call"}],
-        provider_opts: [project_root: nil]
-      )
+    File.cd!(working_directory, fn ->
+      session =
+        start_session(context,
+          tool_calls: [{"shell", %{"command" => "cat cwd-proof.txt"}, "prefix-call"}],
+          provider_opts: [project_root: nil]
+        )
 
-    assert :ok = Session.send_prompt(session, "print the working directory")
+      assert :ok = Session.send_prompt(session, "read the working directory's proof file")
 
-    assert_receive {:agent_event, ^session,
-                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
-                   @timeout
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                     @timeout
 
-    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
-    await_done(session, "shell")
-    result = saved_tool_result(context, session)
-    assert result.metadata.is_error == false
-    assert Enum.map_join(result.content, "", & &1.text) == working_directory
+      assert :ok = Session.respond_to_approval(session, approval_target, :approve)
+      await_done(session, "shell")
+      result = saved_tool_result(context, session)
+      assert result.metadata.is_error == false
+      assert Enum.map_join(result.content, "", & &1.text) == expected
+    end)
   end
 
   test "builtin and bundled metadata do not add approval beyond the current global policy",
@@ -1349,7 +1354,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert saved_tool_result(context, session).metadata.is_error == false
   end
 
-  test "a current builtin context stops using a dead fork store on the next invocation",
+  test "a current builtin context fails closed after its owned fork store dies",
        context do
     assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, [])
@@ -1362,6 +1367,10 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     store = Native.fork_store(provider)
     assert is_pid(store)
     assert :ok = Session.send_prompt(session, "forked\n")
+
+    assert_receive {:agent_event, ^session, {:tool_ended, "read_file", _result, _status}},
+                   @timeout
+
     await_done(session, "write_file")
     assert File.read!(path) == "original\n"
     assert Minga.Buffer.content(buffer) == "original\n"
@@ -1370,9 +1379,15 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert_receive {:DOWN, ^monitor, :process, ^store, _reason}, @timeout
     assert Native.fork_store(provider) == nil
     assert :ok = Session.send_prompt(session, "direct\n")
-    await_done(session, "write_file")
+
+    assert_receive {:agent_event, ^session, {:tool_ended, "read_file", failure, _status}},
+                   @timeout
+
+    assert failure =~ "unavailable"
+    await_idle(session)
+    refute_received {:agent_event, ^session, {:tool_ended, "write_file", _result, _status}}
     assert File.read!(path) == "original\n"
-    assert Minga.Buffer.content(buffer) == "direct\n"
+    assert Minga.Buffer.content(buffer) == "original\n"
   end
 
   test "current local factories receive refreshed context without exposing executable advertisements",
@@ -1447,27 +1462,50 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
   defp file_writer_client(path) do
     fn model, messages, _options ->
-      chunks =
-        case List.last(messages) do
-          %{role: :user, content: parts} ->
-            content = Enum.map_join(parts, "", & &1.text)
-
-            [
-              StreamChunk.tool_call(
-                "write_file",
-                %{"path" => path, "content" => content},
-                %{id: "write-" <> Integer.to_string(System.unique_integer([:positive]))}
-              ),
-              StreamChunk.meta(%{finish_reason: :tool_use})
-            ]
-
-          _tool_result ->
-            [StreamChunk.text("finished")]
-        end
-
-      stream_response(model, chunks)
+      stream_response(model, file_writer_chunks(path, Enum.reverse(messages)))
     end
   end
+
+  defp file_writer_chunks(path, [%{role: :user} | _]) do
+    [
+      StreamChunk.tool_call("read_file", %{"path" => path}, %{
+        id: "read-" <> Integer.to_string(System.unique_integer([:positive]))
+      }),
+      StreamChunk.meta(%{finish_reason: :tool_use})
+    ]
+  end
+
+  defp file_writer_chunks(
+         path,
+         [%{role: :tool, name: "read_file", content: parts} | _] = messages
+       ) do
+    result = Enum.map_join(parts, "", & &1.text)
+
+    case Regex.run(~r/\[expected_revision: ([0-9a-f]{64})\]\z/, result) do
+      [_, revision] ->
+        user = Enum.find(messages, &(&1.role == :user))
+        content = Enum.map_join(user.content, "", & &1.text)
+
+        [
+          StreamChunk.tool_call(
+            "write_file",
+            %{
+              "path" => path,
+              "mode" => "replace",
+              "content" => content,
+              "expected_revision" => revision
+            },
+            %{id: "write-" <> Integer.to_string(System.unique_integer([:positive]))}
+          ),
+          StreamChunk.meta(%{finish_reason: :tool_use})
+        ]
+
+      nil ->
+        [StreamChunk.text("read failed; no mutation attempted")]
+    end
+  end
+
+  defp file_writer_chunks(_path, _messages), do: [StreamChunk.text("finished")]
 
   defp run_policy_fence(context, publication) do
     install_write_tool(context)

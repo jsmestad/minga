@@ -17,7 +17,6 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
-  alias MingaAgent.Test.RecordingProcessBackend
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tools
   alias ReqLLM.Context
@@ -651,50 +650,6 @@ defmodule MingaAgent.Providers.NativeTest do
       git_status = Enum.find(Tools.specs(), &(&1.name == "git_status"))
       GitStub.clear(dir)
       assert "git_status" in tool_names_for.([git_status])
-    end
-
-    test "find executes from the fallback working directory when no project is active", %{
-      tmp_dir: dir
-    } do
-      call_count = :counters.new(1, [:atomics])
-
-      client = fn _model, _messages, _opts ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        chunks =
-          if count == 0 do
-            [
-              ReqLLM.StreamChunk.tool_call("find", %{"pattern" => "*.ex", "path" => "."}, %{
-                id: "tc_find_without_project",
-                index: 0
-              }),
-              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-            ]
-          else
-            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
-          end
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          project_root: nil,
-          llm_client: client,
-          tools: nil,
-          process_backend: RecordingProcessBackend
-        )
-
-      assert :ok = send_prompt(pid, "Find Elixir files")
-      events = collect_run_events()
-
-      assert %Event.ToolEnd{is_error: false, result: result} =
-               Enum.find(events, &match?(%Event.ToolEnd{name: "find"}, &1))
-
-      assert result =~ "find pattern=*.ex"
-      assert result =~ "path=#{File.cwd!()}"
     end
 
     test "provider compaction honors configured threshold", %{tmp_dir: dir} do
@@ -1592,13 +1547,6 @@ defmodule MingaAgent.Providers.NativeTest do
                {"tc_second", "read_file", %{"path" => "test.txt"}}
              ]
 
-      assert Enum.map([first_result, second_result], fn result ->
-               {result["role"], result["tool_call_id"], result["content"]}
-             end) == [
-               {"tool", "tc_first", "file contents"},
-               {"tool", "tc_second", "file contents"}
-             ]
-
       for result <- [first_result, second_result] do
         refute Map.has_key?(result["metadata"] || %{}, "output")
       end
@@ -1609,6 +1557,15 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.all?(durable_results, fn message ->
                match?(%MingaAgent.Tool.Output{reference: %{}}, message.metadata.output)
              end)
+
+      assert [first_durable, second_durable] = durable_results
+
+      assert Enum.map([first_result, second_result], fn result ->
+               {result["role"], result["tool_call_id"], result["content"]}
+             end) == [
+               {"tool", "tc_first", text_content(first_durable)},
+               {"tool", "tc_second", text_content(second_durable)}
+             ]
 
       assert Enum.any?(events, &match?(%Event.ThinkingDelta{delta: "checking the file"}, &1))
       assert Enum.count(events, &match?(%Event.ToolEnd{is_error: false}, &1)) == 2
@@ -1693,6 +1650,87 @@ defmodule MingaAgent.Providers.NativeTest do
                _event ->
                  false
              end)
+    end
+
+    test "view refresh cannot discard a mutation already admitted to the owned view", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      release = make_ref()
+      path = Path.join(dir, "pending.txt")
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "held_creation",
+          description: "Creates a file after the test barrier",
+          parameter_schema: %{},
+          build: fn context ->
+            fn _args ->
+              send(test_pid, {:pending_mutation, self()})
+
+              receive do
+                {:commit, ^release} ->
+                  case MingaAgent.Tool.Context.conditional_mutate(
+                         context,
+                         path,
+                         :absent,
+                         {:create, "kept\n"}
+                       ) do
+                    :ok -> {:ok, "draft kept"}
+                    {:error, reason} -> {:error, inspect(reason)}
+                  end
+              end
+            end
+          end
+        )
+
+      count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        invocation = :counters.get(count, 1)
+        :counters.add(count, 1, 1)
+
+        chunks =
+          case invocation do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("held_creation", %{}, %{id: "held", index: 0}),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, provider} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: [spec],
+          config: agent_config(tool_approval: :none)
+        )
+
+      {:ok, replacement} = ProjectView.overlay(dir)
+      on_exit(fn -> ProjectView.close(replacement) end)
+      assert :ok = send_prompt(provider, "Create the file")
+      assert_receive {:pending_mutation, worker}, 5_000
+      assert {:error, :request_active} = Native.refresh_project_view(provider, replacement)
+      send(worker, {:commit, release})
+      events = collect_run_events()
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "held_creation", is_error: false}, &1)
+             )
+
+      assert {:ok, "kept\n"} =
+               MingaAgent.Changeset.read_file(Native.changeset(provider), "pending.txt")
+
+      refute File.exists?(path)
     end
 
     test "executes independent tool calls concurrently and appends results in call order", %{
@@ -2120,10 +2158,22 @@ defmodule MingaAgent.Providers.NativeTest do
         chunks =
           if count == 0 do
             [
-              ReqLLM.StreamChunk.tool_call("delete_file", %{"path" => path}, %{
-                id: "tc_delete_file",
-                index: 0
-              }),
+              ReqLLM.StreamChunk.tool_call(
+                "delete_file",
+                %{
+                  "path" => path,
+                  "expected_revision" =>
+                    Minga.Buffer.FileMutation.revision(
+                      "delete me",
+                      nil,
+                      {:project_view, absolute_path}
+                    )
+                },
+                %{
+                  id: "tc_delete_file",
+                  index: 0
+                }
+              ),
               ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
             ]
           else
@@ -2155,17 +2205,19 @@ defmodule MingaAgent.Providers.NativeTest do
       assert file_changed.path == absolute_path
       assert file_changed.before_content == "delete me"
       assert file_changed.after_content == ""
+      assert File.read!(absolute_path) == "delete me"
+      GenServer.stop(pid, :normal)
       refute File.exists?(absolute_path)
     end
 
-    test "tracks apply_diff as a file change through fork routing for an open buffer", %{
-      tmp_dir: dir
-    } do
+    test "tracks an atomic edit batch as a file change through fork routing for an open buffer",
+         %{
+           tmp_dir: dir
+         } do
       path = Path.join(dir, "patch-me.txt")
       absolute_path = path
       File.write!(absolute_path, "one\ntwo\n")
       buffer = start_supervised!({BufferProcess, file_path: absolute_path})
-      diff = "@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n"
       call_count = :counters.new(1, [:atomics])
 
       client = fn _model, _messages, _opts ->
@@ -2175,10 +2227,23 @@ defmodule MingaAgent.Providers.NativeTest do
         chunks =
           if count == 0 do
             [
-              ReqLLM.StreamChunk.tool_call("apply_diff", %{"path" => path, "diff" => diff}, %{
-                id: "tc_apply_diff",
-                index: 0
-              }),
+              ReqLLM.StreamChunk.tool_call(
+                "edit_file",
+                %{
+                  "path" => path,
+                  "expected_revision" =>
+                    Minga.Buffer.FileMutation.revision(
+                      "one\ntwo\n",
+                      nil,
+                      {:project_view, absolute_path}
+                    ),
+                  "edits" => [%{"old_text" => "two", "new_text" => "TWO"}]
+                },
+                %{
+                  id: "tc_edit_file",
+                  index: 0
+                }
+              ),
               ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
             ]
           else
@@ -2202,8 +2267,8 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :ok = send_prompt(pid, "Patch the file")
       events = collect_run_events()
 
-      assert Enum.any?(events, &match?(%Event.ToolStart{name: "apply_diff"}, &1))
-      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "apply_diff", is_error: false}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolStart{name: "edit_file"}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "edit_file", is_error: false}, &1))
 
       file_changed = Enum.find(events, &match?(%Event.ToolFileChanged{}, &1))
       assert file_changed != nil

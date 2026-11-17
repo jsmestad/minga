@@ -19,6 +19,22 @@ defmodule MingaAgent.ProjectView.UnavailableBackend do
   def read_file(%ProjectView{}, _relative_path), do: {:error, :read_failed}
 
   @impl true
+  @spec conditional_mutate(
+          ProjectView.t(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: {:error, term()}
+  def conditional_mutate(%ProjectView{}, _relative_path, _expected, {:edit, _edits}),
+    do: {:error, :edit_failed}
+
+  def conditional_mutate(%ProjectView{}, _relative_path, _expected, :delete),
+    do: {:error, :delete_failed}
+
+  def conditional_mutate(%ProjectView{}, _relative_path, _expected, _operation),
+    do: {:error, :write_failed}
+
+  @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{}, _relative_path, _content), do: {:error, :write_failed}
 

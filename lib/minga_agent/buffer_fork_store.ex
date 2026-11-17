@@ -24,9 +24,12 @@ defmodule MingaAgent.BufferForkStore do
 
   alias Minga.Buffer.Fork
 
+  @type owner :: {:fork, pid()} | {:changeset, pid()}
+
   @typedoc "The store's internal state."
   @type state :: %{
           forks: %{String.t() => pid()},
+          claims: %{String.t() => owner()},
           monitors: %{reference() => String.t()}
         }
 
@@ -50,6 +53,29 @@ defmodule MingaAgent.BufferForkStore do
     GenServer.call(store, {:get_or_create, path, buffer_pid})
   end
 
+  @doc """
+  Pins a path to its first selected writer for this store's lifetime.
+
+  Existing claims survive owner death and never fall back to another writer.
+  Discarding a path releases its claim. Without candidates, leaves it unclaimed.
+  """
+  @spec claim_owner(GenServer.server(), String.t(), pid() | nil, pid() | nil) ::
+          {:ok, owner()} | :not_found | {:error, term()}
+  def claim_owner(store, path, buffer_pid, changeset_pid) do
+    GenServer.call(store, {:claim_owner, path, buffer_pid, changeset_pid}, :infinity)
+  end
+
+  @doc "Atomically transfers a sealed fork claim to the changeset containing its published draft."
+  @spec transfer_to_changeset(GenServer.server(), String.t(), pid(), pid()) ::
+          :ok | {:error, term()}
+  def transfer_to_changeset(store, path, expected_fork, changeset_pid) do
+    GenServer.call(
+      store,
+      {:transfer_to_changeset, path, expected_fork, changeset_pid},
+      :infinity
+    )
+  end
+
   @doc "Returns the fork pid for `path`, or nil if no fork exists."
   @spec get(GenServer.server(), String.t()) :: pid() | nil
   def get(store, path) do
@@ -67,7 +93,7 @@ defmodule MingaAgent.BufferForkStore do
           {String.t(), :ok | {:conflict, term()} | {:error, term()}}
         ]
   def merge_all(store) do
-    GenServer.call(store, :merge_all, 30_000)
+    GenServer.call(store, :merge_all, :infinity)
   end
 
   @doc "Merges forks and keeps failed forks alive for later conflict handling."
@@ -75,7 +101,7 @@ defmodule MingaAgent.BufferForkStore do
           {String.t(), :ok | {:conflict, term()} | {:error, term()}}
         ]
   def merge_all_keep_failed(store) do
-    GenServer.call(store, :merge_all_keep_failed, 30_000)
+    GenServer.call(store, :merge_all_keep_failed, :infinity)
   end
 
   @doc "Discards one fork without merging."
@@ -100,31 +126,47 @@ defmodule MingaAgent.BufferForkStore do
 
   @impl true
   def init(:ok) do
-    {:ok, %{forks: %{}, monitors: %{}}}
+    Process.flag(:trap_exit, true)
+    {:ok, %{forks: %{}, claims: %{}, monitors: %{}}}
   end
 
   @impl true
   def handle_call({:get_or_create, path, buffer_pid}, _from, state) do
-    case Map.get(state.forks, path) do
-      nil ->
-        case Fork.create(buffer_pid) do
-          {:ok, fork_pid} ->
-            ref = Process.monitor(fork_pid)
+    {result, state} = claim_path(state, path, buffer_pid, nil)
 
-            new_state = %{
-              state
-              | forks: Map.put(state.forks, path, fork_pid),
-                monitors: Map.put(state.monitors, ref, path)
-            }
+    reply =
+      case result do
+        {:ok, {:fork, fork_pid}} -> {:ok, fork_pid}
+        {:ok, {:changeset, _pid}} -> {:error, :owner_claimed_by_changeset}
+        {:error, _reason} = error -> error
+        :not_found -> {:error, :owner_unavailable}
+      end
 
-            {:reply, {:ok, fork_pid}, new_state}
+    {:reply, reply, state}
+  end
 
-          {:error, _} = err ->
-            {:reply, err, state}
+  def handle_call({:claim_owner, path, buffer_pid, changeset_pid}, _from, state) do
+    {result, state} = claim_path(state, path, buffer_pid, changeset_pid)
+    {:reply, result, state}
+  end
+
+  def handle_call(
+        {:transfer_to_changeset, path, expected_fork, changeset_pid},
+        _from,
+        state
+      ) do
+    case Map.get(state.claims, path) do
+      {:fork, ^expected_fork} ->
+        with {:ok, owner} <- available_owner({:changeset, changeset_pid}),
+             :ok <- ensure_published(expected_fork) do
+          state = stop_forks_for_paths(state, MapSet.new([path]))
+          {:reply, :ok, %{state | claims: Map.put(state.claims, path, owner)}}
+        else
+          {:error, _reason} = error -> {:reply, error, state}
         end
 
-      fork_pid ->
-        {:reply, {:ok, fork_pid}, state}
+      _other_owner ->
+        {:reply, {:error, :owner_mismatch}, state}
     end
   end
 
@@ -152,7 +194,7 @@ defmodule MingaAgent.BufferForkStore do
 
   def handle_call(:discard_all, _from, state) do
     stop_all_forks(state)
-    {:reply, :ok, %{state | forks: %{}, monitors: %{}}}
+    {:reply, :ok, %{state | forks: %{}, claims: %{}, monitors: %{}}}
   end
 
   @impl true
@@ -178,34 +220,79 @@ defmodule MingaAgent.BufferForkStore do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
+  @spec claim_path(state(), String.t(), pid() | nil, pid() | nil) ::
+          {{:ok, owner()} | :not_found | {:error, term()}, state()}
+  defp claim_path(state, path, buffer_pid, changeset_pid) do
+    case Map.get(state.claims, path) do
+      nil ->
+        case Map.get(state.forks, path) do
+          nil -> select_owner(state, path, buffer_pid, changeset_pid)
+          fork -> retain_claim(state, path, {:fork, fork})
+        end
+
+      owner ->
+        {available_owner(owner), state}
+    end
+  end
+
+  @spec select_owner(state(), String.t(), pid() | nil, pid() | nil) ::
+          {{:ok, owner()} | :not_found | {:error, term()}, state()}
+  defp select_owner(state, path, buffer_pid, _changeset_pid) when is_pid(buffer_pid) do
+    case create_fork(buffer_pid) do
+      {:ok, fork_pid} ->
+        ref = Process.monitor(fork_pid)
+
+        state = %{
+          state
+          | forks: Map.put(state.forks, path, fork_pid),
+            monitors: Map.put(state.monitors, ref, path)
+        }
+
+        retain_claim(state, path, {:fork, fork_pid})
+
+      {:error, _reason} = error ->
+        {error, state}
+    end
+  end
+
+  defp select_owner(state, path, nil, changeset_pid) when is_pid(changeset_pid),
+    do: retain_claim(state, path, {:changeset, changeset_pid})
+
+  defp select_owner(state, _path, nil, nil), do: {:not_found, state}
+
+  @spec retain_claim(state(), String.t(), owner()) :: {{:ok, owner()} | {:error, term()}, state()}
+  defp retain_claim(state, path, owner) do
+    case available_owner(owner) do
+      {:ok, _owner} = result -> {result, %{state | claims: Map.put(state.claims, path, owner)}}
+      {:error, _reason} = error -> {error, state}
+    end
+  end
+
+  @spec available_owner(owner()) :: {:ok, owner()} | {:error, :owner_unavailable}
+  defp available_owner({_kind, pid} = owner) do
+    if Process.alive?(pid), do: {:ok, owner}, else: {:error, :owner_unavailable}
+  end
+
+  @spec create_fork(pid()) :: {:ok, pid()} | {:error, term()}
+  defp create_fork(buffer_pid) do
+    Fork.create(buffer_pid)
+  catch
+    :exit, reason -> {:error, {:fork_creation_failed, reason}}
+  end
+
+  @spec ensure_published(pid()) :: :ok | {:error, :fork_not_published | :owner_unavailable}
+  defp ensure_published(fork) do
+    if Fork.published?(fork), do: :ok, else: {:error, :fork_not_published}
+  catch
+    :exit, _reason -> {:error, :owner_unavailable}
+  end
+
   @spec merge_fork(String.t(), pid()) ::
           {String.t(), :ok | {:conflict, term()} | {:error, term()}}
   defp merge_fork(path, fork_pid) do
-    case safe_fork_dirty(fork_pid) do
-      {:ok, true} -> do_merge_fork(path, fork_pid)
-      {:ok, false} -> {path, :ok}
-      {:error, reason} -> {path, {:error, reason}}
-    end
-  end
-
-  @spec safe_fork_dirty(pid()) :: {:ok, boolean()} | {:error, term()}
-  defp safe_fork_dirty(fork_pid) do
-    try do
-      {:ok, Fork.dirty?(fork_pid)}
-    catch
-      :exit, reason -> {:error, {:fork_dirty_failed, reason}}
-    end
-  end
-
-  @spec do_merge_fork(String.t(), pid()) ::
-          {String.t(), :ok | {:conflict, term()} | {:error, term()}}
-  defp do_merge_fork(path, fork_pid) do
     case safe_fork_merge(fork_pid) do
-      {:ok, merged_text} ->
-        case apply_merge_to_parent(path, merged_text) do
-          :ok -> {path, :ok}
-          {:error, reason} -> {path, {:error, reason}}
-        end
+      {:ok, _merged_text} ->
+        {path, :ok}
 
       {:conflict, hunks} ->
         {path, {:conflict, hunks}}
@@ -218,7 +305,7 @@ defmodule MingaAgent.BufferForkStore do
   @spec safe_fork_merge(pid()) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
   defp safe_fork_merge(fork_pid) do
     try do
-      Fork.merge(fork_pid)
+      Fork.publish(fork_pid)
     catch
       :exit, reason -> {:error, {:fork_merge_failed, reason}}
     end
@@ -252,11 +339,23 @@ defmodule MingaAgent.BufferForkStore do
 
     Enum.each(refs_to_stop, fn {ref, _path} -> Process.demonitor(ref, [:flush]) end)
 
-    Enum.each(forks_to_stop, fn {_path, fork_pid} ->
-      if Process.alive?(fork_pid), do: GenServer.stop(fork_pid, :normal)
-    end)
+    Enum.each(forks_to_stop, fn {_path, fork_pid} -> stop_fork(fork_pid) end)
 
-    %{state | forks: Map.new(forks), monitors: Map.new(monitors)}
+    claims = Map.drop(state.claims, MapSet.to_list(paths))
+
+    %{
+      state
+      | forks: Map.new(forks),
+        claims: claims,
+        monitors: Map.new(monitors)
+    }
+  end
+
+  @spec stop_fork(pid()) :: :ok
+  defp stop_fork(fork_pid) do
+    GenServer.stop(fork_pid, :normal)
+  catch
+    :exit, _reason -> :ok
   end
 
   @spec split_map_by_paths(map(), MapSet.t(String.t()), (term() -> String.t())) ::
@@ -276,25 +375,5 @@ defmodule MingaAgent.BufferForkStore do
     end)
 
     :ok
-  end
-
-  @spec apply_merge_to_parent(String.t(), String.t()) :: :ok | {:error, term()}
-  defp apply_merge_to_parent(path, merged_text) do
-    try do
-      case Minga.Buffer.pid_for_path(path) do
-        {:ok, buf_pid} ->
-          try do
-            Minga.Buffer.replace_content(buf_pid, merged_text, :agent)
-          catch
-            :exit, reason -> {:error, {:parent_apply_failed, reason}}
-          end
-
-        :not_found ->
-          # Buffer was closed while fork was active; write to disk
-          File.write(path, merged_text)
-      end
-    catch
-      :exit, reason -> {:error, {:parent_lookup_failed, reason}}
-    end
   end
 end

@@ -106,10 +106,9 @@ defmodule MingaAgent.ToolApproval do
     read_only_preview(name, args)
   end
 
-  defp do_build_preview(name, %{"path" => path} = args)
-       when name in ["edit_file", "multi_edit_file", "apply_diff"] do
+  defp do_build_preview("edit_file", %{"path" => path} = args) do
     path = stringify_value(path)
-    lines = edit_diff_preview_lines(name, args)
+    lines = edit_diff_preview_lines(Map.get(args, "edits", []))
 
     Preview.new(:diff, path, preview_lines(["file: #{path}" | lines]))
   end
@@ -193,72 +192,28 @@ defmodule MingaAgent.ToolApproval do
   defp diff_op_preview_lines({:ins, lines}), do: Enum.map(lines, &("+" <> &1))
   defp diff_op_preview_lines({:del, lines}), do: Enum.map(lines, &("-" <> &1))
 
-  @spec edit_diff_preview_lines(String.t(), map()) :: [String.t()]
-  defp edit_diff_preview_lines("edit_file", args) do
-    old_text = stringify_value(Map.get(args, "old_text") || Map.get(args, "find") || "")
-    new_text = stringify_value(Map.get(args, "new_text") || Map.get(args, "replace") || "")
-    diff_preview_lines(old_text, new_text)
-  end
-
-  defp edit_diff_preview_lines("multi_edit_file", args) do
-    args
-    |> Map.get("edits", [])
-    |> multi_edit_diff_preview_lines()
+  @spec edit_diff_preview_lines(term()) :: [String.t()]
+  defp edit_diff_preview_lines(edits) when is_list(edits) do
+    edits
+    |> Enum.flat_map(&edit_entry_diff_preview_lines/1)
+    |> Enum.reject(&(&1 == "No textual changes detected"))
     |> case do
       [] -> ["No textual changes detected"]
       lines -> Enum.take(lines, 20)
     end
   end
 
-  defp edit_diff_preview_lines("apply_diff", args) do
-    args
-    |> Map.get("diff", "")
-    |> stringify_value()
-    |> String.split("\n")
-    |> Enum.reject(&diff_metadata_line?/1)
-    |> Enum.filter(&diff_change_line?/1)
-    |> Enum.take(20)
-    |> case do
-      [] -> [apply_diff_summary(args)]
-      lines -> lines
-    end
-  end
+  defp edit_diff_preview_lines(_edits), do: ["No textual changes detected"]
 
-  @spec multi_edit_diff_preview_lines(term()) :: [String.t()]
-  defp multi_edit_diff_preview_lines(edits) when is_list(edits) do
-    edits
-    |> Enum.flat_map(&multi_edit_entry_diff_preview_lines/1)
-    |> Enum.reject(&(&1 == "No textual changes detected"))
-  end
-
-  defp multi_edit_diff_preview_lines(_edits), do: []
-
-  @spec multi_edit_entry_diff_preview_lines(term()) :: [String.t()]
-  defp multi_edit_entry_diff_preview_lines(edit) when is_map(edit) do
+  @spec edit_entry_diff_preview_lines(term()) :: [String.t()]
+  defp edit_entry_diff_preview_lines(edit) when is_map(edit) do
     edit = stringify_keys(edit)
-    old_text = stringify_value(Map.get(edit, "old_text") || Map.get(edit, "find") || "")
-    new_text = stringify_value(Map.get(edit, "new_text") || Map.get(edit, "replace") || "")
+    old_text = stringify_value(Map.get(edit, "old_text", ""))
+    new_text = stringify_value(Map.get(edit, "new_text", ""))
     diff_preview_lines(old_text, new_text)
   end
 
-  defp multi_edit_entry_diff_preview_lines(_edit), do: []
-
-  @spec diff_metadata_line?(String.t()) :: boolean()
-  defp diff_metadata_line?("+++" <> _rest), do: true
-  defp diff_metadata_line?("---" <> _rest), do: true
-  defp diff_metadata_line?(_line), do: false
-
-  @spec diff_change_line?(String.t()) :: boolean()
-  defp diff_change_line?("+" <> _rest), do: true
-  defp diff_change_line?("-" <> _rest), do: true
-  defp diff_change_line?(_line), do: false
-
-  @spec apply_diff_summary(map()) :: String.t()
-  defp apply_diff_summary(args) do
-    diff = stringify_value(Map.get(args, "diff", ""))
-    hunk_count = diff |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "@@"))
-    "#{hunk_count} diff hunk(s)"
-  end
+  defp edit_entry_diff_preview_lines(_edit), do: []
 
   @spec stringify_keys(map()) :: map()
   defp stringify_keys(map) do

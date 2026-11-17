@@ -124,23 +124,15 @@ defmodule MingaAgent.Tool.Context do
     MingaAgent.ArtifactStore.fetch(context.artifact_store, reference, range)
   end
 
-  @doc "Writes a file through the session router."
-  @spec write_file(t(), String.t(), binary()) :: :ok | :passthrough | {:error, term()}
-  def write_file(%__MODULE__{} = context, path, content) do
-    ToolRouter.write_file(context.router_context, path, content)
-  end
-
-  @doc "Edits a file through the session router."
-  @spec edit_file(t(), String.t(), String.t(), String.t()) ::
-          :ok | :passthrough | {:error, term()}
-  def edit_file(%__MODULE__{} = context, path, old_text, new_text) do
-    ToolRouter.edit_file(context.router_context, path, old_text, new_text)
-  end
-
-  @doc "Deletes a file through the session router."
-  @spec delete_file(t(), String.t()) :: :ok | :passthrough | {:error, term()}
-  def delete_file(%__MODULE__{} = context, path) do
-    ToolRouter.delete_file(context.router_context, path)
+  @doc "Commits one revision-checked file mutation through the session's content owner."
+  @spec conditional_mutate(
+          t(),
+          String.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  def conditional_mutate(%__MODULE__{} = context, path, expected, operation) do
+    ToolRouter.conditional_mutate(context.router_context, path, expected, operation)
   end
 
   @doc "Returns the command working directory for this context."
