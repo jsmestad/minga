@@ -151,6 +151,8 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	approval = append(approval, string16("edit_file")...)
 	approval = append(approval, string16("demo.ex")...)
 	approval = append(approval, string16("tc_1")...)
+	approval = append(approval, string16("session_1")...)
+	approval = append(approval, string16("request_1")...)
 	approval = append(approval, 2)
 	approval = append(approval, []byte{0, 1}...)
 	approval = append(approval, string16("mix test")...)
@@ -195,7 +197,7 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	if got.Messages[5].Name != "shell" || got.Messages[5].Summary != "ran" || got.Messages[5].Status != 1 || !got.Messages[5].IsError || !got.Messages[5].Collapsed || got.Messages[5].DurationMS != 42 || got.Messages[5].Result != "done" || got.Messages[5].AutoApprovedScope != 2 || got.Messages[5].PreviewKind != 1 || got.Messages[5].PreviewLines[0] != "-old" || styledToolRun.Text != "done" || styledToolRun.FG != 0x98BE65 || styledToolRun.BG != 0x21242B || !styledToolRun.Code() {
 		t.Fatalf("styled tool fields not retained: %+v", got.Messages[5])
 	}
-	if got.Messages[6].Status != 1 || got.Messages[6].Name != "edit_file" || got.Messages[6].Summary != "demo.ex" || got.Messages[6].Result != "tc_1" || got.Messages[6].PreviewKind != 2 || got.Messages[6].PreviewLines[0] != "mix test" {
+	if got.Messages[6].Status != 1 || got.Messages[6].Name != "edit_file" || got.Messages[6].Summary != "demo.ex" || got.Messages[6].ApprovalTarget != (AgentApprovalTarget{SessionID: "session_1", RequestID: "request_1", ToolCallID: "tc_1"}) || got.Messages[6].Result != "" || got.Messages[6].PreviewKind != 2 || got.Messages[6].PreviewLines[0] != "mix test" {
 		t.Fatalf("approval fields not retained: %+v", got.Messages[6])
 	}
 	if got.Messages[7].Usage.Input != 10 || got.Messages[7].Usage.Output != 20 || got.Messages[7].Usage.CacheRead != 3 || got.Messages[7].Usage.CacheWrite != 4 || got.Messages[7].Usage.CostMicros != 500 {

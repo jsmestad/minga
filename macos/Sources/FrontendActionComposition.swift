@@ -20,13 +20,26 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: AgentChatView.Action) -> OutboundAction {
         switch action {
-        case .keyPress(let codepoint, let modifiers, let sequence): .keyPress(codepoint: codepoint, modifiers: modifiers, sequence: sequence)
+        case .toolApproval(let approval): outbound(approval)
         case .executeCommand(let name): .executeCommand(name: name)
         case .agentToolToggle(let messageID): .agentToolToggle(messageID: messageID)
         case .chatScrolledAwayFromBottom: .chatScrolledAwayFromBottom
         case .chatReturnedToBottom: .chatReturnedToBottom
         }
     }
+    public static func outbound(_ action: AgentApprovalCard.Action) -> OutboundAction {
+        switch action {
+        case .approve(let sessionId, let requestId, let toolCallId):
+            .agentToolApproval(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId, decision: .approve)
+        case .trustSession(let sessionId, let requestId, let toolCallId):
+            .agentToolApproval(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId, decision: .approveSession)
+        case .trustTurn(let sessionId, let requestId, let toolCallId):
+            .agentToolApproval(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId, decision: .approveTurn)
+        case .deny(let sessionId, let requestId, let toolCallId):
+            .agentToolApproval(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId, decision: .reject)
+        }
+    }
+
 
     public static func outbound(_ action: AgentHelpView.Action) -> OutboundAction {
         switch action {

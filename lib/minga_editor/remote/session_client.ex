@@ -71,17 +71,22 @@ defmodule MingaEditor.Remote.SessionClient do
   end
 
   @doc "Responds to a remote tool approval as the attached driver."
-  @spec approve(pid(), String.t() | nil, Session.approval_decision(), pid()) ::
+  @spec approve(pid(), Session.approval_target(), Session.approval_decision(), pid()) ::
           :ok | {:error, term()}
-  def approve(remote_pid, approval_id, decision, client_pid \\ self())
-      when is_pid(remote_pid) and (is_binary(approval_id) or is_nil(approval_id)) and
+  def approve(
+        remote_pid,
+        %MingaAgent.ToolApproval.Target{} = target,
+        decision,
+        client_pid \\ self()
+      )
+      when is_pid(remote_pid) and
              decision in [:approve, :approve_session, :approve_turn, :reject] and
              is_pid(client_pid) do
     with {:ok, session_id, token} <- credentials_for_pid(remote_pid) do
       erpc(
         node(remote_pid),
         :approve,
-        [session_id, token, client_pid, approval_id, decision],
+        [session_id, token, client_pid, target, decision],
         10_000
       )
     end

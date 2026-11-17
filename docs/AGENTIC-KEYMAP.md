@@ -89,13 +89,24 @@ When all hunks are resolved (accepted or rejected), the viewer returns to normal
 
 ### Tool Approval
 
-When a destructive tool is pending approval, these keys are intercepted:
+An approval can arrive while you are writing the next message. Keep typing: the composer retains its focus, selection, and text composition. The approval card remains available without turning ordinary draft text into a decision.
+
+Use the card's buttons directly, or leave the composer to use its shortcuts. In Vim INSERT mode, press `Esc` once to enter NORMAL mode, then again to leave prompt editing. With the composer unfocused, these unmodified keys resolve the displayed tool request:
 
 | Key | Action |
 |-----|--------|
-| `y` / `Enter` | Approve the tool |
-| `n` | Reject the tool |
-| `a` | Approve this and all remaining tools in the turn |
+| `y` / `Enter` | Approve this invocation once |
+| `a` | Trust this named tool for the current session |
+| `t` | Trust this named tool for the current turn |
+| `n` / `Esc` | Deny this invocation |
+
+Trust applies to the named tool, not every tool the agent might use. Turn trust expires before the next prompt. Modified shortcuts, such as `Ctrl-a`, are not approval decisions.
+
+Each card identifies its original conversation and tool request. A stale, duplicate, or unauthorized activation cannot approve a replacement request or remove its card; Minga explains the refusal instead. A completed or expired tool wait retires its card, even while another call in the same request is still running. It cannot grant trust afterward.
+
+The header's Help and model controls work without typing commands into your draft, including when the file tree has focus. While Help is open, `Esc` or `?` closes Help before changing the composer's mode or focus. Typing, Enter, and paste cannot edit or submit the covered draft.
+
+In the terminal, use Up/Down, Page Up/Page Down, Home, or End to navigate long Help. The mouse wheel also scrolls Help from the details rail; the composer keeps its own scrolling. Native transcript controls behind Help do not accept pointer or accessibility activation.
 
 See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to configure which tools require approval.
 

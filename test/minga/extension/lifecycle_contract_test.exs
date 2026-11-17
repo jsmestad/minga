@@ -880,6 +880,11 @@ defmodule Minga.Extension.LifecycleContractTest do
     start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
     assert_receive {:init_entered, workflow}, 5_000
     stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+
+    assert eventually(fn ->
+             match?({:starting, %{stop_waiters: [_]}}, Instance.phase(instance(ctx, name)))
+           end)
+
     send(workflow, :continue_init)
 
     assert {:ok, runtime} = Task.await(start_task)
@@ -899,6 +904,11 @@ defmodule Minga.Extension.LifecycleContractTest do
     start_task = Task.async(fn -> start_extension(ctx, name, entry, opts) end)
     assert_receive {:init_entered, workflow}, 5_000
     stop_task = Task.async(fn -> stop_extension(ctx, name, opts) end)
+
+    assert eventually(fn ->
+             match?({:starting, %{stop_waiters: [_]}}, Instance.phase(instance(ctx, name)))
+           end)
+
     send(workflow, :continue_init)
 
     assert {:error, {:cleanup_failed, "init failed: :start_failed", failures}} =

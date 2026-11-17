@@ -314,12 +314,10 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 		title = icon
 	}
 
-	left := title + muted.Render("  ") + identity
 	right := m.renderAgentStatusBadge(chat.Status)
 	if chat.ThinkingLevel != "" && width >= 56 {
 		right += muted.Render("  ◌ " + chat.ThinkingLevel)
 	}
-
 	helpLabel := "[Help]"
 	if width < 24 {
 		helpLabel = "?"
@@ -332,7 +330,13 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 	rightBudget := max(width-helpWidth-1, 0)
 	right = fitStyled(right, min(lipgloss.Width(right), rightBudget))
 	leftBudget := max(width-lipgloss.Width(right)-helpWidth-2, 0)
-	left = fitStyled(left, leftBudget)
+	prefix := title + muted.Render("  ")
+	identityBudget := max(leftBudget-lipgloss.Width(prefix), 0)
+	identity = lipgloss.NewStyle().Inline(true).MaxWidth(identityBudget).Render(identity)
+	if identityBudget == 0 {
+		identity = ""
+	}
+	left := fitStyled(prefix+m.zones.Mark(zoneIDAgentModel, identity), leftBudget)
 	spacer := muted.Render(strings.Repeat(" ", max(width-lipgloss.Width(left)-lipgloss.Width(right)-helpWidth-1, 0)))
 	return base.Render(fitStyled(left+spacer+right+" "+help, width))
 }
@@ -1101,9 +1105,11 @@ func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width i
 		lines = append(lines, m.renderApprovalCardLine(preview, innerWidth, border, innerBG))
 	}
 
-	// Action hints
-	hints := lipgloss.NewStyle().Foreground(p.Muted()).Background(innerBG).Render("y approve · n reject")
-	lines = append(lines, m.renderApprovalCardLine(hints, innerWidth, border, innerBG))
+	// These are backend shortcuts, not local composer bindings. Mouse controls
+	// echo the immutable target captured in this message's rendered zone.
+	for _, actions := range m.renderAgentApprovalActions(msg, innerWidth-1, innerBG) {
+		lines = append(lines, m.renderApprovalCardLine(actions, innerWidth, border, innerBG))
+	}
 
 	// Bottom border
 	bottom := border.Render("╰" + strings.Repeat("─", max(width-2, 0)) + "╯")

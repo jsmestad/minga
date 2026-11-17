@@ -34,7 +34,7 @@ defmodule MingaEditor.Agent.SessionProjectionTest do
         model_selection: selection
       }
 
-      projected = AgentLifecycle.apply_session_snapshot(state, snapshot)
+      projected = AgentLifecycle.apply_session_snapshot(state, self(), snapshot)
       panel = projected.workspace.agent_ui.panel
       assert panel.model_name == selection.route.display_name
       assert panel.provider_name == selection.route.model_provider
@@ -42,7 +42,7 @@ defmodule MingaEditor.Agent.SessionProjectionTest do
       assert panel.credential_readiness == readiness
       assert projected.workspace.agent_ui.view.toast == state.workspace.agent_ui.view.toast
 
-      assert AgentLifecycle.apply_session_snapshot(projected, snapshot).workspace.agent_ui ==
+      assert AgentLifecycle.apply_session_snapshot(projected, self(), snapshot).workspace.agent_ui ==
                projected.workspace.agent_ui
     end
   end
@@ -59,7 +59,7 @@ defmodule MingaEditor.Agent.SessionProjectionTest do
       model_selection: nil
     }
 
-    projected = AgentLifecycle.apply_session_snapshot(state, snapshot)
+    projected = AgentLifecycle.apply_session_snapshot(state, self(), snapshot)
 
     assert projected.workspace.agent_ui.panel.model_name ==
              state.workspace.agent_ui.panel.model_name
@@ -71,7 +71,7 @@ defmodule MingaEditor.Agent.SessionProjectionTest do
   test "an actual activation event still projects the policy and adds its notice" do
     state = TestHelpers.base_state(rendering: :disabled)
     selection = ModelSelectionFixture.selection(display_name: "Activated model")
-    projected = Events.dispatch(state, {:model_selection_changed, selection})
+    projected = Events.dispatch(state, self(), {:model_selection_changed, selection})
     assert projected.workspace.agent_ui.panel.model_name == "Activated model"
     assert projected.workspace.agent_ui.view.toast != state.workspace.agent_ui.view.toast
   end

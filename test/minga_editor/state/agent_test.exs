@@ -3,6 +3,10 @@ defmodule MingaEditor.State.AgentTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.RuntimeState
+  alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.State.Agent, as: AgentState
 
   defp new_agent do
@@ -55,12 +59,12 @@ defmodule MingaEditor.State.AgentTest do
     test "apply_session_snapshot sets active_tool_name only while tool executing" do
       agent =
         new_agent()
-        |> AgentState.apply_session_snapshot(:tool_executing, nil, nil, "read_file")
+        |> AgentState.apply_session_snapshot(self(), :tool_executing, nil, nil, "read_file")
 
       assert agent.runtime.status == :tool_executing
       assert agent.runtime.active_tool_name == "read_file"
 
-      agent = AgentState.apply_session_snapshot(agent, :idle, nil, nil, "stale_tool")
+      agent = AgentState.apply_session_snapshot(agent, self(), :idle, nil, nil, "stale_tool")
 
       assert agent.runtime.status == :idle
       assert agent.runtime.active_tool_name == nil
@@ -69,10 +73,20 @@ defmodule MingaEditor.State.AgentTest do
 
   describe "reset_cache" do
     test "reset_cache clears error, pending_approval, and resets status to :idle" do
+      approval =
+        Public.new(
+          Target.new("state-fixture", "admitted-request", "x"),
+          "shell",
+          %{},
+          Preview.new(:args, "", [])
+        )
+
+      binding = PendingApproval.new(self(), approval)
+
       agent =
         new_agent()
         |> AgentState.set_error("boom")
-        |> AgentState.set_pending_approval(%{tool_call_id: "x"})
+        |> AgentState.set_pending_approval(binding)
         |> AgentState.set_status(:thinking)
         |> AgentState.reset_cache()
 

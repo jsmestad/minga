@@ -7,10 +7,13 @@ defmodule MingaEditor.Commands.AgentSubStates do
   """
 
   alias MingaEditor.Agent.Transcript
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.ChatSearch
   alias MingaAgent.FileMention
   alias MingaAgent.ProjectView
   alias MingaAgent.Session
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -187,59 +190,100 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @doc "Approves the pending tool execution."
   @spec approve_tool(state()) :: state()
-  def approve_tool(state), do: respond_to_tool_approval(state, :approve)
+  def approve_tool(state), do: respond_to_displayed_approval(state, :approve)
 
   @doc "Approves this tool for the rest of the session."
   @spec trust_tool_session(state()) :: state()
-  def trust_tool_session(state), do: respond_to_tool_approval(state, :approve_session)
+  def trust_tool_session(state), do: respond_to_displayed_approval(state, :approve_session)
 
   @doc "Approves this tool for the current turn."
   @spec trust_tool_turn(state()) :: state()
-  def trust_tool_turn(state), do: respond_to_tool_approval(state, :approve_turn)
+  def trust_tool_turn(state), do: respond_to_displayed_approval(state, :approve_turn)
 
   @doc "Denies the pending tool execution."
   @spec deny_tool(state()) :: state()
-  def deny_tool(state), do: respond_to_tool_approval(state, :reject)
+  def deny_tool(state), do: respond_to_displayed_approval(state, :reject)
 
-  @spec respond_to_tool_approval(state(), Session.approval_decision()) :: state()
-  defp respond_to_tool_approval(state, decision) do
+  @doc "Resolves the displayed target through its original Session attachment."
+  @spec respond_to_tool_approval(state(), ApprovalTarget.t(), Session.approval_decision()) ::
+          state()
+  def respond_to_tool_approval(state, %ApprovalTarget{} = target, decision) do
     agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
-    approval = agent.pending_approval
 
-    if is_pid(session) and is_map(approval) do
-      apply_approval_response(
-        state,
-        AgentSession.respond_to_approval_pid(session, approval.tool_call_id, decision)
-      )
-    else
-      state
+    case AgentState.approval_for(agent, target) do
+      {:ok, %PendingApproval{session_pid: session_pid} = binding} ->
+        result = AgentSession.respond_to_approval_pid(session_pid, target, decision)
+        apply_approval_response(state, binding, result)
+
+      {:error, reason} ->
+        publish_approval_failure(state, reason)
     end
   end
 
-  # Only clear the approval UI once the session has *accepted* the decision,
-  # so an undelivered response never silently drops the prompt while the agent
-  # stays blocked. `:no_pending_approval` is the one error that means the
-  # session already resolved this approval, so the prompt is stale: clear it
-  # rather than leave a dead prompt that every retry would re-fail.
-  @spec apply_approval_response(state(), :ok | {:error, term()}) :: state()
-  defp apply_approval_response(state, :ok) do
-    update_agent(state, &AgentState.clear_pending_approval/1)
+  @spec respond_to_displayed_approval(state(), Session.approval_decision()) :: state()
+  defp respond_to_displayed_approval(state, decision) do
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+    case agent.pending_approval do
+      %PendingApproval{approval: %PublicApproval{target: target}} ->
+        respond_to_tool_approval(state, target, decision)
+
+      nil ->
+        publish_approval_failure(state, :approval_not_presented)
+    end
   end
 
-  defp apply_approval_response(state, {:error, :no_pending_approval}) do
+  @spec apply_approval_response(state(), PendingApproval.t(), :ok | {:error, term()}) :: state()
+  defp apply_approval_response(
+         state,
+         %PendingApproval{session_pid: session_pid, approval: %PublicApproval{target: target}},
+         :ok
+       ) do
+    MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(state, target, session_pid)
+  end
+
+  defp apply_approval_response(
+         state,
+         %PendingApproval{session_pid: session_pid, approval: %PublicApproval{target: target}},
+         {:error, :no_pending_approval}
+       ) do
     state
-    |> update_agent(&AgentState.clear_pending_approval/1)
-    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Tool approval already resolved")
+    |> MingaEditor.Shell.Traditional.Workflow.resolve_agent_approval(target, session_pid)
+    |> publish_approval_failure(:no_pending_approval)
   end
 
-  defp apply_approval_response(state, {:error, reason}) do
-    Minga.Log.error(:agent, "[Agent] tool approval response failed: #{inspect(reason)}")
+  defp apply_approval_response(state, %PendingApproval{}, {:error, reason}),
+    do: publish_approval_failure(state, reason)
 
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-      state,
-      "Tool approval failed: #{inspect(reason)}"
-    )
+  @spec publish_approval_failure(state(), term()) :: state()
+  defp publish_approval_failure(state, reason) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, approval_failure_message(reason))
+  end
+
+  @spec approval_failure_message(term()) :: String.t()
+  defp approval_failure_message(:approval_not_presented), do: "No tool approval is displayed"
+
+  defp approval_failure_message(:stale_attachment),
+    do: "This approval is no longer displayed; no decision was applied"
+
+  defp approval_failure_message(:stale_session),
+    do: "This approval belongs to a different session"
+
+  defp approval_failure_message(:stale_request),
+    do: "This approval belongs to an earlier request"
+
+  defp approval_failure_message(:approval_not_found),
+    do: "This tool approval is no longer current"
+
+  defp approval_failure_message(:no_pending_approval),
+    do: "Tool approval is no longer pending"
+
+  defp approval_failure_message(:not_driver),
+    do: "Only the attached driver can resolve this tool approval"
+
+  defp approval_failure_message(reason) do
+    Minga.Log.error(:agent, "[Agent] tool approval response failed: #{inspect(reason)}")
+    "Tool approval failed: #{inspect(reason)}"
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
@@ -607,14 +651,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   # ── State update helpers (delegated to AA) ─────────────────────────────────
-
-  @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun),
-    do:
-      MingaEditor.Shell.Traditional.Workflow.install_agent_state(
-        state,
-        fun.(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
-      )
 
   @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()
   defp update_agent_ui(state, fun),

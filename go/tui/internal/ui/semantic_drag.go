@@ -51,7 +51,7 @@ func (m Model) handleChromeDrag(msg tea.MouseMsg) (Model, []byte, bool) {
 		return m, nil, false
 
 	case tea.MouseMotionMsg:
-		if m.mouseDrag == nil || msg.Mouse().Button == tea.MouseNone {
+		if m.mouseDrag == nil || msg.Mouse().Button != tea.MouseLeft {
 			return m, nil, false
 		}
 		m.mouseDrag.moved = true
@@ -64,6 +64,10 @@ func (m Model) handleChromeDrag(msg tea.MouseMsg) (Model, []byte, bool) {
 		if drag == nil {
 			return m, nil, false
 		}
+		// A legacy buttonless release ends the sole capture; another button cannot end a left drag.
+		if button := msg.Mouse().Button; button != tea.MouseLeft && button != tea.MouseNone {
+			return m, nil, true
+		}
 		m.mouseDrag = nil
 		if !drag.moved {
 			return m, nil, false
@@ -74,6 +78,14 @@ func (m Model) handleChromeDrag(msg tea.MouseMsg) (Model, []byte, bool) {
 		return m, packet, true
 	}
 	return m, nil, false
+}
+
+func isChromeDragContinuation(msg tea.MouseMsg) bool {
+	switch msg.(type) {
+	case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		return true
+	}
+	return false
 }
 
 // chromeDragOrigin resolves a left press to a draggable chrome origin, or nil if

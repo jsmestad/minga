@@ -325,6 +325,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		if m.mouseDrag != nil && isChromeDragContinuation(msg) {
+			updated, packet, _ := m.handleChromeDrag(msg)
+			m = updated
+			if packet != nil {
+				m.send(packet)
+			}
+			break
+		}
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
@@ -562,6 +570,12 @@ func (m Model) View() tea.View {
 		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence()
+	if m.zones != nil && len(m.zones.approvalMarkers) != 0 {
+		if m.transcriptRenderer != nil {
+			m.transcriptRenderer.retainApprovalMarkers(m.zones)
+		}
+		m.zones.retireUnreferencedApprovals()
+	}
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
 	}

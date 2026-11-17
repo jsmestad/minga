@@ -8,6 +8,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
@@ -287,12 +288,36 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   test "switching to inactive remote workspace commits replay cursor after successful replay", %{
     tmp_dir: dir
   } do
+    fixture = MingaAgent.Test.ModelSelectionFixture
+
+    session =
+      Minga.Test.SessionCase.start_test_session(
+        provider: MingaAgent.Providers.Native,
+        session_id: "remote-session",
+        hooks_enabled?: false,
+        provider_opts: [
+          model: fixture.model_intent(),
+          model_resolver_opts: fixture.resolver_opts(),
+          credential_opts: [env: %{"OPENAI_API_KEY" => "fixture-openai-key"}],
+          project_root: dir,
+          tools: [],
+          mcp_enabled?: false
+        ]
+      )
+
+    assert %{
+             credential_readiness: :configured,
+             credentials_configured: true,
+             model_selection: %MingaAgent.ModelSelection{}
+           } = Session.editor_snapshot(session)
+
+    assert :ok = Session.add_system_message(session, "Remote work is ready to resume.")
     state = state_with_agent_workspace_tabs()
     initial_tab_id = TabBar.active(state.shell_runtime.state.tab_bar).id
     catchup = [%{EventRecord.new("remote-session", :message_changed, %{}) | id: 42}]
 
     {tab_bar, agent_tab} = TabBar.add(state.shell_runtime.state.tab_bar, :agent, "Remote Agent")
-    {tab_bar, remote_workspace} = TabBar.add_workspace(tab_bar, "Remote Agent")
+    {tab_bar, remote_workspace} = TabBar.add_workspace(tab_bar, "Remote Agent", session)
 
     remote_workspace =
       remote_workspace
@@ -324,16 +349,14 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
         }
       end)
 
-    initial_version = panel_message_version(state)
-
     state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
+    assert Runtime.active_session(state.shell_runtime) == session
 
     drained_workspace =
       TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id)
 
-    first_version = panel_message_version(state)
-
-    assert first_version == initial_version + 1
+    first_messages = state.workspace.agent_ui.panel.transcript.messages
+    assert {:system, "Remote work is ready to resume.", :info} in first_messages
     assert workspace_payload(drained_workspace).pending_catchup_events == []
     assert workspace_payload(drained_workspace).remote_session.last_seen_event_id == 42
 
@@ -348,7 +371,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
     state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
 
-    assert panel_message_version(state) == first_version
+    assert state.workspace.agent_ui.panel.transcript.messages == first_messages
 
     assert workspace_payload(
              TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id)
@@ -836,8 +859,6 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   defp show_panel(%UIState{} = ui) do
     %{ui | panel: %{ui.panel | visible: true}}
   end
-
-  defp panel_message_version(state), do: state.workspace.agent_ui.panel.transcript.version
 
   defp stop_session(pid) when is_pid(pid) do
     AgentSession.stop_session_pid(pid)

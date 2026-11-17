@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.ViewContext do
   """
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
@@ -43,7 +44,7 @@ defmodule MingaEditor.Agent.ViewContext do
           buffers: MingaEditor.State.Buffers.t(),
           agent_status: atom() | nil,
           active_tool_name: String.t() | nil,
-          pending_approval: map() | nil
+          pending_approval: MingaAgent.ToolApproval.Public.t() | nil
         }
 
   @typedoc "Screen rectangle {row, col, width, height}."
@@ -82,7 +83,7 @@ defmodule MingaEditor.Agent.ViewContext do
       buffers: state.workspace.buffers,
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
-      pending_approval: agent.pending_approval
+      pending_approval: PendingApproval.public(agent.pending_approval)
     }
   end
 
@@ -101,7 +102,7 @@ defmodule MingaEditor.Agent.ViewContext do
       buffers: input.workspace.buffers,
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
-      pending_approval: agent.pending_approval
+      pending_approval: PendingApproval.public(agent.pending_approval)
     }
   end
 end

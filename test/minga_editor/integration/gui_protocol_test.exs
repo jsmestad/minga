@@ -118,6 +118,61 @@ defmodule Minga.Integration.GUIProtocolTest do
              Enum.map(model.entries, & &1.entry_id)
   end
 
+  test "resident approval round-trips its immutable UTF-8 target through the Swift decoder", %{
+    harness: harness
+  } do
+    alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
+    alias Minga.RenderModel.UI.AgentChat
+    alias Minga.RenderModel.UI.AgentChat.ApprovalView
+
+    session_id = "session/" <> String.duplicate("会", 512)
+    request_id = "admitted-request/" <> String.duplicate("é", 1_024)
+    tool_call_id = "tool/" <> String.duplicate("🛠", 768)
+    message_id = 0xFEDCBA98
+
+    approval = %ApprovalView{
+      name: "edit_file",
+      summary: "lib/équipe.ex",
+      session_id: session_id,
+      request_id: request_id,
+      tool_call_id: tool_call_id,
+      preview_kind: :diff,
+      preview_lines: ["file: lib/équipe.ex", "-ancien café", "+新しい 🛠"]
+    }
+
+    model = %AgentChat{
+      visible?: true,
+      transcript_epoch: 37,
+      resident_messages: [
+        {55, {:user, "Review the proposed change"}},
+        {message_id, {:approval_tool_call, approval}}
+      ]
+    }
+
+    {encoded, _caches} = AgentTranscriptEncoder.encode(model, Caches.new())
+    decoded = round_trip(harness, encoded, "gui_agent_transcript")
+
+    assert decoded["mode"] == 0
+    assert decoded["epoch"] == 37
+    assert decoded["truncated"] == false
+    assert decoded["trim_front"] == 0
+    assert decoded["base_count"] == 0
+    assert decoded["message_ids"] == [55, message_id]
+
+    assert decoded["approvals"] == [
+             %{
+               "beam_id" => message_id,
+               "name" => "edit_file",
+               "summary" => "lib/équipe.ex",
+               "tool_call_id" => tool_call_id,
+               "session_id" => session_id,
+               "request_id" => request_id,
+               "preview_kind" => 1,
+               "preview_lines" => ["file: lib/équipe.ex", "-ancien café", "+新しい 🛠"]
+             }
+           ]
+  end
+
   describe "resident semantic production encoder round-trip" do
     test "keyframe preserves positive row revision and all absolute semantic layers", %{
       harness: harness

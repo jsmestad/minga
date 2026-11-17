@@ -3,6 +3,8 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
   # Completion includes durable checkpoints and shared filesystem waits, not a five-second event SLA.
   @durable_workflow_timeout 30_000
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
 
   describe "MCP crash handling" do
     @tag :tmp_dir
@@ -135,10 +137,12 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
       assert :ok = Session.send_prompt(session, "discover mcp")
 
-      assert_receive {:agent_event, ^session, {:approval_pending, %{name: "list_mcp_tools"}}},
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending,
+                       %Public{target: %Target{} = target, name: "list_mcp_tools"}}},
                      @event_timeout
 
-      assert :ok = Session.respond_to_approval(session, :approve)
+      assert :ok = Session.respond_to_approval(session, target, :approve)
       assert_receive {:mcp_transport_started, "Local Tools", transport}, @event_timeout
       await_durable_mcp_turn(session, "list_mcp_tools", 1, "MCP discovery")
 

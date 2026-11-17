@@ -260,6 +260,26 @@ func EncodeGUIAgentToolToggle(messageID uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
 }
 
+// EncodeGUIAgentToolApproval echoes the displayed approval's immutable identity.
+// Invalid decisions or identities cannot become approvals or truncated targets.
+func EncodeGUIAgentToolApproval(target AgentApprovalTarget, decision generated.AgentApprovalDecision) []byte {
+	if !target.Valid() {
+		return nil
+	}
+	switch decision {
+	case generated.AgentApprovalDecisionApprove, generated.AgentApprovalDecisionApproveSession,
+		generated.AgentApprovalDecisionApproveTurn, generated.AgentApprovalDecisionReject:
+	default:
+		return nil
+	}
+	out := make([]byte, 2, 9+len(target.SessionID)+len(target.RequestID)+len(target.ToolCallID))
+	out[0], out[1] = generated.OPGuiAction, generated.GUIActionAgentToolApproval
+	out = appendString16(out, target.SessionID)
+	out = appendString16(out, target.RequestID)
+	out = appendString16(out, target.ToolCallID)
+	return append(out, byte(decision))
+}
+
 // EncodeGUISemanticItemActivate activates one exact BEAM-authored item identity.
 // The frontend treats itemID as opaque bytes and echoes it with the surface,
 // intent, and generation captured from the committed semantic model.

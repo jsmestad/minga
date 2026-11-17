@@ -4,8 +4,12 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   alias Minga.RenderModel.UI.AgentContext
   alias Minga.RenderModel.UI.AgentContext.Todo
   alias MingaAgent.TodoItem
+  alias MingaAgent.ToolApproval.Preview
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.Events, as: AgentEvents
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
@@ -13,8 +17,18 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
 
+  @spec approval(String.t()) :: Public.t()
+  defp approval(tool_call_id) do
+    Public.new(
+      Target.new("context-fixture", "admitted-request", tool_call_id),
+      "shell",
+      %{},
+      Preview.new(:args, "", [])
+    )
+  end
+
   describe "build/1" do
-    test "projects activity, todos, and review vocabulary into agent context" do
+    test "tool approval keeps attention without offering unrelated task review actions" do
       todo = %TodoItem{id: "1", description: "Run tests", status: :in_progress}
 
       activity =
@@ -29,7 +43,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
       agent =
         %AgentState{}
         |> AgentState.set_status(:tool_executing)
-        |> AgentState.set_pending_approval(%{tool_call_id: "tc", name: "shell", args: %{}})
+        |> AgentState.set_pending_approval(PendingApproval.new(self(), approval("tc")))
 
       ctx =
         context(
@@ -41,13 +55,13 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                visible: true,
                task: "Running shell",
                status: :needs_you,
-               can_approve: true,
+               can_approve: false,
                todos: [%Todo{description: "Run tests", status: :in_progress}],
                progress: %{
                  active_action: "Running shell",
                  tool_count: 1,
                  file_count: 1,
-                 review_hint: "Review: approve or reject changes"
+                 review_hint: ""
                }
              } = AgentContextBuilder.build(ctx)
     end
@@ -67,14 +81,11 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
     end
 
     test "approval-only visible context keeps the dispatch timestamp stable" do
-      approval = %{tool_call_id: "tc-approval", name: "shell", args: %{}}
+      approval = approval("tc-approval")
 
       state =
         TestHelpers.base_state(backend: :gui)
-        |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(
-          AgentState.set_pending_approval(%AgentState{}, approval)
-        )
-        |> then(&AgentEvents.dispatch(&1, {:approval_pending, approval}))
+        |> AgentEvents.dispatch(self(), {:approval_pending, approval})
 
       started_at = state.workspace.agent_ui.view.activity.started_at
       assert started_at != nil

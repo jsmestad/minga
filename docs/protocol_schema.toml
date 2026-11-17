@@ -69,7 +69,9 @@ version = "2.0.0"
 # protocol_version 31 adds source-presentation-targeted prompt fit and wrapped
 # visual-row scroll actions. Prompt window 65534 remains a windowed row store.
 # protocol_version 32 separates Agent Help from chat visibility and adds source-bound Review actions.
-protocol_version = 32
+# protocol_version 33 binds tool approval decisions to the displayed session,
+# admitted request and tool call, independently of text-entry focus.
+protocol_version = 33
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1412,6 +1414,12 @@ value = 0x66
 name = "agent_prompt_scroll"
 value = 0x67
 
+# session_id(string16) + request_id(string16) + tool_call_id(string16) +
+# decision(u8 agent_approval_decision). The request ID identifies the admitted turn.
+[[gui_actions]]
+name = "agent_tool_approval"
+value = 0x68
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -1451,6 +1459,18 @@ introduced_in = 2
 # a bare integer. The optional `default` is the byte value an encoder emits for
 # an unmapped atom (it must appear in `values`). Validation requires unique
 # value bytes, every byte in range for the repr, and a resolvable `default`.
+
+[[enums]]
+name = "agent_approval_decision"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "approve", value = 1 },
+  { name = "approve_session", value = 2 },
+  { name = "approve_turn", value = 3 },
+  { name = "reject", value = 4 },
+]
 
 [[enums]]
 name = "frame_rejection_reason"

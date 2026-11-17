@@ -943,6 +943,7 @@ public struct ContentView<EditorSurface: View>: View {
                 }
             }
             .accessibilityHidden(input.agentHelpState.visible)
+            .allowsHitTesting(!input.agentHelpState.visible)
 
             if input.agentHelpState.visible {
                 AgentHelpView(

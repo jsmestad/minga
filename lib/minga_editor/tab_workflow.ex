@@ -224,9 +224,10 @@ defmodule MingaEditor.TabWorkflow do
     case TabBar.active_workspace(tab_bar) do
       %Workspace{
         id: workspace_id,
-        payload: %WorkspaceAgent{pending_catchup_events: [_ | _] = events}
-      } ->
-        state = EventReplay.replay_active(state, events)
+        payload: %WorkspaceAgent{session: session_pid, pending_catchup_events: [_ | _] = events}
+      }
+      when is_pid(session_pid) ->
+        state = EventReplay.replay_active(state, session_pid, events)
         clear_replayed_events(state, workspace_id)
 
       _none ->

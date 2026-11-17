@@ -2,15 +2,20 @@ defmodule MingaEditor.Remote.EventReplayTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Remote.EventReplay
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Taxonomy
   alias MingaAgent.TodoItem
   alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.Tool.Output
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Range
 
@@ -71,61 +76,96 @@ defmodule MingaEditor.Remote.EventReplayTest do
               [%TodoItem{id: "1", description: "Inspect files", status: :in_progress}]}
   end
 
-  test "approval previews accept only complete known preview payloads" do
-    assert EventReplay.to_agent_event(
-             record(:approval_requested, %{
-               "tool_call_id" => "tc1",
-               "name" => "shell",
-               "args" => %{"command" => "mix test"},
-               "preview" => %{
-                 "kind" => "command",
-                 "summary" => "mix test",
-                 "lines" => ["$ mix test", "cwd: /tmp"]
-               }
-             })
-           ) ==
-             {:approval_pending,
-              %{
-                tool_call_id: "tc1",
-                name: "shell",
-                args: %{"command" => "mix test"},
-                preview: %Preview{
-                  kind: :command,
-                  summary: "mix test",
-                  lines: ["$ mix test", "cwd: /tmp"]
-                }
-              }}
+  test "durable approval previews cannot recreate live controls, even when complete" do
+    previews = [
+      %{"kind" => "command", "summary" => "mix test", "lines" => ["$ mix test", "cwd: /tmp"]},
+      %{"kind" => "diff", "summary" => "lib/a.ex", "lines" => ["-old", "+new"]},
+      %{"kind" => "target", "summary" => "lib/a.ex", "lines" => ["lib/a.ex"]},
+      %{"kind" => "args", "summary" => "custom tool", "lines" => []},
+      %{"kind" => "nope", "summary" => "bad", "lines" => ["x"]},
+      %{"kind" => "command", "summary" => "bad", "lines" => [:not_string]},
+      %{"kind" => "command", "summary" => 12, "lines" => ["x"]},
+      %{"kind" => "command", "summary" => "incomplete"},
+      nil
+    ]
 
-    assert {:approval_pending, invalid_kind} =
-             EventReplay.to_agent_event(
-               record(:approval_requested, %{
-                 "tool_call_id" => "tc2",
-                 "name" => "shell",
-                 "args" => %{"command" => "mix test"},
-                 "preview" => %{"kind" => "nope", "summary" => "bad", "lines" => ["x"]}
-               })
-             )
+    for preview <- previews do
+      # This legacy Session payload has a tool ID, but no admitted request ID.
+      payload = %{
+        "approval_id" => "tc1",
+        "tool_call_id" => "tc1",
+        "name" => "shell",
+        "args" => %{"command" => "mix test"},
+        "preview" => preview
+      }
 
-    assert invalid_kind.tool_call_id == "tc2"
-    refute Map.has_key?(invalid_kind, :preview)
+      assert EventReplay.to_agent_event(record(:approval_requested, payload)) == nil
 
-    assert {:approval_pending, malformed} =
-             EventReplay.to_agent_event(
-               record(:approval_requested, %{
-                 "tool_call_id" => "tc3",
-                 "name" => "shell",
-                 "args" => %{"command" => "mix test"},
-                 "preview" => %{"kind" => "command", "summary" => "bad", "lines" => [:not_string]}
-               })
-             )
+      assert EventReplay.replay_active(editor_state(), self(), [
+               record(:approval_requested, payload)
+             ]) ==
+               editor_state()
+    end
+  end
 
-    assert malformed.tool_call_id == "tc3"
-    refute Map.has_key?(malformed, :preview)
+  test "approval history cannot install or resolve a live snapshot attachment" do
+    source = self()
+    target = ApprovalTarget.new("session", "current-admitted-request", "reused-tool-id")
+    preview = Preview.new(:command, "echo current", ["echo current"])
+    approval = PublicApproval.new(target, "shell", %{"command" => "echo current"}, preview)
+    binding = PendingApproval.new(source, approval)
+    agent = AgentState.set_pending_approval(%AgentState{}, binding)
+
+    state = %{
+      editor_state()
+      | shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            TraditionalState.replace_agent(%TraditionalState{}, agent)
+          )
+    }
+
+    public_payload = approval |> JSON.encode!() |> JSON.decode!()
+
+    stale_payload =
+      Map.put(public_payload, "target", %{
+        "session_id" => "session",
+        "request_id" => "old-admitted-request",
+        "tool_call_id" => "reused-tool-id"
+      })
+
+    legacy_payload = %{
+      "approval_id" => "reused-tool-id",
+      "tool_call_id" => "reused-tool-id",
+      "name" => "shell",
+      "args" => %{"command" => "echo historical"},
+      "preview" => %{"kind" => "command", "summary" => "echo historical", "lines" => []}
+    }
+
+    records = [
+      record(:approval_requested, legacy_payload),
+      record(:approval_requested, stale_payload),
+      record(:approval_requested, public_payload),
+      record(:approval_requested, %{"target" => %{"tool_call_id" => "reused-tool-id"}}),
+      record(:approval_resolved, %{
+        "approval_id" => "reused-tool-id",
+        "tool_call_id" => "reused-tool-id",
+        "name" => "shell",
+        "decision" => "approve"
+      }),
+      record(:approval_resolved, %{"target" => public_payload["target"], "decision" => "reject"})
+    ]
+
+    # Durable history is not a live Session event and cannot replace the snapshot attachment.
+    assert EventReplay.replay_active(state, source, records) == state
+
+    # Nor may replay fill missing identities from an editor's active state.
+    assert EventReplay.replay_active(editor_state(), source, records) == editor_state()
   end
 
   test "replay_active applies mapped durable events in storage order and skips ignored families" do
     updated =
-      EventReplay.replay_active(editor_state(), [
+      EventReplay.replay_active(editor_state(), self(), [
         record(:session_started, %{}),
         record(:todo_plan_updated, %{
           "todos" => [
@@ -143,6 +183,19 @@ defmodule MingaEditor.Remote.EventReplayTest do
           "tool_call_id" => "tc1",
           "name" => "shell",
           "args" => %{"command" => "mix test"}
+        }),
+        record(:approval_requested, %{
+          "approval_id" => "tc1",
+          "tool_call_id" => "tc1",
+          "name" => "shell",
+          "args" => %{"command" => "mix test"},
+          "preview" => %{"kind" => "command", "summary" => "mix test", "lines" => ["mix test"]}
+        }),
+        record(:approval_resolved, %{
+          "approval_id" => "tc1",
+          "tool_call_id" => "tc1",
+          "name" => "shell",
+          "decision" => "approve"
         }),
         record(:tool_call_finished, %{
           "tool_call_id" => "tc1",
@@ -205,10 +258,19 @@ defmodule MingaEditor.Remote.EventReplayTest do
        %{"todos" => [%{"id" => "1", "description" => "Inspect files", "status" => "done"}]},
        {:todo_plan_updated, [%TodoItem{id: "1", description: "Inspect files", status: :done}]}},
       {:approval_requested,
-       %{"tool_call_id" => "tc1", "name" => "shell", "args" => %{"command" => "mix test"}},
-       {:approval_pending,
-        %{tool_call_id: "tc1", name: "shell", args: %{"command" => "mix test"}}}},
-      {:approval_resolved, %{"decision" => "approved"}, {:approval_resolved, :approved}},
+       %{
+         "approval_id" => "tc1",
+         "tool_call_id" => "tc1",
+         "name" => "shell",
+         "args" => %{"command" => "mix test"}
+       }, nil},
+      {:approval_resolved,
+       %{
+         "approval_id" => "tc1",
+         "tool_call_id" => "tc1",
+         "name" => "shell",
+         "decision" => "approve"
+       }, nil},
       {:approval_interrupted, %{}, nil},
       {:system_message, %{"message" => "connected"}, nil},
       {:status_changed, %{status: :thinking}, {:status_changed, :thinking}},

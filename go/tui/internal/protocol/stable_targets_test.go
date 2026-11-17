@@ -20,6 +20,7 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionFileTreeDrop":               false,
 		"GUIActionExecuteCommand":             false,
 		"GUIActionAgentToolToggle":            false,
+		"GUIActionAgentToolApproval":          false,
 		"GUIActionSemanticItemActivate":       false,
 		"GUIActionHoverOpenAction":            false,
 		"GUIActionSidebarAction":              false,

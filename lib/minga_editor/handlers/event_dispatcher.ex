@@ -618,8 +618,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
             state
             |> maybe_rebuild_agent_from_workspace(workspace_id)
             |> sync_reconnected_buffer(messages)
-            |> EventReplay.replay_active(events)
-            |> apply_reconnected_snapshot(snapshot)
+            |> EventReplay.replay_active(pid, events)
+            |> apply_reconnected_snapshot(pid, snapshot)
 
           current_tb = state.shell_runtime.state.tab_bar
 
@@ -757,10 +757,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     AgentLifecycle.cache_messages(state, messages)
   end
 
-  @spec apply_reconnected_snapshot(EditorState.t(), MingaAgent.Session.editor_snapshot()) ::
+  @spec apply_reconnected_snapshot(EditorState.t(), pid(), MingaAgent.Session.editor_snapshot()) ::
           EditorState.t()
-  defp apply_reconnected_snapshot(state, snapshot) do
-    AgentLifecycle.apply_session_snapshot(state, snapshot)
+  defp apply_reconnected_snapshot(state, session_pid, snapshot) do
+    AgentLifecycle.apply_session_snapshot(state, session_pid, snapshot)
   end
 
   @spec maybe_rebuild_agent_from_workspace(EditorState.t(), non_neg_integer()) :: EditorState.t()

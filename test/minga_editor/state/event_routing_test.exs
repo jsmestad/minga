@@ -37,9 +37,9 @@ defmodule MingaEditor.State.EventRoutingTest do
 
   describe "Agent.Events direct routing" do
     test "routes status, stream, and session events through focused workflows" do
-      %{state: state} = make_state()
+      %{state: state, session: session} = make_state()
 
-      state = AgentEvents.dispatch(state, {:status_changed, :thinking})
+      state = AgentEvents.dispatch(state, session, {:status_changed, :thinking})
 
       assert MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status ==
                :thinking
@@ -47,13 +47,13 @@ defmodule MingaEditor.State.EventRoutingTest do
       assert state.workspace.agent_ui.panel.scroll.pinned
       assert MingaEditor.State.RenderCorrelation.scheduled?(state.render.render_correlation)
 
-      state = AgentEvents.dispatch(state, {:text_delta, "hello"})
+      state = AgentEvents.dispatch(state, session, {:text_delta, "hello"})
       assert state.workspace.agent_ui.panel.transcript.version == 1
       workspace = TabBar.active_workspace(state.shell_runtime.state.tab_bar)
       assert %WorkspaceAgent{agent_ui: workspace_ui} = workspace.payload
       assert workspace_ui.panel.transcript.version == 0
 
-      state = AgentEvents.dispatch(state, {:credentials_status, :configured})
+      state = AgentEvents.dispatch(state, session, {:credentials_status, :configured})
       assert state.workspace.agent_ui.panel.credentials_configured
     end
 
@@ -72,10 +72,10 @@ defmodule MingaEditor.State.EventRoutingTest do
     end
 
     test "empty batches and unknown events are no-ops" do
-      %{state: state} = make_state()
+      %{state: state, session: session} = make_state()
 
       assert AgentEvents.dispatch_batch(state, []) == state
-      assert AgentEvents.dispatch(state, {:some_future_event, "data"}) == state
+      assert AgentEvents.dispatch(state, session, {:some_future_event, "data"}) == state
     end
   end
 
@@ -129,20 +129,20 @@ defmodule MingaEditor.State.EventRoutingTest do
     end
   end
 
-  describe "Agent.Events.dispatch/2 - tab status sync" do
+  describe "Agent tab status" do
     test "status_changed syncs agent_status on the agent tab" do
-      %{state: state} = make_state()
+      %{state: state, session: session} = make_state()
 
-      new_state = AgentEvents.dispatch(state, {:status_changed, :thinking})
+      new_state = AgentEvents.dispatch(state, session, {:status_changed, :thinking})
 
       agent_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       assert agent_tab.payload.agent_status == :thinking
     end
 
     test "status_changed to :idle updates tab status" do
-      %{state: state} = make_state()
+      %{state: state, session: session} = make_state()
 
-      new_state = AgentEvents.dispatch(state, {:status_changed, :idle})
+      new_state = AgentEvents.dispatch(state, session, {:status_changed, :idle})
 
       agent_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       assert agent_tab.payload.agent_status == :idle
