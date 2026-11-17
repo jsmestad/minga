@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - The Go TUI preserves every step in a finite wheel burst, including direction changes and source-bound composer scrolling, without waiting for another input event. Pointer-motion throttling, modifiers and surface routing are unchanged.
