@@ -157,6 +157,44 @@ defmodule MingaAgent.CompactionTest do
       assert summary_info =~ "→"
       assert summary_info =~ "tokens"
     end
+
+    test "a retained tool result keeps its assistant call and all sibling results" do
+      calls = Enum.map(["one", "two"], &ReqLLM.ToolCall.new(&1, "read_file", "{}"))
+      assistant = %ReqLLM.Message{role: :assistant, tool_calls: calls}
+
+      results =
+        Enum.map(calls, fn call ->
+          %ReqLLM.Message{
+            role: :tool,
+            tool_call_id: call.id,
+            content: [ReqLLM.Message.ContentPart.text("found")]
+          }
+        end)
+
+      retained = [assistant | results] ++ [Context.assistant("finished")]
+
+      messages =
+        [
+          Context.system("instructions"),
+          Context.user("old"),
+          Context.assistant("old reply"),
+          Context.user("inspect")
+        ] ++ retained
+
+      for keep_recent <- [2, 3, 4] do
+        assert {:compacted, compacted, _info} =
+                 Compaction.compact(Context.new(messages),
+                   model: "model",
+                   llm_client: &mock_llm_client/3,
+                   keep_recent: keep_recent
+                 )
+
+        assert Enum.take(compacted.messages, -4) == retained
+
+        assert {:ok, _portable, _counts} =
+                 MingaAgent.Session.PortableHistory.convert(compacted.messages)
+      end
+    end
   end
 
   defp extract_content(%{content: content}) when is_binary(content), do: content

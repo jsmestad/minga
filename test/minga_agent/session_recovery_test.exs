@@ -52,6 +52,8 @@ defmodule MingaAgent.SessionRecoveryTest do
       Keyword.get(opts, :provider_opts, [])
       |> Keyword.merge(skip_api_key_env: true)
       |> Keyword.put_new(:model_resolver_opts, recovery_model_opts())
+      |> Keyword.put_new(:credential_opts, env: %{"ANTHROPIC_API_KEY" => "fixture-anthropic-key"})
+      |> Keyword.put_new(:tool_allowlist, [])
 
     {:ok, session} =
       Session.start_link(

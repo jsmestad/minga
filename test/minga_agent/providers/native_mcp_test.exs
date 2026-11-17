@@ -111,7 +111,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
 
       {:"$gen_call", from, {:preview_prefix, provider}} ->
         Process.put(:native_provider, provider)
-        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, :current}))
+        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, make_ref(), :current}))
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:commit_prefix_preview, provider, token}} ->

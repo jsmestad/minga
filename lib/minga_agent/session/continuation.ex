@@ -12,6 +12,7 @@ defmodule MingaAgent.Session.Continuation do
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.Prefix
   alias MingaAgent.Session.PrefixStore
+  alias MingaAgent.Session.PortableHistory
   alias ReqLLM.Context
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
@@ -108,10 +109,9 @@ defmodule MingaAgent.Session.Continuation do
     do: {:error, :effect_reconciliation_required}
 
   def change_prefix(
-        %__MODULE__{prefixes: %{selected: id}, boundaries: boundaries} = continuation,
-        %Prefix{epoch_id: id, identity: %{native_contract: contract}}
-      )
-      when contract != :unknown or boundaries == [],
+        %__MODULE__{prefixes: %{selected: id}} = continuation,
+        %Prefix{epoch_id: id}
+      ),
       do: {:ok, :unchanged, continuation}
 
   def change_prefix(
@@ -181,43 +181,65 @@ defmodule MingaAgent.Session.Continuation do
 
   defp transition_reason(_epoch_id, _candidate), do: :native_identity_changed
 
-  @doc "Checks a requested route selection before changing the effective provider selection."
-  @spec check_model_change(t(), String.t()) :: :ok | {:error, term()}
-  def check_model_change(%__MODULE__{active_request: %Request{}}, _selection_id),
+  @doc "Hands completed active history to a new model without provider-private replay state."
+  @spec change_model_prefix(t(), Prefix.t(), PortableHistory.file_policy()) ::
+          {:ok, :applied, t()} | {:error, term()}
+  def change_model_prefix(continuation, candidate, file_policy \\ :reject)
+
+  def change_model_prefix(%__MODULE__{active_request: %Request{}}, %Prefix{}, _file_policy),
     do: {:error, :request_active}
 
-  def check_model_change(%__MODULE__{tool_checkpoint: %{}}, _selection_id),
+  def change_model_prefix(%__MODULE__{tool_checkpoint: %{}}, %Prefix{}, _file_policy),
     do: {:error, :effect_reconciliation_required}
 
-  def check_model_change(%__MODULE__{messages: []}, _selection_id), do: :ok
+  def change_model_prefix(%__MODULE__{} = continuation, %Prefix{} = candidate, file_policy) do
+    file_policy = authenticated_file_policy(continuation, candidate, file_policy)
 
-  def check_model_change(
-        %__MODULE__{
-          messages: [%Message{role: :system}],
-          boundaries: [],
-          prefixes: %{selected: selected}
-        },
-        _selection_id
-      )
-      when is_binary(selected), do: :ok
+    with {:ok, messages, counts} <- PortableHistory.convert(continuation.messages, file_policy) do
+      {messages, offset} = replace_model_instructions(messages, candidate.instructions)
 
-  def check_model_change(%__MODULE__{} = continuation, selection_id) do
-    case PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected) do
-      %Prefix{identity: %{selection_id: ^selection_id}} ->
-        :ok
-
-      _changed_or_unknown ->
-        {:error,
-         {:portable_context_transition_required,
+      boundaries =
+        Enum.map(continuation.boundaries, fn boundary ->
           %{
-            epoch_id: continuation.prefixes.selected,
-            reason: :model_identity_changed_or_unknown,
-            actions: [:cancel_retain, :new_session],
-            message:
-              "Retain the current model and saved conversation, or use /new for a fresh conversation before selecting this model."
-          }}}
+            boundary
+            | message_count: Map.fetch!(counts, boundary.message_count) + offset,
+              epoch_id: candidate.epoch_id
+          }
+        end)
+
+      updated = %{
+        continuation
+        | messages: messages,
+          boundaries: boundaries,
+          revision: continuation.revision + 1,
+          prefixes: PrefixStore.select(continuation.prefixes, candidate)
+      }
+
+      {:ok, :applied, prune_prefixes(updated)}
     end
   end
+
+  @spec authenticated_file_policy(t(), Prefix.t(), PortableHistory.file_policy()) ::
+          PortableHistory.file_policy()
+  defp authenticated_file_policy(
+         continuation,
+         %Prefix{identity: %{authentication: authentication}},
+         :retain
+       ) do
+    case PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected) do
+      %Prefix{identity: %{authentication: ^authentication}} -> :retain
+      _different_namespace -> :reject
+    end
+  end
+
+  defp authenticated_file_policy(_continuation, _candidate, _policy), do: :reject
+
+  @spec replace_model_instructions([Message.t()], String.t()) :: {[Message.t()], 0 | 1}
+  defp replace_model_instructions([%Message{role: :system} | rest], instructions),
+    do: {[Context.system(instructions) | rest], 0}
+
+  defp replace_model_instructions(messages, instructions),
+    do: {[Context.system(instructions) | messages], 1}
 
   @doc "Begins one request by appending the exact user content to the last completed boundary."
   @spec begin_request(t(), String.t(), pos_integer(), String.t() | [ContentPart.t()]) ::
@@ -1023,7 +1045,7 @@ defmodule MingaAgent.Session.Continuation do
 
   defp ordered_boundary?(boundary, previous) do
     boundary.transcript_id >= previous.transcript_id and
-      boundary.message_count > previous.message_count and
+      boundary.message_count >= previous.message_count and
       boundary.revision > previous.revision
   end
 
