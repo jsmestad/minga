@@ -1134,7 +1134,8 @@ defmodule MingaAgent.SessionStore do
     message_ids = data["message_ids"]
     branches = Enum.map(data["branches"] || [], &deserialize_branch/1)
 
-    Transcript.restore(
+    Transcript.new([], parse_datetime(timestamp), make_ref())
+    |> Transcript.restore(
       messages,
       message_ids,
       branches,
