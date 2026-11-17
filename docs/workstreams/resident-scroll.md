@@ -6,6 +6,8 @@
 
 **Deferred remnants (candidate follow-ups, not regressions):** wrapped/folded residence (still uses the windowed emit path; needs visual-row offset math); residual O(document) cheap passes at the 65k ceiling (~30 fps resident scroll at the extreme; delta-only row-list construction, only if >5k-line residence matters post-launch); the discrete-wheel-tick-into-boundary one-cell park (standalone micro-fix; #2665 did **not** fold it in — thumb drag uses a separate presentation path, so `seedDiscreteScrollAnimation`'s missing `presentationScrollBoundaryAvailability` gate was untouched and still owed); the `fullRefresh`-without-`resetRequired` promotion discard-gate verification (BEAM forces full_refresh on promotion, so no live-settle cancel gap is expected, but it was flagged for a smoke check); and the Go rows-without-scroll `ScrollSet`-clearing divergence from Swift (`model.go`, harmless today, would surface only under a rows-without-scroll transcript).
 
+See [ADR-0005](../adr/0005-frontend-owns-immediate-ui-feedback.md) for the UI responsiveness policy and its application to soft-wrapped panes. This workstream records the shipped baseline. Wrapped residence is not yet shipped, and folded residence is outside ADR-0005.
+
 ## Status ledger (as of #2679)
 
 The prerequisites the epic set for the default flip have all landed:

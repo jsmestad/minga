@@ -456,6 +456,8 @@ Agent Help is an independent `Minga.RenderModel.UI.AgentHelp` value encoded thro
 
 Historical note (recorded 2026-10-29): epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 completed that work and deleted velocity-aware overscan prefetch. The windowed emit path remains for wrapped/folded buffers and the brief pre-promotion arming frame, with fixed overscan rather than velocity tiers. New scrollable surfaces reuse that lifecycle instead of defining per-surface reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).
 
+[ADR-0005](adr/0005-frontend-owns-immediate-ui-feedback.md) sets the responsiveness target: present feedback from committed data on the next available frontend frame without waiting for a new BEAM decision. Soft-wrapped scrolling is its first application.
+
 #### What survives of the DisplayList
 
 `MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
