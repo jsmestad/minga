@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
+- macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
+- Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - The Go TUI preserves every step in a finite wheel burst, including direction changes and source-bound composer scrolling, without waiting for another input event. Pointer-motion throttling, modifiers and surface routing are unchanged.
 - Terminal Agent transcripts apply validated frame changes to paged resident storage without cloning or reindexing retained history. Stable message occurrences and reading anchors survive updates, and rejected frames preserve the last-good transcript.

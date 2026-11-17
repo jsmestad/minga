@@ -65,6 +65,12 @@ private struct Capture: Codable, Sendable {
     let decodedPixelHeight: Int
 }
 
+private struct ForegroundAcquisition: Encodable {
+    let initialFrontmost: Bool
+    let requestCount: Int
+    let observedFrontmost: Bool
+}
+
 private struct Observation: Encodable {
     let schema = "minga-approval-geometry-v2"
     let kind = "observation"
@@ -74,6 +80,7 @@ private struct Observation: Encodable {
     let observerPid: Int32
     let observerExecutable: String
     let host: HostIdentity
+    let foreground: ForegroundAcquisition
     let workspaceCount: Int
     let workspace: Frame?
     let buttons: [ButtonObservation]
@@ -98,6 +105,7 @@ private struct FailureReceipt: Encodable {
     let runId: String
     let width: Int
     let failure: InfrastructureFailure
+    let foregroundRequestCount: Int
     let observerPid: Int32
     let observerExecutable: String
 }
@@ -154,6 +162,7 @@ private final class GeometryObserver {
     private let arguments: Arguments
     private let clock = ContinuousClock()
     private let system = AXUIElementCreateSystemWide()
+    private var foregroundRequestCount = 0
 
     init(_ arguments: Arguments) {
         self.arguments = arguments
@@ -173,24 +182,28 @@ private final class GeometryObserver {
             let identity = try await awaitHost(deadline: deadline)
             let application = AXUIElementCreateApplication(identity.pid)
             try check(AXUIElementSetMessagingTimeout(application, 1), "set_host_ax_timeout")
+            let window = try await awaitOwnedWindow(application, identity: identity, deadline: deadline)
+            let initialFrontmost = try prepareForeground(application, deadline: deadline)
             try await awaitForeground(application, deadline: deadline)
-            var layout = try snapshot(application, pid: identity.pid)
+            var layout = try snapshot(application, window: window, identity: identity)
             while (layout == nil || layout?.workspaceCount != 1 || (layout?.buttons.count ?? 0) < 4), clock.now < deadline {
                 try await Task.sleep(for: .milliseconds(50))
-                layout = try snapshot(application, pid: identity.pid)
+                layout = try snapshot(application, window: window, identity: identity)
             }
             guard let before = layout else {
                 throw InfrastructureFailure("window_readiness", "The owned host did not expose one accessibility window before the deadline")
             }
             let capture = try await Self.capture(identity: identity, bounds: before.windowFrame, output: arguments.output)
-            guard let after = try snapshot(application, pid: identity.pid), before == after else {
+            guard let after = try snapshot(application, window: window, identity: identity), before == after else {
                 throw InfrastructureFailure("changed_during_capture", "External accessibility observations changed while capturing the owned window")
             }
             let observation = Observation(
                 runId: arguments.runId, width: arguments.width,
                 observerPid: ProcessInfo.processInfo.processIdentifier,
                 observerExecutable: URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.resolvingSymlinksInPath().path,
-                host: identity, workspaceCount: after.workspaceCount, workspace: after.workspace,
+                host: identity,
+                foreground: ForegroundAcquisition(initialFrontmost: initialFrontmost, requestCount: foregroundRequestCount, observedFrontmost: true),
+                workspaceCount: after.workspaceCount, workspace: after.workspace,
                 buttons: after.buttons, capture: capture, startedNs: started,
                 finishedNs: String(DispatchTime.now().uptimeNanoseconds)
             )
@@ -229,6 +242,63 @@ private final class GeometryObserver {
                             bundleIdentifier: value.bundleIdentifier, windowId: value.windowId)
     }
 
+    private func awaitOwnedWindow(_ application: AXUIElement, identity: HostIdentity, deadline: ContinuousClock.Instant) async throws -> AXUIElement {
+        let role: String? = try attribute(application, kAXRoleAttribute)
+        var owner: pid_t = 0
+        try check(AXUIElementGetPid(application, &owner), "host_application_owner")
+        guard role == kAXApplicationRole, owner == identity.pid,
+              let running = NSRunningApplication(processIdentifier: identity.pid), !running.isTerminated,
+              running.bundleIdentifier == identity.bundleIdentifier,
+              let executable = running.executableURL,
+              executable.standardizedFileURL.resolvingSymlinksInPath() == arguments.executable else {
+            throw InfrastructureFailure("host_live_identity", "The live application does not match the supervisor-owned host")
+        }
+        while true {
+            if let window = try ownedWindow(application, identity: identity) { return window }
+            guard clock.now < deadline else {
+                throw InfrastructureFailure("window_readiness", "The owned host did not expose its run-bound accessibility window before the deadline")
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    private func ownedWindow(_ application: AXUIElement, identity: HostIdentity) throws -> AXUIElement? {
+        let windows: [AXUIElement] = try attribute(application, kAXWindowsAttribute) ?? []
+        guard !windows.isEmpty else { return nil }
+        guard windows.count == 1 else {
+            throw InfrastructureFailure("window_identity", "Owned fixture exposed multiple accessibility windows")
+        }
+        let window = windows[0]
+        let role: String? = try attribute(window, kAXRoleAttribute)
+        let identifier: String? = try attribute(window, kAXIdentifierAttribute)
+        var owner: pid_t = 0
+        try check(AXUIElementGetPid(window, &owner), "host_window_owner")
+        guard role == kAXWindowRole, owner == identity.pid,
+              identifier == "minga-approval-window:\(arguments.runId):\(identity.windowId)" else {
+            throw InfrastructureFailure("window_identity", "The live accessibility window does not match this owned run and window")
+        }
+        return window
+    }
+
+    private func prepareForeground(_ application: AXUIElement, deadline: ContinuousClock.Instant) throws -> Bool {
+        let frontmost: Bool? = try attribute(application, kAXFrontmostAttribute)
+        guard let frontmost else {
+            throw InfrastructureFailure("host_foreground_state", "The owned host did not expose its native foreground state")
+        }
+        if frontmost { return true }
+        var settable = DarwinBoolean(false)
+        try check(AXUIElementIsAttributeSettable(application, kAXFrontmostAttribute as CFString, &settable), "host_foreground_settable")
+        guard settable.boolValue else {
+            throw InfrastructureFailure("host_foreground_settable", "The owned host does not support a foreground request")
+        }
+        guard clock.now < deadline else {
+            throw InfrastructureFailure("host_foreground_readiness", "The acquisition deadline expired before requesting foreground")
+        }
+        foregroundRequestCount = 1
+        try check(AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue), "request_host_foreground")
+        return false
+    }
+
     private func awaitForeground(_ application: AXUIElement, deadline: ContinuousClock.Instant) async throws {
         while true {
             let frontmost: Bool? = try attribute(application, kAXFrontmostAttribute)
@@ -248,11 +318,11 @@ private final class GeometryObserver {
         let buttons: [ButtonObservation]
     }
 
-    private func snapshot(_ application: AXUIElement, pid: Int32) throws -> Layout? {
-        let windows: [AXUIElement] = try attribute(application, kAXWindowsAttribute) ?? []
-        guard !windows.isEmpty else { return nil }
-        guard windows.count == 1 else { throw InfrastructureFailure("window_identity", "Owned fixture exposed multiple accessibility windows") }
-        let window = windows[0]
+    private func snapshot(_ application: AXUIElement, window: AXUIElement, identity: HostIdentity) throws -> Layout? {
+        guard let current = try ownedWindow(application, identity: identity), CFEqual(current, window) else {
+            throw InfrastructureFailure("window_identity", "The owned accessibility window changed during acquisition")
+        }
+        let pid = identity.pid
         let windowFrame = try requiredFrame(window)
         let all = try descendants(window, pid: pid)
         let workspaces = try all.filter { try attribute($0, kAXIdentifierAttribute) as String? == "approval-geometry-workspace" }
@@ -438,6 +508,7 @@ private final class GeometryObserver {
     private func writeFailure(_ failure: InfrastructureFailure) {
         do {
             try write(FailureReceipt(runId: arguments.runId, width: arguments.width, failure: failure,
+                                     foregroundRequestCount: foregroundRequestCount,
                                      observerPid: ProcessInfo.processInfo.processIdentifier,
                                      observerExecutable: URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.resolvingSymlinksInPath().path),
                       to: arguments.output.appendingPathComponent("observation.json"))

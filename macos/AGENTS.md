@@ -290,6 +290,10 @@ The entrypoint rechecks previously qualified hosted products after geometry befo
 It does not use an XCTest UI runner, provisioning profile, or Apple account.
 Python alone launches and supervises both children through retained `Popen` handles, holds the host's stdin lifeline, and independently terminates and reaps each created process.
 The collector receives an explicit host PID, executable, readiness file, run ID, width, and evidence directory; it acquires observations but never claims cleanup.
+Before a foreground request, the observer validates the live application's executable, bundle, AX role and PID, plus the unique AX window's role, PID and run/window-specific accessibility identifier.
+An inactive owned host receives at most one checked AX frontmost request through existing Accessibility authority; unsupported requests fail rather than retry.
+Successful submission is not foreground proof: the observer still requires external AX frontmost state under the original deadline before global hit testing or capture.
+Retain the initial state and request count, and require the same run-bound AX window before and after capture.
 Python writes versioned launch/cleanup receipts from actual handles and wait return codes, never signals a PID read from JSON, and stops subsequent launches if lifecycle evidence or descriptor closure is incomplete.
 Cancellation is recorded during geometry rather than raised across child creation, so cleanup still services both children.
 The observer requires existing Accessibility and Screen Recording authorization; it never requests or changes permissions, and missing access fails the gate.

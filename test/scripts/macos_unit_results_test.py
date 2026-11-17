@@ -108,9 +108,12 @@ class MacOSUnitResultsTest(unittest.TestCase):
                 value, context = geometry_fixture(case, width)
                 for button in value["buttons"]:
                     button["title_attribute"] = "AXDescription"
-                errors, captured = native.validate_geometry_observation(value, *context)
-                self.assertEqual(errors, [])
-                self.assertTrue(captured)
+                for initial_frontmost in (False, True):
+                    with self.subTest(width=width, initial_frontmost=initial_frontmost):
+                        value["foreground"] = {"initial_frontmost": initial_frontmost, "request_count": 0 if initial_frontmost else 1, "observed_frontmost": True}
+                        errors, captured = native.validate_geometry_observation(value, *context)
+                        self.assertEqual(errors, [])
+                        self.assertTrue(captured)
 
     def test_geometry_rejects_clipped_overlapping_disabled_or_unhittable_controls(self):
         mutations = [
@@ -145,6 +148,13 @@ class MacOSUnitResultsTest(unittest.TestCase):
         mutations = [
             (("run_id",), "previous-case"),
             (("observer_pid",), 4102),
+            (("foreground",), None),
+            (("foreground", "initial_frontmost"), "false"),
+            (("foreground", "initial_frontmost"), True),
+            (("foreground", "request_count"), 0),
+            (("foreground", "request_count"), 2),
+            (("foreground", "request_count"), True),
+            (("foreground", "observed_frontmost"), False),
             (("host", "window_id"), 100),
             (("capture", "sha256"), "0" * 64),
             (("capture", "decoded_pixel_width"), 221),

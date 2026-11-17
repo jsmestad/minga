@@ -112,7 +112,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp context_status(:thinking, false), do: :working
   defp context_status(:tool_executing, false), do: :iterating
   defp context_status(:error, false), do: :errored
-  defp context_status(:idle, false), do: :done
+  defp context_status(:idle, false), do: :idle
   defp context_status(:plan, false), do: :idle
   defp context_status(_status, false), do: :idle
 

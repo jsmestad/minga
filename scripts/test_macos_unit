@@ -385,6 +385,15 @@ def validate_geometry_observation(value, directory, run_id, width, observer_pid,
         errors.append("infrastructure: wrong owned host identity")
     if value.get("hit_oracle") != "system-wide-AX-hit-test":
         errors.append("infrastructure: wrong external button hit-test oracle")
+    foreground = value.get("foreground")
+    if (
+        not isinstance(foreground, dict)
+        or type(foreground.get("initial_frontmost")) is not bool
+        or type(foreground.get("request_count")) is not int
+        or foreground["request_count"] != (0 if foreground["initial_frontmost"] else 1)
+        or foreground.get("observed_frontmost") is not True
+    ):
+        errors.append("infrastructure: missing or inconsistent native foreground acquisition")
     try:
         ready = geometry_json(directory / "host-ready.json")
         if ready.get("schema") != "minga-approval-host-v1" or ready.get("run_id") != run_id or ready.get("width") != width:

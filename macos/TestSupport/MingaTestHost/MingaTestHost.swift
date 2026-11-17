@@ -69,12 +69,12 @@ private final class MingaTestHostDelegate: NSObject, NSApplicationDelegate {
         fixtureWindow = window
         window.makeKeyAndOrderFront(nil)
         host.layoutSubtreeIfNeeded()
-        NSApplication.shared.activate()
         guard let executable = Bundle.main.executableURL,
               let bundleIdentifier = Bundle.main.bundleIdentifier,
               let windowId = UInt32(exactly: window.windowNumber), windowId > 0 else {
             fatalError("Approval geometry host has no complete lifecycle identity")
         }
+        window.setAccessibilityIdentifier("minga-approval-window:\(runId):\(windowId)")
         geometryLifeline = Task { @MainActor in
             do {
                 for try await _ in FileHandle.standardInput.bytes {}

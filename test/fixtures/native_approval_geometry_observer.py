@@ -33,6 +33,7 @@ def write_fixture(directory, run_id, width, observer_pid, observer, host, host_p
     value = {
         "schema": "minga-approval-geometry-v2", "kind": "observation", "run_id": run_id, "width": width,
         "observer_pid": observer_pid, "observer_executable": str(observer.resolve()), "host": identity,
+        "foreground": {"initial_frontmost": False, "request_count": 1, "observed_frontmost": True},
         "workspace_count": 1, "workspace": {"x": 10, "y": 40, "width": width, "height": 400}, "buttons": buttons,
         "hit_oracle": "system-wide-AX-hit-test",
         "capture": {"filename": "window.png", "api": "ScreenCaptureKit.SCScreenshotManager.desktopIndependentWindow", "window_id": 99, "host_pid": host_pid, "point_bounds": bounds, "ax_window_bounds": dict(bounds), "scale": 1, "pixel_width": width, "pixel_height": 430, "decoded_pixel_width": width, "decoded_pixel_height": 430, "sha256": hashlib.sha256(image).hexdigest()},
