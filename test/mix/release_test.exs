@@ -2,7 +2,7 @@ defmodule Minga.ReleaseTest do
   use ExUnit.Case, async: true
 
   @moduletag :tmp_dir
-  @native_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner)
+  @native_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
   @resources ~w(queries/elixir/highlights.scm extensions/example/extension.ex tree_sitter/parser.h tutor.txt)
 
   setup %{tmp_dir: external_dir} do

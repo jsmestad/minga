@@ -5,10 +5,8 @@ defmodule Mix.Tasks.Native.Build.Tui do
   The packaged TUI ships:
 
     - the Go/Bubble Tea renderer (`minga-renderer-go`), the terminal frontend;
-    - the Zig parser (`minga-parser`) and hook runner (`minga-hook-runner`).
-
-  The Zig renderer was removed in #2223; only the parser infrastructure ships
-  from the Zig build now.
+    - the Zig parser (`minga-parser`), hook runner (`minga-hook-runner`),
+      and demand-driven shell output reader (`minga-shell-output-reader`).
   """
 
   use Mix.Task

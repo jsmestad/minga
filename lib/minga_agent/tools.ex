@@ -663,8 +663,10 @@ defmodule MingaAgent.Tools do
       name: "shell",
       description: """
       Run a shell command in the project root directory. Returns the combined
-      stdout and stderr output, capped at 51KB for the model. Commands time out
-      after 30 seconds. Use this for running tests, linters, git commands, etc.
+      stdout and stderr with a bounded 51KB preview and a stable fetch_output
+      reference to admitted raw output. Quota exhaustion and interruption are
+      explicit incomplete results. Commands time out after 30 seconds.
+      Use this for running tests, linters, git commands, etc.
       Use find and grep for broad file discovery and content search.
       Do not use for interactive commands that require user input.
       """,
@@ -706,7 +708,9 @@ defmodule MingaAgent.Tools do
 
             process_backend.shell(args["command"], shell_root, timeout_secs,
               env: env,
-              on_output: shell_output_callback
+              on_output: shell_output_callback,
+              artifact_store: context.artifact_store,
+              capture_key: context.capture_key
             )
             |> retained_process_result(context)
           else

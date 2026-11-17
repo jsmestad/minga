@@ -132,8 +132,7 @@ pub fn build(b: *std.Build) void {
 
     // ── Parser executable (tree-sitter only) ──────────────────────────────
     // The Zig renderer (libvaxis/zigzag) was removed in #2223. This build now
-    // produces parser infrastructure only: minga-parser, minga-hook-runner, and
-    // the highlight benchmark.
+    // produces the parser, POSIX transport helpers, and highlight benchmark.
     const parser_exe = b.addExecutable(.{
         .name = "minga-parser",
         .root_module = b.createModule(.{
@@ -160,6 +159,18 @@ pub fn build(b: *std.Build) void {
     });
     hook_runner_exe.root_module.link_libc = true;
     b.installArtifact(hook_runner_exe);
+
+    // ── Shell output reader (one-credit POSIX FIFO transport) ────────────
+    const shell_output_reader_exe = b.addExecutable(.{
+        .name = "minga-shell-output-reader",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shell_output_reader_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    shell_output_reader_exe.root_module.link_libc = true;
+    b.installArtifact(shell_output_reader_exe);
 
     // Parser tests (highlighter, predicates, posix_regex)
     const parser_tests = b.addTest(.{

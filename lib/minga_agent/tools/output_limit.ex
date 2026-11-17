@@ -30,7 +30,11 @@ defmodule MingaAgent.Tools.OutputLimit do
   @spec default_timeout_ms() :: pos_integer()
   def default_timeout_ms, do: @default_timeout_ms
 
-  @doc "Runs a command through a Port, terminating it when the finite capture allowance is exhausted."
+  @doc """
+  Collects an explicitly non-retained utility command under a finite byte allowance.
+  This allowance terminates the producer, unlike the presentation-only cap used
+  by retained shell captures.
+  """
   @spec collect_command(String.t(), [String.t()], command_opts()) :: command_result()
   def collect_command(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
     max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes)
@@ -72,10 +76,10 @@ defmodule MingaAgent.Tools.OutputLimit do
   def utf8_prefix(output, limit) when is_binary(output) do
     prefix = binary_part(output, 0, min(limit, byte_size(output)))
 
-    if String.valid?(prefix) do
-      prefix
-    else
-      utf8_prefix(output, limit - 1)
+    case :unicode.characters_to_binary(prefix) do
+      text when is_binary(text) -> text
+      {:incomplete, text, _tail} -> text
+      {:error, text, _rest} -> text
     end
   end
 

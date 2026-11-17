@@ -862,7 +862,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     await_done(session, "shell")
     result = saved_tool_result(context, session)
     assert result.metadata.is_error == false
-    assert Enum.map_join(result.content, "", & &1.text) == expected
+    assert Enum.map_join(result.content, "", & &1.text) == expected <> "\n"
   end
 
   test "builtin and bundled metadata do not add approval beyond the current global policy",

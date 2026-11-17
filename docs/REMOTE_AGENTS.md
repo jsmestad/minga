@@ -65,3 +65,30 @@ Detached sessions are reclaimed by `:agent_session_idle_timeout_ms`. The default
 The reclaimer only stops sessions with no attached clients and no active agent work. A session that is thinking, executing a tool, or waiting on a pending approval is never reclaimed out from under the user. When the active turn returns to idle and there are still no subscribers, the timeout starts again.
 
 Saved session files and the durable event log are still subject to their own retention settings, such as `:agent_session_retention_days` and `:event_retention_days`.
+
+## Recover complete shell output
+
+A long test log must remain readable after its preview leaves model context.
+Agent shell tools retain stdout and stderr as exact bytes in the session record's artifact store; the model-visible preview stays within 51,200 bytes.
+That preview limit is not a capture limit.
+Trailing whitespace belongs to the capture, while an exit-status annotation belongs only to the preview.
+Capture reads on demand, so slow storage blocks the producer instead of accumulating an unbounded output queue in the BEAM.
+
+Use `fetch_output` with the reference from the shell result, then advance the requested byte range until every retained byte has been read.
+For example, after reading the first 51,200 bytes, build the next request from the decoded result without reconstructing its reference:
+
+```elixir
+args = %{
+  "reference" => shell_result["reference"],
+  "unit" => "bytes",
+  "start" => 51_200,
+  "count" => 51_200
+}
+```
+
+Each fetch stays bounded.
+Binary data and byte ranges that split a UTF-8 character use an explicitly labelled base64 view.
+Compaction and application restart do not require rerunning the command: load the saved session and use its restored output reference.
+Configured artifact quotas and explicit retention cleanup still apply.
+If a quota or interruption stops capture, the result reports an incomplete capture and retains the admitted prefix; it never claims that prefix is the complete command output.
+If durable storage is unavailable before execution, the tool fails without starting the command.

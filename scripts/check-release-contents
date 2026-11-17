@@ -162,7 +162,7 @@ def check(release, target, app=None, binary=None):
         if not list((priv / "extensions" / extension / "lib").rglob("*.ex")):
             raise ValueError(f"Missing bundled extension source: {extension}")
     required_native = [erts / "bin/beam.smp"]
-    for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner"):
+    for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"):
         path = priv / name
         require_file(path, executable=True)
         required_native.append(path)

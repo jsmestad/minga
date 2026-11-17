@@ -31,6 +31,9 @@ defmodule MingaAgent.Tools.ProcessBackend.System do
   @spec shell(String.t(), String.t(), pos_integer(), keyword()) ::
           MingaAgent.Tools.ProcessBackend.result()
   def shell(command, cwd, timeout_secs, opts) do
-    Shell.execute(command, cwd, timeout_secs, opts)
+    case Keyword.fetch(opts, :artifact_store) do
+      {:ok, _store} -> Shell.capture(command, cwd, timeout_secs, opts)
+      :error -> Shell.execute(command, cwd, timeout_secs, opts)
+    end
   end
 end

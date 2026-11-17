@@ -7,7 +7,7 @@ root=$(mktemp -d /tmp/minga-agent-recovery-XXXXXXXX)
 printf 'Evidence retained at %s\n' "$root"
 trap 'code=$?; printf "exit_status=%s\n" "$code" > "$root/exit-status.txt"' EXIT
 preflight() {
-  [[ $# == 0 ]] || { echo 'FAIL: Usage: bash scripts/agent_recovery_baseline' >&2; return 64; }
+  [[ $# == 0 || ( $# == 2 && ${1:-} == --scenario && -n ${2:-} ) ]] || { echo 'FAIL: Usage: bash scripts/agent_recovery_baseline [--scenario NAME]' >&2; return 64; }
   [[ $(uname -s) == Linux ]] || { echo 'FAIL: Linux /proc and pidfd support required' >&2; return 1; }
   for tool in git python3 mix erl zig; do
     command -v "$tool" >/dev/null || { echo "FAIL: missing prerequisite $tool" >&2; return 1; }
@@ -46,7 +46,7 @@ env -i PATH="$tool_path" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   XDG_CACHE_HOME="$root/cache" XDG_STATE_HOME="$root/state" TMPDIR="$root/tmp" \
   MIX_ENV=dev MIX_ARCHIVES="$archives" LANG=C.UTF-8 ERL_FLAGS='+S 4:4' PYTHONDONTWRITEBYTECODE=1 \
   MINGA_RECOVERY_ROOT="$root" MINGA_RECOVERY_REVISION="$revision" \
-  "$mix" run --no-start scripts/agent_recovery_baseline.exs 2>&1 | tee "$root/runtime.log"
+  "$mix" run --no-start scripts/agent_recovery_baseline.exs "$@" 2>&1 | tee "$root/runtime.log"
 statuses=("${PIPESTATUS[@]}")
 code=${statuses[0]}
 if [[ ${statuses[1]} != 0 ]]; then

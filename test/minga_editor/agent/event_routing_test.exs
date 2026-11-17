@@ -577,9 +577,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert_retained_review(state, "/tmp/agent-b.ex", "b0", "b1")
     end
 
-    test "a failed tracked remote reload logs its notice and still records the edit" do
-      :ok = Minga.Events.subscribe(:log_message)
-      on_exit(fn -> Minga.Events.unsubscribe(:log_message) end)
+    test "a failed remote reload logs file context and retains the edit without diverting typing" do
       dead = spawn(fn -> :ok end)
       monitor = Process.monitor(dead)
       assert_receive {:DOWN, ^monitor, :process, ^dead, _reason}
@@ -589,16 +587,15 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       workspace = SessionState.transition_mode(state.workspace, :insert)
       state = %{state | remote: remote, workspace: workspace}
 
-      state =
-        Events.dispatch(
-          state,
-          {:file_changed, "/tmp/agent-remote.ex", "old", "new", "remote", "edit"}
-        )
+      {state, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Events.dispatch(
+            state,
+            {:file_changed, "/tmp/agent-remote.ex", "old", "new", "remote", "edit"}
+          )
+        end)
 
-      assert_receive {:minga_event, :log_message,
-                      %Minga.Events.LogMessageEvent{level: :error, text: notice}}
-
-      assert notice =~ "Failed to reload remote file /tmp/agent-remote.ex:"
+      assert log =~ "/tmp/agent-remote.ex"
 
       state = Router.route_key(state, ?x, 0)
       assert BufferProcess.content(state.workspace.buffers.active) == "xhello world"

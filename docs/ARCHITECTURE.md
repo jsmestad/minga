@@ -943,6 +943,13 @@ Tool recovery is a separate effect protocol, not a second conversation log. Pers
 Managed restart is a generation boundary for admitted native effects. `SessionManager` monitors each attached provider and its admitted tool workers, and does not start a replacement Session until both the provider and all registered workers exit. Native providers also drain and await their workers before an orderly exit, so a recovered Session cannot classify an effect as interrupted while the old effect is still running.
 See [Session Recovery](SESSION-RECOVERY.md) for the save, restart, interruption, and explicit legacy-import behavior.
 
+Retained shell output uses a separate byte transport, not a second command executor.
+`MingaAgent.Tools.Shell.OutputReader` grants one bounded read to the native `minga-shell-output-reader` companion only after the previous bytes reach `ArtifactStore`.
+The companion reads a private FIFO and never starts, waits for, or signals the command; the original shell Port and `OutputLimit.close_port/1` retain producer lifetime ownership.
+This backpressure bounds incoming memory independently of output volume, while complete capture requires both FIFO EOF and the producer's exit status.
+Quota, storage, reader and deadline failures retain only the durably admitted prefix and report an incomplete capture.
+See [Remote Agents](REMOTE_AGENTS.md#recover-complete-shell-output) for paged retrieval after compaction and session reload.
+
 ### Extension lifecycle, artifact, and callback ownership
 
 Every declared extension has one stable `Minga.Extension.Instance` mailbox that serializes eager start, lazy or deferred activation, stop, failure rollback, runtime exit, restart, and unload. The runtime child PID is an observed implementation detail. `Minga.Extension.Registry` is only the compatible declaration and status projection: `Instance` publishes the current PID, status, module, manifest, and error from its tagged phase, while callers never consult registry lifecycle fields to decide the next transition. `Minga.Extension.Supervisor` remains the compatible public facade for bulk prerequisites and the existing start, stop, list, and deferred APIs, but routes individual lifecycle requests to the Instance without caller-side restart polling or retries.

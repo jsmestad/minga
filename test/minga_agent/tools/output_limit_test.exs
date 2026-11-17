@@ -9,6 +9,13 @@ defmodule MingaAgent.Tools.OutputLimitTest do
 
   @moduletag :tmp_dir
 
+  test "UTF-8 preview keeps the valid prefix before invalid or split binary bytes" do
+    assert OutputLimit.utf8_prefix("a€b", 3) == "a"
+    assert OutputLimit.utf8_prefix("a€b", 4) == "a€"
+    assert OutputLimit.utf8_prefix(<<255>> <> String.duplicate("x", 51_200), 51_200) == ""
+    assert OutputLimit.utf8_prefix("before" <> <<255>> <> "after", 100) == "before"
+  end
+
   describe "collect_command/3" do
     test "keeps an incomplete UTF-8 prefix valid when the cap splits a codepoint" do
       assert %Result{
