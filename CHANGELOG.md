@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Agent tools reject arguments that violate their declared JSON Schema before constructing or invoking an executable callback, including non-SDK tools. Valid SDK input normalization and defaults remain available, and the schema validator now fails closed when a regular expression exceeds its match budget.
 - Retained shell capture reads complete output and EOF on macOS without waiting for another chunk. Closing either parent channel stops idle, pending-read and backpressured output helpers, including when unread control bytes remain. The original producer is never replayed.
 - Agent edits keep private overlay ownership instead of attempting to adopt a project file's group, which could reject valid macOS edits with `:eperm`. Owner-only staging directories prevent access widening, staged scripts retain their access permissions, and final atomic publication still preserves the original file's metadata.
 - Agent startup prepares the draft before its first frame. macOS composer clicks restore Agent keybindings after sidebar focus, and Follow output remains available when a turn is idle without taking space away from the transcript.

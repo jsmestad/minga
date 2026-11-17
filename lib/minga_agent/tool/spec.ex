@@ -44,12 +44,16 @@ defmodule MingaAgent.Tool.Spec do
   @typedoc "Builds an executable callback from a runtime context."
   @type build_fun :: (term() -> callback())
 
+  @typep argument_validation ::
+           {:ok, term()} | {:error, {:invalid_tool_arguments, term()}}
+
   @typedoc "A tool specification."
   @type t :: %__MODULE__{
           source: source(),
           name: String.t(),
           description: String.t(),
           parameter_schema: map(),
+          parameter_validator: JSV.Root.t(),
           build: build_fun(),
           category: category(),
           approval_level: approval_level(),
@@ -67,11 +71,12 @@ defmodule MingaAgent.Tool.Spec do
     :spawn_agent
   ]
 
-  @enforce_keys [:source, :name, :description, :parameter_schema, :build]
+  @enforce_keys [:source, :name, :description, :parameter_schema, :parameter_validator, :build]
   defstruct source: :config,
             name: nil,
             description: nil,
             parameter_schema: %{},
+            parameter_validator: nil,
             build: nil,
             category: :custom,
             approval_level: :auto,
@@ -107,13 +112,15 @@ defmodule MingaAgent.Tool.Spec do
          :ok <- validate_atom_list(:capabilities, capabilities),
          :ok <- validate_atom_list(:context_requirements, context_requirements),
          :ok <- validate_metadata(metadata),
-         :ok <- validate_context_requirements(category, capabilities, context_requirements) do
+         :ok <- validate_context_requirements(category, capabilities, context_requirements),
+         {:ok, parameter_validator} <- compile_parameter_schema(parameter_schema) do
       {:ok,
        %__MODULE__{
          source: source,
          name: name,
          description: description,
          parameter_schema: parameter_schema,
+         parameter_validator: parameter_validator,
          build: build,
          category: category,
          approval_level: approval_level,
@@ -147,12 +154,90 @@ defmodule MingaAgent.Tool.Spec do
     callback
   end
 
-  @doc "Validates current SDK declarations without invoking their executable callback."
+  @doc "Validates the canonical declared schema before building any executable callback."
   @spec validate_arguments(t(), map()) :: {:ok, map()} | {:error, term()}
-  def validate_arguments(%__MODULE__{metadata: %{sdk_input: tool}}, args),
+  def validate_arguments(%__MODULE__{parameter_validator: validator} = spec, args)
+      when is_map(args) do
+    with {:ok, json_args} <- validation_value(args),
+         {:ok, _validated} <- JSV.validate(json_args, validator, cast: false) do
+      validate_sdk_arguments(spec, args)
+    end
+  end
+
+  @spec validate_sdk_arguments(t(), map()) :: {:ok, map()} | {:error, term()}
+  defp validate_sdk_arguments(%__MODULE__{metadata: %{sdk_input: tool}}, args),
     do: ReqLLM.Tool.validate_input(tool, args)
 
-  def validate_arguments(%__MODULE__{}, args) when is_map(args), do: {:ok, args}
+  defp validate_sdk_arguments(%__MODULE__{}, args), do: {:ok, args}
+
+  @spec compile_parameter_schema(map()) :: {:ok, JSV.Root.t()} | {:error, term()}
+  defp compile_parameter_schema(schema) do
+    case JSV.build(schema, resolver: [], formats: true) do
+      {:ok, validator} -> {:ok, validator}
+      {:error, reason} -> {:error, {:invalid_parameter_schema, reason}}
+    end
+  end
+
+  @spec validation_value(term()) :: argument_validation()
+  defp validation_value(%_{}), do: {:error, {:invalid_tool_arguments, :non_json_value}}
+
+  defp validation_value(value) when is_map(value),
+    do: Enum.reduce_while(value, {:ok, value}, &validation_entry(&1, &2, value))
+
+  defp validation_value([_ | _] = value), do: validation_list(value)
+  defp validation_value([]), do: {:ok, []}
+
+  defp validation_value(value) when is_atom(value) and value not in [true, false, nil],
+    do: {:ok, Atom.to_string(value)}
+
+  defp validation_value(value)
+       when is_binary(value) or is_number(value) or value in [true, false, nil],
+       do: {:ok, value}
+
+  defp validation_value(_value), do: {:error, {:invalid_tool_arguments, :non_json_value}}
+
+  @spec validation_entry({term(), term()}, {:ok, map()}, map()) ::
+          {:cont, {:ok, map()}} | {:halt, argument_validation()}
+  defp validation_entry({key, value}, {:ok, normalized}, original) do
+    with {:ok, json_key} <- validation_key(key, original),
+         {:ok, json_value} <- validation_value(value) do
+      updated =
+        if key === json_key and value === json_value,
+          do: normalized,
+          else: normalized |> Map.delete(key) |> Map.put(json_key, json_value)
+
+      {:cont, {:ok, updated}}
+    else
+      {:error, _reason} = error -> {:halt, error}
+    end
+  end
+
+  @spec validation_key(term(), map()) :: argument_validation()
+  defp validation_key(key, _original) when is_binary(key), do: {:ok, key}
+
+  defp validation_key(key, original) when is_atom(key) do
+    json_key = Atom.to_string(key)
+
+    if Map.has_key?(original, json_key),
+      do: {:error, {:invalid_tool_arguments, {:ambiguous_key, json_key}}},
+      else: {:ok, json_key}
+  end
+
+  defp validation_key(_key, _original), do: {:error, {:invalid_tool_arguments, :non_json_key}}
+
+  @spec validation_list(term()) :: argument_validation()
+  defp validation_list([]), do: {:ok, []}
+
+  defp validation_list([head | tail] = original) do
+    with {:ok, json_head} <- validation_value(head),
+         {:ok, json_tail} <- validation_list(tail) do
+      if head === json_head and tail === json_tail,
+        do: {:ok, original},
+        else: {:ok, [json_head | json_tail]}
+    end
+  end
+
+  defp validation_list(_value), do: {:error, {:invalid_tool_arguments, :non_json_value}}
 
   @spec resolve_build(term(), term()) :: build_fun() | nil
   defp resolve_build(nil, callback) when is_function(callback, 1), do: fn _context -> callback end
