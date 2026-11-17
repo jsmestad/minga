@@ -1,5 +1,5 @@
 defmodule MingaAgent.Session.PrefixAuthorizationTest do
-  # Advice and project discovery use shared owners; the approved shell spawns an OS process.
+  # Advice, project discovery and scoped cwd use shared owners; the approved shell spawns an OS process.
   use ExUnit.Case, async: false
 
   alias Minga.Config.Advice
@@ -838,31 +838,29 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     # Close that owner explicitly instead of inheriting another scenario's workspace.
     assert :ok = Minga.Project.close()
     assert Minga.Project.root() == nil
-    working_directory = File.cwd!()
-
-    expected =
-      working_directory
-      |> Path.join("AGENTS.md")
-      |> File.read!()
-      |> String.split("\n", parts: 2)
-      |> hd()
+    working_directory = Path.join(context.dir, "no-project-cwd")
+    File.mkdir_p!(working_directory)
+    expected = "approval working-directory fixture"
+    File.write!(Path.join(working_directory, "cwd-proof.txt"), expected)
 
     assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, ["shell"])
 
-    session =
-      start_session(context,
-        tool_calls: [{"shell", %{"command" => "head -n 1 AGENTS.md"}, "prefix-call"}],
-        provider_opts: [project_root: nil]
-      )
+    File.cd!(working_directory, fn ->
+      session =
+        start_session(context,
+          tool_calls: [{"shell", %{"command" => "cat cwd-proof.txt"}, "prefix-call"}],
+          provider_opts: [project_root: nil]
+        )
 
-    assert :ok = Session.send_prompt(session, "read the working directory's agent guide")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
-    assert :ok = Session.respond_to_approval(session, :approve)
-    await_done(session, "shell")
-    result = saved_tool_result(context, session)
-    assert result.metadata.is_error == false
-    assert Enum.map_join(result.content, "", & &1.text) == expected
+      assert :ok = Session.send_prompt(session, "read the working directory's proof file")
+      assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
+      assert :ok = Session.respond_to_approval(session, :approve)
+      await_done(session, "shell")
+      result = saved_tool_result(context, session)
+      assert result.metadata.is_error == false
+      assert Enum.map_join(result.content, "", & &1.text) == expected
+    end)
   end
 
   test "builtin and bundled metadata do not add approval beyond the current global policy",

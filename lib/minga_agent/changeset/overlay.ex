@@ -7,7 +7,7 @@ defmodule MingaAgent.Changeset.Overlay do
   Build artifact and cache directories are skipped. `MIX_BUILD_PATH` points inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path.
   """
 
-  alias Minga.Buffer.Persistence.SystemFileSystem
+  import Bitwise, only: [band: 2]
 
   @typedoc "Overlay state."
   @type t :: %__MODULE__{
@@ -36,7 +36,7 @@ defmodule MingaAgent.Changeset.Overlay do
   @empty_stats %{copied_files: 0, copied_bytes: 0, skipped_dirs: 0}
 
   @doc """
-  Creates a new lazy overlay directory for the project.
+  Creates a private lazy overlay directory for the project.
 
   The project tree is not copied during creation. Files are materialized when written or when command execution asks for a writable view.
   """
@@ -63,15 +63,22 @@ defmodule MingaAgent.Changeset.Overlay do
     overlay_dir = Path.join(System.tmp_dir!(), "minga-overlay-#{id}")
     build_dir = Path.join(overlay_dir, "_build")
 
-    case File.mkdir_p(overlay_dir) do
+    case File.mkdir(overlay_dir) do
       :ok ->
-        {:ok,
-         %__MODULE__{
-           overlay_dir: overlay_dir,
-           project_root: project_root,
-           build_dir: build_dir,
-           link_mode: :copy
-         }}
+        case File.chmod(overlay_dir, 0o700) do
+          :ok ->
+            {:ok,
+             %__MODULE__{
+               overlay_dir: overlay_dir,
+               project_root: project_root,
+               build_dir: build_dir,
+               link_mode: :copy
+             }}
+
+          {:error, reason} ->
+            cleanup = File.rmdir(overlay_dir)
+            {:error, {:chmod_failed, overlay_dir, reason, cleanup}}
+        end
 
       {:error, reason} ->
         {:error, {:mkdir_failed, overlay_dir, reason}}
@@ -116,7 +123,7 @@ defmodule MingaAgent.Changeset.Overlay do
     end
   end
 
-  @doc "Installs a prepared mutation without removing the previous overlay bytes on failure."
+  @doc "Installs a prepared mutation without removing prior bytes on failure. Private copies retain overlay ownership and source access permissions, not ownership-dependent special bits."
   @spec commit_file(t(), String.t(), binary() | :deleted) :: :ok | {:error, term()}
   def commit_file(%__MODULE__{} = overlay, relative_path, prepared) do
     with :ok <- reject_tombstone_relative_path(relative_path),
@@ -144,7 +151,7 @@ defmodule MingaAgent.Changeset.Overlay do
 
     result =
       with :ok <- File.write(temporary, bytes, [:binary, :exclusive]),
-           :ok <- SystemFileSystem.preserve_metadata(temporary, metadata, []),
+           :ok <- preserve_access_mode(temporary, metadata),
            {:ok, backed_up?} <- backup_retired(retired, backup) do
         case File.rename(temporary, destination) do
           :ok ->
@@ -158,6 +165,13 @@ defmodule MingaAgent.Changeset.Overlay do
 
     File.rm(temporary)
     result
+  end
+
+  @spec preserve_access_mode(String.t(), File.Stat.t() | nil) :: :ok | {:error, term()}
+  defp preserve_access_mode(_path, nil), do: :ok
+
+  defp preserve_access_mode(path, %File.Stat{mode: mode}) do
+    File.chmod(path, band(mode, 0o777))
   end
 
   @spec rollback_commit(term(), String.t(), String.t(), boolean()) :: {:error, term()}
