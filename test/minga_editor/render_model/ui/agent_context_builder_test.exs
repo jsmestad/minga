@@ -52,6 +52,20 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
              } = AgentContextBuilder.build(ctx)
     end
 
+    test "idle with unfinished activity does not imply completed work" do
+      todo = %TodoItem{id: "unfinished", description: "Run verification", status: :in_progress}
+      activity = Activity.set_todos(Activity.new(), [todo])
+      agent_ui = UIState.replace_activity(UIState.new(), activity)
+      agent = AgentState.set_status(%AgentState{}, :idle)
+      ctx = context(agent_ui, TraditionalState.replace_agent(%TraditionalState{}, agent))
+
+      assert %AgentContext{
+               visible: true,
+               status: :idle,
+               todos: [%Todo{status: :in_progress}]
+             } = AgentContextBuilder.build(ctx)
+    end
+
     test "approval-only visible context keeps the dispatch timestamp stable" do
       approval = %{tool_call_id: "tc-approval", name: "shell", args: %{}}
 
