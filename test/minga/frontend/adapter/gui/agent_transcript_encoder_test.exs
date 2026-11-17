@@ -132,6 +132,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
         name: "edit",
         summary: "demo.ex",
         tool_call_id: "tc",
+        session_id: "session-A",
+        request_id: "request-B",
         preview_kind: :diff,
         preview_lines: ["+new"]
       }
@@ -202,6 +204,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
         name: "edit",
         summary: "demo.ex",
         tool_call_id: "tc",
+        session_id: "session-A",
+        request_id: "request-B",
         preview_kind: :command,
         preview_lines: ["mix test"]
       }
@@ -246,8 +250,9 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
 
       assert Bitwise.band(styled_flags, 0x08) == 0x08
 
-      assert <<0x09, 0, 4::16, "edit", 7::16, "demo.ex", 2::16, "tc", 2, 1::16, 8::16,
-               "mix test">> = Codec.encode_message_body({:approval_tool_call, approval})
+      assert <<0x09, 0, 4::16, "edit", 7::16, "demo.ex", 2::16, "tc", 9::16, "session-A", 9::16,
+               "request-B", 2, 1::16, 8::16, "mix test">> =
+               Codec.encode_message_body({:approval_tool_call, approval})
 
       assert <<0x07, 1::16, 2::16, 4::16, "docs", _fg::24, _bg::24, linked_flags, 19::16,
                "https://example.com", 5::16, "plain", _fg2::24, _bg2::24, plain_flags>> =

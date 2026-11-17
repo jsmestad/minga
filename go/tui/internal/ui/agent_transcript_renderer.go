@@ -21,9 +21,10 @@ type transcriptCacheKey struct {
 }
 
 type transcriptCacheEntry struct {
-	rows     []string
-	bytes    int
-	lastUsed uint64
+	rows            []string
+	bytes           int
+	lastUsed        uint64
+	approvalMarkers []string
 }
 
 // transcriptRenderWork is reset for each production compose. Tests and
@@ -334,7 +335,7 @@ func (r *agentTranscriptRenderer) messageRows(m Model, entry transcriptEntry, st
 			rows = m.renderAgentMessageRows(entry.message, width, chunkStart, chunkCount)
 			r.work.RowsStyled += len(rows)
 			r.work.CacheMisses++
-			r.admit(key, rows)
+			r.admit(key, rows, m.zones)
 		}
 		from := max(start-chunkStart, 0)
 		to := min(end-chunkStart, len(rows))
@@ -357,7 +358,7 @@ func (r *agentTranscriptRenderer) cached(key transcriptCacheKey) ([]string, bool
 	return entry.rows, true
 }
 
-func (r *agentTranscriptRenderer) admit(key transcriptCacheKey, rows []string) {
+func (r *agentTranscriptRenderer) admit(key transcriptCacheKey, rows []string, zones *zoneManager) {
 	bytes := 0
 	for _, row := range rows {
 		bytes += len(row)
@@ -365,8 +366,17 @@ func (r *agentTranscriptRenderer) admit(key transcriptCacheKey, rows []string) {
 	if len(rows) == 0 || len(rows) > r.rowCap || bytes > transcriptCacheByteCap {
 		return
 	}
+	var approvalMarkers []string
+	if zones != nil {
+		var identityBytes int
+		approvalMarkers, identityBytes = zones.cacheApprovalMarkers(rows)
+		bytes += identityBytes
+		if bytes > transcriptCacheByteCap {
+			return
+		}
+	}
 	r.clock++
-	r.cache[key] = transcriptCacheEntry{rows: rows, bytes: bytes, lastUsed: r.clock}
+	r.cache[key] = transcriptCacheEntry{rows: rows, bytes: bytes, lastUsed: r.clock, approvalMarkers: approvalMarkers}
 	r.rows += len(rows)
 	r.bytes += bytes
 	r.enforceCaps()
@@ -387,6 +397,14 @@ func (r *agentTranscriptRenderer) enforceCaps() {
 		r.rows -= len(entry.rows)
 		r.bytes -= entry.bytes
 		r.work.CacheEvictions++
+	}
+}
+
+func (r *agentTranscriptRenderer) retainApprovalMarkers(zones *zoneManager) {
+	for _, entry := range r.cache {
+		for _, marker := range entry.approvalMarkers {
+			zones.retainApprovalMarker(marker)
+		}
 	}
 }
 
@@ -426,7 +444,7 @@ func agentMessageRowCount(message protocol.AgentChatMessage) int {
 		}
 		return count
 	case agentKindApprovalTool:
-		return 4 + min(len(message.PreviewLines), 2)
+		return 5 + min(len(message.PreviewLines), 2)
 	default:
 		return 1 + max(compactTextLineCount(message.Text, 3), 1)
 	}

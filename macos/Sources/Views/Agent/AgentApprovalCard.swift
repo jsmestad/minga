@@ -2,12 +2,17 @@ import SwiftUI
 
 public struct AgentApprovalCard: View {
     public enum Action: Equatable, Sendable {
-        case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+        case approve(sessionId: String, requestId: String, toolCallId: String)
+        case trustSession(sessionId: String, requestId: String, toolCallId: String)
+        case trustTurn(sessionId: String, requestId: String, toolCallId: String)
+        case deny(sessionId: String, requestId: String, toolCallId: String)
     }
 
-    public init(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String], sendAction: ViewActionHandler<Action>?) {
+    public init(name: String, summary: String, toolCallId: String, sessionId: String, requestId: String, previewKind: UInt8, previewLines: [String], sendAction: ViewActionHandler<Action>?) {
         self.name = name
         self.summary = summary
+        self.sessionId = sessionId
+        self.requestId = requestId
         self.toolCallId = toolCallId
         self.previewKind = previewKind
         self.previewLines = previewLines
@@ -15,6 +20,8 @@ public struct AgentApprovalCard: View {
     }
     public let name: String
     public let summary: String
+    public let sessionId: String
+    public let requestId: String
     public let toolCallId: String
     public let previewKind: UInt8
     public let previewLines: [String]
@@ -31,7 +38,7 @@ public struct AgentApprovalCard: View {
                 approvalPreviewLines(visiblePreviewLines)
             }
 
-            approvalButtons(toolCallId: toolCallId)
+            approvalButtons
         }
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -42,14 +49,16 @@ public struct AgentApprovalCard: View {
     // MARK: - Header
 
     private func approvalToolCallHeader(name: String, summary: String, previewKind: UInt8) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-            Image(systemName: "exclamationmark.shield")
-                .font(Typography.font(.emphasis))
-                .foregroundStyle(Color.orange)
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                Image(systemName: "exclamationmark.shield")
+                    .font(Typography.font(.emphasis))
+                    .foregroundStyle(Color.orange)
 
-            Text("Approval required")
-                .font(Typography.font(.body, weight: .semibold))
-                .foregroundStyle(theme.agentTextFg)
+                Text("Approval required")
+                    .font(Typography.font(.body, weight: .semibold))
+                    .foregroundStyle(theme.agentTextFg)
+            }
 
             Text(name)
                 .font(Typography.font(.body, weight: .bold, design: .monospaced))
@@ -114,34 +123,39 @@ public struct AgentApprovalCard: View {
 
     // MARK: - Buttons
 
-    private func approvalButtons(toolCallId _: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Button("Approve (y)") {
-                sendAction?(.keyPress(codepoint: 0x79, modifiers: 0, sequence: 0))
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-
+    private var approvalButtons: some View {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: Spacing.sm) {
-                Button("Trust for session (a)") {
-                    sendAction?(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Button("Trust for this turn (t)") {
-                    sendAction?(.keyPress(codepoint: 0x74, modifiers: 0, sequence: 0))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                approvalButtonContent
             }
-
-            Button("Deny (n)") {
-                sendAction?(.keyPress(codepoint: 0x6E, modifiers: 0, sequence: 0))
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                approvalButtonContent
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
+        .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private var approvalButtonContent: some View {
+        Button("Approve (y)") {
+            sendAction?(.approve(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId))
+        }
+        .buttonStyle(.borderedProminent)
+
+        Button("Trust for session (a)") {
+            sendAction?(.trustSession(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId))
+        }
+        .buttonStyle(.bordered)
+
+        Button("Trust for this turn (t)") {
+            sendAction?(.trustTurn(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId))
+        }
+        .buttonStyle(.bordered)
+
+        Button("Deny (n)") {
+            sendAction?(.deny(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId))
+        }
+        .buttonStyle(.bordered)
     }
 
     // MARK: - Card chrome

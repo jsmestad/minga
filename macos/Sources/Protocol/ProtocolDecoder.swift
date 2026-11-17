@@ -4229,6 +4229,9 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let name = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
         let summary = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
         let toolCallId = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
+        let sessionId = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
+        let requestId = try readRequiredString16(data: data, pos: &approvalHeaderPos, end: end)
+        guard !toolCallId.isEmpty, !sessionId.isEmpty, !requestId.isEmpty else { throw ProtocolDecodeError.malformed }
         guard end >= approvalHeaderPos + 3 else { throw ProtocolDecodeError.malformed }
         let previewKind = data[approvalHeaderPos]
         let lineCount = Int(try readU16(data, approvalHeaderPos + 1))
@@ -4245,7 +4248,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
             previewLines.append(line)
             approvalPos += 2 + lineLen
         }
-        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .approvalToolCall(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)), nextOffset: approvalPos)]
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .approvalToolCall(name: name, summary: summary, toolCallId: toolCallId, sessionId: sessionId, requestId: requestId, previewKind: previewKind, previewLines: previewLines)), nextOffset: approvalPos)]
 
     default:
         throw ProtocolDecodeError.malformed

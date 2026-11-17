@@ -21,6 +21,9 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.Agent.DiffReview
+  alias MingaAgent.ToolApproval.Preview, as: ApprovalPreview
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
   alias MingaEditor.Agent.Events, as: AgentEvents
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -55,13 +58,19 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   defp with_observatory(state), do: SidebarWorkflow.open_observatory(state, nil)
 
   defp with_agent_context(state) do
-    approval = %{tool_call_id: "tc1", name: "shell", args: %{}}
+    approval =
+      Public.new(
+        Target.new("footer-fixture", "admitted-request", "tc1"),
+        "shell",
+        %{},
+        ApprovalPreview.new(:args, "", [])
+      )
+
     frontend = %{state.frontend | backend: :gui}
 
     state
     |> Map.put(:frontend, frontend)
-    |> MingaEditor.Shell.Traditional.Workflow.install_agent_approval(approval)
-    |> AgentEvents.dispatch({:approval_pending, approval})
+    |> AgentEvents.dispatch(self(), {:approval_pending, approval})
   end
 
   # Builds an observatory tree with `count` nodes (one root plus count-1 direct

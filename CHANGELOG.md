@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Generated Python bytecode is excluded from version control while local script caches remain untouched.
+- Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
+- macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
+- Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
+- Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - The Go TUI preserves every step in a finite wheel burst, including direction changes and source-bound composer scrolling, without waiting for another input event. Pointer-motion throttling, modifiers and surface routing are unchanged.
 - Terminal Agent transcripts apply validated frame changes to paged resident storage without cloning or reindexing retained history. Stable message occurrences and reading anchors survive updates, and rejected frames preserve the last-good transcript.
 - Background Agent writes preserve the selected Review and retained draft. Selected-file updates freeze the last-good review as stale until explicit refresh; unrelated paths do not replace it. Changed files stay in a fixed timeline without moving the composer or footer controls. Back resumes draft input, and shared source-bound Refresh and independent Help remain available in both frontends. Read-only Review wrapping preserves boundary characters beside scrollbar indicators, and narrow terminal file labels keep the filename visible.
@@ -49,8 +54,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Retained shell capture reads complete output and EOF on macOS without waiting for another chunk. Closing either parent channel stops idle, pending-read and backpressured output helpers, including when unread control bytes remain. The original producer is never replayed.
+- Agent edits keep private overlay ownership instead of attempting to adopt a project file's group, which could reject valid macOS edits with `:eperm`. Owner-only staging directories prevent access widening, staged scripts retain their access permissions, and final atomic publication still preserves the original file's metadata.
 - Agent startup prepares the draft before its first frame. macOS composer clicks restore Agent keybindings after sidebar focus, and Follow output remains available when a turn is idle without taking space away from the transcript.
 - Codex models such as GPT-5.6 Luna can continue conversations instead of stopping silently after the first reply. Replay qualification checks the exact official transport and captured inputs, including a bounded path for previously unqualified records. Rejected prompts retain their drafts and report failures; pre-admission refusal no longer adds a misleading user entry.
+- Agent approval cards bind decisions to their original session, model request, and tool invocation on both frontends. Stale, duplicate, and unauthorized decisions cannot resolve a newer request or widen trust. Completed or expired waits retire their approval cards and cannot later grant trust. Approval arrival preserves active drafts; keyboard decisions respect text-entry scope and modifiers. Help and model controls use semantic actions, including from file-tree focus. Go renders scrollable Help, and native transcript controls behind Help are inactive and hidden from accessibility. Help owns input until dismissed instead of editing the covered composer.
+- Native approval cards keep their warning, tool name, and summary readable at narrow widths. Their complete decision controls must pass external accessibility geometry checks at narrow, compact, and wide workspace widths, with retained full-window captures rather than in-process SwiftUI proxy assumptions.
 - Go Messages label and color log entries by their committed severity. Errors show `ERR` instead of `OK`, warnings show `WRN`, and informational entries show `INF`.
 - Agent workspace switches preserve each conversation's transcript and draft, clear stale launchpad routing, and restore composer input instead of creating an Untitled buffer. Returning to the editor without an available target keeps Agent input usable.
 - The macOS Add menu creates a new agent workspace with its composer instead of toggling an existing workspace.

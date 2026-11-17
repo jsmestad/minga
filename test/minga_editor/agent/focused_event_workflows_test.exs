@@ -6,6 +6,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.FileEventWorkflow
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.SessionEventWorkflow
   alias MingaEditor.Agent.StatusEventWorkflow
@@ -30,6 +31,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.Session.State, as: SessionState
   alias MingaAgent.Session
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaEditor.Test.FakeShell
 
   test "status workflow preserves an unpinned transcript before installing a render" do
@@ -353,29 +355,78 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert_agent_error_logged()
   end
 
-  test "session workflow installs approval state before render and transcript synchronization" do
-    {:ok, session} = start_supervised({Session, provider_opts: []})
-    state = event_state(session)
-    approval = %{tool_call_id: "tc1", name: "shell", args: %{"command" => "pwd"}}
+  test "approval arrival preserves composer focus while installing the displayed attachment" do
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionContinuationProvider,
+        provider_opts: [test_pid: self()]
+      )
 
-    state = SessionEventWorkflow.approval_pending(state, approval)
+    agent_ui = UIState.new() |> UIState.set_input_focused(true)
 
-    assert TraditionalState.agent(state.shell_runtime.state).pending_approval == approval
-    refute state.workspace.agent_ui.panel.input_focused
+    state =
+      event_state(session)
+      |> TraditionalWorkflow.install_agent_ui(agent_ui)
+
+    approval = admit_approval(session)
+    state = SessionEventWorkflow.approval_pending(state, session, approval)
+
+    assert %PendingApproval{session_pid: ^session, approval: ^approval} =
+             TraditionalState.agent(state.shell_runtime.state).pending_approval
+
+    assert state.workspace.agent_ui.panel.input_focused
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
     assert state.workspace.agent_ui.panel.transcript.messages != []
   end
 
   test "session workflow clears a resolved approval and synchronizes the transcript" do
-    {:ok, session} = start_supervised({Session, provider_opts: []})
-    approval = %{tool_call_id: "tc1", name: "shell", args: %{"command" => "pwd"}}
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionContinuationProvider,
+        provider_opts: [test_pid: self()]
+      )
 
-    state = event_state(session) |> SessionEventWorkflow.approval_pending(approval)
-    state = SessionEventWorkflow.approval_resolved(state, :approved)
+    approval = admit_approval(session)
+
+    state =
+      event_state(session)
+      |> SessionEventWorkflow.approval_pending(session, approval)
+
+    assert :ok = Session.respond_to_approval(session, approval.target, :approve)
+    assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+
+    state =
+      SessionEventWorkflow.approval_resolved(state, session, approval.target, :approve)
 
     assert TraditionalState.agent(state.shell_runtime.state).pending_approval == nil
     assert state.workspace.agent_ui.panel.transcript.messages != []
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
+  end
+
+  test "late resolution events preserve a newer request or a different source attachment" do
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionContinuationProvider,
+        provider_opts: [test_pid: self()]
+      )
+
+    first = admit_approval(session)
+    assert :ok = Session.respond_to_approval(session, first.target, :approve)
+    assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+    assert :ok = Session.abort(session)
+    second = admit_approval(session)
+    refute first.target.request_id == second.target.request_id
+
+    state =
+      event_state(session)
+      |> SessionEventWorkflow.approval_pending(session, second)
+
+    pending = TraditionalState.agent(state.shell_runtime.state).pending_approval
+
+    for {source, target} <- [{session, first.target}, {idle_process(), second.target}] do
+      updated = SessionEventWorkflow.approval_resolved(state, source, target, :approve)
+      assert TraditionalState.agent(updated.shell_runtime.state).pending_approval == pending
+    end
   end
 
   test "session error recalls steering and follow-up prompts before the current draft" do
@@ -498,6 +549,25 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     assert TraditionalState.agent(state.shell_runtime.state).error == "provider failed"
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
+  end
+
+  @spec admit_approval(pid()) :: PublicApproval.t()
+  defp admit_approval(session) do
+    assert :ok = Session.send_prompt(session, "approval turn")
+    assert_receive {:continuation_request, request}, @event_timeout
+    send_provider_event(session, %Event.AgentStart{})
+
+    send_provider_event(session, %Event.ToolApproval{
+      tool_call_id: "tc1",
+      name: "shell",
+      args: %{"command" => "pwd"},
+      reply_to: self()
+    })
+
+    %{pending_approval: %PublicApproval{} = approval} = Session.editor_snapshot(session)
+    assert approval.target.request_id == request.request_id
+    assert approval.target.tool_call_id == "tc1"
+    approval
   end
 
   @spec assert_agent_error_logged(integer()) :: :ok

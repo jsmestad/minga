@@ -11,16 +11,16 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   @spec build(Context.t() | term()) :: AgentContext.t()
   def build(%Context{} = ctx) do
     activity = get_activity(ctx)
-    can_approve = can_approve?(ctx)
-    status = context_status(agent_status(ctx), can_approve)
+    approval_pending = approval_pending?(ctx)
+    status = context_status(agent_status(ctx), approval_pending)
 
-    if visible?(activity, status, can_approve) do
+    if visible?(activity, status, approval_pending) do
       %AgentContext{
         visible: true,
         task: task(activity, status),
         dispatch_timestamp: activity.started_at || DateTime.utc_now(),
         status: status,
-        can_approve: can_approve,
+        can_approve: false,
         todos: todos(activity),
         progress: progress(activity)
       }
@@ -33,20 +33,22 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   @spec visible?(Context.t() | map()) :: boolean()
   def visible?(%Context{} = ctx) do
+    approval_pending = approval_pending?(ctx)
+
     visible?(
       get_activity(ctx),
-      context_status(agent_status(ctx), can_approve?(ctx)),
-      can_approve?(ctx)
+      context_status(agent_status(ctx), approval_pending),
+      approval_pending
     )
   end
 
   def visible?(state) when is_map(state) do
-    can_approve = can_approve_from_state(state)
+    approval_pending = approval_pending_from_state?(state)
 
     visible?(
       get_activity_from_state(state),
-      context_status(agent_status_from_state(state), can_approve),
-      can_approve
+      context_status(agent_status_from_state(state), approval_pending),
+      approval_pending
     )
   end
 
@@ -78,8 +80,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp agent_status_from_state(state),
     do: TraditionalState.agent(shell_state(state)).runtime.status
 
-  @spec can_approve_from_state(map()) :: boolean()
-  defp can_approve_from_state(state),
+  @spec approval_pending_from_state?(map()) :: boolean()
+  defp approval_pending_from_state?(state),
     do: TraditionalState.agent(shell_state(state)).pending_approval != nil
 
   @spec shell_state(map()) :: TraditionalState.t()
@@ -94,7 +96,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp visible?(%Activity{}, _status, true), do: true
   defp visible?(%Activity{}, status, false) when status in [:working, :iterating], do: true
 
-  defp visible?(%Activity{todos: todos} = activity, _status, _can_approve) do
+  defp visible?(%Activity{todos: todos} = activity, _status, _approval_pending) do
     todos != [] or activity.tool_count > 0 or Activity.file_count(activity) > 0
   end
 
@@ -110,17 +112,17 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp context_status(:thinking, false), do: :working
   defp context_status(:tool_executing, false), do: :iterating
   defp context_status(:error, false), do: :errored
-  defp context_status(:idle, false), do: :done
+  defp context_status(:idle, false), do: :idle
   defp context_status(:plan, false), do: :idle
   defp context_status(_status, false), do: :idle
 
-  @spec can_approve?(Context.t()) :: boolean()
-  defp can_approve?(%Context{
+  @spec approval_pending?(Context.t()) :: boolean()
+  defp approval_pending?(%Context{
          intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
        }),
        do: TraditionalState.agent(shell_state).pending_approval != nil
 
-  defp can_approve?(%Context{}), do: false
+  defp approval_pending?(%Context{}), do: false
 
   @spec progress(Activity.t()) :: Progress.t()
   defp progress(%Activity{} = activity) do
@@ -128,7 +130,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
       active_action: activity.active_action,
       tool_count: activity.tool_count,
       file_count: Activity.file_count(activity),
-      review_hint: "Review: approve or reject changes"
+      review_hint: ""
     }
   end
 

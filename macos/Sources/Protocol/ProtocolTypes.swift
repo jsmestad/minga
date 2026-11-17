@@ -1221,7 +1221,7 @@ public enum Wire {
         case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String])
         /// Tool call with pre-styled result runs from tree-sitter.
         case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[StyledTextRun]], previewKind: UInt8, previewLines: [String])
-        case approvalToolCall(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String])
+        case approvalToolCall(name: String, summary: String, toolCallId: String, sessionId: String, requestId: String, previewKind: UInt8, previewLines: [String])
         case system(text: String, isError: Bool)
         case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
     }

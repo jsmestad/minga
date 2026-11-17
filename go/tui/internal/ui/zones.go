@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,10 +33,12 @@ func (z *zoneInfo) InBounds(msg tea.MouseMsg) bool {
 }
 
 type zoneManager struct {
-	nextID int
-	ids    map[string]string
-	rids   map[string]string
-	zones  map[string]*zoneInfo
+	nextID          int
+	ids             map[string]string
+	rids            map[string]string
+	zones           map[string]*zoneInfo
+	approvalMarkers map[string]struct{}
+	approvalRoots   map[string]struct{}
 }
 
 func newZoneManager() *zoneManager {
@@ -50,6 +54,11 @@ func (m *zoneManager) Mark(id string, value string) string {
 	if id == "" || value == "" {
 		return value
 	}
+	marker := m.marker(id)
+	return marker + value + marker
+}
+
+func (m *zoneManager) marker(id string) string {
 	marker, ok := m.ids[id]
 	if !ok {
 		m.nextID++
@@ -57,7 +66,65 @@ func (m *zoneManager) Mark(id string, value string) string {
 		m.ids[id] = marker
 		m.rids[marker] = id
 	}
+	return marker
+}
+
+func (m *zoneManager) MarkAgentApproval(id string, value string) string {
+	if id == "" || value == "" {
+		return value
+	}
+	marker := m.marker(id)
+	if m.approvalMarkers == nil {
+		m.approvalMarkers = map[string]struct{}{}
+		m.approvalRoots = map[string]struct{}{}
+	}
+	m.approvalMarkers[marker] = struct{}{}
 	return marker + value + marker
+}
+
+// cacheApprovalMarkers records references once at cache admission, including their retained identity bytes.
+func (m *zoneManager) cacheApprovalMarkers(rows []string) (markers []string, bytes int) {
+	if len(m.approvalMarkers) == 0 {
+		return nil, 0
+	}
+	for _, row := range rows {
+		for pos := 0; pos < len(row); {
+			nextEscape := strings.IndexByte(row[pos:], zoneMarkerStart)
+			if nextEscape < 0 {
+				break
+			}
+			pos += nextEscape
+			marker, next, ok := readZoneMarker(row, pos)
+			if !ok {
+				pos++
+				continue
+			}
+			if _, approval := m.approvalMarkers[marker]; approval && !slices.Contains(markers, marker) {
+				markers = append(markers, marker)
+				bytes += len(m.rids[marker]) + len(marker)
+			}
+			pos = next
+		}
+	}
+	return markers, bytes
+}
+
+func (m *zoneManager) retainApprovalMarker(marker string) {
+	if _, approval := m.approvalMarkers[marker]; approval {
+		m.approvalRoots[marker] = struct{}{}
+	}
+}
+
+// Retirement follows complete frame composition, never Update: the old frame may still own a click.
+func (m *zoneManager) retireUnreferencedApprovals() {
+	for marker := range m.approvalMarkers {
+		if _, retained := m.approvalRoots[marker]; retained {
+			continue
+		}
+		delete(m.ids, m.rids[marker])
+		delete(m.rids, marker)
+		delete(m.approvalMarkers, marker)
+	}
 }
 
 func (m *zoneManager) Get(id string) *zoneInfo {
@@ -65,6 +132,7 @@ func (m *zoneManager) Get(id string) *zoneInfo {
 }
 
 func (m *zoneManager) Scan(value string) string {
+	clear(m.approvalRoots)
 	out := make([]byte, 0, len(value))
 	line := make([]byte, 0, 128)
 	tracked := map[string]*zoneInfo{}
@@ -73,6 +141,7 @@ func (m *zoneManager) Scan(value string) string {
 
 	for pos := 0; pos < len(value); {
 		if marker, next, ok := readZoneMarker(value, pos); ok {
+			m.retainApprovalMarker(marker)
 			id := m.rids[marker]
 			if id != "" {
 				if start, ok := tracked[marker]; ok {
@@ -123,6 +192,7 @@ func (m *zoneManager) ScanInto(value string, offsetX int, offsetY int) string {
 
 	for pos := 0; pos < len(value); {
 		if marker, next, ok := readZoneMarker(value, pos); ok {
+			m.retainApprovalMarker(marker)
 			id := m.rids[marker]
 			if id != "" {
 				if start, ok := tracked[marker]; ok {

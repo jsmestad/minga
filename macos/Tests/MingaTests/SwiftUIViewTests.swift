@@ -12,6 +12,7 @@
 @testable import MingaUI
 import Testing
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 import ViewInspector
 import MingaProtocol
@@ -1455,7 +1456,7 @@ struct AgentChatViewTests {
         #expect(strings.contains("High"))
     }
 
-    @Test("Header controls dispatch model and thinking commands")
+    @Test("Header controls dispatch named commands with the composer in insert mode")
     @MainActor func headerControlsDispatchCommands() throws {
         let spy = SpyEncoder()
         let state = AgentChatState()
@@ -1463,8 +1464,10 @@ struct AgentChatViewTests {
         state.model = "claude-sonnet-4"
         state.thinkingLevel = "medium"
         state.status = .idle
+        state.promptMode = .insert
+        state.prompt = "unfinished draft"
 
-        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
+        let sut = AgentChatView(state: state, isInsertMode: true, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
 
@@ -1475,6 +1478,12 @@ struct AgentChatViewTests {
         try modelButton.tap()
         #expect(spy.actions.contains(.executeCommand(name: "agent_pick_model")))
 
+        let helpButton = try #require(headerButtons.first(where: {
+            (try? $0.accessibilityLabel().string()) == "Agent help"
+        }))
+        try helpButton.tap()
+        #expect(spy.actions.contains(.executeCommand(name: "agent_toggle_help")))
+
         let thinkingMenu = try body.find(ViewType.Menu.self)
         let thinkingButtons = try thinkingMenu.findAll(ViewType.Button.self)
         let highButton = try #require(thinkingButtons.first(where: {
@@ -1482,25 +1491,30 @@ struct AgentChatViewTests {
         }))
         try highButton.tap()
         #expect(spy.actions.contains(.executeCommand(name: "agent_thinking_high")))
-        let help = try #require(headerButtons.first {
-            (try? $0.accessibilityLabel().string()) == "Agent help"
-        })
-        try help.tap()
-        #expect(spy.actions.last == .executeCommand(name: "agent_toggle_help"))
         #expect(spy.keyPressCalls.isEmpty)
+        #expect(state.prompt == "unfinished draft")
+        #expect(state.promptMode == .insert)
     }
 
-    @Test("Approval buttons dispatch the matching trust keypresses")
-    @MainActor func approvalButtonsDispatchKeys() throws {
+    @Test("Retained approval buttons send their displayed target after the transcript switches")
+    @MainActor func approvalButtonsKeepDisplayedIdentity() throws {
         let spy = SpyEncoder()
         let state = chatState(messages: [
-            .approvalToolCall(id: 1, name: "shell", summary: "git diff --cached", toolCallId: "call-1", previewKind: 2, previewLines: ["git diff --cached"])
+            .approvalToolCall(id: 1, name: "shell", summary: "git diff --cached", toolCallId: "call-1", sessionId: "session-a", requestId: "request-a", previewKind: 2, previewLines: ["git diff --cached"])
         ])
+        state.promptMode = .insert
+        state.prompt = "unfinished draft"
 
-        let sut = AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
+        let sut = AgentChatView(state: state, isInsertMode: true, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = try body.findAll(ViewType.Button.self)
+
+        // Keep the rendered closures, then switch to a different session whose
+        // pending tool has the same tool-call ID. Current state cannot retarget them.
+        state.applyTranscript(mode: 0, epoch: 2, baseCount: 0, messages: [
+            Wire.ChatMessage(beamId: 2, content: .approvalToolCall(name: "shell", summary: "other command", toolCallId: "call-1", sessionId: "session-b", requestId: "request-b", previewKind: 2, previewLines: []))
+        ])
 
         func tap(_ title: String) throws {
             let button = try #require(buttons.first(where: {
@@ -1514,8 +1528,15 @@ struct AgentChatViewTests {
         try tap("Trust for this turn (t)")
         try tap("Deny (n)")
 
-        #expect(spy.keyPressCalls.map(\.codepoint) == [0x79, 0x61, 0x74, 0x6E])
-        #expect(spy.keyPressCalls.allSatisfy { $0.modifiers == 0 })
+        #expect(spy.actions == [
+            .agentToolApproval(sessionId: "session-a", requestId: "request-a", toolCallId: "call-1", decision: .approve),
+            .agentToolApproval(sessionId: "session-a", requestId: "request-a", toolCallId: "call-1", decision: .approveSession),
+            .agentToolApproval(sessionId: "session-a", requestId: "request-a", toolCallId: "call-1", decision: .approveTurn),
+            .agentToolApproval(sessionId: "session-a", requestId: "request-a", toolCallId: "call-1", decision: .reject)
+        ])
+        #expect(spy.keyPressCalls.isEmpty)
+        #expect(state.prompt == "unfinished draft")
+        #expect(state.promptMode == .insert)
     }
 
     @Test("Auto-approved tool calls show the subtle scope pill")

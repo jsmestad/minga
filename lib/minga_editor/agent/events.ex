@@ -15,46 +15,52 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.State, as: EditorState
 
-  @doc "Applies one foreground agent event through its focused workflow."
-  @spec dispatch(EditorState.t(), term()) :: EditorState.t()
-  def dispatch(%EditorState{} = state, {:status_changed, status}),
+  @doc "Applies one foreground session event with its originating Session identity."
+  @spec dispatch(EditorState.t(), pid(), term()) :: EditorState.t()
+  def dispatch(%EditorState{} = state, _session_pid, {:status_changed, status}),
     do: StatusEventWorkflow.status_changed(state, status)
 
-  def dispatch(%EditorState{} = state, {:text_delta, _delta} = event),
+  def dispatch(%EditorState{} = state, _session_pid, {:text_delta, _delta} = event),
     do: StreamEventWorkflow.delta(state, event)
 
-  def dispatch(%EditorState{} = state, {:thinking_delta, _delta} = event),
+  def dispatch(%EditorState{} = state, _session_pid, {:thinking_delta, _delta} = event),
     do: StreamEventWorkflow.delta(state, event)
 
-  def dispatch(%EditorState{} = state, :messages_changed),
+  def dispatch(%EditorState{} = state, _session_pid, :messages_changed),
     do: StreamEventWorkflow.messages_changed(state)
 
-  def dispatch(%EditorState{} = state, {:tool_started, tool_call_id, name, args}),
+  def dispatch(%EditorState{} = state, _session_pid, {:tool_started, tool_call_id, name, args}),
     do: ToolEventWorkflow.started(state, tool_call_id, name, args)
 
-  def dispatch(%EditorState{} = state, {:tool_started, name, args}),
+  def dispatch(%EditorState{} = state, _session_pid, {:tool_started, name, args}),
     do: ToolEventWorkflow.started(state, name, args)
 
-  def dispatch(%EditorState{} = state, {:tool_update, tool_call_id, name, partial}),
+  def dispatch(%EditorState{} = state, _session_pid, {:tool_update, tool_call_id, name, partial}),
     do: ToolEventWorkflow.updated(state, tool_call_id, name, partial)
 
   def dispatch(
         %EditorState{} = state,
+        _session_pid,
         {:tool_ended, tool_call_id, name, result, status, _output}
       ),
       do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
 
-  def dispatch(%EditorState{} = state, {:tool_ended, tool_call_id, name, result, status}),
-    do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
+  def dispatch(
+        %EditorState{} = state,
+        _session_pid,
+        {:tool_ended, tool_call_id, name, result, status}
+      ),
+      do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
 
-  def dispatch(%EditorState{} = state, {:tool_ended, name, result, status}),
+  def dispatch(%EditorState{} = state, _session_pid, {:tool_ended, name, result, status}),
     do: ToolEventWorkflow.ended(state, name, result, status)
 
-  def dispatch(%EditorState{} = state, {:tool_interrupted, tool_call_id}),
+  def dispatch(%EditorState{} = state, _session_pid, {:tool_interrupted, tool_call_id}),
     do: ToolEventWorkflow.interrupted(state, tool_call_id)
 
   def dispatch(
         %EditorState{} = state,
+        _session_pid,
         {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
       ) do
     FileEventWorkflow.changed(
@@ -67,50 +73,50 @@ defmodule MingaEditor.Agent.Events do
     )
   end
 
-  def dispatch(%EditorState{} = state, {:approval_pending, approval}),
-    do: SessionEventWorkflow.approval_pending(state, approval)
+  def dispatch(%EditorState{} = state, session_pid, {:approval_pending, approval}),
+    do: SessionEventWorkflow.approval_pending(state, session_pid, approval)
 
-  def dispatch(%EditorState{} = state, {:approval_resolved, decision}),
-    do: SessionEventWorkflow.approval_resolved(state, decision)
+  def dispatch(%EditorState{} = state, session_pid, {:approval_resolved, target, decision}),
+    do: SessionEventWorkflow.approval_resolved(state, session_pid, target, decision)
 
-  def dispatch(%EditorState{} = state, {:error, message}),
+  def dispatch(%EditorState{} = state, _session_pid, {:error, message}),
     do: SessionEventWorkflow.error(state, message)
 
-  def dispatch(%EditorState{} = state, {:credentials_status, configured?}),
+  def dispatch(%EditorState{} = state, _session_pid, {:credentials_status, configured?}),
     do: SessionEventWorkflow.credentials_status(state, configured?)
 
   def dispatch(
         %EditorState{} = state,
+        _session_pid,
         {:model_selection_changed, %ModelSelection{} = selection}
       ),
       do: apply_model_selection(state, selection)
 
   def dispatch(
         %EditorState{} = state,
+        _session_pid,
         {:model_selection_rejected, %ModelSelection{}, message}
       )
       when is_binary(message),
       do: reject_model_selection(state, message)
 
-  def dispatch(%EditorState{} = state, {:todo_plan_updated, todos}),
+  def dispatch(%EditorState{} = state, _session_pid, {:todo_plan_updated, todos}),
     do: ToolEventWorkflow.todo_plan_updated(state, todos)
 
-  def dispatch(%EditorState{} = state, :spinner_tick),
-    do: SessionEventWorkflow.spinner_tick(state)
+  def dispatch(
+        %EditorState{} = state,
+        _session_pid,
+        {:context_usage, estimated_tokens, context_limit}
+      ),
+      do: StatusEventWorkflow.context_usage(state, estimated_tokens, context_limit)
 
-  def dispatch(%EditorState{} = state, :dismiss_toast),
-    do: SessionEventWorkflow.dismiss_toast(state)
-
-  def dispatch(%EditorState{} = state, {:context_usage, estimated_tokens, context_limit}),
-    do: StatusEventWorkflow.context_usage(state, estimated_tokens, context_limit)
-
-  def dispatch(%EditorState{} = state, {:prompt_queued, content, queue_type}),
+  def dispatch(%EditorState{} = state, _session_pid, {:prompt_queued, content, queue_type}),
     do: SessionEventWorkflow.prompt_queued(state, content, queue_type)
 
-  def dispatch(%EditorState{} = state, :queues_recalled),
+  def dispatch(%EditorState{} = state, _session_pid, :queues_recalled),
     do: SessionEventWorkflow.queues_recalled(state)
 
-  def dispatch(%EditorState{} = state, _unknown), do: state
+  def dispatch(%EditorState{} = state, _session_pid, _unknown), do: state
 
   @spec reject_model_selection(EditorState.t(), String.t()) :: EditorState.t()
   defp reject_model_selection(%EditorState{} = state, message) do

@@ -94,13 +94,17 @@ func (t *residentTranscript) apply(frame protocol.AgentTranscript) transcriptDro
 // reconciling a same-epoch full replacement. It makes occurrence matching
 // linear in the number and encoded size of messages, including ID-zero input.
 func transcriptMessageKey(message protocol.AgentChatMessage) string {
-	key := make([]byte, 0, len(message.Text)+len(message.Result)+len(message.Summary)+64)
+	key := make([]byte, 0, len(message.Text)+len(message.Result)+len(message.Summary)+
+		len(message.ApprovalTarget.SessionID)+len(message.ApprovalTarget.RequestID)+len(message.ApprovalTarget.ToolCallID)+64)
 	key = binary.LittleEndian.AppendUint32(key, message.ID)
 	key = append(key, message.Kind)
 	key = appendTranscriptString(key, message.Text)
 	key = appendTranscriptString(key, message.Name)
 	key = appendTranscriptString(key, message.Summary)
 	key = appendTranscriptString(key, message.Result)
+	key = appendTranscriptString(key, message.ApprovalTarget.SessionID)
+	key = appendTranscriptString(key, message.ApprovalTarget.RequestID)
+	key = appendTranscriptString(key, message.ApprovalTarget.ToolCallID)
 	key = append(key, message.Status, boolByte(message.IsError), boolByte(message.Collapsed))
 	key = binary.LittleEndian.AppendUint32(key, message.DurationMS)
 	key = append(key, message.AutoApprovedScope)

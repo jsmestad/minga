@@ -1,4 +1,6 @@
 defmodule Minga.Test.SessionCase do
+  @moduledoc "Shared fixtures for provider-backed Session behavior tests."
+
   use ExUnit.CaseTemplate
 
   @provider_startup_timeout 30_000
@@ -107,6 +109,15 @@ defmodule Minga.Test.SessionCase do
     send_provider_event(session, approval)
     ExUnit.Assertions.assert_receive({:agent_event, _, {:approval_pending, _}}, 5_000)
     :ok
+  end
+
+  @doc "Returns the immutable target published by the current pending approval."
+  @spec approval_target(GenServer.server()) :: MingaAgent.ToolApproval.Target.t()
+  def approval_target(session) do
+    %{pending_approval: %{target: %MingaAgent.ToolApproval.Target{} = target}} =
+      MingaAgent.Session.editor_snapshot(session)
+
+    target
   end
 
   @spec start_slow_turn(String.t()) :: pid()

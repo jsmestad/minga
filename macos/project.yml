@@ -296,6 +296,9 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+    dependencies:
+      - target: MingaProtocol
+      - target: MingaUI
 
   MingaTests:
     type: bundle.unit-test
@@ -418,6 +421,24 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
     dependencies:
       - target: Minga
+
+  MingaApprovalGeometry:
+    type: tool
+    platform: macOS
+    sources:
+      - path: TestSupport/MingaApprovalGeometry/ApprovalGeometryMain.swift
+        type: file
+    settings:
+      base:
+        PRODUCT_NAME: minga-approval-geometry
+        PRODUCT_BUNDLE_IDENTIFIER: com.minga.approval-geometry-observer
+    dependencies:
+      - sdk: AppKit.framework
+      - sdk: ApplicationServices.framework
+      - sdk: CoreGraphics.framework
+      - sdk: ScreenCaptureKit.framework
+      - sdk: ImageIO.framework
+      - sdk: UniformTypeIdentifiers.framework
 
   NativeRenderPerformance:
     type: tool
@@ -627,6 +648,12 @@ schemes:
         - MingaTests
       environmentVariables:
         MINGA_TEST_PRODUCTION_APP_PATH: "$(BUILT_PRODUCTS_DIR)/Minga.app"
+  MingaApprovalGeometry:
+    build:
+      parallelizeBuild: false
+      targets:
+        MingaTestHost: all
+        MingaApprovalGeometry: all
   PreviewHost:
     build:
       targets:

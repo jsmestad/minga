@@ -24,8 +24,6 @@ public struct AgentContextBar: View {
 
     private let barHeight: CGFloat = 28
 
-    /// Timer to refresh elapsed time every second.
-    @State private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var elapsedDisplay: String = "0s"
 
     public var body: some View {
@@ -69,11 +67,17 @@ public struct AgentContextBar: View {
                 Text(elapsedDisplay)
                     .font(Typography.font(.small, design: .monospaced))
                     .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
-                    .onReceive(timer) { _ in
+                    .task(id: state.dispatchTimestamp) {
                         updateElapsedDisplay()
-                    }
-                    .onAppear {
-                        updateElapsedDisplay()
+                        while !Task.isCancelled {
+                            do {
+                                try await Task.sleep(for: .seconds(1))
+                            } catch {
+                                return
+                            }
+                            guard !Task.isCancelled else { return }
+                            updateElapsedDisplay()
+                        }
                     }
 
                 // Action buttons (right-aligned)

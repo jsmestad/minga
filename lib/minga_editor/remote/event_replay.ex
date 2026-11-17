@@ -4,26 +4,26 @@ defmodule MingaEditor.Remote.EventReplay do
   alias MingaEditor.Agent.Events
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.EventLog.EventRecord
-  alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
 
   @type event :: term()
 
   @doc "Applies replayable event-log records to the active agent surface."
-  @spec replay_active(EditorState.t(), [EventRecord.t()]) :: EditorState.t()
-  def replay_active(%EditorState{} = state, records) when is_list(records) do
+  @spec replay_active(EditorState.t(), pid(), [EventRecord.t()]) :: EditorState.t()
+  def replay_active(%EditorState{} = state, session_pid, records)
+      when is_pid(session_pid) and is_list(records) do
     Enum.reduce(records, state, fn record, acc ->
       case to_agent_event(record) do
         nil ->
           acc
 
         event ->
-          Events.dispatch(acc, event)
+          Events.dispatch(acc, session_pid, event)
       end
     end)
   end
 
-  @doc "Converts a durable event-log record back into the live agent event shape."
+  @doc "Converts replayable history into UI events. Live approvals come only from the Session snapshot."
   @spec to_agent_event(EventRecord.t()) :: event() | nil
   def to_agent_event(%EventRecord{event_type: :assistant_delta, payload: payload}),
     do: {:text_delta, string_payload(payload, "delta")}
@@ -62,21 +62,10 @@ defmodule MingaEditor.Remote.EventReplay do
      string_payload(payload, "tool_name")}
   end
 
-  def to_agent_event(%EventRecord{event_type: :approval_requested, payload: payload}) do
-    approval = %{
-      tool_call_id: string_payload(payload, "tool_call_id"),
-      name: string_payload(payload, "name"),
-      args: map_payload(payload, "args")
-    }
-
-    case approval_preview(payload_value(payload, "preview")) do
-      nil -> {:approval_pending, approval}
-      preview -> {:approval_pending, Map.put(approval, :preview, preview)}
-    end
-  end
-
-  def to_agent_event(%EventRecord{event_type: :approval_resolved, payload: payload}),
-    do: {:approval_resolved, atom_payload(payload, "decision")}
+  # Historical consent records cannot recreate or resolve a live approval attachment.
+  def to_agent_event(%EventRecord{event_type: type})
+      when type in [:approval_requested, :approval_resolved],
+      do: nil
 
   def to_agent_event(%EventRecord{event_type: :status_changed, payload: payload}),
     do: {:status_changed, atom_payload(payload, "status")}
@@ -106,49 +95,6 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   def to_agent_event(%EventRecord{}), do: nil
-
-  @spec approval_preview(term()) :: Preview.t() | nil
-  defp approval_preview(%Preview{} = preview), do: preview
-
-  defp approval_preview(%{} = preview) do
-    case {payload_value(preview, "kind"), payload_value(preview, "summary"),
-          payload_value(preview, "lines")} do
-      {kind, summary, lines} when is_binary(summary) and is_list(lines) ->
-        build_approval_preview(preview_kind(kind), summary, lines)
-
-      _ ->
-        nil
-    end
-  end
-
-  defp approval_preview(_preview), do: nil
-
-  @spec build_approval_preview(Preview.kind() | nil, String.t(), [term()]) :: Preview.t() | nil
-  defp build_approval_preview(nil, _summary, _lines), do: nil
-
-  defp build_approval_preview(preview_kind, summary, lines) do
-    if Enum.all?(lines, &is_binary/1) do
-      Preview.new(preview_kind, summary, lines)
-    else
-      nil
-    end
-  end
-
-  @spec preview_kind(term()) :: Preview.kind() | nil
-  defp preview_kind(kind) when is_atom(kind) and kind in [:diff, :command, :target, :args],
-    do: kind
-
-  defp preview_kind(kind) when is_binary(kind) do
-    case kind do
-      "diff" -> :diff
-      "command" -> :command
-      "target" -> :target
-      "args" -> :args
-      _ -> nil
-    end
-  end
-
-  defp preview_kind(_kind), do: nil
 
   @spec payload_value(map(), String.t()) :: term()
   defp payload_value(payload, key) when is_map(payload) do

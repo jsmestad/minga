@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   The runtime split lives in `MingaEditor.handle_info/2` for `:agent_event`
   messages: events whose `session_pid` matches `Shell.Runtime.active_session/1` go
-  through `Agent.Events.dispatch/2` (rendering cache + tab status); the
+  through `Agent.Events.dispatch/3` (rendering cache + tab status); the
   rest go through `Shell.on_agent_event/4` (presentation only — never
   the active tab's rendering cache).
 
@@ -21,6 +21,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.Events
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Input.Router
@@ -28,6 +29,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaAgent.Event
   alias MingaAgent.Session
   alias MingaAgent.Test.ModelSelectionFixture
+  alias MingaAgent.ToolApproval.Preview, as: ApprovalPreview
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -137,17 +141,55 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert tab(ss2.tab_bar, 1).payload.attention == false
     end
 
-    test "background :approval_pending raises attention on the owning tab", %{
-      shell_state: ss,
-      session_b: session_b
-    } do
-      approval = %{tool_call_id: "x", name: "shell", args: %{}}
+    test "background approval raises its tab's attention without replacing the foreground attachment",
+         %{
+           shell_state: ss,
+           session_a: session_a,
+           session_b: session_b
+         } do
+      preview = ApprovalPreview.new(:command, "echo hello", ["echo hello"])
 
-      {ss2, _ws} =
-        Traditional.on_agent_event(ss, workspace(), session_b, {:approval_pending, approval})
+      foreground =
+        PublicApproval.new(
+          ApprovalTarget.new("session-A", "request-A", "reused-tool-id"),
+          "shell",
+          %{"command" => "echo hello"},
+          preview
+        )
+
+      background =
+        PublicApproval.new(
+          ApprovalTarget.new("session-B", "request-B", "reused-tool-id"),
+          "shell",
+          %{"command" => "echo hello"},
+          preview
+        )
+
+      agent =
+        AgentState.set_pending_approval(
+          TraditionalState.agent(ss),
+          PendingApproval.new(session_a, foreground)
+        )
+
+      ss = TraditionalState.replace_agent(ss, agent)
+
+      {ss2, ws2} =
+        Traditional.on_agent_event(ss, workspace(), session_b, {:approval_pending, background})
 
       assert tab(ss2.tab_bar, 2).payload.attention == true
       assert tab(ss2.tab_bar, 1).payload.attention == false
+      assert TraditionalState.agent(ss2) == agent
+      assert ws2 == workspace()
+
+      # A background resolution cannot clear the active presentation, even with its exact target.
+      for target <- [background.target, foreground.target] do
+        assert Traditional.on_agent_event(
+                 ss2,
+                 workspace(),
+                 session_b,
+                 {:approval_resolved, target, :approve}
+               ) == {ss2, workspace()}
+      end
     end
 
     test "background :error raises attention on the owning tab", %{
@@ -178,13 +220,25 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       ghost = spawn(fn -> :ok end)
 
-      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
+      approval =
+        PublicApproval.new(
+          ApprovalTarget.new("detached-session", "detached-request", "tc-detached"),
+          "shell",
+          %{"command" => "echo detached"},
+          ApprovalPreview.new(:command, "echo detached", ["echo detached"])
+        )
 
-      assert ss2.tab_bar == ss.tab_bar
+      for event <- [
+            {:status_changed, :error},
+            {:approval_pending, approval},
+            {:approval_resolved, approval.target, :reject}
+          ] do
+        assert Traditional.on_agent_event(ss, workspace(), ghost, event) == {ss, workspace()}
+      end
     end
   end
 
-  describe "Agent.Events.dispatch/2 model selection" do
+  describe "Agent.Events.dispatch/3 model selection" do
     test "installs an accepted exact selection in the foreground panel" do
       selection =
         ModelSelectionFixture.selection(
@@ -196,7 +250,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           }
         )
 
-      state = Events.dispatch(event_state(%AgentState{}), {:model_selection_changed, selection})
+      state =
+        Events.dispatch(event_state(%AgentState{}), self(), {:model_selection_changed, selection})
 
       assert state.workspace.agent_ui.panel.model_name == "Accepted Model"
       assert state.workspace.agent_ui.panel.provider_name == "openai"
@@ -219,7 +274,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           ui = UIState.set_model_name(state.workspace.agent_ui, "Active Model")
           MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
         end)
-        |> Events.dispatch({:model_selection_rejected, selection, "The model is unavailable"})
+        |> Events.dispatch(
+          self(),
+          {:model_selection_rejected, selection, "The model is unavailable"}
+        )
 
       assert state.workspace.agent_ui.panel.model_name == "Active Model"
 
@@ -231,7 +289,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     end
   end
 
-  describe "Agent.Events.dispatch/2 tool status" do
+  describe "Agent.Events.dispatch/3 tool status" do
     test "tool_started and tool_ended keep active_tool_name synced with the session snapshot" do
       {:ok, session} = start_supervised({Session, provider_opts: []})
       :sys.get_state(session)
@@ -261,7 +319,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      state = Events.dispatch(state, {:tool_started, "alpha", %{}})
+      state = Events.dispatch(state, session, {:tool_started, "alpha", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -273,7 +331,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      state = Events.dispatch(state, {:tool_started, "beta", %{}})
+      state = Events.dispatch(state, session, {:tool_started, "beta", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -285,7 +343,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      state = Events.dispatch(state, {:tool_ended, "alpha", "contents", :done})
+      state = Events.dispatch(state, session, {:tool_ended, "alpha", "contents", :done})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -297,7 +355,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      state = Events.dispatch(state, {:tool_ended, "beta", "output", :done})
+      state = Events.dispatch(state, session, {:tool_ended, "beta", "output", :done})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -307,13 +365,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     test "tool_started and tool_ended update an editor without an agent session" do
       state = event_state(%AgentState{})
 
-      state = Events.dispatch(state, {:tool_started, "read_file", %{}})
+      state = Events.dispatch(state, self(), {:tool_started, "read_file", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "read_file"
 
-      state = Events.dispatch(state, {:tool_ended, "read_file", "contents", :done})
+      state = Events.dispatch(state, self(), {:tool_ended, "read_file", "contents", :done})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -324,13 +382,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       agent = %AgentState{} |> AgentState.set_active_tool_name("read_file")
       state = event_state(agent)
 
-      state = Events.dispatch(state, {:status_changed, :tool_executing})
+      state = Events.dispatch(state, self(), {:status_changed, :tool_executing})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "read_file"
 
-      state = Events.dispatch(state, {:status_changed, :idle})
+      state = Events.dispatch(state, self(), {:status_changed, :idle})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -359,7 +417,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      state = Events.dispatch(state, {:context_usage, 95, 100})
+      state = Events.dispatch(state, session, {:context_usage, 95, 100})
       assert state.workspace.agent_ui.view.compaction.execution == {:deferred, 95}
       assert state.workspace.agent_ui.view.compaction.threshold == :fresh
     end
@@ -373,7 +431,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       workspace = SessionState.transition_mode(state.workspace, :insert)
       state = %{state | workspace: workspace}
 
-      state = Events.dispatch(state, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+      state =
+        Events.dispatch(
+          state,
+          self(),
+          {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"}
+        )
+
       assert BufferProcess.cursor(buffer) == {0, 6}
 
       state = Router.route_key(state, ?x, 0)
@@ -397,12 +461,16 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         prompt = state.workspace.agent_ui.panel.prompt_buffer
         buffer = state.workspace.buffers.active
         BufferProcess.insert_text(prompt, "draft ")
-        state = Events.dispatch(state, {:status_changed, status})
+        state = Events.dispatch(state, self(), {:status_changed, status})
         ui = UIState.scroll_down(state.workspace.agent_ui, 7)
         state = TraditionalWorkflow.install_agent_ui(state, ui)
 
         state =
-          Events.dispatch(state, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+          Events.dispatch(
+            state,
+            self(),
+            {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"}
+          )
 
         assert PromptBuffer.input_cursor(state.workspace.agent_ui) == {0, 6}
         assert state.workspace.agent_ui.view.presentation.focus == :chat
@@ -420,7 +488,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           keymap_scope: :agent,
           agentic_active: true
         )
-        |> Events.dispatch({:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
+        |> Events.dispatch(self(), {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
         |> select_retained_review("/tmp/agent-a.ex")
 
       preview = state.workspace.agent_ui.view.preview |> Preview.scroll_down(4)
@@ -428,8 +496,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state =
         state
-        |> Events.dispatch({:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
-        |> Events.dispatch({:file_changed, "/tmp/agent-b.ex", "b1", "b2", "b2", "edit"})
+        |> Events.dispatch(self(), {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
+        |> Events.dispatch(self(), {:file_changed, "/tmp/agent-b.ex", "b1", "b2", "b2", "edit"})
 
       assert state.workspace.agent_ui.view.preview == preview
       assert_retained_review(state, "/tmp/agent-a.ex", "a0", "a1")
@@ -452,7 +520,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     test "a selected same-file revision invalidates stale decisions without redirecting input" do
       state =
         background_input_state(keymap_scope: :editor)
-        |> Events.dispatch({:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
+        |> Events.dispatch(self(), {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
         |> select_retained_review("/tmp/agent-a.ex")
 
       preview =
@@ -464,7 +532,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       workspace = SessionState.transition_mode(state.workspace, :insert)
       state = %{state | workspace: workspace}
 
-      state = Events.dispatch(state, {:file_changed, "/tmp/agent-a.ex", "a1", "a2", "a2", "edit"})
+      state =
+        Events.dispatch(
+          state,
+          self(),
+          {:file_changed, "/tmp/agent-a.ex", "a1", "a2", "a2", "edit"}
+        )
+
       updated = state.workspace.agent_ui.view.preview
       assert Preview.diff_review(updated) == nil
       assert updated.content == preview.content
@@ -496,10 +570,12 @@ defmodule MingaEditor.Agent.EventRoutingTest do
             state
             |> Events.dispatch_batch([{:text_delta, "stream #{index}"}])
             |> Events.dispatch(
+              self(),
               {:file_changed, path, "original #{index}", "first #{index}", "first-#{index}",
                "edit"}
             )
             |> Events.dispatch(
+              self(),
               {:file_changed, path, "first #{index}", "latest #{index}", "latest-#{index}",
                "edit"}
             )
@@ -537,6 +613,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state =
         Events.dispatch(
           state,
+          self(),
           {:file_changed, "/tmp/agent-remote.ex", "original", "agent edit", "remote", "edit"}
         )
 
@@ -555,7 +632,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert state.workspace.agent_ui.view.presentation.focus == :chat
     end
 
-    test "approval arrival still defocuses the draft and intervening writes retain the approval" do
+    test "approval arrival preserves the draft and intervening writes retain the bound approval" do
       state =
         background_input_state(
           keymap_scope: :agent,
@@ -564,15 +641,37 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           input_focused: true
         )
 
-      approval = %{tool_call_id: "approval", name: "shell", args: %{"command" => "pwd"}}
-      state = Events.dispatch(state, {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"})
-      assert state.workspace.agent_ui.panel.input_focused
-      state = Events.dispatch(state, {:approval_pending, approval})
-      refute state.workspace.agent_ui.panel.input_focused
+      approval =
+        PublicApproval.new(
+          ApprovalTarget.new("background-session", "admitted-request", "approval"),
+          "shell",
+          %{"command" => "pwd"},
+          ApprovalPreview.new(:command, "pwd", ["pwd"])
+        )
 
-      state = Events.dispatch(state, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"})
-      refute state.workspace.agent_ui.panel.input_focused
-      assert TraditionalState.agent(state.shell_runtime.state).pending_approval == approval
+      state =
+        Events.dispatch(
+          state,
+          self(),
+          {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "a1", "edit"}
+        )
+
+      assert state.workspace.agent_ui.panel.input_focused
+      state = Events.dispatch(state, self(), {:approval_pending, approval})
+      assert state.workspace.agent_ui.panel.input_focused
+
+      state =
+        Events.dispatch(
+          state,
+          self(),
+          {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "b1", "edit"}
+        )
+
+      assert state.workspace.agent_ui.panel.input_focused
+
+      assert TraditionalState.agent(state.shell_runtime.state).pending_approval ==
+               PendingApproval.new(self(), approval)
+
       assert_retained_review(state, "/tmp/agent-a.ex", "a0", "a1")
       assert_retained_review(state, "/tmp/agent-b.ex", "b0", "b1")
     end
@@ -591,6 +690,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         ExUnit.CaptureLog.with_log(fn ->
           Events.dispatch(
             state,
+            self(),
             {:file_changed, "/tmp/agent-remote.ex", "old", "new", "remote", "edit"}
           )
         end)
@@ -637,7 +737,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     )
   end
 
-  describe "Agent.Events.dispatch/2 file association" do
+  describe "Agent.Events.dispatch/3 file association" do
     test "file_changed associates by exact file ref, not duplicate basename" do
       root = Path.join(System.tmp_dir!(), "minga-event-routing")
       lib_path = Path.join([root, "lib", "user.ex"])
@@ -673,6 +773,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state =
         Events.dispatch(
           state,
+          session,
           {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
         )
 
@@ -724,6 +825,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state =
         Events.dispatch(
           state,
+          session,
           {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
         )
 
@@ -771,7 +873,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       }
 
       state =
-        Events.dispatch(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
+        Events.dispatch(
+          state,
+          session,
+          {:file_changed, path, "before", "after", "tc_test", "edit_file"}
+        )
 
       tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == workspace.id
@@ -807,7 +913,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       }
 
       state =
-        Events.dispatch(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
+        Events.dispatch(
+          state,
+          session,
+          {:file_changed, path, "before", "after", "tc_test", "edit_file"}
+        )
 
       tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == 0

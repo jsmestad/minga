@@ -12,6 +12,10 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaAgent.ToolApproval.Preview, as: ApprovalPreview
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.DiffReview, as: DiffReviewData
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -147,38 +151,28 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
 
   describe "ToolApproval.handle_key/3" do
     setup do
-      approval = %{tool_call_id: "tc_1", name: "write_file", args: %{"path" => "/tmp/test"}}
+      approval =
+        PendingApproval.new(
+          self(),
+          Public.new(
+            Target.new("handler-fixture", "admitted-request", "tc_1"),
+            "write_file",
+            %{"path" => "/tmp/test"},
+            ApprovalPreview.new(:args, "", [])
+          )
+        )
+
       {:ok, approval: approval}
     end
 
-    test "handles y when approval is pending", %{approval: approval} do
+    test "modified decision keys cannot resolve or widen the displayed approval", %{
+      approval: approval
+    } do
       state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, _} = ToolApproval.handle_key(state, ?y, 0)
-    end
 
-    test "handles Enter when approval is pending", %{approval: approval} do
-      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, _} = ToolApproval.handle_key(state, 13, 0)
-    end
-
-    test "handles n when approval is pending", %{approval: approval} do
-      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, _} = ToolApproval.handle_key(state, ?n, 0)
-    end
-
-    test "handles Esc as denial when approval is pending", %{approval: approval} do
-      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, _} = ToolApproval.handle_key(state, 27, 0)
-    end
-
-    test "handles a as session trust when approval is pending", %{approval: approval} do
-      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, _} = ToolApproval.handle_key(state, ?a, 0)
-    end
-
-    test "handles t as turn trust when approval is pending", %{approval: approval} do
-      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
-      {:handled, _} = ToolApproval.handle_key(state, ?t, 0)
+      for modifiers <- 1..15, key <- [?y, 13, ?a, ?t, ?n, 27] do
+        assert {:passthrough, ^state} = ToolApproval.handle_key(state, key, modifiers)
+      end
     end
 
     test "passes unrelated keys through when approval is pending", %{approval: approval} do

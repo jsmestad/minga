@@ -206,6 +206,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(volumePath, limit: Int(UInt16.max))
         case .executeCommand(let name):
             return oversizedString(name, limit: Int(UInt16.max))
+        case .agentToolApproval(let sessionId, let requestId, let toolCallId, _):
+            guard !sessionId.isEmpty, !requestId.isEmpty, !toolCallId.isEmpty else {
+                return .invalidPayload("Tool approval requires session, request, and tool call identity")
+            }
+            return oversizedString(sessionId, limit: Int(UInt16.max))
+                ?? oversizedString(requestId, limit: Int(UInt16.max))
+                ?? oversizedString(toolCallId, limit: Int(UInt16.max))
         case .openFile(let path), .gitStageFile(let path), .gitUnstageFile(let path),
              .gitDiscardFile(let path), .gitOpenFile(let path):
             return oversizedString(path, limit: Int(UInt16.max))
@@ -336,6 +343,19 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .commandCut: encodeCmdCut()
         case .panelDismiss: encodePanelDismiss()
         case .panelResize(let heightPercent): encodePanelResize(heightPercent: heightPercent)
+        case .agentToolApproval(let sessionId, let requestId, let toolCallId, let decision):
+            let wireDecision: GeneratedProtocol.AgentApprovalDecision = switch decision {
+            case .approve: .approve
+            case .approveSession: .approveSession
+            case .approveTurn: .approveTurn
+            case .reject: .reject
+            }
+            var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_TOOL_APPROVAL])
+            appendString16(&buf, sessionId)
+            appendString16(&buf, requestId)
+            appendString16(&buf, toolCallId)
+            buf.append(wireDecision.rawValue)
+            writeFrame(buf)
         case .agentToolToggle(let messageID): encodeAgentToolToggle(messageID: messageID)
         case .executeCommand(let name): encodeExecuteCommand(name: name)
         case .openFile(let path): encodeOpenFile(path: path)

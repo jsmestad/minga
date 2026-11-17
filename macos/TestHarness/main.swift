@@ -277,6 +277,33 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         ]
         return result
 
+    case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
+        let approvals = messages.compactMap { message -> [String: Any]? in
+            guard case .approvalToolCall(let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines) = message.content else {
+                return nil
+            }
+            return [
+                "beam_id": Int(message.beamId),
+                "name": name,
+                "summary": summary,
+                "tool_call_id": toolCallId,
+                "session_id": sessionId,
+                "request_id": requestId,
+                "preview_kind": Int(previewKind),
+                "preview_lines": previewLines
+            ]
+        }
+        return [
+            "type": "gui_agent_transcript",
+            "mode": Int(mode),
+            "epoch": Int(epoch),
+            "truncated": truncated,
+            "trim_front": Int(trimFront),
+            "base_count": Int(baseCount),
+            "message_ids": messages.map { Int($0.beamId) },
+            "approvals": approvals
+        ]
+
     case .guiGutterSeparator(let col, let r, let g, let b):
         return ["type": "gui_gutter_separator", "col": Int(col), "r": Int(r), "g": Int(g), "b": Int(b)]
 

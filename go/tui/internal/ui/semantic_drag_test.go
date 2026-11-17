@@ -58,6 +58,25 @@ func TestChromeDragReordersTabOntoDifferentTab(t *testing.T) {
 	}
 }
 
+func TestAnotherButtonReleaseCannotFinishALeftTabDrag(t *testing.T) {
+	model := tabDragModel(t)
+	origin := waitForZone(t, model, zoneIDTab(41))
+	target := waitForZone(t, model, zoneIDTab(43))
+	model, _, _ = model.handleChromeDrag(clickAt(origin))
+	model, _, _ = model.handleChromeDrag(dragAt(target))
+
+	model, packet, handled := model.handleChromeDrag(tea.MouseReleaseMsg(tea.Mouse{
+		Button: tea.MouseRight, X: target.StartX + 1, Y: target.StartY,
+	}))
+	if packet != nil || !handled {
+		t.Fatal("another button's release must stay with the captured drag without completing it")
+	}
+	model, packet, handled = model.handleChromeDrag(releaseAt(target))
+	if !handled || !bytes.Equal(packet, protocol.EncodeGUITabReorder(41, 2)) {
+		t.Fatal("the matching left release did not finish the original drag")
+	}
+}
+
 func TestChromeDragWithoutMotionIsNotAReorder(t *testing.T) {
 	model := tabDragModel(t)
 	origin := waitForZone(t, model, zoneIDTab(41))

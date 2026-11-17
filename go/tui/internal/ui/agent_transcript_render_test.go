@@ -493,7 +493,8 @@ func TestAgentMessageRowCountAndRangeMatchCurrentRenderer(t *testing.T) {
 		{Kind: agentKindThinking, Text: "one\ntwo", Collapsed: true},
 		{Kind: agentKindTool, Name: "shell", Summary: "run", Result: "one\ntwo", Status: 1},
 		{Kind: agentKindTool, Name: "shell", Summary: "run", Result: "one\ntwo", Status: 1, Collapsed: true},
-		{Kind: agentKindApprovalTool, Name: "shell", PreviewLines: []string{"one", "two", "three"}},
+		{Kind: agentKindApprovalTool, Name: "shell", ApprovalTarget: protocol.AgentApprovalTarget{SessionID: "s", RequestID: "r", ToolCallID: "t"}, PreviewLines: []string{"one", "two", "three"}},
+		{Kind: agentKindApprovalTool, Name: "shell", Status: 1, ApprovalTarget: protocol.AgentApprovalTarget{SessionID: "s", RequestID: "r", ToolCallID: "t"}},
 		{Kind: agentKindUsage},
 		{Kind: agentKindAssistantMarkdown, MarkdownBlocks: []protocol.AgentMarkdownBlock{
 			{Kind: 0x01, Lines: []protocol.AgentStyledLine{{{Text: "text"}}}},

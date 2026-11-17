@@ -2,8 +2,11 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
+  alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.RenderModel.UI.AgentChat
+  alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
 
   @op_gui_agent_chat Minga.Protocol.Opcodes.gui_agent_chat()
@@ -242,6 +245,64 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   describe "pending approval section" do
     test "always encodes as not visible" do
       assert section!(encode(%AgentChat{visible?: true}), 0x04) == <<0::8>>
+    end
+
+    test "resident approval controls do not revive the retired chrome approval payload" do
+      approval = %ApprovalView{
+        session_id: "session-A",
+        request_id: "request-B",
+        tool_call_id: "tc-7"
+      }
+
+      base = %AgentChat{visible?: true}
+      {chrome, caches} = AgentChatEncoder.encode(base, Caches.new())
+      with_approval = %{base | resident_messages: [{7, {:approval_tool_call, approval}}]}
+
+      assert encode(with_approval) == chrome
+      assert section!(chrome, 0x04) == <<0>>
+      assert {nil, ^caches} = AgentChatEncoder.encode(with_approval, caches)
+    end
+  end
+
+  describe "version 32 resident approval message body" do
+    test "encodes every preview kind after the complete immutable identity" do
+      for {kind, byte} <- [args: 0, diff: 1, command: 2, target: 3] do
+        approval = %ApprovalView{
+          name: "edit_file",
+          summary: "app.ex",
+          tool_call_id: "tc-7",
+          session_id: "session-A",
+          request_id: "request-B",
+          preview_kind: kind,
+          preview_lines: ["-old", "+new"]
+        }
+
+        body = AgentChatMessageCodec.encode_message_body({:approval_tool_call, approval})
+
+        assert <<0x09, 0, 9::16, "edit_file", 6::16, "app.ex", 4::16, "tc-7", 9::16, "session-A",
+                 9::16, "request-B", ^byte::8, 2::16, 4::16, "-old", 4::16, "+new">> = body
+
+        assert AgentChatMessageCodec.resident_entry_size({7, {:approval_tool_call, approval}}) ==
+                 8 + byte_size(body)
+      end
+    end
+
+    test "rejects each overflowing identity instead of truncating a control target" do
+      approval = %ApprovalView{
+        session_id: "session-A",
+        request_id: "request-B",
+        tool_call_id: "tc-7"
+      }
+
+      oversized = String.duplicate("é", 32_768)
+
+      for field <- [:tool_call_id, :session_id, :request_id] do
+        invalid = struct!(approval, [{field, oversized}])
+
+        assert_raise EncodingError, fn ->
+          AgentChatMessageCodec.encode_message_body({:approval_tool_call, invalid})
+        end
+      end
     end
   end
 end

@@ -69,10 +69,16 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
   def install_agent_approval(%EditorState{} = state, approval),
     do: transition_agent(state, &AgentState.set_pending_approval(&1, approval))
 
-  @doc "Clears pending agent approval."
+  @doc "Clears pending agent approval during teardown."
   @spec clear_agent_approval(EditorState.t()) :: EditorState.t()
   def clear_agent_approval(%EditorState{} = state),
     do: transition_agent(state, &AgentState.clear_pending_approval/1)
+
+  @doc "Retires only the approval attached to the resolved target and Session."
+  @spec resolve_agent_approval(EditorState.t(), MingaAgent.ToolApproval.Target.t(), pid()) ::
+          EditorState.t()
+  def resolve_agent_approval(%EditorState{} = state, target, session_pid),
+    do: transition_agent(state, &AgentState.clear_approval(&1, target, session_pid))
 
   @doc "Installs a changed Traditional agent lifecycle value."
   @spec install_agent_state(EditorState.t(), AgentState.t()) :: EditorState.t()

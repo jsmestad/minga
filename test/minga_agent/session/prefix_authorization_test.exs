@@ -1,5 +1,5 @@
 defmodule MingaAgent.Session.PrefixAuthorizationTest do
-  # Advice and project discovery use shared owners; the approved shell spawns an OS process.
+  # Advice, project discovery and scoped cwd use shared owners; the approved shell spawns an OS process.
   use ExUnit.Case, async: false
 
   alias Minga.Config.Advice
@@ -19,6 +19,8 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
   alias ReqLLM.StreamChunk
 
   @moduletag :tmp_dir
@@ -245,12 +247,15 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     session = start_session(context)
     assert :ok = Session.send_prompt(session, "write once")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
 
     assert {:ok, _} =
              Options.set(context.options_name, :agent_tool_permissions, %{"prefix_write" => :deny})
 
-    assert :ok = Session.respond_to_approval(session, :approve)
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
     await_done(session)
     assert_refused(context, session)
     refute_received :callback_built
@@ -373,9 +378,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     session = start_session(context)
     assert :ok = Session.send_prompt(session, "write once")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
+
     install_write_tool(context, "replacement\n")
-    assert :ok = Session.respond_to_approval(session, :approve)
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
     await_done(session)
     assert_refused(context, session)
     refute_received :callback_built
@@ -805,9 +814,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, [])
     session = start_session(context)
     assert :ok = Session.send_prompt(session, "write")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
+
     refute File.exists?(target(context))
-    assert :ok = Session.respond_to_approval(session, :approve)
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
     await_done(session)
     assert File.read!(target(context)) == "written\n"
   end
@@ -824,8 +837,12 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       )
 
     assert :ok = Session.send_prompt(session, "read")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
-    assert :ok = Session.respond_to_approval(session, :reject)
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
+
+    assert :ok = Session.respond_to_approval(session, approval_target, :reject)
     await_done(session, "read_file")
     result = saved_tool_result(context, session)
     assert result.metadata.is_error == true
@@ -838,31 +855,33 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     # Close that owner explicitly instead of inheriting another scenario's workspace.
     assert :ok = Minga.Project.close()
     assert Minga.Project.root() == nil
-    working_directory = File.cwd!()
-
-    expected =
-      working_directory
-      |> Path.join("AGENTS.md")
-      |> File.read!()
-      |> String.split("\n", parts: 2)
-      |> hd()
+    working_directory = Path.join(context.dir, "no-project-cwd")
+    File.mkdir_p!(working_directory)
+    expected = "approval working-directory fixture"
+    File.write!(Path.join(working_directory, "cwd-proof.txt"), expected)
 
     assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :destructive)
     assert {:ok, _} = Options.set(context.options_name, :agent_destructive_tools, ["shell"])
 
-    session =
-      start_session(context,
-        tool_calls: [{"shell", %{"command" => "head -n 1 AGENTS.md"}, "prefix-call"}],
-        provider_opts: [project_root: nil]
-      )
+    File.cd!(working_directory, fn ->
+      session =
+        start_session(context,
+          tool_calls: [{"shell", %{"command" => "cat cwd-proof.txt"}, "prefix-call"}],
+          provider_opts: [project_root: nil]
+        )
 
-    assert :ok = Session.send_prompt(session, "read the working directory's agent guide")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
-    assert :ok = Session.respond_to_approval(session, :approve)
-    await_done(session, "shell")
-    result = saved_tool_result(context, session)
-    assert result.metadata.is_error == false
-    assert Enum.map_join(result.content, "", & &1.text) == expected <> "\n"
+      assert :ok = Session.send_prompt(session, "read the working directory's proof file")
+
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                     @timeout
+
+      assert :ok = Session.respond_to_approval(session, approval_target, :approve)
+      await_done(session, "shell")
+      result = saved_tool_result(context, session)
+      assert result.metadata.is_error == false
+      assert Enum.map_join(result.content, "", & &1.text) == expected
+    end)
   end
 
   test "builtin and bundled metadata do not add approval beyond the current global policy",
@@ -918,12 +937,138 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       )
 
     assert :ok = Session.send_prompt(session, "write twice")
-    assert_receive {:agent_event, ^session, {:approval_pending, _first}}, @timeout
-    assert :ok = Session.respond_to_approval(session, :approve)
-    assert_receive {:agent_event, ^session, {:approval_pending, _second}}, @timeout
-    assert :ok = Session.respond_to_approval(session, :approve)
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending,
+                     %Public{target: %Target{tool_call_id: "first-call"} = first_target}}},
+                   @timeout
+
+    assert :ok = Session.respond_to_approval(session, first_target, :approve)
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending,
+                     %Public{target: %Target{tool_call_id: "prefix-call"} = second_target}}},
+                   @timeout
+
+    assert second_target.session_id == first_target.session_id
+    assert second_target.request_id == first_target.request_id
+
+    assert {:error, :approval_not_found} =
+             Session.respond_to_approval(session, first_target, :approve_session)
+
+    assert Session.list_tool_trust(session) == %{}
+    assert :ok = Session.respond_to_approval(session, second_target, :approve)
     await_done(session)
     assert File.read!(target(context)) == "written\nwritten\n"
+  end
+
+  test "a later provider group cannot recreate an approved target with different arguments",
+       context do
+    owner = self()
+    calls = :atomics.new(1, [])
+    install_write_tool(context)
+
+    assert {:ok, _} =
+             Options.set(context.options_name, :agent_tool_permissions, %{"prefix_write" => :ask})
+
+    client = fn model, messages, _options ->
+      count = :atomics.add_get(calls, 1, 1)
+      send(owner, {:reuse_group_request, count, messages})
+
+      chunks =
+        case count do
+          1 ->
+            [
+              StreamChunk.tool_call("prefix_write", %{"path" => "effect.txt"}, %{
+                id: "prefix-call"
+              }),
+              StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+
+          2 ->
+            [
+              StreamChunk.tool_call("prefix_write", %{"path" => "different.txt"}, %{
+                id: "prefix-call"
+              }),
+              StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+
+          _ ->
+            [StreamChunk.text("finished"), StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      stream_response(model, chunks)
+    end
+
+    session = start_session(context, provider_opts: [llm_client: client])
+    assert :ok = Session.send_prompt(session, "write the first file")
+
+    assert_receive {:agent_event, ^session,
+                    {:tool_started, "prefix_write", %{"path" => "effect.txt"}}},
+                   @timeout
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending,
+                     %Public{
+                       target: %Target{tool_call_id: "prefix-call"} = approval_target,
+                       args: %{"path" => "effect.txt"}
+                     }}},
+                   @timeout
+
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
+
+    assert_receive {:agent_event, ^session, {:approval_resolved, ^approval_target, :approve}},
+                   @timeout
+
+    assert_receive :callback_built, @timeout
+
+    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+                   @timeout
+
+    assert File.read!(target(context)) == "written\n"
+    assert_receive {:reuse_group_request, 2, second_group_messages}, @timeout
+
+    assert Enum.any?(second_group_messages, fn
+             %{role: :tool, tool_call_id: "prefix-call", metadata: %{is_error: false}} -> true
+             _ -> false
+           end)
+
+    assert_receive {:agent_event, ^session, {:error, message}}, @timeout
+    assert Session.editor_snapshot(session).error == message
+    assert Session.editor_snapshot(session).status == :error
+    assert Session.editor_snapshot(session).pending_approval == nil
+
+    assert Session.list_tool_trust(session) == %{}
+    assert :atomics.get(calls, 1) == 2
+    assert File.read!(target(context)) == "written\n"
+    refute File.exists?(Path.join(context.project, "different.txt"))
+    refute_received :callback_built
+    refute_received {:agent_event, ^session, {:approval_pending, _}}
+    refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
+    refute_received {:agent_event, ^session, {:tool_started, "prefix_write", _}}
+    refute_received {:agent_event, ^session, {:tool_ended, "prefix_write", _, _}}
+
+    session_id = Session.session_id(session)
+    assert :ok = Session.load_session(session, session_id)
+    assert Session.editor_snapshot(session).status == :idle
+    assert Session.editor_snapshot(session).pending_approval == nil
+
+    assert {:error, :stale_request} =
+             Session.respond_to_approval(session, approval_target, :approve_session)
+
+    assert Session.list_tool_trust(session) == %{}
+    assert File.read!(target(context)) == "written\n"
+    assert :atomics.get(calls, 1) == 2
+
+    assert {:ok, saved} =
+             SessionStore.load(Session.session_id(session), context.store_dir,
+               artifact_runtime: context.runtime
+             )
+
+    assert [%{tool_call_id: "prefix-call", metadata: %{is_error: false}} = result] =
+             Enum.filter(saved.continuation.messages, &(&1.role == :tool))
+
+    assert Enum.map_join(result.content, "", & &1.text) =~ "written"
   end
 
   test "approval can start its call while an admitted allowed sibling is still running",
@@ -956,9 +1101,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       )
 
     assert :ok = Session.send_prompt(session, "write")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
+
     assert_receive {:allowed_started, worker}, @timeout
-    assert :ok = Session.respond_to_approval(session, :approve)
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
 
     assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
                    @timeout
@@ -968,6 +1117,163 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     send(worker, :settle)
     await_done(session, "allowed_write")
     assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
+  end
+
+  test "an expired approval cannot retain its slot or grant trust while an allowed sibling runs",
+       context do
+    owner = self()
+    install_write_tool(context)
+
+    install_write_tool(
+      context,
+      "allowed\n",
+      fn ->
+        send(owner, {:allowed_started, self()})
+        receive do: (:settle -> :ok)
+      end,
+      "allowed_write"
+    )
+
+    permissions = %{"prefix_write" => :ask, "allowed_write" => :allow}
+    assert {:ok, _} = Options.set(context.options_name, :agent_tool_permissions, permissions)
+
+    config = %MingaAgent.Config{
+      compaction_threshold: nil,
+      tool_approval: Options.get(context.options_name, :agent_tool_approval),
+      tool_permissions: permissions,
+      destructive_tools: Options.get(context.options_name, :agent_destructive_tools),
+      approval_timeout_ms: 0
+    }
+
+    session =
+      start_session(context,
+        provider_opts: [config: config],
+        tool_calls: [
+          {"prefix_write", %{"path" => "effect.txt"}, "prefix-call"},
+          {"allowed_write", %{"path" => "allowed.txt"}, "allowed-call"}
+        ]
+      )
+
+    assert :ok = Session.send_prompt(session, "write")
+    assert_receive {:allowed_started, worker}, @timeout
+
+    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", result, :error}},
+                   @timeout
+
+    assert result =~ "approval timed out"
+
+    assert {:ok, saved} =
+             SessionStore.load(Session.session_id(session), context.store_dir,
+               artifact_runtime: context.runtime
+             )
+
+    target =
+      Target.new(
+        Session.session_id(session),
+        saved.continuation.tool_checkpoint.request_id,
+        "prefix-call"
+      )
+
+    assert Session.editor_snapshot(session).pending_approval == nil
+
+    assert {:error, :approval_not_found} =
+             Session.respond_to_approval(session, target, :approve_session)
+
+    assert Session.list_tool_trust(session) == %{}
+
+    refute File.exists?(target(context))
+    refute File.exists?(Path.join(context.project, "allowed.txt"))
+    send(worker, :settle)
+    await_done(session, "allowed_write")
+    assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
+    assert saved_tool_result(context, session).metadata.is_error
+  end
+
+  test "completion snapshot retry retires an expired approval without reopening its effect",
+       context do
+    owner = self()
+    install_write_tool(context)
+    assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :all)
+    requests = :atomics.new(1, [])
+
+    client = fn model, _messages, _options ->
+      case :atomics.add_get(requests, 1, 1) do
+        1 ->
+          stream_response(model, response_chunks(true, 1, []))
+
+        2 ->
+          send(owner, {:after_timeout, self()})
+          receive do: (:finish -> :ok)
+          stream_response(model, response_chunks(false, 2, []))
+      end
+    end
+
+    config = %MingaAgent.Config{
+      compaction_threshold: nil,
+      tool_approval: Options.get(context.options_name, :agent_tool_approval),
+      tool_permissions: Options.get(context.options_name, :agent_tool_permissions),
+      destructive_tools: Options.get(context.options_name, :agent_destructive_tools),
+      approval_timeout_ms: 0
+    }
+
+    session = start_session(context, provider_opts: [config: config, llm_client: client])
+    backup = Path.join(context.dir, "records-before-outcome")
+
+    on_exit(fn ->
+      if File.regular?(context.store_dir) and File.dir?(backup) do
+        File.rm!(context.store_dir)
+        File.rename!(backup, context.store_dir)
+      end
+    end)
+
+    debug = fn
+      count,
+      {:in,
+       {:"$gen_call", _from, {:complete_tool_effect, request_id, checkpoint_id, call_id, result}}},
+      _extra ->
+        next = count + 1
+
+        case next do
+          1 ->
+            File.rename!(context.store_dir, backup)
+            File.write!(context.store_dir, "temporarily unavailable snapshot directory")
+
+          2 ->
+            File.rm!(context.store_dir)
+            File.rename!(backup, context.store_dir)
+
+          _later ->
+            :ok
+        end
+
+        send(owner, {:completion_attempt, next, request_id, checkpoint_id, call_id, result})
+        next
+
+      count, _event, _extra ->
+        count
+    end
+
+    assert :ok = :sys.install(session, {debug, 0})
+    assert :ok = Session.send_prompt(session, "write")
+
+    assert_receive {:completion_attempt, 1, request_id, checkpoint_id, "prefix-call", result},
+                   @timeout
+
+    assert_receive {:completion_attempt, 2, ^request_id, ^checkpoint_id, "prefix-call", ^result},
+                   @timeout
+
+    assert_receive {:after_timeout, continuation_worker}, @timeout
+    target = Target.new(Session.session_id(session), request_id, "prefix-call")
+    assert Session.editor_snapshot(session).pending_approval == nil
+
+    assert {:error, :approval_not_found} =
+             Session.respond_to_approval(session, target, :approve_session)
+
+    assert Session.list_tool_trust(session) == %{}
+    refute File.exists?(target(context))
+    send(continuation_worker, :finish)
+    await_idle(session)
+    assert saved_tool_result(context, session).metadata.is_error
   end
 
   test "an allowed sibling settles while another call awaits approval and can be rejected",
@@ -991,14 +1297,17 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       )
 
     assert :ok = Session.send_prompt(session, "write")
-    assert_receive {:agent_event, ^session, {:approval_pending, _approval}}, @timeout
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
 
     assert_receive {:agent_event, ^session, {:tool_ended, "allowed_write", _result, _status}},
                    @timeout
 
     assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
     refute File.exists?(target(context))
-    assert :ok = Session.respond_to_approval(session, :reject)
+    assert :ok = Session.respond_to_approval(session, approval_target, :reject)
     await_done(session)
     assert saved_tool_result(context, session).metadata.is_error == true
 

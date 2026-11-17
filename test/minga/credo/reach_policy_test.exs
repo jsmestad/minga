@@ -2,7 +2,7 @@ Code.require_file("credo/checks/dependency_direction_check.exs")
 
 defmodule Minga.Credo.ReachPolicyTest do
   @moduledoc """
-  `.reach.exs` enforces runtime purity for the Layer 0 modules that `Minga.Credo.DependencyDirectionCheck` enforces dependency direction for. Both tools must agree on which modules those are.
+  `.reach.exs` mirrors global Layer 0 foundations and explicitly protects selected pure Agent-internal Level 0 values without promoting them into the global layer.
   """
 
   use ExUnit.Case, async: true
@@ -10,13 +10,14 @@ defmodule Minga.Credo.ReachPolicyTest do
   alias Minga.Credo.DependencyDirectionCheck
 
   @policy_path ".reach.exs"
+  @agent_pure_prefixes ["MingaAgent.Session.Transcript"]
 
   setup_all do
     {policy, _bindings} = Code.eval_file(@policy_path)
     %{allowed: get_in(policy, [:effects, :allowed]) || []}
   end
 
-  test "the effects policy names exactly the Credo Layer 0 modules, each with a child-module twin",
+  test "the effects policy names exactly global foundations and explicit pure Agent values, each with a child twin",
        %{
          allowed: allowed
        } do
@@ -29,7 +30,10 @@ defmodule Minga.Credo.ReachPolicyTest do
       |> Enum.map(&String.trim_trailing(&1, ".*"))
       |> MapSet.new()
 
-    credo = MapSet.new(DependencyDirectionCheck.layer_0_prefixes())
+    global = MapSet.new(DependencyDirectionCheck.layer_0_prefixes())
+    agent = MapSet.new(@agent_pure_prefixes)
+    assert MapSet.disjoint?(global, agent)
+    credo = MapSet.union(global, agent)
 
     assert MapSet.equal?(exact, credo),
            "Layer 0 modules missing from .reach.exs: #{inspect(MapSet.difference(credo, exact) |> Enum.sort())}; extra in .reach.exs: #{inspect(MapSet.difference(exact, credo) |> Enum.sort())}"
@@ -38,7 +42,9 @@ defmodule Minga.Credo.ReachPolicyTest do
            "Every Layer 0 entry needs a `.*` twin so child modules are covered as Credo covers them; missing twins: #{inspect(MapSet.difference(credo, twins) |> Enum.sort())}"
   end
 
-  test "every Layer 0 module is held to the same effect allowance", %{allowed: allowed} do
+  test "global foundations and explicit pure Agent values share the same effect allowance", %{
+    allowed: allowed
+  } do
     allowances =
       allowed |> Enum.map(fn {_pattern, effects} -> Enum.sort(effects) end) |> Enum.uniq()
 

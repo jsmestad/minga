@@ -6,6 +6,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   """
 
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -19,32 +20,36 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaAgent.Session
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
 
   @typep queued_prompt :: String.t() | [ReqLLM.Message.ContentPart.t()]
 
-  @doc "Installs an approval request, moves input focus, renders, and synchronizes the transcript."
-  @spec approval_pending(EditorState.t(), map()) :: EditorState.t()
-  def approval_pending(%EditorState{} = state, approval) when is_map(approval) do
-    cached = Map.take(approval, [:tool_call_id, :name, :args, :preview])
-    state = TraditionalWorkflow.install_agent_approval(state, cached)
+  @doc "Installs the originating Session's complete approval without changing composer focus."
+  @spec approval_pending(EditorState.t(), pid(), PublicApproval.t()) :: EditorState.t()
+  def approval_pending(%EditorState{} = state, session_pid, %PublicApproval{} = approval)
+      when is_pid(session_pid) do
+    binding = PendingApproval.new(session_pid, approval)
+    state = TraditionalWorkflow.install_agent_approval(state, binding)
     state = update_activity(state, &Activity.ensure_started_at/1)
-
-    state =
-      TraditionalWorkflow.install_agent_ui(
-        state,
-        PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
-      )
 
     state
     |> MingaEditor.schedule_render(16)
     |> AgentLifecycle.sync_transcript()
   end
 
-  @doc "Clears a resolved approval, renders, and synchronizes the transcript."
-  @spec approval_resolved(EditorState.t(), term()) :: EditorState.t()
-  def approval_resolved(%EditorState{} = state, _decision) do
+  @doc "Clears only the resolved approval attachment, renders, and synchronizes the transcript."
+  @spec approval_resolved(EditorState.t(), pid(), ApprovalTarget.t(), Session.approval_decision()) ::
+          EditorState.t()
+  def approval_resolved(
+        %EditorState{} = state,
+        session_pid,
+        %ApprovalTarget{} = target,
+        _decision
+      )
+      when is_pid(session_pid) do
     state
-    |> TraditionalWorkflow.clear_agent_approval()
+    |> TraditionalWorkflow.resolve_agent_approval(target, session_pid)
     |> MingaEditor.schedule_render(16)
     |> AgentLifecycle.sync_transcript()
   end

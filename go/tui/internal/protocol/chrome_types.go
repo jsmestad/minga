@@ -519,6 +519,7 @@ type AgentChatMessage struct {
 	Usage             AgentUsage
 	PreviewKind       byte
 	PreviewLines      []string
+	ApprovalTarget    AgentApprovalTarget
 }
 
 // AgentMarkdownBlock is a BEAM-authored semantic markdown block. Renderers must not infer block/card structure from styled-run flags.

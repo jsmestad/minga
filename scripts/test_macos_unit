@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Run ordinary MingaTests bare, then rebuild and reuse the hosted focus product."""
+"""Run bare units, isolated hosted focus suites, and external approval geometry."""
 
 import argparse
 import hashlib
+import math
+import os
 import json
 import re
 import plistlib
 import subprocess
+import signal
+import struct
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 
@@ -27,6 +32,8 @@ POLICY_FUNCTIONS = {
     "lifecycleAppliesOnlyDecodedOwner", "inlineStemSelectionPrecedesTyping",
     "productionInlineRebuildDoesNotCommit", "productionFieldsRegisterAfterLateInjection",
 }
+GEOMETRY_WIDTHS = (220, 320, 760)
+GEOMETRY_LABELS = {"Approve (y)", "Trust for session (a)", "Trust for this turn (t)", "Deny (n)"}
 
 
 def node_text(node):
@@ -318,16 +325,410 @@ def extract_result(bundle, kind, destination):
         return None
 
 
+def geometry_manifest(paths):
+    """Bind this finite test's inputs/products without relying on a dirty Git revision."""
+    files = set()
+    for path in paths:
+        if not path.exists():
+            raise ValueError(f"Missing geometry input/product: {path}")
+        if path.is_dir():
+            files.update(item for item in path.rglob("*") if item.is_file())
+        else:
+            files.add(path)
+    return {str(path.resolve()): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(files)}
+
+
+def geometry_json(path):
+    if not path.is_file() or path.stat().st_size > 1_048_576:
+        raise ValueError(f"Missing or oversized geometry receipt: {path}")
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict):
+        raise ValueError(f"Geometry receipt is not an object: {path}")
+    return value
+
+
+def geometry_finite(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def geometry_frame(value):
+    if not isinstance(value, dict) or set(value) != {"x", "y", "width", "height"} or not all(geometry_finite(value[key]) for key in value):
+        return False
+    right, bottom = value["x"] + value["width"], value["y"] + value["height"]
+    return value["width"] > 0 and value["height"] > 0 and geometry_finite(right) and geometry_finite(bottom) and right > value["x"] and bottom > value["y"]
+
+
+def geometry_contains(outer, inner):
+    return inner["x"] >= outer["x"] - 0.5 and inner["y"] >= outer["y"] - 0.5 and (
+        inner["x"] + inner["width"] <= outer["x"] + outer["width"] + 0.5
+    ) and inner["y"] + inner["height"] <= outer["y"] + outer["height"] + 0.5
+
+
+def validate_geometry_observation(value, directory, run_id, width, observer_pid, observer, host, host_pid):
+    """Accept real external observations, never a command exit or an invented XCTest count."""
+    errors = []
+    if value.get("schema") != "minga-approval-geometry-v2" or value.get("run_id") != run_id or value.get("width") != width:
+        return ["infrastructure: stale or mismatched geometry observation"], False
+    if value.get("kind") != "observation":
+        return [f"infrastructure: geometry acquisition failed: {value.get('failure')}"], False
+    identity, capture = value.get("host"), value.get("capture")
+    if not all(isinstance(item, dict) for item in (identity, capture)):
+        return ["infrastructure: missing host or capture identity"], False
+    if value.get("observer_pid") != observer_pid or canonical_path(value.get("observer_executable")) != str(observer.resolve()):
+        errors.append("infrastructure: observer execution identity does not match the launched product")
+    if type(identity.get("pid")) is not int or identity["pid"] != host_pid or canonical_path(identity.get("executable")) != str(host.resolve()) or identity.get("bundle_identifier") != "com.minga.test-host":
+        errors.append("infrastructure: wrong owned host identity")
+    if value.get("hit_oracle") != "system-wide-AX-hit-test":
+        errors.append("infrastructure: wrong external button hit-test oracle")
+    foreground = value.get("foreground")
+    if (
+        not isinstance(foreground, dict)
+        or type(foreground.get("initial_frontmost")) is not bool
+        or type(foreground.get("request_count")) is not int
+        or foreground["request_count"] != (0 if foreground["initial_frontmost"] else 1)
+        or foreground.get("observed_frontmost") is not True
+    ):
+        errors.append("infrastructure: missing or inconsistent native foreground acquisition")
+    try:
+        ready = geometry_json(directory / "host-ready.json")
+        if ready.get("schema") != "minga-approval-host-v1" or ready.get("run_id") != run_id or ready.get("width") != width:
+            raise ValueError("Host readiness belongs to another schema/run/width")
+        if any(ready.get(key) != identity.get(key) for key in ("pid", "executable", "bundle_identifier", "window_id")):
+            raise ValueError("Host-ready receipt contradicts the external host observation")
+    except (OSError, ValueError) as error:
+        errors.append(f"infrastructure: {error}")
+    bounds, scale = capture.get("point_bounds"), capture.get("scale")
+    captured = False
+    try:
+        if capture.get("filename") != "window.png" or capture.get("api") != "ScreenCaptureKit.SCScreenshotManager.desktopIndependentWindow":
+            raise ValueError("Missing exact owned-window capture")
+        if type(identity.get("window_id")) is not int or identity["window_id"] <= 0 or capture.get("window_id") != identity["window_id"] or capture.get("host_pid") != identity.get("pid"):
+            raise ValueError("Capture belongs to a different window/process")
+        if not geometry_frame(bounds) or not geometry_finite(scale) or scale <= 0:
+            raise ValueError("Invalid native capture bounds/scale")
+        ax_bounds = capture.get("ax_window_bounds")
+        if not geometry_frame(ax_bounds) or not geometry_contains(bounds, ax_bounds):
+            raise ValueError("The compositor capture does not contain its externally observed AX window")
+        image = directory / "window.png"
+        if not image.is_file() or not 24 <= image.stat().st_size <= 64 * 1024 * 1024:
+            raise ValueError("Missing or oversized retained PNG")
+        data = image.read_bytes()
+        if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR" or hashlib.sha256(data).hexdigest() != capture.get("sha256"):
+            raise ValueError("Retained PNG is corrupt or differs from the ImageIO-decoded bytes")
+        pixels = struct.unpack(">II", data[16:24])
+        dimensions = tuple(bounds[key] * scale for key in ("width", "height"))
+        if not all(geometry_finite(dimension) and 0 < dimension <= 0x7FFFFFFF for dimension in dimensions):
+            raise ValueError("Invalid native-scale PNG dimensions")
+        expected = tuple(int(math.floor(dimension + 0.5)) for dimension in dimensions)
+        if pixels != expected or pixels != (capture.get("pixel_width"), capture.get("pixel_height")) or pixels != (capture.get("decoded_pixel_width"), capture.get("decoded_pixel_height")):
+            raise ValueError("PNG/native-scale/ImageIO-decoded dimensions disagree")
+        captured = True
+    except (OSError, ValueError) as error:
+        errors.append(f"infrastructure: {error}")
+    workspace, buttons = value.get("workspace"), value.get("buttons")
+    if value.get("workspace_count") != 1 or not geometry_frame(workspace):
+        errors.append("assertion: expected one externally exposed positive workspace frame")
+        return errors, captured
+    if abs(workspace["width"] - width) > 0.5:
+        errors.append(f"assertion: actual workspace width is not {width} points")
+    if geometry_frame(bounds) and not geometry_contains(bounds, workspace):
+        errors.append("assertion: workspace escapes the captured owned window")
+    if not isinstance(buttons, list) or any(not isinstance(button, dict) for button in buttons):
+        errors.append("assertion: missing external button observations")
+        return errors, captured
+    titles = [button.get("title") for button in buttons]
+    if len(buttons) != 4 or any(not isinstance(title, str) for title in titles) or set(titles) != GEOMETRY_LABELS:
+        errors.append("assertion: expected all four exact approval controls, without duplicates")
+    valid = []
+    for button in buttons:
+        title, frame, label_width = button.get("title"), button.get("frame"), button.get("label_width")
+        if button.get("title_attribute") not in ("AXTitle", "AXDescription") or button.get("role") != "AXButton" or any(button.get(key) is not True for key in ("enabled", "press_capable", "center_hits_exact_button")):
+            errors.append(f"assertion: {title!r} is not an enabled, press-capable, externally hittable native button")
+        if not geometry_frame(frame):
+            errors.append(f"assertion: {title!r} has no positive finite external frame")
+            continue
+        valid.append(frame)
+        if not geometry_contains(workspace, frame):
+            errors.append(f"assertion: {title!r} escapes the workspace")
+        if not geometry_finite(label_width) or label_width <= 0 or frame["width"] + 0.5 < label_width:
+            errors.append(f"assertion: {title!r} cannot fit its actual native-font label width")
+    for index, left in enumerate(valid):
+        for right in valid[index + 1:]:
+            if min(left["x"] + left["width"], right["x"] + right["width"]) - max(left["x"], right["x"]) > 0.5 and min(left["y"] + left["height"], right["y"] + right["height"]) - max(left["y"], right["y"]) > 0.5:
+                errors.append("assertion: approval controls overlap")
+    return errors, captured
+
+
+def geometry_process_record(process, executable, pgid, cleanup=False):
+    if process is None:
+        status = "not_launched"
+    elif cleanup:
+        status = "terminated_reaped" if type(process.returncode) is int else "failed"
+    else:
+        status = "launched"
+    return {
+        "executable": str(executable.resolve()),
+        "pid": process.pid if process is not None else None,
+        "pgid": pgid,
+        "status": status,
+        "return_code": process.returncode if cleanup and process is not None else None,
+    }
+
+
+def validate_geometry_lifecycle(launch, cleanup, expected):
+    """Compare persisted facts to retained Popen identities, never use receipts as process authority."""
+    errors = []
+    for record, schema in ((launch, "minga-approval-geometry-launch-v2"), (cleanup, "minga-approval-geometry-cleanup-v1")):
+        if not isinstance(record, dict) or record.get("schema") != schema:
+            errors.append("infrastructure: missing or wrong geometry lifecycle schema")
+            continue
+        if any(record.get(key) != expected[key] for key in ("run_id", "width", "supervisor_pid")):
+            errors.append("infrastructure: stale or mismatched geometry lifecycle")
+        for role in ("host", "observer"):
+            actual, owner = record.get(role), expected[role]
+            if not isinstance(actual, dict) or any(actual.get(key) != owner[key] for key in ("pid", "pgid", "executable")):
+                errors.append(f"infrastructure: {role} lifecycle contradicts its owned process")
+                continue
+            if owner["pid"] is None:
+                if actual.get("status") != "not_launched" or any(actual.get(key) is not None for key in ("pid", "pgid", "return_code")):
+                    errors.append(f"infrastructure: {role} falsely claims it was not launched")
+            elif type(owner["pid"]) is not int or owner["pid"] <= 1 or owner["pgid"] != owner["pid"]:
+                errors.append(f"infrastructure: {role} lacks its fresh process-group identity")
+            elif schema.endswith("launch-v2"):
+                if actual.get("status") != "launched" or actual.get("return_code") is not None:
+                    errors.append(f"infrastructure: {role} has contradictory launch facts")
+            elif actual.get("status") != "terminated_reaped" or type(actual.get("return_code")) is not int or type(owner["return_code"]) is not int or actual["return_code"] != owner["return_code"]:
+                errors.append(f"infrastructure: {role} termination/reap was not observed")
+    if not isinstance(cleanup, dict) or cleanup.get("descriptors_closed") is not True or cleanup.get("errors") != []:
+        errors.append("infrastructure: geometry cleanup or descriptor closure is incomplete")
+    return errors
+
+
+def stop_geometry_process(process, role, errors, grace):
+    if process is None:
+        return
+    exited = process.poll()
+    if exited is not None:
+        if role == "host" and exited != 0:
+            errors.append(f"host exited unexpectedly before cleanup: {exited}")
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        pass  # Still require wait/reap below.
+    except OSError as error:
+        errors.append(f"{role} TERM failed: {error}")
+    try:
+        process.wait(timeout=grace)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError as error:
+        errors.append(f"{role} graceful wait failed: {error}")
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass  # Still require wait/reap below.
+    except OSError as error:
+        errors.append(f"{role} KILL failed: {error}")
+    try:
+        process.wait(timeout=grace)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        errors.append(f"{role} final wait/reap failed: {error}")
+
+
+def run_geometry_case(case, receipt, observer, host, cancelled, timeout=60, grace=2):
+    """Own both exact children and every descriptor through one unconditional cleanup path."""
+    processes = {"host": None, "observer": None}
+    groups = {"host": None, "observer": None}
+    executables = {"host": host, "observer": observer}
+    common = {"run_id": receipt["run_id"], "width": receipt["width"], "supervisor_pid": os.getpid()}
+    errors, cleanup_errors, logs = receipt["validation_errors"], [], []
+    receipt.update({"observed": False, "captured": False, "success": False, "cleanup_verified": False})
+    receipt["launch"] = {"schema": "minga-approval-geometry-launch-v2", **common, **{
+        role: geometry_process_record(None, executables[role], None) for role in processes
+    }}
+    try:
+        case.mkdir()
+        host_log, observer_log = case / "host.log", case / "observer.log"
+        logs.append(host_log.open("w"))
+        logs.append(observer_log.open("w"))
+        if cancelled() is not None:
+            raise ValueError("Geometry cancelled before host launch")
+        processes["host"] = subprocess.Popen(
+            [str(host)], stdin=subprocess.PIPE, stdout=logs[0], stderr=subprocess.STDOUT,
+            env={"MINGA_TEST_APPROVAL_WIDTH": str(receipt["width"]), "MINGA_APPROVAL_GEOMETRY_RUN_ID": receipt["run_id"], "MINGA_APPROVAL_GEOMETRY_READY": str((case / "host-ready.json").resolve())},
+            start_new_session=True,
+        )
+        groups["host"] = os.getpgid(processes["host"].pid)
+        receipt["launch"]["host"] = geometry_process_record(processes["host"], host, groups["host"])
+        if cancelled() is not None:
+            raise ValueError("Geometry cancelled after host launch")
+        command = [
+            str(observer), "--host-pid", str(processes["host"].pid), "--host-executable", str(host.resolve()),
+            "--ready-file", str((case / "host-ready.json").resolve()), "--width", str(receipt["width"]),
+            "--run-id", receipt["run_id"], "--output-dir", str(case.resolve()),
+        ]
+        receipt["command"] = command
+        processes["observer"] = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=logs[1], stderr=subprocess.STDOUT, start_new_session=True)
+        groups["observer"] = os.getpgid(processes["observer"].pid)
+        receipt["launch"]["observer"] = geometry_process_record(processes["observer"], observer, groups["observer"])
+        deadline = time.monotonic() + timeout
+        while True:
+            if cancelled() is not None:
+                raise ValueError("Geometry cancelled during acquisition")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                processes["observer"].wait(timeout=min(0.1, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        errors.append(f"infrastructure: {error}")
+    finally:
+        parent = processes["host"]
+        if parent is not None and parent.stdin is not None:
+            try:
+                parent.stdin.close()
+            except OSError as error:
+                cleanup_errors.append(f"host supervisor lifeline close failed: {error}")
+        # Service both handles independently even when the observer has already exited.
+        for role in ("observer", "host"):
+            stop_geometry_process(processes[role], role, cleanup_errors, grace)
+        for stream in logs:
+            try:
+                stream.close()
+            except OSError as error:
+                cleanup_errors.append(f"geometry log close failed: {error}")
+        launch = {"schema": "minga-approval-geometry-launch-v2", **common, **{
+            role: geometry_process_record(processes[role], executables[role], groups[role]) for role in processes
+        }}
+        expected = {**common, **{
+            role: geometry_process_record(processes[role], executables[role], groups[role], cleanup=True) for role in processes
+        }}
+        closed = all(stream.closed for stream in logs) and (parent is None or parent.stdin is None or parent.stdin.closed)
+        cleanup = {"schema": "minga-approval-geometry-cleanup-v1", **expected, "descriptors_closed": closed, "errors": cleanup_errors}
+        errors.extend(f"infrastructure: {error}" for error in cleanup_errors)
+        receipt.update({"launch": launch, "cleanup": cleanup, "exit_code": processes["observer"].returncode if processes["observer"] is not None else None})
+        try:
+            (case / "launch.json").write_text(json.dumps(launch, indent=2) + "\n")
+            (case / "cleanup.json").write_text(json.dumps(cleanup, indent=2) + "\n")
+            lifecycle_errors = validate_geometry_lifecycle(geometry_json(case / "launch.json"), geometry_json(case / "cleanup.json"), expected)
+            errors.extend(lifecycle_errors)
+            receipt["cleanup_verified"] = not lifecycle_errors
+        except (OSError, ValueError) as error:
+            errors.append(f"infrastructure: could not retain lifecycle evidence: {error}")
+        try:
+            if processes["observer"] is not None and processes["host"] is not None:
+                value = geometry_json(case / "observation.json")
+                validation, captured = validate_geometry_observation(value, case, receipt["run_id"], receipt["width"], processes["observer"].pid, observer, host, processes["host"].pid)
+                errors.extend(validation)
+                receipt["captured"] = captured
+                receipt["observed"] = value.get("kind") == "observation" and not any(error.startswith("infrastructure:") for error in errors)
+            if receipt["exit_code"] != 0:
+                errors.append(f"infrastructure: observer did not finish acquisition successfully: {receipt['exit_code']}")
+        except (OSError, ValueError) as error:
+            errors.append(f"infrastructure: {error}")
+        receipt["success"] = not errors and receipt["observed"] and receipt["captured"] and receipt["cleanup_verified"]
+        try:
+            (case / "case-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        except OSError as error:
+            errors.append(f"infrastructure: could not retain case receipt: {error}")
+            receipt["success"] = False
+
+
+def approval_geometry_action(run):
+    return {
+        "name": "approval-geometry", "summary": None, "tests": None, "test_process_ids": [],
+        "success": False, "executed": False, "exit_code": 125, "seconds": 0,
+        "log": str((run / "approval-geometry.log").relative_to(run.parent)), "validation_errors": [], "cases": [],
+        "attempted_widths": [], "observed_widths": [], "captured_widths": [], "passed_widths": [],
+    }
+
+
+def run_approval_geometry(root, products, run, action):
+    started = time.monotonic()
+    log = run / "approval-geometry.log"
+    errors = action["validation_errors"]
+    try:
+        sources = [root / name for name in ("macos/Sources", "macos/TestSupport", "macos/.generated", "macos/project.yml", "macos/Minga.xcodeproj/project.pbxproj", "scripts/test_macos_unit")]
+        before = geometry_manifest(sources)
+        command = ["xcodebuild", "build", "-project", "Minga.xcodeproj", "-scheme", "MingaApprovalGeometry", "-configuration", "Debug", "-derivedDataPath", str(products.parent.parent), "CODE_SIGNING_ALLOWED=NO", "-destination", "platform=macOS"]
+        action["command"], action["executed"] = command, True
+        with log.open("w") as stream:
+            action["exit_code"] = subprocess.run(command, cwd=root / "macos", stdout=stream, stderr=subprocess.STDOUT, check=False, timeout=300).returncode
+        if action["exit_code"] != 0:
+            raise ValueError(f"Geometry host/observer build exited {action['exit_code']}; log={log}")
+        if before != geometry_manifest(sources):
+            raise ValueError("Geometry source/build graph changed during the build")
+        observer = products / "Debug/minga-approval-geometry"
+        app = products / "Debug/MingaTestHost.app"
+        host = app / "Contents/MacOS/MingaTestHost"
+        if not os.access(observer, os.X_OK) or not os.access(host, os.X_OK):
+            raise ValueError("Current geometry host/observer executable is missing")
+        artifacts = geometry_manifest([observer, app, products / "Debug/MingaUI.framework"])
+        action["source_manifest"], action["product_manifest"] = before, artifacts
+        evidence = run / "approval-geometry"
+        evidence.mkdir()
+        cancelled, previous = [None], {}
+
+        def record_cancellation(signum, _frame):
+            if cancelled[0] is None:
+                cancelled[0] = signum
+
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                previous[signum] = signal.getsignal(signum)
+                signal.signal(signum, record_cancellation)
+            for width in GEOMETRY_WIDTHS:
+                receipt = {"width": width, "run_id": str(uuid.uuid4()), "validation_errors": [], "exit_code": None}
+                action["cases"].append(receipt)
+                action["attempted_widths"].append(width)
+                run_geometry_case(evidence / str(width), receipt, observer, host, lambda: cancelled[0])
+                for field, observed in (("observed_widths", "observed"), ("captured_widths", "captured"), ("passed_widths", "success")):
+                    if receipt[observed]:
+                        action[field].append(width)
+                errors.extend(f"{width}: {error}" for error in receipt["validation_errors"])
+                if cancelled[0] is not None:
+                    raise ValueError(f"Geometry cancelled by signal {cancelled[0]}; all owned children serviced")
+                if not receipt["cleanup_verified"]:
+                    raise ValueError(f"Geometry {width} did not prove complete owned cleanup; no further host launched")
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+        if before != geometry_manifest(sources) or artifacts != geometry_manifest([observer, app, products / "Debug/MingaUI.framework"]):
+            raise ValueError("Geometry source/build products changed during observation")
+        if action["passed_widths"] != list(GEOMETRY_WIDTHS):
+            errors.append("assertion: all three real workspace widths must pass with retained captures")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        errors.append(f"infrastructure: {error}")
+    finally:
+        action["seconds"] = time.monotonic() - started
+        action["success"] = not errors and action["passed_widths"] == list(GEOMETRY_WIDTHS)
+    return action
+
+
 def save_results(output, actions, started):
     def total(key):
-        return sum(action["summary"][key] for action in actions if isinstance(action["summary"], dict) and type(action["summary"].get(key)) is int)
+        return sum(action["summary"][key] for action in actions if action["name"] != "approval-geometry" and isinstance(action["summary"], dict) and type(action["summary"].get(key)) is int)
 
+    geometry = next((action for action in actions if action["name"] == "approval-geometry"), {})
+    geometry_ready = geometry.get("summary") is None and geometry.get("tests") is None and all(
+        geometry.get(key) == list(GEOMETRY_WIDTHS) for key in ("attempted_widths", "observed_widths", "captured_widths", "passed_widths")
+    )
     result = {
         "actions": actions,
         "total_passed_tests": total("passedTests"),
         "total_failed_tests": total("failedTests"),
         "seconds": time.monotonic() - started,
-        "success": len(actions) == 3 and all(action["success"] for action in actions),
+        "success": {action["name"] for action in actions} == {"ordinary", "focus-policy", "focus-replay", "approval-geometry"} and len(actions) == 4 and all(action["success"] for action in actions) and geometry_ready,
     }
     (output / "results.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
@@ -342,7 +743,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix="run-", dir=output))
     common = ["-project", "Minga.xcodeproj", "-scheme", "MingaUnitTests", "-configuration", "Debug", "-derivedDataPath", str(root / "macos/DerivedData"), "CODE_SIGNING_ALLOWED=NO"]
-    # Three actions, never three selectors in one runner: Swift Testing's per-suite .serialized trait does not serialize unrelated suites.
+    # Separate processes preserve focus isolation; geometry uses an external UI consumer.
     selections = [
         ("ordinary", "test", ["-only-testing:MingaTests", f"-skip-testing:MingaTests/{POLICY}", f"-skip-testing:MingaTests/{REPLAY}"]),
         ("focus-policy", "test-without-building", [f"-only-testing:MingaTests/{POLICY}"]),
@@ -428,6 +829,21 @@ def main():
             print(f"{'PASS' if action['success'] else 'FAIL'} {name}: xcresult: {bundle}\nTest log: {log}")
             for error in action["validation_errors"]:
                 print(error)
+        geometry = approval_geometry_action(run)
+        actions.append(geometry)
+        save_results(output, actions, started)
+        # A standalone host build must not replace the hosted products consumed by later replay.
+        geometry_products = root / "macos/DerivedData/ApprovalGeometry/Build/Products"
+        run_approval_geometry(root, geometry_products, run, geometry)
+        if actions[2]["success"]:
+            geometry["validation_errors"].extend(
+                f"infrastructure: geometry changed the hosted replay product: {error}"
+                for error in validate_build_identity(hosted_settings, products, True)
+            )
+            geometry["success"] = geometry["success"] and not geometry["validation_errors"]
+        print(f"{'PASS' if geometry['success'] else 'FAIL'} approval-geometry: actual widths: {geometry['passed_widths']}\nGeometry log: {geometry['log']}")
+        for error in geometry["validation_errors"]:
+            print(error)
     finally:
         result = save_results(output, actions, started)
         print(f"Native unit results: {output / 'results.json'}")

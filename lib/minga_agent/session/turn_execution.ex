@@ -193,7 +193,7 @@ defmodule MingaAgent.Session.TurnExecution do
   def request_approval(%__MODULE__{}, %ToolApproval{}), do: :rejected
 
   @doc "Resolves the matching pending approval and restores the active runtime phase."
-  @spec resolve_approval(t(), String.t() | nil, approval_decision()) ::
+  @spec resolve_approval(t(), String.t(), approval_decision()) ::
           {:ok, ToolApproval.t(), t()} | {:error, :approval_not_found | :no_pending_approval}
   def resolve_approval(
         %__MODULE__{
@@ -202,7 +202,8 @@ defmodule MingaAgent.Session.TurnExecution do
         approval_id,
         decision
       )
-      when decision in [:approve, :approve_session, :approve_turn, :reject] do
+      when is_binary(approval_id) and
+             decision in [:approve, :approve_session, :approve_turn, :reject] do
     resolve_matching_approval(execution, activity, approval, error, approval_id, decision)
   end
 
@@ -503,7 +504,7 @@ defmodule MingaAgent.Session.TurnExecution do
           activity(),
           ToolApproval.t(),
           String.t() | nil,
-          String.t() | nil,
+          String.t(),
           approval_decision()
         ) ::
           {:ok, ToolApproval.t(), t()} | {:error, :approval_not_found}
@@ -515,16 +516,19 @@ defmodule MingaAgent.Session.TurnExecution do
          approval_id,
          _decision
        )
-       when is_binary(approval_id) and approval.tool_call_id != approval_id,
+       when approval.tool_call_id != approval_id,
        do: {:error, :approval_not_found}
 
-  defp resolve_matching_approval(execution, activity, approval, error, _approval_id, decision) do
-    next =
-      execution
-      |> maybe_put_decision_trust(approval, decision)
-      |> then(&%{&1 | phase: {:active, activity, nil, error}})
-
-    {:ok, approval, next}
+  defp resolve_matching_approval(
+         execution,
+         activity,
+         %ToolApproval{tool_call_id: approval_id} = approval,
+         error,
+         approval_id,
+         decision
+       ) do
+    execution = maybe_put_decision_trust(execution, approval, decision)
+    {:ok, approval, %{execution | phase: {:active, activity, nil, error}}}
   end
 
   @spec approval_from_event(Event.ToolApproval.t()) :: ToolApproval.t()

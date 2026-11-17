@@ -3,8 +3,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: AgentChatMessageCodec
   alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolApproval.Public, as: PublicApproval
+  alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
+  alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -19,6 +22,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias Minga.RenderModel.UI.AgentChat.Usage
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Window.Content
+
+  @typep approval :: PublicApproval.t()
 
   @spec build(Context.t()) :: AgentChat.t()
   def build(ctx) do
@@ -55,7 +60,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     full_pairs = panel.transcript.message_pairs
     full_styled_cache = resolve_styled_cache(panel, ctx.intent.frame.theme)
-    pending_approval = shell_agent.pending_approval
+    pending_approval = PendingApproval.public(shell_agent.pending_approval)
 
     # Resident transcript (#2654): the projection display-start scoped conversation for
     # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
@@ -150,27 +155,57 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
   end
 
-  @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil, map() | nil) :: [
+  # A tool ID can recur; a pending target decorates only its latest transcript occurrence.
+  @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil, approval() | nil) :: [
           {pos_integer(), term()}
         ]
-  defp build_gui_messages(messages_with_ids, nil, pending_approval) do
-    Enum.map(messages_with_ids, fn message ->
-      message |> maybe_inline_approval(pending_approval) |> to_core_message()
-    end)
+  defp build_gui_messages(messages_with_ids, nil, nil) do
+    Enum.map(messages_with_ids, &to_core_message/1)
   end
 
-  defp build_gui_messages(messages_with_ids, styled_cache, pending_approval)
-       when is_list(styled_cache) do
+  defp build_gui_messages(messages_with_ids, nil, %PublicApproval{} = pending_approval) do
+    {messages, _remaining} =
+      :lists.mapfoldr(
+        fn message, approval ->
+          projected = message |> maybe_inline_approval(approval) |> to_core_message()
+          {projected, remaining_approval(message, approval)}
+        end,
+        pending_approval,
+        messages_with_ids
+      )
+
+    messages
+  end
+
+  defp build_gui_messages(messages_with_ids, styled_cache, nil) when is_list(styled_cache) do
     padded = pad_cache(styled_cache, length(messages_with_ids))
 
     messages_with_ids
     |> Enum.zip(padded)
     |> Enum.map(fn message ->
-      message |> maybe_style_message(pending_approval) |> to_core_message()
+      message |> maybe_style_message(nil) |> to_core_message()
     end)
   end
 
-  @spec maybe_style_message({{pos_integer(), term()}, term()}, map() | nil) ::
+  defp build_gui_messages(messages_with_ids, styled_cache, %PublicApproval{} = pending_approval)
+       when is_list(styled_cache) do
+    padded = pad_cache(styled_cache, length(messages_with_ids))
+    entries = Enum.zip(messages_with_ids, padded)
+
+    {messages, _remaining} =
+      :lists.mapfoldr(
+        fn {message, _cache_entry} = entry, approval ->
+          projected = entry |> maybe_style_message(approval) |> to_core_message()
+          {projected, remaining_approval(message, approval)}
+        end,
+        pending_approval,
+        entries
+      )
+
+    messages
+  end
+
+  @spec maybe_style_message({{pos_integer(), term()}, term()}, approval() | nil) ::
           {pos_integer(), term()}
   defp maybe_style_message({{id, {:assistant, _text} = msg}, nil}, _pending_approval),
     do: {id, msg}
@@ -224,8 +259,21 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp maybe_styled_tool_call(id, _tc, _cache_entry, fallback), do: {id, fallback}
 
-  @spec maybe_inline_approval({pos_integer(), term()}, map() | nil) :: {pos_integer(), term()}
-  defp maybe_inline_approval({id, {:tool_call, tc}}, %{tool_call_id: tool_call_id} = approval)
+  @spec remaining_approval({pos_integer(), term()}, approval() | nil) :: approval() | nil
+  defp remaining_approval(
+         {_id, {:tool_call, %ToolCall{id: tool_call_id}}},
+         %PublicApproval{target: %ApprovalTarget{tool_call_id: tool_call_id}}
+       ),
+       do: nil
+
+  defp remaining_approval(_message, approval), do: approval
+
+  @spec maybe_inline_approval({pos_integer(), term()}, approval() | nil) ::
+          {pos_integer(), term()}
+  defp maybe_inline_approval(
+         {id, {:tool_call, %ToolCall{status: :running} = tc}},
+         %PublicApproval{target: %ApprovalTarget{tool_call_id: tool_call_id}} = approval
+       )
        when tc.id == tool_call_id do
     {id, {:approval_tool_call, tc, approval}}
   end
@@ -283,16 +331,27 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     }
   end
 
-  @spec approval_view(ToolCall.t(), map()) :: ApprovalView.t()
-  defp approval_view(%ToolCall{} = tc, approval) do
-    preview = Map.get(approval, :preview) || ToolApproval.build_preview(tc.name, tc.args)
+  @spec approval_view(ToolCall.t(), approval()) :: ApprovalView.t()
+  defp approval_view(
+         %ToolCall{} = tc,
+         %PublicApproval{
+           target: %ApprovalTarget{
+             session_id: session_id,
+             request_id: request_id,
+             tool_call_id: tool_call_id
+           }
+         } = approval
+       ) do
+    preview = approval.preview
 
     %ApprovalView{
       name: tc.name,
-      tool_call_id: Map.get(approval, :tool_call_id, tc.id),
-      summary: Map.get(preview, :summary) || tool_call_summary(tc),
-      preview_kind: Map.get(preview, :kind, :args),
-      preview_lines: Map.get(preview, :lines, [])
+      tool_call_id: tool_call_id,
+      session_id: session_id,
+      request_id: request_id,
+      summary: preview.summary,
+      preview_kind: preview.kind,
+      preview_lines: preview.lines
     }
   end
 

@@ -220,12 +220,10 @@ defmodule Minga.Keymap.ScopeTest do
   end
 
   describe "help_groups/2" do
-    test "agent scope returns chat help by default" do
+    test "agent chat help includes navigation instructions" do
       groups = Scope.help_groups(:agent, :chat)
-      assert [_ | _] = groups
-      assert {"Navigation", bindings} = List.first(groups)
-      assert is_list(bindings)
-      assert Enum.any?(bindings, fn {key, _desc} -> String.contains?(key, "j") end)
+      assert {"Navigation", bindings} = List.keyfind(groups, "Navigation", 0)
+      assert Enum.any?(bindings, fn {key, _desc} -> key == "j / k" end)
     end
 
     test "agent chat help advertises only the all-toggle collapse binding" do

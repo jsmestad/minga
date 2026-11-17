@@ -183,6 +183,14 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec chat_help() :: [Minga.Keymap.Scope.help_group()]
   defp chat_help do
     [
+      {"Tool approval (composer unfocused)",
+       [
+         {"Esc Esc (Vim)", "Leave INSERT, then leave prompt editing"},
+         {"y / Enter", "Approve the displayed request once"},
+         {"a", "Trust this tool for this session"},
+         {"t", "Trust this tool for this turn"},
+         {"n / Esc", "Deny the displayed request"}
+       ]},
       {"Navigation",
        [
          {"j / k", "Scroll down / up"},
