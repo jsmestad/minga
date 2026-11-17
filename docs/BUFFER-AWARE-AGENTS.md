@@ -6,9 +6,30 @@ How AI agents edit in-memory buffers instead of the filesystem, and why the BEAM
 
 ## Status
 
-Phases 1 and 2 are shipped. Agent file tools route through `MingaAgent.ToolRouter`, which checks for open buffers (fork path) before falling through to the changeset overlay or direct filesystem I/O. Buffer forking with three-way merge works. Changeset overlays handle filesystem-level isolation for shell commands.
+Agent file tools route through `MingaAgent.ToolRouter` to the session's owned buffer, fork, or changeset. A conditional mutation compares the full source revision and commits inside that owner's callback. There is no filesystem write fallback, including in native headless sessions. Fork publication keeps the existing three-way merge and conflict path.
 
 The sections below describe the design rationale and prior art analysis that motivated this work. Implementation details live in `MingaAgent.ToolRouter`, `MingaAgent.BufferForkStore`, `Minga.Buffer.Fork`, and `MingaAgent.Changeset`.
+
+## Atomic file edits
+
+An agent must not overwrite a newer human edit or leave half a batch applied. Read the complete file with `read_file`, then copy its `expected_revision` token into one `edit_file` call:
+
+```json
+{
+  "path": "lib/math.ex",
+  "expected_revision": "<token from the complete read_file result>",
+  "edits": [
+    {"old_text": "def add(a, b), do: a - b", "new_text": "def add(a, b), do: a + b"},
+    {"old_text": "# subtract two numbers", "new_text": "# add two numbers"}
+  ]
+}
+```
+
+The owner prepares replacements in order against the prepared content. Each `old_text` must be nonempty and match exactly once, including overlapping occurrences. Later edits see earlier changes but cannot replace bytes inserted by an earlier edit. A stale revision or a missing, ambiguous, overlapping, or invalid edit rejects the complete batch and identifies the failing edit. A successful file batch creates one undo entry and one version increment. Range-only reads do not authorize whole-file mutations.
+
+Use `write_file` with `mode: "create"` and `expected_revision: "absent"` for creation. Use `mode: "replace"` with a full read revision for whole-file replacement. `delete_file` also requires the full read revision. Approval and read-only policy still apply. The former `multi_edit_file` and `apply_diff` tools are removed; `edit_file` is the only advertised existing-file matching engine.
+
+Atomicity covers one file, not a transaction across files. Each file reports its own outcome. Session edits remain in the existing review view until publication. A newer disk edit is preserved and sent through reconciliation, not overwritten. Portable filesystems do not provide compare-and-swap against arbitrary external writers, so publication does not claim that guarantee. Deleting an open file preserves the parent buffer's bytes; it does not close or discard the user's buffer.
 
 ---
 

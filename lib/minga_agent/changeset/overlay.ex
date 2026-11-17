@@ -7,6 +7,8 @@ defmodule MingaAgent.Changeset.Overlay do
   Build artifact and cache directories are skipped. `MIX_BUILD_PATH` points inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path.
   """
 
+  import Bitwise, only: [band: 2]
+
   @typedoc "Overlay state."
   @type t :: %__MODULE__{
           overlay_dir: String.t(),
@@ -34,7 +36,7 @@ defmodule MingaAgent.Changeset.Overlay do
   @empty_stats %{copied_files: 0, copied_bytes: 0, skipped_dirs: 0}
 
   @doc """
-  Creates a new lazy overlay directory for the project.
+  Creates a private lazy overlay directory for the project.
 
   The project tree is not copied during creation. Files are materialized when written or when command execution asks for a writable view.
   """
@@ -61,15 +63,22 @@ defmodule MingaAgent.Changeset.Overlay do
     overlay_dir = Path.join(System.tmp_dir!(), "minga-overlay-#{id}")
     build_dir = Path.join(overlay_dir, "_build")
 
-    case File.mkdir_p(overlay_dir) do
+    case File.mkdir(overlay_dir) do
       :ok ->
-        {:ok,
-         %__MODULE__{
-           overlay_dir: overlay_dir,
-           project_root: project_root,
-           build_dir: build_dir,
-           link_mode: :copy
-         }}
+        case File.chmod(overlay_dir, 0o700) do
+          :ok ->
+            {:ok,
+             %__MODULE__{
+               overlay_dir: overlay_dir,
+               project_root: project_root,
+               build_dir: build_dir,
+               link_mode: :copy
+             }}
+
+          {:error, reason} ->
+            cleanup = File.rmdir(overlay_dir)
+            {:error, {:chmod_failed, overlay_dir, reason, cleanup}}
+        end
 
       {:error, reason} ->
         {:error, {:mkdir_failed, overlay_dir, reason}}
@@ -113,6 +122,109 @@ defmodule MingaAgent.Changeset.Overlay do
       end
     end
   end
+
+  @doc "Installs a prepared mutation without removing prior bytes on failure. Private copies retain overlay ownership and source access permissions, not ownership-dependent special bits."
+  @spec commit_file(t(), String.t(), binary() | :deleted) :: :ok | {:error, term()}
+  def commit_file(%__MODULE__{} = overlay, relative_path, prepared) do
+    with :ok <- reject_tombstone_relative_path(relative_path),
+         {:ok, target} <- safe_target(overlay, relative_path),
+         :ok <- File.mkdir_p(Path.dirname(target)),
+         :ok <- regular_or_absent(target),
+         :ok <- regular_or_absent(tombstone_path(target)),
+         {:ok, metadata} <- commit_metadata(overlay, relative_path, target, prepared) do
+      commit_prepared(target, prepared, metadata)
+    end
+  end
+
+  @spec commit_prepared(String.t(), binary() | :deleted, File.Stat.t() | nil) ::
+          :ok | {:error, term()}
+  defp commit_prepared(target, prepared, metadata) do
+    {destination, retired, bytes} =
+      case prepared do
+        :deleted -> {tombstone_path(target), target, ""}
+        content -> {target, tombstone_path(target), content}
+      end
+
+    suffix = ".#{System.unique_integer([:positive])}"
+    temporary = destination <> suffix <> ".tmp"
+    backup = retired <> suffix <> ".backup"
+
+    result =
+      with :ok <- File.write(temporary, bytes, [:binary, :exclusive]),
+           :ok <- preserve_access_mode(temporary, metadata),
+           {:ok, backed_up?} <- backup_retired(retired, backup) do
+        case File.rename(temporary, destination) do
+          :ok ->
+            File.rm(backup)
+            :ok
+
+          {:error, reason} ->
+            rollback_commit(reason, retired, backup, backed_up?)
+        end
+      end
+
+    File.rm(temporary)
+    result
+  end
+
+  @spec preserve_access_mode(String.t(), File.Stat.t() | nil) :: :ok | {:error, term()}
+  defp preserve_access_mode(_path, nil), do: :ok
+
+  defp preserve_access_mode(path, %File.Stat{mode: mode}) do
+    File.chmod(path, band(mode, 0o777))
+  end
+
+  @spec rollback_commit(term(), String.t(), String.t(), boolean()) :: {:error, term()}
+  defp rollback_commit(reason, retired, backup, backed_up?) do
+    case rollback_retired(retired, backup, backed_up?) do
+      :ok -> {:error, reason}
+      {:error, rollback} -> {:error, {:commit_failed, reason, rollback}}
+    end
+  end
+
+  @spec commit_metadata(t(), String.t(), String.t(), binary() | :deleted) ::
+          {:ok, File.Stat.t() | nil} | {:error, term()}
+  defp commit_metadata(_overlay, _relative_path, _target, :deleted), do: {:ok, nil}
+
+  defp commit_metadata(overlay, relative_path, target, _content) do
+    case File.stat(target) do
+      {:ok, metadata} ->
+        {:ok, metadata}
+
+      {:error, :enoent} ->
+        case File.stat(Path.join(overlay.project_root, relative_path)) do
+          {:ok, metadata} -> {:ok, metadata}
+          {:error, :enoent} -> {:ok, nil}
+          {:error, _} = error -> error
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  @spec regular_or_absent(String.t()) :: :ok | {:error, term()}
+  defp regular_or_absent(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular}} -> :ok
+      {:ok, _} -> {:error, :invalid_overlay_target}
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec backup_retired(String.t(), String.t()) :: {:ok, boolean()} | {:error, term()}
+  defp backup_retired(retired, backup) do
+    case File.rename(retired, backup) do
+      :ok -> {:ok, true}
+      {:error, :enoent} -> {:ok, false}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec rollback_retired(String.t(), String.t(), boolean()) :: :ok | {:error, term()}
+  defp rollback_retired(retired, backup, true), do: File.rename(backup, retired)
+  defp rollback_retired(_retired, _backup, false), do: :ok
 
   @doc """
   Materializes the project into the overlay for shell command execution.

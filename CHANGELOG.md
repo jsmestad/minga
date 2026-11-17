@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
+- The Go TUI preserves every step in a finite wheel burst, including direction changes and source-bound composer scrolling, without waiting for another input event. Pointer-motion throttling, modifiers and surface routing are unchanged.
+- Terminal Agent transcripts apply validated frame changes to paged resident storage without cloning or reindexing retained history. Stable message occurrences and reading anchors survive updates, and rejected frames preserve the last-good transcript.
 - Background Agent writes preserve the selected Review and retained draft. Selected-file updates freeze the last-good review as stale until explicit refresh; unrelated paths do not replace it. Changed files stay in a fixed timeline without moving the composer or footer controls. Back resumes draft input, and shared source-bound Refresh and independent Help remain available in both frontends. Read-only Review wrapping preserves boundary characters beside scrollbar indicators, and narrow terminal file labels keep the filename visible.
 - Composer keys now reach the active editing model against the retained prompt. Canonical and native arrow encodings no longer insert private-use key glyphs, shifted Unicode text remains intact, and Normal-mode Tab can reach retained Review while the draft stays focused.
 - Release preparation produces the complete five-build candidate as immutable GitHub Actions artifacts, with final-byte checksums, provenance and a separate read-only verification rehearsal. It does not create a tag or GitHub Release, update the Homebrew tap, or push changelog changes to main.
@@ -48,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Agent edits keep private overlay ownership instead of attempting to adopt a project file's group, which could reject valid macOS edits with `:eperm`. Owner-only staging directories prevent access widening, staged scripts retain their access permissions, and final atomic publication still preserves the original file's metadata.
+- Agent startup prepares the draft before its first frame. macOS composer clicks restore Agent keybindings after sidebar focus, and Follow output remains available when a turn is idle without taking space away from the transcript.
 - Codex models such as GPT-5.6 Luna can continue conversations instead of stopping silently after the first reply. Replay qualification checks the exact official transport and captured inputs, including a bounded path for previously unqualified records. Rejected prompts retain their drafts and report failures; pre-admission refusal no longer adds a misleading user entry.
 - Go Messages label and color log entries by their committed severity. Errors show `ERR` instead of `OK`, warnings show `WRN`, and informational entries show `INF`.
 - Agent workspace switches preserve each conversation's transcript and draft, clear stale launchpad routing, and restore composer input instead of creating an Untitled buffer. Returning to the editor without an available target keeps Agent input usable.

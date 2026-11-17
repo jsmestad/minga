@@ -38,7 +38,7 @@ func reviewStatusCommand(t *testing.T, review *protocol.StatusReview) protocol.C
 func reviewFooterModel(t *testing.T, width uint16, freshness protocol.ReviewFreshness) (Model, protocol.StatusReview) {
 	t.Helper()
 	review := protocol.StatusReview{Path: "/project/optional/path/shared.ex", Freshness: freshness, Generation: 0x1234ABCD, ItemID: "opaque:é/+% item\x00"}
-	model := New(width, 12, nil, nil)
+	model := New(width, 12, nil)
 	applyProductionFrame(&model, 1, 0, 1, testThemeCommand(), reviewStatusCommand(t, &review), focusOwnerCommand(0, 0))
 	model.layout = model.computeLayout()
 	model.viewport.SetHeight(model.layout.body.Height)

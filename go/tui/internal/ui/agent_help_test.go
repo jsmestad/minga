@@ -50,7 +50,7 @@ func helpPlacement(width, height uint16) protocol.Command {
 
 func helpModel(t *testing.T, width, height uint16) Model {
 	t.Helper()
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	applyProductionFrame(&model, 1, 0, 1, testThemeCommand(), focusOwnerCommand(0, 0),
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
 			Opcode:    generated.OPGuiAgentChat,
@@ -214,7 +214,7 @@ func TestAgentHelpRespectsHigherModalPrecedenceAndCommittedOwner(t *testing.T) {
 }
 
 func TestAgentHeaderHelpUsesNamedCommandWithoutChangingDraft(t *testing.T) {
-	model := New(80, 24, nil, nil)
+	model := New(80, 24, nil)
 	chat := protocol.AgentChat{Visible: true, ModelName: "provider/model", Prompt: "unchanged draft", PromptCursorCol: 4, PromptVimMode: 1}
 	model.chrome[generated.OPGuiAgentChat] = protocol.ChromePayload{AgentChat: chat}
 	model.viewport.SetContent(model.content())

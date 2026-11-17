@@ -249,8 +249,6 @@ defmodule Minga.Config.OptionsTest do
       default_tools = [
         "write_file",
         "edit_file",
-        "multi_edit_file",
-        "apply_diff",
         "delete_file",
         "shell",
         "git_stage",

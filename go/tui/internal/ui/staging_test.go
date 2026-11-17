@@ -99,7 +99,7 @@ func applyTo(t *testing.T, model Model, commands ...protocol.Command) Model {
 // reject too, but none may duplicate recovery with request_keyframe.
 func TestInvalidationNeverAutomaticallyRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 8)
-	m := New(80, 24, out, nil)
+	m := New(80, 24, out)
 
 	// First invalidation: commit with no open transaction.
 	m = applyTo(t, m, commitFrame(7))
@@ -125,7 +125,7 @@ func TestInvalidationNeverAutomaticallyRequestsKeyframe(t *testing.T) {
 
 func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 	out := make(chan []byte, 8)
-	m := New(80, 24, out, nil)
+	m := New(80, 24, out)
 
 	m = applyTo(t, m, commitFrame(7))
 	packets := drainOutboundPackets(out)
@@ -167,7 +167,7 @@ func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 }
 
 func TestStaleRecoveryGenerationIsConsumedWithoutPublication(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	freshBegin := beginFrame(1, 0)
 	freshBegin.Generation = 11
 	model = applyTo(t, model, freshBegin, testThemeCommand(), windowRowsCommand(1, "fresh"), commitFrame(1))
@@ -188,7 +188,7 @@ func TestStaleRecoveryGenerationIsConsumedWithoutPublication(t *testing.T) {
 
 func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 
 	// Commit a first keyframe so there is a known baseline frame on screen.
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "committed line"), commitFrame(1))
@@ -215,7 +215,7 @@ func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 // AC-3: commit applies the staged frame atomically.
 func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "first frame"), commitFrame(1))
 
 	// Stage the next frame across two separate packets, committing only at the end.
@@ -239,7 +239,7 @@ func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 
 func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model,
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -251,7 +251,7 @@ func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates
 
 	model.transcript.truncated = true
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot, row: 1}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot, row: 1}
 	model.transcript.pendingScroll = -3
 	model.transcript.pinTransition = pinScrolledAway
 	beforeTheme := model.chrome[generated.OPGuiTheme].Theme.Colors[themeEditorBG]
@@ -293,7 +293,7 @@ func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates
 	if got := model.chrome[generated.OPGuiTheme].Theme.Colors[themeEditorBG]; got != beforeTheme {
 		t.Fatalf("invalid transcript published sibling chrome %#x", got)
 	}
-	if model.transcript.epoch != 1 || len(model.transcript.messages) != 1 || model.transcript.messages[0].ID != 1 || !model.transcript.truncated || model.transcript.pinned || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -3 || model.transcript.pinTransition != pinScrolledAway {
+	if model.transcript.epoch != 1 || model.transcript.len() != 1 || model.transcript.entry(0).message.ID != 1 || !model.transcript.truncated || model.transcript.pinned || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -3 || model.transcript.pinTransition != pinScrolledAway {
 		t.Fatalf("invalid transcript changed live transcript state: %+v", model.transcript)
 	}
 
@@ -307,13 +307,13 @@ func TestInvalidTranscriptRejectsCompleteFrameAndRecoveryKeyframeRestoresUpdates
 	if model.resyncPending {
 		t.Fatal("recovery keyframe did not clear pending resync")
 	}
-	if model.lastCommittedSeq != 3 || model.windows[1].Rows[0].Text != "recovered" || model.transcript.epoch != 2 || model.transcript.messages[0].ID != 9 || !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
+	if model.lastCommittedSeq != 3 || model.windows[1].Rows[0].Text != "recovered" || model.transcript.epoch != 2 || model.transcript.entry(0).message.ID != 9 || !model.transcript.pinned || model.transcript.anchor != (transcriptAnchor{}) {
 		t.Fatalf("recovery keyframe did not publish complete state: seq=%d window=%q transcript=%+v", model.lastCommittedSeq, model.windows[1].Rows[0].Text, model.transcript)
 	}
 }
 
 func TestMultipleTranscriptCommandsFoldInOrderAndPublishOnce(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	model = applyTo(t, model,
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -323,7 +323,7 @@ func TestMultipleTranscriptCommandsFoldInOrderAndPublishOnce(t *testing.T) {
 		commitFrame(1),
 	)
 
-	if got, want := ids(model.transcript.messages), []uint32{1, 2, 3}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+	if got, want := ids(testTranscriptMessages(model.transcript)), []uint32{1, 2, 3}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("ordered transcript fold = %v, want %v", got, want)
 	}
 }
@@ -342,7 +342,7 @@ func TestTranscriptPreparationRejectsEveryInvalidTransition(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			out := make(chan []byte, 16)
-			model := New(40, 8, out, nil)
+			model := New(40, 8, out)
 			seedCommands := []protocol.Command{beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline")}
 			if tt.seed != nil {
 				seedCommands = append(seedCommands, transcriptCommand(*tt.seed))
@@ -351,7 +351,7 @@ func TestTranscriptPreparationRejectsEveryInvalidTransition(t *testing.T) {
 			model.applyCommands(seedCommands)
 			drainOutboundPackets(out)
 
-			before := model.transcript.detachedCandidate()
+			before := testTranscriptSnapshot(model.transcript)
 			model.applyCommands([]protocol.Command{beginFrame(2, 1), transcriptCommand(tt.bad), commitFrame(2)})
 
 			if model.lastCommittedSeq != 1 || !reflect.DeepEqual(model.transcript, before) {
@@ -378,7 +378,7 @@ func TestTranscriptPreparationRejectsEveryInvalidTransition(t *testing.T) {
 }
 
 func TestSameEpochFullReplacementPreservesReadingPosition(t *testing.T) {
-	model := New(40, 8, nil, nil)
+	model := New(40, 8, nil)
 	model.applyCommands([]protocol.Command{
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -386,7 +386,7 @@ func TestSameEpochFullReplacementPreservesReadingPosition(t *testing.T) {
 		commitFrame(1),
 	})
 	model.transcript.pinned = false
-	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entries[0].slot, row: 1}
+	model.transcript.anchor = transcriptAnchor{slot: model.transcript.entry(0).slot, row: 1}
 	model.transcript.pendingScroll = -2
 
 	model.applyCommands([]protocol.Command{
@@ -395,10 +395,10 @@ func TestSameEpochFullReplacementPreservesReadingPosition(t *testing.T) {
 		commitFrame(2),
 	})
 
-	if model.transcript.pinned || model.transcript.anchor.slot != model.transcript.entries[0].slot || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -2 {
+	if model.transcript.pinned || model.transcript.anchor.slot != model.transcript.entry(0).slot || model.transcript.anchor.row != 1 || model.transcript.pendingScroll != -2 {
 		t.Fatalf("same-epoch replacement reset reading position: %+v", model.transcript)
 	}
-	if got := ids(model.transcript.messages); len(got) != 1 || got[0] != 3 {
+	if got := ids(testTranscriptMessages(model.transcript)); len(got) != 1 || got[0] != 3 {
 		t.Fatalf("same-epoch replacement messages = %v, want [3]", got)
 	}
 }
@@ -411,7 +411,7 @@ func transcriptFrame(frame protocol.AgentTranscript) *protocol.AgentTranscript {
 // for a keyframe; the prior committed frame stays on screen.
 func TestTruncatedTransactionRejectsAndKeepsPriorFrame(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(7, 0), testThemeCommand(), windowRowsCommand(1, "good frame"), commitFrame(7))
 	drainKeyframeRequests(t, out) // clear
 
@@ -437,7 +437,7 @@ func TestTruncatedTransactionRejectsAndKeepsPriorFrame(t *testing.T) {
 // request and keeps the prior frame.
 func TestStreamErrorInsideTransactionRejects(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(3, 0), testThemeCommand(), windowRowsCommand(1, "stable"), commitFrame(3))
 	drainKeyframeRequests(t, out)
 
@@ -465,7 +465,7 @@ func TestStreamErrorInsideTransactionRejects(t *testing.T) {
 // must not request a keyframe.
 func TestStreamErrorOutsideTransactionIsHarmless(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, protocol.Command{Kind: protocol.CommandStreamError})
 	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
 		t.Fatalf("out-of-band stream error must not request a keyframe: %v", reqs)
@@ -475,7 +475,7 @@ func TestStreamErrorOutsideTransactionIsHarmless(t *testing.T) {
 // AC-2: a commit whose seq does not match the open begin is rejected.
 func TestCommitSeqMismatchRejects(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(10, 0), testThemeCommand(), windowRowsCommand(1, "base"), commitFrame(10))
 	drainKeyframeRequests(t, out)
 
@@ -496,7 +496,7 @@ func TestCommitSeqMismatchRejects(t *testing.T) {
 // is rejected without a second automatic recovery trigger.
 func TestBaseMismatchRejects(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(20, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(20))
 	drainKeyframeRequests(t, out)
 
@@ -515,7 +515,7 @@ func TestBaseMismatchRejects(t *testing.T) {
 // commits.
 func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(30, 0), testThemeCommand(), windowRowsCommand(1, "ok"), commitFrame(30))
 
 	// Force an invalidation (double begin).
@@ -545,7 +545,7 @@ func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 // Out-of-band no-op compatibility commands, such as font setup decoded by the TUI only for sizing, must not invalidate the frame stream.
 func TestOutOfBandNoopDoesNotRequestKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 
 	model = applyTo(t, model, protocol.Command{Kind: protocol.CommandNoop})
 
@@ -560,7 +560,7 @@ func TestOutOfBandNoopDoesNotRequestKeyframe(t *testing.T) {
 // Out-of-band allowance: set_title, set_window_bg, and clipboard_write arriving with no open transaction apply directly as sanctioned side channels and do NOT request a keyframe.
 func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 
 	model = applyTo(t, model,
 		protocol.Command{Kind: protocol.CommandSetTitle, Title: "minga - file.ex"},
@@ -586,7 +586,7 @@ func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 // staged model: it must NOT apply and is reported by typed rejection only.
 func TestSemanticCommandOutsideTransactionRejects(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	model = applyTo(t, model, beginFrame(50, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(50))
 	drainKeyframeRequests(t, out)
 
@@ -604,7 +604,7 @@ func TestSemanticCommandOutsideTransactionRejects(t *testing.T) {
 // commit_frame produces a sample.
 func TestLatencyResolvesOnCommit(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out, nil)
+	model := New(40, 8, out)
 	seq := model.latency.Stamp()
 
 	model = applyTo(t, model, beginFrame(60, 0), testThemeCommand(), windowRowsCommand(1, "frame"))

@@ -17,7 +17,7 @@ func focusOwnerCommand(responder, surface byte) protocol.Command {
 }
 
 func multipleVisibleFocusSurfaces(owner *protocol.Command) Model {
-	model := New(80, 30, nil, nil)
+	model := New(80, 30, nil)
 	commands := []protocol.Command{
 		testThemeCommand(),
 		{Kind: protocol.CommandChrome, Chrome: pickerChrome(3, 0)},
@@ -168,7 +168,7 @@ func TestCommittedOwnerChoosesOnlyItsOwnRetainedPreviewActivation(t *testing.T) 
 }
 
 func TestLaunchpadLeaderOwnerPreventsNavigationBehindWhichKey(t *testing.T) {
-	model := New(80, 30, nil, nil)
+	model := New(80, 30, nil)
 	applyProductionFrame(&model, 1, 0, 1,
 		testThemeCommand(),
 		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{

@@ -25,7 +25,7 @@ func residentSemanticFixture(t *testing.T) (Model, protocol.WindowContent) {
 		ScrollSet: true,
 		Scroll:    protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, LayoutGeneration: 1, VisibleStartLine: 0, VisibleEndLine: 3, OverscanStartLine: 0, OverscanEndLine: 8},
 	}
-	model := New(12, 8, nil, nil)
+	model := New(12, 8, nil)
 	model.putWindow(window)
 	semantic, err := applyResidentSemantics(nil, protocol.ResidentSemantics{
 		ResidentSemanticsHeader: protocol.ResidentSemanticsHeader{

@@ -21,7 +21,7 @@ func productionComplexityModel(t *testing.T, count int) Model {
 		TotalLines: uint32(count), TotalVisualRows: uint32(count),
 	}
 	scroll := protocol.ScrollPresentation{WindowID: 1, VisibleStartLine: uint32(middle), VisibleEndLine: uint32(middle + visible), OverscanStartLine: 0, OverscanEndLine: uint32(count), ContentEpoch: 1}
-	model := New(80, visible, nil, nil)
+	model := New(80, visible, nil)
 	model = applyTo(t, model,
 		beginFrame(1, 0), testThemeCommand(),
 		protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{

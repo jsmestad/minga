@@ -113,6 +113,26 @@ defmodule MingaAgent.ToolsTest do
       end
     end
 
+    test "exposes only the revision-checked mutation schemas", %{tmp_dir: dir} do
+      specs = Map.new(Tools.all(project_root: dir), &{&1.name, &1})
+      refute Map.has_key?(specs, "multi_edit_file")
+      refute Map.has_key?(specs, "apply_diff")
+
+      edit = specs["edit_file"].parameter_schema
+      assert edit["required"] == ["path", "expected_revision", "edits"]
+      assert edit["properties"]["expected_revision"]["type"] == "string"
+      assert edit["properties"]["edits"]["minItems"] == 1
+      assert edit["properties"]["edits"]["items"]["required"] == ["old_text", "new_text"]
+      assert edit["properties"]["edits"]["items"]["properties"]["old_text"]["minLength"] == 1
+      refute Map.has_key?(edit["properties"], "old_text")
+      refute Map.has_key?(edit["properties"], "find")
+
+      write = specs["write_file"].parameter_schema
+      assert write["required"] == ["path", "mode", "content", "expected_revision"]
+      assert write["properties"]["mode"]["enum"] == ["create", "replace"]
+      assert specs["delete_file"].parameter_schema["required"] == ["path", "expected_revision"]
+    end
+
     test "subagent accepts background and model input without backend selection", %{
       tmp_dir: dir
     } do
@@ -148,8 +168,9 @@ defmodule MingaAgent.ToolsTest do
       assert Tools.destructive?("delete_file")
     end
 
-    test "apply_diff is destructive by default" do
-      assert Tools.destructive?("apply_diff")
+    test "removed mutation tools are not classified as destructive" do
+      refute Tools.destructive?("multi_edit_file")
+      refute Tools.destructive?("apply_diff")
     end
 
     test "read_file is not destructive by default" do

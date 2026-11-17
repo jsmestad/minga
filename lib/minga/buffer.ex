@@ -14,6 +14,7 @@ defmodule Minga.Buffer do
   alias Minga.Buffer.ChangeLog
   alias Minga.Buffer.CursorContext
   alias Minga.Buffer.Document
+  alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Buffer.SaveIntent
 
@@ -25,8 +26,6 @@ defmodule Minga.Buffer do
   @type motion_fun :: BufferProcess.motion_fun()
   @type text_edit :: BufferProcess.text_edit()
   @type boundary :: BufferProcess.boundary()
-  @type replace_edit :: BufferProcess.replace_edit()
-  @type replace_result :: BufferProcess.replace_result()
   @type save_intent :: SaveIntent.t()
 
   # ── Lifecycle ──────────────────────────────────────────────────────
@@ -380,10 +379,22 @@ defmodule Minga.Buffer do
           {:ok, String.t()} | {:error, String.t()}
   defdelegate find_and_replace(server, old_text, new_text, boundary \\ nil), to: BufferProcess
 
-  @doc "Find and replace multiple patterns atomically."
-  @spec find_and_replace_batch(t(), [replace_edit()], boundary()) ::
-          {:ok, [replace_result()]} | {:error, String.t()}
-  defdelegate find_and_replace_batch(server, edits, boundary \\ nil), to: BufferProcess
+  @doc "Validates the full source revision and commits an entire file mutation as one undo entry."
+  @spec conditional_mutate(
+          t(),
+          FileMutation.expectation(),
+          FileMutation.operation(),
+          FileMutation.identity()
+        ) :: :ok | {:error, term()}
+  defdelegate conditional_mutate(server, expected, operation, identity), to: BufferProcess
+
+  @doc "Publishes a fork deletion only while its original parent content is current, retaining the open buffer."
+  @spec publish_fork_deletion(
+          t(),
+          String.t(),
+          (-> :ok | {:conflict, term()} | {:error, term()})
+        ) :: :ok | {:conflict, term()} | {:error, term()}
+  defdelegate publish_fork_deletion(server, ancestor, publication), to: BufferProcess
 
   @doc "Append text to the end of the buffer."
   @spec append(t(), String.t()) :: :ok

@@ -940,9 +940,14 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec maybe_update_workspace_project_view(state(), Workspace.t(), ProjectView.t() | nil) ::
           state()
   defp maybe_update_workspace_project_view(state, %Workspace{} = workspace, project_view) do
-    state
-    |> update_workspace_project_view(workspace.id, project_view)
-    |> maybe_refresh_provider_project_view(workspace_session(workspace), project_view)
+    case maybe_refresh_provider_project_view(workspace_session(workspace), project_view) do
+      :ok ->
+        update_workspace_project_view(state, workspace.id, project_view)
+
+      {:error, reason} ->
+        Minga.API.message("Agent editable view was not changed: #{inspect(reason)}")
+        state
+    end
   end
 
   @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::
@@ -969,27 +974,16 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp update_workspace_project_view(state, _workspace_id, _project_view), do: state
 
-  @spec maybe_refresh_provider_project_view(state(), pid() | nil, ProjectView.t() | nil) ::
-          state()
-  defp maybe_refresh_provider_project_view(state, session, project_view) when is_pid(session) do
+  @spec maybe_refresh_provider_project_view(pid() | nil, ProjectView.t() | nil) ::
+          :ok | {:error, term()}
+  defp maybe_refresh_provider_project_view(session, project_view) when is_pid(session) do
     case Session.get_provider(session) do
-      nil ->
-        state
-
-      provider ->
-        refresh_provider_project_view(state, provider, project_view)
+      nil -> :ok
+      provider -> MingaAgent.Providers.Native.refresh_project_view(provider, project_view)
     end
   catch
-    :exit, _ -> state
+    :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
 
-  defp maybe_refresh_provider_project_view(state, _session, _project_view), do: state
-
-  @spec refresh_provider_project_view(state(), pid(), ProjectView.t() | nil) :: state()
-  defp refresh_provider_project_view(state, provider, project_view) do
-    :ok = MingaAgent.Providers.Native.refresh_project_view(provider, project_view)
-    state
-  catch
-    :exit, _ -> state
-  end
+  defp maybe_refresh_provider_project_view(_session, _project_view), do: :ok
 end

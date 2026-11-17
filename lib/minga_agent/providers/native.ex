@@ -110,6 +110,7 @@ defmodule MingaAgent.Providers.Native do
           tools: [term()],
           project_root: String.t(),
           project_view: ProjectView.t() | nil,
+          owned_project_view?: boolean(),
           max_retries: non_neg_integer(),
           credential_opts: keyword(),
           authentication: MingaAgent.Credentials.Binding.t() | nil,
@@ -277,7 +278,7 @@ defmodule MingaAgent.Providers.Native do
     requested_thinking = Keyword.get(opts, :thinking_level)
     selection = initial_selection!(opts, config, model, requested_thinking)
     project_root = Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
-    project_view = Keyword.get(opts, :project_view)
+    requested_view = Keyword.get(opts, :project_view)
 
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
@@ -289,8 +290,7 @@ defmodule MingaAgent.Providers.Native do
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
 
-    {fork_store, changeset} =
-      init_fork_store_and_changeset(project_view, project_root, opts)
+    {project_view, fork_store, changeset} = init_edit_view(requested_view, project_root)
 
     tool_metadata = %{
       parent_session: subscriber,
@@ -377,6 +377,7 @@ defmodule MingaAgent.Providers.Native do
       fork_store: fork_store,
       changeset: changeset,
       project_view: project_view,
+      owned_project_view?: requested_view == nil,
       base_tools: base_tools,
       mcp_tools: mcp_tools,
       internal_tools: internal_tools,
@@ -601,33 +602,19 @@ defmodule MingaAgent.Providers.Native do
   @spec configured_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
   defp configured_mcp_servers_from_state(state), do: state.configured_mcp_configs
 
-  @spec init_fork_store_and_changeset(ProjectView.t() | nil, String.t(), keyword()) ::
-          {pid() | nil, pid() | nil}
-  defp init_fork_store_and_changeset(%ProjectView{}, _project_root, _opts), do: {nil, nil}
+  @spec init_edit_view(ProjectView.t() | nil, String.t()) ::
+          {ProjectView.t(), pid() | nil, pid() | nil}
+  defp init_edit_view(%ProjectView{} = view, _project_root), do: {view, nil, nil}
 
-  defp init_fork_store_and_changeset(_project_view, project_root, opts) do
-    {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
-    Process.monitor(fork_store)
-    changeset = maybe_create_changeset(project_root, opts)
-    {fork_store, changeset}
-  end
+  defp init_edit_view(nil, project_root) do
+    case ProjectView.overlay(project_root) do
+      {:ok, %ProjectView{ref: %{fork_store: fork_store, changeset: changeset}} = view} ->
+        Process.monitor(fork_store)
+        Process.monitor(changeset)
+        {view, fork_store, changeset}
 
-  @spec maybe_create_changeset(String.t(), keyword()) :: pid() | nil
-  defp maybe_create_changeset(project_root, opts) do
-    if Keyword.get(opts, :changeset, false) do
-      case MingaAgent.Changeset.create(project_root) do
-        {:ok, cs} ->
-          Process.monitor(cs)
-          cs
-
-        {:error, reason} ->
-          Log.warning(
-            :agent,
-            "[Agent.Native] changeset creation failed: #{inspect(reason)}"
-          )
-
-          nil
-      end
+      {:error, reason} ->
+        raise "agent editable view unavailable: #{inspect(reason)}"
     end
   end
 
@@ -1097,17 +1084,24 @@ defmodule MingaAgent.Providers.Native do
     {:reply, reply, state}
   end
 
+  def handle_call({:refresh_project_view, view}, _from, %{project_view: view} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:refresh_project_view, nil}, _from, %{owned_project_view?: true} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:refresh_project_view, _view}, _from, %{streaming: true} = state),
+    do: {:reply, {:error, :request_active}, state}
+
+  def handle_call({:refresh_project_view, _view}, _from, %{active_request: request} = state)
+      when request != nil,
+      do: {:reply, {:error, :request_active}, state}
+
   def handle_call({:refresh_project_view, project_view}, _from, state) do
-    base_tools =
-      state
-      |> refresh_base_tools(project_view)
-      |> filter_base_tools_for_read_only(state.read_only?)
-
-    tools =
-      (base_tools ++ state.mcp_tools ++ state.internal_tools)
-      |> filter_tool_allowlist(state.tool_allowlist)
-
-    {:reply, :ok, %{state | project_view: project_view, base_tools: base_tools, tools: tools}}
+    case refresh_edit_view(state, project_view) do
+      {:ok, updated} -> {:reply, :ok, updated}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:update_internal_state, fun}, _from, state) when is_function(fun, 1) do
@@ -1327,7 +1321,7 @@ defmodule MingaAgent.Providers.Native do
       when is_pid(pid) do
     Log.warning(
       :agent,
-      "[Agent.Native] fork store crashed, continuing without fork isolation"
+      "[Agent.Native] fork store crashed; file mutations remain unavailable"
     )
 
     {:noreply, rebuild_tools(%{state | fork_store: nil})}
@@ -1337,7 +1331,7 @@ defmodule MingaAgent.Providers.Native do
       when is_pid(pid) do
     Log.warning(
       :agent,
-      "[Agent.Native] changeset crashed, continuing without filesystem isolation"
+      "[Agent.Native] changeset crashed; file mutations remain unavailable"
     )
 
     {:noreply, rebuild_tools(%{state | changeset: nil})}
@@ -1380,8 +1374,7 @@ defmodule MingaAgent.Providers.Native do
   @impl true
   def terminate(reason, state) do
     stop_registered_tool_workers(state.tool_workers)
-    cleanup_fork_store(state.fork_store)
-    cleanup_changeset(state.changeset, reason)
+    cleanup_edit_view(state, reason)
     cleanup_mcp(state.mcp_registry)
     :ok
   catch
@@ -1680,76 +1673,90 @@ defmodule MingaAgent.Providers.Native do
 
   # ── Terminate cleanup ──────────────────────────────────────────────────────
 
-  @spec cleanup_fork_store(pid() | nil) :: :ok
-  defp cleanup_fork_store(nil), do: :ok
+  @spec cleanup_edit_view(state(), term()) :: :ok
+  defp cleanup_edit_view(%{owned_project_view?: false}, _reason), do: :ok
 
-  defp cleanup_fork_store(fs) when is_pid(fs) do
-    if Process.alive?(fs) do
-      results = MingaAgent.BufferForkStore.merge_all_keep_failed(fs)
+  defp cleanup_edit_view(%{project_view: view}, reason) when reason in [:normal, :shutdown] do
+    case ProjectView.promote(view, :project_root) do
+      :ok ->
+        ProjectView.close(view)
 
-      Enum.each(results, fn
-        {_path, :ok} ->
-          :ok
-
-        {p, {:conflict, _}} ->
-          Log.warning(:agent, "[Agent.Native] fork merge conflict on #{p}")
-
-        {p, {:error, r}} ->
-          Log.warning(:agent, "[Agent.Native] fork merge failed for #{p}: #{inspect(r)}")
-      end)
-
-      if Enum.all?(results, fn {_path, result} -> result == :ok end) do
-        MingaAgent.BufferForkStore.stop(fs)
-      else
+      {:conflict, details} ->
         Log.warning(
           :agent,
-          "[Agent.Native] preserving failed fork drafts after merge cleanup"
+          "[Agent.Native] preserving editable view after merge conflict: #{inspect(details)}"
         )
-      end
+
+      {:error, error} ->
+        Log.warning(
+          :agent,
+          "[Agent.Native] preserving editable view after publication failure: #{inspect(error)}"
+        )
     end
 
     :ok
   end
 
-  @spec cleanup_changeset(pid() | nil, term()) :: :ok
-  defp cleanup_changeset(nil, _reason), do: :ok
+  defp cleanup_edit_view(%{project_view: view}, _reason) do
+    case ProjectView.discard(view) do
+      :ok ->
+        ProjectView.close(view)
 
-  defp cleanup_changeset(cs, reason) when is_pid(cs) do
-    if Process.alive?(cs) do
-      if reason == :normal or reason == :shutdown do
-        merge_changeset(cs)
-      else
-        MingaAgent.Changeset.discard(cs)
-      end
+      {:error, error} ->
+        Log.warning(:agent, "[Agent.Native] editable view cleanup failed: #{inspect(error)}")
     end
 
     :ok
   end
+
+  @spec refresh_edit_view(state(), ProjectView.t() | nil) :: {:ok, state()} | {:error, term()}
+  defp refresh_edit_view(%{owned_project_view?: true} = state, nil), do: {:ok, state}
+  defp refresh_edit_view(%{project_view: view} = state, view), do: {:ok, state}
+
+  defp refresh_edit_view(state, nil) do
+    {view, fork_store, changeset} = init_edit_view(nil, state.project_root)
+
+    install_refreshed_view(%{
+      state
+      | project_view: view,
+        owned_project_view?: true,
+        fork_store: fork_store,
+        changeset: changeset
+    })
+  end
+
+  defp refresh_edit_view(state, view) do
+    with :ok <- release_owned_edit_view(state) do
+      install_refreshed_view(%{
+        state
+        | project_view: view,
+          owned_project_view?: false,
+          fork_store: nil,
+          changeset: nil
+      })
+    end
+  end
+
+  @spec install_refreshed_view(state()) :: {:ok, state()}
+  defp install_refreshed_view(state) do
+    base_tools =
+      state
+      |> refresh_base_tools(state.project_view)
+      |> filter_base_tools_for_read_only(state.read_only?)
+
+    tools =
+      (base_tools ++ state.mcp_tools ++ state.internal_tools)
+      |> filter_tool_allowlist(state.tool_allowlist)
+
+    {:ok, %{state | base_tools: base_tools, tools: tools}}
+  end
+
+  @spec release_owned_edit_view(state()) :: :ok | {:error, term()}
+  defp release_owned_edit_view(%{owned_project_view?: false}), do: :ok
+  defp release_owned_edit_view(%{project_view: view}), do: ProjectView.close(view)
 
   @spec cleanup_mcp(MCPRegistry.t() | nil) :: :ok
   defp cleanup_mcp(registry), do: MCPRegistry.stop_all(registry)
-
-  @spec merge_changeset(pid()) :: :ok
-  defp merge_changeset(cs) do
-    case MingaAgent.Changeset.merge(cs) do
-      :ok ->
-        Log.info(:agent, "[Agent.Native] changeset merged successfully")
-
-      {:conflict, _details} ->
-        Log.warning(
-          :agent,
-          "[Agent.Native] changeset merge found conflicts; discarding legacy changeset"
-        )
-
-        MingaAgent.Changeset.discard(cs)
-
-      {:error, merge_reason} ->
-        Log.warning(
-          :agent,
-          "[Agent.Native] changeset merge failed: #{inspect(merge_reason)}"
-        )
-    end
-  end
 
   # ── Agent turn loop (runs in a Task) ────────────────────────────────────────
 
@@ -2697,7 +2704,7 @@ defmodule MingaAgent.Providers.Native do
     |> format_executor_result()
   end
 
-  @file_tools ~w(edit_file multi_edit_file apply_diff write_file delete_file)
+  @file_tools ~w(edit_file write_file delete_file)
 
   @spec capture_file_before(loop_ctx(), map()) :: String.t() | nil
   defp capture_file_before(%LoopCtx{} = lctx, %{name: name, arguments: %{"path" => path}})
@@ -2768,16 +2775,8 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @spec file_changed_path(loop_ctx(), String.t()) :: String.t()
-  defp file_changed_path(%LoopCtx{} = lctx, path) do
-    if lctx.project_view do
-      case ToolRouter.filesystem_path_result(tool_router_context(lctx), path) do
-        {:ok, filesystem_path} -> filesystem_path
-        {:error, _} -> resolved_tool_path(lctx.project_root, path)
-      end
-    else
-      resolved_tool_path(lctx.project_root, path)
-    end
-  end
+  defp file_changed_path(%LoopCtx{} = lctx, path),
+    do: resolved_tool_path(lctx.project_root, path)
 
   @spec read_deleted_tool_content(loop_ctx(), String.t()) :: String.t() | nil
   defp read_deleted_tool_content(%LoopCtx{} = lctx, path) do
@@ -2866,10 +2865,10 @@ defmodule MingaAgent.Providers.Native do
     do: throw({:tool_storage_failed, reason})
 
   defp format_executor_result({:ok, %Output{} = output}),
-    do: {output.view, false, false, output}
+    do: {format_output(output), false, false, output}
 
   defp format_executor_result({:error, %Output{} = output}),
-    do: {output.view, true, false, output}
+    do: {format_output(output), true, false, output}
 
   defp format_executor_result({:error, %Limitation{} = limitation}),
     do: {Limitation.message(limitation), true, false, nil}
@@ -2879,6 +2878,20 @@ defmodule MingaAgent.Providers.Native do
 
   defp format_executor_result({:error, reason}),
     do: {format_error(reason), true, false, nil}
+
+  @spec format_output(Output.t()) :: String.t()
+  defp format_output(
+         %Output{capture: :complete, revision: %MingaAgent.Tool.Output.Revision{} = revision} =
+           output
+       ) do
+    if MingaAgent.Tool.Output.Revision.full_source?(revision) do
+      output.view <> "\n[expected_revision: #{MingaAgent.Tool.Output.Revision.token(revision)}]"
+    else
+      output.view <> "\n[range revision only; read the complete file before mutation]"
+    end
+  end
+
+  defp format_output(%Output{} = output), do: output.view
 
   @spec deterministic_output(String.t()) :: Output.t()
   defp deterministic_output(text) when is_binary(text) do
@@ -3275,6 +3288,9 @@ defmodule MingaAgent.Providers.Native do
 
   <rules>
   - Read files before editing them and verify changes with appropriate tests.
+  - Use edit_file for one ordered batch per file. Copy expected_revision from a complete read_file result. A rejected batch commits nothing; read again after a stale revision.
+  - Use write_file with mode=create and expected_revision=absent for new files, or mode=replace and a full read revision for replacements. delete_file also requires a full read revision.
+  - Atomicity is one file only. Report each file's outcome separately. Never claim cross-file transactions or bypass revision checks with shell writes.
   - Use the advertised tools for discovery, inspection and changes.
   - Be concise. Show file paths clearly.
   </rules>

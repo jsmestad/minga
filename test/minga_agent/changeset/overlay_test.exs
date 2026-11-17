@@ -15,14 +15,14 @@ defmodule MingaAgent.Changeset.OverlayTest do
   end
 
   describe "create/1" do
-    test "creates an empty lazy overlay", %{project: project} do
+    test "creates an empty private lazy overlay", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
 
       assert File.dir?(overlay.overlay_dir)
+      assert Bitwise.band(File.stat!(overlay.overlay_dir).mode, 0o777) == 0o700
       refute File.exists?(Path.join(overlay.overlay_dir, "hello.txt"))
       refute File.exists?(Path.join(overlay.overlay_dir, "lib/foo.ex"))
-
-      Overlay.cleanup(overlay)
     end
 
     test "does not copy generated and cache directories", %{project: project} do
@@ -159,6 +159,32 @@ defmodule MingaAgent.Changeset.OverlayTest do
 
       Overlay.cleanup(overlay)
       File.rm!(outside)
+    end
+  end
+
+  describe "commit_file/3" do
+    @tag :tmp_dir
+    test "prepared executable copies keep private ownership and source access permissions", %{
+      tmp_dir: project
+    } do
+      source = Path.join(project, "run.sh")
+      File.write!(source, "original\n")
+      File.chmod!(source, 0o755)
+      source_metadata = File.stat!(source)
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+      overlay_metadata = File.stat!(overlay.overlay_dir)
+
+      assert :ok = Overlay.commit_file(overlay, "run.sh", "prepared\n")
+      target = Path.join(overlay.overlay_dir, "run.sh")
+      assert File.read!(target) == "prepared\n"
+      metadata = File.stat!(target)
+      assert {metadata.uid, metadata.gid} == {overlay_metadata.uid, overlay_metadata.gid}
+      assert Bitwise.band(metadata.mode, 0o7777) == 0o755
+      assert File.read!(source) == "original\n"
+
+      assert Map.take(File.stat!(source), [:uid, :gid, :mode]) ==
+               Map.take(source_metadata, [:uid, :gid, :mode])
     end
   end
 

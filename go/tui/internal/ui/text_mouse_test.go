@@ -13,7 +13,7 @@ import (
 )
 
 func TestEditorTextTargetUsesPresentedWrappedRowAndComposedUTF16(t *testing.T) {
-	model := New(30, 8, nil, nil)
+	model := New(30, 8, nil)
 	model.putWindow(protocol.WindowContent{
 		ID: 7, ContentEpoch: 9,
 		Rows: []protocol.WindowRow{
@@ -56,7 +56,7 @@ func TestEditorTextTargetUsesPresentedWrappedRowAndComposedUTF16(t *testing.T) {
 }
 
 func TestComposedUTF16OffsetRetainsRenderRowWideClipBehavior(t *testing.T) {
-	model := New(10, 3, nil, nil)
+	model := New(10, 3, nil)
 	window := protocol.WindowContent{ScrollLeft: 1, ScrollLeftSet: true}
 	row := protocol.WindowRow{Text: "界a"}
 	rendered := xansi.Strip(model.renderRow(window, row, 0, 4, false, 0))
@@ -75,7 +75,7 @@ func TestComposedUTF16OffsetRetainsRenderRowWideClipBehavior(t *testing.T) {
 }
 
 func TestEditorTextDragKeepsSplitOriginAndCleansUpTargetlessRelease(t *testing.T) {
-	model := New(24, 6, nil, nil)
+	model := New(24, 6, nil)
 	model.putWindow(textMouseWindow(1, 0, "left", 11))
 	model.putWindow(textMouseWindow(2, 10, "right", 22))
 	model.textPresentations[1] = 101
@@ -102,7 +102,7 @@ func TestEditorTextDragKeepsSplitOriginAndCleansUpTargetlessRelease(t *testing.T
 }
 
 func TestEditorTextHoverUsesPresentedTarget(t *testing.T) {
-	model := New(20, 5, nil, nil)
+	model := New(20, 5, nil)
 	model.putWindow(textMouseWindow(3, 0, "hover", 33))
 	model.textPresentations[3] = 303
 	_, packet, handled := model.handleEditorTextMouse(tea.MouseMotionMsg(tea.Mouse{Button: tea.MouseNone, X: model.layout.body.X + 2, Y: model.layout.body.Y, Mod: tea.ModCtrl}))
@@ -112,7 +112,7 @@ func TestEditorTextHoverUsesPresentedTarget(t *testing.T) {
 }
 
 func TestEditorTextButtonAndEventSemantics(t *testing.T) {
-	model := New(20, 5, nil, nil)
+	model := New(20, 5, nil)
 	model.putWindow(textMouseWindow(3, 0, "buttons", 33))
 	model.textPresentations[3] = 303
 	x, y := model.layout.body.X+1, model.layout.body.Y
@@ -139,7 +139,7 @@ func TestEditorTextButtonAndEventSemantics(t *testing.T) {
 }
 
 func TestEditorTextHitIgnoresStructuralSurfaceRegistryPlacements(t *testing.T) {
-	model := New(20, 5, nil, nil)
+	model := New(20, 5, nil)
 	model.putWindow(textMouseWindow(3, 0, "visible", 33))
 	model.textPresentations[3] = 303
 	// SurfaceRegistry places editor_area and buffer_content. Its :window node is
@@ -155,7 +155,7 @@ func TestEditorTextHitIgnoresStructuralSurfaceRegistryPlacements(t *testing.T) {
 }
 
 func TestEditorTextInitialHitDefersToVisiblePlacedOverlay(t *testing.T) {
-	model := New(20, 5, nil, nil)
+	model := New(20, 5, nil)
 	model.putWindow(textMouseWindow(3, 0, "covered", 33))
 	model.textPresentations[3] = 303
 	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{
@@ -179,7 +179,7 @@ func TestEditorTextInitialHitDefersToVisiblePlacedOverlay(t *testing.T) {
 
 func TestTextPresentationLifecycleActivatesBeforeDiscardingPastPresentation(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(20, 5, out, nil)
+	model := New(20, 5, out)
 	model.textPresentations[7] = 70
 	commands := []protocol.Command{
 		{Kind: protocol.CommandBeginFrame, FrameSeq: 2, BaseFrameSeq: 1, Generation: 1},
@@ -206,7 +206,7 @@ func TestTextPresentationLifecycleActivatesBeforeDiscardingPastPresentation(t *t
 
 func TestTextPresentationLifecycleSkipsIntermediateCommittedModelInOneUpdate(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(20, 5, out, nil)
+	model := New(20, 5, out)
 	model.textPresentations[7] = 70
 	model.lastCommittedSeq = 1
 	model.lastCommittedGeneration = 1
@@ -234,7 +234,7 @@ func TestTextPresentationLifecycleSkipsIntermediateCommittedModelInOneUpdate(t *
 
 func TestRejectedTextPresentationIsDiscardedWithoutReplacingInputModel(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(20, 5, out, nil)
+	model := New(20, 5, out)
 	model.textPresentations[7] = 70
 	commands := []protocol.Command{
 		{Kind: protocol.CommandBeginFrame, FrameSeq: 3, BaseFrameSeq: 99, Generation: 1},

@@ -12,7 +12,6 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
   alias MingaAgent.ArtifactStore.CaptureSpec
   alias Minga.Buffer
   alias Minga.Buffer.Fork
-  alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Source
@@ -133,13 +132,27 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
     :exit, reason -> {:error, {:project_view_unavailable, reason}}
   end
 
-  defp snapshot(%Context{fork_store: store} = context, path, opts) when store != nil do
-    case BufferForkStore.get(store, path) do
-      nil -> snapshot_changeset_or_direct(context, path, opts)
-      fork -> owner_snapshot({:fork, fork}, :fork, path, opts)
+  defp snapshot(%Context{fork_store: store} = context, path, opts) when is_pid(store) do
+    case MingaAgent.ToolRouter.claim_owner(context, path) do
+      {:ok, {:fork, fork}} ->
+        owner_snapshot({:fork, fork}, :fork, path, opts)
+
+      {:ok, {:changeset, changeset}} ->
+        owner_snapshot(
+          {:changeset, changeset, normalize_changeset_path(changeset, path)},
+          :changeset,
+          path,
+          opts
+        )
+
+      :not_found ->
+        snapshot_changeset_or_direct(context, path, opts)
+
+      {:error, _} = error ->
+        error
     end
   catch
-    :exit, reason -> {:error, {:fork_unavailable, reason}}
+    :exit, reason -> {:error, {:source_unavailable, reason}}
   end
 
   defp snapshot(%Context{} = context, path, opts),
@@ -275,8 +288,10 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
   end
 
   defp read_owner_prefix({:fork, pid}, max_bytes) do
-    {bytes, version, complete?} = Fork.content_prefix_with_version(pid, max_bytes)
-    {:ok, {:memory, bytes, complete?}, version}
+    case Fork.content_prefix_with_version(pid, max_bytes) do
+      {bytes, version, complete?} -> {:ok, {:memory, bytes, complete?}, version}
+      {:error, _} = error -> error
+    end
   catch
     :exit, reason -> {:error, {:fork_unavailable, reason}}
   end
@@ -299,10 +314,13 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
   end
 
   defp read_owner_lines({:fork, pid}, start, count, max_bytes) do
-    {bytes, selected_count, total, version, complete?} =
-      Fork.content_on_lines_with_version(pid, start, count, max_bytes)
+    case Fork.content_on_lines_with_version(pid, start, count, max_bytes) do
+      {bytes, selected_count, total, version, complete?} ->
+        {:ok, {:memory, bytes, selected_count, total, complete?}, version}
 
-    {:ok, {:memory, bytes, selected_count, total, complete?}, version}
+      {:error, _} = error ->
+        error
+    end
   catch
     :exit, reason -> {:error, {:fork_unavailable, reason}}
   end

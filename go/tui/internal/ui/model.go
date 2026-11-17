@@ -140,7 +140,6 @@ type Model struct {
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
 	surfacePlacements []generated.SurfacePlacement
 	localPresentation localPresentation
-	inputFilter       *InputFilter
 	// transcript is the resident agent-chat transcript store (#2654). It folds
 	// gui_agent_transcript (0x86) frames and owns the local message anchor + pin
 	// flag so j/k/wheel repaint the transcript same-frame from local data. It is
@@ -178,11 +177,11 @@ type frameStaging struct {
 	commands []protocol.Command
 }
 
-func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
-	return NewWithTransport(width, height, out, nil, filter)
+func New(width, height uint16, out chan<- []byte) Model {
+	return NewWithTransport(width, height, out, nil)
 }
 
-func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}, filter *InputFilter) Model {
+func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struct{}) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
 		width:                          int(width),
@@ -206,7 +205,6 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		localPresentation:              newLocalPresentation(),
 		textPresentations:              map[uint16]uint64{},
 		pendingTextPresentationDiscard: map[textPresentationRef]struct{}{},
-		inputFilter:                    filter,
 		transcript:                     newResidentTranscript(),
 		transcriptRenderer:             newAgentTranscriptRenderer(),
 		now:                            time.Now,
@@ -285,7 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if chat, ok := m.agentChat(); ok && component == "agent" {
-			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(), msg); handled {
+			if packet, handled := m.agent.handleKey(chat, m.transcript, msg); handled {
 				m.send(packet)
 				break
 			}
@@ -330,7 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
-			delta := m.drainScrollDelta(msg)
+			delta := wheelDeltaSign(msg.Mouse().Button)
 			if m.sendAgentPromptScroll(msg, delta) {
 				break
 			}
@@ -794,7 +792,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		}
 	}
 
-	transcriptCandidate, transcriptFailure := m.prepareTranscriptCandidate()
+	transcriptPlan, transcriptFailure := m.prepareTranscriptPlan()
 	if transcriptFailure != transcriptApplied {
 		return m.rejectStaging(
 			cmds,
@@ -836,6 +834,9 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		return m.rejectStaging(cmds, gutterFailure.reason, gutterFailure.description)
 	}
 
+	if transcriptPlan != nil {
+		transcriptPlan.commit()
+	}
 	if m.staging.base == 0 {
 		m.retireMissingWindows(windowSnapshot.windows)
 		m.lineCache.reset()
@@ -853,9 +854,6 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	// keyframe clears, and structural replacements publish atomically.
 	m.gutters = gutterCandidate
 	m.residentSemantics = windowSnapshot.semantics
-	if transcriptCandidate != nil {
-		m.transcript = transcriptCandidate
-	}
 	m.queueCommittedTextPresentations(nextTextPresentations, unusedTextPresentations)
 	m.lastCommittedSeq = seq
 	m.lastCommittedGeneration = generation
@@ -874,23 +872,22 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	return cmds
 }
 
-// prepareTranscriptCandidate folds every transcript command in arrival order
-// into one detached candidate. It performs no live writes, so any failure can
-// reject the complete frame before keyframe cache reset or mutation replay.
-func (m *Model) prepareTranscriptCandidate() (*residentTranscript, transcriptDropReason) {
-	var candidate *residentTranscript
+// prepareTranscriptPlan simulates every transcript command in arrival order.
+// Its overlay contains only affected entries; all resident pages stay read-only.
+func (m *Model) prepareTranscriptPlan() (*transcriptPlan, transcriptDropReason) {
+	var plan *transcriptPlan
 	for _, command := range m.staging.commands {
 		if command.Kind != protocol.CommandChrome || command.Chrome.Opcode != generated.OPGuiAgentTranscript {
 			continue
 		}
-		if candidate == nil {
-			candidate = m.transcript.detachedCandidate()
+		if plan == nil {
+			plan = m.transcript.prepare()
 		}
-		if reason := candidate.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
+		if reason := plan.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
 			return nil, reason
 		}
 	}
-	return candidate, transcriptApplied
+	return plan, transcriptApplied
 }
 
 // invalidateStaging discards any open transaction and emits one typed
@@ -1200,6 +1197,11 @@ func (m *Model) applyMutation(command protocol.Command) {
 	case protocol.CommandExtensionRuntime:
 		m.applyExtensionRuntime(command.ExtensionRuntime)
 	case protocol.CommandChrome:
+		// Transcript commands were consumed by the sole resident owner after
+		// validation. Never replay or retain their decoded payload in chrome.
+		if command.Chrome.Opcode == generated.OPGuiAgentTranscript {
+			return
+		}
 		if command.Chrome.Opcode == generated.OPGuiAgentHelp {
 			previous, _ := m.agentHelp()
 			if !command.Chrome.AgentHelp.Visible || !previous.Visible {
@@ -1462,14 +1464,6 @@ func (m Model) maxOverlayHeight() int {
 	return min(max(m.height/3, 4), 12)
 }
 
-func (m *Model) drainScrollDelta(msg tea.MouseMsg) int {
-	if m.inputFilter != nil {
-		delta, _ := m.inputFilter.DrainCoalesced()
-		return delta
-	}
-	return wheelDeltaSign(msg.Mouse().Button)
-}
-
 func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	mouse := msg.Mouse()
 	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
@@ -1532,22 +1526,12 @@ func (m *Model) toggleHUD(msg tea.KeyPressMsg) bool {
 	return false
 }
 
-func latestToolMessageID(messages []protocol.AgentChatMessage) (uint32, bool) {
-	for index := len(messages) - 1; index >= 0; index-- {
-		msg := messages[index]
-		if (msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.ID > 0 {
-			return msg.ID, true
-		}
-	}
-	return 0, false
+func latestToolMessageID(messages *residentTranscript) (uint32, bool) {
+	message, found := messages.latest(transcriptSummaryTool)
+	return message.ID, found
 }
 
-func latestThinkingMessageID(messages []protocol.AgentChatMessage) (uint32, bool) {
-	for index := len(messages) - 1; index >= 0; index-- {
-		msg := messages[index]
-		if msg.Kind == agentKindThinking && msg.ID > 0 {
-			return msg.ID, true
-		}
-	}
-	return 0, false
+func latestThinkingMessageID(messages *residentTranscript) (uint32, bool) {
+	message, found := messages.latest(transcriptSummaryThinking)
+	return message.ID, found
 }

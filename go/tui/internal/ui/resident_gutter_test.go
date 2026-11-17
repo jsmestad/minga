@@ -106,7 +106,7 @@ func residentGutterCommand(windowID uint16, contentEpoch, lineCount uint32, reta
 }
 
 func TestResidentGutterSnapshotReplacesAndClearsSigns(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	model = applyTo(t, model,
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -143,7 +143,7 @@ func TestResidentGutterSnapshotReplacesAndClearsSigns(t *testing.T) {
 }
 
 func TestResidentGutterRetainPreservesMatchingOverrides(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	model = applyTo(t, model,
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -163,7 +163,7 @@ func TestResidentGutterRetainPreservesMatchingOverrides(t *testing.T) {
 }
 
 func TestResidentGutterStructuralCountChangeRequiresReplacement(t *testing.T) {
-	model := New(30, 6, nil, nil)
+	model := New(30, 6, nil)
 	model = applyTo(t, model,
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -187,7 +187,7 @@ func TestResidentGutterStructuralCountChangeRequiresReplacement(t *testing.T) {
 
 func TestResidentGutterEpochMismatchRejectsWithoutPublication(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(30, 6, out, nil)
+	model := New(30, 6, out)
 	model = applyTo(t, model,
 		beginFrame(1, 0),
 		testThemeCommand(),
@@ -215,7 +215,7 @@ func TestResidentGutterEpochMismatchRejectsWithoutPublication(t *testing.T) {
 }
 
 func TestResidentGutterTracksLocalPresentationScroll(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	model.gutters[7] = protocol.Gutter{
 		WindowID:        7,
 		ContentHeight:   2,
@@ -261,7 +261,7 @@ func TestResidentGutterTracksLocalPresentationScroll(t *testing.T) {
 }
 
 func TestResidentGutterOverridesParticipateInLineCacheIdentity(t *testing.T) {
-	model := New(20, 6, nil, nil)
+	model := New(20, 6, nil)
 	window := protocol.WindowContent{ID: 7, ContentEpoch: 9}
 	first := protocol.Gutter{WindowID: 7, Resident: &protocol.ResidentGutterEntries{
 		ContentEpoch: 9,
@@ -315,7 +315,7 @@ func TestSequentialResidentA2StructuralEditsKeepShiftedRowsAndGutterAligned(t *t
 		return command
 	}
 	hydrate := func(rows []protocol.WindowRow) Model {
-		model := New(20, 8, nil, nil)
+		model := New(20, 8, nil)
 		return applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowCommand(rows), gutterCommand(uint32(len(rows))), commitFrame(1))
 	}
 	scrollTo50 := func(model Model) Model {
@@ -375,7 +375,7 @@ func TestSequentialResidentA2StructuralEditsKeepShiftedRowsAndGutterAligned(t *t
 }
 
 func TestFullSnapshotPromotesSequentialRowsWithinContentEpoch(t *testing.T) {
-	model := New(20, 8, nil, nil)
+	model := New(20, 8, nil)
 	windowed := residentWindowCommand(7, 10, 3, protocol.CommandWindowContent)
 	windowed.Window.SequentialRows = false
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowed, commitFrame(1))
@@ -387,7 +387,7 @@ func TestFullSnapshotPromotesSequentialRowsWithinContentEpoch(t *testing.T) {
 }
 
 func TestResidentGutterRejectsWindowedRows(t *testing.T) {
-	model := New(20, 8, nil, nil)
+	model := New(20, 8, nil)
 	window := residentWindowCommand(7, 10, 3, protocol.CommandWindowContent)
 	window.Window.SequentialRows = false
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), window,
@@ -398,7 +398,7 @@ func TestResidentGutterRejectsWindowedRows(t *testing.T) {
 }
 
 func TestSequentialRowsRejectIncompleteDocumentWithoutGutter(t *testing.T) {
-	model := New(20, 8, nil, nil)
+	model := New(20, 8, nil)
 	window := residentWindowCommand(7, 10, 3, protocol.CommandWindowContent)
 	window.Window.Geometry.TotalLines = 300
 	window.Window.Geometry.TotalVisualRows = 300

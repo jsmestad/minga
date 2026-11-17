@@ -32,7 +32,7 @@ func TestAuthoredTextMarginPreservesBoundaryGlyphsAndPointerTargets(t *testing.T
 						ViewportRows: 3, ViewportCols: uint16(textWidth), TotalLines: uint32(totalRows),
 					},
 				}
-				model := New(uint16(max(paneWidth, 12)), 8, nil, nil)
+				model := New(uint16(max(paneWidth, 12)), 8, nil)
 				model = applyTo(t, model,
 					beginFrame(1, 0), testThemeCommand(),
 					protocol.Command{Kind: protocol.CommandWindowContent, Window: window},

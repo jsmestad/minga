@@ -234,7 +234,7 @@ graph TD
     style BF1 fill:#2471a3,stroke:#1a5276,color:#fff,stroke-dasharray: 5 5
 ```
 
-> **Note:** `Buffer.Fork` processes (dashed border) are created on demand when an agent session edits a file that has an open buffer. The fork holds an independent copy; the user keeps editing the parent. On session completion, changes merge back via three-way merge. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the full design.
+> **Note:** `Buffer.Fork` processes (dashed border) are created on demand when an agent session reads or edits an open file. The fork holds an independent copy; the user keeps editing the parent. On session completion, the parent owner merges and installs changes in one callback. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md#atomic-file-edits) for revision checks and deletion publication.
 
 ### Services tier
 
@@ -843,11 +843,11 @@ Minga's architecture was *designed* for exactly this kind of workload:
 
 - **Concurrent agents are free.** ✅ Want to run a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. There's no thread pool to tune, no async runtime to configure, no event loop to worry about blocking.
 
-- **Buffer access routes through message passing.** ✅ Agent file tools check whether a buffer is open for the target path. If so, edits route through `Buffer.Fork` (in-memory, instant, with undo integration). If not, edits route through the changeset overlay (filesystem-level isolation) or fall through to direct I/O. The routing decision is transparent to the tool: `MingaAgent.ToolRouter` handles the lookup and delegation.
+- **Buffer access routes through message passing.** Agent file tools use `MingaAgent.ToolRouter` to select the actual buffer, fork, or changeset, including unsaved content. One conditional mutation validates the complete source revision and commits the complete file change in the owner's serialized callback. Failed batches do not advance content, version, or undo history. There is no unchecked filesystem mutation fallback.
 
-- **Buffer forking for concurrent agents.** ✅ Each agent session gets a `BufferForkStore` that creates forks lazily on first write to an open buffer. The fork holds an independent copy of the document. The user keeps editing the parent. On session completion, forks merge back via three-way merge (`Minga.Core.Diff.merge3`). Non-overlapping changes merge automatically. Overlapping changes are flagged as conflicts.
+- **Buffer forking for concurrent agents.** Each session's `BufferForkStore` creates an independent view of an open document. The parent buffer owner calculates and installs a three-way merge in one transition. Conflicts retain the draft. A fork tombstone represents deletion without discarding the open parent buffer's bytes.
 
-- **Filesystem-level isolation via changesets.** ✅ For files that aren't open in a buffer (or when external tools need a coherent filesystem view), agent sessions can opt into a changeset overlay. The overlay creates a hardlink mirror of the project directory where edits are materialized without touching the real project. Shell commands (`mix test`, `mix compile`) run against the overlay. On session completion, changes merge back to the real project via three-way merge.
+- **Filesystem-level isolation via changesets.** Native sessions create an owned overlay even without an Editor process. Shell commands see the same session view. Publication reconciles each file with its original disk baseline and preserves conflicting human changes. It does not claim a portable filesystem compare-and-swap against arbitrary external writers or a cross-file transaction.
 
 Most editors are trying to retrofit agent support onto architectures that assumed a single human operator making sequential edits. Minga's process model treats "external thing wants to modify a buffer" as a first-class operation, because that's literally how the editor itself works internally. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the design rationale and prior art analysis.
 

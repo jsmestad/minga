@@ -27,6 +27,8 @@ agent_pure_effects = [
         {"Minga.Buffer.EditDelta.*", [:pure, :exception, :unknown, :io]},
         {"Minga.Buffer.EditSource", [:pure, :exception, :unknown, :io]},
         {"Minga.Buffer.EditSource.*", [:pure, :exception, :unknown, :io]},
+        {"Minga.Buffer.FileMutation", [:pure, :exception, :unknown, :io]},
+        {"Minga.Buffer.FileMutation.*", [:pure, :exception, :unknown, :io]},
         {"Minga.Buffer.Lines", [:pure, :exception, :unknown, :io]},
         {"Minga.Buffer.Lines.*", [:pure, :exception, :unknown, :io]},
         {"Minga.Buffer.Position", [:pure, :exception, :unknown, :io]},

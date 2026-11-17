@@ -28,7 +28,7 @@ func TestKeyframeRetiresOmittedPaneOnlyAfterSuccessfulValidation(t *testing.T) {
 	presentation := func(id uint16, token uint64) protocol.Command {
 		return protocol.Command{Kind: protocol.CommandTextPresentation, TextPresentation: protocol.TextPresentation{WindowID: id, PresentationID: token}}
 	}
-	model := applyTo(t, New(40, 12, nil, nil),
+	model := applyTo(t, New(40, 12, nil),
 		beginFrame(1, 0), testThemeCommand(),
 		protocol.Command{Kind: protocol.CommandWindowContent, Window: kept},
 		protocol.Command{Kind: protocol.CommandWindowContent, Window: retired},

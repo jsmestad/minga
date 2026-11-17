@@ -16,10 +16,6 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolArgSummary do
   def summarize("write_file", %{path: path}), do: path
   def summarize("edit_file", %{"path" => path}), do: path
   def summarize("edit_file", %{path: path}), do: path
-  def summarize("multi_edit_file", %{"path" => path}), do: path
-  def summarize("multi_edit_file", %{path: path}), do: path
-  def summarize("apply_diff", %{"path" => path}), do: path
-  def summarize("apply_diff", %{path: path}), do: path
   def summarize("delete_file", %{"path" => path}), do: path
   def summarize("delete_file", %{path: path}), do: path
 
