@@ -13,8 +13,10 @@ defmodule MingaEditor.MinibufferDataTest do
 
   alias Minga.Mode.CommandState
   alias MingaEditor.MinibufferData
+  alias MingaEditor.PromptUI
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State.ModalOverlay.CommandCompletion
-  alias MingaEditor.State.Prompt, as: PromptState
 
   test "layout visibility follows minibuffer modes without requiring completion payloads" do
     for mode <- [
@@ -78,24 +80,12 @@ defmodule MingaEditor.MinibufferDataTest do
       assert result.candidates == []
     end
 
-    test "returns a visible text prompt for generic PromptUI overlays" do
-      state = %{
-        shell_state: %{
-          modal:
-            {:prompt,
-             %{
-               prompt_ui: %PromptState{
-                 handler: MingaEditor.UI.Prompt.ProjectAdd,
-                 label: "Add project: ",
-                 text: "~/code",
-                 cursor: 6
-               }
-             }}
-        },
-        workspace: %{editing: %{mode: :normal, mode_state: %{}}}
-      }
+    test "projects the live text prompt into renderer input and exposes its offered actions" do
+      state =
+        TestHelpers.base_state()
+        |> PromptUI.open(MingaEditor.UI.Prompt.ProjectAdd, default: "~/code")
 
-      result = MinibufferData.from_state(state)
+      result = state |> Input.from_editor_state() |> MinibufferData.from_state()
 
       assert result.visible == true
       assert MinibufferData.visible?(state)
@@ -103,7 +93,14 @@ defmodule MingaEditor.MinibufferDataTest do
       assert result.prompt == "Add project: "
       assert result.input == "~/code"
       assert result.cursor_pos == 6
-      assert result.candidates == []
+      assert result.generation > 0
+
+      assert Enum.map(result.candidates, &{&1.label, &1.annotation}) == [
+               {"Submit", "Enter"},
+               {"Cancel", "Escape"}
+             ]
+
+      assert result.total_candidates == 2
     end
   end
 

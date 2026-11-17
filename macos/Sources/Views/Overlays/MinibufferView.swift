@@ -213,7 +213,8 @@ public struct MinibufferView: View {
 
     @ViewBuilder
     private func candidateRow(_ candidate: MinibufferCandidate) -> some View {
-        let isSelected = candidate.id == Int(state.selectedIndex)
+        let isPromptAction = state.mode == .textPrompt
+        let isSelected = !isPromptAction && candidate.id == Int(state.selectedIndex)
         let isHovered = hoveredIndex == candidate.id
         let offeredInputVersion = state.inputVersion
         let offeredGeneration = state.generation
@@ -229,9 +230,7 @@ public struct MinibufferView: View {
                 if !candidate.description.isEmpty {
                     Text(candidate.description)
                         .font(Typography.font(.body))
-                        .foregroundStyle(isSelected
-                            ? theme.popupSelFg.opacity(0.75)
-                            : theme.popupFg.opacity(0.4))
+                        .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.75) : theme.popupFg.opacity(isPromptAction ? 0.7 : 0.4))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -242,9 +241,7 @@ public struct MinibufferView: View {
                 if !candidate.annotation.isEmpty {
                     Text(candidate.annotation)
                         .font(Typography.font(.small, design: .monospaced))
-                        .foregroundStyle(isSelected
-                            ? theme.popupSelFg.opacity(0.65)
-                            : theme.popupFg.opacity(0.3))
+                        .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.65) : theme.popupFg.opacity(isPromptAction ? 0.7 : 0.3))
                         .padding(.horizontal, Spacing.xs)
                         .padding(.vertical, Spacing.pixel)
                         .background(
@@ -294,6 +291,10 @@ public struct MinibufferView: View {
     }
 
     private func updateAccessibilityFocus() {
+        guard state.mode != .textPrompt else {
+            accessibilityFocus = nil
+            return
+        }
         let selected = Int(state.selectedIndex)
         accessibilityFocus = state.visible && state.candidates.contains(where: { $0.id == selected }) ? selected : nil
     }

@@ -356,6 +356,9 @@ func (m Model) leftPaneMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 }
 
 func (m Model) footerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.promptChoiceMousePacket(msg); ok {
+		return packet, true
+	}
 	if packet, ok := m.reviewStatusMousePacket(msg); ok {
 		return packet, true
 	}
