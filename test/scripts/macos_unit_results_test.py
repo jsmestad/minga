@@ -244,17 +244,20 @@ class MacOSUnitResultsTest(unittest.TestCase):
             self.assertIsNone(receipt["cleanup"]["observer"]["pid"])
 
     def test_cancellation_escalates_and_reaps_an_observer_that_ignores_term(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            observer, host = geometry_process_fixture(base)
-            (base / "ignore-observer-term").touch()
-            receipt = {"run_id": "observer-escalation", "width": 220, "validation_errors": []}
-            cancelled = lambda: signal.SIGINT if (base / "observer-armed").exists() else None
-            native.run_geometry_case(base / "case", receipt, observer, host, cancelled, timeout=10, grace=0.1)
-            self.assertFalse(receipt["success"])
-            self.assertTrue(receipt["cleanup_verified"])
-            self.assertEqual(receipt["cleanup"]["observer"]["return_code"], -signal.SIGKILL)
-            self.assertEqual(receipt["cleanup"]["host"]["status"], "terminated_reaped")
+        for host_ready in (True, False):
+            with self.subTest(host_ready=host_ready), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                observer, host = geometry_process_fixture(base)
+                (base / "ignore-observer-term").touch()
+                if not host_ready:
+                    (base / "withhold-host-ready").touch()
+                receipt = {"run_id": "observer-escalation", "width": 220, "validation_errors": []}
+                cancelled = lambda: signal.SIGINT if (base / "observer-armed").exists() else None
+                native.run_geometry_case(base / "case", receipt, observer, host, cancelled, timeout=10, grace=0.1)
+                self.assertFalse(receipt["success"])
+                self.assertTrue(receipt["cleanup_verified"])
+                self.assertEqual(receipt["cleanup"]["observer"]["return_code"], -signal.SIGKILL, receipt)
+                self.assertEqual(receipt["cleanup"]["host"]["status"], "terminated_reaped")
 
     def test_missing_named_case_cannot_hide_behind_a_passing_summary(self):
         tests = replay_tree()

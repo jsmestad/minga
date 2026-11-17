@@ -49,6 +49,9 @@ def run_host():
     ignore_shutdown = executable.with_name("ignore-host-shutdown").exists()
     if ignore_shutdown:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if executable.with_name("withhold-host-ready").exists():
+        while True:
+            signal.pause()
     value = {
         "schema": "minga-approval-host-v1", "run_id": os.environ["MINGA_APPROVAL_GEOMETRY_RUN_ID"],
         "width": int(os.environ["MINGA_TEST_APPROVAL_WIDTH"]), "pid": os.getpid(),
@@ -73,6 +76,11 @@ def run_observer():
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     executable = Path(sys.argv[0]).resolve()
+    if executable.with_name("ignore-observer-term").exists():
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        executable.with_name("observer-armed").write_text("SIGTERM ignored\n")
+        while True:
+            signal.pause()
     deadline = time.monotonic() + 5
     while not args.ready_file.exists():
         if time.monotonic() >= deadline:
@@ -83,11 +91,6 @@ def run_observer():
             signal.pause()
     if executable.with_name("early-observer-exit").exists():
         return 7
-    if executable.with_name("ignore-observer-term").exists():
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        executable.with_name("observer-armed").write_text("SIGTERM ignored\n")
-        while True:
-            signal.pause()
     write_fixture(args.output_dir, args.run_id, args.width, os.getpid(), executable, args.host_executable, args.host_pid, write_ready=False)
     return 0
 
