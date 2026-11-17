@@ -317,6 +317,19 @@ defmodule MingaAgent.Session do
   end
 
   @doc """
+  Atomically queries current transcript entries, stable IDs, pins and source facts.
+
+  Use `:snapshot` for an explicit full snapshot, then the returned runtime cursor
+  for coalesced current changes. Reset outcomes contain a replacement snapshot;
+  invalid cursors are rejected. Normal GenServer timeout/process exits propagate.
+  """
+  @spec transcript_since(GenServer.server(), :snapshot | Transcript.Cursor.t()) ::
+          Transcript.query_result()
+  def transcript_since(session, cursor) do
+    GenServer.call(session, {:transcript_since, cursor})
+  end
+
+  @doc """
   Resolves the exact session, admitted request and tool approval shown by a control.
 
   Identity validation and resolution occur together inside the Session callback. A stale target leaves the current approval untouched.
@@ -826,7 +839,8 @@ defmodule MingaAgent.Session do
             Keyword.get(opts, :startup_notice),
             selection_error
           ),
-          now
+          now,
+          make_ref()
         ),
       continuation: Continuation.new(),
       subscriber_lifecycle: SubscriberLifecycle.new(),
@@ -1049,6 +1063,10 @@ defmodule MingaAgent.Session do
 
   def handle_call(:messages_with_ids, _from, state) do
     {:reply, Transcript.messages_with_ids(state.transcript), state}
+  end
+
+  def handle_call({:transcript_since, cursor}, _from, state) do
+    {:reply, Transcript.since(state.transcript, cursor), state}
   end
 
   def handle_call(:usage, _from, state) do
@@ -6084,6 +6102,7 @@ defmodule MingaAgent.Session do
 
       transcript =
         Transcript.restore(
+          state.transcript,
           data.messages,
           data.message_ids,
           Map.get(data, :branches, []),

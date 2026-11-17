@@ -13,7 +13,7 @@ defmodule MingaAgent.Session.TranscriptTest do
 
   test "streaming replaces the matching tail without changing its identity" do
     transcript =
-      Transcript.new([{:system, "started", :info}], @now)
+      Transcript.new([{:system, "started", :info}], @now, make_ref())
       |> Transcript.append_stream_tail(:thinking, ["plan"])
       |> Transcript.append_stream_tail(:thinking, [" more"])
       |> Transcript.append_stream_tail(:assistant, ["answer"])
@@ -32,7 +32,7 @@ defmodule MingaAgent.Session.TranscriptTest do
     tool_call = %ToolCall{id: "tool-1", name: "shell", status: :running, collapsed: true}
 
     transcript =
-      Transcript.new([{:thinking, "reason", false}, {:tool_call, tool_call}], @now)
+      Transcript.new([{:thinking, "reason", false}, {:tool_call, tool_call}], @now, make_ref())
 
     original_ids = entry_ids(transcript)
     original_revision = Transcript.revision(transcript)
@@ -58,7 +58,8 @@ defmodule MingaAgent.Session.TranscriptTest do
     transcript =
       Transcript.new(
         [{:user, "u"}, {:tool_call, tool}, {:thinking, "t", false}, {:assistant, "a"}],
-        @now
+        @now,
+        make_ref()
       )
 
     tool_toggled = Transcript.toggle_message_collapse(transcript, 2)
@@ -87,7 +88,8 @@ defmodule MingaAgent.Session.TranscriptTest do
           {:assistant, "answer"},
           {:user, "follow-up"}
         ],
-        @now
+        @now,
+        make_ref()
       )
       |> Transcript.toggle_pin(4)
 
@@ -112,7 +114,7 @@ defmodule MingaAgent.Session.TranscriptTest do
   end
 
   test "branch and switch reject invalid indexes without changing the value" do
-    transcript = Transcript.new([{:user, "question"}], @now)
+    transcript = Transcript.new([{:user, "question"}], @now, make_ref())
 
     assert {:error, message} = Transcript.branch_at(transcript, 1, @later)
     assert message =~ "beyond"
@@ -123,7 +125,9 @@ defmodule MingaAgent.Session.TranscriptTest do
   end
 
   test "compaction preserves retained order, branches, and pin relationships" do
-    transcript = Transcript.new([{:user, "one"}, {:user, "two"}, {:user, "three"}], @now)
+    transcript =
+      Transcript.new([{:user, "one"}, {:user, "two"}, {:user, "three"}], @now, make_ref())
+
     assert {:ok, transcript, _branch} = Transcript.branch_at(transcript, 2, @later)
 
     transcript =
@@ -140,6 +144,7 @@ defmodule MingaAgent.Session.TranscriptTest do
   test "restore keeps valid identities and normalizes invalid or duplicate identities once" do
     transcript =
       Transcript.restore(
+        Transcript.new([], @now, make_ref()),
         [{:user, "one"}, {:assistant, "two"}, {:user, "three"}],
         [9, 9, -1],
         [],
@@ -158,6 +163,7 @@ defmodule MingaAgent.Session.TranscriptTest do
   test "restore allocates missing message identities in transcript order" do
     transcript =
       Transcript.restore(
+        Transcript.new([], @now, make_ref()),
         [{:user, "one"}, {:assistant, "two"}, {:user, "three"}],
         [8],
         [],
@@ -173,6 +179,7 @@ defmodule MingaAgent.Session.TranscriptTest do
   test "restore infers structural identities for legacy active messages" do
     transcript =
       Transcript.restore(
+        Transcript.new([], @now, make_ref()),
         [{:user, "one"}, {:assistant, "two"}],
         nil,
         [],
@@ -195,6 +202,7 @@ defmodule MingaAgent.Session.TranscriptTest do
 
     transcript =
       Transcript.restore(
+        Transcript.new([], @now, make_ref()),
         [{:user, "active"}],
         [3],
         [branch],
@@ -211,7 +219,7 @@ defmodule MingaAgent.Session.TranscriptTest do
   test "reset starts a fresh logical transcript" do
     usage = %TurnUsage{input: 10, output: 5, cache_read: 1, cache_write: 2, cost: 0.25}
 
-    transcript = Transcript.new([{:user, "old"}, {:assistant, "reply"}], @now)
+    transcript = Transcript.new([{:user, "old"}, {:assistant, "reply"}], @now, make_ref())
     assert {:ok, transcript, _branch} = Transcript.branch_at(transcript, 0, @later)
 
     reset =
@@ -232,7 +240,7 @@ defmodule MingaAgent.Session.TranscriptTest do
             operations <- list_of(operation_generator(), max_length: 60)
           ) do
       initial
-      |> Transcript.new(@now)
+      |> Transcript.new(@now, make_ref())
       |> apply_operations(operations)
     end
   end

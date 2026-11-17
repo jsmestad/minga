@@ -92,7 +92,7 @@ Minga's code is organized by **dependency direction** and **state ownership**, n
 Code is organized in three layers. Dependencies flow downward only. A module in Layer 0 never imports from Layer 1 or 2. A module in Layer 1 never imports from Layer 2. If you find yourself adding an upward dependency, you're putting logic in the wrong layer.
 
 **Layer 0: Pure foundations**
-The exact pure-module list is returned by `Minga.Credo.DependencyDirectionCheck.layer_0_prefixes/0`.
+The exact global foundation list is returned by `Minga.Credo.DependencyDirectionCheck.layer_0_prefixes/0`. Pure Agent-internal contracts have a separate Level 0 classification; they are not automatically global Layer 0 modules.
 
 These are pure functions and data structures. They take values in and return values out. They don't call GenServers, don't subscribe to events, don't log. They're the stable core that everything else builds on.
 
@@ -152,7 +152,7 @@ Directories under `lib/minga/` group related modules. Some have a top-level entr
 
 The practical rule: **prefer the entry-point module when one exists**, because it gives you a stable API if the internals are reorganized. But reaching into `Buffer.Document` directly from `Editing.Motion` is fine when you need the data structure, not the GenServer. The Layer rules (Rule 1) are what actually prevent bad coupling, not module access.
 
-Minga uses three namespaces: `Minga.*` for pure foundations and services, `MingaAgent.*` for agent services, and `MingaEditor.*` for orchestration and presentation. Namespace alone does not identify a pure module; use the check's explicit pure-module list. `.reach.exs` adds the runtime purity contract, and `test/minga/credo/reach_policy_test.exs` keeps its module list synchronized with Credo.
+Minga uses three namespaces: `Minga.*` for foundations and services, `MingaAgent.*` for agent services and pure Agent contracts, and `MingaEditor.*` for orchestration and presentation. Namespace alone does not identify purity. Credo keeps global foundations and Agent-internal levels distinct; `.reach.exs` mirrors global foundations and explicitly names additional pure Agent values. `test/minga/credo/reach_policy_test.exs` guards that runtime effects policy.
 
 MingaAgent also has internal Agent Level 0/1/2 boundaries: pure contracts and values, runtime services and safety owners, then bundled integrations and presentation. See `docs/ARCHITECTURE.md#mingaagent-internal-levels` for the classification enforced by `DependencyDirectionCheck` (EX9001).
 
@@ -222,7 +222,7 @@ Elixir's set-theoretic type system catches real bugs at compile time. Help it by
 - **Pattern matching** over `if/cond` — helps type narrowing across clauses
 - **No `cond` blocks** — use multi-clause functions with pattern matching and guards instead. `cond` defeats BEAM JIT optimizations and hides control flow that the type system and compiler can reason about. Extract a private helper with multiple `defp` clauses rather than inlining a `cond`.
 - **List append strategy depends on context.** When credo (or your instincts) flags a `list ++ [item]`, don't reflexively reach for `Enum.reverse([item | Enum.reverse(list)])`. That double-reverse is *worse* than `++` for a single append (two O(n) traversals vs one). Evaluate each case:
-  - **Small list, infrequent appends** (e.g., chat messages, UI indicator lines, anything bounded by human interaction speed or terminal height): `list ++ [item]` is fine. Readability wins. The `AppendSingleItem` Credo check is advisory (`exit_status: 0`), not disabled.
+  - **Small, genuinely bounded list, infrequent appends** (e.g., UI indicator lines capped by terminal height): `list ++ [item]` is fine. Retained chat transcripts are not bounded by human interaction speed: streaming appends and keyed revisions must use indexed source storage, not copy an unchanged list prefix. The `AppendSingleItem` Credo check is advisory (`exit_status: 0`), not disabled.
   - **Accumulating in a loop/reduce** (building a list item by item): prepend with `[item | acc]` inside the loop, then `Enum.reverse(acc)` once at the end. This is O(n) total vs O(n²) for repeated `++`. This is the one case where the pattern is correct.
   - **Frequent appends AND frequent ordered reads on a large list**: use `:queue` (Erlang's double-ended queue) for O(1) amortized operations on both ends.
   - **Never use `Enum.reverse([item | Enum.reverse(list)])`** as a substitute for `list ++ [item]`. It's strictly worse: same O(n) complexity, 2x the constant factor, and much harder to read.
