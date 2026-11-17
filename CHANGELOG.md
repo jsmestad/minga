@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Generated Python bytecode is excluded from version control while local script caches remain untouched.
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
