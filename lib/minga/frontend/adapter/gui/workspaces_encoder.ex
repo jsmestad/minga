@@ -143,5 +143,6 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
   defp encode_agent_status(:tool_executing), do: 2
   defp encode_agent_status(:error), do: 3
   defp encode_agent_status(:plan), do: 4
+  defp encode_agent_status(:approval_waiting), do: 5
   defp encode_agent_status(_), do: 0
 end

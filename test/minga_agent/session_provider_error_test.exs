@@ -243,11 +243,14 @@ defmodule MingaAgent.SessionProviderErrorTest do
       send_provider_event(session, %Event.ToolEnd{
         tool_call_id: "tc-running",
         name: "shell",
+        outcome: :error,
         result: "blocked by hook",
         is_error: true
       })
 
-      assert_receive {:agent_event, ^session, {:tool_ended, "shell", "blocked by hook", :error}}
+      assert_receive {:agent_event, ^session,
+                      {:tool_ended,
+                       %Event.ToolEnd{name: "shell", result: "blocked by hook", outcome: :error}}}
 
       assert {:tool_call, %{status: :error, result: "blocked by hook", is_error: true}} =
                Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
@@ -301,10 +304,12 @@ defmodule MingaAgent.SessionProviderErrorTest do
           :ok
   defp await_durable_mcp_turn(session, tool_name, response_call, phase) do
     receive do
-      {:agent_event, ^session, {:tool_ended, ^tool_name, _result, :done}} ->
+      {:agent_event, ^session,
+       {:tool_ended, %Event.ToolEnd{name: ^tool_name, outcome: :complete}}} ->
         :ok
 
-      {:agent_event, ^session, {:tool_ended, ^tool_name, result, status}} ->
+      {:agent_event, ^session,
+       {:tool_ended, %Event.ToolEnd{name: ^tool_name, result: result, outcome: status}}} ->
         flunk("#{phase} tool ended with #{inspect(status)}: #{inspect(result)}")
 
       {:agent_event, ^session, {:approval_pending, approval}} ->

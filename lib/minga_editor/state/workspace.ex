@@ -20,6 +20,7 @@ defmodule MingaEditor.State.Workspace do
           | :plan
           | :thinking
           | :tool_executing
+          | :approval_waiting
           | :error
           | :stopped
           | :needs_review

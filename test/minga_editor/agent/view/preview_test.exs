@@ -33,16 +33,20 @@ defmodule MingaEditor.Agent.View.PreviewTest do
       assert p == Preview.update_shell_output(p, "ignored")
     end
 
-    test "finish_shell marks command as done" do
-      p = Preview.new() |> Preview.set_shell("mix test")
-      p = Preview.finish_shell(p, "3 tests, 0 failures", :done)
-      assert {:shell, "mix test", "3 tests, 0 failures", :done} = p.content
-    end
+    test "terminal shell outcomes retain their meaning and reject late output or completion" do
+      statuses = [:done, :error, :denied, :cancelled, :approval_expired]
 
-    test "finish_shell marks command as error" do
-      p = Preview.new() |> Preview.set_shell("false")
-      p = Preview.finish_shell(p, "exit code 1", :error)
-      assert {:shell, "false", "exit code 1", :error} = p.content
+      for status <- statuses do
+        running = Preview.set_shell(Preview.new(), "printf")
+        finished = Preview.finish_shell(running, "original result", status)
+
+        assert {:shell, "printf", "original result", ^status} = finished.content
+        assert Preview.update_shell_output(finished, "late partial") == finished
+
+        for later <- statuses do
+          assert Preview.finish_shell(finished, "late completion", later) == finished
+        end
+      end
     end
 
     test "auto-follow stays engaged on shell output update" do

@@ -53,12 +53,12 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
 
       assert %AgentContext{
                visible: true,
-               task: "Running shell",
+               task: "Awaiting approval for shell",
                status: :needs_you,
                can_approve: false,
                todos: [%Todo{description: "Run tests", status: :in_progress}],
                progress: %{
-                 active_action: "Running shell",
+                 active_action: "Awaiting approval for shell",
                  tool_count: 1,
                  file_count: 1,
                  review_hint: ""

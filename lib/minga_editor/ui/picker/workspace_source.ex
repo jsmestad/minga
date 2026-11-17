@@ -85,6 +85,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :tool_executing}}),
     do: " ⚙ executing"
 
+  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :approval_waiting}}),
+    do: " awaiting approval"
+
   defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :plan}}), do: " ✎ plan"
 
   defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :error}}),
@@ -99,6 +102,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
 
   defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :tool_executing}}),
     do: "⚙ executing"
+
+  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :approval_waiting}}),
+    do: "awaiting approval"
 
   defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :plan}}), do: "✎ plan"
 

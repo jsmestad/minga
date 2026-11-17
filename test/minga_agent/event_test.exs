@@ -72,6 +72,7 @@ defmodule MingaAgent.EventTest do
       event = %Event.ToolEnd{
         tool_call_id: "call_1",
         name: "bash",
+        outcome: :complete,
         result: "done",
         is_error: false
       }
@@ -88,6 +89,7 @@ defmodule MingaAgent.EventTest do
       event = %Event.ToolEnd{
         tool_call_id: "call-output",
         name: "read_file",
+        outcome: :complete,
         result: "done",
         output: output
       }
@@ -100,6 +102,7 @@ defmodule MingaAgent.EventTest do
       event = %Event.ToolEnd{
         tool_call_id: "call_1",
         name: "bash",
+        outcome: :error,
         result: "failed",
         is_error: true
       }

@@ -60,6 +60,8 @@ defmodule MingaAgent.Event do
   @type tool_end :: %__MODULE__.ToolEnd{
           tool_call_id: String.t(),
           name: String.t(),
+          outcome: MingaAgent.ToolCall.outcome(),
+          reason: MingaAgent.ToolCall.terminal_reason(),
           result: String.t(),
           output: MingaAgent.Tool.Output.t() | nil,
           is_error: boolean()
@@ -160,12 +162,14 @@ defmodule MingaAgent.Event do
 
   defmodule ToolEnd do
     @moduledoc false
-    @enforce_keys [:tool_call_id, :name]
-    defstruct [:tool_call_id, :name, :output, result: "", is_error: false]
+    @enforce_keys [:tool_call_id, :name, :outcome]
+    defstruct [:tool_call_id, :name, :outcome, :reason, :output, result: "", is_error: false]
 
     @type t :: %__MODULE__{
             tool_call_id: String.t(),
             name: String.t(),
+            outcome: MingaAgent.ToolCall.outcome(),
+            reason: MingaAgent.ToolCall.terminal_reason(),
             result: String.t(),
             output: MingaAgent.Tool.Output.t() | nil,
             is_error: boolean()

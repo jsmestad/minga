@@ -113,10 +113,15 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       %{shell_state: shell_state, session_a: session_a, session_b: session_b}
     end
 
-    test "background :status_changed event sets the owning tab's badge without touching the active rendering cache",
+    test "background display status owns the badge without changing the active rendering cache",
          %{shell_state: ss, session_b: session_b} do
       {ss2, ws2} =
-        Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :thinking})
+        Traditional.on_agent_event(
+          ss,
+          workspace(),
+          session_b,
+          {:display_status_changed, :thinking}
+        )
 
       # Background tab's badge updates...
       assert tab(ss2.tab_bar, 2).payload.agent_status == :thinking
@@ -128,6 +133,20 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       # Workspace is also untouched: background events must not nudge the
       # active tab's editing surface.
       assert ws2 == workspace()
+
+      {waiting, _ws} =
+        Traditional.on_agent_event(
+          ss2,
+          workspace(),
+          session_b,
+          {:display_status_changed, :approval_waiting}
+        )
+
+      {unchanged, _ws} =
+        Traditional.on_agent_event(waiting, workspace(), session_b, {:status_changed, :thinking})
+
+      assert tab(unchanged.tab_bar, 2).payload.agent_status == :approval_waiting
+      assert TraditionalState.agent(unchanged) == TraditionalState.agent(ss)
     end
 
     test "background :status_changed -> :idle raises attention on the owning tab", %{
@@ -337,25 +356,33 @@ defmodule MingaEditor.Agent.EventRoutingTest do
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "beta"
 
-      Minga.Test.SessionCase.send_provider_event(
-        session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "alpha", result: "contents"}
-      )
+      alpha_end = %Event.ToolEnd{
+        tool_call_id: "tc1",
+        name: "alpha",
+        result: "contents",
+        outcome: :complete
+      }
+
+      Minga.Test.SessionCase.send_provider_event(session, alpha_end)
 
       :sys.get_state(session)
-      state = Events.dispatch(state, session, {:tool_ended, "alpha", "contents", :done})
+      state = Events.dispatch(state, session, {:tool_ended, alpha_end})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "beta"
 
-      Minga.Test.SessionCase.send_provider_event(
-        session,
-        %Event.ToolEnd{tool_call_id: "tc2", name: "beta", result: "output"}
-      )
+      beta_end = %Event.ToolEnd{
+        tool_call_id: "tc2",
+        name: "beta",
+        result: "output",
+        outcome: :complete
+      }
+
+      Minga.Test.SessionCase.send_provider_event(session, beta_end)
 
       :sys.get_state(session)
-      state = Events.dispatch(state, session, {:tool_ended, "beta", "output", :done})
+      state = Events.dispatch(state, session, {:tool_ended, beta_end})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -371,7 +398,14 @@ defmodule MingaEditor.Agent.EventRoutingTest do
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "read_file"
 
-      state = Events.dispatch(state, self(), {:tool_ended, "read_file", "contents", :done})
+      event = %Event.ToolEnd{
+        tool_call_id: "no-session-tool",
+        name: "read_file",
+        result: "contents",
+        outcome: :complete
+      }
+
+      state = Events.dispatch(state, self(), {:tool_ended, event})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)

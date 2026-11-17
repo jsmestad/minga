@@ -15,7 +15,7 @@ import (
 
 func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing.T) {
 	for _, width := range []uint16{60, 80, 120} {
-		for _, status := range []byte{0, 2} {
+		for _, status := range []byte{0, 2, 5} {
 			for _, fragmented := range []bool{false, true} {
 				t.Run(fmt.Sprintf("width%d/status%d/fragmented%t", width, status, fragmented), func(t *testing.T) {
 					out := make(chan []byte, 64)
@@ -44,7 +44,7 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 					updated, _ = model.Update(tea.WindowSizeMsg{Width: int(width), Height: 24})
 					model = updated.(Model)
 					label, command := "Send", "agent_submit_or_newline"
-					if status == 2 {
+					if status == 2 || status == 5 {
 						label, command = "Stop", "agent_abort"
 					}
 					x, y := renderedComposerControl(t, model, label)

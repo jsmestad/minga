@@ -239,7 +239,7 @@ defmodule MingaEditor.Session.ChromeState do
 
   @spec running_background_count(Workspace.t()) :: non_neg_integer()
   defp running_background_count(%Workspace{payload: %WorkspaceAgent{agent_status: status}})
-       when status in [:plan, :thinking, :tool_executing],
+       when status in [:thinking, :tool_executing],
        do: 1
 
   defp running_background_count(%Workspace{}), do: 0

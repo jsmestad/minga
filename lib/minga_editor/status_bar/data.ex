@@ -150,7 +150,7 @@ defmodule MingaEditor.StatusBar.Data do
         indent: %StatusIndent{type: indent_type, size: indent_size},
         selection: selection_model(selection_info),
         agent: %SemanticStatusAgent{
-          agent_status: agent.runtime.status,
+          agent_status: AgentState.display_status(agent),
           background_count: background.count,
           background_label: background.label,
           active_tool_name: agent.runtime.active_tool_name
@@ -345,7 +345,7 @@ defmodule MingaEditor.StatusBar.Data do
       common: state |> build_common_data("[no file]") |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
-        session_status: agent.runtime.status,
+        session_status: AgentState.display_status(agent),
         message_count: agent_message_count(session)
       }
     }
@@ -370,6 +370,12 @@ defmodule MingaEditor.StatusBar.Data do
   defp agent_message_count(_session), do: 0
 
   @spec agent_status_command_content(EditorState.t() | map(), AgentState.t()) :: String.t() | nil
+  defp agent_status_command_content(
+         _state,
+         %AgentState{pending_approval: %MingaEditor.Agent.PendingApproval{}}
+       ),
+       do: "Awaiting approval"
+
   defp agent_status_command_content(state, agent) do
     StatusCommand.content(agent_status_command_context(state, agent))
   end
