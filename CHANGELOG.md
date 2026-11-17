@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Retained shell capture reads complete output and EOF on macOS without waiting for another chunk. Closing either parent channel stops idle, pending-read and backpressured output helpers, including when unread control bytes remain. The original producer is never replayed.
 - Agent edits keep private overlay ownership instead of attempting to adopt a project file's group, which could reject valid macOS edits with `:eperm`. Owner-only staging directories prevent access widening, staged scripts retain their access permissions, and final atomic publication still preserves the original file's metadata.
 - Agent startup prepares the draft before its first frame. macOS composer clicks restore Agent keybindings after sidebar focus, and Follow output remains available when a turn is idle without taking space away from the transcript.
 - Codex models such as GPT-5.6 Luna can continue conversations instead of stopping silently after the first reply. Replay qualification checks the exact official transport and captured inputs, including a bounded path for previously unqualified records. Rejected prompts retain their drafts and report failures; pre-admission refusal no longer adds a misleading user entry.

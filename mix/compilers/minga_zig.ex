@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @moduledoc """
   Opt-in Mix task that builds the Zig parser support binaries.
 
-  Since the Zig renderer was removed in #2223, this builds only the tree-sitter
-  parser (`minga-parser`) and the hook runner (`minga-hook-runner`).
+  Builds the tree-sitter parser (`minga-parser`), hook runner
+  (`minga-hook-runner`), and shell output reader (`minga-shell-output-reader`).
 
   This task is intentionally not registered in the project's compiler list. Native binaries are built by explicit Makefile and CI steps, not by every `mix compile`.
 
@@ -14,8 +14,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
 
   @zig_dir "zig"
   @priv_dir "priv"
-  @parser_name "minga-parser"
-  @hook_runner_name "minga-hook-runner"
+  @native_names ~w(minga-parser minga-hook-runner minga-shell-output-reader)
   @optimize if Mix.env() == :prod, do: "ReleaseSafe", else: "Debug"
 
   @impl true
@@ -40,7 +39,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
     case System.cmd("zig", args, cd: @zig_dir, stderr_to_stdout: true) do
       {_output, 0} ->
         Mix.shell().info("Zig parser binaries compiled successfully")
-        Enum.each([@parser_name, @hook_runner_name], &copy_to_priv/1)
+        Enum.each(@native_names, &copy_to_priv/1)
         {:ok, []}
 
       {output, _code} ->
@@ -108,6 +107,8 @@ defmodule Mix.Tasks.Compile.MingaZig do
     if File.dir?(@zig_dir) do
       System.cmd("zig", ["build", "--clean"], cd: @zig_dir, stderr_to_stdout: true)
     end
+
+    Enum.each(@native_names, &File.rm(Path.join(@priv_dir, &1)))
 
     :ok
   end

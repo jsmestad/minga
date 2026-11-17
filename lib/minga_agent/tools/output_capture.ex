@@ -1,6 +1,6 @@
 defmodule MingaAgent.Tools.OutputCapture do
   @moduledoc """
-  Stores one bounded tool result and builds the canonical output value.
+  Stores tool bytes/items and builds the canonical bounded model-visible output.
 
   This module is the byte/item boundary for built-in tools whose producer has
   already applied its semantic filtering. It never invents a successful
@@ -8,6 +8,7 @@ defmodule MingaAgent.Tools.OutputCapture do
   """
 
   alias MingaAgent.ArtifactStore
+  alias MingaAgent.ArtifactStore.Capture
   alias MingaAgent.ArtifactStore.CaptureSpec
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Range
@@ -50,6 +51,94 @@ defmodule MingaAgent.Tools.OutputCapture do
            ),
          {:ok, capture} <- ArtifactStore.begin(store, spec) do
       append_bytes(store, capture, bytes, 0, opts)
+    end
+  end
+
+  @doc "Admits a streamed byte capture before starting its producer."
+  @spec begin_stream(GenServer.server() | nil, term() | nil) ::
+          {:ok, Capture.t()} | {:error, term()}
+  def begin_stream(nil, _delivery_key), do: {:error, :retention_unavailable}
+  def begin_stream(_store, nil), do: {:error, :retention_unavailable}
+
+  def begin_stream(store, delivery_key) do
+    with {:ok, spec} <-
+           CaptureSpec.new(
+             media_type: "text/plain; charset=utf-8",
+             mode: :bytes,
+             owner_pid: self(),
+             delivery_key: delivery_key
+           ) do
+      ArtifactStore.begin(store, spec)
+    end
+  catch
+    :exit, _reason -> {:error, :retention_unavailable}
+  end
+
+  @doc "Writes raw producer bytes in finite appends without retaining the full command in memory."
+  @spec append_stream(GenServer.server(), Capture.t(), binary()) :: :ok | {:error, term()}
+  def append_stream(_store, %Capture{}, <<>>), do: :ok
+
+  def append_stream(store, %Capture{} = capture, bytes) when is_binary(bytes) do
+    count = min(@append_bytes, byte_size(bytes))
+    <<chunk::binary-size(^count), rest::binary>> = bytes
+
+    case ArtifactStore.append(store, capture, chunk) do
+      {:ok, _progress} -> append_stream(store, capture, rest)
+      {:error, _reason} = error -> error
+    end
+  catch
+    :exit, _reason -> {:error, :storage_unavailable}
+  end
+
+  @doc "Finishes a streamed capture using only its bounded preview; status text is never stored as producer bytes."
+  @spec finish_stream(
+          GenServer.server(),
+          Capture.t(),
+          binary(),
+          :complete | {:incomplete, term()},
+          String.t()
+        ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
+  def finish_stream(store, %Capture{} = capture, preview, status, status_text)
+      when byte_size(preview) <= @visible_bytes and is_binary(status_text) do
+    status_text = OutputLimit.truncate_utf8(status_text, @visible_bytes, "")
+
+    with {:ok, stored} <- ArtifactStore.finish(store, capture, stream_status(status)) do
+      captured = binary_part(preview, 0, min(stored.reference.bytes, byte_size(preview)))
+      {view, visible_bytes} = stream_view(captured, @visible_bytes - byte_size(status_text))
+
+      with {:ok, output} <-
+             Output.new(
+               view <> status_text,
+               stored.capture,
+               selection([], stored.capture, stored.reference.bytes, nil),
+               reference: stored.reference,
+               presentation: presentation(stored.reference.bytes, visible_bytes, stored.reference)
+             ) do
+        Output.result(output)
+      end
+    end
+  catch
+    :exit, _reason -> {:error, :storage_unavailable}
+  end
+
+  @spec stream_status(:complete | {:incomplete, term()}) :: Output.capture_status()
+  defp stream_status(:complete), do: :complete
+  defp stream_status({:incomplete, reason}), do: incomplete(reason)
+
+  @spec stream_view(binary(), non_neg_integer()) :: {String.t(), non_neg_integer()}
+  defp stream_view(bytes, limit) do
+    case :unicode.characters_to_binary(bytes) do
+      text when is_binary(text) ->
+        view = OutputLimit.utf8_prefix(text, limit)
+        {view, byte_size(view)}
+
+      {:incomplete, text, _tail} ->
+        view = OutputLimit.utf8_prefix(text, limit)
+        {view, byte_size(view)}
+
+      {:error, _text, _rest} ->
+        prefix = binary_part(bytes, 0, min(byte_size(bytes), div(max(limit - 64, 0), 4) * 3))
+        {"[base64 shell output]\n" <> Base.encode64(prefix), byte_size(prefix)}
     end
   end
 

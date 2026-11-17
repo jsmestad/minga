@@ -14,10 +14,21 @@ defmodule MingaAgent.Tools.Shell do
   @type execute_opts :: [
           on_output: (String.t() -> :ok),
           running_indicator_ms: pos_integer(),
-          env: [{String.t(), String.t()}]
+          env: [{String.t(), String.t()}],
+          artifact_store: GenServer.server() | nil,
+          capture_key: term() | nil,
+          helper_path: String.t()
         ]
 
+  alias MingaAgent.ArtifactStore.Capture
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.OutputLimit
+  alias MingaAgent.Tools.Shell.OutputReader
+
+  @type result :: {:ok, String.t() | Output.t()} | {:error, term()}
+  @typep capture :: {GenServer.server(), Capture.t()} | nil
+  @typep transport :: port() | OutputReader.t()
 
   @debounce_ms 200
   @running_indicator_ms 3_000
@@ -38,45 +49,99 @@ defmodule MingaAgent.Tools.Shell do
       a "running..." indicator (default: #{@running_indicator_ms})
     - `:env` — additional environment variables to include in the command process.
   """
-  @spec execute(String.t(), String.t(), pos_integer(), execute_opts()) ::
-          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
+  @spec execute(String.t(), String.t(), pos_integer(), execute_opts()) :: result()
   def execute(command, cwd, timeout_secs, opts \\ [])
       when is_binary(command) and is_binary(cwd) and is_integer(timeout_secs) do
-    on_output = Keyword.get(opts, :on_output)
-    indicator_ms = Keyword.get(opts, :running_indicator_ms, @running_indicator_ms)
-    timeout_ms = timeout_secs * 1_000
-    env = Keyword.get(opts, :env, [])
+    run(command, cwd, timeout_secs, opts, nil)
+  end
 
-    port =
-      Port.open(
-        {:spawn_executable, "/bin/sh"},
-        [
-          :binary,
-          :exit_status,
-          :stderr_to_stdout,
-          args: ["-c", command],
-          cd: cwd,
-          env: safe_env_charlist(env)
-        ]
-      )
+  @doc """
+  Admits durable retention before running the command once. Raw stdout/stderr
+  stream directly to ArtifactStore; only the model/UI preview is capped at 51KB.
+  Quota, timeout and storage failures stop the producer and cannot report a
+  complete capture. The returned reference addresses only raw producer bytes,
+  including trailing whitespace, never status text or presentation markers.
+  """
+  @spec capture(String.t(), String.t(), pos_integer(), execute_opts()) :: result()
+  def capture(command, cwd, timeout_secs, opts)
+      when is_binary(command) and is_binary(cwd) and is_integer(timeout_secs) do
+    store = Keyword.get(opts, :artifact_store)
 
+    with {:ok, capture} <- OutputCapture.begin_stream(store, Keyword.get(opts, :capture_key)) do
+      run(command, cwd, timeout_secs, opts, {store, capture})
+    end
+  end
+
+  @spec run(String.t(), String.t(), pos_integer(), execute_opts(), capture()) :: result()
+  defp run(command, cwd, timeout_secs, opts, capture) do
     now = System.monotonic_time(:millisecond)
-    deadline = now + timeout_ms
 
-    collect_output(port, %{
-      deadline: deadline,
-      on_output: on_output,
-      indicator_ms: indicator_ms,
+    state = %{
+      deadline: now + timeout_secs * 1_000,
+      on_output: Keyword.get(opts, :on_output),
+      indicator_ms: Keyword.get(opts, :running_indicator_ms, @running_indicator_ms),
       acc: empty_output_state(),
       pending: empty_output_state(),
       last_flush: now,
       last_data: now,
-      stream_state: {0, false, ""}
-    })
-  rescue
-    e ->
-      {:error, "command failed: #{Exception.message(e)}"}
+      stream_state: {0, false, ""},
+      capture: capture
+    }
+
+    case open_output(command, cwd, Keyword.get(opts, :env, []), capture, state.deadline, opts) do
+      {:ok, port} -> collect_output(port, state)
+      {:error, message} -> failed_start(state, message)
+    end
   end
+
+  @spec open_output(
+          String.t(),
+          String.t(),
+          [{String.t(), String.t()}],
+          capture(),
+          integer(),
+          execute_opts()
+        ) :: {:ok, transport()} | {:error, term()}
+  defp open_output(command, cwd, env, nil, _deadline, _opts), do: open_port(command, cwd, env)
+
+  defp open_output(command, cwd, env, _capture, deadline, opts) do
+    OutputReader.open(command, cwd, safe_env_charlist(env), deadline, opts)
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  @spec open_port(String.t(), String.t(), [{String.t(), String.t()}]) ::
+          {:ok, port()} | {:error, String.t()}
+  defp open_port(command, cwd, env) do
+    {:ok,
+     Port.open(
+       {:spawn_executable, "/bin/sh"},
+       [
+         :binary,
+         :exit_status,
+         :stderr_to_stdout,
+         args: ["-c", command],
+         cd: cwd,
+         env: safe_env_charlist(env)
+       ]
+     )}
+  rescue
+    e -> {:error, "command failed: #{Exception.message(e)}"}
+  end
+
+  @spec failed_start(collect_state(), term()) :: result()
+  defp failed_start(state, :timeout),
+    do: finish_capture(state, {:incomplete, :timeout}, "\n[command timed out]")
+
+  defp failed_start(%{capture: nil}, message), do: {:error, message}
+
+  defp failed_start(state, message),
+    do:
+      finish_capture(
+        state,
+        {:incomplete, :capture_failed},
+        "\n[command failed: #{inspect(message)}]"
+      )
 
   @typep output_state ::
            {chunks :: [binary()], retained_bytes :: non_neg_integer(), truncated? :: boolean()}
@@ -90,25 +155,55 @@ defmodule MingaAgent.Tools.Shell do
            pending: output_state(),
            last_flush: integer(),
            last_data: integer(),
-           stream_state: stream_state()
+           stream_state: stream_state(),
+           capture: capture()
          }
 
-  @spec collect_output(port(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
-  defp collect_output(port, state) do
+  @spec collect_output(transport(), collect_state()) :: result()
+  defp collect_output(port, state) when is_port(port) do
     remaining = max(state.deadline - System.monotonic_time(:millisecond), 0)
     wait_ms = min(remaining, @debounce_ms)
 
     receive do
       {^port, {:data, data}} -> handle_port_data(port, data, state)
-      {^port, {:exit_status, exit_code}} -> handle_port_exit(exit_code, state)
+      {^port, {:exit_status, exit_code}} -> handle_port_exit(port, exit_code, state)
     after
       wait_ms -> handle_port_wait(port, state)
     end
   end
 
-  @spec handle_port_data(port(), binary(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
+  defp collect_output(reader, state) do
+    remaining = max(state.deadline - System.monotonic_time(:millisecond), 0)
+
+    if remaining == 0 do
+      timeout_result(reader, state)
+    else
+      case OutputReader.next(reader, min(remaining, @debounce_ms)) do
+        {:data, data, reader} -> handle_port_data(reader, data, state)
+        {:exit_status, status, reader} -> handle_port_exit(reader, status, state)
+        {:wait, reader} -> handle_port_wait(reader, state)
+        {:error, reason, reader} -> transport_failure(reader, reason, state)
+      end
+    end
+  end
+
+  @spec transport_failure(OutputReader.t(), term(), collect_state()) :: result()
+  defp transport_failure(reader, reason, state) do
+    close_output(reader)
+    flush_if_needed(state)
+
+    finish_capture(
+      state,
+      {:incomplete, :capture_failed},
+      "\n[output transport failed: #{inspect(reason)}]"
+    )
+  end
+
+  @spec close_output(transport()) :: :ok
+  defp close_output(port) when is_port(port), do: OutputLimit.close_port(port)
+  defp close_output(reader), do: OutputReader.close(reader)
+
+  @spec handle_port_data(transport(), binary(), collect_state()) :: result()
   defp handle_port_data(port, data, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -116,16 +211,46 @@ defmodule MingaAgent.Tools.Shell do
       timeout_result(port, state)
     else
       state = %{state | acc: retain_output(state.acc, data), last_data: now}
-      state = retain_pending(data, state)
+
+      case append_capture(state.capture, data) do
+        :ok ->
+          state = retain_pending(data, state)
+          continue_after_append(port, state)
+
+        {:error, reason} ->
+          close_output(port)
+          flush_if_needed(state)
+
+          finish_capture(
+            state,
+            {:incomplete, reason},
+            "\n[capture incomplete: #{inspect(reason)}]"
+          )
+      end
+    end
+  end
+
+  @spec continue_after_append(transport(), collect_state()) :: result()
+  defp continue_after_append(port, state) do
+    now = System.monotonic_time(:millisecond)
+
+    if now >= state.deadline do
+      timeout_result(port, state)
+    else
       continue_or_finish_quota(port, now, state)
     end
   end
 
-  @spec continue_or_finish_quota(port(), integer(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
-  defp continue_or_finish_quota(port, _now, %{acc: {_chunks, _bytes, true}} = state) do
+  @spec append_capture(capture(), binary()) :: :ok | {:error, term()}
+  defp append_capture(nil, _data), do: :ok
+
+  defp append_capture({store, capture}, data),
+    do: OutputCapture.append_stream(store, capture, data)
+
+  @spec continue_or_finish_quota(transport(), integer(), collect_state()) :: result()
+  defp continue_or_finish_quota(port, _now, %{capture: nil, acc: {_chunks, _bytes, true}} = state) do
     flush_if_needed(state)
-    OutputLimit.close_port(port)
+    close_output(port)
     output = state.acc |> output_state_to_binary() |> String.trim_trailing()
     {:ok, output}
   end
@@ -133,8 +258,17 @@ defmodule MingaAgent.Tools.Shell do
   defp continue_or_finish_quota(port, now, state),
     do: maybe_flush_pending_and_continue(port, now, state)
 
-  @spec handle_port_exit(integer(), collect_state()) :: {:ok, String.t()}
-  defp handle_port_exit(exit_code, state) do
+  @spec handle_port_exit(transport(), integer(), collect_state()) :: result()
+  defp handle_port_exit(port, exit_code, state) do
+    if System.monotonic_time(:millisecond) >= state.deadline do
+      timeout_result(port, state)
+    else
+      finish_exit(state, exit_code)
+    end
+  end
+
+  @spec finish_exit(collect_state(), integer()) :: result()
+  defp finish_exit(%{capture: nil} = state, exit_code) do
     flush_if_needed(state)
     output = state.acc |> output_state_to_binary() |> String.trim_trailing()
 
@@ -142,8 +276,26 @@ defmodule MingaAgent.Tools.Shell do
     {:ok, result}
   end
 
-  @spec handle_port_wait(port(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
+  defp finish_exit(state, exit_code) do
+    flush_if_needed(state)
+    status_text = if exit_code == 0, do: "", else: "\n[exit code: #{exit_code}]"
+    finish_capture(state, :complete, status_text)
+  end
+
+  @spec finish_capture(collect_state(), :complete | {:incomplete, term()}, String.t()) :: result()
+  defp finish_capture(%{capture: {store, capture}} = state, status, status_text) do
+    if status_text != "" and state.on_output != nil, do: state.on_output.(status_text)
+
+    OutputCapture.finish_stream(
+      store,
+      capture,
+      output_state_content(state.acc),
+      status,
+      status_text
+    )
+  end
+
+  @spec handle_port_wait(transport(), collect_state()) :: result()
   defp handle_port_wait(port, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -171,13 +323,18 @@ defmodule MingaAgent.Tools.Shell do
     end
   end
 
-  @spec timeout_result(port(), collect_state()) ::
-          {:error, {:incomplete, :timeout, String.t()}}
-  defp timeout_result(port, state) do
+  @spec timeout_result(transport(), collect_state()) :: result()
+  defp timeout_result(port, %{capture: nil} = state) do
     flush_if_needed(state)
-    OutputLimit.close_port(port)
+    close_output(port)
     output = state.acc |> output_state_to_binary() |> String.trim_trailing()
     {:error, {:incomplete, :timeout, output}}
+  end
+
+  defp timeout_result(port, state) do
+    flush_if_needed(state)
+    close_output(port)
+    finish_capture(state, {:incomplete, :timeout}, "\n[command timed out]")
   end
 
   @spec flush_if_needed(collect_state()) :: :ok
@@ -196,8 +353,7 @@ defmodule MingaAgent.Tools.Shell do
     %{state | pending: retain_output(state.pending, data, pending_limit(state.stream_state))}
   end
 
-  @spec maybe_flush_pending_and_continue(port(), integer(), collect_state()) ::
-          {:ok, String.t()} | {:error, String.t() | {:incomplete, :timeout, String.t()}}
+  @spec maybe_flush_pending_and_continue(transport(), integer(), collect_state()) :: result()
   defp maybe_flush_pending_and_continue(port, now, state) do
     if state.on_output != nil and now - state.last_flush >= @debounce_ms do
       stream_state = flush_pending(state.on_output, state.pending, state.stream_state)
@@ -279,11 +435,11 @@ defmodule MingaAgent.Tools.Shell do
     do: stream_state
 
   defp emit_stream_chunk(on_output, batch, {sent_bytes, false, tail}) do
-    batch = tail <> batch
+    {batch, tail} = split_valid_prefix(tail <> batch)
     remaining = @max_output_bytes - sent_bytes
 
     if byte_size(batch) <= remaining do
-      {prefix, tail} = split_valid_prefix(batch)
+      prefix = batch
       if prefix != "", do: on_output.(prefix)
       {sent_bytes + byte_size(prefix), false, tail}
     else
@@ -296,10 +452,11 @@ defmodule MingaAgent.Tools.Shell do
 
   @spec split_valid_prefix(binary()) :: {String.t(), binary()}
   defp split_valid_prefix(batch) do
-    prefix = OutputLimit.utf8_prefix(batch, byte_size(batch))
-    tail_size = byte_size(batch) - byte_size(prefix)
-    tail = binary_part(batch, byte_size(prefix), tail_size)
-    {prefix, tail}
+    case :unicode.characters_to_binary(batch) do
+      text when is_binary(text) -> {text, ""}
+      {:incomplete, text, tail} -> {text, tail}
+      {:error, _text, _rest} -> {String.replace_invalid(batch), ""}
+    end
   end
 
   @spec empty_output_state() :: output_state()
@@ -325,7 +482,7 @@ defmodule MingaAgent.Tools.Shell do
     if byte_size(data) <= remaining do
       {[data | chunks], retained_bytes + byte_size(data), false}
     else
-      prefix = binary_part(data, 0, remaining)
+      prefix = data |> binary_part(0, remaining) |> :binary.copy()
       chunks = if prefix == "", do: chunks, else: [prefix | chunks]
       {chunks, max_bytes, true}
     end

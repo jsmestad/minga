@@ -104,8 +104,19 @@ defmodule Minga.Project.FileFind.WorkerTest do
 
   @spec process_alive?(String.t()) :: boolean()
   defp process_alive?(pid) do
-    kill = System.find_executable("kill")
-    {_output, status} = System.cmd(kill, ["-0", pid], stderr_to_stdout: true)
-    status == 0
+    ps = System.find_executable("ps")
+
+    case System.cmd(ps, ["-o", "stat=", "-p", pid], stderr_to_stdout: true) do
+      {state, 0} ->
+        case String.trim(state) do
+          "" -> false
+          "Z" <> _rest -> false
+          "X" <> _rest -> false
+          _live_state -> true
+        end
+
+      {_output, _status} ->
+        false
+    end
   end
 end

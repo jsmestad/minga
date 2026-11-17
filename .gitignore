@@ -33,6 +33,7 @@ erl_crash.dump
 /priv/minga-renderer-go
 /priv/minga-parser
 /priv/minga-hook-runner
+/priv/minga-shell-output-reader
 /priv/minga-test-harness
 /priv/extensions
 /burrito_out/

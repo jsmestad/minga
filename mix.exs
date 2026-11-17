@@ -32,7 +32,7 @@ defmodule Minga.MixProject do
   @version "0.1.0"
   @generated_language_aliases_path ".generated/language_aliases/elixir/lib"
   @generated_elixir_path ".generated/protocol/elixir/lib"
-  @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner)
+  @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
   @release_priv_entries @native_release_artifacts ++ ~w(extensions queries tree_sitter tutor.txt)
 
   def project do
