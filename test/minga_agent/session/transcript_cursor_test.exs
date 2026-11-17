@@ -55,7 +55,7 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
     assert Active.change_count(next.active) == 4
   end
 
-  test "tool occurrences update in source order, coalesce, and maintain changed lookup keys" do
+  test "current tool occurrence coalesces changes and maintains indexed lookup keys" do
     tool = %ToolCall{id: "duplicate", name: "shell"}
 
     source =
@@ -70,13 +70,13 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
       |> Transcript.update_tool_call("duplicate", &ToolCall.complete(&1, "complete"))
 
     assert {:changes, changes} = Transcript.since(next, cursor)
-    assert Enum.map(changes.entries, & &1.ordinal) == [0, 2]
+    assert Enum.map(changes.entries, & &1.ordinal) == [2]
 
     assert Enum.all?(changes.entries, fn %Entry{message: {:tool_call, tc}} ->
              tc.result == "complete" and tc.status == :complete
            end)
 
-    assert Enum.map(changes.entries, & &1.change_revision) == [3, 3]
+    assert Enum.map(changes.entries, & &1.change_revision) == [3]
     assert Active.change_count(next.active) == 4
 
     # Changing a tool ID and changing a non-tool into a tool both reform lookups.
@@ -93,7 +93,7 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
     assert [
              {:user, "no longer a tool"},
              {:tool_call, %{result: "new lookup"}},
-             {:tool_call, %{result: "only last"}},
+             {:tool_call, %{result: "complete", status: :complete}},
              {:assistant, "tail"}
            ] = Transcript.messages(next)
   end
@@ -118,6 +118,28 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
     assert tool_entry.change_revision > text_revision
     assert thinking_entry.content_revision == 0
     assert thinking_entry.change_revision == next.revision
+  end
+
+  test "a saved approval-timeout reason advances semantic content revision" do
+    tool =
+      ToolCall.restore(
+        id: "tool",
+        name: "shell",
+        status: :error,
+        result: "failed",
+        is_error: true
+      )
+
+    source = new([{:tool_call, tool}])
+
+    changed =
+      Transcript.update_tool_call(source, "tool", fn call ->
+        ToolCall.reconcile(call, :error, :approval_timeout, "failed", nil)
+      end)
+
+    assert {:changes, changes} = Transcript.since(changed, Transcript.cursor(source))
+    assert [%Entry{content_revision: revision}] = changes.entries
+    assert revision == changed.revision
   end
 
   test "no-ops leave cursors and content facts unchanged, including missing and negative indexes" do

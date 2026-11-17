@@ -125,7 +125,7 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 }
 
 func agentComposerControlLabel(chat protocol.AgentChat, width int) string {
-	if chat.Status == 1 || chat.Status == 2 {
+	if agentHasActiveTurn(chat.Status) {
 		if width < 4 {
 			return "■"
 		}
@@ -204,7 +204,7 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		return nil, false
 	}
 	command := "agent_submit_or_newline"
-	if chat.Status == 1 || chat.Status == 2 {
+	if agentHasActiveTurn(chat.Status) {
 		command = "agent_abort"
 	}
 	return protocol.EncodeGUIExecuteCommand(command), true

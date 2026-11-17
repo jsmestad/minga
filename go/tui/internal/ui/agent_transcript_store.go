@@ -490,10 +490,19 @@ func (s *transcriptSummaryIndex) remove(ordinal uint64) {
 
 func transcriptSummaryMembership(message protocol.AgentChatMessage) [transcriptSummaryKinds]bool {
 	return [transcriptSummaryKinds]bool{
-		message.Text != "" && ((message.Kind == agentKindSystem && message.Status == 1) || message.IsError),
+		message.Text != "" && ((message.Kind == agentKindSystem && message.Status == 1) || transcriptMessageIsError(message)),
 		message.Kind == agentKindUsage,
 		message.ID > 0 && (message.Kind == agentKindTool || message.Kind == agentKindStyledTool),
 		message.ID > 0 && message.Kind == agentKindThinking,
+	}
+}
+
+func transcriptMessageIsError(message protocol.AgentChatMessage) bool {
+	switch message.Kind {
+	case agentKindTool, agentKindStyledTool:
+		return agentToolIsError(message)
+	default:
+		return message.IsError
 	}
 }
 
@@ -501,7 +510,7 @@ func transcriptToolCounts(message protocol.AgentChatMessage) [3]int {
 	if message.Kind != agentKindTool && message.Kind != agentKindStyledTool && message.Kind != agentKindApprovalTool {
 		return [3]int{}
 	}
-	return [3]int{1, boolInt(message.Status == 0), boolInt(message.Status == 2 || message.IsError)}
+	return [3]int{1, boolInt(message.Status == 0), boolInt(agentToolIsError(message))}
 }
 
 func (t *residentTranscript) latest(kind int) (protocol.AgentChatMessage, bool) {

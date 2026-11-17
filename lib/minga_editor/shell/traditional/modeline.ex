@@ -615,6 +615,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     active_tool_name = Map.get(data, :active_tool_name)
 
     case {status_command, status, colors} do
+      {_custom, :approval_waiting, c} ->
+        [{" Awaiting approval ", c.status_tool, bar_bg, [bold: true], nil}]
+
       {custom, _status, c} when is_binary(custom) and custom != "" ->
         [{" #{custom} ", agent_status_fg(c), bar_bg, [], nil}]
 

@@ -55,9 +55,6 @@ public struct AgentPromptView: View {
         CGFloat(max(1, Int(state.promptVisibleRows))) * state.promptRowPitch
     }
 
-    /// Whether the agent is actively streaming a response.
-    private var isStreaming: Bool { state.status.isWorking }
-
     /// Capsule border color: accent when in insert mode, subtle border otherwise.
     private var capsuleBorderColor: Color {
         if isInsertMode { return theme.agentInputBorder.opacity(0.5) }
@@ -67,7 +64,7 @@ public struct AgentPromptView: View {
     /// Capsule background opacity shifts with mode.
     private var capsuleBgOpacity: Double {
         if isInsertMode { return 0.8 }
-        if isStreaming { return 0.6 }
+        if state.status.hasActiveTurn { return 0.6 }
         return 0.4
     }
 
@@ -218,26 +215,26 @@ struct AgentPromptActionButton: View {
     let sendAction: ViewActionHandler<AgentPromptView.Action>?
     @Environment(\.themeColors) private var theme
 
-    private var isStreaming: Bool { state.status.isWorking }
+    private var hasActiveTurn: Bool { state.status.hasActiveTurn }
 
     /// A nonempty draft can be submitted independently of Vim mode or native key focus.
-    private var canSend: Bool { !state.prompt.isEmpty && !isStreaming }
+    private var canSend: Bool { !state.prompt.isEmpty && !hasActiveTurn }
 
     /// The SF Symbol name for the action button, morphing between send and stop.
     private var actionButtonIcon: String {
-        isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill"
+        hasActiveTurn ? "stop.circle.fill" : "arrow.up.circle.fill"
     }
 
     /// The action button's foreground color based on state.
     private var actionButtonColor: Color {
-        if isStreaming { return .red }
+        if hasActiveTurn { return .red }
         if canSend { return theme.agentInputBorder }
         return theme.agentTextFg.opacity(0.2)
     }
 
     var body: some View {
         Button {
-            if isStreaming {
+            if hasActiveTurn {
                 sendAction?(.abort)
             } else if canSend {
                 sendAction?(.submit)
@@ -249,10 +246,10 @@ struct AgentPromptActionButton: View {
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
-        .disabled(!canSend && !isStreaming)
+        .disabled(!canSend && !hasActiveTurn)
         .frame(width: Typography.Step.action.rawValue)
-        .accessibilityLabel(isStreaming ? "Stop generating" : "Send message")
-        .accessibilityHint(isStreaming ? "Aborts the current response" : "Sends the current prompt")
+        .accessibilityLabel(hasActiveTurn ? "Stop generating" : "Send message")
+        .accessibilityHint(hasActiveTurn ? "Aborts the current response" : "Sends the current prompt")
         .accessibilityAddTraits(.isButton)
     }
 }

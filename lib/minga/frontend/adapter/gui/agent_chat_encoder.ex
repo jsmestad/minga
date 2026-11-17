@@ -169,6 +169,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   defp encode_agent_chat_status(:thinking), do: 1
   defp encode_agent_chat_status(:tool_executing), do: 2
   defp encode_agent_chat_status(:error), do: 3
+  defp encode_agent_chat_status(:plan), do: 4
+  defp encode_agent_chat_status(:approval_waiting), do: 5
   defp encode_agent_chat_status(_), do: 0
 
   @spec bool_byte(boolean() | nil) :: 0 | 1

@@ -104,6 +104,12 @@ Trust applies to the named tool, not every tool the agent might use. Turn trust 
 
 Each card identifies its original conversation and tool request. A stale, duplicate, or unauthorized activation cannot approve a replacement request or remove its card; Minga explains the refusal instead. A completed or expired tool wait retires its card, even while another call in the same request is still running. It cannot grant trust afterward.
 
+Entering plan mode, losing the provider, resetting the conversation, or restoring another conversation also retires the outgoing approval. Its controls cannot transfer to the replacement request or conversation.
+
+While a tool waits for a decision, the workspace shows **Awaiting approval**, not Running. Stop remains available. Denied, Cancelled, and Expired are distinct outcomes, not generic tool errors; their cards do not count the approval wait as execution time.
+
+Stopping a tool already admitted for execution may leave its outcome indeterminate. Minga retains captured output and does not claim that Stop rolled back its effects.
+
 The header's Help and model controls work without typing commands into your draft, including when the file tree has focus. While Help is open, `Esc` or `?` closes Help before changing the composer's mode or focus. Typing, Enter, and paste cannot edit or submit the covered draft.
 
 In the terminal, use Up/Down, Page Up/Page Down, Home, or End to navigate long Help. The mouse wheel also scrolls Help from the details rail; the composer keeps its own scrolling. Native transcript controls behind Help do not accept pointer or accessibility activation.

@@ -39,7 +39,12 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   end
 
   @doc "Clears only the resolved approval attachment, renders, and synchronizes the transcript."
-  @spec approval_resolved(EditorState.t(), pid(), ApprovalTarget.t(), Session.approval_decision()) ::
+  @spec approval_resolved(
+          EditorState.t(),
+          pid(),
+          ApprovalTarget.t(),
+          Session.approval_decision() | :approval_timeout | :interrupted
+        ) ::
           EditorState.t()
   def approval_resolved(
         %EditorState{} = state,
