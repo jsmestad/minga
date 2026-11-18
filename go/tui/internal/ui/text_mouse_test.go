@@ -2,7 +2,6 @@ package ui
 
 import (
 	"encoding/binary"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,32 +44,39 @@ func TestEditorTextTargetUsesPresentedWrappedRowAndComposedUTF16(t *testing.T) {
 	assertTextTarget(t, model, model.layout.body.X+2, model.layout.body.Y, 7, 700, 2, 101, 2)
 	assertTextTarget(t, model, model.layout.body.X+3, model.layout.body.Y, 7, 700, 2, 101, 4)
 
-	// A local horizontal presentation offset uses the same effective clipping as
-	// renderRow. The partially clipped wide glyph remains the first rendered cell.
+	// A clipped wide glyph leaves one blank cell, still mapped to that
+	// grapheme's start. The next grapheme stays at its document column.
 	model.localPresentation.scrolls[7] = presentationScroll{anchorTop: 10, anchorLeft: 0, contentEpoch: 9, layoutGeneration: 4, colOffset: 1}
 	assertTextTarget(t, model, model.layout.body.X, model.layout.body.Y, 7, 700, 2, 101, 1)
+	assertTextTarget(t, model, model.layout.body.X+1, model.layout.body.Y, 7, 700, 2, 101, 2)
 
 	// Local vertical scroll advances the absolute payload-store rank.
 	model.localPresentation.scrolls[7] = presentationScroll{anchorTop: 10, anchorLeft: 0, contentEpoch: 9, layoutGeneration: 4, rowOffset: 1}
 	assertTextTarget(t, model, model.layout.body.X, model.layout.body.Y, 7, 700, 3, 110, 1)
 }
 
-func TestComposedUTF16OffsetRetainsRenderRowWideClipBehavior(t *testing.T) {
+func TestEditorRowPaintAndHitAgreeAtWideGlyphBoundaries(t *testing.T) {
 	model := New(10, 3, nil)
-	window := protocol.WindowContent{ScrollLeft: 1, ScrollLeftSet: true}
-	row := protocol.WindowRow{Text: "界a"}
-	rendered := xansi.Strip(model.renderRow(window, row, 0, 4, false, 0))
-	if !strings.HasPrefix(rendered, "界a") {
-		t.Fatalf("partially clipped wide grapheme changed render behavior: %q", rendered)
-	}
-	if got := composedUTF16OffsetAtCell(row.Text, 1, 0); got != 0 {
-		t.Fatalf("first wide cell offset = %d, want 0", got)
-	}
-	if got := composedUTF16OffsetAtCell(row.Text, 1, 1); got != 0 {
-		t.Fatalf("second wide cell offset = %d, want 0", got)
-	}
-	if got := composedUTF16OffsetAtCell(row.Text, 1, 2); got != 1 {
-		t.Fatalf("cell after wide grapheme offset = %d, want 1", got)
+	row := protocol.WindowRow{Text: "a界c😀z"}
+	for _, tc := range []struct {
+		left int
+		want string
+		hits []int
+	}{
+		{0, "a界c ", []int{0, 1, 1, 2, 3}},
+		{1, "界c😀", []int{1, 1, 2, 3, 3}},
+		{2, " c😀z", []int{1, 2, 3, 3, 5}},
+	} {
+		window := protocol.WindowContent{ScrollLeft: uint16(tc.left), ScrollLeftSet: true}
+		rendered := xansi.Strip(model.renderRow(window, row, 0, 5, false, 0))
+		if rendered != tc.want {
+			t.Errorf("left %d paints %q, want %q", tc.left, rendered, tc.want)
+		}
+		for cell, want := range tc.hits {
+			if got := composedUTF16OffsetAtCell(row.Text, tc.left, cell); got != want {
+				t.Errorf("left %d cell %d hits offset %d, want %d", tc.left, cell, got, want)
+			}
+		}
 	}
 }
 

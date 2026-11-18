@@ -351,16 +351,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		if updated, ok := m.localMouse(msg); ok {
-			m = updated
-		} else if isWheelButton(msg.Mouse().Button) {
-			delta := wheelDeltaSign(msg.Mouse().Button)
+		mouse := msg.Mouse()
+		if delta, horizontal := wheelScroll(mouse); delta != 0 {
+			if horizontal {
+				// There is no raw mouse fallback for a horizontal wheel: only
+				// an unobscured editor pane can accept a column displacement.
+				if m.layout.body.Contains(mouse.X, mouse.Y) && !m.editorTextOccluded(mouse.X, mouse.Y) {
+					m.scrollWindowByWheel(mouse, delta, true)
+				}
+				break
+			}
+			if updated, ok := m.localMouse(msg); ok {
+				m = updated
+				break
+			}
 			if m.sendAgentPromptScroll(msg, delta) {
 				break
 			}
 			m.queueAgentWheelScroll(msg, delta)
-			m = m.applyPresentationScrollDelta(msg, delta)
-			if !m.sendScrollBatchDelta(msg, delta) {
+			if !m.scrollWindowByWheel(mouse, delta, false) {
 				if packet, ok := m.mousePacket(msg); ok {
 					m.send(packet)
 				}
@@ -506,7 +515,6 @@ func (m *Model) queueAgentWheelScroll(msg tea.MouseMsg, delta int) {
 	if !m.layout.body.Contains(mouse.X, mouse.Y) {
 		return
 	}
-	// wheelDeltaSign: +down / -up, matching the resident store's row convention.
 	m.transcript.scrollBy(delta)
 }
 
@@ -624,7 +632,8 @@ func (m Model) residentCursor() *tea.Cursor {
 		if !semantics.cursor.Eligible {
 			continue
 		}
-		_, height := m.windowRenderDimensions(window, false, protocol.Gutter{})
+		gutter, hasGutter := m.windowGutter(id)
+		width, height := m.windowRenderDimensions(window, hasGutter, gutter)
 		start := m.presentationSourceStart(window, height)
 		row := int(semantics.cursor.Row)
 		if row < start || row >= start+height {
@@ -635,8 +644,12 @@ func (m Model) residentCursor() *tea.Cursor {
 		if col < 0 {
 			continue
 		}
-		textWidth := int(window.Geometry.TextRect.Width)
-		if textWidth > 0 && col >= textWidth {
+		width, _, _ = windowRowComposition(window, width, height, start)
+		textWidth := windowTextWidth(width, gutter)
+		if authoredWidth := int(window.Geometry.TextRect.Width); authoredWidth > 0 {
+			textWidth = min(textWidth, authoredWidth)
+		}
+		if col >= textWidth {
 			continue
 		}
 		x := int(window.Geometry.TextRect.Col) + col
@@ -1414,9 +1427,7 @@ func (m *Model) publishWindow(window protocol.WindowContent, store residentRows)
 		sort.Slice(m.windowOrder, func(i, j int) bool { return m.windowOrder[i] < m.windowOrder[j] })
 	}
 	m.reconcilePresentationScroll(window)
-	if window.Scroll.Wrapped {
-		window.Scroll.ResetRequired = false
-	}
+	window.Scroll.ResetRequired = false
 	m.windows[window.ID] = window
 }
 
@@ -1527,37 +1538,6 @@ func (m Model) bodyHeight() int {
 
 func (m Model) maxOverlayHeight() int {
 	return min(max(m.layout.grid.Height/3, 4), maxPopupRows)
-}
-
-func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
-	mouse := msg.Mouse()
-	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
-	if !ok {
-		return false
-	}
-	window, ok := m.windows[windowID]
-	if !ok {
-		return false
-	}
-	if window.Scroll.Wrapped && (mouse.Button == tea.MouseWheelLeft || mouse.Button == tea.MouseWheelRight) {
-		return false
-	}
-
-	if delta == 0 {
-		return true
-	}
-	var deltaLines int16
-	var direction byte
-	if delta > 0 {
-		deltaLines = int16(min(delta, 0x7FFF))
-		direction = 0
-	} else {
-		deltaLines = int16(max(delta, -0x7FFF))
-		direction = 1
-	}
-
-	m.send(protocol.EncodeScrollBatch(windowID, deltaLines, direction))
-	return true
 }
 
 func (m Model) send(payload []byte) bool {

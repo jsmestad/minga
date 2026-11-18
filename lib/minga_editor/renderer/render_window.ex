@@ -53,6 +53,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
     :scroll_detach_cursor,
     :scroll_echo_anchor,
     :authoritative_scroll_seq,
+    :horizontal_pan_ack,
     :review_frame_rendered?
   ]
 
@@ -68,8 +69,9 @@ defmodule MingaEditor.Renderer.RenderWindow do
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
-          scroll_echo_anchor: {non_neg_integer(), non_neg_integer()} | nil,
+          scroll_echo_anchor: Viewport.scroll_anchor() | nil,
           authoritative_scroll_seq: non_neg_integer(),
+          horizontal_pan_ack: non_neg_integer(),
           review_frame_rendered?: boolean()
         }
 
@@ -92,6 +94,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
       scroll_detach_cursor: carrier.scroll_detach_cursor,
       scroll_echo_anchor: carrier.scroll_echo_anchor,
       authoritative_scroll_seq: carrier.authoritative_scroll_seq,
+      horizontal_pan_ack: carrier.horizontal_pan_ack,
       review_frame_rendered?: false
     }
   end
@@ -114,7 +117,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
     cache =
       RenderCache.settle_scroll_seq(
         cache,
-        {visual_top, 0},
+        {visual_top, 0, 0},
         window.scroll_echo_anchor,
         window.authoritative_scroll_seq
       )
@@ -171,7 +174,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
   Settles the per-frame `scroll_seq` decision against the render cache baseline.
 
   Delegates to `MingaEditor.Renderer.WindowCache.settle_scroll_seq/4` with the
-  committed vertical anchor, the input path's `scroll_echo_anchor`, and the
+  committed pane position, the input path's `scroll_echo_anchor`, and the
   `authoritative_scroll_seq` request counter set by command
   handlers. `scroll_seq` advances when EITHER an authoritative jump was marked
   since the last settle OR the top moved to a value that is neither the previous
@@ -191,7 +194,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
           authoritative_scroll_seq: auth_seq
         } = window
       ) do
-    anchor = Viewport.vertical_anchor(viewport)
+    anchor = Viewport.scroll_anchor(viewport)
     %{window | render_cache: RenderCache.settle_scroll_seq(cache, anchor, echo_anchor, auth_seq)}
   end
 

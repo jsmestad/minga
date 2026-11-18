@@ -4,10 +4,9 @@ import MingaProtocol
 
 @Suite("Editor scroll-track geometry (issue #2358)")
 struct EditorScrollTrackTests {
-    @Test("active surface viewport and local transform produce one thumb metric")
-    func surfaceMetricsIncludeLocalScroll() throws {
+    private func unwrappedSurface(top: UInt32) throws -> PresentedWindowSurface {
         let viewport = GUIViewportSummary(
-            top: 40, left: 0, rows: 20, cols: 80,
+            top: top, left: 0, rows: 20, cols: 80,
             totalLines: 100, visualRowOffset: 0, totalVisualRows: 100
         )
         let rect = GUICellRect(row: 0, col: 0, width: 80, height: 20)
@@ -31,20 +30,26 @@ struct EditorScrollTrackTests {
             documentHighlights: [], paneGeometry: geometry,
             scrollPresentation: presentation
         )
-        let surface = PresentedWindowSurface(
+        return PresentedWindowSurface(
             content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil
         )
+    }
+
+    @Test("active surface viewport and local transform produce one thumb metric")
+    func surfaceMetricsIncludeLocalScroll() throws {
+        let surface = try unwrappedSurface(top: 40)
         let local = EditorLocalPresentationTransform(
             windowId: 1, offset: CGPoint(x: 0, y: 25)
         )
 
         let metrics = try #require(EditorScrollTrack.metrics(
-            surface: surface, localTransform: local, cellHeight: 10
+            surface: surface, localTransform: local, rowPitch: 10
         ))
-        #expect(metrics.viewportTopLine == 42.5)
-        #expect(metrics.totalLines == 100)
+        #expect(metrics.coordinate == .logicalLine)
+        #expect(metrics.displayedTop == 42.5)
+        #expect(metrics.totalRows == 100)
         #expect(metrics.visibleRows == 20)
-        #expect(metrics.resident)
+        #expect(metrics.presentsLocally)
 
         let thumb = try #require(EditorScrollTrack.thumb(
             viewHeight: 100, metrics: metrics
@@ -52,63 +57,76 @@ struct EditorScrollTrackTests {
         #expect(abs(thumb.y - (42.5 / 99 * 80)) < 0.001)
     }
 
-    @Test("wrapped rank prediction does not move the logical thumb or enable local dragging")
-    @MainActor func wrappedThumbRemainsLogical() throws {
-        let fixture = WrappedScrollFixture(groups: [3, 1, 4, 2])
-        let content = try fixture.content(top: 1, continuation: 0)
+    @Test("wrapped residence uses rank and clamps only the matching pane's offset")
+    @MainActor func wrappedThumbUsesResidentRank() throws {
+        let fixture = WrappedScrollFixture()
+        let content = try fixture.content(top: 0, continuation: 1)
         let geometry = try #require(content.paneGeometry)
         let surface = PresentedWindowSurface(content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil)
-        let local = EditorLocalPresentationTransform(windowId: 1, offset: CGPoint(x: 0, y: 40))
-        let metrics = try #require(EditorScrollTrack.metrics(surface: surface, localTransform: local, cellHeight: 20))
-        #expect(metrics.viewportTopLine == 1)
-        #expect(metrics.totalLines == 4)
-        #expect(!metrics.resident)
-        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: content.scrollPresentation, totalLines: 4))
+        func metrics(windowID: UInt16, offset: CGFloat) throws -> EditorScrollTrack.Metrics {
+            try #require(EditorScrollTrack.metrics(
+                surface: surface,
+                localTransform: EditorLocalPresentationTransform(windowId: windowID, offset: CGPoint(x: 0, y: offset)),
+                rowPitch: 20
+            ))
+        }
+
+        let matching = try metrics(windowID: 1, offset: 30)
+        #expect(matching.coordinate == .visualRank)
+        #expect(matching.totalRows == 8)
+        #expect(matching.visibleRows == 3)
+        #expect(matching.displayedTop == 2.5)
+        #expect(matching.maxTop == 5)
+        #expect(matching.presentsLocally)
+        #expect(try metrics(windowID: 2, offset: 30).displayedTop == 1)
+        #expect(try metrics(windowID: 1, offset: 200).displayedTop == 5)
+        #expect(try metrics(windowID: 1, offset: -200).displayedTop == 0)
+        #expect(EditorScrollTrack.target(forDraggedY: 100, dragOffset: 0, viewHeight: 100, metrics: matching) == 5)
     }
 
-    @Test("clicking the top of the track maps to the first line")
-    func topMapsToFirstLine() {
-        let line = EditorScrollTrack.line(
-            forY: 0, viewHeight: 100, totalLines: 200, visibleRows: 50)
-        #expect(line == 0)
+    @Test("windowed wrapping has no track without an absolute visual rank")
+    @MainActor func windowedWrappedThumbIsUnavailable() throws {
+        let fixture = WrappedScrollFixture(fittedRows: 2)
+        let content = try fixture.content(top: 1, continuation: 0, resident: false)
+        let geometry = try #require(content.paneGeometry)
+        let surface = PresentedWindowSurface(content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil)
+        let local = EditorLocalPresentationTransform(windowId: 1, offset: CGPoint(x: 0, y: 20))
+        #expect(EditorScrollTrack.metrics(surface: surface, localTransform: local, rowPitch: 20) == nil)
     }
 
-    @Test("clicking the bottom of the track maps to the last scrollable line")
-    func bottomMapsToMaxTop() {
-        let line = EditorScrollTrack.line(
-            forY: 100, viewHeight: 100, totalLines: 200, visibleRows: 50)
-        #expect(line == 150)  // totalLines - visibleRows
+    private let windowedTrack = EditorScrollTrack.Metrics(
+        coordinate: .logicalLine, totalRows: 200, visibleRows: 50, top: 10, maxTop: 150, presentsLocally: false
+    )
+    private let fittingTrack = EditorScrollTrack.Metrics(
+        coordinate: .logicalLine, totalRows: 50, visibleRows: 50, top: 0, maxTop: 0, presentsLocally: false
+    )
+    private let dragTrack = EditorScrollTrack.Metrics(
+        coordinate: .logicalLine, totalRows: 1_000, visibleRows: 100, top: 450, maxTop: 900, presentsLocally: false
+    )
+
+    @Test("track click maps proportionally and clamps out-of-bounds pointers")
+    func clickMapsToTop() {
+        #expect(EditorScrollTrack.target(forY: -50, viewHeight: 100, metrics: windowedTrack) == 0)
+        #expect(EditorScrollTrack.target(forY: 0, viewHeight: 100, metrics: windowedTrack) == 0)
+        #expect(EditorScrollTrack.target(forY: 50, viewHeight: 100, metrics: windowedTrack) == 75)
+        #expect(EditorScrollTrack.target(forY: 100, viewHeight: 100, metrics: windowedTrack) == 150)
+        #expect(EditorScrollTrack.target(forY: 200, viewHeight: 100, metrics: windowedTrack) == 150)
     }
 
-    @Test("clicking the middle maps to roughly the middle of the scroll range")
-    func middleMapsToHalf() {
-        let line = EditorScrollTrack.line(
-            forY: 50, viewHeight: 100, totalLines: 200, visibleRows: 50)
-        #expect(line == 75)  // 0.5 * (200 - 50)
+    @Test("track click reaches a single overflowing wrapped row")
+    func clickReachesSingleWrappedOverflowRow() {
+        let track = EditorScrollTrack.Metrics(
+            coordinate: .visualRank, totalRows: 4, visibleRows: 3, top: 0, maxTop: 1, presentsLocally: true
+        )
+        #expect(EditorScrollTrack.target(forY: 90, viewHeight: 100, metrics: track) == 1)
     }
 
-    @Test("a document that fits entirely on screen never scrolls")
-    func fitsOnScreen() {
-        #expect(
-            EditorScrollTrack.line(forY: 0, viewHeight: 100, totalLines: 40, visibleRows: 50) == 0)
-        #expect(
-            EditorScrollTrack.line(forY: 0, viewHeight: 100, totalLines: 50, visibleRows: 50) == 0)
-    }
-
-    @Test("out-of-bounds Y is clamped to the valid range")
-    func clampsOutOfBounds() {
-        #expect(
-            EditorScrollTrack.line(forY: 200, viewHeight: 100, totalLines: 200, visibleRows: 50)
-                == 150)
-        #expect(
-            EditorScrollTrack.line(forY: -50, viewHeight: 100, totalLines: 200, visibleRows: 50)
-                == 0)
-    }
-
-    @Test("a zero-height view never crashes and reports no scroll")
-    func zeroHeight() {
-        #expect(
-            EditorScrollTrack.line(forY: 0, viewHeight: 0, totalLines: 200, visibleRows: 50) == 0)
+    @Test("a fitting document or zero-height view never scrolls")
+    func degenerateTrack() {
+        #expect(EditorScrollTrack.target(forY: 50, viewHeight: 100, metrics: fittingTrack) == 0)
+        #expect(EditorScrollTrack.target(forY: 50, viewHeight: 0, metrics: windowedTrack) == 0)
+        #expect(EditorScrollTrack.thumb(viewHeight: 100, metrics: fittingTrack) == nil)
+        #expect(EditorScrollTrack.thumb(viewHeight: 0, metrics: windowedTrack) == nil)
     }
 
     @Test("the hit region covers the right edge but not the content area")
@@ -123,61 +141,26 @@ struct EditorScrollTrackTests {
     }
 
     @Test("scroll-track capture follows visibility and scrollability rules")
-    func captureRules() {
-        let hiddenIndicator = EditorScrollTrack.shouldCaptureTrackClick(
-            totalLines: 200,
-            visibleRows: 50,
-            viewportTopLine: 10,
-            scrollIndicatorAlpha: 0,
-            alwaysShowScrollbar: false
-        )
-        #expect(!hiddenIndicator)
-
-        let visibleIndicator = EditorScrollTrack.shouldCaptureTrackClick(
-            totalLines: 200,
-            visibleRows: 50,
-            viewportTopLine: 10,
-            scrollIndicatorAlpha: 1,
-            alwaysShowScrollbar: false
-        )
-        #expect(visibleIndicator)
-
-        let alwaysVisible = EditorScrollTrack.shouldCaptureTrackClick(
-            totalLines: 200,
-            visibleRows: 50,
-            viewportTopLine: 10,
-            scrollIndicatorAlpha: 0,
-            alwaysShowScrollbar: true
-        )
-        #expect(alwaysVisible)
-
-        let notScrollable = EditorScrollTrack.shouldCaptureTrackClick(
-            totalLines: 50,
-            visibleRows: 50,
-            viewportTopLine: 10,
-            scrollIndicatorAlpha: 1,
-            alwaysShowScrollbar: true
-        )
-        #expect(!notScrollable)
-
-        let invalidViewportTop = EditorScrollTrack.shouldCaptureTrackClick(
-            totalLines: 200,
-            visibleRows: 50,
-            viewportTopLine: UInt32.max,
-            scrollIndicatorAlpha: 1,
-            alwaysShowScrollbar: true
-        )
-        #expect(!invalidViewportTop)
+    func captureRules() throws {
+        #expect(!EditorScrollTrack.shouldCaptureTrackClick(
+            metrics: windowedTrack, scrollIndicatorAlpha: 0, alwaysShowScrollbar: false
+        ))
+        #expect(EditorScrollTrack.shouldCaptureTrackClick(
+            metrics: windowedTrack, scrollIndicatorAlpha: 1, alwaysShowScrollbar: false
+        ))
+        #expect(EditorScrollTrack.shouldCaptureTrackClick(
+            metrics: windowedTrack, scrollIndicatorAlpha: 0, alwaysShowScrollbar: true
+        ))
+        #expect(!EditorScrollTrack.shouldCaptureTrackClick(
+            metrics: fittingTrack, scrollIndicatorAlpha: 1, alwaysShowScrollbar: true
+        ))
+        let invalidSurface = try unwrappedSurface(top: UInt32.max)
+        #expect(EditorScrollTrack.metrics(surface: invalidSurface, localTransform: nil, rowPitch: 20) == nil)
     }
 
     @Test("thumb geometry matches renderer sizing and travel range")
     func thumbGeometryMatchesRenderer() throws {
-        let thumb = try #require(EditorScrollTrack.thumb(
-            viewHeight: 100,
-            totalLines: 1_000,
-            visibleRows: 100,
-            viewportTopLine: 450
-        ))
+        let thumb = try #require(EditorScrollTrack.thumb(viewHeight: 100, metrics: dragTrack))
 
         #expect(thumb.height == 20)
         #expect(thumb.travelHeight == 80)
@@ -186,27 +169,13 @@ struct EditorScrollTrackTests {
 
     @Test("dragging a grabbed thumb preserves the grabbed offset")
     func draggingThumbPreservesGrabbedOffset() throws {
-        let thumb = try #require(EditorScrollTrack.thumb(
-            viewHeight: 100,
-            totalLines: 1_000,
-            visibleRows: 100,
-            viewportTopLine: 450
-        ))
+        let thumb = try #require(EditorScrollTrack.thumb(viewHeight: 100, metrics: dragTrack))
         let pointerY = thumb.y + 5
         let dragOffset = try #require(EditorScrollTrack.dragOffset(forY: pointerY, thumb: thumb))
 
-        let lineWithoutOffset = EditorScrollTrack.line(
-            forY: pointerY,
-            viewHeight: 100,
-            totalLines: 1_000,
-            visibleRows: 100
-        )
-        let lineWithOffset = EditorScrollTrack.line(
-            forDraggedY: pointerY,
-            dragOffset: dragOffset,
-            viewHeight: 100,
-            totalLines: 1_000,
-            visibleRows: 100
+        let lineWithoutOffset = EditorScrollTrack.target(forY: pointerY, viewHeight: 100, metrics: dragTrack)
+        let lineWithOffset = EditorScrollTrack.target(
+            forDraggedY: pointerY, dragOffset: dragOffset, viewHeight: 100, metrics: dragTrack
         )
 
         #expect(lineWithoutOffset == 405)
@@ -215,20 +184,7 @@ struct EditorScrollTrackTests {
 
     @Test("dragging a grabbed thumb clamps to the rendered travel range")
     func draggingThumbClampsToTravelRange() {
-        #expect(EditorScrollTrack.line(
-            forDraggedY: -40,
-            dragOffset: 5,
-            viewHeight: 100,
-            totalLines: 1_000,
-            visibleRows: 100
-        ) == 0)
-
-        #expect(EditorScrollTrack.line(
-            forDraggedY: 140,
-            dragOffset: 5,
-            viewHeight: 100,
-            totalLines: 1_000,
-            visibleRows: 100
-        ) == 900)
+        #expect(EditorScrollTrack.target(forDraggedY: -40, dragOffset: 5, viewHeight: 100, metrics: dragTrack) == 0)
+        #expect(EditorScrollTrack.target(forDraggedY: 140, dragOffset: 5, viewHeight: 100, metrics: dragTrack) == 900)
     }
 }

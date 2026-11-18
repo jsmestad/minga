@@ -35,9 +35,7 @@ defmodule MingaEditor.Mouse do
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
-  alias MingaEditor.DisplayMap
   alias MingaEditor.FocusTree.Node, as: FocusNode
-  alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Mouse.BufferScroll
@@ -45,7 +43,6 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Mouse.Target.Text, as: TextTarget
   alias MingaEditor.Mouse.TextEvent
-  alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -75,10 +72,6 @@ defmodule MingaEditor.Mouse do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
-  @typep fold_gutter_target ::
-           {:window_fold, Window.id(), non_neg_integer()} | {:decoration_fold, pid(), reference()}
-
-  @typep fold_row_target :: {:window_fold, non_neg_integer()} | {:decoration_fold, reference()}
   @typep drag_window_context ::
            {Window.id(), Window.t(), pid(), integer(), integer(), pos_integer(), pos_integer()}
   @typep tab_command ::
@@ -569,11 +562,18 @@ defmodule MingaEditor.Mouse do
     handle(state, row, col, button, mods, event_type, click_count)
   end
 
-  @spec handle_scroll_batch(state(), non_neg_integer(), integer(), :down | :up) :: state()
+  @spec handle_scroll_batch(state(), non_neg_integer(), integer(), :down | :up) ::
+          state()
   def handle_scroll_batch(state, _window_id, 0, _direction), do: state
 
   def handle_scroll_batch(state, window_id, delta_lines, direction) do
     apply_scroll_intent(state, window_id, delta_lines, direction)
+  end
+
+  @doc "Commits a pane-scoped horizontal intent and makes its receipt visible to the sender."
+  @spec handle_horizontal_pan(state(), non_neg_integer(), integer(), pos_integer()) :: state()
+  def handle_horizontal_pan(state, window_id, delta, input_seq) do
+    scroll_window_horizontal(state, window_id, delta, input_seq)
   end
 
   @doc "Commits an admitted Review scrollbar position through its Preview owner."
@@ -761,23 +761,11 @@ defmodule MingaEditor.Mouse do
 
   # ── Scroll wheel (horizontal) ──
 
-  def handle(state, _r, _c, :wheel_right, _m, :press, _cc) do
-    vp = current_viewport(state)
-    new_left = vp.left + scroll_cols(state)
+  def handle(state, _r, _c, :wheel_right, _m, :press, _cc),
+    do: scroll_window_horizontal(state, state.workspace.windows.active, scroll_cols(state))
 
-    state
-    |> update_current_viewport(%{vp | left: new_left})
-    |> clamp_cursor_to_horizontal_viewport()
-  end
-
-  def handle(state, _r, _c, :wheel_left, _m, :press, _cc) do
-    vp = current_viewport(state)
-    new_left = max(vp.left - scroll_cols(state), 0)
-
-    state
-    |> update_current_viewport(%{vp | left: new_left})
-    |> clamp_cursor_to_horizontal_viewport()
-  end
+  def handle(state, _r, _c, :wheel_left, _m, :press, _cc),
+    do: scroll_window_horizontal(state, state.workspace.windows.active, -scroll_cols(state))
 
   # ── Middle-click paste ──
 
@@ -1204,26 +1192,24 @@ defmodule MingaEditor.Mouse do
     apply_scroll_intent(state, win_id, delta, dir)
   end
 
-  @spec scroll_window_horizontal(state(), term(), integer()) :: state()
-  defp scroll_window_horizontal(state, win_id, delta) do
-    case Map.fetch(state.workspace.windows.map, win_id) do
-      {:ok, %Window{}} ->
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.set_windows(
-                state.workspace,
-                MingaEditor.State.Windows.scroll_horizontal(
-                  state.workspace.windows,
-                  win_id,
-                  delta
-                )
-              )
-        }
+  @spec scroll_window_horizontal(state(), term(), integer(), non_neg_integer()) :: state()
+  defp scroll_window_horizontal(state, win_id, delta, input_seq \\ 0) do
+    with {:ok, %Window{content: {:buffer, buffer}} = window} when is_pid(buffer) <-
+           Map.fetch(state.workspace.windows.map, win_id),
+         false <- Buffer.get_option(buffer, :wrap) do
+      cursor =
+        if state.workspace.windows.active == win_id,
+          do: Buffer.cursor(buffer),
+          else: window.cursor
 
-      _ ->
-        state
+      window = Window.pan_horizontally(window, delta, cursor, input_seq)
+      windows = Windows.replace_window(state.workspace.windows, win_id, window)
+      %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+    else
+      _ -> state
     end
+  catch
+    :exit, _ -> state
   end
 
   # Native wheel events and the terminal's wrapped fallback use the same
@@ -1646,17 +1632,26 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_buffer_target_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_buffer_target_click(state, row, col) do
-    case handle_block_command_click(state, row, col) do
-      {:handled, state} -> state
-      :miss -> handle_non_block_content_click(state, row, col)
-    end
-  end
+    case HitTest.resolve_click(state, row, col) do
+      {:buffer, %BufferTarget{} = target} ->
+        apply_plain_click(state, target)
 
-  @spec handle_non_block_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp handle_non_block_content_click(state, row, col) do
-    case handle_fold_gutter_click(state, row, col) do
-      {:handled, state} -> state
-      :miss -> handle_buffer_content_click(state, row, col)
+      {:command, command} ->
+        MingaEditor.dispatch_command(state, command)
+
+      {:window_fold, win_id, line} ->
+        windows = Windows.toggle_fold(state.workspace.windows, win_id, line)
+        %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+
+      {:decoration_fold, buf, fold_id} ->
+        toggle_decoration_fold(buf, fold_id)
+        state
+
+      :block_noop ->
+        state
+
+      :miss ->
+        state
     end
   end
 
@@ -1722,184 +1717,12 @@ defmodule MingaEditor.Mouse do
   defp normalize_position_range(first, second) when first <= second, do: {first, second}
   defp normalize_position_range(first, second), do: {second, first}
 
-  @spec handle_block_command_click(state(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, state()} | :miss
-  defp handle_block_command_click(state, row, col) do
-    case HitTest.resolve_buffer(state, row, col) do
-      {:command, command} -> {:handled, MingaEditor.dispatch_command(state, command)}
-      :block_noop -> {:handled, state}
-      _target_or_miss -> :miss
-    end
-  end
-
-  @spec handle_buffer_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp handle_buffer_content_click(state, row, col) do
-    case HitTest.resolve_buffer(state, row, col) do
-      {:buffer, %BufferTarget{} = target} -> apply_plain_click(state, target)
-      _command_or_miss -> state
-    end
-  end
-
-  @spec handle_fold_gutter_click(state(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, state()} | :miss
-  defp handle_fold_gutter_click(state, row, col) do
-    case fold_gutter_click_target(state, row, col) do
-      nil ->
-        :miss
-
-      {:window_fold, win_id, buf_line} ->
-        {:handled,
-         %{
-           state
-           | workspace:
-               MingaEditor.Session.State.set_windows(
-                 state.workspace,
-                 MingaEditor.State.Windows.toggle_fold(state.workspace.windows, win_id, buf_line)
-               )
-         }}
-
-      {:decoration_fold, buf, fold_id} ->
-        toggle_decoration_fold(buf, fold_id)
-        {:handled, state}
-    end
-  end
-
   @spec toggle_decoration_fold(pid(), reference()) :: :ok
   defp toggle_decoration_fold(buf, fold_id) do
     Buffer.batch_decorations(buf, fn decs -> Decorations.toggle_fold_region(decs, fold_id) end)
     :ok
   catch
     :exit, _ -> :ok
-  end
-
-  @spec fold_gutter_click_target(state(), non_neg_integer(), non_neg_integer()) ::
-          fold_gutter_target() | nil
-  defp fold_gutter_click_target(state, row, col) do
-    layout = Layout.get(state)
-
-    case Layout.active_window_layout(layout, state) do
-      %{content: {win_row, win_col, content_w, win_h}} ->
-        find_fold_gutter_click_target(state, row, col, win_row, win_col, content_w, win_h)
-
-      nil ->
-        nil
-    end
-  end
-
-  @spec find_fold_gutter_click_target(
-          state(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pos_integer(),
-          pos_integer()
-        ) :: fold_gutter_target() | nil
-  defp find_fold_gutter_click_target(state, row, col, win_row, win_col, content_w, win_h) do
-    local_row = row - win_row
-
-    fold_col = win_col + Gutter.fold_column_offset()
-
-    if col == fold_col and local_row >= 0 and local_row < win_h do
-      active_fold_target_at_row(state, local_row, win_h, content_w)
-    else
-      nil
-    end
-  end
-
-  @spec active_fold_target_at_row(state(), non_neg_integer(), pos_integer(), pos_integer()) ::
-          fold_gutter_target() | nil
-  defp active_fold_target_at_row(
-         %{workspace: %{windows: %{active: win_id}}} = state,
-         local_row,
-         win_h,
-         content_w
-       ) do
-    case MingaEditor.Session.State.active_window_struct(state.workspace) do
-      %Window{content: {:buffer, buf}} = window ->
-        total_lines = Buffer.line_count(buf)
-        {cursor_line, _} = window.cursor
-        scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
-
-        case fold_target_line_at_row(
-               buf,
-               window,
-               local_row,
-               scroll_top,
-               win_h,
-               content_w,
-               total_lines
-             ) do
-          nil -> nil
-          {:window_fold, buf_line} -> {:window_fold, win_id, buf_line}
-          {:decoration_fold, fold_id} -> {:decoration_fold, buf, fold_id}
-        end
-
-      _other ->
-        nil
-    end
-  end
-
-  @spec fold_target_line_at_row(
-          pid(),
-          Window.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pos_integer(),
-          pos_integer(),
-          non_neg_integer()
-        ) :: fold_row_target() | nil
-  defp fold_target_line_at_row(buf, window, local_row, scroll_top, win_h, content_w, total_lines) do
-    decs = Buffer.decorations(buf)
-
-    first_buf_line = display_map_scroll_top(window, scroll_top)
-
-    text_width = HitTest.content_text_width(buf, total_lines, content_w)
-
-    case DisplayMap.compute(window.fold_map, decs, first_buf_line, win_h, total_lines, text_width) do
-      nil ->
-        direct_fold_target(window, local_row + scroll_top, total_lines)
-
-      %DisplayMap{} = dm ->
-        display_map_fold_target(window, dm, local_row)
-    end
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec display_map_scroll_top(Window.t(), non_neg_integer()) :: non_neg_integer()
-  defp display_map_scroll_top(%Window{fold_map: %FoldMap{folds: []}}, scroll_top), do: scroll_top
-
-  defp display_map_scroll_top(%Window{fold_map: fold_map}, scroll_top),
-    do: FoldMap.visible_to_buffer(fold_map, scroll_top)
-
-  @spec display_map_fold_target(Window.t(), DisplayMap.t(), non_neg_integer()) ::
-          fold_row_target() | nil
-  defp display_map_fold_target(window, dm, local_row) do
-    case Enum.at(dm.entries, local_row) do
-      {buf_line, {:fold_start, _}} -> {:window_fold, buf_line}
-      {_buf_line, {:decoration_fold, %{id: fold_id}}} -> {:decoration_fold, fold_id}
-      {buf_line, :normal} -> foldable_start_target(window, buf_line)
-      _ -> nil
-    end
-  end
-
-  @spec direct_fold_target(Window.t(), non_neg_integer(), non_neg_integer()) ::
-          fold_row_target() | nil
-  defp direct_fold_target(_window, target_line, total_lines) when target_line >= total_lines,
-    do: nil
-
-  defp direct_fold_target(window, target_line, _total_lines),
-    do: foldable_start_target(window, target_line)
-
-  @spec foldable_start_target(Window.t(), non_neg_integer()) :: fold_row_target() | nil
-  defp foldable_start_target(window, buf_line) do
-    if fold_indicator_line?(window, buf_line), do: {:window_fold, buf_line}, else: nil
-  end
-
-  @spec fold_indicator_line?(Window.t(), non_neg_integer()) :: boolean()
-  defp fold_indicator_line?(%Window{fold_map: fold_map, fold_ranges: ranges}, buf_line) do
-    FoldMap.fold_start?(fold_map, buf_line) or Enum.any?(ranges, &(&1.start_line == buf_line))
   end
 
   @spec maybe_unfocus_file_tree_for_content_click(state()) :: state()
@@ -2103,58 +1926,6 @@ defmodule MingaEditor.Mouse do
     max_top = max(0, total_lines - visible_rows)
     new_top = (vp.top + delta) |> max(0) |> min(max_top)
     Viewport.put_top(vp, new_top)
-  end
-
-  @spec clamp_cursor_to_horizontal_viewport(state()) :: state()
-  defp clamp_cursor_to_horizontal_viewport(%{workspace: %{buffers: %{active: buf}}} = state)
-       when is_pid(buf) do
-    vp = current_viewport(state)
-    {line, byte_col} = Buffer.cursor(buf)
-    line_text = cursor_line_text(buf, line)
-    display_col = Unicode.display_col(line_text, byte_col)
-    target_col = horizontal_cursor_target(display_col, vp.left, vp.cols)
-
-    if target_col == display_col do
-      state
-    else
-      Buffer.move_to(buf, {line, byte_offset_for_visible_col(line_text, target_col)})
-      state
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  defp clamp_cursor_to_horizontal_viewport(state), do: state
-
-  @spec horizontal_cursor_target(non_neg_integer(), non_neg_integer(), pos_integer()) ::
-          non_neg_integer()
-  defp horizontal_cursor_target(display_col, left, _cols) when display_col < left, do: left
-
-  defp horizontal_cursor_target(display_col, left, cols) when display_col >= left + cols do
-    left + cols - 1
-  end
-
-  defp horizontal_cursor_target(display_col, _left, _cols), do: display_col
-
-  @spec byte_offset_for_visible_col(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp byte_offset_for_visible_col(line_text, target_col) do
-    line_text
-    |> Unicode.display_col_to_byte(target_col)
-    |> advance_to_visible_col(line_text, target_col)
-  end
-
-  @spec advance_to_visible_col(non_neg_integer(), String.t(), non_neg_integer()) ::
-          non_neg_integer()
-  defp advance_to_visible_col(byte_col, line_text, target_col) do
-    display_col = Unicode.display_col(line_text, byte_col)
-
-    if display_col >= target_col or byte_col >= byte_size(line_text) do
-      byte_col
-    else
-      line_text
-      |> Unicode.next_grapheme_byte_offset(byte_col)
-      |> advance_to_visible_col(line_text, target_col)
-    end
   end
 
   @spec cursor_line_text(pid(), non_neg_integer()) :: String.t()

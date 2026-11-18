@@ -2,9 +2,7 @@ import CoreGraphics
 
 /// Pure accumulator for smooth trackpad scrolling.
 ///
-/// Tracks a fractional pixel offset and emits discrete line/column events
-/// when the offset crosses a cell boundary. The pixel offset (vertical)
-/// gives the Metal renderer a sub-cell-height shift for smooth visual scrolling.
+/// Converts AppKit's signed deltas to whole cells while retaining sub-cell motion.
 ///
 /// This struct is intentionally free of NSEvent and encoder dependencies
 /// so the accumulation logic can be unit tested.
@@ -18,12 +16,9 @@ struct ScrollAccumulator {
     /// Positive = content shifted left, negative = content shifted right.
     var pixelOffsetX: CGFloat = 0
 
-    /// Scroll direction emitted to the BEAM.
-    enum Event: Equatable {
+    enum VerticalEvent: Equatable {
         case scrollDown
         case scrollUp
-        case scrollLeft
-        case scrollRight
     }
 
     /// Reset both accumulators (call at the start of a new gesture).
@@ -36,14 +31,14 @@ struct ScrollAccumulator {
     ///
     /// `deltaY` follows AppKit convention: positive = scroll up (content moves down).
     /// Returns an array of discrete scroll events to send to the BEAM.
-    mutating func accumulateVertical(deltaY: CGFloat, cellHeight: CGFloat) -> [Event] {
+    mutating func accumulateVertical(deltaY: CGFloat, cellHeight: CGFloat) -> [VerticalEvent] {
         guard cellHeight > 0 else { return [] }
 
         // scrollingDeltaY is positive when scrolling up (content down),
         // but pixelOffsetY is positive when content shifts up (scrolling down).
         pixelOffsetY -= deltaY
 
-        var events: [Event] = []
+        var events: [VerticalEvent] = []
 
         while pixelOffsetY >= cellHeight {
             events.append(.scrollDown)
@@ -57,31 +52,43 @@ struct ScrollAccumulator {
         return events
     }
 
-    /// Accumulate a horizontal pixel delta from a trackpad event.
-    ///
-    /// `deltaX` follows AppKit convention: positive = scroll left.
-    /// Returns an array of discrete scroll events to send to the BEAM.
-    mutating func accumulateHorizontal(deltaX: CGFloat, cellWidth: CGFloat) -> [Event] {
-        guard cellWidth > 0 else { return [] }
-
-        pixelOffsetX += deltaX
-
-        var events: [Event] = []
-
-        while pixelOffsetX >= cellWidth {
-            events.append(.scrollLeft)
-            pixelOffsetX -= cellWidth
+    /// AppKit positive X moves the content right; positive viewport motion moves it left.
+    /// Keep only the accepted sub-cell residual at a viewport edge or after i16 saturation.
+    mutating func accumulateHorizontal(
+        deltaX: CGFloat, cellWidth: CGFloat, left: Int = Int(UInt16.max), right: Int = Int(UInt16.max)
+    ) -> Int16 {
+        guard cellWidth > 0 else { return 0 }
+        let offset = pixelOffsetX - deltaX
+        let columns = offset / cellWidth
+        guard columns > -CGFloat(left) else {
+            snapHorizontal()
+            return Int16(clamping: -left)
         }
-        while pixelOffsetX <= -cellWidth {
-            events.append(.scrollRight)
-            pixelOffsetX += cellWidth
+        guard columns < CGFloat(right) else {
+            snapHorizontal()
+            return Int16(clamping: right)
         }
+        let wholeColumns = Int(columns)
+        pixelOffsetX = offset - CGFloat(wholeColumns) * cellWidth
+        return Int16(clamping: wholeColumns)
+    }
 
-        return events
+    mutating func snapHorizontal() {
+        pixelOffsetX = 0
     }
 
     /// Snap the vertical pixel offset to zero (call at end of gesture/momentum).
     mutating func snapVertical() {
         pixelOffsetY = 0
+    }
+}
+
+/// The endpoint and latest sequence of the accepted pan input for one pane.
+struct HorizontalScrollPrediction {
+    let left: Int
+    let inputSeq: UInt32
+
+    func columns(from committedLeft: UInt16) -> Int {
+        left - Int(committedLeft)
     }
 }

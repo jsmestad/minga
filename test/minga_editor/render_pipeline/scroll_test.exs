@@ -14,6 +14,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
@@ -155,20 +156,42 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert ["#{replacement} TAIL"] == scrolls[id].lines
     end
 
-    test "wheel does not reuse a wrapped anchor when a transient block takes over layout" do
+    test "Inline Ask preserves a detached continuation and participates in wheel bounds" do
       editor = prepared_wrapped_wheel_state()
       buffer = editor.workspace.buffers.active
       id = editor.workspace.windows.active
+      assert {0, old_bottom} = Viewport.vertical_anchor(editor.workspace.windows.map[id].viewport)
+      assert old_bottom > 0
+
       file = %FileRef{kind: :buffer, display_name: "scratch", buffer_pid: buffer}
       ask = InlineAsk.new(buffer, file, "scratch", 0, nil, "context")
       shell = TraditionalState.activate_inline_ask(%TraditionalState{}, ask)
       runtime = Runtime.new(Runtime.default_entry(), shell)
       editor = %{editor | shell_runtime: runtime}
-      editor = Mouse.handle_scroll_batch(editor, id, 1, :down)
-      assert %{visual_row_offset: 0} = editor.workspace.windows.map[id].viewport
 
-      {scrolls, _input, _layout} = run_through_scroll(editor)
-      assert %{wrap_on: false, viewport: %{visual_row_offset: 0}} = scrolls[id]
+      next = old_bottom + 1
+      editor = Mouse.handle_scroll_batch(editor, id, 1, :down)
+      assert {0, ^next} = Viewport.vertical_anchor(editor.workspace.windows.map[id].viewport)
+
+      {scrolls, input, _layout} = run_through_scroll(editor)
+      assert %{wrap_on: true, full_residence: false, viewport: viewport} = scrolls[id]
+      assert Viewport.vertical_anchor(viewport) == {0, next}
+      {[%{models: [model]}], nil, _input} = Content.build_content(input, scrolls)
+      assert [%{row_type: :wrap_continuation, visual_index: ^next} | _] = model.rows
+      assert Enum.at(model.rows, Viewport.content_rows(viewport) - 1).row_type == :block
+
+      at_bottom = Mouse.handle_scroll_batch(editor, id, 100, :down)
+      {0, bottom} = Viewport.vertical_anchor(at_bottom.workspace.windows.map[id].viewport)
+      assert bottom > next
+      assert at_bottom.workspace.windows.map[id].pinned
+
+      reversed = Mouse.handle_scroll_batch(at_bottom, id, -1, :up)
+      {scrolls, input, _layout} = run_through_scroll(reversed)
+      {[%{models: [model]}], nil, _input} = Content.build_content(input, scrolls)
+      assert Viewport.vertical_anchor(scrolls[id].viewport) == {0, bottom - 1}
+      assert hd(model.rows).visual_index == bottom - 1
+      refute reversed.workspace.windows.map[id].pinned
+      assert BufferProcess.cursor(buffer) == {0, 0}
     end
 
     test "scroll result has correct cursor at line 0" do
@@ -219,31 +242,42 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert Enum.count(scroll.lines) == 500
     end
 
-    test "wrap_on is false when folds produce a visible_line_map" do
-      state = base_state(content: String.duplicate("a", 120) <> "\n" <> "hidden\nfold\ntail")
-      buffer = state.workspace.buffers.active
-      _ = BufferProcess.set_option(buffer, :wrap, true)
+    test "wheel and paint keep wrapping the current line with a closed fold far offscreen" do
+      state =
+        gui_state(
+          rows: 8,
+          cols: 18,
+          content: String.duplicate("a", 120) <> "\n" <> long_content(40)
+        )
 
-      win_id = state.workspace.windows.active
-      window = Map.fetch!(state.workspace.windows.map, win_id)
-      window = Window.set_fold_ranges(window, [FoldRange.new!(1, 3)])
-      window = Window.fold_at(window, 1)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+
+      id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, id)
+      window = Window.set_fold_ranges(window, [FoldRange.new!(30, 35)])
+      window = Window.fold_at(window, 30)
 
       state = %{
         state
         | workspace:
             SessionState.set_windows(state.workspace, %{
               state.workspace.windows
-              | map: Map.put(state.workspace.windows.map, win_id, window)
+              | map: Map.put(state.workspace.windows.map, id, window)
             })
       }
 
-      {scrolls, _state, _layout} = run_through_scroll(state)
-      [{_win_id, scroll}] = Map.to_list(scrolls)
+      state = RenderPipeline.compute_layout(state)
+      state = Mouse.handle_scroll_batch(state, id, 1, :down)
+      assert {0, 1} = Viewport.vertical_anchor(state.workspace.windows.map[id].viewport)
 
-      assert scroll.visible_line_map != nil
-      refute scroll.wrap_on
-      assert scroll.viewport.visual_row_offset == 0
+      {scrolls, input, _layout} = run_through_scroll(state)
+      assert %{full_residence: false, viewport: viewport} = scrolls[id]
+      assert Viewport.vertical_anchor(viewport) == {0, 1}
+      {[%{models: [model]}], nil, _input} = Content.build_content(input, scrolls)
+
+      assert [%{buf_line: 0, row_type: :wrap_continuation, visual_index: 1} | _] = model.rows
+      assert BufferProcess.cursor(buffer) == {0, 0}
     end
 
     test "wrapped scroll keeps offset 0 when the wrapped file fits" do

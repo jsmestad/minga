@@ -133,11 +133,8 @@ func (m Model) editorTextTargetAt(screenX, screenY int, capturedWindowID uint16)
 
 	sourceStart := m.presentationSourceStart(window, height)
 	width, _, _ = windowRowComposition(window, width, height, sourceStart)
-	gutterWidth := 0
-	if hasGutter {
-		gutterWidth = gutterRenderWidth(gutter)
-	}
-	contentWidth := max(width-gutterWidth, 1)
+	gutterWidth := gutterRenderWidth(gutter)
+	contentWidth := windowTextWidth(width, gutter)
 	textStart := placement.col + gutterWidth
 	textEnd := textStart + contentWidth
 	if capturedWindowID == 0 && (bodyX < textStart || bodyX >= textEnd || bodyY < placement.row || bodyY >= placement.row+height) {
@@ -196,24 +193,16 @@ func edgeDirection(value, start, end int) int8 {
 }
 
 func composedUTF16OffsetAtCell(text string, scrollLeft, cell int) int {
+	target := scrollLeft + cell
 	displayCol := 0
-	visibleCol := 0
 	utf16Offset := 0
 	for graphemes := uniseg.NewGraphemes(text); graphemes.Next(); {
 		grapheme := graphemes.Str()
-		width := max(displayWidth(grapheme), 1)
-		units := utf16Units(grapheme)
-		if displayCol+width <= scrollLeft {
-			displayCol += width
-			utf16Offset += units
-			continue
-		}
-		if cell < visibleCol+width {
+		displayCol += max(displayWidth(grapheme), 1)
+		if target < displayCol {
 			return utf16Offset
 		}
-		displayCol += width
-		visibleCol += width
-		utf16Offset += units
+		utf16Offset += utf16Units(grapheme)
 	}
 	return utf16Offset
 }

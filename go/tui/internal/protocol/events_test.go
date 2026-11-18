@@ -169,6 +169,14 @@ func TestEncodeScrollBatchUp(t *testing.T) {
 	}
 }
 
+func TestEncodeHorizontalPan(t *testing.T) {
+	got := EncodeHorizontalPan(0x0123, -261, 0x12345678)
+	want := []byte{generated.OPHorizontalPan, 0x01, 0x23, 0xFE, 0xFB, 0x12, 0x34, 0x56, 0x78}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("horizontal pan = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUISidebarAction(t *testing.T) {
 	got := EncodeGUISidebarAction("git", "git_status", "activate")
 	want := []byte{

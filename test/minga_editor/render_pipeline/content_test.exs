@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
   alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.Face
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
   alias MingaEditor.Agent.UIState
@@ -15,6 +16,8 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias MingaEditor.Agent.ViewContext
   alias MingaEditor.RenderPipeline.WindowContent
   alias MingaEditor.Layout
+  alias MingaEditor.Mouse.HitTest
+  alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
@@ -81,41 +84,87 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert Enum.any?(model.rows, fn row -> String.contains?(row.text, "hello world") end)
     end
 
-    test "visible_line_map keeps wrapped cursor math out of the folded path" do
-      state =
-        base_state(
-          content:
-            String.duplicate("a", 120) <>
-              "\n" <> String.duplicate("b", 160) <> "\nvisible\nfold\ntail"
-        )
-
+    test "mixed rows preserve decoration order, fold summaries, cursor placement, and hits" do
+      head = String.duplicate("a", 42)
+      state = gui_state(rows: 24, cols: 24, content: head <> "\nfolded\nhidden\ntail")
       buffer = state.workspace.buffers.active
-      Minga.Buffer.Process.set_option(buffer, :wrap, true)
-      Minga.Buffer.Process.move_to(buffer, {2, 0})
-      assert Minga.Buffer.Process.cursor(buffer) == {2, 0}
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, :absolute} = BufferProcess.set_option(buffer, :line_numbers, :absolute)
+      face = Face.new()
 
-      win_id = state.workspace.windows.active
-      window = Map.fetch!(state.workspace.windows.map, win_id)
-      window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(3, 4)])
-      window = Window.fold_at(window, 3)
+      BufferProcess.add_block_decoration(buffer, 0,
+        placement: :above,
+        render: fn _width -> [{"block above", face}] end
+      )
+
+      BufferProcess.add_virtual_text(buffer, {0, 0},
+        placement: :above,
+        segments: [{"virtual above", face}]
+      )
+
+      BufferProcess.add_virtual_text(buffer, {0, 0},
+        placement: :below,
+        segments: [{"virtual below", face}]
+      )
+
+      BufferProcess.add_block_decoration(buffer, 0,
+        placement: :below,
+        height: :dynamic,
+        render: fn _width -> [[{"block first", face}], [{"block second", face}]] end,
+        on_click: fn row, col -> {:command, {:clicked, row, col}} end
+      )
+
+      id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, id)
+      window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(1, 2)])
+      window = Window.fold_at(window, 1)
 
       state = %{
         state
         | workspace:
             SessionState.set_windows(state.workspace, %{
               state.workspace.windows
-              | map: Map.put(state.workspace.windows.map, win_id, window)
+              | map: Map.put(state.workspace.windows.map, id, window)
             })
       }
 
-      {scrolls, state, _layout} = run_through_scroll(state)
-      [{_scroll_win_id, scroll}] = Map.to_list(scrolls)
-      assert scroll.visible_line_map != nil
+      state = RenderPipeline.compute_layout(state)
+      width = wrapped_content_width(state, buffer)
+      :ok = BufferProcess.move_to(buffer, {0, width + 1})
+      [wraps] = WrapMap.compute([head], width, linebreak: false)
+      wrap_text = Enum.map(wraps, &WrapMap.display_text/1)
 
-      {[_content], cursor_info, _state} = Content.build_content(state, scrolls)
+      {scrolls, input, layout} = run_through_scroll(state)
 
-      assert %Cursor{row: row} = cursor_info
-      assert row <= 3
+      assert {[%WindowContent{models: [model]}], %Cursor{} = cursor, _input} =
+               Content.build_content(input, scrolls)
+
+      assert Enum.map(model.rows, & &1.text) ==
+               ["block above", "virtual above"] ++
+                 wrap_text ++
+                 ["virtual below", "block first", "block second", "folded ··· 1 lines", "tail"]
+
+      assert Enum.map(model.gutter.entries, & &1.display_type) ==
+               [:blank, :blank, :normal] ++
+                 List.duplicate(:wrap_continuation, length(wraps) - 1) ++
+                 [:blank, :blank, :blank, :fold_start, :normal]
+
+      %{content: {row, col, _width, _height}} = layout.window_layouts[id]
+      text_col = col + scrolls[id].gutter_w
+      assert {model.cursor_row, model.cursor_col} == {3, 1}
+      assert {cursor.row, cursor.col} == {row + 3, text_col + 1}
+      assert {:buffer, target} = HitTest.resolve_buffer(state, row + 3, text_col + 1)
+      assert BufferTarget.position(target) == {0, width + 1}
+      assert HitTest.resolve_buffer(state, row + 1, text_col) == :miss
+
+      second_block = row + 4 + length(wraps)
+
+      assert HitTest.resolve_buffer(state, second_block, text_col + 1) ==
+               {:command, {:clicked, 1, 1}}
+
+      assert {:buffer, target} = HitTest.resolve_buffer(state, second_block + 1, text_col)
+      assert BufferTarget.position(target) == {1, 0}
     end
 
     test "updates window tracking fields after render" do

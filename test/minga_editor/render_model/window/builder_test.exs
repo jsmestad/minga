@@ -732,6 +732,31 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.accessibility_cursor == {1, 0}
     end
 
+    test "insert caret stays before the window-fold summary in a wrapped pane" do
+      state = gui_state(content: "x\nfolded\nalso folded\nlast")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert :ok = BufferProcess.move_to(buffer, {0, 1})
+
+      id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, id)
+
+      window =
+        window |> EditorWindow.set_fold_ranges([FoldRange.new!(0, 2)]) |> EditorWindow.fold_at(0)
+
+      windows = %{state.workspace.windows | map: Map.put(state.workspace.windows.map, id, window)}
+
+      workspace =
+        state.workspace
+        |> SessionState.set_windows(windows)
+        |> SessionState.transition_mode(:insert)
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      assert [%{row_type: :fold_start, text: "x ··· 2 lines"} | _] = wf.window_model.rows
+      assert wf.window_model.cursor_col == 1
+      assert wf.window_model.accessibility_cursor == {0, 1}
+    end
+
     test "wrapped cursor projection follows a tab presentation split across rows" do
       content = String.duplicate("a", 13) <> "\tb"
       state = gui_state(cols: 20, content: content)

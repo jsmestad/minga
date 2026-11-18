@@ -64,7 +64,9 @@ defmodule Minga.RenderModel.Window do
             row_delta: nil,
             row_store_mode: :windowed,
             resident_semantics: nil,
-            scroll_seq: 0
+            scroll_seq: 0,
+            horizontal_pan_ack: 0,
+            horizontal_pan_limit: 0
 
   @type t :: %__MODULE__{
           window_id: pos_integer(),
@@ -100,6 +102,8 @@ defmodule Minga.RenderModel.Window do
           row_delta: Minga.RenderModel.Window.RowDelta.t() | nil,
           row_store_mode: :windowed | {:resident, non_neg_integer()},
           resident_semantics: Minga.RenderModel.Window.ResidentSemantics.t() | nil,
-          scroll_seq: non_neg_integer()
+          scroll_seq: non_neg_integer(),
+          horizontal_pan_ack: non_neg_integer(),
+          horizontal_pan_limit: non_neg_integer()
         }
 end
