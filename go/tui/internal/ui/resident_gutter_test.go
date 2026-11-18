@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -50,7 +49,7 @@ func residentTestRowsDelta(t *testing.T, windowID uint16, contentEpoch, baseCoun
 		splices = append(splices, residentTestEncodeRow(row)...)
 	}
 
-	scroll := make([]byte, 0, 39)
+	scroll := make([]byte, 0, 45)
 	scroll = binary.BigEndian.AppendUint16(scroll, windowID)
 	scroll = append(scroll, 0)
 	scroll = binary.BigEndian.AppendUint32(scroll, 0)
@@ -63,6 +62,8 @@ func residentTestRowsDelta(t *testing.T, windowID uint16, contentEpoch, baseCoun
 	scroll = binary.BigEndian.AppendUint32(scroll, contentEpoch)
 	scroll = binary.BigEndian.AppendUint32(scroll, 1)
 	scroll = binary.BigEndian.AppendUint32(scroll, 0)
+	scroll = binary.BigEndian.AppendUint32(scroll, 0)
+	scroll = binary.BigEndian.AppendUint16(scroll, 0) // horizontal_pan_limit
 
 	packet := []byte{generated.OPGuiWindowRowsDelta, 3}
 	packet = append(packet, residentTestSection(0x01, header)...)
@@ -253,7 +254,7 @@ func TestResidentGutterTracksLocalPresentationScroll(t *testing.T) {
 		t.Fatalf("initial resident gutter rows are misaligned: %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	model.previewVerticalScroll(model.windows[7], 1)
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "A  one") || !strings.Contains(scrolled, "B  two") || strings.Contains(scrolled, "zero") {
 		t.Fatalf("locally scrolled resident gutter rows are misaligned: %q", scrolled)
@@ -328,7 +329,7 @@ func TestSequentialResidentA2StructuralEditsKeepShiftedRowsAndGutterAligned(t *t
 	}
 	scrollTo50 := func(model Model) Model {
 		for range 50 {
-			model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+			model.previewVerticalScroll(model.windows[windowID], 1)
 		}
 		return model
 	}

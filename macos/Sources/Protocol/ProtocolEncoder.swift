@@ -247,6 +247,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return nil
         case .agentPromptScroll(let windowID, _, _):
             return windowID == 65534 ? nil : .invalidPayload("Invalid agent prompt scroll target")
+        case .horizontalPan(_, _, let inputSeq):
+            return inputSeq > 0 ? nil : .invalidPayload("Horizontal pan requires a positive input sequence")
         case .ready, .keyPress, .resize, .requestKeyframe, .frameApplied, .frameRejected,
              .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
              .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
@@ -310,6 +312,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             buf[11] = state.rawValue
             writeFrame(buf)
         case .scrollBatch(let windowID, let deltaLines, let direction): encodeScrollBatch(windowId: windowID, deltaLines: deltaLines, direction: direction)
+        case .horizontalPan(let windowID, let deltaColumns, let inputSeq):
+            var buf = Data(count: 9)
+            buf[0] = OP_HORIZONTAL_PAN
+            writeU16(&buf, 1, windowID)
+            writeI16(&buf, 3, deltaColumns)
+            writeU32(&buf, 5, inputSeq)
+            writeFrame(buf)
         case .paste(let text): encodePasteEvent(text: text)
         case .log(let level, let message): encodeLog(level: level, message: message)
         case .selectTab(let id): encodeSelectTab(id: id)

@@ -12,9 +12,12 @@ defmodule MingaEditor.Mouse.HitTestTest do
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Startup
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Window
 
@@ -98,23 +101,8 @@ defmodule MingaEditor.Mouse.HitTestTest do
     test "adds horizontal viewport offset to the resolved target column" do
       {state, buffer} = start_mouse_state("abcdefghijklmnopqrstuvwxyz")
 
-      state =
-        then(state, fn state ->
-          %{
-            state
-            | workspace:
-                then(state.workspace, fn workspace ->
-                  MingaEditor.Session.State.set_windows(
-                    workspace,
-                    MingaEditor.State.Windows.scroll_horizontal(
-                      state.workspace.windows,
-                      state.workspace.windows.active,
-                      5
-                    )
-                  )
-                end)
-          }
-        end)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+      state = with_left(state, 5)
 
       %{content: {row, col, _width, _height}} = active_window_layout(state)
       gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
@@ -146,23 +134,8 @@ defmodule MingaEditor.Mouse.HitTestTest do
           decorations
         end)
 
-      state =
-        then(state, fn state ->
-          %{
-            state
-            | workspace:
-                then(state.workspace, fn workspace ->
-                  MingaEditor.Session.State.set_windows(
-                    workspace,
-                    MingaEditor.State.Windows.scroll_horizontal(
-                      state.workspace.windows,
-                      state.workspace.windows.active,
-                      20
-                    )
-                  )
-                end)
-          }
-        end)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+      state = with_left(state, 20)
 
       %{content: {row, col, _width, _height}} = active_window_layout(state)
       gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
@@ -268,6 +241,14 @@ defmodule MingaEditor.Mouse.HitTestTest do
   end
 
   defp active_window_layout(state), do: Layout.active_window_layout(Layout.get(state), state)
+
+  defp with_left(state, left) do
+    id = state.workspace.windows.active
+    window = Map.fetch!(state.workspace.windows.map, id)
+    viewport = window.viewport |> Viewport.put_horizontal_pan_limit(left) |> Viewport.pan(left)
+    windows = Windows.set_viewport(state.workspace.windows, id, viewport)
+    %{state | workspace: SessionState.set_windows(state.workspace, windows)}
+  end
 
   defp lines(range), do: Enum.map_join(range, "\n", &"line #{&1}")
 

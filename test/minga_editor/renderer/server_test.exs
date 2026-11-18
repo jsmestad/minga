@@ -2244,7 +2244,8 @@ defmodule MingaEditor.Renderer.ServerTest do
       scroll_velocity: %MingaEditor.Window.ScrollVelocity{},
       scroll_detach_cursor: nil,
       scroll_echo_anchor: nil,
-      authoritative_scroll_seq: 0
+      authoritative_scroll_seq: 0,
+      horizontal_pan_ack: 0
     }
   end
 

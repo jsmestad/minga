@@ -25,6 +25,30 @@ private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
     return raw.subdata(in: 4..<(4 + len))
 }
 
+@Suite("Encoder Binary: Scroll Batch")
+struct EncoderScrollBatchTests {
+    @Test("vertical scroll batches still use the six-byte input layout", arguments: [Int16(257), -257])
+    func verticalBatch(delta: Int16) {
+        let direction: UInt8 = delta > 0 ? 0 : 1
+        let payload = captureFrame {
+            $0.send(.scrollBatch(windowID: 0x1234, deltaLines: delta, direction: direction))
+        }
+        #expect(payload == Data(delta > 0
+            ? [0x09, 0x12, 0x34, 0x01, 0x01, 0]
+            : [0x09, 0x12, 0x34, 0xFE, 0xFF, 1]))
+    }
+
+    @Test("horizontal pan carries a signed column delta followed by its intent sequence", arguments: [Int16(257), -257])
+    func horizontalPan(delta: Int16) {
+        let payload = captureFrame {
+            #expect($0.send(.horizontalPan(windowID: 0x1234, deltaColumns: delta, inputSeq: 0x12345678)).wasAccepted)
+        }
+        #expect(payload == Data(delta > 0
+            ? [0x12, 0x12, 0x34, 0x01, 0x01, 0x12, 0x34, 0x56, 0x78]
+            : [0x12, 0x12, 0x34, 0xFE, 0xFF, 0x12, 0x34, 0x56, 0x78]))
+    }
+}
+
 // MARK: - Search session
 
 @Suite("Encoder Binary: Search Session")

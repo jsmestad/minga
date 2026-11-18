@@ -454,6 +454,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  test "horizontal pan carries a signed display-column delta and a nonzero intent sequence" do
+    for delta <- [-3, 4] do
+      assert {:ok, {:horizontal_pan, 7, ^delta, 12}} =
+               Protocol.decode_event(<<0x12, 7::16, delta::16-signed, 12::32>>)
+    end
+
+    assert {:error, :malformed} = Protocol.decode_event(<<0x12, 7::16, -3::16-signed, 0::32>>)
+    assert {:error, :malformed} = Protocol.decode_event(<<0x09, 7::16, 3::16-signed, 2>>)
+  end
+
   describe "decode_event/1 — frame status" do
     test "decodes protocol-v12 rejection reasons and dispositions" do
       assert {:ok, {:frame_applied, 3, 9}} = Protocol.decode_event(<<0x0A, 3::32, 9::32>>)

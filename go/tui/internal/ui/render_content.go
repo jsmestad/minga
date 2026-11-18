@@ -240,8 +240,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 			m.renderWork.decorationVisits++
 		}
 	}
-	gutterWidth := gutterRenderWidth(gutter)
-	contentWidth := max(width-gutterWidth, 1)
+	contentWidth := windowTextWidth(width, gutter)
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
 		m.renderWork.editorRowVisits++
 		trailing := blankMargin
@@ -457,6 +456,10 @@ func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeig
 	return paneWidth - margin, margin, sb
 }
 
+func windowTextWidth(rowWidth int, gutter protocol.Gutter) int {
+	return max(rowWidth-gutterRenderWidth(gutter), 1)
+}
+
 func presentationVisibleRows(window protocol.WindowContent) int {
 	if window.GeometrySet {
 		if window.Geometry.ViewportRows > 0 {
@@ -532,7 +535,16 @@ func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) in
 	if !ok || !scroll.keysMatch(window.Scroll) {
 		return scrollLeft
 	}
-	return max(scrollLeft+scroll.colOffset, 0)
+	return max(scrollLeft+m.presentationColumnOffset(scroll.colOffset), 0)
+}
+
+func (m Model) presentationColumnOffset(offset int) int {
+	// While selection owns the pointer, paint and hit-testing use the same
+	// committed column. Pending wheel intents still reconcile behind it.
+	if m.textDrag != nil {
+		return 0
+	}
+	return offset
 }
 
 func (m Model) lineCacheKeyFor(window protocol.WindowContent, row protocol.WindowRow, rowIndex int) (lineCacheKey, bool) {
@@ -570,17 +582,18 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 	}
 
 	var builder strings.Builder
-	scrollLeft := int(window.ScrollLeft)
-	scrollLeft = m.presentationScrollEffectiveLeft(window)
+	scrollLeft := m.presentationScrollEffectiveLeft(window)
+	scrollRight := scrollLeft + width
 	col := 0
-	for graphemes := uniseg.NewGraphemes(row.Text); graphemes.Next(); {
+	for graphemes := uniseg.NewGraphemes(row.Text); col < scrollRight && graphemes.Next(); {
 		text := graphemes.Str()
-		span := spanAt(row.Spans, uint16(col))
 		spanWidth := max(displayWidth(text), 1)
-		if col+spanWidth <= scrollLeft {
-			col += spanWidth
+		end := col + spanWidth
+		if end <= scrollLeft {
+			col = end
 			continue
 		}
+		span := spanAt(row.Spans, uint16(col))
 		style := m.styleForEditorSpan(span)
 		if window.ID == protocol.AgentPromptWindowID && span.BG == 0 {
 			style = style.Background(m.palette().AgentInputSurface())
@@ -590,11 +603,18 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 		}
 		style = m.applyWindowOverlaysAt(style, window, sourceRowIndex, contentRowIndex, col)
 		style, text = m.applyIndentGuide(window, style, sourceRowIndex, contentRowIndex, col, text)
+		if col < scrollLeft || end > scrollRight {
+			// The terminal cannot draw part of a wide grapheme. Keep its
+			// visible cells blank, rather than shifting the following text.
+			text = strings.Repeat(" ", min(end, scrollRight)-max(col, scrollLeft))
+		}
 		builder.WriteString(style.Render(text))
-		col += spanWidth
+		col = end
 	}
-	if annotation := m.renderRowAnnotationsAt(window, sourceRowIndex, contentRowIndex); annotation != "" {
-		builder.WriteString(annotation)
+	if col < scrollRight {
+		if annotation := m.renderRowAnnotationsAt(window, sourceRowIndex, contentRowIndex); annotation != "" {
+			builder.WriteString(annotation)
+		}
 	}
 	return base.Render(fitStyled(builder.String(), width))
 }

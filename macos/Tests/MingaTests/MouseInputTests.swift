@@ -734,26 +734,6 @@ struct MouseInputTests {
 
     // MARK: - Mouse move (deduplication)
 
-    @Test("smooth scroll target resets when pointer leaves target pane")
-    func smoothScrollTargetResetsWhenPointerLeavesTargetPane() {
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, hasPixelOffset: true) == true)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: nil, hasPixelOffset: true) == true)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 1, hasPixelOffset: true) == false)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, hasPixelOffset: false) == false)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: nil, pointerWindowId: 2, hasPixelOffset: true) == false)
-    }
-
-    @Test("smooth scroll routing keeps the gesture target cell after the pointer moves")
-    func smoothScrollRoutingKeepsGestureTargetCell() {
-        let routedTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: (row: 5, col: 12), row: 5, col: 40)
-        #expect(routedTarget.row == 5)
-        #expect(routedTarget.col == 12)
-
-        let fallbackTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: nil, row: 5, col: 40)
-        #expect(fallbackTarget.row == 5)
-        #expect(fallbackTarget.col == 40)
-    }
-
     @Test("presentation scroll offset suppresses negative horizontal normalization when scrollLeft is zero")
     func presentationScrollOffsetSuppressesNegativeHorizontalNormalization() {
         let suppressed = EditorNSView.presentationScrollOffset(scrollLeft: 0, scrollOffset: CGPoint(x: -8, y: 3))

@@ -90,6 +90,87 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     state
   end
 
+  test "horizontal wheel keeps an empty caret row detached until the caret moves" do
+    editor =
+      gui_state(content: "\n" <> String.duplicate("x", 80), rows: 8, cols: 26, filetype: :text)
+
+    buffer = editor.workspace.buffers.active
+    id = editor.workspace.windows.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+
+    {initial, state} = build_frame(editor)
+    editor = Mouse.handle_horizontal_pan(state.editor, id, 10, 1)
+    {panned, state} = build_frame(%{state | editor: editor})
+
+    assert %{top: 0, left: 10} = panned.geometry.viewport
+    assert panned.scroll_seq == initial.scroll_seq
+
+    assert %{can_pan_horizontally: true, horizontal_pan_ack: 1} =
+             ScrollPresentation.from_window(panned)
+
+    assert ScrollPresentation.from_window(panned).layout_generation ==
+             ScrollPresentation.from_window(initial).layout_generation
+
+    refute panned.cursor_visible
+    assert BufferProcess.cursor(buffer) == {0, 0}
+
+    assert :ok = BufferProcess.move_to(buffer, {1, 1})
+    {following, state} = build_frame(state)
+    assert %{top: 0, left: 0} = following.geometry.viewport
+    assert following.scroll_seq > panned.scroll_seq
+    assert following.cursor_visible
+
+    editor = Mouse.handle_horizontal_pan(state.editor, id, -1, 2)
+    {clamped, _state} = build_frame(%{state | editor: editor})
+    assert %{anchor_left: 0, horizontal_pan_ack: 2} = ScrollPresentation.from_window(clamped)
+  end
+
+  test "a windowed caret keeps its source coordinate when the committed horizontal clip hides it" do
+    content = String.duplicate("x", 80) <> :binary.copy("\n", 65_536)
+    editor = gui_state(content: content, rows: 8, cols: 26, filetype: :text)
+    buffer = editor.workspace.buffers.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+    {initial, state} = build_frame(editor)
+    assert initial.row_store_mode == :windowed
+    editor = Mouse.handle_horizontal_pan(state.editor, editor.workspace.windows.active, 10, 1)
+
+    assert {%{row_store_mode: :windowed, cursor_visible: false, accessibility_cursor: {0, 0}},
+            _state} = build_frame(%{state | editor: editor})
+  end
+
+  test "horizontal pan ignores long overscan rows and caps at the visible right edge" do
+    long = String.duplicate("x", 80)
+    content = :binary.copy("abc\n", 7) <> long <> :binary.copy("\nabc", 20)
+
+    editor =
+      base_state(
+        content: content,
+        rows: 8,
+        cols: 26,
+        filetype: :text,
+        capabilities: %MingaEditor.Frontend.Capabilities{frontend_type: :tui, semantic_ui: true}
+      )
+
+    buffer = editor.workspace.buffers.active
+    id = editor.workspace.windows.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+    {first, state} = build_frame(editor)
+    assert Enum.any?(first.rows, &(&1.text == long))
+    assert %{anchor_left: 0, horizontal_pan_limit: 0} = ScrollPresentation.from_window(first)
+
+    editor = Mouse.handle_horizontal_pan(state.editor, id, 100, 1)
+    {clamped, state} = build_frame(%{state | editor: editor})
+    assert %{anchor_left: 0, horizontal_pan_ack: 1} = ScrollPresentation.from_window(clamped)
+
+    editor = Mouse.handle_scroll_batch(state.editor, id, 7, :down)
+    {wide, state} = build_frame(%{state | editor: editor})
+    limit = 80 - wide.geometry.viewport.cols + 1
+    assert %{horizontal_pan_limit: ^limit} = ScrollPresentation.from_window(wide)
+    editor = Mouse.handle_horizontal_pan(state.editor, id, 100, 2)
+    {panned, _state} = build_frame(%{state | editor: editor})
+    assert %{anchor_left: ^limit, horizontal_pan_ack: 2} = ScrollPresentation.from_window(panned)
+  end
+
   test "wrapped wheel reaches the final continuation without changing the cursor or resending rows" do
     editor =
       gui_state(content: String.duplicate("x", 256) <> "TAIL", rows: 8, cols: 26, filetype: :text)

@@ -76,7 +76,7 @@ version = "2.0.0"
 # and effective wrapped scrolling (scroll presentation flags bit 1). Pane
 # geometry uses a u32 continuation offset for oversized windowed lines.
 # protocol_version 36 adds source-presentation-bound absolute visual scroll targets.
-protocol_version = 36
+protocol_version = 37
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -142,6 +142,7 @@ value = 0x08
 direction = "frontend_to_beam"
 framing = "fixed:9"
 
+# Vertical displacement in display rows, direction 0 down or 1 up.
 [[opcodes]]
 category = "input"
 name = "scroll_batch"
@@ -224,6 +225,14 @@ value = 0x1F
 direction = "frontend_to_beam"
 framing = "fixed:12"
 
+
+# Pane ID, signed display columns, and the intent sequence echoed by that pane.
+[[opcodes]]
+category = "input"
+name = "horizontal_pan"
+value = 0x12
+direction = "frontend_to_beam"
+framing = "fixed:9"
 [[opcodes]]
 category = "input"
 name = "log_message"
@@ -231,7 +240,7 @@ value = 0x60
 direction = "frontend_to_beam"
 
 # Render-transport commands. The 9 cell-paradigm opcodes (draw_text 0x10,
-# set_cursor 0x11, clear 0x12, define_region 0x14, clear_region 0x18,
+# set_cursor 0x11, clear 0x12 (now horizontal_pan), define_region 0x14, clear_region 0x18,
 # destroy_region 0x19, set_active_region 0x1A, scroll_region 0x1B,
 # draw_styled_text 0x1C) were retired in protocol_version 2; semantic windows
 # (gui_window_content 0x80) replaced them. Only transport-level framing survives
@@ -2025,6 +2034,8 @@ fields = [
   { name = "content_epoch", type = "u32" },
   { name = "layout_generation", type = "u32" },
   { name = "scroll_seq", type = "u32" },
+  { name = "horizontal_pan_ack", type = "u32" },
+  { name = "horizontal_pan_limit", type = "u16" },
 ]
 
 # Pane-local accessibility metadata. `generation` identifies the BEAM-owned

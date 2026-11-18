@@ -261,7 +261,7 @@ func TestDecodeWindowContentRequiresOneHeaderAndRows(t *testing.T) {
 func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
 	rowsPayload := []byte{0, 0, 0, 0}
-	scrollPayload := []byte{0, 7, 0x03}
+	scrollPayload := []byte{0, 7, 0x07}
 	scrollPayload = append(scrollPayload, u32Bytes(5)...)
 	scrollPayload = append(scrollPayload, 0, 2)
 	scrollPayload = append(scrollPayload, 0, 1)
@@ -272,6 +272,8 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
 	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
+	scrollPayload = append(scrollPayload, u32Bytes(0x12345678)...) // horizontal_pan_ack
+	scrollPayload = append(scrollPayload, 0x9A, 0xBC) // horizontal_pan_limit
 
 	packet := windowContentPacket(
 		section32(0x01, headerPayload),
@@ -302,6 +304,9 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	if scroll.ScrollSeq != 3 {
 		t.Fatalf("scroll_seq decoded incorrectly: %+v", scroll)
 	}
+	if !scroll.CanPanHorizontally || scroll.HorizontalPanAck != 0x12345678 || scroll.HorizontalPanLimit != 0x9ABC {
+		t.Fatalf("horizontal pan metadata decoded incorrectly: %+v", scroll)
+	}
 }
 
 func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
@@ -318,6 +323,8 @@ func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
 	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
+	scrollPayload = append(scrollPayload, u32Bytes(0)...) // horizontal_pan_ack
+	scrollPayload = append(scrollPayload, 0, 0) // horizontal_pan_limit
 
 	packet := windowContentPacket(
 		section32(0x01, headerPayload),

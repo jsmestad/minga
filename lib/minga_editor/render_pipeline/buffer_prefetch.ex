@@ -486,7 +486,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # so the cursor triggers scroll when it reaches the content edge,
     # not the full viewport edge.
     viewport =
-      if is_active do
+      if wrap_on or (is_active and follow_cursor) do
         scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, scroll_margin)
       else
         viewport
@@ -528,8 +528,15 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
   defp preserve_resident_anchor?(true, false, _window, _viewport), do: true
 
-  defp preserve_resident_anchor?(true, true, window, viewport),
-    do: window.scroll_echo_anchor == Viewport.vertical_anchor(viewport)
+  defp preserve_resident_anchor?(
+         true,
+         true,
+         %{scroll_echo_anchor: {line, offset, _left}},
+         viewport
+       ),
+       do: {line, offset} == Viewport.vertical_anchor(viewport)
+
+  defp preserve_resident_anchor?(true, true, _window, _viewport), do: false
 
   defp preserve_resident_anchor?(false, _active?, _window, _viewport), do: false
 

@@ -895,7 +895,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_scroll_presentation(%ScrollPresentation{} = presentation, command) do
     flags =
       if(presentation.reset_required, do: 0x01, else: 0) |||
-        if(presentation.wrapped, do: 0x02, else: 0)
+        if(presentation.wrapped, do: 0x02, else: 0) |||
+        if(presentation.can_pan_horizontally, do: 0x04, else: 0)
 
     command
     |> Writer.new()
@@ -911,6 +912,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     |> Writer.uint32(:scroll_content_epoch, presentation.content_epoch)
     |> Writer.uint32(:layout_generation, presentation.layout_generation)
     |> Writer.uint32(:scroll_seq, presentation.scroll_seq)
+    |> Writer.uint32(:horizontal_pan_ack, presentation.horizontal_pan_ack)
+    |> Writer.uint16(:horizontal_pan_limit, presentation.horizontal_pan_limit)
     |> Writer.finish()
   end
 

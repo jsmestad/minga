@@ -562,11 +562,18 @@ defmodule MingaEditor.Mouse do
     handle(state, row, col, button, mods, event_type, click_count)
   end
 
-  @spec handle_scroll_batch(state(), non_neg_integer(), integer(), :down | :up) :: state()
+  @spec handle_scroll_batch(state(), non_neg_integer(), integer(), :down | :up) ::
+          state()
   def handle_scroll_batch(state, _window_id, 0, _direction), do: state
 
   def handle_scroll_batch(state, window_id, delta_lines, direction) do
     apply_scroll_intent(state, window_id, delta_lines, direction)
+  end
+
+  @doc "Commits a pane-scoped horizontal intent and makes its receipt visible to the sender."
+  @spec handle_horizontal_pan(state(), non_neg_integer(), integer(), pos_integer()) :: state()
+  def handle_horizontal_pan(state, window_id, delta, input_seq) do
+    scroll_window_horizontal(state, window_id, delta, input_seq)
   end
 
   @doc "Commits an admitted Review scrollbar position through its Preview owner."
@@ -754,23 +761,11 @@ defmodule MingaEditor.Mouse do
 
   # ── Scroll wheel (horizontal) ──
 
-  def handle(state, _r, _c, :wheel_right, _m, :press, _cc) do
-    vp = current_viewport(state)
-    new_left = vp.left + scroll_cols(state)
+  def handle(state, _r, _c, :wheel_right, _m, :press, _cc),
+    do: scroll_window_horizontal(state, state.workspace.windows.active, scroll_cols(state))
 
-    state
-    |> update_current_viewport(%{vp | left: new_left})
-    |> clamp_cursor_to_horizontal_viewport()
-  end
-
-  def handle(state, _r, _c, :wheel_left, _m, :press, _cc) do
-    vp = current_viewport(state)
-    new_left = max(vp.left - scroll_cols(state), 0)
-
-    state
-    |> update_current_viewport(%{vp | left: new_left})
-    |> clamp_cursor_to_horizontal_viewport()
-  end
+  def handle(state, _r, _c, :wheel_left, _m, :press, _cc),
+    do: scroll_window_horizontal(state, state.workspace.windows.active, -scroll_cols(state))
 
   # ── Middle-click paste ──
 
@@ -1197,26 +1192,24 @@ defmodule MingaEditor.Mouse do
     apply_scroll_intent(state, win_id, delta, dir)
   end
 
-  @spec scroll_window_horizontal(state(), term(), integer()) :: state()
-  defp scroll_window_horizontal(state, win_id, delta) do
-    case Map.fetch(state.workspace.windows.map, win_id) do
-      {:ok, %Window{}} ->
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.set_windows(
-                state.workspace,
-                MingaEditor.State.Windows.scroll_horizontal(
-                  state.workspace.windows,
-                  win_id,
-                  delta
-                )
-              )
-        }
+  @spec scroll_window_horizontal(state(), term(), integer(), non_neg_integer()) :: state()
+  defp scroll_window_horizontal(state, win_id, delta, input_seq \\ 0) do
+    with {:ok, %Window{content: {:buffer, buffer}} = window} when is_pid(buffer) <-
+           Map.fetch(state.workspace.windows.map, win_id),
+         false <- Buffer.get_option(buffer, :wrap) do
+      cursor =
+        if state.workspace.windows.active == win_id,
+          do: Buffer.cursor(buffer),
+          else: window.cursor
 
-      _ ->
-        state
+      window = Window.pan_horizontally(window, delta, cursor, input_seq)
+      windows = Windows.replace_window(state.workspace.windows, win_id, window)
+      %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+    else
+      _ -> state
     end
+  catch
+    :exit, _ -> state
   end
 
   # Native wheel events and the terminal's wrapped fallback use the same
@@ -1933,58 +1926,6 @@ defmodule MingaEditor.Mouse do
     max_top = max(0, total_lines - visible_rows)
     new_top = (vp.top + delta) |> max(0) |> min(max_top)
     Viewport.put_top(vp, new_top)
-  end
-
-  @spec clamp_cursor_to_horizontal_viewport(state()) :: state()
-  defp clamp_cursor_to_horizontal_viewport(%{workspace: %{buffers: %{active: buf}}} = state)
-       when is_pid(buf) do
-    vp = current_viewport(state)
-    {line, byte_col} = Buffer.cursor(buf)
-    line_text = cursor_line_text(buf, line)
-    display_col = Unicode.display_col(line_text, byte_col)
-    target_col = horizontal_cursor_target(display_col, vp.left, vp.cols)
-
-    if target_col == display_col do
-      state
-    else
-      Buffer.move_to(buf, {line, byte_offset_for_visible_col(line_text, target_col)})
-      state
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  defp clamp_cursor_to_horizontal_viewport(state), do: state
-
-  @spec horizontal_cursor_target(non_neg_integer(), non_neg_integer(), pos_integer()) ::
-          non_neg_integer()
-  defp horizontal_cursor_target(display_col, left, _cols) when display_col < left, do: left
-
-  defp horizontal_cursor_target(display_col, left, cols) when display_col >= left + cols do
-    left + cols - 1
-  end
-
-  defp horizontal_cursor_target(display_col, _left, _cols), do: display_col
-
-  @spec byte_offset_for_visible_col(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp byte_offset_for_visible_col(line_text, target_col) do
-    line_text
-    |> Unicode.display_col_to_byte(target_col)
-    |> advance_to_visible_col(line_text, target_col)
-  end
-
-  @spec advance_to_visible_col(non_neg_integer(), String.t(), non_neg_integer()) ::
-          non_neg_integer()
-  defp advance_to_visible_col(byte_col, line_text, target_col) do
-    display_col = Unicode.display_col(line_text, byte_col)
-
-    if display_col >= target_col or byte_col >= byte_size(line_text) do
-      byte_col
-    else
-      line_text
-      |> Unicode.next_grapheme_byte_offset(byte_col)
-      |> advance_to_visible_col(line_text, target_col)
-    end
   end
 
   @spec cursor_line_text(pid(), non_neg_integer()) :: String.t()

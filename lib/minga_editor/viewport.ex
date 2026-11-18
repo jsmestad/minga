@@ -11,10 +11,23 @@ defmodule MingaEditor.Viewport do
   alias Minga.Config
 
   @enforce_keys [:top, :left, :rows, :cols]
-  defstruct [:top, :left, :rows, :cols, reserved: 2, visual_row_offset: 0, mixed_row_anchor: nil]
+  defstruct [
+    :top,
+    :left,
+    :rows,
+    :cols,
+    reserved: 2,
+    visual_row_offset: 0,
+    mixed_row_anchor: nil,
+    horizontal_pan_limit: 0
+  ]
 
   @typedoc "A decorated top row addressed independently of the source's wrap count."
   @type mixed_row_anchor :: :source_head | {:above, pos_integer()} | {:below, non_neg_integer()}
+
+  @type scroll_anchor ::
+          {line :: non_neg_integer(), continuation :: non_neg_integer(),
+           left :: non_neg_integer()}
 
   @typedoc """
   A viewport representing the visible terminal region.
@@ -41,7 +54,8 @@ defmodule MingaEditor.Viewport do
           cols: pos_integer(),
           reserved: non_neg_integer(),
           visual_row_offset: non_neg_integer(),
-          mixed_row_anchor: mixed_row_anchor() | nil
+          mixed_row_anchor: mixed_row_anchor() | nil,
+          horizontal_pan_limit: non_neg_integer()
         }
 
   @doc "Creates a new viewport with the given dimensions and default reserved rows (2)."
@@ -61,6 +75,28 @@ defmodule MingaEditor.Viewport do
   @doc "Returns the committed logical line and numeric scroll offset."
   @spec vertical_anchor(t()) :: {non_neg_integer(), non_neg_integer()}
   def vertical_anchor(%__MODULE__{top: top, visual_row_offset: offset}), do: {top, offset}
+
+  @doc "Returns the committed vertical and horizontal position used for scroll reconciliation."
+  @spec scroll_anchor(t()) :: scroll_anchor()
+  def scroll_anchor(%__MODULE__{top: top, visual_row_offset: offset, left: left}),
+    do: {top, offset, left}
+
+  @doc "Checks whether a display column belongs to the current horizontal slice."
+  @spec includes_column?(t(), non_neg_integer(), pos_integer()) :: boolean()
+  def includes_column?(%__MODULE__{left: left}, column, width),
+    do: column >= left and column < left + width
+
+  @doc "Stores the rightmost horizontal pan position for the last rendered viewport."
+  @spec put_horizontal_pan_limit(t(), non_neg_integer()) :: t()
+  def put_horizontal_pan_limit(%__MODULE__{} = viewport, limit),
+    do: %{viewport | horizontal_pan_limit: limit}
+
+  @doc "Pans within the last visible text extent, while allowing a leftward return after it shrinks."
+  @spec pan(t(), integer()) :: t()
+  def pan(%__MODULE__{left: left, horizontal_pan_limit: limit} = viewport, delta) do
+    next_left = min(max(left + delta, 0), max(left, limit))
+    %{viewport | left: next_left}
+  end
 
   @doc "Fits the viewport to the pane's allocated content without changing its anchor."
   @spec fit_content(t(), pos_integer(), pos_integer()) :: t()

@@ -193,6 +193,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     presentation_rows = Enum.map(resident_entries, & &1.row)
     committed_rows = Enum.map(visual_entries, & &1.row)
     wrapped_coordinates? = wrapped_coordinates?(scroll)
+    row_store_mode = row_store_mode(resident_build_state)
 
     resident_cursor =
       resident_wrapped_cursor(
@@ -257,7 +258,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # eval, search_prompt modes). The native SwiftUI minibuffer shows its
     # own cursor; having two cursors visible is confusing. Also hide it when the
     # cursor has scrolled off-viewport (#2684).
-    cursor_visible = cursor_visible?(cursor_eligible, cursor_on_screen?)
+    {cursor_visible, retain_cursor_source?} =
+      cursor_presentation_visibility(
+        cursor_eligible,
+        cursor_on_screen?,
+        display_cursor_col,
+        ctx.content_w,
+        scroll,
+        row_store_mode,
+        content_kind
+      )
 
     raw_selection =
       ContentHelpers.visual_selection_bounds(state, {cursor_line, scroll.cursor_byte_col})
@@ -284,7 +294,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     accessibility_cursor =
       accessibility_cursor(
-        cursor_visible,
+        retain_cursor_source?,
         {display_cursor_row, display_cursor_col},
         {cursor_line, scroll.cursor_byte_col},
         Enum.find(visual_entries, &(&1.display_row == display_cursor_row))
@@ -336,8 +346,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
-    row_store_mode = row_store_mode(resident_build_state)
     geometry = build_geometry(state, scroll, content_kind, row_store_mode)
+
+    horizontal_pan_limit =
+      horizontal_pan_limit(
+        visual_entries,
+        geometry,
+        content_kind,
+        scroll.wrap_on,
+        state.intent.frame.capabilities
+      )
 
     text_rows = text_presentation_rows(resident_build_state, resident_entries)
 
@@ -440,6 +458,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       content_epoch: scroll.content_epoch,
       full_refresh: scroll.full_refresh,
       scroll_seq: scroll.scroll_seq,
+      horizontal_pan_ack: window.horizontal_pan_ack,
+      horizontal_pan_limit: horizontal_pan_limit,
       # Non-wrapped, non-folded windows emit consecutive :normal buffer lines, so
       # ScrollPresentation can derive the resident line range arithmetically.
       contiguous_rows: is_nil(visible_line_map) and not wrap_on,
@@ -2672,7 +2692,36 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp cursor_eligible?(state, true), do: not Editing.minibuffer_mode?(state)
   defp cursor_eligible?(_state, false), do: false
 
-  defp cursor_visible?(eligible, on_screen?), do: eligible and on_screen?
+  @spec cursor_presentation_visibility(
+          boolean(),
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          WindowScroll.t(),
+          :windowed | {:resident, non_neg_integer()},
+          RenderWindow.content_kind()
+        ) :: {boolean(), boolean()}
+  defp cursor_presentation_visibility(true, true, col, width, scroll, store_mode, content_kind) do
+    visible =
+      wrapped_coordinates?(scroll) or Viewport.includes_column?(scroll.viewport, col, width)
+
+    # A local pan can reveal a windowed caret before the BEAM commits its new clip.
+    retain_source =
+      visible or (store_mode == :windowed and content_kind == :buffer and not scroll.wrap_on)
+
+    {visible, retain_source}
+  end
+
+  defp cursor_presentation_visibility(
+         _eligible,
+         _on_screen,
+         _col,
+         _width,
+         _scroll,
+         _store_mode,
+         _content_kind
+       ),
+       do: {false, false}
 
   defp adjust_cursor_col_for_shape(row, col, :block, visual_rows) do
     row_width = visual_rows |> Enum.at(row) |> visual_row_width()
@@ -2766,6 +2815,30 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       hit_regions: hit_regions(state, scroll.window.id, text_rect, gutter_rect, metrics)
     }
   end
+
+  @spec horizontal_pan_limit(
+          [VisualRow.t()],
+          PaneGeometry.t(),
+          RenderWindow.content_kind(),
+          boolean(),
+          term()
+        ) :: non_neg_integer()
+  defp horizontal_pan_limit(rows, %PaneGeometry{} = geometry, :buffer, false, capabilities) do
+    {_row, _col, width, height} = geometry.text_rect
+    width = pan_aperture_width(width, height, geometry.viewport, capabilities)
+    widest = Enum.reduce(rows, 0, fn row, acc -> max(row.row_width, acc) end)
+    min(max(widest - width, 0), 0xFFFF)
+  end
+
+  defp horizontal_pan_limit(_rows, _geometry, _kind, _wrapped, _capabilities), do: 0
+
+  @spec pan_aperture_width(non_neg_integer(), non_neg_integer(), RenderViewport.t(), term()) ::
+          pos_integer()
+  defp pan_aperture_width(width, height, %{total_lines: lines}, %{frontend_type: :tui})
+       when width > 1 and height > 0 and lines > height,
+       do: width - 1
+
+  defp pan_aperture_width(width, _height, _viewport, _capabilities), do: max(width, 1)
 
   @spec gutter_metrics(WindowScroll.t(), RenderWindow.content_kind()) :: GutterMetrics.t()
   defp gutter_metrics(%WindowScroll{} = scroll, content_kind)

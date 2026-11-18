@@ -228,7 +228,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     # Compute context fingerprint and check for context changes.
     # If any context input (visual selection, search, highlights, signs,
-    # horizontal scroll, active status) changed, all lines are dirty.
+    # or active status) changed, all lines are dirty.
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
@@ -245,9 +245,11 @@ defmodule MingaEditor.RenderPipeline.Content do
         adjusted_col =
           Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
 
-        row = max(visible_cursor - viewport.top + row_off, 0)
-        col = gutter_w + adjusted_col - viewport.left + col_off
-        Cursor.new(row, col, Minga.Editing.cursor_shape(state))
+        if Viewport.includes_column?(viewport, adjusted_col, scroll.content_w) do
+          row = max(visible_cursor - viewport.top + row_off, 0)
+          col = gutter_w + adjusted_col - viewport.left + col_off
+          Cursor.new(row, col, Minga.Editing.cursor_shape(state))
+        end
       end
 
     # Build the canonical window model; TUI adapts it to cells at the frontend boundary.
@@ -333,8 +335,10 @@ defmodule MingaEditor.RenderPipeline.Content do
        ),
        do: {model, window, scroll.viewport, wrapped_model_cursor(model, scroll)}
 
-  defp finalize_buffer_presentation(model, window, scroll, cursor),
-    do: {model, window, scroll.viewport, cursor}
+  defp finalize_buffer_presentation(model, window, scroll, cursor) do
+    viewport = Viewport.put_horizontal_pan_limit(scroll.viewport, model.horizontal_pan_limit)
+    {model, Window.set_viewport(window, viewport), viewport, cursor}
+  end
 
   defp wrapped_model_cursor(model, scroll) do
     if scroll.is_active and model.cursor_visible do

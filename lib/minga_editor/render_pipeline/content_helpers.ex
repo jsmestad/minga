@@ -632,7 +632,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       highlight_fingerprint(ctx.highlight),
       ctx.diagnostic_signs,
       ctx.git_signs,
-      ctx.viewport.left,
       ctx.viewport.cols,
       ctx.content_w,
       is_active,

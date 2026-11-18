@@ -1992,7 +1992,7 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 		t.Fatalf("initial render should use committed visible rows, got %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	model.previewVerticalScroll(model.windows[7], 1)
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "bottom") || !strings.Contains(scrolled, "below") || strings.Contains(scrolled, "top") {
 		t.Fatalf("local presentation scroll should shift into overscan rows immediately, got %q", scrolled)
@@ -2000,7 +2000,7 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 }
 
 func TestPresentationScrollConsumesProducerResetAtCommit(t *testing.T) {
-	const encodedWindow = "gAAAA/sKAQAAAA4AAQEAWAAAAAAAAAAAAgIAAALzAAAADQAQAAAAAAAAAAAAAAAGe7ZOAAAAEnJvdyAwMDEgdmFsdWVfMCDOuwABAAAAEQAAAAAAAAACAAAQAAAAEAAAAAAAAAECLvILAAAAFCAgcm93IDAwMiB2YWx1ZV8xIM67AAEAAAATAAAAAAAAAAIAABAAAAAgAAAAAAAAAgPaHdcAAAAWICAgIHJvdyAwMDMgdmFsdWVfMiDOuwABAAAAFQAAAAAAAAACAAAQAAAAMAAAAAAAAAMCtGT4AAAAGCAgICAgIHJvdyAwMDQgdmFsdWVfMyDOuwABAAAAFwAAAAAAAAACAAAQAAAAQAAAAAAAAAQEn7M6AAAAGiAgICAgICAgcm93IDAwNSB2YWx1ZV80IM67AAEAAAAZAAAAAAAAAAIAABAAAABQAAAAAAAABQLzlZAAAAAScm93IDAwNiB2YWx1ZV81IM67AAEAAAARAAAAAAAAAAIAABAAAABgAAAAAAAABgcR/TkAAAAUICByb3cgMDA3IHZhbHVlXzYgzrsAAQAAABMAAAAAAAAAAgAAEAAAAHAAAAAAAAAHAZ6zIQAAABYgICAgcm93IDAwOCB2YWx1ZV83IM67AAEAAAAVAAAAAAAAAAIAABAAAACAAAAAAAAACAe4FDMAAAAYICAgICAgcm93IDAwOSB2YWx1ZV84IM67AAEAAAAXAAAAAAAAAAIAABAAAACQAAAAAAAACQHbNpYAAAAaICAgICAgICByb3cgMDEwIHZhbHVlXzkgzrsAAQAAABkAAAAAAAAAAgAAEAAAAKAAAAAAAAAKAptyggAAABNyb3cgMDExIHZhbHVlXzEwIM67AAEAAAASAAAAAAAAAAIAABAAAACwAAAAAAAACwG2l2sAAAAVICByb3cgMDEyIHZhbHVlXzExIM67AAEAAAAUAAAAAAAAAAIAABAAAADAAAAAAAAADAW13t0AAAAXICAgIHJvdyAwMTMgdmFsdWVfMTIgzrsAAQAAABYAAAAAAAAAAgADAAAAAQAEAAAAAgAABQAAAAIAAAYAAAACAAAHAAAAAgAACAAAAGYAAQAAAAAASAAMAAAAAABIAAwAAAAHAEEADAAAAAAABwAMAAAABwBBAAwAAAAAAAAADABBAAAAeAAAAAAAAAB4AAQAAwMBAAAABwBBAAwAAQIAAAAAAAcADAABAwAAAAIAAQAMAAEKAAAAJwABAQAAAAAAAAAAAAAAAAAAAAwAAAAAAAAADQAAAAIGgQnYAAAAAAwAAAAxAAAAAAAAAAP///////8AAAAfbWluZ2EtMzQyNC1yZXNpZGVudC1maXh0dXJlLnR4dA=="
+	const encodedWindow = "gAAABAEKAQAAAA4AAQEAWAAAAAAAAAAAAgIAAALzAAAADQAQAAAAAAAAAAAAAAAGe7ZOAAAAEnJvdyAwMDEgdmFsdWVfMCDOuwABAAAAEQAAAAAAAAACAAAQAAAAEAAAAAAAAAECLvILAAAAFCAgcm93IDAwMiB2YWx1ZV8xIM67AAEAAAATAAAAAAAAAAIAABAAAAAgAAAAAAAAAgPaHdcAAAAWICAgIHJvdyAwMDMgdmFsdWVfMiDOuwABAAAAFQAAAAAAAAACAAAQAAAAMAAAAAAAAAMCtGT4AAAAGCAgICAgIHJvdyAwMDQgdmFsdWVfMyDOuwABAAAAFwAAAAAAAAACAAAQAAAAQAAAAAAAAAQEn7M6AAAAGiAgICAgICAgcm93IDAwNSB2YWx1ZV80IM67AAEAAAAZAAAAAAAAAAIAABAAAABQAAAAAAAABQLzlZAAAAAScm93IDAwNiB2YWx1ZV81IM67AAEAAAARAAAAAAAAAAIAABAAAABgAAAAAAAABgcR/TkAAAAUICByb3cgMDA3IHZhbHVlXzYgzrsAAQAAABMAAAAAAAAAAgAAEAAAAHAAAAAAAAAHAZ6zIQAAABYgICAgcm93IDAwOCB2YWx1ZV83IM67AAEAAAAVAAAAAAAAAAIAABAAAACAAAAAAAAACAe4FDMAAAAYICAgICAgcm93IDAwOSB2YWx1ZV84IM67AAEAAAAXAAAAAAAAAAIAABAAAACQAAAAAAAACQHbNpYAAAAaICAgICAgICByb3cgMDEwIHZhbHVlXzkgzrsAAQAAABkAAAAAAAAAAgAAEAAAAKAAAAAAAAAKAptyggAAABNyb3cgMDExIHZhbHVlXzEwIM67AAEAAAASAAAAAAAAAAIAABAAAACwAAAAAAAACwG2l2sAAAAVICByb3cgMDEyIHZhbHVlXzExIM67AAEAAAAUAAAAAAAAAAIAABAAAADAAAAAAAAADAW13t0AAAAXICAgIHJvdyAwMTMgdmFsdWVfMTIgzrsAAQAAABYAAAAAAAAAAgADAAAAAQAEAAAAAgAABQAAAAIAAAYAAAACAAAHAAAAAgAACAAAAGYAAQAAAAAASAAMAAAAAABIAAwAAAAHAEEADAAAAAAABwAMAAAABwBBAAwAAAAAAAAADABBAAAAeAAAAAAAAAB4AAQAAwMBAAAABwBBAAwAAQIAAAAAAAcADAABAwAAAAIAAQAMAAEKAAAALQABAQAAAAAAAAAAAAAAAAAAAAwAAAAAAAAADQAAAAIGgQnYAAAAAAAAAAAAAAwAAAAxAAAAAAAAAAP///////8AAAAfbWluZ2EtMzQyNC1yZXNpZGVudC1maXh0dXJlLnR4dA=="
 
 	raw, err := base64.StdEncoding.DecodeString(encodedWindow)
 	if err != nil {
@@ -2017,11 +2017,7 @@ func TestPresentationScrollConsumesProducerResetAtCommit(t *testing.T) {
 
 	model := New(80, 24, nil)
 	model.putWindow(window)
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{
-		Button: tea.MouseWheelDown,
-		X:      int(window.Geometry.ContentRect.Col) + 1,
-		Y:      model.layout.header.Height + int(window.Geometry.ContentRect.Row) + 1,
-	}), 1)
+	model.previewVerticalScroll(model.windows[window.ID], 1)
 
 	scroll, ok := model.localPresentation.scrolls[window.ID]
 	if !ok || scroll.rowOffset != 1 {
@@ -2073,7 +2069,7 @@ func TestPresentationScrollResidentReachesDocumentBottom(t *testing.T) {
 	// A fling far larger than the payload window: it must accumulate to the
 	// document bottom, not clamp at a small overscan runway.
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+		model.previewVerticalScroll(model.windows[7], 1)
 	}
 
 	scroll := model.localPresentation.scrolls[7]
@@ -2122,7 +2118,7 @@ func TestPresentationScrollWindowedClampsAtOverscanEdge(t *testing.T) {
 	}
 
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+		model.previewVerticalScroll(model.windows[7], 1)
 	}
 
 	// Overscan payload bound: len(rows)=4, visible=2, before=(10-9)=1 -> after=1.
@@ -2166,7 +2162,7 @@ func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
 	})
 
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 1, Y: model.layout.header.Height}), -1)
+		model.previewVerticalScroll(model.windows[7], -1)
 	}
 	scroll := model.localPresentation.scrolls[7]
 	if want := -anchorTop; scroll.rowOffset != want {
@@ -2174,7 +2170,7 @@ func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
 	}
 
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+		model.previewVerticalScroll(model.windows[7], 1)
 	}
 	scroll = model.localPresentation.scrolls[7]
 	// Scroll-past-end: max forward offset is docRows - 1 - anchorTop.
@@ -2270,7 +2266,7 @@ func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
 		t.Fatalf("visible content should use the matching presentation gutter row, got %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	model.previewVerticalScroll(model.windows[7], 1)
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "C  bottom") || !strings.Contains(scrolled, "D  below") {
 		t.Fatalf("locally shifted content should keep matching gutter rows, got %q", scrolled)
@@ -2307,9 +2303,9 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 		t.Fatalf("wrapped payload should not skip its first row just because document visual offset is non-zero, got %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	for range 3 {
+		model.previewVerticalScroll(model.windows[7], 1)
+	}
 
 	scroll := model.localPresentation.scrolls[7]
 	if scroll.rowOffset != 3 {
@@ -2319,30 +2315,6 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(rendered, "bottom") || !strings.Contains(rendered, "below") || strings.Contains(rendered, "top") {
 		t.Fatalf("wrapped presentation scroll should render the actual payload rows, got %q", rendered)
-	}
-}
-
-func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
-	model := New(20, 6, nil)
-	model.putWindow(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
-		GeometrySet:  true,
-		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 4, Height: 1}},
-		ScrollSet:    true,
-		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
-	})
-
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}), 1)
-	scroll := model.localPresentation.scrolls[7]
-	if scroll.rowOffset != 0 || scroll.colOffset != 1 {
-		t.Fatalf("shift wheel-down should move presentation horizontally, got row=%d col=%d", scroll.rowOffset, scroll.colOffset)
-	}
-
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}), -1)
-	if _, ok := model.localPresentation.scrolls[7]; ok {
-		t.Fatalf("shift wheel-up should cancel the horizontal offset and clear presentation scroll")
 	}
 }
 
@@ -2367,53 +2339,6 @@ func TestPresentationScrollHorizontalOffsetInvalidatesCachedRows(t *testing.T) {
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "cdef") || strings.Contains(scrolled, "abcdef") {
 		t.Fatalf("horizontal presentation scroll should invalidate cached rows and shift content, got %q", scrolled)
-	}
-}
-
-func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T) {
-	model := New(20, 6, nil)
-	model.putWindow(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
-		GeometrySet:  true,
-		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 4, Height: 1}},
-		ScrollSet:    true,
-		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
-	})
-
-	for range 10 {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 1, Y: model.layout.header.Height}), 1)
-	}
-
-	scroll := model.localPresentation.scrolls[7]
-	if scroll.colOffset != 2 {
-		t.Fatalf("horizontal presentation scroll should clamp at right edge, got col offset %d", scroll.colOffset)
-	}
-	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
-	if !strings.Contains(rendered, "cdef") || strings.TrimSpace(rendered) == "" {
-		t.Fatalf("repeated wheel-right should not blank content past the edge, got %q", rendered)
-	}
-}
-
-func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
-	model := New(20, 6, nil)
-	model.putWindow(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
-		GeometrySet:  true,
-		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 7, Height: 1}, TextRect: protocol.Rect{Row: 0, Col: 3, Width: 4, Height: 1}},
-		ScrollSet:    true,
-		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
-	})
-
-	for range 10 {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 3, Y: model.layout.header.Height}), 1)
-	}
-
-	if got := model.localPresentation.scrolls[7].colOffset; got != 2 {
-		t.Fatalf("horizontal presentation scroll should clamp against text rect width, got col offset %d", got)
 	}
 }
 

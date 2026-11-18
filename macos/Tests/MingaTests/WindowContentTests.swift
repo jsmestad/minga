@@ -180,7 +180,7 @@ struct WindowContentBuilder {
     static func sampleScrollPresentationPayload(windowId: UInt16 = 7) -> Data {
         var data = Data()
         appendU16(&data, windowId)
-        data.append(0x01)
+        data.append(0x05)
         appendU32(&data, 5)
         appendU16(&data, 2)
         appendU16(&data, 1)
@@ -191,6 +191,8 @@ struct WindowContentBuilder {
         appendU32(&data, 42)
         appendU32(&data, 99)
         appendU32(&data, 3) // scroll_seq (#2661)
+        appendU32(&data, 0x12345678) // horizontal_pan_ack
+        appendU16(&data, 0x012C) // horizontal_pan_limit
         return data
     }
 
@@ -767,6 +769,9 @@ struct WindowContentDecoderTests {
         #expect(presentation.contentEpoch == 42)
         #expect(presentation.layoutGeneration == 99)
         #expect(presentation.scrollSeq == 3)
+        #expect(presentation.canPanHorizontally)
+        #expect(presentation.horizontalPanAck == 0x12345678)
+        #expect(presentation.horizontalPanLimit == 0x012C)
     }
 
     @Test("Reject scroll presentation identity mismatch")
@@ -1131,6 +1136,9 @@ struct WindowContentDecoderTests {
         #expect(presentation.contentEpoch == 42)
         #expect(presentation.layoutGeneration == 99)
         #expect(presentation.scrollSeq == 3)
+        #expect(presentation.canPanHorizontally)
+        #expect(presentation.horizontalPanAck == 0x12345678)
+        #expect(presentation.horizontalPanLimit == 0x012C)
     }
 
     @Test("Rows delta rejects mismatched scroll presentation identity")

@@ -95,7 +95,7 @@ struct RendererResidentSliceTests {
         #expect(presented.residentSemanticRows.first?.diagnostics.first?.severity == .error)
         #expect(presented.residentSemanticRows.last?.annotations.map(\.text) == ["last"])
         #expect(CoreTextMetalRenderer.projectedSelection(
-            semantics.selection, visibleStart: anchor, visibleRows: Int(fixture.fittedRows), visibleCols: 80
+            semantics.selection, visibleStart: anchor, visibleRows: Int(fixture.fittedRows)
         )?.startRow == 0)
         #expect(ax.value == (earlierSourceLine ? "row 3row 4\nrow 5\nrow 6" : "row 6row 7row 8"))
         #expect(ax.rows.map(\.absoluteRow) == Array(prepared.range))
@@ -398,15 +398,44 @@ struct RendererResidentSliceTests {
         #expect(ResidentRenderPreparation.clip(row: wide, scrollLeft: 0, viewportCols: 3).text == "a界")
     }
 
+    @Test("a slice starting inside a wide glyph keeps its original display origin and style")
+    func horizontalSlicePreservesWideGlyphOrigin() throws {
+        let row = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "a界bc",
+            spans: [GUIHighlightSpan(startCol: 1, endCol: 3, fg: 1, bg: 2, attrs: 0, fontWeight: 0, fontId: 0)]
+        )
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )
+        for left in [1, 2] {
+            let command = try #require(ResidentRenderPreparation.prepare(
+                content: content, fallbackVisibleRows: 1, overscanRows: 0, scrollLeft: left, viewportCols: 4
+            ).commands.first)
+            #expect(command.row.text == "界bc")
+            #expect(command.composedStartColumn == 1)
+            #expect(command.composedUTF16Start == 1)
+            #expect(command.row.spans.first?.startCol == 0)
+            #expect(command.row.spans.first?.endCol == 2)
+        }
+    }
+
     @Test("resident selection projects continuation edges into a local slice")
     func residentSelectionProjection() throws {
         let selection = GUIResidentSelection(type: .char, startRow: 2, startCol: 7, endRow: 12, endCol: 3)
-        let projected = try #require(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 5, visibleRows: 4, visibleCols: 80))
+        let projected = try #require(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 5, visibleRows: 4))
         #expect(projected.startRow == 0)
-        #expect(projected.startCol == 0)
+        #expect(projected.startCol == nil)
         #expect(projected.endRow == 3)
-        #expect(projected.endCol == 80)
-        #expect(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 20, visibleRows: 4, visibleCols: 80) == nil)
+        #expect(projected.endCol == nil)
+        #expect(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 20, visibleRows: 4) == nil)
+
+        let block = GUIResidentSelection(type: .block, startRow: 2, startCol: 3, endRow: 12, endCol: 7)
+        let clippedBlock = try #require(CoreTextMetalRenderer.projectedSelection(block, visibleStart: 5, visibleRows: 4))
+        #expect(clippedBlock.startRow == 0)
+        #expect(clippedBlock.endRow == 3)
+        #expect(clippedBlock.startCol == 3)
+        #expect(clippedBlock.endCol == 7)
     }
 
     @Test("resident semantics feed every prepared surface after local scrolling")
@@ -451,7 +480,7 @@ struct RendererResidentSliceTests {
         #expect(semanticRow.annotations.map(\.text) == ["hint 0", "hint 1", "hint 2", "hint 3", "hint 4"])
         #expect(semanticRow.diagnostics.map(\.severity) == [.error])
         #expect(presented.residentSemanticSlice?.cursorline?.row == 4)
-        #expect(CoreTextMetalRenderer.projectedSelection(semantics.selection, visibleStart: 3, visibleRows: 3, visibleCols: 12)?.startRow == 1)
+        #expect(CoreTextMetalRenderer.projectedSelection(semantics.selection, visibleStart: 3, visibleRows: 3)?.startRow == 1)
         #expect(CoreTextMetalRenderer.resolveCursor(preparedSurfaces: [presented], activeWindowId: 1, cellW: 8, displayCellH: 20, scale: 1, gutterLeftMarginPx: 0, gutterPaddingPx: 0)?.y == 80)
         #expect(CoreTextMetalRenderer.atlasSlotDemand(
             frameState: FrameState(cols: 12, rows: 3), preparedSurfaces: [presented]
