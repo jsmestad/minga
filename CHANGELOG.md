@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Entering plan mode, losing a provider, resetting a conversation, and restoring another conversation retire the original approval target before its identity changes. Known non-execution carries no execution duration, and plan mode does not increase the workspace's running-work count.
 - Saving or removing an agent API key replaces the credential file atomically. A failed write leaves existing keys intact, and malformed files report an error without including credential contents.
 - Text prompts show clickable Submit and Cancel controls in both frontends. Enter and Escape keep their existing behavior.
+- A rejected manual OAuth completion no longer consumes the original session's pending login. The original client can still finish it once.
 - Wheel and trackpad scrolling now reach the last screen row of a soft-wrapped file without moving the cursor there first. Both frontends scroll locally when they have the wrapped rows in memory.
 - Retained shell capture reads complete output and EOF on macOS without waiting for another chunk. Closing either parent channel stops idle, pending-read and backpressured output helpers, including when unread control bytes remain. The original producer is never replayed.
 - Codex login and revoke safely replace the OAuth credential file without dropping other providers. If the running instance is refreshing its credentials, login and disconnect ask the user to retry instead of racing the refresh.

@@ -58,18 +58,36 @@ defmodule MingaAgent.OAuth.FlowTest do
       assert message =~ "possible CSRF"
     end
 
-    test "complete_manual rejects remote owner mismatches" do
+    test "only the owning remote client and session can consume a manual flow" do
       owner = self()
-      other = spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Process.exit(other, :kill) end)
+      other = start_supervised!({Agent, fn -> nil end})
 
       {:ok, _url, ref} =
         Flow.begin_manual(session_id: "session-a", client_pid: owner, timeout_ms: 60_000)
 
-      assert {:error, message} =
-               Flow.complete_manual(ref, "code", session_id: "session-a", client_pid: other)
+      opts = [exchange_fun: token_exchange(owner), write_fun: token_writer(owner)]
 
-      assert message =~ "different remote session"
+      for identity <- [
+            [],
+            [session_id: "session-a", client_pid: other],
+            [session_id: "session-b", client_pid: owner]
+          ] do
+        assert {:error, message} = Flow.complete_manual(ref, "code", identity ++ opts)
+        assert message =~ "different remote session"
+      end
+
+      refute_received {:exchange_code, _}
+      refute_received {:write_tokens, _}
+
+      owner_opts = [session_id: "session-a", client_pid: owner] ++ opts
+      assert {:ok, :openai} = Flow.complete_manual(ref, "code", owner_opts)
+      assert_received {:exchange_code, "code"}
+      assert_received {:write_tokens, %{access: "access"}}
+
+      assert {:error, message} = Flow.complete_manual(ref, "code", owner_opts)
+      assert message =~ "Unknown OAuth flow"
+      refute_received {:exchange_code, _}
+      refute_received {:write_tokens, _}
     end
 
     test "complete_manual rejects expired and unknown flow refs clearly" do
@@ -87,7 +105,7 @@ defmodule MingaAgent.OAuth.FlowTest do
       entry = PendingFlow.Entry.new("verifier", "state", 1455, "session-a", self())
 
       assert {:ok, ref} = PendingFlow.put(entry, 60_000)
-      assert {:ok, stored} = PendingFlow.take(ref)
+      assert {:ok, stored} = PendingFlow.take(ref, session_id: "session-a", client_pid: self())
       assert %PendingFlow.Entry{} = stored
       assert stored.verifier == "verifier"
       assert stored.state == "state"
