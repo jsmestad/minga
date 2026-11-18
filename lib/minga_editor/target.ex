@@ -14,6 +14,7 @@ defmodule MingaEditor.Target do
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Picker.ActivationOffer
   alias MingaEditor.State.Prompt, as: PromptState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -42,6 +43,7 @@ defmodule MingaEditor.Target do
           | {:completion, Completion.t()}
           | {:picker_item, non_neg_integer(), non_neg_integer()}
           | {:picker_action, non_neg_integer(), non_neg_integer()}
+          | :picker_dismissal
           | {:file_tree, FileTree.t(), FileTree.entry() | nil}
           | {:command_completion, String.t()}
           | {:prompt, non_neg_integer(), binary()}
@@ -94,11 +96,11 @@ defmodule MingaEditor.Target do
     end
   end
 
-  def resolve(state, %__MODULE__{surface: :picker, generation: generation, item_id: <<id::32>>}) do
+  def resolve(state, %__MODULE__{surface: :picker, generation: generation} = target) do
     case state.shell_runtime.state do
       %{modal: {:picker, %{picker_ui: %{activation_offer: offer}}}} ->
         with :ok <- generation(offer.generation, generation) do
-          resolve_picker_item(state, offer.items, offer.actions, generation, id)
+          resolve_picker_target(state, offer, target)
         end
 
       _ ->
@@ -206,6 +208,21 @@ defmodule MingaEditor.Target do
   @spec generation(non_neg_integer(), non_neg_integer()) :: :ok | {:error, reason()}
   defp generation(current, requested) when current == requested and requested != 0, do: :ok
   defp generation(_current, _requested), do: {:error, :stale_generation}
+
+  @spec resolve_picker_target(EditorState.t(), ActivationOffer.t(), t()) ::
+          {:ok, resolved()} | {:error, reason()}
+  defp resolve_picker_target(_state, _offer, %__MODULE__{intent: :dismiss, item_id: ""}),
+    do: {:ok, :picker_dismissal}
+
+  defp resolve_picker_target(state, offer, %__MODULE__{
+         intent: intent,
+         generation: generation,
+         item_id: <<id::32>>
+       })
+       when intent in [:activate_item, :activate_action, :resolve],
+       do: resolve_picker_item(state, offer.items, offer.actions, generation, id)
+
+  defp resolve_picker_target(_state, _offer, _target), do: {:error, :target_mismatch}
 
   @spec resolve_picker_item(
           EditorState.t(),
