@@ -44,16 +44,7 @@ public enum ResidentRenderPreparation {
         viewportCols: Int = Int(UInt16.max)
     ) -> ResidentRenderPreparationResult {
         let store = content.rowStore
-        let visibleStart: Int
-
-        if let presentation = content.scrollPresentation {
-            let indexedStart = store.lowerBound(bufferLine: presentation.visibleStartLine)
-            let anchorStart = store.lowerBound(bufferLine: presentation.anchorTop)
-            let anchoredVisualStart = min(anchorStart + Int(presentation.anchorVisualRowOffset), store.count)
-            visibleStart = anchoredVisualStart < store.count ? anchoredVisualStart : min(indexedStart, store.count)
-        } else {
-            visibleStart = 0
-        }
+        let visibleStart = content.presentationRowOrigin
 
         let overscan = max(overscanRows, 0)
         // Select the local viewport, but keep row coordinates relative to the committed anchor.

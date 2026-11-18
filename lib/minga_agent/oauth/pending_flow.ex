@@ -11,6 +11,7 @@ defmodule MingaAgent.OAuth.PendingFlow do
   alias MingaAgent.OAuth.PendingFlow.Entry
 
   @type flow :: Entry.t()
+  @typep owner :: {String.t() | nil, pid() | nil}
   @type entry :: %{flow: flow() | nil, timer: reference() | nil, expired?: boolean()}
   @type state :: %{optional(ref()) => entry()}
 
@@ -32,11 +33,13 @@ defmodule MingaAgent.OAuth.PendingFlow do
     end
   end
 
-  @doc "Consumes a pending OAuth flow by ref."
-  @spec take(ref()) :: {:ok, flow()} | {:error, :unknown_flow | :expired_flow | term()}
-  def take(ref) when is_binary(ref) do
+  @doc "Consumes a pending OAuth flow only for its owner, or for standalone login."
+  @spec take(ref(), keyword()) :: {:ok, flow()} | {:error, term()}
+  def take(ref, opts \\ []) when is_binary(ref) do
+    owner = {Keyword.get(opts, :session_id), Keyword.get(opts, :client_pid)}
+
     with {:ok, _pid} <- ensure_started() do
-      GenServer.call(__MODULE__, {:take, ref})
+      GenServer.call(__MODULE__, {:take, ref, owner})
     end
   end
 
@@ -64,9 +67,8 @@ defmodule MingaAgent.OAuth.PendingFlow do
     end
   end
 
-  def handle_call({:take, ref}, _from, state) do
-    {entry, state} = Map.pop(state, ref)
-    {reply, state} = take_reply(entry, state)
+  def handle_call({:take, ref, owner}, _from, state) do
+    {reply, state} = take_reply(Map.get(state, ref), ref, owner, state)
     {:reply, reply, state}
   end
 
@@ -100,16 +102,26 @@ defmodule MingaAgent.OAuth.PendingFlow do
     end
   end
 
-  @spec take_reply(entry() | nil, state()) ::
-          {{:ok, flow()} | {:error, :unknown_flow | :expired_flow}, state()}
-  defp take_reply(nil, state), do: {{:error, :unknown_flow}, state}
+  @spec take_reply(entry() | nil, ref(), owner(), state()) ::
+          {{:ok, flow()} | {:error, :unknown_flow | :expired_flow | :wrong_owner}, state()}
+  defp take_reply(nil, _ref, _owner, state), do: {{:error, :unknown_flow}, state}
 
-  defp take_reply(%{expired?: true}, state), do: {{:error, :expired_flow}, state}
+  defp take_reply(%{expired?: true}, ref, _owner, state),
+    do: {{:error, :expired_flow}, Map.delete(state, ref)}
 
-  defp take_reply(%{flow: flow, timer: timer}, state) when is_map(flow) and is_reference(timer) do
-    Process.cancel_timer(timer)
-    {{:ok, flow}, state}
+  defp take_reply(%{flow: %Entry{} = flow, timer: timer}, ref, owner, state) do
+    if owned_by?(flow, owner) do
+      Process.cancel_timer(timer)
+      {{:ok, flow}, Map.delete(state, ref)}
+    else
+      {{:error, :wrong_owner}, state}
+    end
   end
+
+  @spec owned_by?(flow(), owner()) :: boolean()
+  defp owned_by?(%Entry{owner_session_id: nil, owner_client_pid: nil}, _owner), do: true
+  defp owned_by?(%Entry{owner_session_id: id, owner_client_pid: pid}, {id, pid}), do: true
+  defp owned_by?(%Entry{}, _owner), do: false
 
   @spec expire_ref(state(), ref()) :: state()
   defp expire_ref(state, ref) do

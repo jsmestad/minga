@@ -51,7 +51,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
     :render_cache,
     :scroll_velocity,
     :scroll_detach_cursor,
-    :scroll_echo_top,
+    :scroll_echo_anchor,
     :authoritative_scroll_seq,
     :review_frame_rendered?
   ]
@@ -68,7 +68,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
-          scroll_echo_top: integer() | nil,
+          scroll_echo_anchor: {non_neg_integer(), non_neg_integer()} | nil,
           authoritative_scroll_seq: non_neg_integer(),
           review_frame_rendered?: boolean()
         }
@@ -90,7 +90,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
       render_cache: cache,
       scroll_velocity: carrier.scroll_velocity,
       scroll_detach_cursor: carrier.scroll_detach_cursor,
-      scroll_echo_top: carrier.scroll_echo_top,
+      scroll_echo_anchor: carrier.scroll_echo_anchor,
       authoritative_scroll_seq: carrier.authoritative_scroll_seq,
       review_frame_rendered?: false
     }
@@ -114,8 +114,8 @@ defmodule MingaEditor.Renderer.RenderWindow do
     cache =
       RenderCache.settle_scroll_seq(
         cache,
-        visual_top,
-        window.scroll_echo_top,
+        {visual_top, 0},
+        window.scroll_echo_anchor,
         window.authoritative_scroll_seq
       )
 
@@ -170,9 +170,9 @@ defmodule MingaEditor.Renderer.RenderWindow do
   @doc """
   Settles the per-frame `scroll_seq` decision against the render cache baseline.
 
-  Delegates to `MingaEditor.Window.RenderCache.settle_scroll_seq/4` with this
-  frame's committed viewport top, the sticky `scroll_echo_top` recorded by the
-  input path, and the `authoritative_scroll_seq` request counter set by command
+  Delegates to `MingaEditor.Renderer.WindowCache.settle_scroll_seq/4` with the
+  committed vertical anchor, the input path's `scroll_echo_anchor`, and the
+  `authoritative_scroll_seq` request counter set by command
   handlers. `scroll_seq` advances when EITHER an authoritative jump was marked
   since the last settle OR the top moved to a value that is neither the previous
   committed top nor a frontend-reported free-scroll top (a genuine BEAM-initiated
@@ -186,12 +186,13 @@ defmodule MingaEditor.Renderer.RenderWindow do
   def settle_scroll_seq(
         %__MODULE__{
           render_cache: cache,
-          viewport: %Viewport{top: top},
-          scroll_echo_top: echo_top,
+          viewport: %Viewport{} = viewport,
+          scroll_echo_anchor: echo_anchor,
           authoritative_scroll_seq: auth_seq
         } = window
       ) do
-    %{window | render_cache: RenderCache.settle_scroll_seq(cache, top, echo_top, auth_seq)}
+    anchor = Viewport.vertical_anchor(viewport)
+    %{window | render_cache: RenderCache.settle_scroll_seq(cache, anchor, echo_anchor, auth_seq)}
   end
 
   @spec scroll_follow_cursor?(t(), Buffer.position(), integer()) :: {t(), boolean()}

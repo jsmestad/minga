@@ -1909,11 +1909,11 @@ func DecodeGuiWindowContentGeometry(data []byte, offset int, windowEnd int) (Gui
 	}
 	viewportTotalLines := decodeU32(data, pos)
 	pos += 4
-	if err := decodeRequireWindow(windowEnd, pos+2, "viewport_visual_row_offset"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "viewport_visual_row_offset"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}
-	viewportVisualRowOffset := decodeU16(data, pos)
-	pos += 2
+	viewportVisualRowOffset := decodeU32(data, pos)
+	pos += 4
 	if err := decodeRequireWindow(windowEnd, pos+4, "viewport_total_visual_rows"); err != nil {
 		return GuiWindowContentGeometry{}, offset, err
 	}

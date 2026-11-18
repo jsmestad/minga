@@ -27,6 +27,13 @@ type presentationScroll struct {
 	anchorLeft       uint16
 	contentEpoch     uint32
 	layoutGeneration uint32
+	wrapped          bool
+	wrappedResident  bool
+	anchorOffset     uint16
+	anchorRank       int
+	// A zero offset is not an acknowledgement: a reversal can return to the
+	// original rank while earlier wheel frames are still in flight.
+	predictingWrapped bool
 	// scrollSeq is the scroll-authority sequence the committed frame carried when
 	// this local offset was captured (#2671). The reconciler discards the offset
 	// when a later frame reports a strictly-newer scroll_seq: an authoritative
@@ -39,10 +46,27 @@ type presentationScroll struct {
 }
 
 func (s presentationScroll) keysMatch(scroll protocol.ScrollPresentation) bool {
+	return s.basisMatches(scroll) &&
+		s.anchorTop == scroll.AnchorTop &&
+		s.anchorLeft == scroll.AnchorLeft &&
+		(!s.wrapped || s.anchorOffset == scroll.AnchorVisualRowOffset)
+}
+
+func (s presentationScroll) basisMatches(scroll protocol.ScrollPresentation) bool {
 	return s.contentEpoch == scroll.ContentEpoch &&
 		s.layoutGeneration == scroll.LayoutGeneration &&
-		s.anchorTop == scroll.AnchorTop &&
-		s.anchorLeft == scroll.AnchorLeft
+		s.wrapped == scroll.Wrapped
+}
+
+func capturePresentationScroll(window protocol.WindowContent, anchorRank int) presentationScroll {
+	scroll := window.Scroll
+	return presentationScroll{
+		anchorTop: scroll.AnchorTop, anchorLeft: scroll.AnchorLeft,
+		contentEpoch: scroll.ContentEpoch, layoutGeneration: scroll.LayoutGeneration,
+		scrollSeq: scroll.ScrollSeq, wrapped: scroll.Wrapped,
+		wrappedResident: window.WrappedResidentRows, anchorOffset: scroll.AnchorVisualRowOffset,
+		anchorRank: anchorRank,
+	}
 }
 
 type localPresentation struct {
@@ -62,21 +86,10 @@ func newLocalPresentation() localPresentation {
 	}
 }
 
-// reconcileScroll decides whether an incoming committed frame discards the local
-// scroll offset. It follows the documented reconciliation rule (docs/GUI_PROTOCOL.md)
-// in the same order Swift's shouldResetScrollPresentation uses:
-//
-//  1. reset_required (or no scroll payload) always discards;
-//  2. a strictly-newer scroll_seq discards, checked AHEAD of the anchor-key
-//     check so an authoritative jump that landed on the same top is not mistaken
-//     for a routine echo (#2671);
-//  3. an anchor-key mismatch (content_epoch / layout_generation / anchor)
-//     discards.
-//
-// Everything else (echo commits: same scroll_seq, same anchor key) keeps the
-// offset, so a wheel report the BEAM committed as the same anchor does not
-// trigger a re-anchor storm.
-func (lp *localPresentation) reconcileScroll(window protocol.WindowContent) {
+// Reconcile authority and layout before processing an echo. Unwrapped offsets
+// use the existing strict anchor key; wrapped resident prediction rebases onto
+// the new committed visual anchor without shifting the displayed top.
+func (lp *localPresentation) reconcileScroll(window protocol.WindowContent, anchorRank int) {
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		delete(lp.scrolls, window.ID)
 		return
@@ -85,8 +98,23 @@ func (lp *localPresentation) reconcileScroll(window protocol.WindowContent) {
 	if !ok {
 		return
 	}
-	if window.Scroll.ScrollSeq > scroll.scrollSeq {
+	if window.Scroll.ScrollSeq > scroll.scrollSeq || !scroll.basisMatches(window.Scroll) || scroll.wrappedResident != window.WrappedResidentRows {
 		delete(lp.scrolls, window.ID)
+		return
+	}
+	if scroll.predictingWrapped {
+		// Preserve the predicted absolute rank across same-authority echoes.
+		// Applying an old relative offset to the new continuation would scroll
+		// twice, and clearing on equal anchors would lose delayed reversals.
+		scroll.rowOffset += scroll.anchorRank - anchorRank
+		scroll.anchorRank = anchorRank
+		scroll.anchorTop = window.Scroll.AnchorTop
+		scroll.anchorOffset = window.Scroll.AnchorVisualRowOffset
+		if scroll.anchorLeft != window.Scroll.AnchorLeft {
+			scroll.anchorLeft = window.Scroll.AnchorLeft
+			scroll.colOffset = 0
+		}
+		lp.scrolls[window.ID] = scroll
 		return
 	}
 	if !scroll.keysMatch(window.Scroll) {

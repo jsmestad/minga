@@ -358,6 +358,42 @@ defmodule MingaEditor.ViewportTest do
       assert vp.top == 3
       assert vp.visual_row_offset == 3
     end
+
+    test "wheel moves within one logical line, clamps at the last full screen, and reverses" do
+      vp = Viewport.new(4, 80, 0)
+      count_rows = fn 0 -> 6 end
+
+      assert {%{top: 0, visual_row_offset: 1} = vp, false} =
+               Viewport.scroll_visual_rows(vp, 1, 1, count_rows)
+
+      assert {%{top: 0, visual_row_offset: 2} = vp, true} =
+               Viewport.scroll_visual_rows(vp, 9, 1, count_rows)
+
+      assert {%{top: 0, visual_row_offset: 1}, false} =
+               Viewport.scroll_visual_rows(vp, -1, 1, count_rows)
+    end
+
+    test "the first upward wheel tick after reflow moves away from the new bottom" do
+      vp = Viewport.new(4, 80, 0) |> Viewport.put_top_visual(0, 8, 9)
+      count_rows = fn 0 -> 6 end
+
+      assert {%{top: 0, visual_row_offset: 1}, false} =
+               Viewport.scroll_visual_rows(vp, -1, 1, count_rows)
+    end
+
+    test "wheel uses cumulative wrap lengths across logical line boundaries" do
+      vp = Viewport.new(4, 80, 0) |> Viewport.put_top_visual(0, 2, 3)
+      count_rows = &elem({3, 1, 3, 1}, &1)
+
+      assert {%{top: 2, visual_row_offset: 0} = vp, true} =
+               Viewport.scroll_visual_rows(vp, 2, 4, count_rows)
+
+      assert {%{top: 1, visual_row_offset: 0}, false} =
+               Viewport.scroll_visual_rows(vp, -1, 4, count_rows)
+
+      assert {%{top: 0, visual_row_offset: 2}, false} =
+               Viewport.scroll_visual_rows(vp, -2, 4, count_rows)
+    end
   end
 
   describe "content_cols/2" do

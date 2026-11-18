@@ -136,39 +136,29 @@ struct PresentedWindowSurface: Sendable {
     }
 
     var visibleRowRange: Range<Int> {
-        let viewport = paneGeometry.viewport
-        let start: Int
-        if let presentation = content.scrollPresentation {
-            start = content.rowStore.lowerBound(bufferLine: presentation.anchorTop) + Int(presentation.anchorVisualRowOffset)
-        } else {
-            // Windowed payloads already start at the committed viewport, including
-            // a leading continuation. Match ResidentRenderPreparation's row origin.
-            start = 0
-        }
-        let end = start + Int(viewport.rows)
-        return min(start, content.rowStore.count)..<min(max(end, start), content.rowStore.count)
+        let start = content.presentationRowOrigin
+        let end = start + Int(paneGeometry.viewport.rows)
+        return start..<min(end, content.rowStore.count)
     }
 
-    /// Resolves the gutter entry for one viewport-local visual row without expanding resident data.
-    func gutterEntry(atPresentationRow presentationRow: Int) -> Wire.GutterEntry? {
-        guard presentationRow >= 0, case .present(let gutter) = gutter else { return nil }
-        let startIndex: Int
-        if let presentation = content.scrollPresentation {
-            let anchor = content.rowStore.lowerBound(bufferLine: presentation.anchorTop)
-            startIndex = min(
-                anchor + Int(presentation.anchorVisualRowOffset),
-                content.rowStore.count
-            )
-        } else {
-            startIndex = 0
-        }
-        let rowIndex = startIndex + presentationRow
-        guard content.rowStore.row(at: rowIndex) != nil else { return nil }
-        return gutter.entries.entry(rowIndex: rowIndex)
+    /// Resolves a gutter entry at a row-store index, including rows outside the committed viewport.
+    func gutterEntry(atRowIndex rowIndex: Int) -> Wire.GutterEntry? {
+        guard case .present(let gutter) = gutter else { return nil }
+        guard let row = content.rowStore.row(at: rowIndex) else { return nil }
+        return gutter.entries.entry(visualRow: row, rowIndex: rowIndex)
     }
 
     var cursorLineOffset: Int {
         Int(content.cursorRow) * Int(paneGeometry.viewport.cols) + Int(content.cursorCol)
+    }
+}
+
+extension Wire.GutterEntries {
+    /// Dense gutters follow their payload's visual rows; sparse gutters follow source starts.
+    func entry(visualRow row: GUIVisualRow, rowIndex: Int) -> Wire.GutterEntry? {
+        guard residentIdentity != nil else { return entry(rowIndex: rowIndex) }
+        guard row.rowType != .wrapContinuation else { return nil }
+        return entry(rowIndex: Int(row.bufLine))
     }
 }
 

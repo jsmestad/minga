@@ -2243,7 +2243,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       popup_meta: nil,
       scroll_velocity: %MingaEditor.Window.ScrollVelocity{},
       scroll_detach_cursor: nil,
-      scroll_echo_top: nil,
+      scroll_echo_anchor: nil,
       authoritative_scroll_seq: 0
     }
   end

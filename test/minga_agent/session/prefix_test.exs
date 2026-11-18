@@ -111,9 +111,6 @@ defmodule MingaAgent.Session.PrefixTest do
     assert idle.messages == request.messages ++ [Context.assistant("answer")]
     assert map_size(idle.prefixes.epochs) == 1
 
-    assert {:error, {:portable_context_transition_required, _}} =
-             Continuation.check_model_change(idle, "ms2_other")
-
     {:ok, next, active} = Continuation.begin_request(idle, "request-2", 3, "inspect again")
 
     assistant = %Message{
@@ -127,10 +124,14 @@ defmodule MingaAgent.Session.PrefixTest do
       ])
 
     assert {:error, :request_active} = Continuation.change_prefix(checkpointed, changed)
+    assert {:error, :request_active} = Continuation.change_model_prefix(checkpointed, changed)
     unsettled = Continuation.cancel(checkpointed)
 
     assert {:error, :effect_reconciliation_required} =
              Continuation.change_prefix(unsettled, changed)
+
+    assert {:error, :effect_reconciliation_required} =
+             Continuation.change_model_prefix(unsettled, changed)
 
     assert checkpointed.tool_checkpoint.epoch_id == original.epoch_id
   end
@@ -182,6 +183,7 @@ defmodule MingaAgent.Session.PrefixTest do
     assert {:ok, restored} = history |> ContinuationCodec.encode() |> ContinuationCodec.decode()
     assert {:ok, :unchanged, ^restored} = Continuation.change_prefix(restored, current)
     assert PrefixStore.resolve(restored.prefixes, restored.prefixes.selected) == captured
+    assert {:ok, :unchanged, ^restored} = Continuation.change_prefix(restored, captured)
 
     assert {:ok, request, active} =
              Continuation.begin_request(restored, "qualified-second", 3, "second")
@@ -206,8 +208,7 @@ defmodule MingaAgent.Session.PrefixTest do
           {current.instructions, current.schemas, current.identity, ["changed-skill"]},
           {current.instructions, current.schemas,
            Map.put(current.identity, :authentication, changed_authentication), current.skills},
-          {current.instructions, current.schemas, different_identity, current.skills},
-          {current.instructions, current.schemas, captured_identity, current.skills}
+          {current.instructions, current.schemas, different_identity, current.skills}
         ] do
       assert {:ok, changed} =
                PrefixStore.candidate(:unknown, instructions, schemas, replay_identity, skills)
@@ -528,5 +529,83 @@ defmodule MingaAgent.Session.PrefixTest do
 
     assert history.prefixes == initial.prefixes
     assert byte_size(JSON.encode!(ContinuationCodec.encode(history)["prefixes"])) == initial_bytes
+  end
+
+  test "model handoff retains branch snapshots and can reopen before another prompt" do
+    first = candidate()
+    {_request, history} = completed(first)
+    {:ok, branched} = Continuation.branch_at(history, "original", 2)
+
+    selection =
+      ModelSelectionFixture.selection(request_provider: :openai_codex, model_id: "other-model")
+
+    identity = ModelSelection.replay_identity(selection, first.identity.authentication)
+    {:ok, target} = PrefixStore.candidate("target instructions", first.schemas, identity)
+
+    assert {:ok, :applied, switched} = Continuation.change_model_prefix(branched, target)
+
+    assert switched.messages == [
+             Context.system("target instructions"),
+             Context.user("first"),
+             Context.assistant("answer")
+           ]
+
+    assert {:ok, reopened} = switched |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+
+    assert {:ok, next, _active} =
+             Continuation.begin_request(reopened, "after-switch", 3, "continue")
+
+    assert next.prefix == target
+    assert next.messages == switched.messages ++ [Context.user("continue")]
+    assert {:ok, historical} = Continuation.switch_branch(reopened, "original")
+    assert historical.messages == history.messages
+    assert historical.prefixes.selected == first.epoch_id
+    assert {:ok, converted_branch} = Continuation.branch_at(reopened, "converted", 2)
+    assert converted_branch.messages == switched.messages
+    assert converted_branch.prefixes.selected == target.epoch_id
+  end
+
+  test "reasoning-only boundaries remain branchable after model handoff" do
+    first = candidate()
+    {_request, history} = completed(first)
+    {:ok, request, active} = Continuation.begin_request(history, "thinking-only", 3, "think")
+    thinking = %Message{role: :assistant, content: [ContentPart.thinking("private reasoning")]}
+    outcome = Outcome.new(request, request.messages ++ [thinking])
+    {:ok, completed} = Continuation.complete(active, outcome, 4)
+
+    assert {:ok, :applied, switched} =
+             Continuation.change_model_prefix(completed, candidate("next"))
+
+    assert {:ok, restored} = switched |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+    assert {:ok, branch} = Continuation.branch_at(restored, "thinking", 4)
+    assert List.last(branch.messages) == Context.user("think")
+  end
+
+  test "file references cannot inherit a replacement key or account through model selection" do
+    first = candidate()
+    {:ok, :applied, initial} = Continuation.change_prefix(Continuation.new(), first)
+    file = ContentPart.owned_file_id("private-file", :openai)
+    {:ok, request, active} = Continuation.begin_request(initial, "file", 1, [file])
+
+    {:ok, history} =
+      Continuation.complete(
+        active,
+        Outcome.new(request, request.messages ++ [Context.assistant("read")]),
+        2
+      )
+
+    {:ok, same_namespace} = PrefixStore.candidate("another model", first.schemas, first.identity)
+
+    assert {:ok, :applied, _switched} =
+             Continuation.change_model_prefix(history, same_namespace, :retain)
+
+    changed_identity =
+      put_in(first.identity, [:authentication, :account_id], "replacement-account")
+
+    {:ok, different_namespace} =
+      PrefixStore.candidate("another model", first.schemas, changed_identity)
+
+    assert {:error, :unportable_attachment} =
+             Continuation.change_model_prefix(history, different_namespace, :retain)
   end
 end

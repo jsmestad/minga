@@ -41,12 +41,14 @@ enum EditorScrollTrack {
     ) -> Metrics? {
         let viewport = surface.paneGeometry.viewport
         guard viewport.totalLines > 0, viewport.rows > 0, cellHeight > 0 else { return nil }
-        let localOffset = localTransform?.windowId == surface.windowId
+        let scroll = surface.content.scrollPresentation
+        // Local wrapped-wheel transforms are visual ranks, not logical thumb positions.
+        let localOffset = scroll?.isWrapped != true && localTransform?.windowId == surface.windowId
             ? localTransform?.offset.y ?? 0
             : 0
         let topLine = max(0, CGFloat(viewport.top) + localOffset / cellHeight)
-        let resident = surface.content.scrollPresentation.map {
-            $0.overscanStartLine == 0 && $0.overscanEndLine >= viewport.totalLines
+        let resident = scroll.map {
+            !$0.isWrapped && $0.overscanStartLine == 0 && $0.overscanEndLine >= viewport.totalLines
         } ?? false
         return Metrics(
             totalLines: viewport.totalLines,

@@ -1625,14 +1625,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     window
     |> Window.set_viewport(new_vp)
-    |> Window.mark_scroll_echo(new_vp.top)
+    |> Window.mark_scroll_echo()
     |> Window.record_scroll_event(now, cursor_pos)
   end
 
   defp scroll_to_line_commit(%Window{} = window, new_vp) do
     window
     |> Window.set_viewport(new_vp)
-    |> Window.mark_scroll_echo(new_vp.top)
+    |> Window.mark_scroll_echo()
   end
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()

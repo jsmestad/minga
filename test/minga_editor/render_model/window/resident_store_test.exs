@@ -20,9 +20,13 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
   alias Minga.RenderModel.Window.ContentDigest
   alias Minga.RenderModel.Window.Row
   alias Minga.Core.Decorations
+  alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderModel.Window.SourceOffsetMap
   alias MingaEditor.RenderModel.Window.VisualRow
+  alias MingaEditor.Renderer.TextInteractionIndex
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
+  alias MingaEditor.Renderer.TextPresentation
 
   @max_rows 100
 
@@ -74,6 +78,86 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
         byte_size(row.text),
         0
       )
+    )
+  end
+
+  test "rank and select preserve groups split by chunks and pointer lease projection" do
+    entries = [visual_entry(0) | Enum.map(1..130, &continuation_entry/1)] ++ [visual_entry(1)]
+    store = ResidentStore.from_entries(entries)
+
+    assert ResidentStore.line_count(store) == 2
+    assert ResidentStore.line_extent(store, 0) == {0, 131}
+    assert ResidentStore.visual_rank(store, 2) == 132
+    assert ResidentStore.anchor_at(store, 64) == {0, 64}
+    assert ResidentStore.anchor_at(store, 128) == {0, 128}
+    assert ResidentStore.anchor_at(store, 131) == {1, 0}
+
+    inserted = visual_entry(25)
+    next = ResidentStore.insert_at(store, 0, inserted)
+    assert ResidentStore.line_extent(next, 1) == {1, 131}
+    assert ResidentStore.entry_at(next, 129) == ResidentStore.entry_at(store, 128)
+
+    assert [%VisualRow{buf_line: 1, visual_index: 128}] =
+             ResidentStore.payload_range(next, 129, 1)
+
+    index = TextInteractionIndex.new()
+    reader = TextInteractionIndex.reader(index)
+    buffer = self()
+    identity = {:wrapped_resident, :width_basis, :identity}
+    presentation = TextPresentation.new(5, buffer, 11, identity, {:resident, next}, 7)
+    index = TextInteractionIndex.publish(index, presentation)
+    assert :ok = TextInteractionIndex.activate(index, 5, 7)
+
+    assert {:ok, {1, 128}, true} =
+             Reader.scroll_anchor(reader, 5, buffer, 11, :width_basis, {1, 127}, 1, 4)
+
+    assert {:ok, {1, 127}, false} =
+             Reader.scroll_anchor(reader, 5, buffer, 11, :width_basis, {1, 128}, -1, 4)
+
+    assert :error = Reader.scroll_anchor(reader, 5, buffer, 10, :width_basis, {1, 128}, 1, 4)
+    assert :error = Reader.scroll_anchor(reader, 5, buffer, 11, :stale_width, {1, 128}, 1, 4)
+
+    event =
+      TextEvent.new(%{
+        window_id: 5,
+        presentation_id: 7,
+        row_index: 129,
+        row_id: Row.stable_id(:wrap_continuation, 0, 128),
+        utf16_offset: 0,
+        button: :left,
+        mods: 0,
+        event_type: :press,
+        click_count: 1,
+        scroll_x: 0,
+        scroll_y: 0
+      })
+
+    assert {:ok, %{line: 1, byte: 128, source_version: 11}} = Reader.resolve(reader, event)
+    _index = TextInteractionIndex.drop_buffer(index, buffer)
+    assert :error = Reader.scroll_anchor(reader, 5, buffer, 11, :width_basis, {1, 128}, 1, 4)
+  end
+
+  defp continuation_entry(offset) do
+    source = String.duplicate("x", 131)
+
+    row = %Row{
+      row_id: Row.stable_id(:wrap_continuation, 0, offset),
+      row_type: :wrap_continuation,
+      buf_line: 0,
+      visual_index: offset,
+      text: "x",
+      spans: [],
+      content_hash: Row.compute_hash("x", [])
+    }
+
+    map =
+      SourceOffsetMap.new(source, source, Decorations.new(), 0)
+      |> SourceOffsetMap.slice(offset, offset + 1, offset, offset + 1)
+
+    ResidentStore.entry(
+      row.row_id,
+      row.content_hash,
+      VisualRow.new(row, map, offset, offset + 1, 0)
     )
   end
 
