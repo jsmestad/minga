@@ -513,6 +513,18 @@ defmodule MingaEditor.Renderer.State do
     }
   end
 
+  @doc "Publishes current scroll geometry only for locally completed frames."
+  @spec commit_local_scroll_geometry(t(), Input.t()) :: t()
+  def commit_local_scroll_geometry(%__MODULE__{require_ack?: true} = state, %Input{}), do: state
+
+  def commit_local_scroll_geometry(%__MODULE__{} = state, %Input{} = output) do
+    %{
+      state
+      | text_presentations:
+          TextPresentations.commit_local_output(state.text_presentations, output)
+    }
+  end
+
   @doc "Applies an ordered frontend visibility lifecycle transition."
   @spec text_presentation_state(t(), Window.id(), non_neg_integer(), :active | :discarded) ::
           {:ok, t()} | {:error, :unknown, t()}

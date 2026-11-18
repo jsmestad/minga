@@ -381,6 +381,8 @@ public struct GUIScrollPresentation: Sendable, Equatable {
     public let resetRequired: Bool
     /// Whether vertical scroll intents step through visual rows rather than source lines.
     public let isWrapped: Bool
+    /// Whether the BEAM accepts horizontal pan intent for this pane.
+    public let canPanHorizontally: Bool
     public let anchorTop: UInt32
     public let anchorLeft: UInt16
     public let anchorVisualRowOffset: UInt16
@@ -396,11 +398,20 @@ public struct GUIScrollPresentation: Sendable, Equatable {
     /// being reflected back even when the jump coincidentally lands on the same
     /// `anchorTop`.
     public let scrollSeq: UInt32
+    /// Last horizontal pan input sequence processed for this pane, or zero before any input.
+    public let horizontalPanAck: UInt32
+    /// Rightmost left column allowed by the BEAM for the committed viewport.
+    public let horizontalPanLimit: UInt16
 
-    public init(windowId: UInt16, resetRequired: Bool, anchorTop: UInt32, anchorLeft: UInt16, anchorVisualRowOffset: UInt16, visibleStartLine: UInt32, visibleEndLine: UInt32, overscanStartLine: UInt32, overscanEndLine: UInt32, contentEpoch: UInt32, layoutGeneration: UInt32, scrollSeq: UInt32 = 0, isWrapped: Bool = false) {
+    public init(windowId: UInt16, resetRequired: Bool, anchorTop: UInt32, anchorLeft: UInt16,
+                anchorVisualRowOffset: UInt16, visibleStartLine: UInt32, visibleEndLine: UInt32,
+                overscanStartLine: UInt32, overscanEndLine: UInt32, contentEpoch: UInt32,
+                layoutGeneration: UInt32, scrollSeq: UInt32 = 0, isWrapped: Bool = false,
+                canPanHorizontally: Bool = false, horizontalPanAck: UInt32 = 0, horizontalPanLimit: UInt16 = 0) {
         self.windowId = windowId
         self.resetRequired = resetRequired
         self.isWrapped = isWrapped
+        self.canPanHorizontally = canPanHorizontally
         self.anchorTop = anchorTop
         self.anchorLeft = anchorLeft
         self.anchorVisualRowOffset = anchorVisualRowOffset
@@ -411,6 +422,8 @@ public struct GUIScrollPresentation: Sendable, Equatable {
         self.contentEpoch = contentEpoch
         self.layoutGeneration = layoutGeneration
         self.scrollSeq = scrollSeq
+        self.horizontalPanAck = horizontalPanAck
+        self.horizontalPanLimit = horizontalPanLimit
     }
 
     public func isSameAnchorKey(as other: GUIScrollPresentation) -> Bool {

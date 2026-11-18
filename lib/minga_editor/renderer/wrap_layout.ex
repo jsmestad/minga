@@ -4,9 +4,13 @@ defmodule MingaEditor.Renderer.WrapLayout do
   alias Minga.Buffer.RenderSnapshot
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias Minga.Core.PositionEncoding
   alias Minga.Core.WidthOracle
   alias Minga.Core.WrapMap
+  alias MingaEditor.RenderModel.Window.SourceOffsetMap
   alias MingaEditor.Renderer.Composition
+
+  @type counts :: %{optional(non_neg_integer()) => pos_integer()}
 
   @doc "Builds the wrap options shared by measurement and row composition."
   @spec options(pos_integer(), WidthOracle.t(), map()) :: keyword()
@@ -52,13 +56,34 @@ defmodule MingaEditor.Renderer.WrapLayout do
           [String.t()]
         ) :: [pos_integer()]
   def row_counts(%RenderSnapshot{} = snapshot, width, oracle, cursor_line, lines) do
+    row_counts(snapshot, width, oracle, cursor_line, lines, %{})
+  end
+
+  @doc "Measures only lines without an exact retained count for this source and wrap basis."
+  @spec row_counts(
+          RenderSnapshot.t(),
+          pos_integer(),
+          WidthOracle.t(),
+          non_neg_integer(),
+          [String.t()],
+          counts()
+        ) :: [pos_integer()]
+  def row_counts(%RenderSnapshot{} = snapshot, width, oracle, cursor_line, lines, retained) do
     options = options(width, oracle, snapshot.options)
     show_invisible? = Map.get(snapshot.options, :show_invisible, false)
 
     {counts, _next_line} =
       Enum.map_reduce(lines, snapshot.first_line, fn text, line ->
-        {row_count(text, line, snapshot.decorations, cursor_line, options, show_invisible?),
-         line + 1}
+        count =
+          case Map.fetch(retained, line) do
+            {:ok, count} ->
+              count
+
+            :error ->
+              row_count(text, line, snapshot.decorations, cursor_line, options, show_invisible?)
+          end
+
+        {count, line + 1}
       end)
 
     counts
@@ -75,16 +100,59 @@ defmodule MingaEditor.Renderer.WrapLayout do
   defp row_count(text, line, decorations, cursor_line, options, show_invisible?) do
     decorations = visible_decorations(decorations, cursor_line, line)
     tab_width = Keyword.fetch!(options, :tab_width)
-    width = Keyword.fetch!(options, :content_width)
-
-    composed =
-      [{text, Face.new()}]
-      |> Composition.compose_segments(decorations, line)
-      |> Composition.present_whitespace(tab_width, show_invisible?, nil)
-      |> Enum.map_join(&elem(&1, 0))
-
-    max(WrapMap.visual_row_count(WrapMap.compute([composed], width, options)), 1)
+    composed = compose_text(text, line, decorations, tab_width, show_invisible?)
+    composed |> wrap_composed(options) |> length()
   end
+
+  @doc "Measures a composed source line and, if requested, projects the cursor into its wrap."
+  @spec measure(
+          String.t(),
+          non_neg_integer(),
+          Decorations.t(),
+          keyword(),
+          boolean(),
+          {non_neg_integer(), non_neg_integer() | nil}
+        ) :: {String.t(), WrapMap.wrap_entry(), non_neg_integer()}
+  def measure(text, line, decorations, options, show_invisible?, {cursor_line, byte}) do
+    decorations = visible_decorations(decorations, cursor_line, line)
+    tab_width = Keyword.fetch!(options, :tab_width)
+    composed = compose_text(text, line, decorations, tab_width, show_invisible?)
+
+    rows = wrap_composed(composed, options)
+
+    segment =
+      if line == cursor_line and is_integer(byte) and match?([_, _ | _], rows) do
+        source = SourceOffsetMap.new(text, composed, decorations, line, tab_width: tab_width)
+        character = SourceOffsetMap.source_to_composed_utf16(source, byte, :start)
+
+        {_, composed_byte} =
+          PositionEncoding.from_lsp(%{"line" => line, "character" => character}, composed, :utf16)
+
+        wrapped_segment(rows, composed_byte, 0)
+      else
+        0
+      end
+
+    {composed, rows, segment}
+  end
+
+  defp compose_text(text, line, decorations, tab_width, show_invisible?) do
+    [{text, Face.new()}]
+    |> Composition.compose_segments(decorations, line)
+    |> Composition.present_whitespace(tab_width, show_invisible?, nil)
+    |> Enum.map_join(&elem(&1, 0))
+  end
+
+  @spec wrap_composed(String.t(), keyword()) :: WrapMap.wrap_entry()
+  defp wrap_composed(text, options) do
+    [rows] = WrapMap.compute([text], Keyword.fetch!(options, :content_width), options)
+    rows
+  end
+
+  defp wrapped_segment([_ | [%{byte_offset: start} | _] = rest], byte, index) when start <= byte,
+    do: wrapped_segment(rest, byte, index + 1)
+
+  defp wrapped_segment(_rows, _byte, index), do: index
 
   @spec visible_decorations(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
           Decorations.t()

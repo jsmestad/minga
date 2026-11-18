@@ -191,21 +191,9 @@ func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	case tea.MouseRight:
 		button = 2
 	case tea.MouseWheelUp:
-		if mouse.Mod.Contains(tea.ModShift) {
-			button = 0x43
-		} else {
-			button = 0x40
-		}
+		button = 0x40
 	case tea.MouseWheelDown:
-		if mouse.Mod.Contains(tea.ModShift) {
-			button = 0x42
-		} else {
-			button = 0x41
-		}
-	case tea.MouseWheelRight:
-		button = 0x42
-	case tea.MouseWheelLeft:
-		button = 0x43
+		button = 0x41
 	}
 	switch msg.(type) {
 	case tea.MouseReleaseMsg:
@@ -243,7 +231,7 @@ func (m Model) normalizePresentationMouse(row int, col int) (int, int) {
 		return row, col
 	}
 	normalizedRow := clampInt(row+scroll.rowOffset, placement.row, placement.row+placement.height-1)
-	normalizedBodyCol := clampInt(bodyCol+scroll.colOffset, placement.col, placement.col+placement.width-1)
+	normalizedBodyCol := clampInt(bodyCol+m.presentationColumnOffset(scroll.colOffset), placement.col, placement.col+placement.width-1)
 	return normalizedRow, normalizedBodyCol + leftChrome
 }
 
@@ -252,6 +240,23 @@ func clampInt(value int, low int, high int) int {
 		return low
 	}
 	return min(max(value, low), high)
+}
+
+// wheelScroll normalizes modified and physical wheel events to a single axis
+// and signed step, before routing to a scroll target.
+func wheelScroll(mouse tea.Mouse) (delta int, horizontal bool) {
+	switch mouse.Button {
+	case tea.MouseWheelDown:
+		return 1, mouse.Mod.Contains(tea.ModShift)
+	case tea.MouseWheelUp:
+		return -1, mouse.Mod.Contains(tea.ModShift)
+	case tea.MouseWheelRight:
+		return 1, true
+	case tea.MouseWheelLeft:
+		return -1, true
+	default:
+		return 0, false
+	}
 }
 
 // isWheelButton reports whether a Bubble Tea mouse button is a scroll-wheel

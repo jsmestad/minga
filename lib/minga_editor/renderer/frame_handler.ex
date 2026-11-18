@@ -128,7 +128,10 @@ defmodule MingaEditor.Renderer.FrameHandler do
   @doc "Commits a locally completed or frontend-acknowledged frame."
   @spec commit_output(State.t(), Input.t()) :: State.t()
   def commit_output(state, output) do
-    state = BufferChanges.commit(state, output, output.intent)
+    state =
+      state
+      |> State.commit_local_scroll_geometry(output)
+      |> BufferChanges.commit(output, output.intent)
 
     %{
       state

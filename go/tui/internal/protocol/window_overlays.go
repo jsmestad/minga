@@ -52,6 +52,7 @@ type ScrollPresentation struct {
 	WindowID              uint16
 	ResetRequired         bool
 	Wrapped               bool
+	CanPanHorizontally    bool
 	AnchorTop             uint32
 	AnchorLeft            uint16
 	AnchorVisualRowOffset uint16
@@ -63,6 +64,10 @@ type ScrollPresentation struct {
 	LayoutGeneration      uint32
 	// ScrollSeq advances on a BEAM-authoritative move, not a routine wheel echo.
 	ScrollSeq uint32
+	// HorizontalPanAck is the last horizontal intent processed for this pane.
+	HorizontalPanAck uint32
+	// HorizontalPanLimit is the rightmost left edge for the committed visible rows.
+	HorizontalPanLimit uint16
 }
 
 type PaneGeometry struct {
@@ -164,6 +169,7 @@ func decodeScrollPresentation(section []byte, window *WindowContent) {
 		WindowID:              gen.WindowID,
 		ResetRequired:         gen.Flags&0x01 != 0,
 		Wrapped:               gen.Flags&0x02 != 0,
+		CanPanHorizontally:    gen.Flags&0x04 != 0,
 		AnchorTop:             gen.AnchorTop,
 		AnchorLeft:            gen.AnchorLeft,
 		AnchorVisualRowOffset: gen.AnchorVisualRowOffset,
@@ -174,6 +180,8 @@ func decodeScrollPresentation(section []byte, window *WindowContent) {
 		ContentEpoch:          gen.ContentEpoch,
 		LayoutGeneration:      gen.LayoutGeneration,
 		ScrollSeq:             gen.ScrollSeq,
+		HorizontalPanAck:      gen.HorizontalPanAck,
+		HorizontalPanLimit:    gen.HorizontalPanLimit,
 	}
 	window.ScrollSet = true
 }

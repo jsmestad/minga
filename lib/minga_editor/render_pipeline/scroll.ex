@@ -18,6 +18,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     Bundles the viewport, buffer snapshot, cursor positions, gutter dimensions, buffer options, and pre-fetched signs for one window. Downstream render stages consume this struct instead of making GenServer calls.
     """
 
+    alias MingaEditor.DisplayMap
     alias MingaEditor.FoldMap.VisibleLines
     alias MingaEditor.Layout
     alias MingaEditor.Viewport
@@ -92,7 +93,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             width_oracle: Minga.Core.WidthOracle.t(),
             git_signs: %{non_neg_integer() => atom()},
             visible_line_map:
-              [VisibleLines.line_entry()] | [MingaEditor.DisplayMap.entry()] | nil,
+              [VisibleLines.line_entry()] | [DisplayMap.entry()] | DisplayMap.t() | nil,
             total_visual_rows: non_neg_integer() | nil,
             visible_row_start_index: non_neg_integer(),
             content_epoch: non_neg_integer(),

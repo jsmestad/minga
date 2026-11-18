@@ -986,11 +986,17 @@ defmodule MingaEditor do
       ),
       do: {:noreply, state}
 
-  def handle_info({:minga_input, {:scroll_batch, window_id, delta_lines, direction}}, state) do
+  def handle_info({:minga_input, {:scroll_batch, window_id, delta, direction}}, state) do
     snapshot = Input.Router.capture_snapshot(state)
-    new_state = MingaEditor.Mouse.handle_scroll_batch(state, window_id, delta_lines, direction)
+    new_state = MingaEditor.Mouse.handle_scroll_batch(state, window_id, delta, direction)
     new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:horizontal_pan, window_id, delta, input_seq}}, state) do
+    snapshot = Input.Router.capture_snapshot(state)
+    state = MingaEditor.Mouse.handle_horizontal_pan(state, window_id, delta, input_seq)
+    {:noreply, Input.Router.post_action_housekeeping(state, snapshot)}
   end
 
   # Legacy in-process fixtures omit generation; treat them as an explicit retry.

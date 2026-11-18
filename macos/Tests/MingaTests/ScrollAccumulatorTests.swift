@@ -114,42 +114,43 @@ struct ScrollAccumulatorVerticalTests {
 @Suite("ScrollAccumulator horizontal")
 struct ScrollAccumulatorHorizontalTests {
 
-    @Test("small delta below cellWidth produces no events")
+    @Test("sub-column motion keeps the viewport sign, not the AppKit content sign")
     func smallDelta() {
         var acc = ScrollAccumulator()
-        let events = acc.accumulateHorizontal(deltaX: 5, cellWidth: 10)
-        #expect(events.isEmpty)
-        #expect(acc.pixelOffsetX == 5)
+        let columns = acc.accumulateHorizontal(deltaX: 5, cellWidth: 10)
+        #expect(columns == 0)
+        #expect(acc.pixelOffsetX == -5)
     }
 
-    @Test("positive delta crossing cellWidth produces scrollLeft")
+    @Test("positive AppKit delta crosses a cell to the left")
     func scrollLeft() {
         var acc = ScrollAccumulator()
-        let events = acc.accumulateHorizontal(deltaX: 15, cellWidth: 10)
-        #expect(events == [.scrollLeft])
+        let columns = acc.accumulateHorizontal(deltaX: 15, cellWidth: 10)
+        #expect(columns == -1)
+        #expect(acc.pixelOffsetX == -5)
+    }
+
+    @Test("negative AppKit delta crosses a cell to the right")
+    func scrollRight() {
+        var acc = ScrollAccumulator()
+        let columns = acc.accumulateHorizontal(deltaX: -15, cellWidth: 10)
+        #expect(columns == 1)
         #expect(acc.pixelOffsetX == 5)
     }
 
-    @Test("negative delta crossing cellWidth produces scrollRight")
-    func scrollRight() {
+    @Test("large horizontal deltas produce a signed column count, bounded by i16")
+    func multipleColumns() {
         var acc = ScrollAccumulator()
-        let events = acc.accumulateHorizontal(deltaX: -15, cellWidth: 10)
-        #expect(events == [.scrollRight])
+        #expect(acc.accumulateHorizontal(deltaX: -35, cellWidth: 10) == 3)
+        #expect(acc.pixelOffsetX == 5)
+        #expect(acc.accumulateHorizontal(deltaX: 500_000, cellWidth: 10) == Int16.min)
         #expect(acc.pixelOffsetX == -5)
     }
 
-    @Test("large delta produces multiple events")
-    func multipleEvents() {
-        var acc = ScrollAccumulator()
-        let events = acc.accumulateHorizontal(deltaX: -35, cellWidth: 10)
-        #expect(events == [.scrollRight, .scrollRight, .scrollRight])
-        #expect(acc.pixelOffsetX == -5)
-    }
-
-    @Test("zero cellWidth returns no events")
+    @Test("zero cellWidth consumes no horizontal motion")
     func zeroCellWidth() {
         var acc = ScrollAccumulator()
-        let events = acc.accumulateHorizontal(deltaX: 50, cellWidth: 0)
-        #expect(events.isEmpty)
+        #expect(acc.accumulateHorizontal(deltaX: 50, cellWidth: 0) == 0)
+        #expect(acc.pixelOffsetX == 0)
     }
 }

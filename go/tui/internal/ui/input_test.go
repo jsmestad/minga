@@ -104,29 +104,6 @@ func TestTerminalInputParsesFragmentedSGRMouseTail(t *testing.T) {
 	}
 }
 
-func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		msg  tea.MouseMsg
-		want byte
-	}{
-		{name: "wheel right", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight}), want: 0x42},
-		{name: "wheel left", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelLeft}), want: 0x43},
-		{name: "shift wheel down", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift}), want: 0x42},
-		{name: "shift wheel up", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift}), want: 0x43},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := New(80, 24, nil).mousePacket(tc.msg)
-			if !ok {
-				t.Fatal("wheel should encode a mouse packet")
-			}
-			if packet[0] != generated.OPMouseEvent || packet[5] != tc.want {
-				t.Fatalf("mouse packet opcode/button = %#x/%#x, want mouse/%#x", packet[0], packet[5], tc.want)
-			}
-		})
-	}
-}
-
 // A held-button motion is a drag (event_type 0x03) and a free-pointer motion is
 // a hover (event_type 0x02). The BEAM only extends a selection on a drag, so the
 // distinction is load-bearing for drag selection (ticket #2229, AC2).
@@ -188,17 +165,6 @@ func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
 				t.Fatalf("event type = %#x, want %#x", packet[7], tc.wantEventType)
 			}
 		})
-	}
-}
-
-func TestTerminalInputPreservesShiftWheelSGRMouseTail(t *testing.T) {
-	mouse := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"})).(tea.MouseMsg)
-	packet, ok := New(80, 24, nil).mousePacket(mouse)
-	if !ok {
-		t.Fatal("SGR shift wheel tail should encode a mouse packet")
-	}
-	if packet[5] != 0x42 {
-		t.Fatalf("shift wheel-down should encode wheel-right button, got %#x", packet[5])
 	}
 }
 

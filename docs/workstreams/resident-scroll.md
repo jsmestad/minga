@@ -4,11 +4,11 @@
 
 **Feel-track follow-ups shipped:** scrollbar thumb-drag now renders same-frame from resident rows — [#2665](https://github.com/jsmestad/minga/issues/2665). The drag applies the target-line delta as the existing local offset over resident rows (throttled to one intent per frame on the ordered channel), and the BEAM's `scroll_to_line` commit path got the same `mark_scroll_echo` + `record_scroll_event` treatment as the wheel free-scroll (`GuiActionHandler.scroll_to_line_commit`), so releasing commits without a settle-jump and the cursor stays put (VSCode semantics). The Swift side is a pure `ThumbDragSession` state machine (gate fixed at drag start, throttle, release baselines, authoritative-interrupt bailout, and a reconcile watchdog) owned by `EditorNSView`.
 
-**Soft-wrap wheel scrolling:** The BEAM commits `{source_line, continuation_offset}` and bounds the viewport in visual rows. Eligible panes retain all their laid-out rows, so Swift and Go can move the viewport on the input frame using the same row order without wrapping text locally. Cold and over-budget wrapped panes use the same visual bounds on the windowed path. Folded panes keep their existing display-map path.
+**Soft-wrap scrolling:** The BEAM commits a source line and continuation together and bounds the viewport in visual rows. Eligible panes retain all their laid-out rows, so Swift and Go move the viewport on the input frame without wrapping text locally. The native scrollbar presents the same visual position and sends absolute rank targets tied to the displayed text presentation. Windowed panes reuse exact wrap counts for unchanged source groups when available. Folds and block decorations stay windowed, but ordinary source lines still wrap and wheel scrolling follows the mixed row order.
 
 **Deferred remnants (candidate follow-ups, not regressions):** folded residence; residual O(document) cheap passes at the 65k ceiling (~30 fps resident scroll at the extreme); the one-cell park on a discrete wheel tick at the boundary; the `fullRefresh`-without-`resetRequired` promotion discard gate; and the Go rows-without-scroll `ScrollSet`-clearing divergence from Swift.
 
-See [ADR-0005](../adr/0005-frontend-owns-immediate-ui-feedback.md) for the UI responsiveness policy and its application to soft-wrapped panes. This workstream records the shipped baseline. Wrapped residence is not yet shipped, and folded residence is outside ADR-0005.
+See [ADR-0005](../adr/0005-frontend-owns-immediate-ui-feedback.md) for the UI responsiveness policy and its application to soft-wrapped panes. Folded residence is outside that decision.
 
 ## Status ledger (as of #2679)
 

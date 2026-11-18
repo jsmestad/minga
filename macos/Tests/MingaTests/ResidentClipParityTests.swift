@@ -34,7 +34,7 @@ struct ResidentClipParityTests {
         #expect(mismatches.isEmpty, "\(mismatches)")
     }
 
-    @Test("prepared commands keep reference rows and composed UTF-16 bounds")
+    @Test("prepared commands match reference text, styles, glyph origin, and composed UTF-16 bounds")
     func prepareMatchesReferenceCommands() throws {
         var mismatches: [String] = []
         for spanCase in 0..<Self.spanSets(displayWidth: 1).count {
@@ -53,10 +53,13 @@ struct ResidentClipParityTests {
                     )
                     #expect(prepared.commands.count == rows.count)
                     for (command, source) in zip(prepared.commands, rows) {
-                        let expected = Self.referenceClip(row: source, scrollLeft: max(scrollLeft, 0), viewportCols: max(viewportCols, 0))
+                        let expected = Self.referenceClip(
+                            row: source, scrollLeft: scrollLeft, viewportCols: viewportCols, glyphAligned: true
+                        )
                         let matches = command.row == expected.row
                             && command.composedUTF16Start == expected.startUTF16
                             && command.composedUTF16End == expected.startUTF16 + expected.row.text.utf16.count
+                            && command.composedStartColumn == expected.startColumn
                             && command.gutterBufferLine == source.bufLine
                         if !matches, mismatches.count < 8 {
                             mismatches.append("\(source.text.debugDescription) span=\(spanCase) left=\(scrollLeft) cols=\(viewportCols)")
@@ -119,9 +122,11 @@ struct ResidentClipParityTests {
     // MARK: - Reference
 
     /// Rebuilding clip semantics: every non-empty row is re-sliced, re-spanned, and re-hashed.
-    private static func referenceClip(row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> (row: GUIVisualRow, startUTF16: Int) {
+    private static func referenceClip(
+        row: GUIVisualRow, scrollLeft: Int, viewportCols: Int, glyphAligned: Bool = false
+    ) -> (row: GUIVisualRow, startUTF16: Int, startColumn: Int) {
         let text = row.text
-        guard !text.isEmpty else { return (row, 0) }
+        guard !text.isEmpty else { return (row, 0, 0) }
         let clipStart = max(scrollLeft, 0)
         let clipLimit = clipStart + max(viewportCols, 0)
         var column = 0
@@ -145,20 +150,25 @@ struct ResidentClipParityTests {
         }
         let clipEnd = min(clipLimit, column)
         guard clipStart < clipEnd else {
-            return (referenceRebuilt(row, text: "", spans: [], scrollLeft: scrollLeft), text.utf16.count)
+            return (referenceRebuilt(row, text: "", spans: [], scrollLeft: scrollLeft), text.utf16.count, clipStart)
         }
+        // Prepared commands position text and styles at the retained glyph's origin,
+        // while the standalone clip API rebases styles to the requested viewport column.
+        let startColumn = glyphAligned
+            ? text[..<start].reduce(0) { $0 + referenceWidth($1) }
+            : clipStart
         let spans = row.spans.compactMap { span -> GUIHighlightSpan? in
             let start = Int(span.startCol)
             let end = Int(span.endCol)
-            guard end > clipStart, start < clipEnd else { return nil }
-            let newStart = UInt16(clamping: max(start - clipStart, 0))
-            let newEnd = UInt16(clamping: min(end - clipStart, clipEnd - clipStart))
+            guard end > startColumn, start < clipEnd else { return nil }
+            let newStart = UInt16(clamping: max(start - startColumn, 0))
+            let newEnd = UInt16(clamping: min(end, clipEnd) - startColumn)
             guard newStart < newEnd else { return nil }
             return GUIHighlightSpan(startCol: newStart, endCol: newEnd, fg: span.fg, bg: span.bg,
                                     attrs: span.attrs, fontWeight: span.fontWeight, fontId: span.fontId)
         }
         return (referenceRebuilt(row, text: String(text[start..<end]), spans: spans, scrollLeft: scrollLeft),
-                start.utf16Offset(in: text))
+                start.utf16Offset(in: text), startColumn)
     }
 
     private static func referenceRebuilt(_ row: GUIVisualRow, text: String, spans: [GUIHighlightSpan], scrollLeft: Int) -> GUIVisualRow {

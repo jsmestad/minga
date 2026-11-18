@@ -14,7 +14,8 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
     :scroll_velocity,
     :scroll_detach_cursor,
     :scroll_echo_anchor,
-    :authoritative_scroll_seq
+    :authoritative_scroll_seq,
+    :horizontal_pan_ack
   ]
   @enforce_keys @fields
   defstruct @fields
@@ -29,8 +30,9 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
           popup_meta: MingaEditor.UI.Popup.Active.t() | nil,
           scroll_velocity: MingaEditor.Window.ScrollVelocity.t(),
           scroll_detach_cursor: Minga.Buffer.position() | nil,
-          scroll_echo_anchor: {non_neg_integer(), non_neg_integer()} | nil,
-          authoritative_scroll_seq: non_neg_integer()
+          scroll_echo_anchor: MingaEditor.Viewport.scroll_anchor() | nil,
+          authoritative_scroll_seq: non_neg_integer(),
+          horizontal_pan_ack: non_neg_integer()
         }
 
   @spec from_window(Window.t()) :: t()
@@ -46,7 +48,8 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
       scroll_velocity: window.scroll_velocity,
       scroll_detach_cursor: window.scroll_detach_cursor,
       scroll_echo_anchor: window.scroll_echo_anchor,
-      authoritative_scroll_seq: window.authoritative_scroll_seq
+      authoritative_scroll_seq: window.authoritative_scroll_seq,
+      horizontal_pan_ack: window.horizontal_pan_ack
     }
   end
 end

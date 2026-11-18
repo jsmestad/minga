@@ -63,6 +63,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       content_epoch: Keyword.get(opts, :content_epoch, 0),
       full_refresh: Keyword.get(opts, :full_refresh, true),
       scroll_seq: Keyword.get(opts, :scroll_seq, 0),
+      horizontal_pan_ack: Keyword.get(opts, :horizontal_pan_ack, 0),
+      horizontal_pan_limit: Keyword.get(opts, :horizontal_pan_limit, 0),
       accessibility_label: Keyword.get(opts, :accessibility_label, ""),
       accessibility_generation: Keyword.get(opts, :accessibility_generation, 0),
       accessibility_cursor: Keyword.get(opts, :accessibility_cursor, nil),
@@ -604,6 +606,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
              window_id: 1,
              reset_required: true,
              wrapped: false,
+             can_pan_horizontally: true,
              anchor_top: 5,
              anchor_left: 2,
              anchor_visual_row_offset: 0,
@@ -613,7 +616,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
              overscan_end_line: 8,
              content_epoch: 42,
              layout_generation: decoded.scroll_presentation.layout_generation,
-             scroll_seq: 0
+             scroll_seq: 0,
+             horizontal_pan_ack: 0,
+             horizontal_pan_limit: 0
            }
 
     assert is_integer(decoded.scroll_presentation.layout_generation)
@@ -627,7 +632,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
            ]
   end
 
-  test "encodes the scroll-authority sequence onto scroll presentation (#2661)" do
+  test "encodes independent authority and horizontal receipt counters" do
     row = %Row{
       row_id: Row.stable_id(:normal, 7),
       row_type: :normal,
@@ -638,11 +643,20 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     }
 
     decoded =
-      window(content_epoch: 42, geometry: geometry_model(), rows: [row], scroll_seq: 9)
+      window(
+        content_epoch: 42,
+        geometry: geometry_model(),
+        rows: [row],
+        scroll_seq: 9,
+        horizontal_pan_ack: 16,
+        horizontal_pan_limit: 19
+      )
       |> WindowEncoder.encode_window_content()
       |> GUIWindowDecoder.decode()
 
     assert decoded.scroll_presentation.scroll_seq == 9
+    assert decoded.scroll_presentation.horizontal_pan_ack == 16
+    assert decoded.scroll_presentation.horizontal_pan_limit == 19
   end
 
   test "encodes distinct visible and overscan bounds for simple windows" do

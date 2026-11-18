@@ -761,7 +761,14 @@ final class CommandDispatcher {
                 effects.append(.application(.scrollPresentationReset(windowID: surface.windowId)))
             }
         }
-        guiState.windowContents = snapshot.windowContents
+        let contents = snapshot.windowContents
+        if let priorSnapshot {
+            for surface in priorSnapshot.surfaces where surface.content.scrollPresentation?.canPanHorizontally == true
+                && contents[surface.windowId] == nil {
+                effects.append(.application(.scrollPresentationReset(windowID: surface.windowId)))
+            }
+        }
+        guiState.windowContents = contents
     }
 
     /// Rejects one frame, leaves the last-good publication untouched, and emits
@@ -1427,22 +1434,6 @@ final class CommandDispatcher {
         case identity
     }
 
-    struct ScrollAnchorKey: Equatable {
-        let contentEpoch: UInt32
-        let layoutGeneration: UInt32
-        let anchorTop: UInt32
-        let anchorLeft: UInt16
-        let anchorVisualRowOffset: UInt16
-
-        init(_ sp: GUIScrollPresentation) {
-            self.contentEpoch = sp.contentEpoch
-            self.layoutGeneration = sp.layoutGeneration
-            self.anchorTop = sp.anchorTop
-            self.anchorLeft = sp.anchorLeft
-            self.anchorVisualRowOffset = sp.anchorVisualRowOffset
-        }
-    }
-
     private func shouldResetScrollPresentation(previous: GUIWindowContent?, next: GUIWindowContent) -> Bool {
         if next.scrollPresentation?.resetRequired == true { return true }
         guard let previous, previous !== next else { return false }
@@ -1459,6 +1450,7 @@ final class CommandDispatcher {
         guard let prev = previous.scrollPresentation else { return false }
         guard let next = next.scrollPresentation else { return true }
         if next.isWrapped != prev.isWrapped { return true }
+        if prev.canPanHorizontally, !next.canPanHorizontally { return true }
         // #2661: a strictly newer scroll-authority sequence means the BEAM
         // committed a fresh authoritative anchor (a jump racing a local
         // scroll report), even in the rare case where the jump coincidentally
