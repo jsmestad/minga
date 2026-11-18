@@ -42,6 +42,7 @@ defmodule MingaEditor.UI.Picker do
             selected: 0,
             filtered: [],
             max_visible: 10,
+            results: :bounded,
             title: "",
             marked: %{}
 
@@ -49,15 +50,8 @@ defmodule MingaEditor.UI.Picker do
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Scorer
 
-  # Upper bound on how many results filtering retains. Sources with fewer items
-  # are unaffected (the full set fits); large sources (e.g. the file picker with
-  # tens of thousands of paths) are bounded to the best matches so each keystroke
-  # never scores-and-sorts the entire candidate list. Generous so paging past the
-  # visible window still has somewhere to land.
-  #
-  # Consequence: `count/1` (and the picker footer's filtered count) reports how
-  # many results are *shown*, capped here, not the true number of matches in a
-  # huge source. `total/1` still reflects the full candidate count.
+  # Keep the best matches for ordinary pickers, including large file lists.
+  # Complete catalogs can opt out without increasing the visible window.
   @result_limit 200
 
   @typedoc "A picker item struct."
@@ -72,11 +66,13 @@ defmodule MingaEditor.UI.Picker do
           selected: non_neg_integer(),
           filtered: [Item.t()],
           max_visible: pos_integer(),
+          results: :bounded | :all,
           title: String.t(),
           marked: %{optional(term()) => true}
         }
 
-  @type option :: {:title, String.t()} | {:max_visible, pos_integer()}
+  @type option ::
+          {:title, String.t()} | {:max_visible, pos_integer()} | {:results, :bounded | :all}
 
   # ── Constructor ──────────────────────────────────────────────────────────────
 
@@ -91,6 +87,7 @@ defmodule MingaEditor.UI.Picker do
       candidates: Candidate.from_items(items),
       title: title,
       max_visible: max_visible,
+      results: Keyword.get(opts, :results, :bounded),
       filtered: items,
       query: "",
       match_query: "",
@@ -352,14 +349,14 @@ defmodule MingaEditor.UI.Picker do
   # source-ordered) items, bounded so huge sources don't materialize every item.
   @spec refilter(t()) :: t()
   defp refilter(%__MODULE__{items: items, match_query: ""} = picker) do
-    filtered = bounded_unscored(items, result_limit(picker))
+    filtered = unscored_results(picker, items)
     %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
   end
 
   defp refilter(%__MODULE__{candidates: candidates, match_query: match_query} = picker) do
     case split_query(match_query) do
       [] ->
-        filtered = bounded_unscored(picker.items, result_limit(picker))
+        filtered = unscored_results(picker, picker.items)
 
         %{
           picker
@@ -369,8 +366,8 @@ defmodule MingaEditor.UI.Picker do
 
       segments ->
         filtered =
-          candidates
-          |> Scorer.top_k(segments, result_limit(picker))
+          picker
+          |> scored_results(candidates, segments)
           |> Enum.map(&highlight_winner(&1, match_query))
 
         %{
@@ -381,20 +378,29 @@ defmodule MingaEditor.UI.Picker do
     end
   end
 
-  # Build a displayable item from a winning candidate, attaching match positions.
-  # Positions are computed only here, for the bounded winners, never for the
-  # whole candidate set.
+  # Attach match positions only to candidates retained by the picker.
   @spec highlight_winner(Candidate.t(), String.t()) :: Item.t()
   defp highlight_winner(%Candidate{item: %Item{label: label} = item}, query) do
     %{item | match_positions: match_positions(label, query)}
   end
 
-  @spec bounded_unscored([Item.t()], pos_integer()) :: [Item.t()]
-  defp bounded_unscored(items, limit) do
+  @spec unscored_results(t(), [Item.t()]) :: [Item.t()]
+  defp unscored_results(%__MODULE__{results: :all}, items) do
+    Enum.map(items, &%{&1 | match_positions: []})
+  end
+
+  defp unscored_results(picker, items) do
     items
-    |> Enum.take(limit)
+    |> Enum.take(result_limit(picker))
     |> Enum.map(&%{&1 | match_positions: []})
   end
+
+  @spec scored_results(t(), [Candidate.t()], [String.t()]) :: [Candidate.t()]
+  defp scored_results(%__MODULE__{results: :all}, candidates, segments),
+    do: Scorer.all_matches(candidates, segments)
+
+  defp scored_results(picker, candidates, segments),
+    do: Scorer.top_k(candidates, segments, result_limit(picker))
 
   @spec result_limit(t()) :: pos_integer()
   defp result_limit(%__MODULE__{max_visible: max_visible}) do

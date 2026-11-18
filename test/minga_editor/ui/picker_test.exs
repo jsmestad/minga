@@ -101,6 +101,20 @@ defmodule MingaEditor.UI.PickerTest do
       assert Enum.all?(picker.filtered, &(&1.match_positions != []))
       assert Enum.count(picker.filtered) == @result_limit
     end
+
+    test "complete searches can navigate past the ordinary result cap" do
+      items =
+        for i <- 100..300, do: %Item{id: i, label: "format_command_#{i}", description: "Reindent"}
+
+      picker = Picker.new(items, results: :all, max_visible: 10)
+      assert %Item{id: 300} = picker |> Picker.move_up() |> Picker.selected_item()
+
+      picker = picker |> Picker.filter("reindent") |> Picker.move_up()
+
+      assert %Item{id: 300} = Picker.selected_item(picker)
+      assert {visible, 9} = Picker.visible_items(picker)
+      assert Enum.map(visible, & &1.id) == Enum.to_list(291..300)
+    end
   end
 
   describe "fuzzy/orderless matching" do

@@ -49,6 +49,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     has_preview = source != nil and Picker.Source.gui_preview?(source, callback_source)
 
     offered_items = ActivationOffer.offered_items(activation_offer)
+    {selected_index, selected_item_id} = offered_selection(offered_items, picker.selected)
 
     enriched_items =
       offered_items
@@ -70,12 +71,12 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       query: picker.query,
       query_generation: query_generation,
       acknowledged_query_edit_seq: acknowledged_query_edit_seq,
-      selected_index: picker.selected,
+      selected_index: selected_index,
       filtered_count: length(picker.filtered),
       total_count: length(picker.items),
       marked_count: Picker.marked_count(picker),
       activation_generation: activation_offer.generation,
-      selected_item_id: selected_activation_id(offered_items, picker.selected),
+      selected_item_id: selected_item_id,
       selected_action_id: selected_action_activation_id(action_menu, activation_offer),
       has_preview?: has_preview,
       items: items,
@@ -86,14 +87,18 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     }
   end
 
-  @spec selected_activation_id([ActivationOffer.item_entry()], non_neg_integer()) ::
-          non_neg_integer()
-  defp selected_activation_id(offered_items, selected_index) do
-    case Enum.find(offered_items, fn {_id, index, _item} -> index == selected_index end) do
-      {activation_id, _index, _item} -> activation_id
-      nil -> 0
+  @spec offered_selection([ActivationOffer.item_entry()], non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp offered_selection([{_id, start_index, _item} | _] = offered_items, selected) do
+    offset = selected - start_index
+
+    case Enum.at(offered_items, offset) do
+      {activation_id, ^selected, _item} -> {offset, activation_id}
+      nil -> {selected, 0}
     end
   end
+
+  defp offered_selection([], _selected), do: {0, 0}
 
   @spec selected_action_activation_id(term(), ActivationOffer.t()) :: non_neg_integer()
   defp selected_action_activation_id(nil, _offer), do: 0
