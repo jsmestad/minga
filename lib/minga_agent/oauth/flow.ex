@@ -74,13 +74,7 @@ defmodule MingaAgent.OAuth.Flow do
     write_fun = Keyword.get(opts, :write_fun, &OAuth.write_oauth_file/1)
 
     with {:ok, event} <- parse_manual_callback(pasted),
-         {:ok, pending} <- pending_flow(ref),
-         :ok <-
-           validate_pending_owner(
-             pending,
-             Keyword.get(opts, :session_id),
-             Keyword.get(opts, :client_pid)
-           ),
+         {:ok, pending} <- pending_flow(ref, opts),
          {:ok, code} <- validate_manual_event(event, pending) do
       exchange_and_persist(code, pending.verifier, pending.port, exchange_fun, write_fun)
     end
@@ -298,35 +292,25 @@ defmodule MingaAgent.OAuth.Flow do
     end
   end
 
-  @spec pending_flow(String.t()) :: {:ok, PendingFlow.flow()} | {:error, String.t()}
-  defp pending_flow(ref) do
-    case PendingFlow.take(ref) do
-      {:ok, pending} -> {:ok, pending}
-      {:error, :expired_flow} -> {:error, "OAuth flow expired. Run /login --manual to try again."}
-      {:error, :unknown_flow} -> {:error, "Unknown OAuth flow. Run /login --manual to try again."}
-      {:error, reason} -> {:error, "Could not read OAuth flow: #{inspect(reason)}"}
+  @spec pending_flow(String.t(), keyword()) :: {:ok, PendingFlow.flow()} | {:error, String.t()}
+  defp pending_flow(ref, opts) do
+    case PendingFlow.take(ref, opts) do
+      {:ok, pending} ->
+        {:ok, pending}
+
+      {:error, :expired_flow} ->
+        {:error, "OAuth flow expired. Run /login --manual to try again."}
+
+      {:error, :unknown_flow} ->
+        {:error, "Unknown OAuth flow. Run /login --manual to try again."}
+
+      {:error, :wrong_owner} ->
+        {:error,
+         "OAuth flow belongs to a different remote session. Run /login --manual to try again."}
+
+      {:error, reason} ->
+        {:error, "Could not read OAuth flow: #{inspect(reason)}"}
     end
-  end
-
-  @spec validate_pending_owner(PendingFlow.flow(), String.t() | nil, pid() | nil) ::
-          :ok | {:error, String.t()}
-  defp validate_pending_owner(
-         %{owner_session_id: nil, owner_client_pid: nil},
-         _session_id,
-         _client_pid
-       ),
-       do: :ok
-
-  defp validate_pending_owner(
-         %{owner_session_id: session_id, owner_client_pid: client_pid},
-         session_id,
-         client_pid
-       ),
-       do: :ok
-
-  defp validate_pending_owner(_pending, _session_id, _client_pid) do
-    {:error,
-     "OAuth flow belongs to a different remote session. Run /login --manual to try again."}
   end
 
   @spec validate_manual_event(
