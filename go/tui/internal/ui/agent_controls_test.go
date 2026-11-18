@@ -273,7 +273,7 @@ func TestAgentControlsDoNotClickThroughNoninteractiveOverlay(t *testing.T) {
 			model, out := newAgentControlModel(t, true)
 			x, y := renderedComposerControl(t, model, label)
 			model.chrome[generated.OPGuiFloatPopup] = protocol.ChromePayload{Opcode: generated.OPGuiFloatPopup, Float: protocol.FloatPopup{Visible: true, Title: "Covered control", Lines: []string{"overlay owns input"}}}
-			model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: uint16(y), Col: 0, Width: uint16(model.width), Height: 1}, Z: 201, HitKind: 8}}
+			model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: uint16(y - model.layout.grid.Y), Col: 0, Width: uint16(model.width), Height: 1}, Z: 201, HitKind: 8}}
 			if !strings.Contains(agentControlCanvasText(model), "Covered control") {
 				t.Fatal("occluding overlay was not composed")
 			}

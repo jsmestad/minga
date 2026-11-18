@@ -101,7 +101,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
 | `0x01` | key_press | 10 | A key was pressed with an input correlation sequence |
-| `0x02` | resize | 5 | Terminal/window was resized |
+| `0x02` | resize | 5 | Frontend content grid changed size |
 | `0x03` | ready | 29 | Frontend is initialized and ready (capability format 2 plus exact protocol version) |
 | `0x04` | mouse_event | 9 | Legacy non-text pointer events and wheel input |
 | `0x1E` | editor_text_event | 33 | Pointer target in an immutable displayed text row |
@@ -351,7 +351,7 @@ Combined with bitwise OR: Ctrl+Shift = `0x03`.
 
 ### `0x02` resize
 
-The terminal or window was resized.
+The frontend's primary content grid changed size.
 
 ```
 opcode: u8  = 0x02
@@ -361,15 +361,17 @@ height: u16           content rows available at current presentation metrics
 
 Total size: 5 bytes.
 
-**Behavior:** Sent when the frontend detects a size change (SIGWINCH for TUI, window resize event for GUI). The BEAM re-renders to the new dimensions on the next frame.
+**Behavior:** Sent when the reported grid dimensions change. Besides window or terminal resizing, changes to font metrics, line spacing, or frontend-owned chrome can change these dimensions. The BEAM re-renders to the new dimensions.
 
-`width`/`height` are **content cells**, not pixels. Each frontend owns the single row-fit floor and reports how many rows and columns fit its content area at the current font, backing scale, and line spacing: `rows = floor(content_pixels / (cell_height × line_spacing))`, computed once in the layer that owns the pixels. The BEAM lays out in exactly these rows and performs no pixel or line-spacing arithmetic of its own. The TUI reports its terminal grid unchanged (line spacing is 1.0 there by construction). Line spacing reaches the GUI only as a draw-time rendering hint (`gui_line_spacing`, 0x92) and a runtime spacing change arrives back here as an ordinary resize. See `docs/adr/0001-frontend-owns-row-fit.md`.
+`width` and `height` are **content cells**, not pixels. Each frontend owns the row-fit calculation. The BEAM performs no pixel or line-spacing arithmetic of its own. Line spacing reaches the GUI only as a draw-time hint (`gui_line_spacing`, 0x92). See [ADR-0001](adr/0001-frontend-owns-row-fit.md).
+
+The TUI reports the physical terminal width and the rows below its local header (title, workspaces, tabs, or breadcrumb), with a minimum reported size of 1×1. Primary grid row zero is the first screen row below the header. The reported grid still includes the terminal status/minibuffer and timeline rows, which the BEAM reserves in semantic layout.
 
 ### `0x03` ready
 
 The frontend has initialized and is ready to receive render commands.
 
-The `width`/`height` fields carry the same "content cells at current presentation metrics" meaning as `resize` above (see that section for the row-fit rule and ADR-0001 reference).
+The `width` and `height` fields use the same grid as `resize`. Before the first committed chrome arrives, the TUI measures with its one-row title header.
 
 **Current format (29 bytes):**
 ```
@@ -390,8 +392,8 @@ A legacy non-text mouse button, wheel, or motion event. Editor text click, drag,
 
 ```
 opcode:      u8  = 0x04
-row:         i16           screen row (signed; -1 = outside window)
-col:         i16           screen column (signed; -1 = outside window)
+row:         i16           primary-grid row (signed; -1 = outside window)
+col:         i16           primary-grid column (signed; -1 = outside window)
 button:      u8            button identifier
 modifiers:   u8            modifier flags (same as key_press)
 event_type:  u8            type of mouse event

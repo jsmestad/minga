@@ -181,12 +181,8 @@ func (m Model) floatingOverlayContains(screenX, screenY int) bool {
 	if !ok {
 		return false
 	}
-	rect, ok := m.surfacePlacementFor(winner.surfaceID)
-	if !ok || rect.Width == 0 || rect.Height == 0 {
-		return false
-	}
-	return screenX >= int(rect.Col) && screenX < int(rect.Col)+int(rect.Width) &&
-		screenY >= int(rect.Row) && screenY < int(rect.Row)+int(rect.Height)
+	rect, ok := m.surfaceScreenRect(winner.surfaceID)
+	return ok && rect.Contains(screenX, screenY)
 }
 
 func edgeDirection(value, start, end int) int8 {

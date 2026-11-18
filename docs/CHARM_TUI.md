@@ -49,6 +49,10 @@ The resident agent transcript owns fixed-size pages, absolute message ordinals, 
 
 A wrapped resident pane's committed scroll anchor must match the logical top line and continuation ordinal in its pane geometry. Its visual rank cannot exceed the last full-page origin, `max(totalVisualRows - viewportRows, 0)`. The TUI rejects frames that violate this contract instead of acknowledging a clamped anchor, preserving the last committed state.
 
+The TUI reports its full terminal width and the number of rows below the local header in `ready` and `resize`. Before the first committed frame the title takes one row. Workspaces, tabs, and breadcrumbs can change the header height later; the TUI reports a resize only when the resulting grid dimensions change, even without a terminal resize. Status, minibuffer, and timeline rows stay in the reported grid so the BEAM can reserve them explicitly.
+
+Semantic pane rows, split separators, and surface rectangles count from the first row below the header. The TUI translates those rows for screen composition and applies the inverse to raw pointer events. Native terminal chrome zones still use physical screen coordinates. A terminal too short to draw a body reports at least one grid row for the protocol but does not draw through the header or footer.
+
 ## Editor pointer input
 
 The TUI resolves text clicks and drags from the committed row store, terminal grapheme widths, clipping, and local scroll transform used to render the editor. It sends `editor_text_event` with the presentation ID, absolute row-store rank, row ID, and composed UTF-16 offset. The renderer maps that position to source bytes; the BEAM owns selection and editing behavior.

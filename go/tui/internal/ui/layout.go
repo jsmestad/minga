@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/jsmestad/minga/go/tui/internal/generated"
+
 // uiRect describes a rectangular region of the terminal in absolute screen
 // coordinates. A zero-value rect (Width == 0 || Height == 0) means the region
 // is absent this frame (e.g. no file tree visible).
@@ -17,14 +19,12 @@ func (r uiRect) Translate(x, y int) (int, int) {
 	return x - r.X, y - r.Y
 }
 
-// uiLayout describes the spatial arrangement of every top-level region for
-// one frame. It is computed once per Update() from the current chrome state
-// and terminal dimensions, then read by the renderer, the mouse router, and
-// the viewport sizing code. This centralizes the scattered bodyHeight() /
-// renderedHeaderHeight / leftChromeWidth() / semanticContentOffsets() calls
-// into a single source of truth for region positions.
+// uiLayout describes one frame's regions in absolute screen coordinates.
+// The primary grid starts below the local header and still includes the
+// BEAM-authored footer and timeline reservations.
 type uiLayout struct {
 	header   uiRect
+	grid     uiRect
 	body     uiRect
 	footer   uiRect
 	timeline uiRect // persistent BEAM-authored chrome, never an overlay candidate
@@ -35,15 +35,19 @@ func (m Model) computeLayout() uiLayout {
 	width := max(m.width, 1)
 	height := max(m.height, 1)
 
-	headerHeight := min(len(m.headerLines()), height)
-	footerHeight := min(len(m.footerLines()), height-headerHeight)
+	headerHeight := min(m.headerChrome().height(), height)
+	grid := uiRect{Y: headerHeight, Width: width, Height: height - headerHeight}
+	footerHeight := min(m.footerRows(), grid.Height)
 	footerY := height - footerHeight
 	bodyBottom := footerY
 	var timeline uiRect
 	if _, visible := m.editTimeline(); visible {
-		if rect, placed := m.surfacePlacementFor(surfaceIDEditTimeline); placed && rect.Width > 0 && rect.Height > 0 {
-			timeline = uiRect{X: int(rect.Col), Y: int(rect.Row), Width: int(rect.Width), Height: int(rect.Height)}
-			bodyBottom = min(bodyBottom, timeline.Y)
+		if rect, placed := m.surfaceRectOnGrid(surfaceIDEditTimeline, grid); placed {
+			rect.Height = min(rect.Height, footerY-rect.Y)
+			if rect.Width > 0 && rect.Height > 0 {
+				timeline = rect
+				bodyBottom = timeline.Y
+			}
 		}
 	}
 	bodyHeight := max(bodyBottom-headerHeight, 0)
@@ -52,9 +56,28 @@ func (m Model) computeLayout() uiLayout {
 
 	return uiLayout{
 		header:   uiRect{X: leftPaneWidth, Y: 0, Width: max(width-leftPaneWidth, 1), Height: headerHeight},
+		grid:     grid,
 		body:     uiRect{X: leftPaneWidth, Y: headerHeight, Width: max(width-leftPaneWidth, 1), Height: bodyHeight},
 		footer:   uiRect{X: 0, Y: footerY, Width: width, Height: footerHeight},
 		timeline: timeline,
 		leftPane: uiRect{X: 0, Y: 0, Width: leftPaneWidth, Height: headerHeight + bodyHeight},
+	}
+}
+
+type gridSize struct {
+	cols, rows uint16
+}
+
+func (l uiLayout) gridSize() gridSize {
+	return gridSize{uint16(l.grid.Width), uint16(max(l.grid.Height, 1))}
+}
+
+// screenRect translates a BEAM rect from primary-grid coordinates to the
+// terminal. A placement from before a resize may extend beyond the new grid.
+func (r uiRect) screenRect(rect generated.Rect) uiRect {
+	x, y := int(rect.Col), int(rect.Row)
+	return uiRect{
+		X: r.X + x, Y: r.Y + y,
+		Width: min(int(rect.Width), max(r.Width-x, 0)), Height: min(int(rect.Height), max(r.Height-y, 0)),
 	}
 }

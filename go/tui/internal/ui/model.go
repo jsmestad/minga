@@ -109,7 +109,8 @@ type Model struct {
 	// of truth for region positions, replacing the old renderedHeaderHeight
 	// cache. Recomputed whenever inputs change: applied commands (chrome) and
 	// resize (width/height).
-	layout uiLayout
+	layout       uiLayout
+	reportedGrid gridSize
 	// staging holds the open frame transaction (#2219). It is non-nil only
 	// between a begin_frame and its commit_frame: semantic/chrome commands
 	// accumulate here instead of mutating the live model, so View() never paints
@@ -132,12 +133,9 @@ type Model struct {
 	// tests observe it after submission; they never infer or pre-populate status.
 	lastFrameOutcome      frameOutcome
 	lastTerminalRejection *terminalRejection
-	// surfacePlacements is the BEAM's authoritative per-frame surface layout from
-	// gui_surface_layout (0xA4, #2268): one rect+z list. Compositing reads the z
-	// of a placed surface to order it instead of the old hand-coded
-	// overlayLines() precedence chain; the rects equal what BEAM mouse
-	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
-	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
+	// surfacePlacements is the BEAM's per-frame rect+z list from gui_surface_layout.
+	// The BEAM hit-tests these rects in primary-grid coordinates. The frontend
+	// translates them to screen coordinates for compositing and pointer input.
 	surfacePlacements []generated.SurfacePlacement
 	localPresentation localPresentation
 	// transcript is the resident agent-chat transcript store (#2654). It folds
@@ -212,8 +210,22 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
 	m.layout = m.computeLayout()
+	m.reportedGrid = m.layout.gridSize()
 	m.viewport.SetHeight(m.layout.body.Height)
 	return m
+}
+
+// ReadyPacket reports the initial primary grid, before any BEAM chrome arrives.
+func (m Model) ReadyPacket() []byte {
+	size := m.layout.gridSize()
+	return protocol.EncodeReady(size.cols, size.rows)
+}
+
+func (m *Model) reportGridResize() {
+	size := m.layout.gridSize()
+	if size != m.reportedGrid && m.send(protocol.EncodeResize(size.cols, size.rows)) {
+		m.reportedGrid = size
+	}
 }
 
 func (m Model) currentTime() time.Time {
@@ -262,9 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// for the old geometry.
 		m.lineCache.reset()
 		m.layout = m.computeLayout()
-		m.viewport.SetWidth(msg.Width)
-		m.viewport.SetHeight(m.layout.body.Height)
-		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
+		m.reportGridResize()
 	case tea.KeyPressMsg:
 		if m.toggleHUD(msg) {
 			break
@@ -387,6 +397,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
 		m.publishTextPresentationInputModel()
+		m.reportGridResize()
 	case port.LogMsg:
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	}
@@ -558,8 +569,10 @@ func (m Model) View() tea.View {
 		// leaving a blank screen (ticket #2237).
 		content = m.protocolErrorView()
 	} else {
-		body := m.viewport.View()
-		parts := append(m.headerLines()[:m.layout.header.Height], body)
+		parts := m.headerLines()[:m.layout.header.Height]
+		if m.layout.body.Height > 0 {
+			parts = append(parts, m.viewport.View())
+		}
 		if gap := m.layout.footer.Y - m.layout.body.Y - m.layout.body.Height; gap > 0 {
 			blank := strings.Repeat(" ", max(m.width, 1))
 			for range gap {
@@ -619,7 +632,10 @@ func (m Model) residentCursor() *tea.Cursor {
 			continue
 		}
 		x := int(window.Geometry.TextRect.Col) + col
-		y := int(window.Geometry.TextRect.Row) + (row - start)
+		y := m.layout.grid.Y + int(window.Geometry.TextRect.Row) + (row - start)
+		if y < m.layout.body.Y || y >= m.layout.body.Y+m.layout.body.Height {
+			continue
+		}
 		cursor := tea.NewCursor(x, y)
 		switch window.CursorShape {
 		case 1:
@@ -1502,7 +1518,7 @@ func (m Model) bodyHeight() int {
 }
 
 func (m Model) maxOverlayHeight() int {
-	return min(max(m.height/3, 4), 12)
+	return min(max(m.layout.grid.Height/3, 4), 12)
 }
 
 func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {

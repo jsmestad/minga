@@ -133,7 +133,7 @@ func TestWorkingAgentContextCannotCoverRenderedStop(t *testing.T) {
 				rows := promptRows("row one", "row two", "row three", "row four", "row five", "row six", "row seven", "row eight")
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows[:visibleRows], 0, 0, 0, 0, protocol.Selection{}), 823)
 				context := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiAgentContext, AgentContext: protocol.AgentContext{Visible: true, Status: 1, Task: "Thinking", Progress: protocol.AgentProgress{ActiveAction: "Thinking"}}}}
-				placement := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiSurfaceLayout, Placements: []generated.SurfacePlacement{{SurfaceID: surfaceIDAgentContext, Rect: generated.Rect{Row: 16, Col: 0, Width: width, Height: 8}, Z: 260, HitKind: 8}}}}
+				placement := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiSurfaceLayout, Placements: []generated.SurfacePlacement{{SurfaceID: surfaceIDAgentContext, Rect: generated.Rect{Row: 16, Col: 0, Width: width, Height: 7}, Z: 260, HitKind: 8}}}}
 				fullChatPlacement := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiSurfaceLayout}}
 				updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
 					beginFrame(2, 1), context, fullChatPlacement,

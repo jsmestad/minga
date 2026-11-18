@@ -230,6 +230,9 @@ func (m Model) presentationScrollWindowAt(x int, y int) (uint16, bool) {
 }
 
 func (m Model) presentationScrollWindowAtBody(x int, y int) (uint16, bool) {
+	if x < 0 || x >= m.layout.body.Width || y < 0 || y >= m.layout.body.Height {
+		return 0, false
+	}
 	// Chat replaces the ordinary semantic canvas. Its transcript and source-backed prompt aperture have dedicated wheel routes; hidden editor geometry must not claim those physical cells.
 	if m.agentChatVisible() {
 		return 0, false
@@ -246,18 +249,11 @@ func (m Model) presentationScrollWindowAtBody(x int, y int) (uint16, bool) {
 	return 0, false
 }
 
-// mouseInHoverPopup reports whether screen coordinates (x, y) fall inside the
-// hover popup's BEAM placement rect. The placement rect is composited at its
-// row/col as screen coordinates (overlayLayer), so a raw mouse coordinate is
-// compared directly, matching mouseInBottomPanel. Used to suppress free-motion
-// forwarding so motion over the popup does not dismiss it (#2629).
+// mouseInHoverPopup checks the same translated rect used to composite hover
+// so free motion inside the popup does not dismiss it (#2629).
 func (m Model) mouseInHoverPopup(x int, y int) bool {
-	rect, ok := m.surfacePlacementFor(surfaceIDHoverPopup)
-	if !ok {
-		return false
-	}
-	return y >= int(rect.Row) && y < int(rect.Row)+int(rect.Height) &&
-		x >= int(rect.Col) && x < int(rect.Col)+int(rect.Width)
+	rect, ok := m.surfaceScreenRect(surfaceIDHoverPopup)
+	return ok && rect.Contains(x, y)
 }
 
 func (m Model) mouseInBottomPanel(y int) bool {
@@ -266,8 +262,8 @@ func (m Model) mouseInBottomPanel(y int) bool {
 	// footer line count. Use the placement rect's row span when present; fall back
 	// to the locally computed panel height when no placement was emitted (older
 	// BEAM) so frontend scroll still works.
-	if rect, ok := m.surfacePlacementFor(surfaceIDBottomPanel); ok {
-		return y >= int(rect.Row) && y < int(rect.Row)+int(rect.Height)
+	if rect, ok := m.surfaceScreenRect(surfaceIDBottomPanel); ok {
+		return y >= rect.Y && y < rect.Y+rect.Height
 	}
 	panel, ok := m.bottomPanel()
 	if !ok || !panel.Visible {
@@ -447,7 +443,7 @@ func (m Model) floatPopupMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if !ok || !float.Visible {
 		return nil, false
 	}
-	rect, ok := m.surfacePlacementFor(surfaceIDFloatPopup)
+	rect, ok := m.surfaceScreenRect(surfaceIDFloatPopup)
 	if !ok {
 		return nil, false
 	}
@@ -455,16 +451,15 @@ func (m Model) floatPopupMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	row, col := mouse.Y, mouse.X
 	// Only clicks inside the band rect are ours; outside it the click is buffer
 	// content (or another surface) and must not dismiss.
-	if row < int(rect.Row) || row >= int(rect.Row)+int(rect.Height) ||
-		col < int(rect.Col) || col >= int(rect.Col)+int(rect.Width) {
+	if !rect.Contains(col, row) {
 		return nil, false
 	}
 	// Content is bottom-aligned within the rect (overlayLayer): its top row is
-	// rect.Row + rect.Height - contentLines. Rows above that are the phantom band,
+	// rect.Y + rect.Height - contentLines. Rows above that are the phantom band,
 	// where an outside-the-popup click dismisses; rows at/below it are the popup
 	// box itself, which has no clickable affordance, so leave them for containment.
-	contentLines := m.floatPopupContentLines(float, int(rect.Height))
-	contentTop := int(rect.Row) + int(rect.Height) - contentLines
+	contentLines := m.floatPopupContentLines(float, rect.Height)
+	contentTop := rect.Y + rect.Height - contentLines
 	if row < contentTop {
 		return protocol.EncodeGUIFloatPopupDismiss(), true
 	}
@@ -591,13 +586,24 @@ func (m Model) completionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if !ok || !completion.Visible {
 		return nil, false
 	}
+	rect, placed := m.surfaceScreenRect(surfaceIDCompletionMenu)
+	mouse := msg.Mouse()
+	if !placed || !rect.Contains(mouse.X, mouse.Y) {
+		return nil, false
+	}
+	winner, active := m.overlayWinner()
+	if !active || winner.surfaceID != surfaceIDCompletionMenu {
+		return nil, false
+	}
 	for index := range completion.Items {
 		zoneInfo := m.zones.Get(zoneIDCompletionItem(index))
 		if zoneInfo != nil && zoneInfo.InBounds(msg) {
 			return protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, completion.Generation, []byte(completion.Items[index].ID)), true
 		}
 	}
-	return nil, false
+	// Title, documentation, and other non-item cells must not become a raw
+	// click that the BEAM interprets as an item index.
+	return nil, true
 }
 
 func (m Model) sidebarMousePacket(msg tea.MouseMsg) ([]byte, bool) {

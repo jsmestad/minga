@@ -25,34 +25,21 @@ defmodule MingaEditor.CompletionUI do
           viewport_cols: non_neg_integer()
         }
 
-  @doc "Returns the screen rect for the visible completion menu, or nil when it is empty."
+  @doc "Returns the completion surface in the primary grid, including space for the selected item's docs when available."
   @spec menu_rect(Completion.t() | nil, render_opts()) :: MingaEditor.Layout.rect() | nil
   def menu_rect(nil, _opts), do: nil
 
   def menu_rect(%Completion{} = completion, opts) do
     {visible, _selected_offset} = Completion.visible_items(completion)
 
-    case menu_geometry(visible, opts) do
-      nil -> nil
-      %{row: row, col: col, width: width, height: height} -> {row, col, width, height}
-    end
+    menu_geometry(visible, Completion.selected_item(completion), opts)
   end
 
-  @spec menu_geometry([Completion.item()], render_opts()) ::
-          %{
-            row: non_neg_integer(),
-            col: non_neg_integer(),
-            width: pos_integer(),
-            height: pos_integer(),
-            box_row: non_neg_integer(),
-            box_col: non_neg_integer(),
-            box_width: pos_integer(),
-            box_height: pos_integer()
-          }
-          | nil
-  defp menu_geometry([], _opts), do: nil
+  @spec menu_geometry([Completion.item()], Completion.item() | nil, render_opts()) ::
+          MingaEditor.Layout.rect() | nil
+  defp menu_geometry([], _selected, _opts), do: nil
 
-  defp menu_geometry(items, opts) do
+  defp menu_geometry(items, selected, opts) do
     item_capacity = max(min(@max_rows, opts.viewport_rows - 2), 1)
     item_count = min(Enum.count(items), item_capacity)
     visible_items = Enum.take(items, item_count)
@@ -60,21 +47,24 @@ defmodule MingaEditor.CompletionUI do
     desired_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)
     box_width = min(max(desired_width + 2, 3), max(opts.viewport_cols, 1))
     popup_width = max(box_width - 2, 1)
-    box_height = min(item_count + 2, max(opts.viewport_rows, 1))
+    doc_rows = documentation_rows(selected, opts.viewport_rows - item_count - 2)
+    popup_height = item_count + doc_rows
+    box_height = min(popup_height + 2, max(opts.viewport_rows, 1))
     box_row = menu_box_start_row(opts.cursor_row, opts.viewport_rows, box_height)
     box_col = min(opts.cursor_col, max(0, opts.viewport_cols - box_width))
 
-    %{
-      row: box_row + 1,
-      col: box_col + 1,
-      width: popup_width,
-      height: item_count,
-      box_row: box_row,
-      box_col: box_col,
-      box_width: box_width,
-      box_height: box_height
-    }
+    row = min(box_row + 1, max(opts.viewport_rows - popup_height, 0))
+    col = min(box_col + 1, max(opts.viewport_cols - popup_width, 0))
+    {row, col, popup_width, popup_height}
   end
+
+  @spec documentation_rows(Completion.item() | nil, integer()) :: non_neg_integer()
+  defp documentation_rows(%Completion.Item{documentation: doc}, available)
+       when available >= 2 and doc != "" do
+    if String.trim(doc) == "", do: 0, else: min(available, 6)
+  end
+
+  defp documentation_rows(_selected, _available), do: 0
 
   @spec menu_box_start_row(non_neg_integer(), non_neg_integer(), pos_integer()) ::
           non_neg_integer()
