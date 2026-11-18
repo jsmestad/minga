@@ -296,6 +296,8 @@ Each extension declaration gets one ordered root beneath `Minga.Extension.RootSu
 
 The runtime tier handles rendering and user interaction. `rest_for_one` keeps the render path ordered: if Frontend.Manager fails, Renderer.Server and the Editor generation restart because both depend on the frontend port. If Renderer.Server fails, the Editor generation restarts because Editor holds the renderer pid. The generation is a `one_for_all` boundary around Editor, its effect scheduler, and supervised effect workers. An Editor crash therefore stops every old formatting or git mutation worker before replacement authority starts. Buffers remain outside this boundary, so undo history, cursor positions, and unsaved changes are preserved.
 
+Credential input uses a private `ConnectionInput` task under the Editor generation's `EffectTaskSupervisor`. The Editor sends sealed input directly to this task, not through the effect scheduler or the renderer. The task can write only after the scheduled effect joins it and Session confirms that the original Editor registered it as the writer. Canceling the join stops the task; detaching the original Session driver or canceling setup revokes its write authority. Session orders credential writes against those changes and sends a successful save notice after the connection snapshot for the resulting conversation.
+
 ```mermaid
 graph TD
     RT["Runtime.Supervisor<br/><i>one_for_one</i>"]

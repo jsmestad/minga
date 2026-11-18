@@ -14,6 +14,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaAgent.Test.ModelSelectionFixture
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.Transcript
@@ -24,7 +25,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias Minga.Project.FileRef
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.AgentSession
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
@@ -69,8 +73,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     def init(message), do: {:ok, message}
 
     @impl GenServer
-    def handle_call({:set_model, _model}, _from, message),
-      do: {:reply, {:error, message}, message}
+    def handle_call({:set_model_for_target, %{session: session}, "missing"}, _from, message)
+        when session == self(),
+        do: {:reply, {:error, message}, message}
   end
 
   defmodule RestorableModelSession do
@@ -992,11 +997,40 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   describe "set_model/2" do
     test "preserves the prior model and shows an actionable rejection" do
       message = "Model \"missing\" is unavailable. Open /model and choose an exact route."
-      {:ok, session} = RejectingModelSession.start_link(message)
+      session = start_supervised!({RejectingModelSession, message})
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
 
-      state = base_state(session: session) |> with_model_name("Prior Model")
+      connection = %ConnectionSnapshot{
+        target: ConnectionTarget.new(session, "model-command-test", nil, make_ref()),
+        credential_readiness: :configured,
+        model_selection: nil,
+        provider_phase: :running,
+        operation: :idle,
+        problem: nil
+      }
+
+      state = base_state(session: session)
+
+      ui =
+        state.workspace.agent_ui
+        |> UIState.project_connection(connection)
+        |> UIState.set_model_name("Prior Model")
+
+      state =
+        %{
+          state
+          | effect_scheduler: scheduler,
+            frontend: %Frontend{port_manager: nil, rendering: :disabled}
+        }
+        |> Workflow.install_agent_ui(ui)
 
       state = AgentCommands.set_model(state, "missing")
+      assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
+
+      assert {:noreply, state} =
+               MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
 
       assert state.workspace.agent_ui.panel.model_name == "Prior Model"
       assert state.shell_runtime.state.notice.message == message

@@ -18,6 +18,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.Session
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
+  alias MingaEditor.Agent.ConnectionSetup
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Remote.SessionClient
   alias Minga.Config
@@ -770,7 +771,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       end)
 
     message =
-      "API key status:\n#{lines}\n\nUse /auth <provider> <key> to add a key.\nUse /auth revoke <provider> to remove one."
+      "API key status:\n#{lines}\n\nUse /auth <provider> to open a masked key prompt.\nUse /auth revoke <provider> to remove a stored key."
 
     emit_system_message(state, message)
   end
@@ -791,77 +792,15 @@ defmodule MingaEditor.Agent.SlashCommand do
           "Usage: /auth revoke <provider>\nProviders: #{Enum.join(Credentials.known_providers(), ", ")}"
         )
 
-      [provider, key] ->
-        do_auth_store(state, String.downcase(provider), key)
-
       [provider] ->
-        url = Credentials.dashboard_url_for(provider)
+        ConnectionSetup.start_current(state, String.downcase(provider))
 
-        hint =
-          if url,
-            do: "\nGet your API key at: #{url}",
-            else: ""
-
+      _inline_or_extra_args ->
         emit_system_message(
           state,
-          "Usage: /auth #{provider} <api-key>\nPaste your API key after the provider name.#{hint}"
-        )
-
-      _ ->
-        emit_system_message(
-          state,
-          "Usage: /auth [provider] [key]\nProviders: #{Enum.join(Credentials.known_providers(), ", ")}"
+          "Enter /auth <provider> without the key to open the masked prompt."
         )
     end
-  end
-
-  @spec do_auth_store(state(), String.t(), String.t()) :: state()
-  defp do_auth_store(state, provider, key) do
-    case validate_and_store(provider, key) do
-      :ok ->
-        Session.refresh_credentials(Runtime.active_session(state.shell_runtime))
-
-        emit_system_message(
-          state,
-          "✓ #{String.capitalize(provider)} API key saved."
-        )
-
-      {:error, :unknown_provider} ->
-        emit_system_message(
-          state,
-          "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}"
-        )
-
-      {:error, reason} ->
-        emit_system_message(state, "✗ Failed to save key: #{inspect(reason)}")
-    end
-  end
-
-  @spec validate_and_store(String.t(), String.t()) :: :ok | {:error, term()}
-  defp validate_and_store(provider, key) do
-    if provider in Credentials.known_providers() do
-      case Credentials.store(provider, key) do
-        :ok ->
-          set_env_for_provider(provider, key)
-          :ok
-
-        error ->
-          error
-      end
-    else
-      {:error, :unknown_provider}
-    end
-  end
-
-  # Sets the env var for a provider so the current session picks it up immediately.
-  @spec set_env_for_provider(String.t(), String.t()) :: :ok
-  defp set_env_for_provider(provider, key) do
-    case Credentials.env_var_for(provider) do
-      nil -> :ok
-      var_name -> System.put_env(var_name, key)
-    end
-
-    :ok
   end
 
   @spec do_auth_revoke(state(), String.t()) :: state()

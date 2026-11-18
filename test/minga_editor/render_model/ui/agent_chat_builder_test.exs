@@ -234,7 +234,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
              Enum.map(model.resident_messages, &message_summary/1)
 
     assert text =~ "Connect a provider"
-    assert text =~ "/auth anthropic <key>"
+    assert text =~ "/auth anthropic"
+    assert text =~ "masked API key prompt"
     assert text =~ "/login"
     refute text =~ "Session started"
   end
