@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Entering plan mode, losing a provider, resetting a conversation, and restoring another conversation retire the original approval target before its identity changes. Known non-execution carries no execution duration, and plan mode does not increase the workspace's running-work count.
 - Saving or removing an agent API key replaces the credential file atomically. A failed write leaves existing keys intact, and malformed files report an error without including credential contents.
 - Text prompts show clickable Submit and Cancel controls in both frontends. Enter and Escape keep their existing behavior.
+- Clicking a terminal picker result chooses the item shown on that row, even when the popup is narrow or scrolled. Clicking outside the picker dismisses it without choosing a result.
 - A rejected manual OAuth completion no longer consumes the original session's pending login. The original client can still finish it once.
 - Wheel and trackpad scrolling now reach the last screen row of a soft-wrapped file without moving the cursor there first. Both frontends scroll locally when they have the wrapped rows in memory.
 - The macOS scrollbar follows screen rows in soft-wrapped panes with retained rows. It stays visible for a long single line, and dragging can land within that line without moving the cursor.

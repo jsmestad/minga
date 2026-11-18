@@ -1084,6 +1084,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_intent(:completion, 1), do: {:ok, :accept}
   defp decode_semantic_intent(:picker, 1), do: {:ok, :activate_item}
   defp decode_semantic_intent(:picker, 2), do: {:ok, :activate_action}
+  defp decode_semantic_intent(:picker, 3), do: {:ok, :dismiss}
   defp decode_semantic_intent(:file_tree, 1), do: {:ok, :primary}
   defp decode_semantic_intent(:file_tree, 2), do: {:ok, :toggle}
   defp decode_semantic_intent(:file_tree, 3), do: {:ok, :open_in_split}
