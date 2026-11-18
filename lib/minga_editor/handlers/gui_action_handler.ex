@@ -1244,6 +1244,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        ),
        do: PickerUI.activate_action(state, generation, id)
 
+  defp apply_semantic_target(state, %Target{}, :dismiss, :picker_dismissal),
+    do: PickerUI.close(state)
+
   defp apply_semantic_target(state, %Target{}, :accept, {:prompt, generation, id}),
     do: MingaEditor.PromptUI.activate(state, generation, id)
 

@@ -318,9 +318,7 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 		if picker, present := m.picker(); present && picker.Visible && preview.generation == picker.Generation {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
-				activationID := picker.Items[index].ActivationID
-				itemID := []byte{byte(activationID >> 24), byte(activationID >> 16), byte(activationID >> 8), byte(activationID)}
-				return protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 1, preview.generation, itemID), true
+				return pickerActivationPacket(preview.generation, picker.Items[index].ActivationID), true
 			}
 		}
 	}
