@@ -35,6 +35,7 @@ defmodule Minga.Test.HeadlessPort do
   @op_gui_window_overlay_delta Opcodes.gui_window_overlay_delta()
   @op_gui_window_viewport_delta Opcodes.gui_window_viewport_delta()
   @op_gui_window_rows_delta Opcodes.gui_window_rows_delta()
+  @op_gui_resident_semantics Opcodes.gui_resident_semantics()
   @op_gui_gutter Opcodes.gui_gutter()
   @op_gui_tab_bar Opcodes.gui_tab_bar()
   @op_gui_status_bar Opcodes.gui_status_bar()
@@ -558,6 +559,42 @@ defmodule Minga.Test.HeadlessPort do
     %{state | windows: Map.put(state.windows, window_id, window)}
   end
 
+  defp apply_command(
+         <<@op_gui_resident_semantics, _size::32, 1, _mode, window_id::16,
+           _header::binary-size(36), flags, cursor_row::32, cursor_col::16, overlays::binary>>,
+         state
+       ) do
+    overlays =
+      if (flags &&& 0x02) != 0,
+        do: binary_part(overlays, 7, byte_size(overlays) - 7),
+        else: overlays
+
+    selection =
+      if (flags &&& 0x04) != 0 do
+        <<type, first::32, start_col::16, last::32, end_col::16, _::binary>> = overlays
+
+        %{
+          type: if(type == 1, do: :char, else: :line),
+          start_row: first,
+          start_col: start_col,
+          end_row: last,
+          end_col: end_col
+        }
+      end
+
+    semantics = %{
+      cursor: {cursor_row, cursor_col},
+      visible: (flags &&& 0x01) != 0,
+      selection: selection
+    }
+
+    %{
+      state
+      | windows:
+          Map.update!(state.windows, window_id, &Map.put(&1, :resident_semantics, semantics))
+    }
+  end
+
   defp apply_command(<<@op_gui_gutter, _rest::binary>> = binary, state) do
     gutter = decode_gutter(binary)
     gutter = resolve_resident_gutter(gutter, state)
@@ -742,6 +779,7 @@ defmodule Minga.Test.HeadlessPort do
   @spec draw_window_rows(State.t(), map(), non_neg_integer()) :: State.t()
   defp draw_window_rows(state, %{rows: rows} = window, offset) do
     rows = visible_resident_rows(rows, Map.get(state.gutters, window.window_id), window)
+    window = project_resident_overlays(window, length(rows))
     {row0, col0} = window_text_origin(window)
     row0 = row0 + offset
     region = content_region_height(state, offset)
@@ -756,7 +794,7 @@ defmodule Minga.Test.HeadlessPort do
             row0 + display_row,
             col0,
             row,
-            display_row,
+            display_row + Map.get(window, :selection_row_origin, 0),
             Map.get(window, :selection)
           )
         else
@@ -771,6 +809,51 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   defp draw_window_rows(state, _window, _offset), do: state
+
+  defp project_resident_overlays(
+         %{resident_semantics: semantics, geometry: %{viewport: vp}} = window,
+         visible_count
+       ) do
+    first = resident_visual_origin(window, vp)
+    {absolute_row, col} = semantics.cursor
+    local_row = absolute_row - first
+
+    window
+    |> Map.put(
+      :cursor_visible,
+      semantics.visible and local_row >= 0 and local_row < visible_count
+    )
+    |> Map.put(:cursor_row, max(local_row, 0))
+    |> Map.put(:cursor_col, col)
+    |> Map.put(:selection, semantics.selection)
+    |> Map.put(:selection_row_origin, first)
+  end
+
+  defp project_resident_overlays(window, _visible_count), do: window
+
+  defp resident_visual_origin(%{wrapped_rows: true, rows: rows}, vp) do
+    {origin, _} =
+      Enum.reduce_while(rows, {0, -1}, fn row, {rank, line} ->
+        line = if row.row_type == :normal, do: line + 1, else: line
+        if line == vp.top, do: {:halt, {rank, line}}, else: {:cont, {rank + 1, line}}
+      end)
+
+    origin + vp.visual_row_offset
+  end
+
+  defp resident_visual_origin(_window, vp), do: vp.top
+
+  defp visible_resident_rows(rows, _gutter, %{wrapped_rows: true, geometry: %{viewport: vp}}) do
+    {rows, _last_line} =
+      Enum.map_reduce(rows, -1, fn row, line ->
+        line = if row.row_type == :normal, do: line + 1, else: line
+        {%{row | buf_line: line}, line}
+      end)
+
+    rows
+    |> Enum.drop_while(&(&1.buf_line < vp.top))
+    |> Enum.slice(vp.visual_row_offset, vp.rows)
+  end
 
   defp visible_resident_rows(rows, %{resident: {:committed, _epoch, _count, _overrides}}, window),
     do: Enum.slice(rows, window.geometry.viewport.top, window.geometry.viewport.rows)
@@ -817,22 +900,41 @@ defmodule Minga.Test.HeadlessPort do
     end)
   end
 
+  defp visible_gutter_entries(
+         %{resident: {:committed, _epoch, _count, overrides}} = gutter,
+         %{wrapped_rows: true, rows: rows} = window
+       ) do
+    Enum.map(visible_resident_rows(rows, gutter, window), fn row ->
+      case row.row_type do
+        :normal ->
+          Map.get(overrides, row.buf_line, resident_gutter_entry(row.buf_line, :normal))
+
+        :wrap_continuation ->
+          resident_gutter_entry(row.buf_line, :wrap_continuation)
+      end
+    end)
+  end
+
   defp visible_gutter_entries(%{resident: {:committed, _epoch, count, overrides}}, window) do
     top = window.geometry.viewport.top
     visible = min(window.geometry.viewport.rows, max(count - top, 0))
 
     for line <- top..(top + visible - 1)//1 do
-      Map.get(overrides, line, %{
-        buf_line: line,
-        display_type: :normal,
-        sign_type: :none,
-        sign_text: nil,
-        fold_end_line: 0xFFFF_FFFF
-      })
+      Map.get(overrides, line, resident_gutter_entry(line, :normal))
     end
   end
 
   defp visible_gutter_entries(gutter, _window), do: gutter.entries
+
+  defp resident_gutter_entry(line, type) do
+    %{
+      buf_line: line,
+      display_type: type,
+      sign_type: :none,
+      sign_text: nil,
+      fold_end_line: 0xFFFF_FFFF
+    }
+  end
 
   @spec put_window_cursor(State.t(), map(), non_neg_integer()) :: State.t()
   defp put_window_cursor(state, window, offset) do
@@ -1184,7 +1286,9 @@ defmodule Minga.Test.HeadlessPort do
     window = Map.fetch!(state.windows, gutter.window_id)
 
     true =
-      window.sequential_rows and window.content_epoch == epoch and length(window.rows) == count
+      window.content_epoch == epoch and
+        ((window.wrapped_rows and window.geometry.viewport.total_lines == count) or
+           (window.sequential_rows and length(window.rows) == count))
 
     overrides =
       case operation do
@@ -1677,7 +1781,7 @@ defmodule Minga.Test.HeadlessPort do
   defp decode_geometry_tuple(
          <<window_id::16, total::binary-size(8), content::binary-size(8), text::binary-size(8),
            gutter::binary-size(8), clip::binary-size(8), viewport_top::32, viewport_left::16,
-           viewport_rows::16, viewport_cols::16, total_lines::32, visual_row_offset::16,
+           viewport_rows::16, viewport_cols::16, total_lines::32, visual_row_offset::32,
            total_visual_rows::32, line_number_width::16, sign_col_width::16, hit_count::8,
            rest::binary>>
        ) do

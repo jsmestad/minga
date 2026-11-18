@@ -72,7 +72,10 @@ version = "2.0.0"
 # protocol_version 33 binds tool approval decisions to the displayed session,
 # admitted request and tool call, independently of text-entry focus.
 # protocol_version 34 adds authoritative approval-wait presentation and distinct denied, cancelled and approval-expired tool statuses.
-protocol_version = 34
+# protocol_version 35 adds grouped wrapped resident rows (0x80 header bit 3)
+# and effective wrapped scrolling (scroll presentation flags bit 1). Pane
+# geometry uses a u32 continuation offset for oversized windowed lines.
+protocol_version = 35
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1985,7 +1988,7 @@ fields = [
   { name = "viewport_rows", type = "u16" },
   { name = "viewport_cols", type = "u16" },
   { name = "viewport_total_lines", type = "u32" },
-  { name = "viewport_visual_row_offset", type = "u16" },
+  { name = "viewport_visual_row_offset", type = "u32" },
   { name = "viewport_total_visual_rows", type = "u32" },
   { name = "line_number_width", type = "u16" },
   { name = "sign_col_width", type = "u16" },

@@ -77,8 +77,10 @@ defmodule MingaAgent.Compaction do
     if Enum.count(conversation) <= keep_recent do
       {:ok, context}
     else
-      {to_summarize, to_keep} = split_conversation(conversation, keep_recent)
-      do_compact(system_msgs, to_summarize, to_keep, opts)
+      case split_conversation(conversation, keep_recent) do
+        {[], _to_keep} -> {:ok, context}
+        {to_summarize, to_keep} -> do_compact(system_msgs, to_summarize, to_keep, opts)
+      end
     end
   end
 
@@ -132,8 +134,24 @@ defmodule MingaAgent.Compaction do
   defp split_conversation(conversation, keep_recent) do
     total = Enum.count(conversation)
     split_at = max(0, total - keep_recent)
-    Enum.split(conversation, split_at)
+    {older, recent} = Enum.split(conversation, split_at)
+    retain_complete_tool_group(older, recent)
   end
+
+  @spec retain_complete_tool_group([Message.t()], [Message.t()]) :: {[Message.t()], [Message.t()]}
+  defp retain_complete_tool_group(older, [%Message{role: :tool} | _] = recent) do
+    {results, remaining} = Enum.split_while(Enum.reverse(older), &(&1.role == :tool))
+
+    case remaining do
+      [assistant | before_group] ->
+        {Enum.reverse(before_group), [assistant | Enum.reverse(results, recent)]}
+
+      [] ->
+        {[], Enum.reverse(results, recent)}
+    end
+  end
+
+  defp retain_complete_tool_group(older, recent), do: {older, recent}
 
   @spec build_summary_prompt([Message.t()]) :: String.t()
   defp build_summary_prompt(messages) do

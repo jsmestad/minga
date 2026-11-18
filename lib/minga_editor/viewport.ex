@@ -52,6 +52,16 @@ defmodule MingaEditor.Viewport do
     %__MODULE__{top: 0, left: 0, rows: rows, cols: cols, reserved: reserved}
   end
 
+  @doc "Returns the committed logical line and continuation offset."
+  @spec vertical_anchor(t()) :: {non_neg_integer(), non_neg_integer()}
+  def vertical_anchor(%__MODULE__{top: top, visual_row_offset: offset}), do: {top, offset}
+
+  @doc "Fits the viewport to the pane's allocated content without changing its anchor."
+  @spec fit_content(t(), pos_integer(), pos_integer()) :: t()
+  def fit_content(%__MODULE__{} = viewport, width, height) do
+    %{viewport | rows: height, cols: width, reserved: 0}
+  end
+
   @doc "Stores a logical top line and resets wrapped row offset."
   @spec put_top(t(), non_neg_integer()) :: t()
   def put_top(%__MODULE__{} = vp, top) when is_integer(top) and top >= 0 do
@@ -170,6 +180,97 @@ defmodule MingaEditor.Viewport do
   end
 
   def clamp_top_to_eof(%__MODULE__{} = vp, 0), do: vp
+
+  @doc "Moves the top by display rows, keeping the last full page reachable without scrolling past it."
+  @spec scroll_visual_rows(t(), integer(), pos_integer(), (non_neg_integer() -> pos_integer())) ::
+          {t(), boolean()}
+  def scroll_visual_rows(%__MODULE__{} = vp, delta, line_count, row_count) do
+    top = min(vp.top, line_count - 1)
+    offset = min(vp.visual_row_offset, row_count.(top) - 1)
+    rows = content_rows(vp)
+
+    {top, offset} =
+      if delta < 0 do
+        {top, offset, _bottom?} = clamp_visual_anchor(top, offset, rows, line_count, row_count)
+        {top, offset}
+      else
+        {top, offset}
+      end
+
+    {top, offset} = shift_visual_anchor(top, offset, delta, line_count, row_count)
+    {top, offset, at_bottom?} = clamp_visual_anchor(top, offset, rows, line_count, row_count)
+    {%{vp | top: top, visual_row_offset: offset}, at_bottom?}
+  end
+
+  @spec clamp_visual_anchor(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          (non_neg_integer() -> pos_integer())
+        ) :: {non_neg_integer(), non_neg_integer(), boolean()}
+  defp clamp_visual_anchor(top, offset, rows, line_count, row_count) do
+    remaining = visual_rows_ahead(top, offset, rows + 1, line_count, row_count)
+
+    {top, offset} =
+      shift_visual_anchor(top, offset, min(remaining - rows, 0), line_count, row_count)
+
+    {top, offset, remaining <= rows}
+  end
+
+  @spec shift_visual_anchor(
+          non_neg_integer(),
+          non_neg_integer(),
+          integer(),
+          pos_integer(),
+          (non_neg_integer() -> pos_integer())
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp shift_visual_anchor(line, offset, delta, _line_count, _row_count)
+       when offset + delta >= 0 and delta <= 0,
+       do: {line, offset + delta}
+
+  defp shift_visual_anchor(0, _offset, delta, _line_count, _row_count) when delta < 0,
+    do: {0, 0}
+
+  defp shift_visual_anchor(line, offset, delta, line_count, row_count) when delta < 0 do
+    previous = line - 1
+
+    shift_visual_anchor(
+      previous,
+      row_count.(previous) - 1,
+      delta + offset + 1,
+      line_count,
+      row_count
+    )
+  end
+
+  defp shift_visual_anchor(line, offset, delta, line_count, row_count) do
+    count = row_count.(line)
+    target = offset + delta
+
+    case {target < count, line + 1 < line_count} do
+      {true, _} -> {line, target}
+      {false, true} -> shift_visual_anchor(line + 1, 0, target - count, line_count, row_count)
+      {false, false} -> {line, count - 1}
+    end
+  end
+
+  @spec visual_rows_ahead(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          (non_neg_integer() -> pos_integer())
+        ) :: pos_integer()
+  defp visual_rows_ahead(line, offset, limit, line_count, row_count) do
+    available = row_count.(line) - offset
+
+    if available >= limit or line + 1 == line_count do
+      min(available, limit)
+    else
+      available + visual_rows_ahead(line + 1, 0, limit - available, line_count, row_count)
+    end
+  end
 
   @doc "Scrolls down by one visual row when wrapping is active."
   @spec scroll_visual_row_down(t(), pos_integer(), non_neg_integer(), non_neg_integer()) :: t()

@@ -31,7 +31,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
     {state, materialize(state, intent, highlights)}
   end
 
-  @doc "Commits renderer-owned per-window cache state after a successful pipeline frame."
+  @doc "Installs per-window caches and retires incorporated deltas after frame acceptance."
   @spec commit(State.t(), Input.t(), Intent.t()) :: State.t()
   def commit(%State{} = state, %Input{} = output, %Intent{}) do
     residents =

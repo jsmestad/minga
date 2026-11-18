@@ -603,6 +603,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert decoded.scroll_presentation == %{
              window_id: 1,
              reset_required: true,
+             wrapped: false,
              anchor_top: 5,
              anchor_left: 2,
              anchor_visual_row_offset: 0,

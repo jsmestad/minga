@@ -311,7 +311,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       {section_count, sections_binary} = window_sections(binary)
       payload = extract_section_payload(sections_binary, section_count, 0x08)
 
-      assert <<_prefix::binary-size(67), hit_region::binary-size(11)>> = payload
+      assert <<_prefix::binary-size(69), hit_region::binary-size(11)>> = payload
+
       assert hit_region == <<1, 0, 1, 0, 4, 0, 76, 0, 22, 0, 1>>
     end
   end

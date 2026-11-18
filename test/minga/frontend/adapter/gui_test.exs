@@ -9,7 +9,12 @@ defmodule Minga.Frontend.Adapter.GUITest do
   alias Minga.RenderModel.UI.GutterSeparator
   alias Minga.RenderModel.UI.Theme
   alias Minga.RenderModel.Window
+  alias Minga.RenderModel.Window.GutterMetrics
+  alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowDelta
+  alias Minga.RenderModel.Window.RowSplice
+  alias Minga.RenderModel.Window.Viewport
   alias Minga.Test.GUIWindowDecoder
 
   describe "encode/2" do
@@ -264,6 +269,36 @@ defmodule Minga.Frontend.Adapter.GUITest do
              ]
     end
 
+    test "publishes new scroll authority even when a wrapped pane stays at the same anchor" do
+      window = wrapped_window(row(0, "still here", 1))
+
+      initial = GUI.encode(render_model(window), Caches.new())
+      caches = Caches.acknowledge_pending_window_deltas(initial.caches)
+      assert {:ok, empty_splices} = RowDelta.new(1, 1, [])
+      jumped = %{window | scroll_seq: 1, row_delta: empty_splices}
+
+      assert %{metal_commands: [<<0xA2, _count, sections::binary>>]} =
+               GUI.encode(render_model(jumped), caches)
+
+      assert <<_::binary-size(35), 1::32>> = section_payload(sections, 0x0A)
+    end
+
+    test "emits the splice for a render-equivalent resident replacement" do
+      row = row(0, "  ", 1)
+      window = wrapped_window(row)
+      initial = GUI.encode(render_model(window), Caches.new())
+      caches = Caches.acknowledge_pending_window_deltas(initial.caches)
+
+      assert {:ok, splices} = RowDelta.new(1, 1, [RowSplice.new(0, 1, [row])])
+      replaced = %{window | row_delta: splices}
+
+      assert %{metal_commands: [<<0xA2, _count, sections::binary>>]} =
+               GUI.encode(render_model(replaced), caches)
+
+      assert <<1::32, 1::32, 1::32, 0::32, 1::32, 1::32, _::binary>> =
+               section_payload(sections, 0x0B)
+    end
+
     test "acknowledged viewport delta keeps unchanged and changed windows incremental" do
       row0 = row(0, "zero", 1)
       row1 = row(1, "one", 2)
@@ -335,6 +370,29 @@ defmodule Minga.Frontend.Adapter.GUITest do
   end
 
   defp opcode(<<opcode, _rest::binary>>), do: opcode
+
+  defp section_payload(<<id, size::32, payload::binary-size(size), _::binary>>, id), do: payload
+
+  defp section_payload(<<_id, size::32, _::binary-size(size), rest::binary>>, id),
+    do: section_payload(rest, id)
+
+  defp wrapped_window(row) do
+    rect = {0, 0, 80, 20}
+
+    geometry = %PaneGeometry{
+      window_id: 1,
+      total_rect: rect,
+      content_rect: rect,
+      text_rect: rect,
+      gutter_rect: {0, 0, 0, 20},
+      clip_rect: rect,
+      viewport: %Viewport{top: 0, left: 0, rows: 20, cols: 80, total_lines: 1},
+      gutter_metrics: %GutterMetrics{line_number_width: 0, sign_col_width: 0},
+      hit_regions: []
+    }
+
+    %{window([row]) | geometry: geometry, wrapped: true, row_store_mode: {:resident, 1}}
+  end
 
   defp render_model(window),
     do: RenderModel.new([window], %RenderModel.UI{}, Cursor.new(0, 0, :block))

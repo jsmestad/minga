@@ -14,7 +14,7 @@ func TestReconcileScrollDiscardsOnKeyMismatch(t *testing.T) {
 		ID:        7,
 		ScrollSet: true,
 		Scroll:    protocol.ScrollPresentation{ContentEpoch: 42, LayoutGeneration: 2, AnchorTop: 10, AnchorLeft: 0},
-	})
+	}, 0)
 
 	if _, ok := lp.scrolls[7]; ok {
 		t.Fatal("scroll should be discarded on layoutGeneration mismatch")
@@ -29,7 +29,7 @@ func TestReconcileScrollSurvivesOnMatchingKey(t *testing.T) {
 		ID:        7,
 		ScrollSet: true,
 		Scroll:    protocol.ScrollPresentation{ContentEpoch: 42, LayoutGeneration: 1, AnchorTop: 10, AnchorLeft: 0},
-	})
+	}, 0)
 
 	scroll, ok := lp.scrolls[7]
 	if !ok {
@@ -48,7 +48,7 @@ func TestReconcileScrollDiscardsOnResetRequired(t *testing.T) {
 		ID:        7,
 		ScrollSet: true,
 		Scroll:    protocol.ScrollPresentation{ContentEpoch: 42, LayoutGeneration: 1, AnchorTop: 10, AnchorLeft: 0, ResetRequired: true},
-	})
+	}, 0)
 
 	if _, ok := lp.scrolls[7]; ok {
 		t.Fatal("scroll should be discarded on resetRequired")
@@ -84,7 +84,7 @@ func TestReconcileScrollScrollSeq(t *testing.T) {
 				Scroll: protocol.ScrollPresentation{
 					ContentEpoch: 42, LayoutGeneration: 1, AnchorTop: 10, AnchorLeft: 0, ScrollSeq: tt.frameSeq,
 				},
-			})
+			}, 0)
 
 			_, ok := lp.scrolls[7]
 			if ok != tt.wantPreserved {
@@ -106,7 +106,7 @@ func TestReconcileScrollSeqOrderVsAnchorKey(t *testing.T) {
 		ScrollSet: true,
 		// Same anchor key as the captured offset, only scroll_seq advanced.
 		Scroll: protocol.ScrollPresentation{ContentEpoch: 1, LayoutGeneration: 9, AnchorTop: 0, AnchorLeft: 0, ScrollSeq: 6},
-	})
+	}, 0)
 
 	if _, ok := lp.scrolls[7]; ok {
 		t.Fatal("a strictly-newer scroll_seq must discard even on a matching anchor key")

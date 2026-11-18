@@ -261,10 +261,11 @@ struct DecoderTruncatedGUIChromeTests {
     }
 }
 
-private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> Data {
+private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil,
+                               headerFlags: UInt8 = 0x03, scrollFlags: UInt8 = 0) -> Data {
     var headerPayload = Data()
     appendU16(&headerPayload, 1) // window_id
-    headerPayload.append(0x03) // flags
+    headerPayload.append(headerFlags)
     appendU16(&headerPayload, 0) // cursor_row
     appendU16(&headerPayload, 0) // cursor_col
     headerPayload.append(0x00) // cursor_shape
@@ -281,7 +282,7 @@ private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> D
     if let scrollSeq {
         var scrollPresentationPayload = Data()
         appendU16(&scrollPresentationPayload, 1) // window_id
-        scrollPresentationPayload.append(0x00) // flags
+        scrollPresentationPayload.append(scrollFlags)
         appendU32(&scrollPresentationPayload, 5) // anchor_top
         appendU16(&scrollPresentationPayload, 0) // anchor_left
         appendU16(&scrollPresentationPayload, 0) // anchor_visual_row_offset
@@ -389,6 +390,28 @@ struct DecoderScrollPresentationScrollSeqTests {
             return
         }
         #expect(content.scrollPresentation?.scrollSeq == 99)
+    }
+
+    @Test("wrapped wheel intent is independent of row-store residence", arguments: [UInt8(0x03), UInt8(0x0B)])
+    func decodesWrappedScrollFlags(headerFlags: UInt8) throws {
+        let data = windowContentData(
+            rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99, headerFlags: headerFlags, scrollFlags: 0x02
+        )
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiWindowContent(let content) = command else {
+            Issue.record("Expected guiWindowContent")
+            return
+        }
+        #expect(size == data.count)
+        #expect(content.scrollPresentation?.isWrapped == true)
+        #expect(content.scrollPresentation?.resetRequired == false)
+        #expect(content.scrollPresentation?.scrollSeq == 99)
+        #expect(content.rowStore.mode.isResident == (headerFlags == 0x0B))
+    }
+
+    @Test("gui_window_content rejects mutually exclusive residency bits")
+    func rejectsContradictoryResidence() {
+        expectMalformedWindowContent(windowContentData(rowsPayload: Self.emptyRowsPayload(), headerFlags: 0x0F))
     }
 
     @Test("truncated scroll_presentation section (missing scroll_seq bytes) throws malformed")

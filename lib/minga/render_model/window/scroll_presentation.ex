@@ -28,6 +28,7 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
   ]
   defstruct window_id: 0,
             reset_required: false,
+            wrapped: false,
             anchor_top: 0,
             anchor_left: 0,
             anchor_visual_row_offset: 0,
@@ -42,6 +43,7 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
   @type t :: %__MODULE__{
           window_id: non_neg_integer(),
           reset_required: boolean(),
+          wrapped: boolean(),
           anchor_top: non_neg_integer(),
           anchor_left: non_neg_integer(),
           anchor_visual_row_offset: non_neg_integer(),
@@ -68,9 +70,10 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
     %__MODULE__{
       window_id: window.window_id,
       reset_required: window.full_refresh,
+      wrapped: window.wrapped,
       anchor_top: geometry.viewport.top,
       anchor_left: geometry.viewport.left,
-      anchor_visual_row_offset: retained_anchor_offset(window.rows, geometry),
+      anchor_visual_row_offset: retained_anchor_offset(window, geometry),
       visible_start_line: visible_start_line,
       visible_end_line: visible_end_line,
       overscan_start_line: overscan_start_line,
@@ -83,18 +86,24 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
 
   # The row store can begin partway through the anchor's wrapped source line.
   # Frontends skip only the continuation rows still present in that store.
-  @spec retained_anchor_offset([Row.t()], PaneGeometry.t()) :: non_neg_integer()
+  @spec retained_anchor_offset(Window.t(), PaneGeometry.t()) :: non_neg_integer()
+  defp retained_anchor_offset(%Window{row_store_mode: {:resident, _}}, geometry),
+    do: geometry.viewport.visual_row_offset
+
   defp retained_anchor_offset(
-         [%Row{buf_line: line, visual_index: first_visual_index} | _],
+         %Window{rows: [%Row{buf_line: line, visual_index: first_visual_index} | _]},
          %PaneGeometry{viewport: %{top: line, visual_row_offset: offset}}
        ),
        do: max(offset - first_visual_index, 0)
 
-  defp retained_anchor_offset(_rows, %PaneGeometry{viewport: viewport}),
+  defp retained_anchor_offset(_window, %PaneGeometry{viewport: viewport}),
     do: viewport.visual_row_offset
 
   @spec resident_line_range(Window.t(), PaneGeometry.t()) ::
           {non_neg_integer(), non_neg_integer()}
+  defp resident_line_range(%Window{wrapped: true, row_store_mode: {:resident, _}}, geometry),
+    do: {0, geometry.viewport.total_lines}
+
   defp resident_line_range(%Window{row_store_mode: {:resident, count}}, _geometry),
     do: {0, count}
 

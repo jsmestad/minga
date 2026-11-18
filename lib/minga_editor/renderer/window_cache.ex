@@ -104,7 +104,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           resident: boolean(),
           residence_armed: boolean(),
           scroll_seq: non_neg_integer(),
-          scroll_seq_last_top: integer() | nil,
+          scroll_seq_last_anchor: {non_neg_integer(), non_neg_integer()} | nil,
           scroll_seq_last_authoritative: non_neg_integer()
         }
 
@@ -143,7 +143,7 @@ defmodule MingaEditor.Renderer.WindowCache do
             resident: false,
             residence_armed: false,
             scroll_seq: 0,
-            scroll_seq_last_top: nil,
+            scroll_seq_last_anchor: nil,
             scroll_seq_last_authoritative: 0
 
   @doc """
@@ -831,9 +831,9 @@ defmodule MingaEditor.Renderer.WindowCache do
     landing exactly on the previous or echoed top (`zz` while already centered,
     a search hit already on screen), which the top comparison below cannot see.
 
-  * **Top comparison:** `top` differs from both the previous committed top
-    (`scroll_seq_last_top`) and the frontend-reported free-scroll top
-    (`echo_top`). A move to the echoed top is the frontend's own report reflected
+  * **Anchor comparison:** `anchor` differs from both the previous committed anchor
+    (`scroll_seq_last_anchor`) and the frontend-reported `echo_anchor`. A move to
+    the echoed anchor is the frontend's own report reflected
     back (a wheel/trackpad free scroll, always viewport-only), so it does not
     advance the sequence. The first settle after a fresh cache (nil baseline) does
     not bump via this path (it only records the baseline).
@@ -850,21 +850,25 @@ defmodule MingaEditor.Renderer.WindowCache do
   values, which the frontend tolerates (strict greater-than check, with anchor-key
   and reset_required covering discards).
   """
-  @spec settle_scroll_seq(t(), integer(), integer() | nil, non_neg_integer()) :: t()
-  def settle_scroll_seq(%__MODULE__{} = cache, top, echo_top, authoritative_seq)
-      when is_integer(top) and is_integer(authoritative_seq) do
+  @spec settle_scroll_seq(
+          t(),
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()} | nil,
+          non_neg_integer()
+        ) :: t()
+  def settle_scroll_seq(%__MODULE__{} = cache, anchor, echo_anchor, authoritative_seq) do
     authoritative_move? = authoritative_seq != cache.scroll_seq_last_authoritative
 
-    top_move? =
-      not is_nil(cache.scroll_seq_last_top) and top != cache.scroll_seq_last_top and
-        top != echo_top
+    anchor_move? =
+      not is_nil(cache.scroll_seq_last_anchor) and anchor != cache.scroll_seq_last_anchor and
+        anchor != echo_anchor
 
-    seq = if authoritative_move? or top_move?, do: cache.scroll_seq + 1, else: cache.scroll_seq
+    seq = if authoritative_move? or anchor_move?, do: cache.scroll_seq + 1, else: cache.scroll_seq
 
     %{
       cache
       | scroll_seq: seq,
-        scroll_seq_last_top: top,
+        scroll_seq_last_anchor: anchor,
         scroll_seq_last_authoritative: authoritative_seq
     }
   end
