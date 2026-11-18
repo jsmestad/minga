@@ -28,6 +28,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
   alias MingaEditor.RenderModel.Window.BuildResult
+  alias MingaEditor.RenderModel.Window.ResidentBuild
   alias MingaEditor.RenderModel.Window.ReviewBuilder
   alias MingaEditor.RenderModel.Window.ReviewLayout
   alias MingaEditor.Shell.Runtime
@@ -147,12 +148,37 @@ defmodule MingaEditor.RenderPipeline.Content do
           {WindowScroll.t(), Context.t(), state(),
            MingaEditor.RenderModel.Window.ResidentBuild.plan() | :windowed}
   defp prepare_planned_source(state, scroll, _ctx, {:hydrate, _reason} = plan) do
+    prepare_resident_range(state, scroll, plan)
+  end
+
+  defp prepare_planned_source(
+         state,
+         %WindowScroll{wrap_on: true} = scroll,
+         _ctx,
+         {:splice, _, _, count} = plan
+       )
+       when count > 0 do
+    prepare_resident_range(state, scroll, plan)
+  end
+
+  defp prepare_planned_source(
+         state,
+         %WindowScroll{wrap_on: true} = scroll,
+         _ctx,
+         {:splices, _} = plan
+       ) do
+    prepare_resident_range(state, scroll, plan)
+  end
+
+  defp prepare_planned_source(state, scroll, ctx, plan), do: {scroll, ctx, state, plan}
+
+  @spec prepare_resident_range(state(), WindowScroll.t(), ResidentBuild.plan()) ::
+          {WindowScroll.t(), Context.t(), state(), ResidentBuild.plan()}
+  defp prepare_resident_range(state, scroll, plan) do
     scroll = BufferPrefetch.ensure_resident_source(state, scroll, plan)
     {ctx, state} = build_render_context(state, scroll)
     {scroll, ctx, state, plan}
   end
-
-  defp prepare_planned_source(state, scroll, ctx, plan), do: {scroll, ctx, state, plan}
 
   @spec build_render_context(state(), WindowScroll.t()) :: {Context.t(), state()}
   defp build_render_context(state, scroll) do
@@ -213,7 +239,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     # Resolve the active window's buffer cursor.
     buf_cursor =
-      if is_active do
+      if is_active and not (wrap_on and scroll.full_residence) do
         # When folds are active, viewport.top is in visible-line coordinates.
         # Convert cursor_line from buffer to visible for correct screen position.
         visible_cursor =
@@ -261,6 +287,9 @@ defmodule MingaEditor.RenderPipeline.Content do
     {window_model, build_result, window, font_registry} =
       build_window_model_with_slot_reset(state, scroll, window, render_ctx, plan)
 
+    {window_model, window, viewport, buf_cursor} =
+      finalize_wrapped_resident(window_model, window, scroll, buf_cursor)
+
     window =
       window
       |> Window.put_retained_rows(build_result.retained_rows)
@@ -296,6 +325,47 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     {window_content, cursor_info, state}
   end
+
+  @spec finalize_wrapped_resident(
+          Minga.RenderModel.Window.t(),
+          Window.t(),
+          WindowScroll.t(),
+          Cursor.t() | nil
+        ) :: {Minga.RenderModel.Window.t(), Window.t(), Viewport.t(), Cursor.t() | nil}
+  defp finalize_wrapped_resident(
+         model,
+         window,
+         %WindowScroll{wrap_on: true, full_residence: true} = scroll,
+         _cursor
+       ) do
+    geometry = model.geometry.viewport
+
+    viewport =
+      Viewport.put_top_visual(
+        scroll.viewport,
+        geometry.top,
+        geometry.visual_row_offset,
+        geometry.visual_row_offset + 1
+      )
+
+    window = window |> Window.set_viewport(viewport) |> Window.settle_scroll_seq()
+    model = %{model | scroll_seq: Window.scroll_seq(window)}
+    {row, col, _width, _height} = scroll.win_layout.content
+
+    cursor =
+      if scroll.is_active and model.cursor_visible,
+        do:
+          Cursor.new(
+            row + model.cursor_row,
+            col + scroll.gutter_w + model.cursor_col,
+            model.cursor_shape
+          )
+
+    {model, window, viewport, cursor}
+  end
+
+  defp finalize_wrapped_resident(model, window, scroll, cursor),
+    do: {model, window, scroll.viewport, cursor}
 
   @spec cursor_visual_position(map()) :: {integer(), non_neg_integer(), non_neg_integer()}
   defp cursor_visual_position(%{wrap_on: false}), do: {0, 0, 0}

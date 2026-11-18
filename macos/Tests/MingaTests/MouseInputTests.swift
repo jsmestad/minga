@@ -700,21 +700,6 @@ struct MouseInputTests {
         #expect(spy.mouseEventCalls.isEmpty)
     }
 
-    @Test("presentation scroll normalization shifts fold hit testing vertically only")
-    @MainActor func presentationScrollNormalizationShiftsFoldHitTestingVerticallyOnly() {
-        let normalized = EditorNSView.presentationNormalizedGutterPoint(
-            NSPoint(x: 18.0, y: 3.0),
-            presentation: EditorNSView.LocalScrollPresentation(windowId: 7, offset: CGPoint(x: 0, y: 8.0)),
-            targetGutterRect: GUICellRect(row: 0, col: 2, width: 6, height: 4),
-            cellWidth: 8.0,
-            cellHeight: 8.0
-        )
-
-        #expect(normalized.x == 18.0)
-        #expect(Int(normalized.y / 8.0) == 1)
-        #expect(normalized.y > 3.0)
-    }
-
     @Test("mouseDown ignores committed-but-unpresented gutter data")
     @MainActor func staleGutterIgnoredForHitTesting() throws {
         let spy = SpyEncoder()

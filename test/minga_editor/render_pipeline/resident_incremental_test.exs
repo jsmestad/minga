@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias Minga.Events.BufferChangedEvent
   alias Minga.Search.IndexOwner
   alias MingaEditor.Layout
+  alias MingaEditor.Mouse
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.Gutter.ResidentRows
   alias Minga.RenderModel.Window.ScrollPresentation
@@ -74,13 +75,65 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     state
   end
 
-  # A plain-text, non-wrapped buffer so tree-sitter never re-highlights mid-test
-  # and residence stays eligible (wrap opts out), keeping the path on the splice
-  # (not full-rebuild) branch across an edit.
+  # Plain text avoids asynchronous parser highlights, and these fixtures use
+  # unwrapped rows so their splice budgets have exact logical-row counts.
   defp resident_state(line_count) do
     state = gui_state(content: long_content(line_count), rows: 12, cols: 60, filetype: :text)
     BufferProcess.set_option(state.workspace.buffers.active, :wrap, false)
     state
+  end
+
+  test "wrapped wheel reaches the final continuation without changing the cursor or resending rows" do
+    editor =
+      gui_state(content: String.duplicate("x", 256) <> "TAIL", rows: 8, cols: 26, filetype: :text)
+
+    buffer = editor.workspace.buffers.active
+    assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+    id = editor.workspace.windows.active
+
+    {first, state} = build_frame(editor)
+    assert first.row_store_mode == :windowed
+    {promoted, state} = build_frame(state)
+    assert {:resident, total_rows} = promoted.row_store_mode
+    fitted = promoted.geometry.viewport.rows
+    assert total_rows > fitted + 1
+    assert Enum.any?(promoted.rows, &String.ends_with?(&1.text, "TAIL"))
+
+    editor = Mouse.handle_scroll_batch(state.editor, id, 1, :down)
+    {advanced, state} = build_frame(%{state | editor: editor})
+    assert %{top: 0, visual_row_offset: 1} = advanced.geometry.viewport
+    assert advanced.scroll_seq == promoted.scroll_seq
+    assert %{splices: []} = advanced.row_delta
+
+    editor = Mouse.handle_scroll_batch(state.editor, id, 100, :down)
+    {bottom, state} = build_frame(%{state | editor: editor})
+    assert bottom.geometry.viewport.visual_row_offset == total_rows - fitted
+    assert %{splices: []} = bottom.row_delta
+
+    editor = Mouse.handle_scroll_batch(state.editor, id, -1, :up)
+    {reversed, _state} = build_frame(%{state | editor: editor})
+    assert reversed.geometry.viewport.visual_row_offset == total_rows - fitted - 1
+    assert BufferProcess.cursor(buffer) == {0, 0}
+  end
+
+  test "growing a wrapped line splices its visual group and preserves the unchanged suffix" do
+    editor = gui_state(content: "alpha\nbeta\ntail", rows: 6, cols: 20, filetype: :text)
+    buffer = editor.workspace.buffers.active
+    assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    {_first, state} = build_frame(editor)
+    {initial, state} = build_frame(state)
+    assert initial.row_store_mode == {:resident, 3}
+    assert [_alpha, _beta, %{row_id: tail_id, text: "tail"}] = initial.rows
+
+    BufferProcess.insert_text(buffer, String.duplicate("x", 120))
+    {edited, state} = build_frame(state)
+    refute edited.full_refresh
+    assert [%{start_index: 0, delete_count: 1, insert_rows: inserted}] = edited.row_delta.splices
+    assert [_, _ | _] = inserted
+    assert edited.row_delta.result_row_count == 2 + length(inserted)
+    {recovered, _state} = build_frame(Map.put(state, :keyframe?, true))
+    assert Enum.any?(recovered.rows, &match?(%{row_id: ^tail_id, text: "tail"}, &1))
   end
 
   describe "digest consistency" do

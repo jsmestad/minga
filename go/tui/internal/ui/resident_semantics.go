@@ -63,8 +63,8 @@ func applyResidentSemantics(base *residentSemanticStore, wire protocol.ResidentS
 	if wire.Version != 1 || (wire.Mode != 0 && wire.Mode != 1) {
 		return nil, fmt.Errorf("unsupported resident semantics version or mode")
 	}
-	if !rows.sequential {
-		return nil, fmt.Errorf("resident semantics require sequential rows")
+	if !rows.complete() {
+		return nil, fmt.Errorf("resident semantics require a complete row store")
 	}
 	if wire.RowCount > maxResidentSemanticRows || int(wire.RowCount) != rows.count() {
 		return nil, fmt.Errorf("resident semantic row count mismatch")

@@ -756,8 +756,8 @@ final class CommandDispatcher {
         effects: inout [CommitEffect]
     ) {
         for surface in snapshot.surfaces where changedWindowIds.contains(surface.windowId) {
-            let previousScroll = priorSnapshot?.content(for: surface.windowId)?.scrollPresentation
-            if shouldResetScrollPresentation(previous: previousScroll, next: surface.content.scrollPresentation) {
+            let previous = priorSnapshot?.content(for: surface.windowId)
+            if shouldResetScrollPresentation(previous: previous, next: surface.content) {
                 effects.append(.application(.scrollPresentationReset(windowID: surface.windowId)))
             }
         }
@@ -1263,9 +1263,9 @@ final class CommandDispatcher {
             break
 
         case .guiWindowContent(let data):
-            let previousScroll = guiState.windowContents[data.windowId]?.scrollPresentation
+            let previous = guiState.windowContents[data.windowId]
             guiState.windowContents[data.windowId] = data
-            if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
+            if shouldResetScrollPresentation(previous: previous, next: data) {
                 effects.append(.application(.scrollPresentationReset(windowID: data.windowId)))
             }
 
@@ -1281,9 +1281,8 @@ final class CommandDispatcher {
                 guiState.windowContents.removeValue(forKey: delta.windowId)
                 break
             }
-            let previousScroll = current.scrollPresentation
             guiState.windowContents[delta.windowId] = updated
-            if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
+            if shouldResetScrollPresentation(previous: current, next: updated) {
                 effects.append(.application(.scrollPresentationReset(windowID: delta.windowId)))
             }
 
@@ -1444,10 +1443,22 @@ final class CommandDispatcher {
         }
     }
 
-    private func shouldResetScrollPresentation(previous: GUIScrollPresentation?, next: GUIScrollPresentation?) -> Bool {
-        if let next, next.resetRequired { return true }
-        guard let prev = previous else { return false }
-        guard let next else { return true }
+    private func shouldResetScrollPresentation(previous: GUIWindowContent?, next: GUIWindowContent) -> Bool {
+        if next.scrollPresentation?.resetRequired == true { return true }
+        guard let previous, previous !== next else { return false }
+        if previous.rowStore.mode != next.rowStore.mode,
+           previous.rowStore.mode == .sequentialWrapped || next.rowStore.mode == .sequentialWrapped {
+            return true
+        }
+        // An edit or hydration may change the absolute visual coordinate basis without
+        // changing the epoch. Do not reconcile that change as a wheel acknowledgment.
+        if next.rowStore.mode == .sequentialWrapped,
+           next.rowStoreOperationCounters.fullResets > 0 || next.rowStoreOperationCounters.splices > 0 {
+            return true
+        }
+        guard let prev = previous.scrollPresentation else { return false }
+        guard let next = next.scrollPresentation else { return true }
+        if next.isWrapped != prev.isWrapped { return true }
         // #2661: a strictly newer scroll-authority sequence means the BEAM
         // committed a fresh authoritative anchor (a jump racing a local
         // scroll report), even in the rare case where the jump coincidentally

@@ -262,7 +262,7 @@ func TestResidentGutterTracksLocalPresentationScroll(t *testing.T) {
 
 func TestResidentGutterOverridesParticipateInLineCacheIdentity(t *testing.T) {
 	model := New(20, 6, nil)
-	window := protocol.WindowContent{ID: 7, ContentEpoch: 9}
+	key := lineCacheKey{rowID: 1, hash: 1}
 	first := protocol.Gutter{WindowID: 7, Resident: &protocol.ResidentGutterEntries{
 		ContentEpoch: 9,
 		LineCount:    4,
@@ -274,8 +274,16 @@ func TestResidentGutterOverridesParticipateInLineCacheIdentity(t *testing.T) {
 		Overrides:    map[uint32]protocol.GutterEntry{1: {BufferLine: 1, SignType: 2}},
 	}}
 
-	if model.windowContextFingerprint(window, 20, first, true) == model.windowContextFingerprint(window, 20, second, true) {
-		t.Fatal("resident gutter override change did not invalidate line cache identity")
+	before := model.lineCache.beginWindowRender(7, 1, first.Resident)
+	before.store(key, "old sign")
+	before.commit()
+	retain := model.lineCache.beginWindowRender(7, 1, first.Resident)
+	if got, ok := retain.lookup(key); !ok || got != "old sign" {
+		t.Fatal("retained resident gutter did not reuse a cached row")
+	}
+	changed := model.lineCache.beginWindowRender(7, 1, second.Resident)
+	if _, ok := changed.lookup(key); ok {
+		t.Fatal("resident gutter override change reused a stale cached row")
 	}
 }
 
@@ -337,7 +345,7 @@ func TestSequentialResidentA2StructuralEditsKeepShiftedRowsAndGutterAligned(t *t
 	}
 	insertA2 := residentTestRowsDelta(t, windowID, epoch, 300, 303, 50, 0, inserted)
 	model = applyTo(t, model, beginFrame(2, 1), insertA2, gutterCommand(303), commitFrame(2))
-	if model.lastFrameOutcome != frameOutcomeApplied || !model.residentRows[windowID].sequential {
+	if model.lastFrameOutcome != frameOutcomeApplied || model.residentRows[windowID].mode != sequentialRows {
 		t.Fatalf("sequential A2 insert outcome = %v", model.lastFrameOutcome)
 	}
 
@@ -381,7 +389,7 @@ func TestFullSnapshotPromotesSequentialRowsWithinContentEpoch(t *testing.T) {
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowed, commitFrame(1))
 	sequential := residentWindowCommand(7, 10, 3, protocol.CommandWindowContent)
 	model = applyTo(t, model, beginFrame(2, 1), sequential, commitFrame(2))
-	if model.lastFrameOutcome != frameOutcomeApplied || !model.residentRows[7].sequential || model.lastCommittedSeq != 2 {
+	if model.lastFrameOutcome != frameOutcomeApplied || model.residentRows[7].mode != sequentialRows || model.lastCommittedSeq != 2 {
 		t.Fatal("same-epoch full snapshot did not promote the row store")
 	}
 }

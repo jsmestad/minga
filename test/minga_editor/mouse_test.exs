@@ -29,6 +29,27 @@ defmodule MingaEditor.MouseTest do
   @ctrl 0x02
   @super 0x08
 
+  test "trackpad advances and reverses inside the only logical line without moving the cursor" do
+    {state, buffer} = start_mouse_state(String.duplicate("x", 256), width: 26, height: 8)
+    state = native_gui_state(state)
+    assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+    win_id = state.workspace.windows.active
+
+    state = Mouse.handle_scroll_batch(state, win_id, 1, :down)
+    assert %{top: 0, visual_row_offset: 1} = window_viewport(state, win_id)
+
+    state = Mouse.handle_scroll_batch(state, win_id, 100, :down)
+    assert %{top: 0, visual_row_offset: bottom} = window_viewport(state, win_id)
+    assert bottom > 1
+    assert %{pinned: true} = Map.fetch!(state.workspace.windows.map, win_id)
+
+    state = Mouse.handle_scroll_batch(state, win_id, -1, :up)
+    assert %{top: 0, visual_row_offset: offset} = window_viewport(state, win_id)
+    assert offset == bottom - 1
+    assert BufferProcess.cursor(buffer) == {0, 0}
+  end
+
   describe "resident window scroll intent (#2661)" do
     test "handle_scroll_batch records the committed top as the free-scroll echo top" do
       {state, _buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
@@ -39,7 +60,7 @@ defmodule MingaEditor.MouseTest do
       state = Mouse.handle_scroll_batch(state, win_id, 3, :down)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_top == window.viewport.top
+      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
     end
 
     test "H resolves against the reported top after a scroll report (ordered channel, AC2)" do
@@ -87,8 +108,8 @@ defmodule MingaEditor.MouseTest do
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
       # apply_scroll_intent marks the committed top as a free-scroll echo; the
-      # viewport-only path never touches scroll_echo_top.
-      assert window.scroll_echo_top == window.viewport.top
+      # viewport-only path never touches the scroll echo.
+      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
       assert BufferProcess.cursor(buffer) == {50, 0}
     end
 
@@ -108,7 +129,7 @@ defmodule MingaEditor.MouseTest do
       # and every committed top stayed a free-scroll echo.
       assert new_top > 50
       assert BufferProcess.cursor(buffer) == {50, 0}
-      assert window.scroll_echo_top == new_top
+      assert window.scroll_echo_anchor == {new_top, 0}
     end
 
     test "a resident GUI window scrolls up through apply_scroll_intent as well" do
@@ -122,13 +143,14 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 0, :wheel_up, :press)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_top == window.viewport.top
+      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
       assert window.viewport.top == 39
       assert BufferProcess.cursor(buffer) == {50, 0}
     end
 
-    test "the TUI keeps viewport-only wheel behavior byte-identically (no cursor move, no echo)" do
+    test "the TUI keeps unwrapped viewport-only wheel behavior" do
       {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
       win_id = state.workspace.windows.active
       # Resident, but a non-GUI frontend: the shared clause must NOT free-scroll.
       state = mark_resident(state, win_id)
@@ -139,7 +161,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 0, :wheel_down, :press)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_top == nil
+      assert window.scroll_echo_anchor == nil
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.viewport.top > before_top
     end
@@ -155,7 +177,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 0, :wheel_down, :press)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_top == window.viewport.top
+      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.viewport.top > before_top
     end
@@ -175,7 +197,7 @@ defmodule MingaEditor.MouseTest do
       # The committed top is recorded as a free-scroll echo, exactly like the wheel
       # path, so settle_scroll_seq/1 treats it as an echo and never bumps scroll_seq.
       assert window.viewport.top == 30
-      assert window.scroll_echo_top == 30
+      assert window.scroll_echo_anchor == {30, 0}
     end
 
     test "never moves the cursor even when the target scrolls it off-screen (#2691)" do
@@ -195,7 +217,7 @@ defmodule MingaEditor.MouseTest do
       assert window.viewport.top == 0
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.scroll_detach_cursor == {50, 0}
-      assert window.scroll_echo_top == window.viewport.top
+      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
     end
 
     test "commits the exact dragged top so the frontend offset reconciles to zero" do
@@ -212,7 +234,7 @@ defmodule MingaEditor.MouseTest do
       # The committed anchor lands exactly on the requested line so the frontend's
       # local presentation offset (target - anchorTop) drains to zero on grid.
       assert window.viewport.top == 72
-      assert window.scroll_echo_top == 72
+      assert window.scroll_echo_anchor == {72, 0}
     end
   end
 

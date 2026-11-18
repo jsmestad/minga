@@ -344,6 +344,279 @@ struct ContentViewTests {
         #expect(editor.interactionSnapshot.scrollOffset == .zero)
     }
 
+    @Test("wrapped resident wheel reverses before EOF echoes without accumulating clamp debt", arguments: [false, true], [false, true])
+    func wrappedWheelReversesAtEOF(precise: Bool, returnsToCommittedRank: Bool) throws {
+        let gui = GUIState()
+        var resetHandler: ((UInt16) -> Void)?
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 3, guiState: gui,
+            applicationEffectSink: { effect in
+                if case .scrollPresentationReset(let windowId) = effect { resetHandler?(windowId) }
+            }
+        )
+        let fixture = WrappedScrollFixture()
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 300)
+        var resets = 0
+        resetHandler = { [weak editor] windowId in
+            resets += 1
+            editor?.resetScrollPresentation(windowId: windowId)
+        }
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: returnsToCommittedRank ? 2 : 1, continuation: 0)))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let start = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorSnapshot(start)
+
+        let point = editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight), to: nil)
+        func wheel(_ rows: CGFloat, phase: NSEvent.Phase = []) {
+            let event = MountedPreciseScrollEvent(
+                locationInWindow: point, windowNumber: 0, deltaY: -rows * editor.cellHeight, phase: phase
+            )
+            event.preciseDeltas = precise
+            editor.scrollWheel(with: event)
+        }
+        wheel(1, phase: precise ? .began : [])
+        wheel(1, phase: precise ? .changed : [])
+        wheel(1, phase: precise ? .changed : [])
+        wheel(1, phase: precise ? .changed : [])
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: start).unconfirmedLines == (returnsToCommittedRank ? 1 : 2))
+        wheel(-1, phase: precise ? .changed : [])
+        let reversing = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: start)
+        #expect(reversing.unconfirmedLines == (returnsToCommittedRank ? 0 : 1))
+        if precise {
+            #expect(reversing.presentation?.offset.y == (returnsToCommittedRank ? 0 : reversing.cellHeight))
+            #expect(spy.actions.last == .scrollBatch(windowID: 1, deltaLines: -1, direction: 1))
+            wheel(0, phase: .ended)
+        } else {
+            #expect(spy.mouseEventCalls.last?.button == MOUSE_SCROLL_UP)
+        }
+
+        func echo(_ frameSeq: UInt32, continuation: UInt16, scrollSeq: UInt32 = 0) throws -> CommittedEditorSnapshot {
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: frameSeq - 1, generation: 1))
+            dispatcher.dispatch(.guiWindowRowsDelta(data: fixture.delta(
+                top: 2, continuation: continuation, scrollSeq: scrollSeq
+            )))
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+            return try #require(dispatcher.committedEditorSnapshot)
+        }
+        // The first echo can reach the clamp before the reversal arrives. Keep
+        // the display targeting rank 4 rather than jumping to rank 5 and back.
+        let eof = try echo(2, continuation: 1)
+        #expect(eof.content(for: 1)?.wrappedResidentAnchor == 5)
+        let atEOF = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: eof)
+        #expect(atEOF.unconfirmedLines == -1)
+        #expect(atEOF.lastConfirmedAnchorTop == 5)
+        if precise { #expect(atEOF.presentation?.offset.y == -atEOF.cellHeight) }
+
+        let reversed = try echo(3, continuation: 0)
+        #expect(reversed.content(for: 1)?.scrollPresentation?.anchorTop == 2)
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: reversed).unconfirmedLines == 0)
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: reversed).unconfirmedLines == 0)
+        #expect(resets == 0)
+        dispatcher.promoteVisibleEditorSnapshot(reversed)
+        wheel(1, phase: precise ? .began : [])
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: reversed).unconfirmedLines == 1)
+        let authoritative = try echo(4, continuation: 0, scrollSeq: 1)
+        #expect(resets == 1)
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: authoritative).presentation == nil)
+
+        dispatcher.promoteVisibleEditorSnapshot(authoritative)
+        wheel(1, phase: precise ? .began : [])
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: authoritative).unconfirmedLines == 1)
+        let insert = GUIVisualRow(rowType: .wrapContinuation, rowId: 20, bufLine: 0, contentHash: 20, text: "added", spans: [])
+        let grown = WrappedScrollFixture(groups: [4, 1, 4])
+        var rows = fixture.rows
+        rows.insert(insert, at: 3)
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 4, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: grown.delta(
+            top: 2, continuation: 0, scrollSeq: 1, baseRowCount: 8,
+            rowSplices: [GUIWindowRowSplice(startIndex: 3, deleteCount: 0, insertEntries: [.full(insert)])]
+        )))
+        dispatcher.dispatch(.guiResidentSemantics(data: grown.semantics(
+            rows: rows, splices: [GUIResidentRowSplice(start: 3, deleteCount: 0, insertCount: 1)]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+        let edited = try #require(dispatcher.committedEditorSnapshot)
+        #expect(edited.content(for: 1)?.wrappedResidentAnchor == 5)
+        #expect(resets == 2)
+        #expect(editor.prepareLocalScrollPresentationForTesting(committedSnapshot: edited).presentation == nil)
+    }
+
+    @Test("consecutive wrapped trackpad gestures survive one coalesced echo")
+    func consecutiveWrappedTrackpadGesturesKeepPendingMotion() throws {
+        let gui = GUIState()
+        var resetHandler: ((UInt16) -> Void)?
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 3, guiState: gui,
+            applicationEffectSink: { effect in
+                if case .scrollPresentationReset(let windowId) = effect { resetHandler?(windowId) }
+            }
+        )
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy, reduceMotionEnabled: true)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = editor
+        defer { window.contentView = nil }
+        try #require(editor.window === window)
+        resetHandler = { [weak editor] windowId in editor?.resetScrollPresentation(windowId: windowId) }
+
+        let fixture = WrappedScrollFixture()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: 0)))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let initial = try #require(dispatcher.committedEditorSnapshot)
+        #expect(initial.content(for: 1)?.wrappedResidentAnchor == 0)
+        dispatcher.promoteVisibleEditorSnapshot(initial)
+
+        let point = editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight), to: nil)
+        func wheel(_ phase: NSEvent.Phase, deltaY: CGFloat) {
+            editor.scrollWheel(with: MountedPreciseScrollEvent(
+                locationInWindow: point, windowNumber: window.windowNumber, deltaY: deltaY, phase: phase
+            ))
+        }
+        for expectedRank in 1...2 {
+            wheel(.began, deltaY: -editor.cellHeight)
+            wheel(.ended, deltaY: 0)
+            let pending = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: initial)
+            #expect(pending.unconfirmedLines == expectedRank)
+            #expect(pending.presentation?.offset.y == CGFloat(expectedRank) * pending.cellHeight)
+            dispatcher.promoteVisibleEditorPresentation(snapshot: initial, localTransform: pending.presentation)
+        }
+        let batch = OutboundAction.scrollBatch(windowID: 1, deltaLines: 1, direction: 0)
+        #expect(spy.actions.filter { $0 == batch }.count == 2)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: fixture.delta(top: 0, continuation: 2)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let echo = try #require(dispatcher.committedEditorSnapshot)
+        #expect(echo.frameSeq == 2)
+        #expect(echo.content(for: 1)?.wrappedResidentAnchor == 2)
+
+        let reconciled = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: echo)
+        #expect(reconciled.unconfirmedLines == 0)
+        #expect((reconciled.presentation?.offset.y ?? 0) == 0)
+    }
+
+    @Test("wrapped fold clicks resolve visible resident rows at either gutter edge", arguments: [-1, 1])
+    func wrappedGutterHitUsesDisplayedResidentRank(direction: Int) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 2, guiState: gui)
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 300)
+
+        let fixture = WrappedScrollFixture(groups: [2, 1, 1, 1, 1], fittedRows: 2)
+        let rows = fixture.rows
+        let scroll = fixture.scroll(top: 2, continuation: 0)
+        let rect = GUICellRect(row: 0, col: 0, width: 80, height: 2)
+        let gutterRect = GUICellRect(row: 0, col: 0, width: 7, height: 2)
+        let geometry = GUIPaneGeometry(
+            windowId: 1, totalRect: rect, contentRect: rect,
+            textRect: GUICellRect(row: 0, col: 7, width: 73, height: 2), gutterRect: gutterRect, clipRect: rect,
+            viewport: GUIViewportSummary(
+                top: 2, left: 0, rows: 2, cols: 73, totalLines: UInt32(fixture.groups.count),
+                visualRowOffset: 0, totalVisualRows: UInt32(rows.count)
+            ),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 3),
+            hitRegions: [GUIHitRegion(kind: .gutter, rect: gutterRect, windowId: 1)]
+        )
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: scroll.contentEpoch, cursorRow: 0, cursorCol: 0,
+            cursorShape: .block, rowStoreMode: .sequentialWrapped, rows: rows, selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], paneGeometry: geometry,
+            scrollPresentation: scroll, accessibilityGeneration: 77
+        )
+        let entries = try #require(Wire.GutterEntries.resident(
+            contentEpoch: scroll.contentEpoch, lineCount: UInt32(fixture.groups.count),
+            overrides: (UInt32(1)...4).map { Wire.GutterEntry(bufLine: $0, displayType: .foldStart, signType: .none) }
+        ))
+        let gutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 2, isActive: true, contentWidth: 80,
+            cursorLine: 2, lineNumberStyle: .hybrid, lineNumberWidth: 4, signColWidth: 3, entries: entries
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: rows)))
+        dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        #expect(snapshot.surface(for: 1)?.visibleRowRange == 3..<5)
+        dispatcher.promoteVisibleEditorPresentation(
+            snapshot: snapshot,
+            localTransform: EditorLocalPresentationTransform(
+                windowId: 1, offset: CGPoint(x: editor.cellWidth * 2, y: CGFloat(direction) * editor.cellHeight)
+            )
+        )
+
+        func click(row: CGFloat) throws {
+            let point = NSPoint(
+                x: CoreTextMetalRenderer.gutterLeftMarginPt + editor.cellWidth * 2.5,
+                y: row * editor.cellHeight
+            )
+            editor.mouseDown(with: try #require(mouseEvent(
+                type: .leftMouseDown, locationInWindow: editor.convert(point, to: nil), windowNumber: 0
+            )))
+        }
+        try click(row: direction < 0 ? 0.5 : 1.5)
+        #expect(spy.actions.last == .foldToggleAtLine(windowID: 1, generation: 77, bufferLine: direction < 0 ? 1 : 4))
+        #expect(spy.mouseEventCalls.isEmpty)
+
+        // The inverse transform maps this outside point to a fold inside the old viewport.
+        try click(row: direction < 0 ? 2.5 : -0.5)
+        let toggles = spy.actions.filter { action in
+            if case .foldToggleAtLine = action { return true }
+            return false
+        }
+        #expect(toggles.count == 1)
+    }
+
+    @Test("windowed wrapped wheel sends intent and waits for committed visual motion", arguments: [false, true])
+    func windowedWrappedWheelIsCommitted(precise: Bool) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 3, guiState: gui)
+        let spy = SpyEncoder()
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy)
+        editor.frame = NSRect(x: 0, y: 0, width: 800, height: 300)
+        let fixture = WrappedScrollFixture()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 2, continuation: 0, resident: false)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let start = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorSnapshot(start)
+        let event = MountedPreciseScrollEvent(
+            locationInWindow: editor.convert(NSPoint(x: editor.cellWidth * 8, y: editor.cellHeight), to: nil),
+            windowNumber: 0, deltaY: -editor.cellHeight, phase: precise ? .began : []
+        )
+        event.preciseDeltas = precise
+        editor.scrollWheel(with: event)
+        let pending = editor.prepareLocalScrollPresentationForTesting(committedSnapshot: start)
+        #expect(pending.unconfirmedLines == 0)
+        #expect((pending.presentation?.offset.y ?? 0) == 0)
+        if precise {
+            #expect(spy.actions.last == .scrollBatch(windowID: 1, deltaLines: 1, direction: 0))
+        } else {
+            #expect(spy.mouseEventCalls.last?.button == MOUSE_SCROLL_DOWN)
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 2, continuation: 1, resident: false)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let eof = try #require(dispatcher.committedEditorSnapshot)
+        let surface = try #require(eof.surface(for: 1))
+        #expect(surface.visibleRowRange == 0..<3)
+        #expect(surface.content.rowStore.row(at: 0)?.rowId == 6)
+        #expect((editor.prepareLocalScrollPresentationForTesting(committedSnapshot: eof).presentation?.offset.y ?? 0) == 0)
+    }
+
     @Test("wheel ticks around an undisplayed echo keep moving forward", arguments: [-1, 1])
     func wheelReconciliationUsesRenderedAnchor(direction: Int) throws {
         let gui = GUIState()

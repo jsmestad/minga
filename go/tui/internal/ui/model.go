@@ -829,7 +829,10 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			return cmds
 		}
 		description := "window epoch mismatch"
-		if failure.reason == protocol.RejectInvalidRowSplice {
+		switch failure.reason {
+		case protocol.RejectInvalidRetainedRows:
+			description = "invalid retained rows or resident semantics"
+		case protocol.RejectInvalidRowSplice:
 			description = "invalid row splice"
 		}
 		return m.rejectStaging(cmds, failure.reason, description)
@@ -857,10 +860,22 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		m.renderWork.fullResets++
 	}
 
-	// Valid: replay the buffer atomically through the live mutation path.
+	// Publish the validated row roots; replay only the remaining mutations.
 	generation, seq := m.staging.generation, m.staging.seq
 	nextTextPresentations, unusedTextPresentations := stagedTextPresentations(m.staging.commands)
+	for id := range windowSnapshot.updated {
+		m.publishWindow(windowSnapshot.windows[id], windowSnapshot.stores[id])
+	}
+	if len(windowSnapshot.updated) > 0 {
+		m.refreshCursorFromWindows()
+	}
 	for _, staged := range m.staging.commands {
+		if staged.Kind == protocol.CommandWindowDelta {
+			m.renderWork.rowUpdates += len(staged.Window.RowSplices)
+		}
+		if staged.Kind == protocol.CommandWindowContent || staged.Kind == protocol.CommandWindowDelta {
+			continue
+		}
 		m.applyMutation(staged)
 	}
 	m.scrollAgentHelp(0)
@@ -984,6 +999,12 @@ type windowReferenceSnapshot struct {
 	windows   map[uint16]protocol.WindowContent
 	stores    map[uint16]residentRows
 	semantics map[uint16]*residentSemanticStore
+	updated   map[uint16]bool
+}
+
+type wrappedSemanticBasis struct {
+	hydration bool
+	splices   []protocol.WindowRowSplice
 }
 
 type gutterReferenceFailure struct {
@@ -1005,6 +1026,8 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 	semantics := make(map[uint16]*residentSemanticStore, retained)
 	initializedSemantics := make(map[uint16]bool, retained)
 	pendingSemantics := make(map[uint16]bool)
+	updated := make(map[uint16]bool)
+	wrappedUpdates := make(map[uint16]wrappedSemanticBasis)
 	if m.staging.base != 0 {
 		for id, window := range m.windows {
 			working[id] = window
@@ -1020,17 +1043,24 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 	for _, command := range m.staging.commands {
 		switch command.Kind {
 		case protocol.CommandWindowContent:
-			store, err := newResidentRowsWithMode(command.Window.Rows, command.Window.SequentialRows)
+			store, err := buildWindowRowStore(command.Window)
 			if err != nil {
 				return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
 			}
-			working[command.Window.ID] = command.Window
-			stores[command.Window.ID] = store
-			if !command.Window.SequentialRows {
-				delete(semantics, command.Window.ID)
-				delete(pendingSemantics, command.Window.ID)
-			} else if initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil {
-				pendingSemantics[command.Window.ID] = true
+			id := command.Window.ID
+			window := command.Window
+			window.Rows = compatibilityRows(store)
+			working[id], stores[id], updated[id] = window, store, true
+			if store.mode == wrappedRows {
+				wrappedUpdates[id] = wrappedSemanticBasis{hydration: true}
+			} else {
+				delete(wrappedUpdates, id)
+			}
+			if !store.complete() {
+				delete(semantics, id)
+				delete(pendingSemantics, id)
+			} else if store.mode == wrappedRows || initializedSemantics[id] || semantics[id] != nil {
+				pendingSemantics[id] = true
 			}
 		case protocol.CommandWindowDelta:
 			previous, ok := working[command.Window.ID]
@@ -1045,6 +1075,12 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 				if !exists {
 					return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 				}
+				if store.mode == wrappedRows && len(command.Window.RowSplices) > 0 {
+					if _, pending := wrappedUpdates[command.Window.ID]; pending {
+						return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRetainedRows}
+					}
+					wrappedUpdates[command.Window.ID] = wrappedSemanticBasis{splices: command.Window.RowSplices}
+				}
 				next, refMiss, err := store.splice(command.Window, m.renderWork)
 				if err != nil {
 					if refMiss {
@@ -1053,8 +1089,11 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 					return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
 				}
 				stores[command.Window.ID] = next
-				previous.Rows = compatibilityRows(next)
-				if next.sequential && (initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil) {
+				if len(command.Window.RowSplices) > 0 {
+					previous.Rows = compatibilityRows(next)
+				}
+				if next.complete() && (next.mode == sequentialRows || len(command.Window.RowSplices) > 0) &&
+					(initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil) {
 					pendingSemantics[command.Window.ID] = true
 				}
 			} else if command.Window.Rows != nil {
@@ -1062,31 +1101,34 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 				if !exists {
 					return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 				}
+				if store.mode == wrappedRows {
+					return nil, &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
+				}
 				next, refMiss, err := store.resolveRows(command.Window.Rows)
 				if err != nil {
 					return nil, &windowReferenceFailure{windowID: command.Window.ID, targeted: refMiss}
 				}
 				stores[command.Window.ID] = next
 				previous.Rows = compatibilityRows(next)
-				if next.sequential && (initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil) {
+				if next.complete() && (initializedSemantics[command.Window.ID] || semantics[command.Window.ID] != nil) {
 					pendingSemantics[command.Window.ID] = true
 				}
 			}
-			if command.Window.GeometrySet {
-				previous.Geometry = command.Window.Geometry
-				previous.GeometrySet = true
-			}
-			if command.Window.AccessibilitySet {
-				previous.AccessibilityGeneration = command.Window.AccessibilityGeneration
-				previous.AccessibilitySet = true
-			}
-			working[command.Window.ID] = previous
+			working[command.Window.ID] = mergeWindowDelta(previous, command.Window)
+			updated[command.Window.ID] = true
 		case protocol.CommandResidentSemantics:
 			wire := command.ResidentSemantics
 			window, windowOK := working[wire.WindowID]
 			store, storeOK := stores[wire.WindowID]
 			if !windowOK || !storeOK {
 				return nil, &windowReferenceFailure{windowID: wire.WindowID, reason: protocol.RejectInvalidRetainedRows}
+			}
+			if store.mode == wrappedRows {
+				basis := wrappedUpdates[wire.WindowID]
+				if (basis.hydration && wire.Mode != 0) || !residentSplicesMatch(basis.splices, wire.RowSplices) {
+					return nil, &windowReferenceFailure{windowID: wire.WindowID, reason: protocol.RejectInvalidRetainedRows}
+				}
+				delete(wrappedUpdates, wire.WindowID)
 			}
 			next, err := applyResidentSemantics(semantics[wire.WindowID], wire, window, store)
 			if err != nil {
@@ -1099,8 +1141,18 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 	}
 	for id, window := range working {
 		store := stores[id]
-		if store.sequential && (!window.GeometrySet || store.count() != int(window.Geometry.TotalLines) || window.Geometry.TotalVisualRows != window.Geometry.TotalLines) {
+		if store.complete() && (!window.GeometrySet || store.count() != int(window.Geometry.TotalVisualRows) || store.lineCount() != int(window.Geometry.TotalLines)) {
 			return nil, &windowReferenceFailure{windowID: id, reason: protocol.RejectInvalidRetainedRows}
+		}
+		if store.mode == wrappedRows {
+			anchorRank, anchorOK := store.wrappedAnchor(window.Scroll)
+			maxAnchorRank := max(store.count()-int(window.Geometry.ViewportRows), 0)
+			if !window.ScrollSet || !window.Scroll.Wrapped || !anchorOK || store.count() > maxResidentSemanticRows ||
+				window.Scroll.AnchorTop != window.Geometry.ViewportTop ||
+				uint32(window.Scroll.AnchorVisualRowOffset) != window.Geometry.VisualRowOffset ||
+				anchorRank > maxAnchorRank {
+				return nil, &windowReferenceFailure{windowID: id, reason: protocol.RejectInvalidRetainedRows}
+			}
 		}
 		if semantic, ok := semantics[id]; ok {
 			firstID, lastID := uint64(0), uint64(0)
@@ -1128,7 +1180,19 @@ func (m *Model) validateWindowReferences() (*windowReferenceSnapshot, *windowRef
 	if hasPendingWindow {
 		return nil, &windowReferenceFailure{windowID: pendingWindowID, reason: protocol.RejectInvalidRetainedRows}
 	}
-	return &windowReferenceSnapshot{windows: working, stores: stores, semantics: semantics}, nil
+	return &windowReferenceSnapshot{windows: working, stores: stores, semantics: semantics, updated: updated}, nil
+}
+
+func residentSplicesMatch(text []protocol.WindowRowSplice, semantics []protocol.ResidentRowSplice) bool {
+	if len(text) != len(semantics) {
+		return false
+	}
+	for i, splice := range semantics {
+		if splice.Start != text[i].StartIndex || splice.DeleteCount != text[i].DeleteCount || int(splice.InsertCount) != len(text[i].InsertRows) {
+			return false
+		}
+	}
+	return true
 }
 
 // prepareGutterCandidate resolves resident gutter updates against the frame's
@@ -1164,10 +1228,10 @@ func (m *Model) prepareGutterCandidate(snapshot *windowReferenceSnapshot) (map[u
 		if window.ContentEpoch != next.Resident.ContentEpoch {
 			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectWindowEpoch, description: "gutter content epoch mismatch"}
 		}
-		if !store.sequential {
-			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectInvalidRetainedRows, description: "resident gutter requires sequential rows"}
+		if !store.complete() {
+			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectInvalidRetainedRows, description: "resident gutter requires a complete row store"}
 		}
-		if store.count() != int(next.Resident.LineCount) {
+		if store.lineCount() != int(next.Resident.LineCount) {
 			return nil, &gutterReferenceFailure{windowID: next.WindowID, reason: protocol.RejectInvalidRetainedRows, description: "gutter line count mismatch"}
 		}
 
@@ -1176,21 +1240,15 @@ func (m *Model) prepareGutterCandidate(snapshot *windowReferenceSnapshot) (map[u
 			if m.staging.base == 0 || !ok || previous.Resident == nil || previous.Resident.ContentEpoch != next.Resident.ContentEpoch || previous.Resident.LineCount != next.Resident.LineCount {
 				return nil, &gutterReferenceFailure{windowID: next.WindowID, targeted: true}
 			}
-			next.Resident = &protocol.ResidentGutterEntries{
-				ContentEpoch: previous.Resident.ContentEpoch,
-				LineCount:    previous.Resident.LineCount,
-				Overrides:    previous.Resident.Overrides,
-			}
+			// The cache uses the immutable overrides snapshot as its identity.
+			next.Resident = previous.Resident
 		}
 		candidate[next.WindowID] = next
 	}
 	return candidate, nil
 }
 
-// applyMutation runs a single command through the live per-command mutation
-// switch (#2219). It is the ONE mutation path: both a committed transaction's
-// replay and an out-of-band side-channel write go through here, so there is no
-// shadow Model and no forked mutators.
+// applyMutation handles commands that have no prepared resident snapshot.
 func (m *Model) applyMutation(command protocol.Command) {
 	switch command.Kind {
 	case protocol.CommandSetCursorShape:
@@ -1199,10 +1257,6 @@ func (m *Model) applyMutation(command protocol.Command) {
 		m.title = command.Title
 	case protocol.CommandSetWindowBg:
 		m.bg = command.WindowBg
-	case protocol.CommandWindowContent:
-		m.putWindow(command.Window)
-	case protocol.CommandWindowDelta:
-		m.applyWindowDelta(command.Window)
 	case protocol.CommandTextPresentation:
 		// Presentation identities publish as one complete map at commit. Keeping
 		// this command mutation-free prevents a partial replay from changing input.
@@ -1311,28 +1365,38 @@ func (m *Model) applyExtensionRuntime(payload protocol.ExtensionRuntimePayload) 
 	m.extensionRuntimes[payload.ExtensionID] = payload
 }
 
-func (m *Model) putWindow(window protocol.WindowContent) {
-	store, err := newResidentRowsWithMode(window.Rows, window.SequentialRows)
-	if err != nil {
-		m.removeWindow(window.ID)
-		return
+func buildWindowRowStore(window protocol.WindowContent) (residentRows, error) {
+	mode := windowedRows
+	if window.WrappedResidentRows {
+		if window.SequentialRows {
+			return residentRows{}, fmt.Errorf("conflicting resident row modes")
+		}
+		mode = wrappedRows
+	} else if window.SequentialRows {
+		mode = sequentialRows
+	}
+	return newResidentRows(window.Rows, mode)
+}
+
+func (m *Model) publishWindow(window protocol.WindowContent, store residentRows) {
+	previous, hadWindow := m.residentRows[window.ID]
+	if hadWindow && (previous.mode != store.mode || (store.mode == wrappedRows && previous.root != store.root)) {
+		m.localPresentation.removeWindow(window.ID)
+		m.lineCache.dropWindow(window.ID)
 	}
 	m.residentRows[window.ID] = store
-	window.Rows = compatibilityRows(store)
 	if _, ok := m.windows[window.ID]; !ok {
 		m.windowOrder = append(m.windowOrder, window.ID)
 		sort.Slice(m.windowOrder, func(i, j int) bool { return m.windowOrder[i] < m.windowOrder[j] })
 	}
 	m.reconcilePresentationScroll(window)
+	if window.Scroll.Wrapped {
+		window.Scroll.ResetRequired = false
+	}
 	m.windows[window.ID] = window
-	m.refreshCursorFromWindows()
 }
 
-func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
-	window, ok := m.windows[delta.ID]
-	if !ok || window.ContentEpoch != delta.ContentEpoch {
-		return
-	}
+func mergeWindowDelta(window, delta protocol.WindowContent) protocol.WindowContent {
 	window.CursorRow = delta.CursorRow
 	window.CursorCol = delta.CursorCol
 	window.CursorShape = delta.CursorShape
@@ -1383,41 +1447,15 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.Scroll = protocol.ScrollPresentation{}
 		window.ScrollSet = false
 	}
-	if delta.RowSplicesSet {
-		m.renderWork.rowUpdates += len(delta.RowSplices)
-		store, exists := m.residentRows[delta.ID]
-		if !exists {
-			m.removeWindow(delta.ID)
-			return
-		}
-		next, _, err := store.splice(delta, m.renderWork)
-		if err != nil {
-			m.removeWindow(delta.ID)
-			return
-		}
-		m.residentRows[delta.ID] = next
-		window.Rows = compatibilityRows(next)
-	} else if delta.Rows != nil {
-		store, exists := m.residentRows[delta.ID]
-		if !exists {
-			m.removeWindow(delta.ID)
-			return
-		}
-		next, _, err := store.resolveRows(delta.Rows)
-		if err != nil {
-			m.removeWindow(delta.ID)
-			return
-		}
-		m.residentRows[delta.ID] = next
-		window.Rows = compatibilityRows(next)
-	}
-	m.reconcilePresentationScroll(window)
-	m.windows[delta.ID] = window
-	m.refreshCursorFromWindows()
+	return window
 }
 
 func (m *Model) reconcilePresentationScroll(window protocol.WindowContent) {
-	m.localPresentation.reconcileScroll(window)
+	anchor := 0
+	if window.WrappedResidentRows {
+		anchor, _ = m.residentRows[window.ID].wrappedAnchor(window.Scroll)
+	}
+	m.localPresentation.reconcileScroll(window, anchor)
 }
 
 func (m *Model) refreshCursorFromWindows() {
@@ -1429,17 +1467,6 @@ func (m *Model) refreshCursorFromWindows() {
 		m.cursorRow = window.CursorRow
 		m.cursorCol = window.CursorCol
 		m.cursorShape = window.CursorShape
-	}
-}
-
-func (m *Model) removeWindow(id uint16) {
-	m.discardWindowState(id)
-	m.lineCache.dropWindow(id)
-	for index, windowID := range m.windowOrder {
-		if windowID == id {
-			m.windowOrder = append(m.windowOrder[:index], m.windowOrder[index+1:]...)
-			return
-		}
 	}
 }
 
@@ -1484,7 +1511,11 @@ func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	if !ok {
 		return false
 	}
-	if _, ok := m.windows[windowID]; !ok {
+	window, ok := m.windows[windowID]
+	if !ok {
+		return false
+	}
+	if window.Scroll.Wrapped && (mouse.Button == tea.MouseWheelLeft || mouse.Button == tea.MouseWheelRight) {
 		return false
 	}
 

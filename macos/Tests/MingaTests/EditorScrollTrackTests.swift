@@ -52,6 +52,20 @@ struct EditorScrollTrackTests {
         #expect(abs(thumb.y - (42.5 / 99 * 80)) < 0.001)
     }
 
+    @Test("wrapped rank prediction does not move the logical thumb or enable local dragging")
+    @MainActor func wrappedThumbRemainsLogical() throws {
+        let fixture = WrappedScrollFixture(groups: [3, 1, 4, 2])
+        let content = try fixture.content(top: 1, continuation: 0)
+        let geometry = try #require(content.paneGeometry)
+        let surface = PresentedWindowSurface(content: content, gutter: .none, paneGeometry: geometry, indentGuides: nil)
+        let local = EditorLocalPresentationTransform(windowId: 1, offset: CGPoint(x: 0, y: 40))
+        let metrics = try #require(EditorScrollTrack.metrics(surface: surface, localTransform: local, cellHeight: 20))
+        #expect(metrics.viewportTopLine == 1)
+        #expect(metrics.totalLines == 4)
+        #expect(!metrics.resident)
+        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: content.scrollPresentation, totalLines: 4))
+    }
+
     @Test("clicking the top of the track maps to the first line")
     func topMapsToFirstLine() {
         let line = EditorScrollTrack.line(

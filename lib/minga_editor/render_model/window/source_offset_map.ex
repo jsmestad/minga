@@ -208,10 +208,16 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   @spec composed_utf16_to_source_bytes(t(), [{non_neg_integer(), affinity()}]) ::
           [non_neg_integer()]
   def composed_utf16_to_source_bytes(%__MODULE__{} = map, boundaries) do
-    {source_bytes, _cache} =
-      Enum.map_reduce(boundaries, nil, fn {composed_utf16, affinity}, cache ->
+    {source_bytes, _cursor} =
+      Enum.map_reduce(boundaries, {map.spans, nil}, fn {composed_utf16, affinity},
+                                                       {remaining, cache} ->
         composed_utf16 = min(composed_utf16, map.composed_end_utf16)
-        resolve_composed_boundary(map, composed_utf16, affinity, cache)
+        remaining = skip_before(remaining, composed_utf16)
+
+        {source_byte, cache} =
+          resolve_composed_boundary(map, remaining, composed_utf16, affinity, cache)
+
+        {source_byte, {remaining, cache}}
       end)
 
     source_bytes
@@ -220,40 +226,53 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   @typep inverse_cache ::
            {span(), source_byte :: non_neg_integer(), composed_utf16 :: non_neg_integer()} | nil
 
-  @spec resolve_composed_boundary(t(), non_neg_integer(), affinity(), inverse_cache()) ::
+  @spec resolve_composed_boundary(t(), [span()], non_neg_integer(), affinity(), inverse_cache()) ::
           {non_neg_integer(), inverse_cache()}
-  defp resolve_composed_boundary(%__MODULE__{} = map, composed_utf16, affinity, cache) do
-    case source_span_interior(map.spans, composed_utf16) do
-      nil ->
-        {composed_utf16_to_source_byte(map, composed_utf16, affinity), nil}
+  defp resolve_composed_boundary(
+         %__MODULE__{} = map,
+         [{:source, _, end_byte, first, last} = span | _],
+         composed_utf16,
+         affinity,
+         cache
+       )
+       when composed_utf16 > first and composed_utf16 < last do
+    {scan_start_byte, scan_start_utf16} = inverse_scan_start(span, cache, composed_utf16)
 
-      {:source, _start_byte, end_byte, _start_utf16, _end_utf16} = span ->
-        {scan_start_byte, scan_start_utf16} = inverse_scan_start(span, cache, composed_utf16)
+    {source_byte, snapped_local_utf16} =
+      utf16_to_byte_with_offset(
+        map.source_text,
+        scan_start_byte,
+        end_byte,
+        composed_utf16 - scan_start_utf16,
+        affinity
+      )
 
-        {source_byte, snapped_local_utf16} =
-          utf16_to_byte_with_offset(
-            map.source_text,
-            scan_start_byte,
-            end_byte,
-            composed_utf16 - scan_start_utf16,
-            affinity
-          )
-
-        snapped_utf16 = scan_start_utf16 + snapped_local_utf16
-        {source_byte, {span, source_byte, snapped_utf16}}
-    end
+    {source_byte, {span, source_byte, scan_start_utf16 + snapped_local_utf16}}
   end
 
-  @spec source_span_interior([span()], non_neg_integer()) :: span() | nil
-  defp source_span_interior(spans, composed_utf16) do
-    Enum.find(spans, fn
-      {:source, _start_byte, _end_byte, start_utf16, end_utf16} ->
-        composed_utf16 > start_utf16 and composed_utf16 < end_utf16
-
-      _other ->
-        false
-    end)
+  defp resolve_composed_boundary(map, spans, composed_utf16, affinity, _cache) do
+    candidates = boundary_candidates(spans, map.source_text, composed_utf16, affinity, [])
+    {choose_source_candidate(candidates, map, composed_utf16, affinity), nil}
   end
+
+  defp skip_before([{_, _, _, _, last} | spans], target) when last < target,
+    do: skip_before(spans, target)
+
+  defp skip_before(spans, _target), do: spans
+
+  defp boundary_candidates(
+         [{_, _, _, first, _} = span | rest],
+         text,
+         target,
+         affinity,
+         acc
+       )
+       when first <= target do
+    next = Enum.reverse(source_candidates(span, text, target, affinity), acc)
+    boundary_candidates(rest, text, target, affinity, next)
+  end
+
+  defp boundary_candidates(_spans, _text, _target, _affinity, acc), do: acc
 
   @spec inverse_scan_start(span(), inverse_cache(), non_neg_integer()) ::
           {source_byte :: non_neg_integer(), composed_utf16 :: non_neg_integer()}
@@ -306,6 +325,12 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   @spec source_candidates(span(), String.t(), non_neg_integer(), affinity()) :: [
           non_neg_integer()
         ]
+  defp source_candidates({:source, first, _, first_utf16, _}, _, first_utf16, _),
+    do: [first]
+
+  defp source_candidates({:source, _, last, _, last_utf16}, _, last_utf16, _),
+    do: [last]
+
   defp source_candidates(
          {:source, start_byte, end_byte, start_utf16, end_utf16},
          source_text,
@@ -829,9 +854,10 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   end
 
   @spec utf16_length(String.t()) :: non_neg_integer()
-  defp utf16_length(text) do
-    text
-    |> String.to_charlist()
-    |> Enum.reduce(0, fn codepoint, units -> units + if(codepoint > 0xFFFF, do: 2, else: 1) end)
-  end
+  defp utf16_length(text), do: utf16_length(text, 0)
+
+  defp utf16_length(<<>>, units), do: units
+
+  defp utf16_length(<<cp::utf8, rest::binary>>, units),
+    do: utf16_length(rest, units + if(cp > 0xFFFF, do: 2, else: 1))
 end

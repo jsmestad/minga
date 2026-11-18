@@ -209,7 +209,8 @@ func (m Model) windowRow(window protocol.WindowContent, index int) (protocol.Win
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
 	width, height := m.windowRenderDimensions(window, hasGutter, gutter)
-	width, margin, sb := windowRowComposition(window, width, height)
+	sourceStart := m.presentationSourceStart(window, height)
+	width, margin, sb := windowRowComposition(window, width, height, sourceStart)
 	blankMargin, marginPrefix := "", ""
 	if margin > 0 && !sb.active {
 		blankMargin = lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", margin))
@@ -230,8 +231,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	// committed at the end. This keeps the window's map at the rendered row count
 	// instead of accumulating an entry per (row_id, hash, index) ever seen, which
 	// would grow without bound under vertical scroll.
-	builder := m.lineCache.beginWindowRender(window.ID, context)
-	sourceStart := m.presentationSourceStart(window, height)
+	builder := m.lineCache.beginWindowRender(window.ID, context, gutter.Resident)
 	overscanBefore := m.presentationPayloadStart(window)
 	lines := make([]string, 0, height)
 	if semantics := m.residentSemanticsFor(window); semantics == nil {
@@ -240,6 +240,8 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 			m.renderWork.decorationVisits++
 		}
 	}
+	gutterWidth := gutterRenderWidth(gutter)
+	contentWidth := max(width-gutterWidth, 1)
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
 		m.renderWork.editorRowVisits++
 		trailing := blankMargin
@@ -248,7 +250,8 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		}
 		sourceRowIndex := rowIndex + sourceStart
 		contentRowIndex := sourceRowIndex - overscanBefore
-		key, cacheable := m.lineCacheKeyFor(window, sourceRowIndex)
+		row, hasRow := m.windowRow(window, sourceRowIndex)
+		key, cacheable := m.lineCacheKeyFor(window, row, sourceRowIndex)
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
@@ -258,14 +261,18 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		}
 
 		cursorline, cursorlineBG := m.cursorlineForRow(window, sourceRowIndex, contentRowIndex)
-		contentWidth := width
 		gutterText := ""
 		if hasGutter {
-			gutterText = m.renderGutterEntry(gutter, sourceRowIndex, cursorline, cursorlineBG)
-			contentWidth = max(width-lipgloss.Width(gutterText), 1)
+			entry, ok := presentedGutterEntry(window.WrappedResidentRows, gutter, sourceRowIndex, row, hasRow)
+			gutterText = m.renderGutterEntry(gutter, entry, ok, cursorline, cursorlineBG)
 		}
 
-		content := m.renderSemanticContentRow(window, sourceRowIndex, contentRowIndex, contentWidth)
+		var content string
+		if hasRow {
+			content = m.renderRowAt(window, row, sourceRowIndex, contentRowIndex, contentWidth, cursorline, cursorlineBG)
+		} else {
+			content = m.renderTildeRow(contentWidth, cursorline, cursorlineBG)
+		}
 		line := lipgloss.JoinHorizontal(lipgloss.Top, gutterText, content)
 		if cacheable {
 			m.lineCache.misses++
@@ -287,6 +294,16 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 	if !window.ScrollSet {
 		return 0
 	}
+	if window.Scroll.Wrapped {
+		start := m.presentationPayloadStart(window)
+		if window.WrappedResidentRows {
+			if scroll, ok := m.localPresentation.scrolls[window.ID]; ok && scroll.keysMatch(window.Scroll) {
+				start += scroll.rowOffset
+			}
+			return clampInt(start, 0, m.wrappedResidentMaxTop(window, height))
+		}
+		return start
+	}
 	before, _ := m.presentationPayloadOverscanBounds(window, height)
 	// Scroll-past-end: the last document line can reach the top of the
 	// viewport, so maxStart is rows-1 (not rows-height). Rows past the
@@ -300,6 +317,10 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 		start += scroll.rowOffset
 	}
 	return min(max(start, 0), maxStart)
+}
+
+func (m Model) wrappedResidentMaxTop(window protocol.WindowContent, height int) int {
+	return max(m.windowRowCount(window)-max(height, 1), 0)
 }
 
 func scrollOverscanBefore(scroll protocol.ScrollPresentation) int {
@@ -379,6 +400,10 @@ func (m Model) presentationPayloadStart(window protocol.WindowContent) int {
 		return 0
 	}
 	if store, ok := m.residentRows[window.ID]; ok {
+		if store.mode == wrappedRows {
+			anchor, _ := store.wrappedAnchor(window.Scroll)
+			return anchor
+		}
 		anchor := store.lowerBoundBufferLine(window.Scroll.AnchorTop) + int(window.Scroll.AnchorVisualRowOffset)
 		if anchor < store.count() {
 			return anchor
@@ -415,8 +440,8 @@ func (m Model) windowRenderDimensions(window protocol.WindowContent, hasGutter b
 }
 
 // windowRowComposition honors an authored trailing margin without reserving a second scrollbar cell.
-func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeight int) (width, margin int, sb scrollbarState) {
-	sb = computeScrollbar(window, viewportHeight)
+func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeight, sourceStart int) (width, margin int, sb scrollbarState) {
+	sb = computeScrollbar(window, viewportHeight, sourceStart)
 	if paneWidth <= 1 {
 		sb.active = false
 		return max(paneWidth, 1), 0, sb
@@ -458,9 +483,22 @@ type scrollbarState struct {
 // computeScrollbar derives scrollbar geometry from the window's pane geometry
 // and scroll presentation. The scrollbar is active only when total content
 // exceeds the rendered viewport height.
-func computeScrollbar(window protocol.WindowContent, viewportHeight int) scrollbarState {
+func computeScrollbar(window protocol.WindowContent, viewportHeight, sourceStart int) scrollbarState {
 	if !window.GeometrySet || viewportHeight <= 0 {
 		return scrollbarState{}
+	}
+	if window.Scroll.Wrapped {
+		if !window.WrappedResidentRows {
+			// The payload-relative anchor is not a document position.
+			return scrollbarState{}
+		}
+		total := int(window.Geometry.TotalVisualRows)
+		if total <= viewportHeight {
+			return scrollbarState{}
+		}
+		thumbSize := max(viewportHeight*viewportHeight/total, 1)
+		thumbTop := sourceStart * (viewportHeight - thumbSize) / (total - viewportHeight)
+		return scrollbarState{active: true, thumbTop: thumbTop, thumbBot: thumbTop + thumbSize}
 	}
 	totalRows := int(window.Geometry.TotalLines)
 	if totalRows <= viewportHeight {
@@ -497,11 +535,7 @@ func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) in
 	return max(scrollLeft+scroll.colOffset, 0)
 }
 
-func (m Model) lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lineCacheKey, bool) {
-	row, ok := m.windowRow(window, rowIndex)
-	if !ok {
-		return lineCacheKey{}, false
-	}
+func (m Model) lineCacheKeyFor(window protocol.WindowContent, row protocol.WindowRow, rowIndex int) (lineCacheKey, bool) {
 	if row.ID == 0 || row.ContentHash == 0 {
 		return lineCacheKey{}, false
 	}
@@ -512,15 +546,6 @@ func (m Model) lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lin
 		position = rowIndex
 	}
 	return lineCacheKey{rowID: row.ID, hash: row.ContentHash, rowIndex: position}, true
-}
-
-func (m Model) renderSemanticContentRow(window protocol.WindowContent, sourceRowIndex int, contentRowIndex int, width int) string {
-	cursorline, cursorlineBG := m.cursorlineForRow(window, sourceRowIndex, contentRowIndex)
-	row, ok := m.windowRow(window, sourceRowIndex)
-	if !ok {
-		return m.renderTildeRow(width, cursorline, cursorlineBG)
-	}
-	return m.renderRowAt(window, row, sourceRowIndex, contentRowIndex, width, cursorline, cursorlineBG)
 }
 
 func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) string {
@@ -651,7 +676,7 @@ func (m Model) renderRowAnnotationsAt(window protocol.WindowContent, sourceRowIn
 
 func (m Model) residentSemanticsFor(window protocol.WindowContent) *residentSemanticStore {
 	store, ok := m.residentRows[window.ID]
-	if !ok || !store.sequential {
+	if !ok || !store.complete() {
 		return nil
 	}
 	return m.residentSemantics[window.ID]
@@ -952,9 +977,29 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	return lines
 }
 
-func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int, cursorline bool, cursorlineBG uint32) string {
+func presentedGutterEntry(wrappedResident bool, gutter protocol.Gutter, rank int, row protocol.WindowRow, hasRow bool) (protocol.GutterEntry, bool) {
+	if wrappedResident {
+		if !hasRow || row.Kind != protocol.WindowRowNormal {
+			return protocol.GutterEntry{}, false
+		}
+		if gutter.Resident != nil {
+			return gutter.EntryAt(int(row.BufferLine))
+		}
+	}
+	return gutter.EntryAt(rank)
+}
+
+func gutterRenderWidth(gutter protocol.Gutter) int {
 	width := int(gutter.SignColWidth) + max(int(gutter.LineNumberWidth)-1, 0) + 1
 	if width <= 1 {
+		return 0
+	}
+	return width
+}
+
+func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEntry, hasEntry bool, cursorline bool, cursorlineBG uint32) string {
+	width := gutterRenderWidth(gutter)
+	if width == 0 {
 		return ""
 	}
 	bg := m.editorBackground()
@@ -964,8 +1009,7 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int, cursorlin
 		style = style.Background(clBG)
 		bg = clBG
 	}
-	entry, ok := gutter.EntryAt(rowIndex)
-	if !ok {
+	if !hasEntry {
 		return style.Render(strings.Repeat(" ", width))
 	}
 	if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {

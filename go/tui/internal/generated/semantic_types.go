@@ -375,7 +375,7 @@ type GuiWindowContentGeometry struct {
 	ViewportRows            uint16
 	ViewportCols            uint16
 	ViewportTotalLines      uint32
-	ViewportVisualRowOffset uint16
+	ViewportVisualRowOffset uint32
 	ViewportTotalVisualRows uint32
 	LineNumberWidth         uint16
 	SignColWidth            uint16

@@ -73,6 +73,8 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
     do: %{entry | wrap_line_hash: wrap_line_hash}
 
   @spec reposition(t(), non_neg_integer()) :: t()
+  def reposition(%__MODULE__{buf_line: line} = entry, line), do: entry
+
   def reposition(%__MODULE__{row: row} = entry, buf_line),
     do: %{entry | buf_line: buf_line, row: Row.reposition(row, buf_line)}
 
@@ -82,6 +84,84 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
 
   @spec reused?(t()) :: boolean()
   def reused?(%__MODULE__{reused?: reused?}), do: reused?
+
+  @doc "Uses actual continuation source and synthetic wrap indent for guides."
+  @spec guide_source_line(t()) :: String.t()
+  def guide_source_line(%__MODULE__{row: %Row{row_type: :wrap_continuation}} = entry) do
+    source =
+      binary_part(
+        entry.source_text,
+        entry.source_start_byte,
+        entry.source_end_byte - entry.source_start_byte
+      )
+
+    String.duplicate(" ", entry.indent_width) <> source
+  end
+
+  def guide_source_line(%__MODULE__{source_text: text}), do: text
+
+  @doc "Returns the exclusive source end of the editor character at a grapheme boundary."
+  @spec source_character_end(t(), non_neg_integer()) :: non_neg_integer()
+  def source_character_end(%__MODULE__{source_text: text}, byte) when byte >= byte_size(text),
+    do: byte_size(text)
+
+  def source_character_end(%__MODULE__{source_text: text}, byte) do
+    {grapheme, _rest} = String.next_grapheme(binary_part(text, byte, byte_size(text) - byte))
+    byte + byte_size(grapheme)
+  end
+
+  @doc "Projects a source byte to a display column, including continuation indentation."
+  @spec display_col(t(), non_neg_integer(), SourceOffsetMap.affinity()) :: non_neg_integer()
+  def display_col(%__MODULE__{} = entry, byte, affinity) do
+    composed = SourceOffsetMap.source_to_composed_utf16(entry.source_offset_map, byte, affinity)
+    display_col_at_composed(entry, composed)
+  end
+
+  @doc "Projects an unmodified source slice without scanning the logical line prefix."
+  @spec plain_source_display_col(t(), non_neg_integer()) :: non_neg_integer()
+  def plain_source_display_col(%__MODULE__{} = entry, byte) do
+    length = entry.source_end_byte - entry.source_start_byte
+    text = binary_part(entry.source_text, entry.source_start_byte, length)
+
+    entry.indent_width +
+      display_col_for_byte(text, byte - entry.source_start_byte, 0, 0)
+  end
+
+  defp display_col_for_byte("", _target, _current, col), do: col
+  defp display_col_for_byte(_text, target, current, col) when current >= target, do: col
+
+  defp display_col_for_byte(text, target, current, col) do
+    {grapheme, rest} = String.next_grapheme(text)
+    next = current + byte_size(grapheme)
+
+    if next > target,
+      do: col,
+      else: display_col_for_byte(rest, target, next, col + Unicode.grapheme_width(grapheme))
+  end
+
+  @spec display_col_at_composed(t(), non_neg_integer()) :: non_neg_integer()
+  def display_col_at_composed(%__MODULE__{} = entry, composed) do
+    local = entry.indent_width + composed - entry.composed_start_utf16
+    display_col_for_utf16(entry.row.text, max(local, 0), 0, 0)
+  end
+
+  defp display_col_for_utf16("", _target, _utf16, col), do: col
+  defp display_col_for_utf16(_text, target, utf16, col) when target <= utf16, do: col
+
+  defp display_col_for_utf16(text, target, utf16, col) do
+    {grapheme, rest} = String.next_grapheme(text)
+    next_utf16 = utf16_length(grapheme, utf16)
+
+    if next_utf16 > target,
+      do: col,
+      else:
+        display_col_for_utf16(rest, target, next_utf16, col + Unicode.grapheme_width(grapheme))
+  end
+
+  defp utf16_length(<<>>, units), do: units
+
+  defp utf16_length(<<cp::utf8, rest::binary>>, units),
+    do: utf16_length(rest, units + if(cp > 0xFFFF, do: 2, else: 1))
 
   @doc """
   Resolves a modal pointer target to a character in the displayed row.
