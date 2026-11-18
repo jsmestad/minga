@@ -1602,6 +1602,24 @@ defmodule MingaEditor do
   # ── Agent event dispatch ──────────────────────────────────────────────────
 
   @spec route_agent_event(EditorState.t(), pid(), term()) :: {:noreply, EditorState.t()}
+  defp route_agent_event(
+         state,
+         session,
+         {:connection_input_requested, workspace_id, %{session: session} = target, ref, method}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.offer(state, workspace_id, target, ref, method)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:connection_api_key_saved, workspace_id, %{session: session} = target, ref}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.saved(state, workspace_id, target, ref)
+    {:noreply, schedule_render(state, 16)}
+  end
+
   defp route_agent_event(state, session_pid, event) do
     route_agent_event(state, session_pid, event, agent_event_owner(state, session_pid))
   end

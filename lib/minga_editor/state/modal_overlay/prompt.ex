@@ -42,4 +42,13 @@ defmodule MingaEditor.State.ModalOverlay.Prompt do
   def put_prompt_ui(%__MODULE__{} = payload, %PromptState{} = prompt_ui) do
     %{payload | prompt_ui: prompt_ui}
   end
+
+  @doc "Removes private input from a render-only prompt payload."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{prompt_ui: prompt} = payload) do
+    case PromptState.render_snapshot(prompt) do
+      ^prompt -> payload
+      snapshot -> %{payload | prompt_ui: snapshot}
+    end
+  end
 end

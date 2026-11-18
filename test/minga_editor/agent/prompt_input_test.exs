@@ -6,6 +6,7 @@ defmodule MingaEditor.Agent.PromptInputTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.PromptInput
   alias MingaEditor.Agent.UIState
@@ -25,6 +26,7 @@ defmodule MingaEditor.Agent.PromptInputTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Render
+  alias MingaEditor.State.{Tab, TabBar}
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
 
@@ -391,8 +393,39 @@ defmodule MingaEditor.Agent.PromptInputTest do
   end
 
   test "model picker activation cannot restore an inactive regular buffer index" do
-    {state, regular} = prompt_state("")
+    {state, regular} = prompt_state("", rendering: :disabled)
     source = MingaEditor.UI.Picker.AgentModelSource
+    target = ConnectionTarget.new(self(), "fixture-agent", nil, make_ref())
+
+    connection = %ConnectionSnapshot{
+      target: target,
+      credential_readiness: :configured,
+      model_selection: nil,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
+
+    {tab_bar, owner} =
+      Tab.new_agent(1, "Agent") |> TabBar.new() |> TabBar.add_workspace("Agent", self())
+
+    tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, owner.id)
+
+    shell =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(state.shell_runtime.state, tab_bar)
+
+    state = %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell)
+    }
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        UIState.project_connection(state.workspace.agent_ui, connection)
+      )
+
     {opened, revision} = MingaEditor.PickerUI.open_loading(state, source)
     {:picker, %{picker_ui: picker}} = opened.shell_runtime.state.modal
     assert picker.restore == nil
@@ -401,7 +434,7 @@ defmodule MingaEditor.Agent.PromptInputTest do
     item = %MingaEditor.UI.Picker.Item{
       id: "selected-route",
       label: "Selected model",
-      meta: %{selection: selection}
+      meta: %{workspace_id: owner.id, target: target, intent: {:model, selection}}
     }
 
     candidates = MingaEditor.UI.Picker.Candidate.from_items([item])
@@ -419,8 +452,10 @@ defmodule MingaEditor.Agent.PromptInputTest do
     assert selected.workspace.keymap_scope == :agent
     assert selected.workspace.buffers.active == nil
     assert selected.shell_runtime.state.modal == :none
-    # Selection reaches the real model callback, which truthfully rejects a missing session.
-    assert selected.shell_runtime.state.notice.message =~ "No agent session"
+
+    assert selected.shell_runtime.state.notice.message =~
+             "Connection action is busy or unavailable"
+
     assert {:handled, typed} = AgentPanel.handle_key(selected, ?X, 0)
     assert PromptBuffer.input_text(typed.workspace.agent_ui) == "X"
     assert Buffer.content(regular) == "regular source"
@@ -457,8 +492,8 @@ defmodule MingaEditor.Agent.PromptInputTest do
     assert {chat.prompt_cursor_line, chat.prompt_cursor_col} == output.prompt.projection.cursor
   end
 
-  defp prompt_state(text) do
-    state = TestHelpers.base_state(content: "regular source")
+  defp prompt_state(text, opts \\ []) do
+    state = TestHelpers.base_state([content: "regular source"] ++ opts)
     regular = state.workspace.buffers.active
     Buffer.move_to(regular, {0, 0})
 

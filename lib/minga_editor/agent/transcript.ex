@@ -297,12 +297,12 @@ defmodule MingaEditor.Agent.Transcript do
      """
      Connect a provider
 
-     Add an API key with /auth <provider> <key>, or run /login to sign in with a ChatGPT subscription.
+     Open Models and connections with /model, or run /auth <provider> to open a masked API key prompt. Run /login to sign in with a ChatGPT subscription.
 
      Examples:
-       /auth anthropic <key>
-       /auth openai <key>
-       /auth google <key>
+       /auth anthropic
+       /auth openai
+       /auth google
      """, :info}
   end
 

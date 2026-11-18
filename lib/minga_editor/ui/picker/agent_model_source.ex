@@ -1,11 +1,8 @@
 defmodule MingaEditor.UI.Picker.AgentModelSource do
   @moduledoc """
-  Picker source for exact executable model routes.
+  Shared model and connection actions for one captured workspace and Session target.
 
-  Items retain the immutable resolved selection in opaque picker metadata.
-  Labels identify the model while descriptions expose protocol, endpoint,
-  credential profile, verification status, limits, thinking controls, and
-  favorite state without ever displaying credential values.
+  Catalog work runs outside the Editor. Connection actions remain available when the catalog is empty or unavailable. Every item retains its original target because the picker closes before invoking its selection callback.
   """
 
   @behaviour MingaEditor.UI.Picker.Source
@@ -13,37 +10,193 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session
+  alias MingaAgent.Credentials
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaAgent.Session.ConnectionTarget
+  alias MingaEditor.Agent.ConnectionAction
+  alias MingaEditor.Agent.ConnectionPrompt
+  alias MingaEditor.Agent.ConnectionSetup
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Traditional.Workflow
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   @impl true
   @spec title() :: String.t()
-  def title, do: "Agent Model"
+  def title, do: "Models and connections"
 
   @impl true
   @spec layout() :: MingaEditor.UI.Picker.Source.layout()
   def layout, do: :centered
 
-  @impl true
-  @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(%Context{agent_session: session}) do
-    with true <- is_pid(session),
-         {:ok, candidates} when is_list(candidates) <- fetch_models(session) do
-      Enum.map(candidates, &format_candidate/1)
-    else
-      _ -> []
+  @doc "Opens the shared chooser with immutable origin metadata."
+  @spec open(EditorState.t()) :: EditorState.t()
+  def open(state) do
+    case ConnectionAction.origin(state) do
+      {:ok, workspace_id, connection} ->
+        PickerUI.open(state, __MODULE__, %{
+          workspace_id: workspace_id,
+          target: connection.target,
+          connection: connection,
+          connection_prompt: state.workspace.agent_ui.connection_prompt
+        })
+
+      {:error, :connection_unavailable} ->
+        ui =
+          UIState.push_toast(
+            state.workspace.agent_ui,
+            "Connection details are unavailable. Reopen the agent workspace.",
+            :error
+          )
+
+        Workflow.install_agent_ui(state, ui)
     end
   end
 
   @impl true
-  @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{meta: %{selection: %ModelSelection{} = selection}}, state) do
-    MingaEditor.Commands.Agent.set_model(state, selection)
+  @spec async?() :: boolean()
+  def async?, do: true
+
+  @impl true
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(context) do
+    case async_fetch(context) do
+      {:ok, items, _metadata} -> items
+      {:error, _message} -> []
+    end
   end
 
-  # ── Private ─────────────────────────────────────────────────────────────────
+  @impl true
+  @spec async_fetch(Context.t()) :: {:ok, [Item.t()], map()} | {:error, String.t()}
+  def async_fetch(%Context{
+        picker_ui: %{context: %{target: %ConnectionTarget{} = target} = origin}
+      }) do
+    actions = connection_actions(origin)
+
+    case fetch_models(target.session) do
+      {:ok, models} ->
+        items =
+          Enum.map(models, &with_origin(format_candidate(&1), origin, {:model, &1.selection}))
+
+        {:ok, items ++ actions, %{status: connection_label(origin.connection)}}
+
+      {:error, _reason} ->
+        {:ok, actions,
+         %{status: "Model catalog is unavailable. Connection actions are still available."}}
+    end
+  end
+
+  def async_fetch(_context),
+    do: {:error, "The original connection is unavailable. Reopen the agent workspace."}
+
+  @impl true
+  @spec on_select(Item.t(), EditorState.t()) :: EditorState.t()
+  def on_select(
+        %Item{meta: %{workspace_id: id, target: target, intent: {:connect, method}}},
+        state
+      ),
+      do: ConnectionSetup.start(state, id, target, method)
+
+  def on_select(%Item{meta: %{intent: {:resume, %ConnectionPrompt{} = prompt}}}, state),
+    do: ConnectionSetup.resume(state, prompt)
+
+  def on_select(%Item{meta: %{workspace_id: id, target: target, intent: intent}}, state),
+    do: ConnectionAction.schedule(state, id, target, intent)
 
   @spec fetch_models(pid()) :: {:ok, [ModelCandidate.t()]} | {:error, term()}
-  defp fetch_models(session), do: Session.get_available_models(session)
+  defp fetch_models(session) do
+    Session.get_available_models(session)
+  catch
+    :exit, _reason -> {:error, :session_unavailable}
+  end
+
+  @spec connection_actions(map()) :: [Item.t()]
+  defp connection_actions(%{target: %{session: session}} = origin) when node(session) == node() do
+    setup = setup_actions()
+
+    retry = [
+      {"Retry current connection", :retry, "Recheck credentials without sending your draft."}
+    ]
+
+    cancel =
+      case origin.connection.operation do
+        {:connecting, ref} ->
+          [
+            {"Cancel connection setup", {:cancel, ref},
+             "Cancel only this offered setup operation."}
+          ]
+
+        :idle ->
+          []
+      end
+
+    resume = resume_action(origin.connection_prompt, origin.connection)
+
+    Enum.map(setup ++ retry ++ cancel ++ resume, fn {label, intent, description} ->
+      with_origin(
+        %Item{
+          id: {:connection, intent},
+          label: label,
+          description: description,
+          search_text: label
+        },
+        origin,
+        intent
+      )
+    end)
+  end
+
+  defp connection_actions(_remote), do: []
+
+  @spec resume_action(ConnectionPrompt.t() | nil, ConnectionSnapshot.t()) :: [
+          {String.t(), term(), String.t()}
+        ]
+  defp resume_action(%ConnectionPrompt{} = prompt, connection) do
+    if ConnectionPrompt.current?(prompt, connection) do
+      [
+        {"Resume API key entry", {:resume, prompt},
+         "Open a blank masked prompt for this operation."}
+      ]
+    else
+      []
+    end
+  end
+
+  defp resume_action(nil, _connection), do: []
+
+  @spec setup_actions() :: [{String.t(), term(), String.t()}]
+  defp setup_actions do
+    Credentials.known_providers()
+    |> Enum.filter(&(Credentials.env_var_for(&1) != nil))
+    |> Enum.map(fn provider ->
+      {"Connect #{provider} with API key", {:connect, {:api_key, provider}},
+       "Masked input keeps your draft."}
+    end)
+  end
+
+  @spec with_origin(Item.t(), map(), term()) :: Item.t()
+  defp with_origin(item, origin, intent) do
+    %{item | meta: %{workspace_id: origin.workspace_id, target: origin.target, intent: intent}}
+  end
+
+  @spec connection_label(ConnectionSnapshot.t()) :: String.t()
+  defp connection_label(connection),
+    do: connection |> ConnectionSnapshot.status() |> status_label()
+
+  @spec status_label(atom()) :: String.t()
+  defp status_label(:unconfigured),
+    do: "Choose a model or connect a provider. Your draft will not be sent."
+
+  defp status_label(:checking),
+    do: "Checking local credentials. No provider request is made by this menu."
+
+  defp status_label(:connecting), do: "Connecting. Your draft will not be sent."
+
+  defp status_label(:ready),
+    do: "Provider is running. Selecting a model does not send your draft."
+
+  defp status_label(_status), do: "Connection needs attention. Connect a provider or retry."
 
   @spec format_candidate(ModelCandidate.t()) :: Item.t()
   defp format_candidate(%ModelCandidate{selection: selection} = candidate) do
@@ -78,8 +231,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       search_text:
         "#{route.model_provider} #{route.model_id} #{route.execution.wire_protocol} #{endpoint} #{credential}",
       two_line: true,
-      active: candidate.current,
-      meta: %{selection: selection}
+      active: candidate.current
     }
   end
 

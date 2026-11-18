@@ -583,6 +583,7 @@ defmodule MingaAgent.SessionLifecycleTest do
     test "stops receiving events after unsubscribe" do
       session = start_subscribed_session()
       assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
+      assert_receive {:agent_event, ^session, {:connection_changed, _snapshot}}
 
       :ok = Session.unsubscribe(session)
 
