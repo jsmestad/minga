@@ -4,9 +4,10 @@ import copy
 import importlib.machinery
 import importlib.util
 import json
+import os
 import plistlib
 import runpy
-import shutil
+import shlex
 import signal
 import sys
 import tempfile
@@ -33,8 +34,12 @@ def geometry_fixture(directory, width=220):
 
 def geometry_process_fixture(directory):
     observer, host = directory / "observer", directory / "MingaTestHost"
+    _, fixture = GEOMETRY_FIXTURE_PATH.read_text().split("\n", 1)
+    # The host launches with a scrubbed environment. Both children must use this test's Python.
+    # The shell prelude is an inert docstring when Python reads the same file.
+    launcher = f'#!/bin/sh\n""":"\nexec {shlex.quote(sys.executable)} "$0" "$@"\n":"""\n'
     for destination in (observer, host):
-        shutil.copyfile(GEOMETRY_FIXTURE_PATH, destination)
+        destination.write_text(launcher + fixture)
         destination.chmod(0o755)
     return observer, host
 
@@ -232,11 +237,16 @@ class MacOSUnitResultsTest(unittest.TestCase):
             (base / "early-observer-exit").touch()
             (base / "ignore-host-shutdown").touch()
             receipt = {"run_id": "early-exit", "width": 220, "validation_errors": []}
-            native.run_geometry_case(base / "case", receipt, observer, host, lambda: None, timeout=10, grace=0.1)
+            with patch.dict(os.environ, {"PATH": ""}):
+                native.run_geometry_case(base / "case", receipt, observer, host, lambda: None, timeout=10, grace=0.1)
             self.assertFalse(receipt["success"])
             self.assertTrue(receipt["cleanup_verified"])
-            self.assertEqual(receipt["cleanup"]["observer"]["return_code"], 7)
-            self.assertEqual(receipt["cleanup"]["host"]["return_code"], -signal.SIGKILL)
+            logs = "\n".join(
+                f"{role}: {(base / 'case' / (role + '.log')).read_text()}"
+                for role in ("host", "observer")
+            )
+            self.assertEqual(receipt["cleanup"]["observer"]["return_code"], 7, logs)
+            self.assertEqual(receipt["cleanup"]["host"]["return_code"], -signal.SIGKILL, logs)
 
     def test_cancellation_between_launches_reaps_the_host_without_starting_an_observer(self):
         with tempfile.TemporaryDirectory() as directory:
