@@ -431,6 +431,35 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
     assert target(session) == previous
   end
 
+  test "a first native model activation retires setup for the unconfigured target", context do
+    intent = ModelSelectionFixture.model_intent()
+
+    session =
+      start_session(context,
+        provider: MingaAgent.Providers.Native,
+        provider_opts: [
+          model: intent,
+          credential_opts: context.credential_opts,
+          config: %MingaAgent.Config{},
+          model_resolver_opts: resolver_opts()
+        ]
+      )
+
+    original = target(session)
+    assert original.selection_id == nil
+    assert {:ok, ref} = Session.begin_connection(session, original, {:api_key, "openai"}, self())
+    worker = cancellation_worker()
+    assert :ok = Session.register_connection_worker(session, original, ref, worker)
+    assert :ok = Credentials.store("openai", "synthetic-configured", context.credential_opts)
+    assert :ok = Session.set_model_for_target(session, original, intent)
+    assert_receive {:worker_cancelled, ^worker, ^ref}
+
+    assert %{target: activated, operation: :idle} = Session.editor_snapshot(session).connection
+    assert activated.selection_id != nil
+    assert activated.epoch != original.epoch
+    assert Session.cancel_connection(session, original, ref) == {:error, :stale_target}
+  end
+
   test "structured provider auth failure differs from ordinary tool failure", context do
     session = start_session(context)
 

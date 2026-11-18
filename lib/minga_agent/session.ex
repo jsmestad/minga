@@ -5861,7 +5861,7 @@ defmodule MingaAgent.Session do
 
     case start_loaded_provider(prepared) do
       {:ok, staged} ->
-        case commit_model_selection(staged, state.model_selection, selection) do
+        case commit_model_selection(staged, state, selection) do
           {:ok, committed} ->
             {:ok, finish_loaded_provider_attachment(committed, state.provider)}
 
@@ -5876,18 +5876,18 @@ defmodule MingaAgent.Session do
   end
 
   defp do_apply_resolved_model_selection(state, selection) do
-    commit_model_selection(state, state.model_selection, selection)
+    commit_model_selection(state, state, selection)
   end
 
-  @spec commit_model_selection(state(), ModelSelection.t() | nil, ModelSelection.t()) ::
+  @spec commit_model_selection(state(), state(), ModelSelection.t()) ::
           {:ok, state()} | {:error, term()}
   defp commit_model_selection(state, previous, selection) do
-    operation = {:model, selection, model_transition(previous, selection)}
+    operation = {:model, selection, model_transition(previous.model_selection, selection)}
 
     with {:ok, committed, :ok} <- refresh_continuation_prefix(state, operation) do
       {:ok,
        committed
-       |> commit_connection_selection(state)
+       |> commit_connection_selection(previous)
        |> install_credential_readiness(:configured)
        |> broadcast_credential_readiness()
        |> publish_connection()}

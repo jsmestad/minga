@@ -179,7 +179,9 @@ defmodule MingaEditor.Agent.ConnectionInput do
        ) do
     receive do
       {:api_key_worker_binding, ^operation_ref, :ok} ->
-        Session.commit_api_key(session, target, operation_ref, provider, secret)
+        with :ok <- prepare_model_catalog() do
+          Session.commit_api_key(session, target, operation_ref, provider, secret)
+        end
 
       {:api_key_worker_binding, ^operation_ref, {:error, reason}} ->
         {:error, reason}
@@ -192,5 +194,14 @@ defmodule MingaEditor.Agent.ConnectionInput do
   catch
     :exit, {:timeout, _call} -> {:error, :credential_result_unknown}
     :exit, _reason -> {:error, :session_unavailable}
+  end
+
+  @spec prepare_model_catalog() :: :ok | {:error, :model_catalog_unavailable}
+  defp prepare_model_catalog do
+    # First use parses the bundled catalog. Do it in the authorized worker before Session refreshes model readiness.
+    _providers = LLMDB.providers()
+    :ok
+  rescue
+    LLMDB.LoadError -> {:error, :model_catalog_unavailable}
   end
 end

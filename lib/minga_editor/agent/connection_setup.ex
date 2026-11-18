@@ -396,6 +396,9 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   defp result_message(:credential_store_failed),
     do: "Could not save the API key. The previous key was kept."
 
+  defp result_message(:model_catalog_unavailable),
+    do: "Could not load the model catalog. The API key was not changed."
+
   defp result_message(:stale_target),
     do: "The conversation or model changed. Open Models and connections to try again."
 
