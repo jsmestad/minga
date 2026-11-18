@@ -27,7 +27,9 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.RenderModel.Window.ResidentBuild
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Renderer.MixedLayout
   alias MingaEditor.Renderer.SearchHighlight
+  alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.WrapLayout
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Input
@@ -194,7 +196,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec safe_scroll_window(state(), Window.id(), Window.t(), Layout.window_layout(), boolean()) ::
           {:ok, WindowScroll.t()} | :skip
   defp safe_scroll_window(state, win_id, window, win_layout, is_active) do
-    {:ok, scroll_window(state, win_id, window, win_layout, is_active)}
+    {:ok, scroll_window(state, window, win_layout, is_active)}
   catch
     :exit, _ ->
       Minga.Log.debug(:render, "[scroll] skipped window #{win_id}: buffer process dead")
@@ -203,12 +205,11 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
   @spec scroll_window(
           state(),
-          Window.id(),
           Window.t(),
           Layout.window_layout(),
           boolean()
         ) :: WindowScroll.t()
-  defp scroll_window(state, win_id, window, win_layout, is_active) do
+  defp scroll_window(state, window, win_layout, is_active) do
     {_row_off, _col_off, content_width, content_height} = win_layout.content
 
     # Cursor: active window reads live from buffer; inactive uses stored
@@ -263,8 +264,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         viewport
       end
 
-    visible_rows = Viewport.content_rows(viewport)
-
     # Map viewport visible range back to buffer lines
     {vis_first, _vis_last} = Viewport.visible_range(viewport)
 
@@ -284,16 +283,129 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     content_w = max(viewport.cols - gutter_w, 1)
 
-    # Compute which buffer lines are visible at each screen row.
-    # The DisplayMap merges per-window folds, decoration folds, and virtual
-    # lines into a unified mapping. Falls back to VisibleLines when there
-    # are no decoration folds or virtual lines (pure window-fold case).
-    decorations = fetch_decorations(state, buffer_pid(window))
+    buffer = buffer_pid(window)
+    decorations = fetch_decorations(state, buffer)
+
+    scroll = %WindowScroll{
+      window: window,
+      win_layout: win_layout,
+      is_active: is_active,
+      viewport: viewport,
+      cursor_line: cursor_line,
+      cursor_byte_col: cursor_byte_col,
+      cursor_col: 0,
+      first_line: first_line,
+      lines: [],
+      snapshot: base_snapshot,
+      gutter_w: gutter_w,
+      content_w: content_w,
+      has_sign_column: has_sign_column,
+      preview_matches: [],
+      line_number_style: line_number_style,
+      wrap_on: wrap_on,
+      width_oracle: width_oracle,
+      git_signs: ContentHelpers.signs_for_window(state, window)
+    }
+
+    if wrap_on and DisplayMap.required?(fold_map, decorations) do
+      layout_snapshot =
+        if changed_snapshot,
+          do: fetch_at_version!(buffer, expected_version, 0, 0),
+          else: base_snapshot
+
+      mixed_source(
+        state,
+        %{scroll | snapshot: layout_snapshot},
+        decorations,
+        follow_cursor,
+        scroll_margin
+      )
+    else
+      direct_source(
+        state,
+        scroll,
+        decorations,
+        {expected_version, changed_snapshot},
+        follow_cursor,
+        scroll_margin
+      )
+    end
+  end
+
+  defp mixed_source(state, scroll, decorations, follow_cursor, scroll_margin) do
+    cursor = {scroll.cursor_line, scroll.cursor_byte_col}
+    motion = if scroll.is_active and follow_cursor, do: {:follow, scroll_margin}, else: 0
+    buffer = buffer_pid(scroll.window)
+
+    case MixedLayout.page(
+           buffer,
+           scroll.snapshot,
+           {scroll.window.fold_map, decorations},
+           scroll.viewport,
+           {scroll.content_w, scroll.width_oracle, cursor},
+           motion,
+           preview_owner(state, scroll.is_active),
+           Window.text_presentation(scroll.window)
+         ) do
+      {:ok, %DisplayMap{entries: [{first, _} | _]} = page, viewport, _, matches} ->
+        report_line_fetch(scroll.window.id, buffer, page.source_fetch_count, false)
+        text = DisplayMap.source_text(page, scroll.cursor_line)
+
+        %{
+          scroll
+          | window: Window.set_residence_armed(scroll.window, false),
+            viewport:
+              scroll_horizontal(viewport, scroll.cursor_line, 0, true, scroll.content_w, 0),
+            cursor_col: Unicode.display_col(text, scroll.cursor_byte_col),
+            first_line: first,
+            visible_line_map: page,
+            preview_matches: matches
+        }
+
+      :stale ->
+        raise MingaEditor.Renderer.StaleBufferError,
+          buffer: buffer,
+          expected_version: scroll.snapshot.version
+    end
+  end
+
+  defp report_line_fetch(win_id, buffer, count, full_residence?) do
+    Minga.Telemetry.execute(
+      [:minga, :render, :line_fetch],
+      %{lines_fetched: count},
+      %{window_id: win_id, buffer: buffer, full_residence?: full_residence?}
+    )
+  end
+
+  defp direct_source(
+         state,
+         %WindowScroll{} = scroll,
+         decorations,
+         {expected_version, changed_snapshot},
+         follow_cursor,
+         scroll_margin
+       ) do
+    %WindowScroll{
+      window: window,
+      is_active: is_active,
+      viewport: viewport,
+      cursor_line: cursor_line,
+      cursor_byte_col: cursor_byte_col,
+      first_line: first_line,
+      snapshot: base_snapshot,
+      content_w: content_w,
+      wrap_on: wrap_on,
+      width_oracle: width_oracle
+    } = scroll
+
+    fold_map = window.fold_map
+    line_count = base_snapshot.line_count
+    visible_rows = Viewport.content_rows(viewport)
 
     # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
     # If decorations push the cursor off-screen, adjust first_line and recompute.
     {first_line, visible_line_map} =
-      if DisplayMap.required?(fold_map, decorations) do
+      if not wrap_on and DisplayMap.required?(fold_map, decorations) do
         compute_display_map_with_cursor_check(
           fold_map,
           decorations,
@@ -307,10 +419,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         {first_line, nil}
       end
 
-    # First paint uses a bounded slice. Wrapped residency needs a visual-row
-    # admission check on the following frame; folded panes stay windowed.
-    wrap_on = wrap_on and is_nil(visible_line_map)
-
+    # Mixed wrapped panes took the separate, windowed path above.
     {viewport, first_line} =
       layout_anchor(viewport, first_line, visible_line_map, wrap_on, line_count)
 
@@ -347,16 +456,12 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       )
 
     lines = snapshot.lines
-
-    Minga.Telemetry.execute(
-      [:minga, :render, :line_fetch],
-      %{lines_fetched: length(lines)},
-      %{window_id: win_id, buffer: buffer_pid(window), full_residence?: full_residence?}
-    )
+    report_line_fetch(window.id, buffer_pid(window), length(lines), full_residence?)
 
     # Cursor byte → display col
     {viewport, first_line, snapshot, lines, _cursor_line_text, cursor_col} =
       maybe_adjust_wrapped_viewport(%{
+        window: window,
         wrap_on: wrap_on,
         is_active: is_active,
         follow_cursor: follow_cursor,
@@ -372,7 +477,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         scroll_margin: scroll_margin,
         fetch_count: fetch_count,
         oracle: width_oracle,
-        preview: preview_owner(state, is_active),
+        preview: preview_owner(state, is_active and wrap_on),
         preserve_anchor?: preserve_resident_anchor?(full_residence?, is_active, window, viewport)
       })
 
@@ -389,29 +494,19 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     {lines, preview_matches} = preview_lines(state, is_active, lines, first_line)
 
-    %WindowScroll{
-      window: window,
-      win_layout: win_layout,
-      is_active: is_active,
-      viewport: viewport,
-      cursor_line: cursor_line,
-      cursor_byte_col: cursor_byte_col,
-      cursor_col: cursor_col,
-      first_line: first_line,
-      lines: lines,
-      snapshot: snapshot,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      has_sign_column: has_sign_column,
-      preview_matches: preview_matches,
-      line_number_style: line_number_style,
-      wrap_on: wrap_on,
-      width_oracle: width_oracle,
-      git_signs: ContentHelpers.signs_for_window(state, window),
-      visible_line_map: visible_line_map,
-      total_visual_rows: total_visual_rows,
-      visible_row_start_index: visible_row_start_index,
-      full_residence: full_residence?
+    %{
+      scroll
+      | window: window,
+        viewport: viewport,
+        cursor_col: cursor_col,
+        first_line: first_line,
+        lines: lines,
+        snapshot: snapshot,
+        preview_matches: preview_matches,
+        visible_line_map: visible_line_map,
+        total_visual_rows: total_visual_rows,
+        visible_row_start_index: visible_row_start_index,
+        full_residence: full_residence?
     }
   end
 
@@ -438,7 +533,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
   defp preserve_resident_anchor?(false, _active?, _window, _viewport), do: false
 
-  defp preview_owner(state, true), do: state
+  defp preview_owner(state, true), do: if(SearchHighlight.substitute_preview?(state), do: state)
   defp preview_owner(_state, false), do: nil
 
   defp preview_lines(state, true, lines, first),
@@ -782,6 +877,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       scroll.content_w,
       scroll.gutter_w,
       scroll.wrap_on,
+      match?(%DisplayMap{}, scroll.visible_line_map),
       scroll.line_number_style,
       scroll.viewport.rows,
       scroll.viewport.cols,
@@ -858,7 +954,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {Viewport.put_top(viewport, top), top}
   end
 
-  defp layout_anchor(viewport, first, _display_map, true, _line_count), do: {viewport, first}
+  defp layout_anchor(viewport, first, _display_map, true, _line_count),
+    do: {Viewport.source_rows(viewport), first}
 
   defp layout_anchor(viewport, _first, nil, false, line_count) do
     viewport = viewport |> Viewport.put_top(viewport.top) |> Viewport.clamp_top_to_eof(line_count)
@@ -874,6 +971,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           {Viewport.t(), non_neg_integer(), RenderSnapshot.t(), [String.t()], String.t(),
            non_neg_integer()}
   defp present_free_scroll_wrapped_viewport(%{
+         window: window,
          viewport: viewport,
          first_line: first_line,
          lines: lines,
@@ -886,14 +984,16 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
          oracle: oracle,
          preview: preview
        }) do
-    counts = wrapped_visible_counts(snapshot, lines, width, oracle, cursor_line, preview)
+    retained = retained_wrap_counts(window, snapshot, width, oracle, cursor_line, preview)
+    counts = wrapped_visible_counts(snapshot, width, oracle, cursor_line, preview, retained)
 
     {measured_first, counts} =
       if first_line > 0 and first_line + length(lines) >= snapshot.line_count and
            Enum.sum(counts) < visible_rows do
         earlier = max(first_line - visible_rows + 1, 0)
-        page = fetch_at_version!(buf, snapshot.version, earlier, snapshot.line_count - earlier)
-        {earlier, wrapped_visible_counts(page, page.lines, width, oracle, cursor_line, preview)}
+        prefix = fetch_at_version!(buf, snapshot.version, earlier, first_line - earlier)
+        preceding = wrapped_visible_counts(prefix, width, oracle, cursor_line, preview, retained)
+        {earlier, preceding ++ counts}
       else
         {first_line, counts}
       end
@@ -916,19 +1016,30 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {viewport, top, snapshot, snapshot.lines, text, Unicode.display_col(text, cursor_byte_col)}
   end
 
+  defp retained_wrap_counts(window, snapshot, width, oracle, cursor_line, nil) do
+    TextPresentation.matching_wrap_counts(
+      Window.text_presentation(window),
+      buffer_pid(window),
+      snapshot.version,
+      WrapLayout.basis(snapshot, width, oracle, cursor_line)
+    )
+  end
+
+  defp retained_wrap_counts(_window, _snapshot, _width, _oracle, _cursor_line, _preview), do: %{}
+
   @spec wrapped_visible_counts(
           RenderSnapshot.t(),
-          [String.t()],
           pos_integer(),
           WidthOracle.t(),
           non_neg_integer(),
-          state() | nil
+          state() | nil,
+          WrapLayout.counts()
         ) :: [pos_integer()]
-  defp wrapped_visible_counts(snapshot, lines, width, oracle, cursor_line, preview) do
+  defp wrapped_visible_counts(snapshot, width, oracle, cursor_line, preview, retained) do
     {lines, _matches} =
-      SearchHighlight.maybe_substitute_preview(preview, lines, snapshot.first_line)
+      SearchHighlight.maybe_substitute_preview(preview, snapshot.lines, snapshot.first_line)
 
-    WrapLayout.row_counts(snapshot, width, oracle, cursor_line, lines)
+    WrapLayout.row_counts(snapshot, width, oracle, cursor_line, lines, retained)
   end
 
   @spec adjust_wrapped_viewport_from_map(map()) ::
@@ -1184,7 +1295,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     |> Map.put(:left, saved_left)
   end
 
-  @spec fetch_decorations(term(), pid()) :: Decorations.t()
+  @spec fetch_decorations(state(), pid()) :: Decorations.t()
   defp fetch_decorations(state, buf) do
     decorations = BufferDecorations.compose(state, buf)
 

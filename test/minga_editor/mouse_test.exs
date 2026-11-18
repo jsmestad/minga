@@ -649,6 +649,46 @@ defmodule MingaEditor.MouseTest do
              )
     end
 
+    test "wrapped fold gutter hits first segments and summaries, not continuation rows" do
+      {state, buffer} =
+        start_mouse_state("#{String.duplicate("a", 40)}\nfold start\nfold end\nafter\nlast",
+          width: 20
+        )
+
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      state = set_active_fold_ranges(state, [FoldRange.new!(0, 4), FoldRange.new!(1, 2)])
+      state = fold_active_window_at(state, 1)
+      {row, col} = active_content_origin(state)
+      fold_col = col + MingaEditor.Renderer.Gutter.fold_column_offset()
+
+      assert %{fold_map: closed} = SessionState.active_window_struct(state.workspace)
+      assert FoldMap.fold_start?(closed, 1)
+
+      # The first source line occupies three rows; only its first row has a fold control.
+      for offset <- 1..2 do
+        clicked = mouse(state, row + offset, fold_col, :left, :press)
+        assert %{fold_map: ^closed} = SessionState.active_window_struct(clicked.workspace)
+        assert {0, _byte} = BufferProcess.cursor(buffer)
+      end
+
+      head_clicked = mouse(state, row, fold_col, :left, :press)
+      assert %{fold_map: head_fold} = SessionState.active_window_struct(head_clicked.workspace)
+      assert FoldMap.fold_start?(head_fold, 0)
+
+      summary_clicked = mouse(state, row + 3, fold_col, :left, :press)
+      assert %{fold_map: opened} = SessionState.active_window_struct(summary_clicked.workspace)
+      assert FoldMap.empty?(opened)
+
+      # With no closed folds, the same wrapped geometry still puts the control on row three.
+      opened_state = install_mouse(summary_clicked, state.workspace.mouse)
+      source_clicked = mouse(opened_state, row + 3, fold_col, :left, :press)
+      assert %{fold_map: reclosed} = SessionState.active_window_struct(source_clicked.workspace)
+      assert FoldMap.fold_start?(reclosed, 1)
+    end
+
     test "clicking a decoration fold indicator opens the folded region" do
       {state, buffer} = start_mouse_state("agent output\nline two\nline three")
 

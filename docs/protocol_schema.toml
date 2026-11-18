@@ -75,7 +75,8 @@ version = "2.0.0"
 # protocol_version 35 adds grouped wrapped resident rows (0x80 header bit 3)
 # and effective wrapped scrolling (scroll presentation flags bit 1). Pane
 # geometry uses a u32 continuation offset for oversized windowed lines.
-protocol_version = 35
+# protocol_version 36 adds source-presentation-bound absolute visual scroll targets.
+protocol_version = 36
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1423,6 +1424,11 @@ value = 0x67
 [[gui_actions]]
 name = "agent_tool_approval"
 value = 0x68
+
+# window_id(u16) + displayed text presentation ID(u64) + absolute visual rank(u32).
+[[gui_actions]]
+name = "scroll_to_visual_rank"
+value = 0x69
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #

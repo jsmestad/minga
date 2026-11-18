@@ -28,6 +28,25 @@ defmodule MingaEditor.Renderer.TextPresentations do
   @doc "Retains every presentation carried by one acknowledged pipeline output."
   @spec acknowledge_output(t(), Input.t()) :: t()
   def acknowledge_output(%__MODULE__{} = state, %Input{} = output) do
+    presentations = output_presentations(output)
+    state = acknowledge(state, presentations)
+    retain_current_windows(state, presentations)
+  end
+
+  @doc "Replaces current scroll geometry for a locally completed frame without retaining input leases."
+  @spec commit_local_output(t(), Input.t()) :: t()
+  def commit_local_output(%__MODULE__{} = state, %Input{} = output) do
+    presentations = output_presentations(output)
+    index = Enum.reduce(presentations, state.index, &TextInteractionIndex.publish_current(&2, &1))
+    retain_current_windows(%{state | index: index}, presentations)
+  end
+
+  defp retain_current_windows(state, presentations) do
+    window_ids = MapSet.new(presentations, & &1.window_id)
+    %{state | index: TextInteractionIndex.retain_current_windows(state.index, window_ids)}
+  end
+
+  defp output_presentations(output) do
     presentations =
       Enum.flat_map(output.windows.map, fn
         {_window_id,
@@ -38,15 +57,10 @@ defmodule MingaEditor.Renderer.TextPresentations do
           []
       end)
 
-    presentations =
-      case output.prompt do
-        nil -> presentations
-        %{presentation: presentation} -> [presentation | presentations]
-      end
-
-    state = acknowledge(state, presentations)
-    window_ids = MapSet.new(presentations, & &1.window_id)
-    %{state | index: TextInteractionIndex.retain_current_windows(state.index, window_ids)}
+    case output.prompt do
+      nil -> presentations
+      %{presentation: presentation} -> [presentation | presentations]
+    end
   end
 
   @doc "Retains acknowledged presentation candidates without changing visibility."
@@ -60,7 +74,8 @@ defmodule MingaEditor.Renderer.TextPresentations do
       else
         %{
           acc
-          | leases: Map.put(acc.leases, presentation_key, presentation),
+          | leases:
+              Map.put(acc.leases, presentation_key, TextPresentation.for_lease(presentation)),
             index: TextInteractionIndex.publish(acc.index, presentation)
         }
       end

@@ -1271,6 +1271,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x66 | agent_prompt_fit | window_id(2) + generation(8) + columns(2) + max_rows(2) | Report the maximum physical inner text allocation for committed prompt window 65534 |
 | 0x67 | agent_prompt_scroll | window_id(2) + generation(8) + delta_rows(4, signed) | Scroll the committed prompt by wrapped visual rows; positive is down |
 | 0x68 | agent_tool_approval | session_id(string16) + request_id(string16) + tool_call_id(string16) + decision(1) | Resolve only the displayed session's admitted request and pending tool call |
+| 0x69 | scroll_to_visual_rank | window_id(2) + presentation_id(8) + rank(4) | Scroll the named wrapped resident pane to a visual row without moving its cursor or focus. The BEAM ignores stale presentations. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

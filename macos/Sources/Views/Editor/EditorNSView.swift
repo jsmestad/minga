@@ -324,6 +324,8 @@ final class EditorNSView: MTKView {
         scrollFadeWorkItem?.cancel()
         scrollFadeWorkItem = nil
         scrollIndicatorDragOffset = nil
+        scrollIndicatorTarget = nil
+        isDraggingScrollIndicator = false
         spaceGraceTimer?.cancel()
         spaceGraceTimer = nil
         cancelResizeFlushTask()
@@ -579,8 +581,13 @@ final class EditorNSView: MTKView {
     /// keep the round-trip `sendScrollToLine` path (`thumbDragSession` stays nil). It outlives the
     /// button-held phase until the BEAM's echo-marked commit reaches the target or an authoritative interrupt or watchdog fires.
     private var thumbDragSession: ThumbDragSession?
-    /// Pane identity captured at scrollbar press, retained through throttled reconciliation.
-    private var scrollIndicatorTarget: (windowID: UInt16, generation: UInt64)?
+    /// The pane and coordinate basis at press, not the lease (which follows the display).
+    private struct ScrollIndicatorTarget {
+        let windowID: UInt16
+        let generation: UInt64
+        let visualBasis: ThumbDragSession.Committed?
+    }
+    private var scrollIndicatorTarget: ScrollIndicatorTarget?
 
     /// Cell position that owns the current precise scroll gesture.
     /// Nil means the gesture has not latched onto a scroll target yet.
@@ -685,16 +692,19 @@ final class EditorNSView: MTKView {
         let promptPlacement = agentPromptPlacement
 
         let localScrollPresentation = prepareLocalScrollPresentationForDraw(committedSnapshot: committedSnapshot)
-        if !isDraggingScrollIndicator,
-           let surface = committedSnapshot.activeSurface,
-           let metrics = EditorScrollTrack.metrics(
-               surface: surface,
-               localTransform: localScrollPresentation,
-               cellHeight: effectiveCellHeight
-           ),
-           metrics.viewportTopLine != lastViewportTopForScroll {
-            lastViewportTopForScroll = metrics.viewportTopLine
-            flashScrollIndicator()
+        if !isDraggingScrollIndicator {
+            let metrics = committedSnapshot.activeSurface.flatMap {
+                EditorScrollTrack.metrics(
+                    surface: $0,
+                    localTransform: localScrollPresentation,
+                    rowPitch: cellHeight * CGFloat(committedSnapshot.frameState.lineSpacing)
+                )
+            }
+            let top = metrics.flatMap { $0.canScroll ? $0.displayedTop : nil }
+            if top != lastViewportTopForScroll {
+                lastViewportTopForScroll = top
+                if top != nil { flashScrollIndicator() }
+            }
         }
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             committedSnapshot.windowIds.contains(windowId) ? windowId : nil
@@ -1220,6 +1230,7 @@ final class EditorNSView: MTKView {
         // flush the final target (position is never silently dropped), then clear.
         cancelThumbDragWithFlush()
         isDraggingScrollIndicator = false
+        scrollIndicatorTarget = nil
         scrollIndicatorDragOffset = nil
         // Pointer input is dropped during the resize (AC5), so a mouseUp that would
         // end an in-flight press may never reach the BEAM. Mirror the thumb-drag
@@ -1320,125 +1331,88 @@ final class EditorNSView: MTKView {
     /// Pointer offset from the rendered thumb's top edge captured at drag start.
     private var scrollIndicatorDragOffset: CGFloat?
 
-    /// Tests whether a point should start scroll-track interaction.
-    ///
-    /// The track only captures clicks when the document can scroll, the viewport top is valid,
-    /// and either the indicator is currently visible or the macOS setting forces it to stay visible.
-    private func shouldCaptureScrollTrackClick(_ point: NSPoint) -> Bool {
-        guard let metrics = visibleScrollTrackMetrics else { return false }
-        return EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width)
-            && EditorScrollTrack.shouldCaptureTrackClick(
-                metrics: metrics,
-                scrollIndicatorAlpha: coreTextRenderer.scrollIndicatorAlpha,
-                alwaysShowScrollbar: alwaysShowScrollbar
-            )
-    }
-
-    /// Captures the pointer's offset inside the rendered thumb when the user starts dragging on the thumb.
-    private func scrollTrackDragOffset(forY y: CGFloat) -> CGFloat? {
-        guard let metrics = visibleScrollTrackMetrics,
-              let thumb = EditorScrollTrack.thumb(
-                  viewHeight: bounds.height,
-                  metrics: metrics
-              ) else { return nil }
-        return EditorScrollTrack.dragOffset(forY: y, thumb: thumb)
-    }
-
-    /// Converts a Y coordinate in the scroll track to a target line number.
-    private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
-        guard let metrics = visibleScrollTrackMetrics else { return 0 }
-
+    private func scrollTrackTarget(atY y: CGFloat, metrics: EditorScrollTrack.Metrics) -> UInt32 {
         if let scrollIndicatorDragOffset {
-            return EditorScrollTrack.line(
-                forDraggedY: y,
-                dragOffset: scrollIndicatorDragOffset,
-                viewHeight: bounds.height,
-                totalLines: metrics.totalLines,
-                visibleRows: metrics.visibleRows,
-                resident: metrics.resident
+            return EditorScrollTrack.target(
+                forDraggedY: y, dragOffset: scrollIndicatorDragOffset, viewHeight: bounds.height, metrics: metrics
             )
         }
-
-        return EditorScrollTrack.line(
-            forY: y,
-            viewHeight: bounds.height,
-            totalLines: metrics.totalLines,
-            visibleRows: metrics.visibleRows,
-            resident: metrics.resident
-        )
+        return EditorScrollTrack.target(forY: y, viewHeight: bounds.height, metrics: metrics)
     }
 
-    private var visibleScrollTrackMetrics: EditorScrollTrack.Metrics? {
-        guard let snapshot = editorPresentationSnapshot,
-              let surface = snapshot.activeSurface else { return nil }
-        return EditorScrollTrack.metrics(
-            surface: surface,
-            localTransform: visibleLocalScrollPresentation,
-            cellHeight: effectiveCellHeight
+    private func scrollTrackMetrics(for surface: PresentedWindowSurface) -> EditorScrollTrack.Metrics? {
+        EditorScrollTrack.metrics(
+            surface: surface, localTransform: visibleLocalScrollPresentation, rowPitch: effectiveCellHeight
         )
     }
 
     // MARK: - Scrollbar thumb-drag local presentation (#2665)
 
-    /// The active editor window's id, derived from the active gutter. The scroll track
-    /// operates on the active pane (its metrics drive `scrollTrackYToLine`), so this is the
-    /// window a thumb drag scrolls.
-    private var activeWindowId: UInt16? {
-        editorPresentationSnapshot?.activeSurface?.windowId
-    }
-
-    private var activeWindowIsResident: Bool {
+    /// Captures the active track and sends the first target immediately. Resident panes
+    /// also present locally; windowed panes keep the scroll-to-line round trip.
+    private func beginScrollIndicatorDrag(at point: NSPoint) -> Bool {
         guard let snapshot = editorPresentationSnapshot,
-              let windowId = activeWindowId,
-              let content = snapshot.content(for: windowId) else { return false }
-        return Self.thumbDragCanPresentLocally(
-            scrollPresentation: content.scrollPresentation,
-            totalLines: content.paneGeometry?.viewport.totalLines ?? snapshot.frameState.totalLineCount
-        )
-    }
+              let surface = snapshot.activeSurface,
+              let metrics = scrollTrackMetrics(for: surface),
+              EditorScrollTrack.isInTrack(x: point.x, viewWidth: bounds.width),
+              EditorScrollTrack.shouldCaptureTrackClick(
+                  metrics: metrics, scrollIndicatorAlpha: coreTextRenderer.scrollIndicatorAlpha,
+                  alwaysShowScrollbar: alwaysShowScrollbar
+              ) else { return false }
 
-    /// Establishes resident local presentation for a thumb drag if the active pane is resident,
-    /// and sends the first intent immediately for a responsive click. Windowed / non-resident panes
-    /// leave `thumbDragSession` nil and keep the round-trip path; the residency decision is made
-    /// once here and never re-checked (see `ThumbDragSession` gate policy).
-    private func beginThumbDragPresentation(targetLine: UInt32) {
-        // A thumb interaction supersedes every trackpad/discrete presentation, including
-        // accumulator and reconciliation bookkeeping. Reset before residency routing so the
-        // round-trip path cannot leave an old settle or rebound visible either.
-        resetSmoothScrollState()
-        scrollIndicatorTarget = nil
-        guard let targetWindowID = activeWindowId,
-              let targetContent = editorPresentationSnapshot?.content(for: targetWindowID) else { return }
-        scrollIndicatorTarget = (windowID: targetWindowID, generation: targetContent.accessibilityGeneration)
-        guard let snapshot = editorPresentationSnapshot,
-              let windowId = activeWindowId,
-              let content = snapshot.content(for: windowId),
-              Self.thumbDragCanPresentLocally(
-                  scrollPresentation: content.scrollPresentation,
-                  totalLines: content.paneGeometry?.viewport.totalLines ?? snapshot.frameState.totalLineCount
-              )
-        else {
-            thumbDragSession = nil
-            // Windowed pane: send the initial jump on the round-trip path (today's behavior).
-            sendScrollIndicatorIntent(targetLine)
-            return
+        let visualBasis: ThumbDragSession.Committed?
+        switch metrics.coordinate {
+        case .visualRank:
+            guard snapshot.metadata.textPresentations[surface.windowId] != nil,
+                  let committed = Self.committedThumbDrag(content: surface.content, coordinate: .visualRank)
+            else { return false }
+            visualBasis = committed
+        case .logicalLine:
+            visualBasis = nil
         }
-        var session = ThumbDragSession(windowId: windowId, targetLine: targetLine)
-        if let intent = session.takeIntent() { sendScrollIndicatorIntent(intent) }
-        thumbDragSession = session
-        applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
-        needsDisplay = true
+        scrollIndicatorDragOffset = EditorScrollTrack.thumb(viewHeight: bounds.height, metrics: metrics).flatMap {
+            EditorScrollTrack.dragOffset(forY: point.y, thumb: $0)
+        }
+        let target = scrollTrackTarget(atY: point.y, metrics: metrics)
+        isDraggingScrollIndicator = true
+
+        // Thumb interaction supersedes trackpad/discrete prediction, including reconciliation.
+        resetSmoothScrollState()
+        thumbDragSession = nil
+        let windowID = surface.windowId
+        scrollIndicatorTarget = ScrollIndicatorTarget(
+            windowID: windowID, generation: surface.content.accessibilityGeneration, visualBasis: visualBasis
+        )
+        if metrics.presentsLocally {
+            var session = ThumbDragSession(windowId: windowID, targetLine: target)
+            if let intent = session.takeIntent() { sendScrollIndicatorIntent(intent) }
+            thumbDragSession = session
+            applyThumbDragOffset(target: target, windowId: windowID)
+        } else {
+            sendScrollIndicatorIntent(target)
+        }
+        flashScrollIndicator()
+        return true
     }
 
     /// Updates the drag target. Resident panes present same-frame and defer the intent to the
     /// per-frame throttle; windowed panes keep sending on every event (today's behavior).
-    private func updateThumbDragPresentation(targetLine: UInt32) {
+    private func updateThumbDragPresentation(atY y: CGFloat) {
+        guard let target = scrollIndicatorTarget,
+              let snapshot = editorPresentationSnapshot,
+              let surface = scrollIndicatorSurface(for: target, in: snapshot),
+              let metrics = scrollTrackMetrics(for: surface) else {
+            scrollIndicatorTarget = nil
+            discardThumbDragPresentation()
+            return
+        }
+        let position = scrollTrackTarget(atY: y, metrics: metrics)
         if let windowId = thumbDragSession?.windowId {
-            thumbDragSession?.updateTarget(targetLine)
-            applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
+            thumbDragSession?.updateTarget(position)
+            applyThumbDragOffset(target: position, windowId: windowId)
             needsDisplay = true
         } else {
-            sendScrollIndicatorIntent(targetLine)
+            sendScrollIndicatorIntent(position)
         }
     }
 
@@ -1446,7 +1420,11 @@ final class EditorNSView: MTKView {
     /// hands off to the draw-loop reconcile: the offset keeps tracking the committed anchor until
     /// the BEAM's echo-marked commit reaches the target (offset 0), so there is no settle-jump.
     private func endThumbDragPresentation() {
-        guard var session = thumbDragSession, session.phase == .dragging else { return }
+        guard var session = thumbDragSession else {
+            scrollIndicatorTarget = nil
+            return
+        }
+        guard session.phase == .dragging else { return }
         if let intent = session.release(committed: committedThumbDrag(for: session.windowId), now: CACurrentMediaTime()) {
             sendScrollIndicatorIntent(intent)
         }
@@ -1461,17 +1439,22 @@ final class EditorNSView: MTKView {
     private func cancelThumbDragWithFlush() {
         guard var session = thumbDragSession else { return }
         if let intent = session.cancelWithFlush() { sendScrollIndicatorIntent(intent) }
+        discardThumbDragPresentation()
+    }
+
+    private func discardThumbDragPresentation() {
+        guard thumbDragSession != nil else { return }
         thumbDragSession = nil
         scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
         needsDisplay = true
     }
 
-    /// Presents the drag offset for `targetLine` against the pane's committed anchor.
-    private func applyThumbDragOffset(targetLine: UInt32, windowId: UInt16) {
-        guard let anchorTop = committedThumbDrag(for: windowId)?.anchorTop, effectiveCellHeight > 0 else { return }
+    /// Shifts resident rows from the committed top to the dragged line or visual rank.
+    private func applyThumbDragOffset(target: UInt32, windowId: UInt16) {
+        guard let top = committedThumbDrag(for: windowId)?.anchorTop, effectiveCellHeight > 0 else { return }
         scrollPixelOffset = CGPoint(
             x: scrollPixelOffset.x,
-            y: Self.thumbDragPresentationOffsetY(targetLine: targetLine, committedAnchorTop: anchorTop, cellHeight: effectiveCellHeight)
+            y: Self.thumbDragPresentationOffsetY(targetLine: target, committedAnchorTop: top, cellHeight: effectiveCellHeight)
         )
     }
 
@@ -1481,8 +1464,30 @@ final class EditorNSView: MTKView {
     }
 
     private func committedThumbDrag(for windowId: UInt16, in snapshot: CommittedEditorSnapshot?) -> ThumbDragSession.Committed? {
-        guard let sp = snapshot?.content(for: windowId)?.scrollPresentation, !sp.isWrapped else { return nil }
-        return ThumbDragSession.Committed(anchorTop: sp.anchorTop, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration)
+        guard let content = snapshot?.content(for: windowId) else { return nil }
+        if let target = scrollIndicatorTarget, let basis = target.visualBasis {
+            guard content.accessibilityGeneration == target.generation,
+                  let committed = Self.committedThumbDrag(content: content, coordinate: .visualRank),
+                  committed.hasSameAuthority(as: basis) else { return nil }
+            return committed
+        }
+        return Self.committedThumbDrag(content: content, coordinate: .logicalLine)
+    }
+
+    private static func committedThumbDrag(content: GUIWindowContent, coordinate: EditorScrollTrack.Coordinate) -> ThumbDragSession.Committed? {
+        guard let sp = content.scrollPresentation else { return nil }
+        let top: UInt32
+        switch coordinate {
+        case .visualRank:
+            guard let rank = content.wrappedResidentAnchor else { return nil }
+            top = UInt32(rank)
+        case .logicalLine:
+            guard !sp.isWrapped else { return nil }
+            top = sp.anchorTop
+        }
+        return ThumbDragSession.Committed(
+            anchorTop: top, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration
+        )
     }
 
     /// Advances the thumb-drag session one frame and applies its decision: flushes at most one
@@ -1497,22 +1502,43 @@ final class EditorNSView: MTKView {
         let buttonHeld = NSEvent.pressedMouseButtons & 0x1 != 0
         let outcome = session.advance(committed: committed, now: CACurrentMediaTime(), buttonHeld: buttonHeld)
 
-        if let intent = outcome.intent { sendScrollIndicatorIntent(intent) }
+        if let intent = outcome.intent, committed != nil { sendScrollIndicatorIntent(intent) }
         if outcome.finished {
-            thumbDragSession = nil
-            scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
+            if committed == nil || !buttonHeld { scrollIndicatorTarget = nil }
+            discardThumbDragPresentation()
         } else {
             thumbDragSession = session
-            if effectiveCellHeight > 0 {
-                scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: CGFloat(outcome.offsetLines) * effectiveCellHeight)
+            let rowPitch = cellHeight * CGFloat(committedSnapshot.frameState.lineSpacing)
+            if rowPitch > 0 {
+                scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: CGFloat(outcome.offsetLines) * rowPitch)
             }
         }
         if outcome.needsRedraw { needsDisplay = true }
     }
 
-    private func sendScrollIndicatorIntent(_ line: UInt32) {
-        guard let target = scrollIndicatorTarget else { return }
-        encoder.send(.scrollToLine(windowID: target.windowID, generation: target.generation, line: line))
+    private func scrollIndicatorSurface(for target: ScrollIndicatorTarget, in snapshot: CommittedEditorSnapshot) -> PresentedWindowSurface? {
+        guard let surface = snapshot.surface(for: target.windowID),
+              surface.content.accessibilityGeneration == target.generation else { return nil }
+        // Never reinterpret a captured pointer after its coordinate space changes.
+        if let basis = target.visualBasis {
+            guard let visual = Self.committedThumbDrag(content: surface.content, coordinate: .visualRank),
+                  visual.hasSameAuthority(as: basis) else { return nil }
+        } else if surface.content.scrollPresentation?.isWrapped == true {
+            return nil
+        }
+        return surface
+    }
+
+    private func sendScrollIndicatorIntent(_ position: UInt32) {
+        guard let target = scrollIndicatorTarget,
+              let snapshot = editorPresentationSnapshot,
+              scrollIndicatorSurface(for: target, in: snapshot) != nil else { return }
+        if target.visualBasis != nil {
+            guard let presentationID = snapshot.metadata.textPresentations[target.windowID] else { return }
+            encoder.send(.scrollToVisualRank(windowID: target.windowID, presentationID: presentationID, rank: position))
+        } else {
+            encoder.send(.scrollToLine(windowID: target.windowID, generation: target.generation, line: position))
+        }
     }
 
     /// Pixel offset that shifts resident rows so `targetLine` renders at the viewport top, given
@@ -1520,16 +1546,6 @@ final class EditorNSView: MTKView {
     /// matching `scrollPixelOffset.y`. Pure for testability.
     nonisolated static func thumbDragPresentationOffsetY(targetLine: UInt32, committedAnchorTop: UInt32, cellHeight: CGFloat) -> CGFloat {
         CGFloat(Int64(targetLine) - Int64(committedAnchorTop)) * cellHeight
-    }
-
-    /// Whether a resident pane can present a thumb-drag target same-frame from resident rows.
-    ///
-    /// Resident panes carry the whole document (overscan spans line 0 through `totalLines`), so
-    /// any drag target renders from resident rows. Windowed panes carry only a viewport band and
-    /// must keep the round-trip path. Pure for testability.
-    nonisolated static func thumbDragCanPresentLocally(scrollPresentation: GUIScrollPresentation?, totalLines: UInt32) -> Bool {
-        guard let sp = scrollPresentation, !sp.isWrapped, totalLines > 0 else { return false }
-        return sp.overscanStartLine == 0 && sp.overscanEndLine >= totalLines
     }
 
     // MARK: - Line spacing
@@ -1864,16 +1880,8 @@ final class EditorNSView: MTKView {
         leftMousePressActive = true
         focusPolicy.pointerReturnedToEditor()
 
-        // Scroll indicator track: intercept clicks on the right edge.
         let point = convert(event.locationInWindow, from: nil)
-        if editorPresentation?.textLayout?.promptTransform == nil, shouldCaptureScrollTrackClick(point) {
-            isDraggingScrollIndicator = true
-            scrollIndicatorDragOffset = scrollTrackDragOffset(forY: point.y)
-            let line = scrollTrackYToLine(point.y)
-            // beginThumbDragPresentation sends the first intent itself (un-throttled) for a
-            // responsive click, on either the resident or the round-trip path.
-            beginThumbDragPresentation(targetLine: line)
-            flashScrollIndicator()
+        if editorPresentation?.textLayout?.promptTransform == nil, beginScrollIndicatorDrag(at: point) {
             return
         }
 
@@ -2061,8 +2069,7 @@ final class EditorNSView: MTKView {
         guard !inLiveResize else { return }
         if isDraggingScrollIndicator {
             let point = convert(event.locationInWindow, from: nil)
-            let line = scrollTrackYToLine(point.y)
-            updateThumbDragPresentation(targetLine: line)
+            updateThumbDragPresentation(atY: point.y)
             return
         }
 
@@ -2309,8 +2316,10 @@ final class EditorNSView: MTKView {
         }
     }
 
-    func scrollTrackLineForTesting(y: CGFloat) -> UInt32 {
-        scrollTrackYToLine(y)
+    func scrollTrackTargetForTesting(y: CGFloat) -> UInt32 {
+        guard let surface = editorPresentationSnapshot?.activeSurface,
+              let metrics = scrollTrackMetrics(for: surface) else { return 0 }
+        return scrollTrackTarget(atY: y, metrics: metrics)
     }
 
     struct ScrollDrawSnapshot {
@@ -2765,6 +2774,9 @@ final class EditorNSView: MTKView {
 
     /// Discards local prediction when its pane receives an authoritative reset.
     func resetScrollPresentation(windowId: UInt16) {
+        if let target = scrollIndicatorTarget, target.windowID == windowId, target.visualBasis != nil {
+            scrollIndicatorTarget = nil
+        }
         guard [scrollTargetWindowId, scrollSettleWindowId, scrollElasticWindowId, thumbDragSession?.windowId].contains(windowId) else { return }
         hardResetSmoothScroll()
     }
@@ -2804,6 +2816,9 @@ final class EditorNSView: MTKView {
             availableWindowIds: availableWindowIds
         ) {
             // The thumb-drag pane vanished: drop the session (no flush; the window is gone).
+            if let target = scrollIndicatorTarget, !availableWindowIds.contains(target.windowID) {
+                scrollIndicatorTarget = nil
+            }
             thumbDragSession = nil
             resetSmoothScrollState()
         }
@@ -2942,7 +2957,7 @@ final class EditorNSView: MTKView {
 
         let totalLines = windowContent?.paneGeometry?.viewport.totalLines
         let isResident = totalLines.map {
-            $0 > 0 && Self.thumbDragCanPresentLocally(scrollPresentation: scrollPresentation, totalLines: $0)
+            EditorScrollTrack.isUnwrappedResident(scrollPresentation, totalLines: $0)
         } ?? false
 
         let payloadAfter: Int

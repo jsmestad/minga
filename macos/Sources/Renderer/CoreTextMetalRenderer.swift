@@ -1759,15 +1759,14 @@ final class CoreTextMetalRenderer {
         let scrollMetrics = (renderingPrompt ? nil : activeSurface).flatMap {
             EditorScrollTrack.metrics(
                 surface: $0, localTransform: localTransform,
-                cellHeight: CGFloat(displayCellH)
+                rowPitch: CGFloat(displayCellH)
             )
         }
 
         if let scrollMetrics,
            let thumb = EditorScrollTrack.thumb(
-               viewHeight: CGFloat(viewportSize.height),
-               metrics: scrollMetrics,
-               minThumbHeight: CGFloat(20.0 * scale)
+               viewHeight: viewportSize.height / CGFloat(scale),
+               metrics: scrollMetrics
            ),
            scrollIndicatorAlpha > 0 {
             let viewportH = Float(viewportSize.height)
@@ -1775,8 +1774,8 @@ final class CoreTextMetalRenderer {
             let indicatorMargin: Float = 2.0 * scale
             let trackHeight = viewportH
 
-            let thumbHeight = Float(thumb.height)
-            let thumbY = Float(thumb.y)
+            let thumbHeight = Float(thumb.height) * scale
+            let thumbY = Float(thumb.y) * scale
 
             let thumbX = Float(viewportSize.width) - indicatorWidth - indicatorMargin
 

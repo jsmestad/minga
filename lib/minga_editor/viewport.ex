@@ -11,7 +11,10 @@ defmodule MingaEditor.Viewport do
   alias Minga.Config
 
   @enforce_keys [:top, :left, :rows, :cols]
-  defstruct [:top, :left, :rows, :cols, reserved: 2, visual_row_offset: 0]
+  defstruct [:top, :left, :rows, :cols, reserved: 2, visual_row_offset: 0, mixed_row_anchor: nil]
+
+  @typedoc "A decorated top row addressed independently of the source's wrap count."
+  @type mixed_row_anchor :: :source_head | {:above, pos_integer()} | {:below, non_neg_integer()}
 
   @typedoc """
   A viewport representing the visible terminal region.
@@ -26,8 +29,10 @@ defmodule MingaEditor.Viewport do
                  Defaults to `footer_rows()` (2) for the terminal-level viewport.
                  Set to 0 for per-window viewports where Layout already excluded
                  the modeline from the content rect.
-  * `visual_row_offset` — first visual row shown within `top` when wrapping is active.
-                          `{top: 5, visual_row_offset: 2}` starts on the third visual row of logical line 5.
+  * `visual_row_offset` — continuation offset in a plain source layout, or the numeric
+    projection of the current mixed page anchor for scroll change detection.
+  * `mixed_row_anchor` — stable address when the top is a decoration or a source head
+    that follows decorations. `nil` means the start of the group or a source continuation.
   """
   @type t :: %__MODULE__{
           top: non_neg_integer(),
@@ -35,7 +40,8 @@ defmodule MingaEditor.Viewport do
           rows: pos_integer(),
           cols: pos_integer(),
           reserved: non_neg_integer(),
-          visual_row_offset: non_neg_integer()
+          visual_row_offset: non_neg_integer(),
+          mixed_row_anchor: mixed_row_anchor() | nil
         }
 
   @doc "Creates a new viewport with the given dimensions and default reserved rows (2)."
@@ -52,7 +58,7 @@ defmodule MingaEditor.Viewport do
     %__MODULE__{top: 0, left: 0, rows: rows, cols: cols, reserved: reserved}
   end
 
-  @doc "Returns the committed logical line and continuation offset."
+  @doc "Returns the committed logical line and numeric scroll offset."
   @spec vertical_anchor(t()) :: {non_neg_integer(), non_neg_integer()}
   def vertical_anchor(%__MODULE__{top: top, visual_row_offset: offset}), do: {top, offset}
 
@@ -65,7 +71,7 @@ defmodule MingaEditor.Viewport do
   @doc "Stores a logical top line and resets wrapped row offset."
   @spec put_top(t(), non_neg_integer()) :: t()
   def put_top(%__MODULE__{} = vp, top) when is_integer(top) and top >= 0 do
-    %{vp | top: top, visual_row_offset: 0}
+    put_source_anchor(vp, top, 0)
   end
 
   @doc """
@@ -132,7 +138,22 @@ defmodule MingaEditor.Viewport do
   def put_top_visual(%__MODULE__{} = vp, top, offset, visual_row_count)
       when is_integer(top) and top >= 0 and is_integer(offset) and offset >= 0 and
              is_integer(visual_row_count) and visual_row_count > 0 do
-    %{vp | top: top, visual_row_offset: min(offset, visual_row_count - 1)}
+    put_source_anchor(vp, top, min(offset, visual_row_count - 1))
+  end
+
+  @doc "Stores a mixed row address and its numeric projection in the resolved page."
+  @spec put_top_mixed(t(), non_neg_integer(), mixed_row_anchor(), non_neg_integer()) :: t()
+  def put_top_mixed(%__MODULE__{} = vp, top, anchor, offset) do
+    %{vp | top: top, visual_row_offset: offset, mixed_row_anchor: anchor}
+  end
+
+  @doc "Projects the anchor onto a source-only layout, where decorated rows have no offset."
+  @spec source_rows(t()) :: t()
+  def source_rows(%__MODULE__{mixed_row_anchor: nil} = vp), do: vp
+  def source_rows(%__MODULE__{} = vp), do: put_source_anchor(vp, vp.top, 0)
+
+  defp put_source_anchor(vp, top, offset) do
+    %{vp | top: top, visual_row_offset: offset, mixed_row_anchor: nil}
   end
 
   @doc "Returns the maximum visual row offset allowed for the rows remaining to EOF."
@@ -199,7 +220,7 @@ defmodule MingaEditor.Viewport do
 
     {top, offset} = shift_visual_anchor(top, offset, delta, line_count, row_count)
     {top, offset, at_bottom?} = clamp_visual_anchor(top, offset, rows, line_count, row_count)
-    {%{vp | top: top, visual_row_offset: offset}, at_bottom?}
+    {put_source_anchor(vp, top, offset), at_bottom?}
   end
 
   @spec clamp_visual_anchor(

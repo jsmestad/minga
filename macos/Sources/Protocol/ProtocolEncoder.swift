@@ -259,7 +259,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .gitUnstageAll, .gitPush, .gitPull, .gitFetch, .gitPullAndRetry,
              .workspaceClose, .spaceLeaderChord, .spaceLeaderRetract, .agentApprove,
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
-             .chatReturnedToBottom, .scrollToLine, .foldToggleAtLine, .focusWindow,
+             .chatReturnedToBottom, .scrollToLine, .scrollToVisualRank, .foldToggleAtLine, .focusWindow,
              .configQuery, .fontSizeAdjust, .searchFocus, .searchNext,
              .searchPrevious, .searchDismiss:
             return nil
@@ -401,6 +401,14 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             writeU32(&buf, 12, UInt32(bitPattern: deltaRows))
             writeFrame(buf)
         case .scrollToLine(let windowID, let generation, let line): encodeScrollToLine(windowID: windowID, generation: generation, line: line)
+        case .scrollToVisualRank(let windowID, let presentationID, let rank):
+            var buf = Data(count: 16)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_SCROLL_TO_VISUAL_RANK
+            writeU16(&buf, 2, windowID)
+            writeU64(&buf, 4, presentationID)
+            writeU32(&buf, 12, rank)
+            writeFrame(buf)
         case .foldToggleAtLine(let windowID, let generation, let bufferLine): encodeFoldToggleAtLine(windowId: windowID, generation: generation, bufferLine: bufferLine)
         case .focusWindow(let windowID, let generation): encodeFocusWindow(windowId: windowID, generation: generation)
         case .configQuery: encodeConfigQuery()

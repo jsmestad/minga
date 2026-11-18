@@ -128,6 +128,7 @@ public enum OutboundAction: Equatable, Sendable {
     case chatScrolledAwayFromBottom
     case chatReturnedToBottom
     case scrollToLine(windowID: UInt16, generation: UInt64, line: UInt32)
+    case scrollToVisualRank(windowID: UInt16, presentationID: UInt64, rank: UInt32)
     case foldToggleAtLine(windowID: UInt16, generation: UInt64, bufferLine: UInt32)
     case focusWindow(windowID: UInt16, generation: UInt64)
     case configQuery

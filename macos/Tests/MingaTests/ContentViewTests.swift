@@ -504,6 +504,110 @@ struct ContentViewTests {
         #expect((reconciled.presentation?.offset.y ?? 0) == 0)
     }
 
+    @Test("mounted wrapped thumb draws and drags between continuations", .timeLimit(.minutes(1)))
+    func mountedWrappedThumbTracksVisualRank() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 3, guiState: gui)
+        let spy = SpyEncoder()
+        let completions = QueuedCompletionCoordinator()
+        var factories = NativeRenderFactories.production
+        factories.makeLibrary = { device in
+            Bundle.allBundles.lazy.compactMap { try? device.makeDefaultLibrary(bundle: $0) }.first
+        }
+        factories.observeCompletion = { completions.observeCompletion($0, $1) }
+        let editor = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: spy, factories: factories)
+        let frame = NSRect(x: 0, y: 0, width: 640, height: 300)
+        let window = ControlledPresentationWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        editor.enableSetNeedsDisplay = false
+        editor.autoResizeDrawable = false
+        editor.frame = frame
+        window.contentView = editor
+        window.orderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        try #require(editor.window === window)
+
+        let device = try #require(editor.device)
+        let queue = try #require(device.makeCommandQueue())
+        let scale = window.backingScaleFactor
+        let width = Int(editor.bounds.width * scale)
+        let height = Int(editor.bounds.height * scale)
+        editor.drawableSize = CGSize(width: width, height: height)
+
+        let fixture = WrappedScrollFixture() // Three logical lines fit, but their eight visual rows do not.
+        func commit(_ sequence: UInt32, continuation: UInt16, lease: UInt64) throws -> CommittedEditorSnapshot {
+            dispatcher.dispatch(.beginFrame(frameSeq: sequence, baseFrameSeq: sequence - 1, generation: 1))
+            if sequence == 1 {
+                dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+                dispatcher.dispatch(.setWindowBg(r: 0x10, g: 0x10, b: 0x10))
+                dispatcher.dispatch(.guiGutterSeparator(col: 0, r: 0xEE, g: 0xEE, b: 0xEE))
+                dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: continuation)))
+                dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+            } else {
+                dispatcher.dispatch(.guiWindowRowsDelta(data: fixture.delta(top: 0, continuation: continuation)))
+            }
+            dispatcher.dispatch(.guiTextPresentation(windowID: 1, presentationID: lease))
+            dispatcher.dispatch(.commitFrame(frameSeq: sequence, seq: 0))
+            let snapshot = try #require(dispatcher.committedEditorSnapshot)
+            try #require(snapshot.frameSeq == sequence)
+            return snapshot
+        }
+
+        func draw(_ sequence: UInt32) async throws -> ReadbackImage {
+            let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+            let drawable = ReadbackDrawable(texture: texture)
+            editor.drawableProvider = { drawable }
+            editor.draw(editor.bounds)
+            try #require(editor.inFlightNativePresentationCountForTesting == 1)
+            await completions.waitForPending(1)
+            completions.flushFirst()
+            try #require(editor.inFlightNativePresentationCountForTesting == 1)
+            await completions.waitForPending(1)
+            completions.flushFirst()
+            try #require(dispatcher.visibleEditorSnapshot?.frameSeq == sequence)
+            return try #require(await OffscreenReadback.read(texture: texture, queue: queue))
+        }
+
+        _ = try commit(1, continuation: 0, lease: 80)
+        let first = try await draw(1)
+        _ = try commit(2, continuation: 1, lease: 81)
+        let next = try await draw(2)
+
+        // The thumb is 3/8 of the track. At rank 1 its top moves by 1/8 of
+        // the track despite the top logical line remaining 0.
+        let x = width - Int(5 * scale)
+        let nearTop = height / 16
+        let belowInitialThumb = height * 7 / 16
+        let thumbColor = first.pixel(x: x, y: nearTop)
+        let trackColor = first.pixel(x: x, y: belowInitialThumb)
+        #expect(thumbColor.rgbDistanceSquared(to: trackColor) > 0.001)
+        #expect(next.pixel(x: x, y: nearTop) == trackColor)
+        #expect(next.pixel(x: x, y: belowInitialThumb) == thumbColor)
+        #expect(dispatcher.visibleEditorSnapshot?.content(for: 1)?.wrappedResidentAnchor == 1)
+
+        func mouse(_ type: NSEvent.EventType, at trackFraction: CGFloat) throws -> NSEvent {
+            let point = NSPoint(x: editor.bounds.width - 5, y: editor.bounds.height * trackFraction)
+            return try #require(mouseEvent(
+                type: type, locationInWindow: editor.convert(point, to: nil), windowNumber: window.windowNumber
+            ))
+        }
+        editor.mouseDown(with: try mouse(.leftMouseDown, at: 3.0 / 16))
+        #expect(spy.actions.last == .scrollToVisualRank(windowID: 1, presentationID: 81, rank: 1))
+
+        // Refresh the displayed lease during the gesture, then leave a newer
+        // commit unpresented. Neither the press lease nor the latest commit wins.
+        let displayed = try commit(3, continuation: 1, lease: 82)
+        dispatcher.promoteVisibleEditorSnapshot(displayed)
+        _ = try commit(4, continuation: 1, lease: 83)
+        editor.mouseDragged(with: try mouse(.leftMouseDragged, at: 5.0 / 16))
+        #expect(editor.interactionSnapshot.scrollWindowId == 1)
+        #expect(editor.interactionSnapshot.scrollOffset.y == editor.cellHeight)
+        editor.mouseUp(with: try mouse(.leftMouseUp, at: 5.0 / 16))
+        #expect(spy.actions.last == .scrollToVisualRank(windowID: 1, presentationID: 82, rank: 2))
+    }
+
     @Test("wrapped fold clicks resolve visible resident rows at either gutter edge", arguments: [-1, 1])
     func wrappedGutterHitUsesDisplayedResidentRank(direction: Int) throws {
         let gui = GUIState()
@@ -1569,22 +1673,9 @@ struct ContentViewTests {
         #expect((visiblePane.accessibilityValue() as? String)?.contains("committed row") == false)
         #expect(visiblePane.accessibilityInsertionPointLineNumber() == 0)
         let scrollY = editorView.bounds.height * 0.75
-        let visibleLine = EditorScrollTrack.line(
-            forY: scrollY,
-            viewHeight: editorView.bounds.height,
-            totalLines: 100,
-            visibleRows: 4,
-            resident: true
-        )
-        let committedLine = EditorScrollTrack.line(
-            forY: scrollY,
-            viewHeight: editorView.bounds.height,
-            totalLines: 300,
-            visibleRows: 24,
-            resident: true
-        )
-        #expect(visibleLine != committedLine)
-        #expect(editorView.scrollTrackLineForTesting(y: scrollY) == visibleLine)
+        // The resident logical range is 0...99 for the visible frame, not
+        // 0...299 from the unpresented commit.
+        #expect(editorView.scrollTrackTargetForTesting(y: scrollY) == 74)
 
         let textPoint = NSPoint(x: editorView.cellWidth * 12.2, y: editorView.cellHeight * 0.5)
         let textEvent = try #require(mouseEvent(

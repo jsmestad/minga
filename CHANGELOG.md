@@ -60,6 +60,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Text prompts show clickable Submit and Cancel controls in both frontends. Enter and Escape keep their existing behavior.
 - A rejected manual OAuth completion no longer consumes the original session's pending login. The original client can still finish it once.
 - Wheel and trackpad scrolling now reach the last screen row of a soft-wrapped file without moving the cursor there first. Both frontends scroll locally when they have the wrapped rows in memory.
+- The macOS scrollbar follows screen rows in soft-wrapped panes with retained rows. It stays visible for a long single line, and dragging can land within that line without moving the cursor.
+- Repeated wheel ticks on an oversized wrapped line reuse the renderer's measured row count instead of laying out the unchanged line again on the input path.
+- Soft wrap stays on when a buffer contains closed folds, virtual lines, or Inline Ask blocks. Wheel scrolling follows the rendered rows without moving the cursor.
 - Retained shell capture reads complete output and EOF on macOS without waiting for another chunk. Closing either parent channel stops idle, pending-read and backpressured output helpers, including when unread control bytes remain. The original producer is never replayed.
 - Codex login and revoke safely replace the OAuth credential file without dropping other providers. If the running instance is refreshing its credentials, login and disconnect ask the user to retry instead of racing the refresh.
 - Agent edits keep private overlay ownership instead of attempting to adopt a project file's group, which could reject valid macOS edits with `:eperm`. Owner-only staging directories prevent access widening, staged scripts retain their access permissions, and final atomic publication still preserves the original file's metadata.

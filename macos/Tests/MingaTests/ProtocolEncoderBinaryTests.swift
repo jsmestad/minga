@@ -560,6 +560,19 @@ struct EncoderGUIActionTests {
         #expect(readU32(payload, 12) == 99)
     }
 
+    @Test("scroll_to_visual_rank carries the displayed presentation and a wide rank")
+    func scrollToVisualRankLayout() {
+        let payload = captureFrame {
+            $0.send(.scrollToVisualRank(windowID: 513, presentationID: 0x0102_0304_0506_0708, rank: 70_001))
+        }
+        #expect(payload.count == 16)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_SCROLL_TO_VISUAL_RANK)
+        #expect(readU16(payload, 2) == 513)
+        #expect(readU64(payload, 4) == 0x0102_0304_0506_0708)
+        #expect(readU32(payload, 12) == 70_001)
+    }
+
     @Test("focus_window encodes the pane window ID and durable generation")
     func focusWindowLayout() {
         let payload = captureFrame { $0.send(.focusWindow(windowID: 513, generation: 0x0102_0304_0506_0708)) }

@@ -274,7 +274,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       semantic_item_activate: 0x65,
       agent_prompt_fit: 0x66,
       agent_prompt_scroll: 0x67,
-      agent_tool_approval: 0x68
+      agent_tool_approval: 0x68,
+      scroll_to_visual_rank: 0x69
     )
   end
 

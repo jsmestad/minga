@@ -5,6 +5,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   A clause that receives a Target must not rediscover its subject through active editor state. Binary lengths are framing, not positions; existing 16-bit identity contracts require a documented exemption.
 
   Prompt fit has one structural physical-capacity exception: window 65534 and its u64 retained presentation identify the subject; columns and max_rows are u16 measurements, not item positions. Changed or additional fields are not exempt.
+
+  An absolute visual scrollbar target carries a pane and its exact retained presentation. A rank without that presentation is not an identity.
   """
 
   use Credo.Check,
@@ -94,7 +96,7 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   defp position_issues({:decode_gui_action, _, [{:@, _, [{opcode, _, _}]}, payload]}, meta, exemptions) do
     fields = binary_fields(payload)
     if opcode == :gui_action_tab_reorder or Keyword.has_key?(exemptions, opcode) or
-         identity?(fields) or physical_capacity?(opcode, fields) do
+         identity?(fields) or presentation_rank?(opcode, fields) or physical_capacity?(opcode, fields) do
       []
     else
       for {name, line} <- bare_positions(fields) do
@@ -107,6 +109,18 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   defp binary_fields({:<<>>, _, fields}), do: fields
   defp binary_fields({:=, _, [left, right]}), do: binary_fields(left) ++ binary_fields(right)
   defp binary_fields(_pattern), do: []
+
+  defp presentation_rank?(:gui_action_scroll_to_visual_rank, [
+         {:"::", _, [{:window_id, _, _}, window_type]},
+         {:"::", _, [{:presentation_id, _, _}, presentation_type]},
+         {:"::", _, [{:rank, _, _}, rank_type]}
+       ]) do
+    unsigned_integer_width(window_type) == 16 and
+      unsigned_integer_width(presentation_type) == 64 and
+      unsigned_integer_width(rank_type) == 32
+  end
+
+  defp presentation_rank?(_opcode, _fields), do: false
 
   defp physical_capacity?(:gui_action_agent_prompt_fit, [
          {:"::", _, [65_534, window_type]},
