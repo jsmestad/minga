@@ -38,7 +38,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
     :tab_width,
     :diagnostics_revision,
     :diagnostic_index,
-    :annotations_revision
+    :annotations_revision,
+    :overlay_key
   ]
   defstruct @enforce_keys
 
@@ -51,7 +52,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
           tab_width: pos_integer(),
           diagnostics_revision: non_neg_integer(),
           diagnostic_index: DiagnosticIndex.t(),
-          annotations_revision: non_neg_integer()
+          annotations_revision: non_neg_integer(),
+          overlay_key: tuple()
         }
 
   @type input :: %{
@@ -65,6 +67,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
           required(:cursor_col) => non_neg_integer(),
           required(:cursorline_bg) => non_neg_integer() | nil,
           required(:selection) => term(),
+          required(:wrapped?) => boolean(),
           required(:diagnostics_snapshot) => {non_neg_integer(), [Diagnostic.t()]},
           required(:annotations_revision) => non_neg_integer(),
           required(:decorations) => Decorations.t(),
@@ -72,11 +75,33 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
           required(:guides_enabled?) => boolean()
         }
 
-  @spec build(t() | nil, input()) :: {t(), ResidentSemantics.t()}
+  @spec build(t() | nil, input()) :: {t(), ResidentSemantics.t() | nil}
   def build(previous, input) do
-    %ResidentBuild{} = resident = input.resident_build
-    validate_row_count!(resident.line_count)
+    resident = input.resident_build
     keyframe? = keyframe?(previous, input)
+
+    overlay_key =
+      {input.cursor_eligible, input.cursor_row, input.cursor_col, input.cursorline_bg,
+       input.selection, input.guides_enabled?}
+
+    if input.wrapped? and not keyframe? and
+         previous.row_revision == resident.revision and previous.overlay_key == overlay_key and
+         previous.diagnostics_revision == elem(input.diagnostics_snapshot, 0) and
+         previous.annotations_revision == input.annotations_revision do
+      # A geometry-only frame must not advance an unaffected pane's semantic
+      # revision. A targeted reference miss can discard that frame without
+      # requiring a new semantic snapshot for every other pane.
+      {previous, nil}
+    else
+      build_update(previous, input, keyframe?, overlay_key)
+    end
+  end
+
+  @spec build_update(t() | nil, input(), boolean(), tuple()) :: {t(), ResidentSemantics.t()}
+  defp build_update(previous, input, keyframe?, overlay_key) do
+    %ResidentBuild{} = resident = input.resident_build
+    row_count = ResidentStore.size(resident.store)
+    validate_row_count!(row_count)
     guide_index = next_guide_index(previous, resident, input, keyframe?)
     row_splices = semantic_row_splices(input.resident_result.row_delta)
     guide_replacements = guide_replacements(previous, guide_index, input, keyframe?)
@@ -86,7 +111,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
       diagnostic_layer(previous, resident, input, keyframe?)
 
     annotations = annotation_layer(previous, input, keyframe?)
-    {first_row_id, last_row_id} = boundary_row_ids(resident)
+    {first_row_id, last_row_id} = boundary_row_ids(resident.store, row_count)
     max_level = GuideIndex.max_level(guide_index)
 
     active_guide_col =
@@ -98,12 +123,13 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
       content_epoch: input.content_epoch,
       revision: revision,
       row_revision: resident.revision,
-      row_count: resident.line_count,
+      row_count: row_count,
       guide_index: guide_index,
       tab_width: input.tab_width,
       diagnostics_revision: diagnostics_revision,
       diagnostic_index: diagnostic_index,
-      annotations_revision: input.annotations_revision
+      annotations_revision: input.annotations_revision,
+      overlay_key: overlay_key
     }
 
     semantics = %ResidentSemantics{
@@ -114,7 +140,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
         base_revision: if(keyframe?, do: 0, else: previous.revision),
         revision: revision,
         target_row_revision: resident.revision,
-        row_count: resident.line_count,
+        row_count: row_count,
         first_row_id: first_row_id,
         last_row_id: last_row_id
       },
@@ -124,7 +150,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
         col: input.cursor_col
       },
       cursorline: cursorline(input),
-      selection: selection(input.selection),
+      selection: selection(input.selection, resident.store, input.wrapped?),
       diagnostics: diagnostics,
       annotations: annotations,
       tab_width: input.tab_width,
@@ -166,20 +192,13 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
   defp apply_guide_splices(index, %RowDelta{splices: []}, _inserted, _tab_width), do: index
 
   defp apply_guide_splices(index, %RowDelta{splices: splices}, inserted, tab_width) do
-    by_line = Map.new(inserted, fn %VisualRow{buf_line: line} = entry -> {line, entry} end)
-
-    {index, _shift} =
-      Enum.reduce(splices, {index, 0}, fn %RowSplice{} = splice, {acc, shift} ->
+    {index, [], _shift} =
+      Enum.reduce(splices, {index, inserted, 0}, fn %RowSplice{} = splice, {acc, rows, shift} ->
         start_row = splice.start_index + shift
         insert_count = RowSplice.insert_count(splice)
-
-        rows =
-          if insert_count == 0,
-            do: [],
-            else: Enum.map(start_row..(start_row + insert_count - 1), &Map.fetch!(by_line, &1))
-
-        next = GuideIndex.splice(acc, start_row, splice.delete_count, rows, tab_width)
-        {next, shift + insert_count - splice.delete_count}
+        {inserted_rows, remaining} = Enum.split(rows, insert_count)
+        next = GuideIndex.splice(acc, start_row, splice.delete_count, inserted_rows, tab_width)
+        {next, remaining, shift + insert_count - splice.delete_count}
       end)
 
     index
@@ -229,8 +248,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
     diagnostic_layer(previous, resident, diagnostics, revision, input, replace?)
   end
 
-  defp diagnostic_layer(_previous, resident, diagnostics, revision, _input, true) do
-    index = DiagnosticIndex.build(diagnostics, resident)
+  defp diagnostic_layer(_previous, resident, diagnostics, revision, input, true) do
+    index = DiagnosticIndex.build(diagnostics, resident, input.wrapped?)
     {revision, index, {:replace, DiagnosticIndex.to_ranges(index)}}
   end
 
@@ -238,7 +257,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
     {index, starts, _work} =
       DiagnosticIndex.apply_splices(
         previous.diagnostic_index,
-        input.resident_result.row_delta.splices,
+        input.resident_result.source_splices,
         resident
       )
 
@@ -252,12 +271,14 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
     do: {:replace_ranges, diagnostic_replacements(index, starts)}
 
   defp diagnostic_replacements(index, starts) do
+    by_start = index |> DiagnosticIndex.ranges_at(starts) |> Enum.group_by(& &1.start_row)
+
     starts
     |> Enum.map(fn start_row ->
       %DiagnosticReplace{
         start_row: start_row,
         end_row: start_row + 1,
-        diagnostics: DiagnosticIndex.ranges_at(index, [start_row])
+        diagnostics: Map.get(by_start, start_row, [])
       }
     end)
     |> merge_diagnostic_replacements([])
@@ -292,8 +313,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
       )
 
   defp annotation_layer_for(input, true, _splices) do
+    store = input.resident_build.store
+
     {:replace,
-     absolute_annotations(input.decorations.annotations, input.resident_build.line_count)}
+     absolute_annotations(input.decorations.annotations, store, 0, ResidentStore.size(store))}
   end
 
   defp annotation_layer_for(_input, false, []), do: :retain
@@ -301,24 +324,33 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
   defp annotation_layer_for(input, false, splices),
     do:
       {:replace_ranges,
-       annotation_replacements(input.decorations, splices, input.resident_build.line_count)}
+       annotation_replacements(input.decorations, splices, input.resident_build.store)}
 
-  defp absolute_annotations(annotations, row_count) do
+  defp absolute_annotations(annotations, store, first, last) do
     annotations
     |> Enum.sort_by(fn annotation -> {annotation.line, annotation.priority} end)
-    |> Enum.filter(&(&1.line < row_count))
-    |> Enum.map(fn annotation ->
-      %Annotation{
-        row: annotation.line,
-        kind: annotation.kind,
-        fg: annotation.fg,
-        bg: annotation.bg,
-        text: annotation.text
-      }
+    |> Enum.flat_map(fn annotation ->
+      case ResidentStore.visual_rank(store, annotation.line) do
+        rank when is_integer(rank) and rank >= first and rank < last ->
+          [
+            %Annotation{
+              row: rank,
+              kind: annotation.kind,
+              fg: annotation.fg,
+              bg: annotation.bg,
+              text: annotation.text
+            }
+          ]
+
+        _ ->
+          []
+      end
     end)
   end
 
-  defp annotation_replacements(decorations, splices, row_count) do
+  defp annotation_replacements(decorations, splices, store) do
+    row_count = ResidentStore.size(store)
+
     {ranges, _shift} =
       Enum.map_reduce(splices, 0, fn splice, shift ->
         start_row = splice.start_index + shift
@@ -336,13 +368,16 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
     ranges
     |> canonical_ranges()
     |> Enum.map(fn {start_row, end_row} ->
+      {first_line, _} = ResidentStore.anchor_at(store, start_row)
+      {last_line, _} = ResidentStore.anchor_at(store, end_row - 1)
+
       %AnnotationReplace{
         start_row: start_row,
         end_row: end_row,
         annotations:
           decorations
-          |> Decorations.annotations_for_range(start_row, end_row)
-          |> absolute_annotations(end_row)
+          |> Decorations.annotations_for_range(first_line, last_line + 1)
+          |> absolute_annotations(store, start_row, end_row)
       }
     end)
   end
@@ -360,12 +395,32 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
 
   defp cursorline(_input), do: nil
 
-  defp selection(nil), do: nil
+  defp selection(nil, _store, _wrapped?), do: nil
 
-  defp selection({:line, start_row, end_row}),
+  defp selection({:line, start_line, end_line}, store, true) do
+    with {first, _} <- ResidentStore.line_extent(store, start_line),
+         {last, count} <- ResidentStore.line_extent(store, end_line) do
+      selection({:line, first, last + count - 1}, store, false)
+    end
+  end
+
+  defp selection({:char, {start_line, start_byte}, {end_line, end_byte}}, store, true) do
+    with {first, start_col} <-
+           ResidentStore.source_position(store, start_line, start_byte, :start),
+         {:ok, entry} <- ResidentStore.source_row(store, end_line),
+         end_exclusive = VisualRow.source_character_end(entry, end_byte),
+         {last, end_col} <- ResidentStore.source_position(store, end_line, end_exclusive, :end) do
+      end_position = max({first, start_col}, {last, end_col})
+      selection({:char, {first, start_col}, end_position}, store, false)
+    else
+      _ -> nil
+    end
+  end
+
+  defp selection({:line, start_row, end_row}, _store, false),
     do: %Selection{type: :line, start_row: start_row, start_col: 0, end_row: end_row, end_col: 0}
 
-  defp selection({:char, {start_row, start_col}, {end_row, end_col}}),
+  defp selection({:char, {start_row, start_col}, {end_row, end_col}}, _store, false),
     do: %Selection{
       type: :char,
       start_row: start_row,
@@ -374,12 +429,12 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticState do
       end_col: end_col
     }
 
-  defp boundary_row_ids(%ResidentBuild{line_count: 0}), do: {0, 0}
+  defp boundary_row_ids(_store, 0), do: {0, 0}
 
-  defp boundary_row_ids(%ResidentBuild{store: store, line_count: count}) do
-    {:ok, %VisualRow{row: first}} = ResidentStore.payload_at(store, 0)
-    {:ok, %VisualRow{row: last}} = ResidentStore.payload_at(store, count - 1)
-    {first.row_id, last.row_id}
+  defp boundary_row_ids(store, count) do
+    {:ok, %{id: first}} = ResidentStore.entry_at(store, 0)
+    {:ok, %{id: last}} = ResidentStore.entry_at(store, count - 1)
+    {first, last}
   end
 
   defp active_guide_col(0, _tab_width, _cursor_col), do: 0xFFFF

@@ -723,6 +723,7 @@ Flags:
   bit 0: full_refresh (1 = all rows changed, 0 = incremental)
   bit 2: sequential resident rows (buffer line equals row-store index; full 0x80 replaces mode, A1/A2 inherit it)
   bit 1: cursor_visible (1 = show cursor, 0 = hide cursor)
+  bit 3: wrapped resident rows (mutually exclusive with bit 2; full 0x80 replaces mode, A1/A2 inherit it)
 
 Cursor shape: 0 = block, 1 = beam, 2 = underline
 
@@ -783,11 +784,12 @@ ScrollPresentation section:
 
 ScrollPresentation flags:
   bit 0: reset_required. The client must discard any local presentation offset, velocity, and reconciliation target before using this frame as a new anchor.
+  bit 1: effective wrapping is active. If the store is windowed, whole-row vertical motion follows commits. Wrapped resident stores can present it locally.
 
 Pane geometry section:
   window_id(2)
   total_rect(8) + content_rect(8) + text_rect(8) + gutter_rect(8) + clip_rect(8)
-  viewport_top(4) + viewport_left(2) + viewport_rows(2) + viewport_cols(2) + total_lines(4) + visual_row_offset(2) + total_visual_rows(4)
+  viewport_top(4) + viewport_left(2) + viewport_rows(2) + viewport_cols(2) + total_lines(4) + visual_row_offset(4) + total_visual_rows(4)
   line_number_width(2) + sign_col_width(2) + hit_region_count(1)
   Per hit region: kind(1) + rect(8) + window_id(2)
 
@@ -1544,9 +1546,11 @@ A client reports text hits using that presentation ID, the absolute row-store ra
 
 For a windowed wrapped payload, `ScrollPresentation.anchor_visual_row_offset` counts continuation rows retained before the visible anchor in that payload. Rows already trimmed from the payload are not counted again. The document viewport's visual-row offset can therefore differ from the payload-relative offset.
 
+In a wrapped resident store, each source line starts with a normal row followed by its continuation rows. Count normal rows to recover current source line numbers after a splice; the embedded `buf_line` can be historical. A2 splices and A9 layers use visual ranks, while sparse gutter overrides use source lines. The viewport's logical top selects the group's first rank, and `anchor_visual_row_offset` advances within that full group. Clamp local movement to `max(total_visual_rows - viewport_rows, 0)`. Elastic presentation must not add pending row motion beyond that bound.
+
 ## Resident Semantics (0xA9)
 
-`gui_resident_semantics` publishes renderer-owned semantics beside a sequential resident row store. It uses a u32 length envelope. All row coordinates are absolute u32 ranks in the retained store. Clients clip and rebase the committed model for the locally displayed slice; they do not recompute indentation, diagnostics, annotations, selection, or cursor policy.
+`gui_resident_semantics` publishes renderer-owned semantics beside a resident row store. It uses a u32 length envelope. All row coordinates are absolute u32 visual ranks in the retained store. Clients clip and rebase the committed model for the locally displayed slice; they do not recompute indentation, diagnostics, annotations, selection, or cursor policy.
 
 Resident `gui_window_content` commands omit the viewport selection, search, diagnostics, document highlight, annotation, and cursorline sections, and resident frame metadata omits legacy `gui_cursorline` and `gui_indent_guides`. Their legacy cursor and accessibility cursor fields are absent or hidden; the client projects cursor and selection accessibility from the committed resident semantics and local text slice. Search and document highlight colors remain part of each retained row's composed spans. Windowed frames keep the legacy viewport sections and metadata.
 

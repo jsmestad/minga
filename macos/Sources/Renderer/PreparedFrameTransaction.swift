@@ -361,6 +361,11 @@ struct PreparedFrameTransactionBuilder {
     private var workingResidentSemantics: [UInt16: ResidentSemanticStore]
     private let initializedResidentSemanticWindowIds: Set<UInt16>
     private var pendingResidentSemanticWindowIds: Set<UInt16> = []
+    private enum WrappedSemanticExpectation {
+        case hydration
+        case splices([GUIWindowRowSplice])
+    }
+    private var pendingWrappedSemantics: [UInt16: WrappedSemanticExpectation] = [:]
     private let committedGutters: [UInt16: Wire.WindowGutter]
     private var workingGutters: [UInt16: Wire.WindowGutter]
     private var workingIndentGuides: [UInt16: IndentGuideData]
@@ -454,11 +459,16 @@ struct PreparedFrameTransactionBuilder {
             }
             let aggregated = aggregatingOperationCounters(for: content)
             guard stageWindow(aggregated) else { return }
-            if content.rowStore.mode == .sequential,
-               initializedResidentSemanticWindowIds.contains(content.windowId) || workingResidentSemantics[content.windowId] != nil {
-                pendingResidentSemanticWindowIds.insert(content.windowId)
-            } else if content.rowStore.mode != .sequential {
-                pendingResidentSemanticWindowIds.remove(content.windowId)
+            if content.rowStore.mode == .sequentialWrapped {
+                pendingWrappedSemantics[content.windowId] = .hydration
+            } else {
+                pendingWrappedSemantics.removeValue(forKey: content.windowId)
+                if content.rowStore.mode == .sequential,
+                   initializedResidentSemanticWindowIds.contains(content.windowId) || workingResidentSemantics[content.windowId] != nil {
+                    pendingResidentSemanticWindowIds.insert(content.windowId)
+                } else if !content.rowStore.mode.isResident {
+                    pendingResidentSemanticWindowIds.remove(content.windowId)
+                }
             }
             touchedWindowIds.insert(content.windowId)
             recordFontResources(in: content)
@@ -472,9 +482,29 @@ struct PreparedFrameTransactionBuilder {
         case .guiResidentSemantics(let update):
             touchedWindowIds.insert(update.windowId)
             guard let content = workingWindows[update.windowId] else { rejection = .invalidRetainedRows(windowId: update.windowId, contentEpoch: update.contentEpoch); return }
+            if content.rowStore.mode == .sequentialWrapped {
+                let matches: Bool
+                switch pendingWrappedSemantics[update.windowId] {
+                case .some(.hydration):
+                    matches = update.mode == 0
+                case .some(.splices(let expected)):
+                    matches = update.mode == 1 && expected.count == update.rowSplices.count
+                        && zip(expected, update.rowSplices).allSatisfy { wire, semantic in
+                            wire.startIndex == semantic.start && wire.deleteCount == semantic.deleteCount
+                                && wire.insertEntries.count == Int(semantic.insertCount)
+                        }
+                case nil:
+                    matches = update.rowSplices.isEmpty
+                }
+                guard matches else {
+                    rejection = .invalidRetainedRows(windowId: update.windowId, contentEpoch: update.contentEpoch)
+                    return
+                }
+            }
             do {
                 workingResidentSemantics[update.windowId] = try (workingResidentSemantics[update.windowId] ?? ResidentSemanticStore()).applying(update, content: content)
                 pendingResidentSemanticWindowIds.remove(update.windowId)
+                pendingWrappedSemantics.removeValue(forKey: update.windowId)
             } catch { rejection = .invalidRetainedRows(windowId: update.windowId, contentEpoch: update.contentEpoch) }
 
         case .guiGutter(let data):
@@ -584,20 +614,19 @@ struct PreparedFrameTransactionBuilder {
         if let missingReference = referencedWindowIds.subtracting(liveWindowIds).min() {
             return .failure(.missingWindowReference(windowId: missingReference))
         }
-        for content in workingWindows.values where content.rowStore.mode == .sequential {
-            guard let viewport = content.paneGeometry?.viewport,
-                  content.rowStore.count == Int(viewport.totalLines),
-                  viewport.totalVisualRows == viewport.totalLines else {
+        for content in workingWindows.values where content.rowStore.mode.isResident {
+            guard validResidentGeometry(content) else {
                 return .failure(.invalidRetainedRows(windowId: content.windowId, contentEpoch: content.contentEpoch))
             }
         }
         for (windowId, semantics) in workingResidentSemantics {
-            guard let content = workingWindows[windowId], content.rowStore.mode == .sequential,
+            guard let content = workingWindows[windowId], content.rowStore.mode.isResident,
                   semantics.contentEpoch == content.contentEpoch,
                   Int(semantics.rowCount) == content.rowStore.count,
                   (semantics.rowCount == 0 ? semantics.firstRowId == 0 && semantics.lastRowId == 0 : content.rowStore.row(at: 0)?.rowId == semantics.firstRowId && content.rowStore.row(at: content.rowStore.count - 1)?.rowId == semantics.lastRowId) else { return .failure(.invalidRetainedRows(windowId: windowId, contentEpoch: semantics.contentEpoch)) }
         }
-        if let windowId = pendingResidentSemanticWindowIds.min(), let content = workingWindows[windowId] {
+        if let windowId = pendingResidentSemanticWindowIds.union(pendingWrappedSemantics.keys).min(),
+           let content = workingWindows[windowId] {
             return .failure(.invalidRetainedRows(windowId: windowId, contentEpoch: content.contentEpoch))
         }
         if let residentGutterFailure = residentGutterFailure() {
@@ -766,6 +795,25 @@ struct PreparedFrameTransactionBuilder {
         return metadata
     }
 
+    private func validResidentGeometry(_ content: GUIWindowContent) -> Bool {
+        let store = content.rowStore
+        guard let viewport = content.paneGeometry?.viewport, store.count == Int(viewport.totalVisualRows) else {
+            return false
+        }
+        if store.mode == .sequential {
+            return viewport.totalVisualRows == viewport.totalLines && content.scrollPresentation?.isWrapped != true
+        }
+        guard let scroll = content.scrollPresentation,
+              scroll.belongsTo(windowId: content.windowId, contentEpoch: content.contentEpoch),
+              viewport.top == scroll.anchorTop, viewport.visualRowOffset == UInt32(scroll.anchorVisualRowOffset),
+              store.normalStartCount == Int(viewport.totalLines),
+              store.isEmpty || store.row(at: 0)?.rowType == .normal,
+              let anchor = content.wrappedResidentAnchor, let maxTop = content.wrappedResidentMaxTop else {
+            return false
+        }
+        return anchor <= maxTop
+    }
+
     private func residentGutterFailure() -> PreparedFrameRejection? {
         for gutter in workingGutters.values {
             guard let identity = gutter.entries.residentIdentity else { continue }
@@ -777,8 +825,9 @@ struct PreparedFrameTransactionBuilder {
                     actual: identity.contentEpoch
                 )
             }
-            guard content.rowStore.mode == .sequential,
-                  UInt64(content.rowStore.count) == UInt64(identity.lineCount) else {
+            let store = content.rowStore
+            let sourceLineCount = store.mode == .sequentialWrapped ? store.normalStartCount : store.count
+            guard store.mode.isResident, sourceLineCount == Int(identity.lineCount) else {
                 return .invalidResidentGutter(
                     windowId: gutter.windowId,
                     contentEpoch: identity.contentEpoch
@@ -850,8 +899,14 @@ struct PreparedFrameTransactionBuilder {
         }
         let aggregated = aggregatingOperationCounters(for: updated)
         guard stageWindow(aggregated) else { return }
-        if updated.rowStore.mode == .sequential,
-           initializedResidentSemanticWindowIds.contains(delta.windowId) || workingResidentSemantics[delta.windowId] != nil {
+        if updated.rowStore.mode == .sequentialWrapped, let splices = delta.rowSplices, !splices.isEmpty {
+            guard pendingWrappedSemantics[delta.windowId] == nil else {
+                rejection = .invalidRetainedRows(windowId: delta.windowId, contentEpoch: delta.contentEpoch)
+                return
+            }
+            pendingWrappedSemantics[delta.windowId] = .splices(splices)
+        } else if updated.rowStore.mode == .sequential,
+                  initializedResidentSemanticWindowIds.contains(delta.windowId) || workingResidentSemantics[delta.windowId] != nil {
             pendingResidentSemanticWindowIds.insert(delta.windowId)
         }
         recordFontResources(in: delta)
@@ -968,7 +1023,7 @@ struct PreparedFrameTransactionBuilder {
             removing: previousWeight, adding: residentWeight
         ) else { return false }
         workingWindows[content.windowId] = content
-        if content.rowStore.mode != .sequential { workingResidentSemantics.removeValue(forKey: content.windowId) }
+        if !content.rowStore.mode.isResident { workingResidentSemantics.removeValue(forKey: content.windowId) }
         changedWindows[content.windowId] = content
         return true
     }

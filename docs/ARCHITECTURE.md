@@ -454,7 +454,7 @@ Agent Help is an independent `Minga.RenderModel.UI.AgentHelp` value encoded thro
 
 #### Resident-store history
 
-Historical note (recorded 2026-10-29): epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 completed that work and deleted velocity-aware overscan prefetch. The windowed emit path remains for wrapped/folded buffers and the brief pre-promotion arming frame, with fixed overscan rather than velocity tiers. New scrollable surfaces reuse that lifecycle instead of defining per-surface reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).
+Epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 removed velocity-aware overscan. Normal-size soft-wrapped buffers also retain their BEAM-composed visual rows in Swift and Go. The fixed-overscan windowed path serves folded buffers, panes over the residence budget, and panes waiting for promotion. New scrollable surfaces reuse this lifecycle instead of defining their own reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).
 
 #### What survives of the DisplayList
 
@@ -514,6 +514,8 @@ An explicit `recovery_reserver` supplies the complete `{generation, next_frame_s
 The `framed` transcript kind carries an actual begin/commit batch, required transaction-result and last-committed expectations, resident rows, and cell-space pane rectangles. Swift uses the production decoded-frame dispatcher and Go the production transaction fixture. The BEAM re-decodes the recorded bytes and checks lineage, rows and geometry. Resize inputs first pass through the real Editor mailbox and then through real Layout; frontend-reported row fit remains authoritative under ADR-0001. Wheel-during-commit and click-after-settle steps exercise the input corpus's local-presentation and pointer seams.
 
 Targeted recovery is recorded against a warmed, acknowledged two-pane base. The missed pane receives full content without changing generation or dropping the nonzero base; the sibling's rows and content epoch stay unchanged. Captured lifecycle side channels remain attached to their original delivery, including rejected frames, but are not repeated when an old frame is replayed as stale input. Both frontend runners check those background/title effects and every pane's row identities and epochs.
+
+When the frontend rejects a transaction, it discards updates for every pane. The renderer keeps the acknowledged row and semantic bases plus any pending edits until the frame is acknowledged. A targeted retry can therefore replay changes for siblings from their acknowledged bases without refreshing unchanged panes.
 
 Recovery responses are never hand-typed. `mix conformance.gen --check` generates twice, rejects nondeterministic output, and compares against committed bytes without rewriting them. The corpus format and exact status expectations are documented in `test/conformance/corpus/README.md`.
 

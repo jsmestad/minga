@@ -3,7 +3,7 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
 
   alias Minga.Core.Decorations
   alias Minga.Diagnostics.Diagnostic
-  alias Minga.RenderModel.Window.{DiagnosticRange, Row, RowSplice}
+  alias Minga.RenderModel.Window.{DiagnosticRange, Row}
 
   alias MingaEditor.RenderModel.Window.{
     DiagnosticIndex,
@@ -41,10 +41,9 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
       Enum.map(1_000..9_999, fn line -> diagnostic(line, 0, 1, :utf8) end)
 
     index = DiagnosticIndex.build(diagnostics, resident)
-    splice = RowSplice.new(5, 1, [row(5, "edited")])
     edited = resident(List.replace_at(lines, 5, "edited"), 2)
 
-    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [splice], edited)
+    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{5, 1, 1}], edited)
 
     assert starts == []
     assert work == %{groups_reprojected: 0, suffix_shifts: 0}
@@ -55,9 +54,8 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
     first = resident(["start", "middle", "a😀b"])
     index = DiagnosticIndex.build([diagnostic(0, 1, 3, :utf16, 2)], first)
     edited = resident(["start", "middle", "aa😀b"], 2)
-    splice = RowSplice.new(2, 1, [row(2, "aa😀b")])
 
-    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [splice], edited)
+    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{2, 1, 1}], edited)
 
     assert starts == [0]
     assert work == %{groups_reprojected: 1, suffix_shifts: 0}
@@ -78,9 +76,8 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
         resident
       )
 
-    splice = RowSplice.new(1, 1, [])
     edited = resident(["zero", "two", "three"], 2)
-    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [splice], edited)
+    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{1, 1, 0}], edited)
 
     assert starts == []
     assert work == %{groups_reprojected: 1, suffix_shifts: 1}
@@ -109,11 +106,65 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
     edited = resident(["zero", "two"], 2)
 
     {updated, starts, work} =
-      DiagnosticIndex.apply_splices(index, [RowSplice.new(1, 1, [])], edited)
+      DiagnosticIndex.apply_splices(index, [{1, 1, 0}], edited)
 
     assert starts == []
     assert work.suffix_shifts == 1
     assert DiagnosticIndex.to_ranges(updated) == []
+  end
+
+  test "wrap growth reprojects affected endpoints and lazily shifts the untouched suffix" do
+    start = entry(0, "head")
+    target = entry(1, "abcd")
+    suffix = entry(2, "tail")
+    base = resident_entries([start, target, suffix], 3, 1)
+
+    diagnostics = [
+      diagnostic(0, 1, 3, :utf8, 1),
+      diagnostic(1, 2, 4, :utf8),
+      diagnostic(2, 0, 1, :utf8)
+    ]
+
+    index = DiagnosticIndex.build(diagnostics, base, true)
+    [first, continuation] = wrap_ascii(target, 2)
+    grown = resident_entries([start, first, continuation, suffix], 3, 2)
+
+    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{1, 1, 1}], grown)
+
+    assert starts == [0, 2]
+    assert work == %{groups_reprojected: 2, suffix_shifts: 0}
+
+    assert [%{end_row: 2, end_col: 1}, %{start_row: 2, start_col: 0, end_col: 2}] =
+             DiagnosticIndex.ranges_at(updated, starts)
+
+    assert DiagnosticIndex.to_ranges(updated) ==
+             DiagnosticIndex.to_ranges(DiagnosticIndex.build(diagnostics, grown, true))
+  end
+
+  defp wrap_ascii(%VisualRow{source_text: text, row: row, source_offset_map: map}, split) do
+    first = binary_part(text, 0, split)
+    second = binary_part(text, split, byte_size(text) - split)
+    first_row = %{row | text: first, content_hash: Row.compute_hash(first, [])}
+
+    second_row = %{
+      row
+      | row_id: Row.stable_id(:wrap_continuation, row.buf_line + 1, 1),
+        row_type: :wrap_continuation,
+        visual_index: 1,
+        text: second,
+        content_hash: Row.compute_hash(second, [])
+    }
+
+    [
+      VisualRow.new(first_row, SourceOffsetMap.slice(map, 0, split, 0, split), 0, split, 0),
+      VisualRow.new(
+        second_row,
+        SourceOffsetMap.slice(map, split, byte_size(text), split, byte_size(text)),
+        split,
+        byte_size(text),
+        0
+      )
+    ]
   end
 
   defp diagnostic(start_line, start_col, end_col, encoding, end_line \\ nil) do
@@ -132,7 +183,10 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
 
   defp resident(lines, revision \\ 1) do
     entries = Enum.with_index(lines, fn text, line -> entry(line, text) end)
+    resident_entries(entries, length(lines), revision)
+  end
 
+  defp resident_entries(entries, line_count, revision) do
     %ResidentBuild{
       store:
         ResidentStore.from_entries(
@@ -140,7 +194,7 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
             ResidentStore.entry(row.row_id, row.content_hash, payload)
           end)
         ),
-      line_count: length(lines),
+      line_count: line_count,
       revision: revision
     }
   end

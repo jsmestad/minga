@@ -76,6 +76,62 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
     end
   end
 
+  @doc "Moves the live editor anchor using a compatible immutable wrapped root."
+  @spec scroll_anchor(
+          t(),
+          pos_integer(),
+          pid(),
+          non_neg_integer(),
+          term(),
+          {non_neg_integer(), non_neg_integer()},
+          integer(),
+          pos_integer()
+        ) :: {:ok, {non_neg_integer(), non_neg_integer()}, boolean()} | :error
+  def scroll_anchor(
+        %__MODULE__{table: table},
+        window_id,
+        buffer,
+        version,
+        basis,
+        {line, offset},
+        delta,
+        fitted
+      ) do
+    key = {:scroll_root, window_id}
+    header = fn ref -> rank_header(table, ref) end
+
+    with {:ok, {^buffer, ^version, ^basis, root} = identity} <- read(table, key),
+         {:ok, {size, lines, _, _, _, _, _}} when lines > 0 <-
+           read(table, {:node_header, root}),
+         line = min(line, lines - 1),
+         first when is_integer(first) <- ResidentStore.select_start(root, line, header),
+         last when is_integer(last) <- next_line_rank(root, line + 1, lines, size, header),
+         bottom = max(size - fitted, 0),
+         current = min(first + min(offset, last - first - 1), bottom),
+         target = current |> Kernel.+(delta) |> max(0) |> min(bottom),
+         {_, _} = anchor <- ResidentStore.locate_anchor(root, target, header),
+         {:ok, ^identity} <- read(table, key) do
+      {:ok, anchor, target == bottom}
+    else
+      _ -> :error
+    end
+  end
+
+  defp next_line_rank(_root, lines, lines, size, _header), do: size
+
+  defp next_line_rank(root, line, _lines, _size, header),
+    do: ResidentStore.select_start(root, line, header)
+
+  defp rank_header(table, ref) do
+    case read(table, {:node_header, ref}) do
+      {:ok, {_, _, left, left_size, left_lines, starts, right}} ->
+        {:ok, {left, left_size, left_lines, starts, right}}
+
+      _ ->
+        :error
+    end
+  end
+
   @spec row_at(
           :ets.table(),
           {:resident, reference() | nil} | {:windowed, tuple()},
@@ -85,23 +141,13 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
   defp row_at(_table, {:resident, nil}, _row_index), do: {:error, :row_not_found}
 
   defp row_at(table, {:resident, root}, row_index) do
-    header = fn ref ->
-      case read(table, {:node_header, ref}) do
-        {:ok, {_size, left, left_size, own_size, right}} ->
-          {:ok, {left, left_size, own_size, right}}
-
-        _missing_or_unavailable ->
-          :error
-      end
-    end
-
-    with {:ok, {size, _left, _left_size, _own_size, _right}} <-
-           read(table, {:node_header, root}),
-         true <- row_index < size,
-         {:ok, node, offset} <- ResidentStore.locate_rank(root, row_index, header),
+    with {:ok, {size, _, _, _, _, _, _}} <- read(table, {:node_header, root}),
+         true <- row_index >= 0 and row_index < size,
+         {:ok, node, offset, line} <-
+           ResidentStore.locate_rank(root, row_index, &rank_header(table, &1)),
          {:ok, entries} <- read(table, {:node_entries, node}),
          %{payload: payload} <- elem(entries, offset) do
-      {:ok, ResidentStore.project_payload(payload, row_index)}
+      {:ok, ResidentStore.project_payload(payload, line)}
     else
       false -> {:error, :row_not_found}
       :error -> {:error, :unavailable}

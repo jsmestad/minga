@@ -2238,6 +2238,7 @@ struct CommandDispatcherStagingTests {
         windowId: UInt16 = 7,
         epoch: UInt32,
         lineCount: UInt32 = 24,
+        contentHeight: UInt16 = 24,
         cursorLine: UInt32 = 0,
         overrides: [Wire.GutterEntry]
     ) throws -> Wire.WindowGutter {
@@ -2245,7 +2246,7 @@ struct CommandDispatcherStagingTests {
             contentEpoch: epoch, lineCount: lineCount, overrides: overrides
         ))
         return Wire.WindowGutter(
-            windowId: windowId, contentRow: 0, contentCol: 0, contentHeight: 24,
+            windowId: windowId, contentRow: 0, contentCol: 0, contentHeight: contentHeight,
             isActive: true, contentWidth: 80, cursorLine: cursorLine,
             lineNumberStyle: .absolute, lineNumberWidth: 0, signColWidth: 0,
             entries: entries
@@ -2403,6 +2404,129 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
         #expect(dispatcher.lastCommittedFrameSeq == 2)
         #expect(dispatcher.committedEditorSnapshot?.windowContents[7]?.rowStore.mode == .sequential)
+    }
+
+    @Test("wrapped residence hydrates, shares rows on an echo, and commits a matching A2/A9")
+    @MainActor func wrappedResidentTransaction() throws {
+        let (dispatcher, _) = makeDispatcher()
+        let fixture = WrappedScrollFixture()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: 2, resident: false)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.content(for: 1)?.rowStore.mode == .windowed)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: 2)))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        dispatcher.dispatch(.guiGutter(data: try residentGutter(
+            windowId: 1, epoch: 8, lineCount: 3, contentHeight: fixture.fittedRows, overrides: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        let initial = try #require(dispatcher.committedEditorSnapshot?.content(for: 1))
+        #expect(initial.rowStore.mode == .sequentialWrapped)
+        #expect(initial.wrappedResidentAnchor == 2)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: fixture.delta(top: 1, continuation: 0)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        let echoed = try #require(dispatcher.committedEditorSnapshot?.content(for: 1))
+        #expect(echoed.wrappedResidentAnchor == 3)
+        #expect(echoed.rowStore.sharesStorage(with: initial.rowStore))
+        #expect(echoed.rowStoreOperationCounters == ResidentRowStoreCounters())
+
+        let insert = GUIVisualRow(rowType: .wrapContinuation, rowId: 20, bufLine: 0, contentHash: 20, text: "added", spans: [])
+        var resultingRows = fixture.rows
+        resultingRows.insert(insert, at: 3)
+        let grown = WrappedScrollFixture(groups: [4, 1, 4])
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: grown.delta(
+            top: 1, continuation: 0, baseRowCount: 8,
+            rowSplices: [GUIWindowRowSplice(startIndex: 3, deleteCount: 0, insertEntries: [.full(insert)])]
+        )))
+        dispatcher.dispatch(.guiResidentSemantics(data: grown.semantics(
+            rows: resultingRows, splices: [GUIResidentRowSplice(start: 3, deleteCount: 0, insertCount: 1)]
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+        let snapshot = try #require(dispatcher.committedEditorSnapshot)
+        let applied = try #require(snapshot.content(for: 1))
+        #expect(snapshot.frameSeq == 4)
+        #expect(applied.contentEpoch == initial.contentEpoch)
+        #expect(applied.wrappedResidentAnchor == 4)
+        #expect(applied.rowStore.row(at: 8) == initial.rowStore.row(at: 7))
+        #expect(applied.rowStoreOperationCounters.fullResets == 0)
+        #expect(snapshot.surface(for: 1)?.residentSemantics?.rowRevision == 2)
+    }
+
+    enum InvalidWrappedUpdate: CaseIterable, Sendable {
+        case missingSemantics, mismatchedSemantics, staleReference, unsupportedKind, invalidAnchor, mismatchedTotals, leadingContinuation
+    }
+
+    @Test("invalid wrapped transactions preserve the last-good presentation", arguments: InvalidWrappedUpdate.allCases)
+    @MainActor func rejectsInvalidWrappedTransaction(invalid: InvalidWrappedUpdate) throws {
+        let (dispatcher, _) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let fixture = WrappedScrollFixture()
+        let before = try fixture.content(top: 0, continuation: 0)
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: before))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        dispatcher.dispatch(.guiTextPresentation(windowID: 1, presentationID: 88))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let lastGood = try #require(dispatcher.committedEditorSnapshot)
+        dispatcher.promoteVisibleEditorSnapshot(lastGood)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        let invalidRows = PreparedFrameRejection.invalidRetainedRows(windowId: 1, contentEpoch: 8)
+        var expected = FrameTransactionResult.rejected(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1, reason: invalidRows)
+        switch invalid {
+        case .invalidAnchor:
+            // The offset spills into the next source line even though rank 3 exists.
+            dispatcher.dispatch(.guiWindowRowsDelta(data: fixture.delta(top: 0, continuation: 3)))
+        case .mismatchedTotals:
+            let badTotals = WrappedScrollFixture(groups: [2, 2, 4, 1])
+            dispatcher.dispatch(.guiWindowContent(data: try badTotals.content(top: 0, continuation: 0, rowPayload: fixture.rows)))
+            dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        case .leadingContinuation:
+            var rows = fixture.rows
+            rows.swapAt(0, 1)
+            dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: 0, rowPayload: rows)))
+            dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: rows)))
+        case .missingSemantics, .mismatchedSemantics, .staleReference, .unsupportedKind:
+            let insert = GUIVisualRow(
+                rowType: invalid == .unsupportedKind ? .foldStart : .wrapContinuation,
+                rowId: 20, bufLine: 0, contentHash: 20, text: "added", spans: []
+            )
+            let entry: GUIWindowRowDeltaEntry = invalid == .staleReference
+                ? .reference(rowId: 2, contentHash: 999)
+                : .full(insert)
+            let grown = WrappedScrollFixture(groups: [4, 1, 4])
+            dispatcher.dispatch(.guiWindowRowsDelta(data: grown.delta(
+                top: 0, continuation: 0, baseRowCount: 8,
+                rowSplices: [GUIWindowRowSplice(startIndex: 3, deleteCount: 0, insertEntries: [entry])]
+            )))
+            if invalid == .mismatchedSemantics {
+                var rows = fixture.rows
+                rows.insert(insert, at: 3)
+                dispatcher.dispatch(.guiResidentSemantics(data: grown.semantics(
+                    rows: rows, splices: [GUIResidentRowSplice(start: 2, deleteCount: 0, insertCount: 1)]
+                )))
+            } else if invalid == .staleReference {
+                expected = .windowRefMiss(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1, windowId: 1)
+            } else if invalid == .unsupportedKind {
+                expected = .rejected(
+                    generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+                    reason: .invalidRowSplice(windowId: 1, contentEpoch: 8)
+                )
+            }
+        }
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(results.last == expected)
+        #expect(dispatcher.committedEditorSnapshot?.frameSeq == lastGood.frameSeq)
+        #expect(dispatcher.committedEditorSnapshot?.surface(for: 1)?.residentSemantics?.rowRevision == 1)
+        #expect(dispatcher.visibleEditorSnapshot?.metadata.textPresentations[1] == 88)
     }
 
     @Test("resident gutter rejects a windowed row store")

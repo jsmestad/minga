@@ -64,7 +64,7 @@ defmodule MingaEditor.Mouse.ReviewScrollTest do
       assert scrolled.workspace.windows.active == state.workspace.windows.active
       assert scrolled.workspace.editing == state.workspace.editing
       updated_window = Map.fetch!(scrolled.workspace.windows.map, 1)
-      assert updated_window.scroll_echo_top == updated_window.viewport.top
+      assert updated_window.scroll_echo_anchor == {updated_window.viewport.top, 0}
 
       intent = WindowIntent.from_window(updated_window)
       render_window = RenderWindow.materialize(1, intent, cached.render_cache)

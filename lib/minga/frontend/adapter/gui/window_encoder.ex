@@ -483,11 +483,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_window_content_with_metrics(RenderWindow.t()) :: {binary(), metrics()}
   def encode_window_content_with_metrics(%RenderWindow{} = sw) do
     command = :gui_window_content
-    # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible, bit 2 = sequential resident rows
+    # Bits 2 and 3 distinguish sequential source rows from grouped wrapped rows.
     flags =
       if(sw.full_refresh, do: 1, else: 0) |||
         if(legacy_cursor_visible?(sw), do: 0x02, else: 0) |||
-        resident_row_flags(sw.row_store_mode)
+        resident_row_flags(sw)
 
     header_payload =
       command
@@ -629,9 +629,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     end
   end
 
-  @spec resident_row_flags(:windowed | {:resident, non_neg_integer()}) :: non_neg_integer()
-  defp resident_row_flags(:windowed), do: 0
-  defp resident_row_flags({:resident, _count}), do: 0x04
+  @spec resident_row_flags(RenderWindow.t()) :: non_neg_integer()
+  defp resident_row_flags(%RenderWindow{row_store_mode: :windowed}), do: 0
+  defp resident_row_flags(%RenderWindow{wrapped: true}), do: 0x08
+  defp resident_row_flags(%RenderWindow{}), do: 0x04
 
   @spec delta_sections(RenderWindow.t(), non_neg_integer(), binary(), atom()) :: [binary()]
   defp delta_sections(%RenderWindow{} = sw, row_section_id, rows_payload, command) do
@@ -879,7 +880,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     |> Writer.uint16(:viewport_rows, geometry.viewport.rows)
     |> Writer.uint16(:viewport_cols, geometry.viewport.cols)
     |> Writer.uint32(:viewport_total_lines, geometry.viewport.total_lines)
-    |> Writer.uint16(:viewport_visual_row_offset, geometry.viewport.visual_row_offset)
+    |> Writer.uint32(:viewport_visual_row_offset, geometry.viewport.visual_row_offset)
     |> Writer.uint32(:viewport_total_visual_rows, geometry.viewport.total_visual_rows)
     |> Writer.uint16(:gutter_line_number_width, geometry.gutter_metrics.line_number_width)
     |> Writer.uint16(:gutter_sign_col_width, geometry.gutter_metrics.sign_col_width)
@@ -892,7 +893,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_scroll_presentation(nil, _command), do: nil
 
   defp encode_scroll_presentation(%ScrollPresentation{} = presentation, command) do
-    flags = if presentation.reset_required, do: 0x01, else: 0x00
+    flags =
+      if(presentation.reset_required, do: 0x01, else: 0) |||
+        if(presentation.wrapped, do: 0x02, else: 0)
 
     command
     |> Writer.new()

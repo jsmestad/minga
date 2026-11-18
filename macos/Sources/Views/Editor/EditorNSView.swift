@@ -94,7 +94,7 @@ final class EditorNSView: MTKView {
     /// Gutter hover state used for fold chevron visibility and range highlight.
     private var isMouseInGutter: Bool = false
     private var gutterHoverWindowId: UInt16?
-    private var gutterHoverRow: UInt16?
+    private var gutterHoverRowIndex: Int?
 
     /// Current resize cursor pushed for split divider hover or drag.
     private var dividerCursorState: DividerCursorState = .none
@@ -593,7 +593,11 @@ final class EditorNSView: MTKView {
     private static let axisLockThreshold: CGFloat = 4
 
     private var scrollUnconfirmedLines: Int = 0
-    private var scrollLastConfirmedAnchorTop: UInt32? = nil
+    /// Absolute visual rank for wrapped residence, logical top otherwise.
+    private var scrollLastConfirmedAnchor: UInt32?
+    /// A reversal can return to the committed rank before either leg has echoed.
+    /// Keep reconciling until the turning rank is observed or the basis is reset.
+    private var scrollWrappedTurningRank: UInt32?
 
     /// Schedule a render on the next vsync. Multiple calls between vsyncs
     /// are coalesced by MTKView into a single draw() call.
@@ -626,7 +630,7 @@ final class EditorNSView: MTKView {
         lastMoveCol = -1
         isMouseInGutter = false
         gutterHoverWindowId = nil
-        gutterHoverRow = nil
+        gutterHoverRowIndex = nil
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
         thumbDragSession = nil
@@ -695,7 +699,7 @@ final class EditorNSView: MTKView {
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             committedSnapshot.windowIds.contains(windowId) ? windowId : nil
         }
-        let validGutterHoverRow = validGutterHoverWindowId == nil ? nil : gutterHoverRow
+        let validGutterHoverRowIndex = validGutterHoverWindowId == nil ? nil : gutterHoverRowIndex
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.capturePresentationInputSeq()
@@ -708,7 +712,7 @@ final class EditorNSView: MTKView {
             cursorBlinkVisible: cursorBlinkVisible,
             isMouseInGutter: validMouseInGutter,
             gutterHoverWindowId: validGutterHoverWindowId,
-            gutterHoverRow: validGutterHoverRow,
+            gutterHoverRowIndex: validGutterHoverRowIndex,
             drawableProvider: { [weak self] in
                 guard let self else { return nil }
                 if let drawableProvider = self.drawableProvider {
@@ -1477,7 +1481,7 @@ final class EditorNSView: MTKView {
     }
 
     private func committedThumbDrag(for windowId: UInt16, in snapshot: CommittedEditorSnapshot?) -> ThumbDragSession.Committed? {
-        guard let sp = snapshot?.content(for: windowId)?.scrollPresentation else { return nil }
+        guard let sp = snapshot?.content(for: windowId)?.scrollPresentation, !sp.isWrapped else { return nil }
         return ThumbDragSession.Committed(anchorTop: sp.anchorTop, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration)
     }
 
@@ -1524,7 +1528,7 @@ final class EditorNSView: MTKView {
     /// any drag target renders from resident rows. Windowed panes carry only a viewport band and
     /// must keep the round-trip path. Pure for testability.
     nonisolated static func thumbDragCanPresentLocally(scrollPresentation: GUIScrollPresentation?, totalLines: UInt32) -> Bool {
-        guard let sp = scrollPresentation, totalLines > 0 else { return false }
+        guard let sp = scrollPresentation, !sp.isWrapped, totalLines > 0 else { return false }
         return sp.overscanStartLine == 0 && sp.overscanEndLine >= totalLines
     }
 
@@ -2196,12 +2200,6 @@ final class EditorNSView: MTKView {
             cancelThumbDragWithFlush()
         }
 
-        if event.hasPreciseScrollingDeltas && event.phase == .began {
-            // A fresh trackpad gesture supersedes any in-flight settle; the `.began`
-            // branch in handleTrackpadScroll performs the full reset.
-            cancelScrollAnimations()
-        }
-
         let (row, col) = cellPosition(from: event)
         let mods = modifierBits(from: event.modifierFlags)
 
@@ -2326,7 +2324,7 @@ final class EditorNSView: MTKView {
         scrollTargetWindowId = settling ? nil : windowId
         scrollSettleWindowId = settling ? windowId : nil
         scrollUnconfirmedLines = unconfirmedLines
-        scrollLastConfirmedAnchorTop = confirmedAnchorTop
+        scrollLastConfirmedAnchor = confirmedAnchorTop
         scrollPixelOffset = CGPoint(x: 0, y: CGFloat(unconfirmedLines) * effectiveCellHeight)
         if settling {
             scrollSettleAnimator.start(offset: 0, duration: 60)
@@ -2352,21 +2350,20 @@ final class EditorNSView: MTKView {
         return ScrollDrawSnapshot(
             presentation: presentation,
             unconfirmedLines: scrollUnconfirmedLines,
-            lastConfirmedAnchorTop: scrollLastConfirmedAnchorTop,
+            lastConfirmedAnchorTop: scrollLastConfirmedAnchor,
             cellHeight: effectiveCellHeight
         )
     }
 #endif
 
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
-        if event.phase == .began {
-            cancelScrollAnimations()
-            scrollAccumulator.reset()
-            scrollPixelOffset = .zero
-            scrollElasticOffsetY = 0
+        let beginsGesture = event.phase == .began
+        let previousWindowId = beginsGesture ? scrollTargetWindowId ?? scrollSettleWindowId : nil
+        if beginsGesture {
+            resetSmoothScrollOffsetPreservingTarget()
             scrollTargetWindowId = nil
             scrollTargetCellPosition = nil
-            resetScrollTrackingState()
+            resetScrollAxisLock()
         } else if event.momentumPhase == .began || event.momentumPhase == .changed {
             // Momentum resuming after finger-lift: cancel the tentative settle started at
             // `.ended` so the animator and live momentum don't both drive the offset. The
@@ -2382,11 +2379,20 @@ final class EditorNSView: MTKView {
 
         establishSmoothScrollTargetIfNeeded(row: row, col: col)
         let targetCell = Self.smoothScrollEventCellPosition(targetCell: scrollTargetCellPosition, row: row, col: col)
+        let targetContent = scrollTargetWindowId.flatMap { dispatcher.committedEditorSnapshot?.content(for: $0) }
+        // Dispatcher resets discard predictions when the pane's scroll basis changes.
+        // A new finger gesture on that same wrapped basis does not unsend prior intent.
+        if beginsGesture, scrollTargetWindowId != previousWindowId || targetContent?.wrappedResidentAnchor == nil {
+            resetScrollReconciliation()
+        }
+        if let targetContent { reconcileUnconfirmedLines(against: targetContent) }
+        let suppressLocalOffset = scrollTargetWindowId == nil || isSelectionDragActive
+        var excessWrappedRows = 0
 
         let vEvents = scrollAccumulator.accumulateVertical(
             deltaY: lockedDeltaY, cellHeight: effectiveCellHeight)
         if let windowId = scrollTargetWindowId {
-            var deltaLines: Int16 = 0
+            var deltaLines = 0
             for e in vEvents {
                 switch e {
                 case .scrollDown: deltaLines += 1
@@ -2394,10 +2400,22 @@ final class EditorNSView: MTKView {
                 default: break
                 }
             }
-            if deltaLines != 0 {
-                let direction: UInt8 = deltaLines > 0 ? 0 : 1
-                encoder.send(.scrollBatch(windowID: windowId, deltaLines: deltaLines, direction: direction))
-                scrollUnconfirmedLines += Int(deltaLines)
+            let wireDelta = Int16(clamping: deltaLines)
+            if wireDelta != 0 {
+                let direction: UInt8 = wireDelta > 0 ? 0 : 1
+                let sent = encoder.send(.scrollBatch(windowID: windowId, deltaLines: wireDelta, direction: direction))
+                if sent.wasAccepted {
+                    let requested = Int(wireDelta)
+                    if let targetContent, targetContent.scrollPresentation?.isWrapped == true {
+                        if !suppressLocalOffset, targetContent.wrappedResidentAnchor != nil {
+                            let reachable = wrappedScrollPrediction(requested, content: targetContent)
+                            scrollUnconfirmedLines += reachable
+                            excessWrappedRows = requested - reachable
+                        }
+                    } else {
+                        scrollUnconfirmedLines += requested
+                    }
+                }
             }
         } else {
             for e in vEvents {
@@ -2409,30 +2427,30 @@ final class EditorNSView: MTKView {
         for e in hEvents {
             sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
-        let targetWindowContent = scrollTargetWindowId.flatMap { dispatcher.committedEditorSnapshot?.content(for: $0) }
-        let targetScrollPresentation = targetWindowContent?.scrollPresentation
-        let scrollBounds = Self.presentationScrollBounds(
-            for: targetWindowContent,
-            scrollPresentation: targetScrollPresentation
-        )
-
-        if let sp = targetScrollPresentation {
-            reconcileUnconfirmedLines(against: sp)
-        }
-
-        let compensatedOffsetY = scrollAccumulator.pixelOffsetY + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
-        let translation = Self.presentationScrollTranslation(
-            scrollPresentation: targetScrollPresentation,
-            scrollOffsetY: compensatedOffsetY,
-            scrollDeltaY: lockedDeltaY,
-            payloadOverscanBefore: scrollBounds.payloadBefore,
-            payloadOverscanAfter: scrollBounds.payloadAfter,
-            boundaryBefore: scrollBounds.boundaryBefore,
-            boundaryAfter: scrollBounds.boundaryAfter
-        )
-        let suppressLocalOffset = scrollTargetWindowId == nil || isSelectionDragActive
         let offsetX = suppressLocalOffset ? 0 : scrollAccumulator.pixelOffsetX
-        applyPresentationTranslation(translation, offsetX: offsetX, suppressLocalOffset: suppressLocalOffset)
+        let compensatedOffsetY = scrollAccumulator.pixelOffsetY + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
+        if let targetContent, targetContent.scrollPresentation?.isWrapped == true {
+            if targetContent.wrappedResidentAnchor != nil, !suppressLocalOffset {
+                applyWrappedTrackpadOffset(
+                    compensatedOffsetY + CGFloat(excessWrappedRows) * effectiveCellHeight,
+                    offsetX: offsetX, content: targetContent, deltaY: lockedDeltaY
+                )
+            } else {
+                // The windowed payload has no exact visual rank or global bounds.
+                // Keep reporting intent but only present committed vertical movement.
+                scrollPixelOffset = CGPoint(x: offsetX, y: 0)
+            }
+        } else {
+            let scroll = targetContent?.scrollPresentation
+            let bounds = Self.presentationScrollBounds(for: targetContent, scrollPresentation: scroll)
+            let translation = Self.presentationScrollTranslation(
+                scrollPresentation: scroll, scrollOffsetY: compensatedOffsetY,
+                scrollDeltaY: lockedDeltaY,
+                payloadOverscanBefore: bounds.payloadBefore, payloadOverscanAfter: bounds.payloadAfter,
+                boundaryBefore: bounds.boundaryBefore, boundaryAfter: bounds.boundaryAfter
+            )
+            applyPresentationTranslation(translation, offsetX: offsetX, suppressLocalOffset: suppressLocalOffset)
+        }
 
         // Settle onto the grid when the gesture, then any following momentum, truly ends.
         if (event.phase == .ended || event.phase == .cancelled) && event.momentumPhase == [] {
@@ -2448,10 +2466,14 @@ final class EditorNSView: MTKView {
     }
 
     /// Ends a smooth-scroll gesture. With animations enabled this eases the residual sub-line
-    /// offset to the grid (AC1) and springs the rubber band back (AC2) instead of snapping;
-    /// under Reduce Motion it hard-resets to the grid immediately.
+    /// offset and springs the rubber band back. Reduce Motion snaps the residual to the grid
+    /// but keeps a reachable wrapped-row prediction until it commits.
     private func finishSmoothScrollGesture() {
-        guard scrollAnimateEnabled else {
+        let needsConfirmation = scrollUnconfirmedLines != 0 || scrollWrappedTurningRank != nil
+        let keepWrappedPrediction = needsConfirmation && scrollTargetWindowId.flatMap {
+            dispatcher.committedEditorSnapshot?.content(for: $0)?.wrappedResidentAnchor
+        } != nil
+        guard scrollAnimateEnabled || keepWrappedPrediction else {
             hardResetSmoothScroll()
             return
         }
@@ -2469,27 +2491,24 @@ final class EditorNSView: MTKView {
 
         // AC1: ease the residual sub-line offset to the grid while unconfirmed-line
         // reconciliation keeps the anchor easing forward (no back-then-forward stutter).
-        if let windowId = scrollTargetWindowId, scrollUnconfirmedLines != 0 || scrollAccumulator.pixelOffsetY != 0 {
-            let residual = scrollAccumulator.pixelOffsetY
+        if let windowId = scrollTargetWindowId, needsConfirmation || scrollAccumulator.pixelOffsetY != 0 {
+            let residual = scrollAnimateEnabled ? scrollAccumulator.pixelOffsetY : 0
             scrollAccumulator.reset()
-            beginScrollSettle(windowId: windowId, residual: residual, duration: Self.scrollSettleDuration)
+            beginScrollSettle(windowId: windowId, residual: residual, duration: scrollAnimateEnabled ? Self.scrollSettleDuration : 0)
             startedAnimation = true
         }
 
         // Release live-gesture-only state; the settle keeps reconciling via scrollSettleWindowId.
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
-        scrollAxisLock = .undecided
-        scrollAxisAccumulatedX = 0
-        scrollAxisAccumulatedY = 0
+        resetScrollAxisLock()
 
         if !startedAnimation {
             scrollAccumulator.reset()
             scrollPixelOffset = .zero
             scrollElasticOffsetY = 0
             scrollElasticRawDistance = 0
-            scrollUnconfirmedLines = 0
-            scrollLastConfirmedAnchorTop = nil
+            resetScrollReconciliation()
             scrollSettleWindowId = nil
             scrollElasticWindowId = nil
         }
@@ -2512,11 +2531,20 @@ final class EditorNSView: MTKView {
     }
 
     private func resetScrollTrackingState() {
+        resetScrollAxisLock()
+        resetScrollReconciliation()
+    }
+
+    private func resetScrollAxisLock() {
         scrollAxisLock = .undecided
         scrollAxisAccumulatedX = 0
         scrollAxisAccumulatedY = 0
+    }
+
+    private func resetScrollReconciliation() {
         scrollUnconfirmedLines = 0
-        scrollLastConfirmedAnchorTop = nil
+        scrollLastConfirmedAnchor = nil
+        scrollWrappedTurningRank = nil
     }
 
     /// Cancels in-flight presentation scroll animations without moving the offset.
@@ -2533,13 +2561,9 @@ final class EditorNSView: MTKView {
     /// Begins the AC1/AC3 settle: decays `residual` px to the grid while the draw loop
     /// reconciles unconfirmed lines against `windowId`'s committed anchor.
     private func beginScrollSettle(windowId: UInt16, residual: CGFloat, duration: CFTimeInterval) {
-        if let current = scrollSettleWindowId, current != windowId {
-            // Settling switched panes: rebase the anchor reconciliation baseline.
-            scrollLastConfirmedAnchorTop = nil
-        }
         scrollSettleWindowId = windowId
-        if scrollLastConfirmedAnchorTop == nil {
-            scrollLastConfirmedAnchorTop = dispatcher.committedEditorSnapshot?.content(for: windowId)?.scrollPresentation?.anchorTop
+        if scrollLastConfirmedAnchor == nil, let content = dispatcher.committedEditorSnapshot?.content(for: windowId) {
+            scrollLastConfirmedAnchor = Self.wheelAnchor(content)
         }
         scrollSettleAnimator.start(offset: residual, duration: duration)
         // Reflect the seeded offset immediately so this frame is continuous with the last.
@@ -2547,34 +2571,62 @@ final class EditorNSView: MTKView {
         needsDisplay = true
     }
 
-    /// Reconciles the predicted unconfirmed-line count against a freshly committed anchor.
-    /// Keeps the rendered position stable as the BEAM's anchor catches up to local prediction.
-    private func reconcileUnconfirmedLines(against sp: GUIScrollPresentation) {
-        guard let lastAnchor = scrollLastConfirmedAnchorTop else {
-            scrollLastConfirmedAnchorTop = sp.anchorTop
-            return
-        }
-        let anchorDelta = Int(sp.anchorTop) - Int(lastAnchor)
-        guard anchorDelta != 0 else { return }
-        scrollUnconfirmedLines = Self.reconciledUnconfirmedLines(current: scrollUnconfirmedLines, anchorDelta: anchorDelta)
-        scrollLastConfirmedAnchorTop = sp.anchorTop
+    private static func wheelAnchor(_ content: GUIWindowContent) -> UInt32? {
+        guard let scroll = content.scrollPresentation else { return nil }
+        if scroll.isWrapped { return content.wrappedResidentAnchor.map { UInt32($0) } }
+        return scroll.anchorTop
     }
 
-    /// Applies trackpad and discrete-wheel acknowledgements from this draw's committed snapshot.
-    /// A live gesture adjusts its already-derived pixel offset by only the newly acknowledged
-    /// lines. A settle derives its complete offset in `advancePresentationScrollAnimation()`.
-    private func reconcileTrackpadPresentation(against committedSnapshot: CommittedEditorSnapshot) {
-        guard let windowId = scrollTargetWindowId ?? scrollSettleWindowId,
-              let sp = committedSnapshot.content(for: windowId)?.scrollPresentation else { return }
-        let previousUnconfirmedLines = scrollUnconfirmedLines
-        reconcileUnconfirmedLines(against: sp)
-        guard scrollTargetWindowId != nil else { return }
-        let acknowledgedLines = previousUnconfirmedLines - scrollUnconfirmedLines
-        guard acknowledgedLines != 0 else { return }
-        scrollPixelOffset = CGPoint(
-            x: scrollPixelOffset.x,
-            y: scrollPixelOffset.y - CGFloat(acknowledgedLines) * effectiveCellHeight
-        )
+    /// Reconciles only newly committed movement in the pane's wheel coordinate.
+    private func reconcileUnconfirmedLines(against content: GUIWindowContent) {
+        guard let anchor = Self.wheelAnchor(content) else { return }
+        if let previous = scrollLastConfirmedAnchor, previous != anchor {
+            let delta = Int(anchor) - Int(previous)
+            if content.rowStore.mode == .sequentialWrapped {
+                // A same-authority echo can land beyond the predicted target when
+                // it acknowledges only the outward part of a mid-flight reversal.
+                scrollUnconfirmedLines = isSelectionDragActive ? 0 : scrollUnconfirmedLines - delta
+                if scrollWrappedTurningRank == anchor || isSelectionDragActive {
+                    scrollWrappedTurningRank = nil
+                }
+            } else {
+                scrollUnconfirmedLines = Self.reconciledUnconfirmedLines(current: scrollUnconfirmedLines, anchorDelta: delta)
+            }
+        }
+        scrollLastConfirmedAnchor = anchor
+    }
+
+    private func wrappedScrollPrediction(_ requested: Int, content: GUIWindowContent) -> Int {
+        guard let anchor = content.wrappedResidentAnchor, let maxTop = content.wrappedResidentMaxTop else { return 0 }
+        let predictedTop = anchor + scrollUnconfirmedLines
+        let reachable = min(max(predictedTop + requested, 0), maxTop) - predictedTop
+        if (reachable < 0 && scrollUnconfirmedLines > 0) || (reachable > 0 && scrollUnconfirmedLines < 0) {
+            scrollWrappedTurningRank = UInt32(predictedTop)
+        }
+        return reachable
+    }
+
+    /// Clamp the content at the visual EOF/top while keeping reachable movement
+    /// pending. Extraneous precise input belongs only to the elastic transform.
+    private func applyWrappedTrackpadOffset(_ requestedY: CGFloat, offsetX: CGFloat, content: GUIWindowContent, deltaY: CGFloat) {
+        let bounded = boundedScrollOffset(requestedY, content: content)
+        let excess = requestedY - bounded
+        scrollPixelOffset = CGPoint(x: offsetX, y: bounded)
+        guard deltaY != 0 else { return }
+        if excess != 0 {
+            scrollAccumulator.snapVertical()
+        }
+        if excess != 0, scrollAnimateEnabled {
+            scrollElasticRawDistance += excess
+            scrollElasticWindowId = scrollTargetWindowId
+            scrollElasticOffsetY = PresentationScrollAnimator.rubberBandOffset(
+                rawDistance: scrollElasticRawDistance, limit: effectiveCellHeight * Self.scrollElasticLimitCells
+            )
+        } else {
+            scrollElasticRawDistance = 0
+            scrollElasticOffsetY = 0
+            scrollElasticWindowId = nil
+        }
     }
 
     /// Advances the settle and rubber-band spring-back animations one frame.
@@ -2583,28 +2635,27 @@ final class EditorNSView: MTKView {
     /// mirroring the cursor animation's draw-loop self-retrigger. Discards always win: the state
     /// is cleared out from under this by `resetSmoothScrollState()` before it runs.
     private func advancePresentationScrollAnimation(snapshot: CommittedEditorSnapshot) {
-        if let windowId = scrollTargetWindowId, let content = snapshot.content(for: windowId), let sp = content.scrollPresentation {
-            reconcileUnconfirmedLines(against: sp)
+        if let windowId = scrollTargetWindowId, let content = snapshot.content(for: windowId), content.scrollPresentation != nil {
+            reconcileUnconfirmedLines(against: content)
             let offsetY = scrollAccumulator.pixelOffsetY + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
             scrollPixelOffset.y = boundedScrollOffset(offsetY, content: content)
         }
-        guard scrollAnimateEnabled else { return }
         let now = CACurrentMediaTime()
         var keepAnimating = false
 
         if let windowId = scrollSettleWindowId {
-            if let sp = snapshot.content(for: windowId)?.scrollPresentation {
-                reconcileUnconfirmedLines(against: sp)
+            if let content = snapshot.content(for: windowId) {
+                reconcileUnconfirmedLines(against: content)
             }
             let residual = scrollSettleAnimator.offset(now: now)
             let offsetY = residual + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
             scrollPixelOffset.y = boundedScrollOffset(offsetY, content: snapshot.content(for: windowId))
             if scrollSettleAnimator.isActive {
                 keepAnimating = true
-            } else if scrollUnconfirmedLines == 0 {
+            } else if scrollUnconfirmedLines == 0, scrollWrappedTurningRank == nil {
                 // Fully settled: residual is exactly 0 and no unconfirmed lines remain.
                 scrollSettleWindowId = nil
-                scrollLastConfirmedAnchorTop = nil
+                scrollLastConfirmedAnchor = nil
                 scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
             }
             // Otherwise the residual is done but whole (on-grid) lines are still committing;
@@ -2630,7 +2681,11 @@ final class EditorNSView: MTKView {
     /// Projects a reconciled offset without repeating an input event's elastic pull.
     private func boundedScrollOffset(_ offsetY: CGFloat, content: GUIWindowContent?) -> CGFloat {
         guard !isSelectionDragActive else { return 0 }
-        guard let presentation = content?.scrollPresentation else { return offsetY }
+        guard let content, let presentation = content.scrollPresentation else { return offsetY }
+        if presentation.isWrapped {
+            guard let anchor = content.wrappedResidentAnchor, let maxTop = content.wrappedResidentMaxTop else { return 0 }
+            return min(max(offsetY, -CGFloat(anchor) * effectiveCellHeight), CGFloat(maxTop - anchor) * effectiveCellHeight)
+        }
         let bounds = Self.presentationScrollBounds(for: content, scrollPresentation: presentation)
         let translation = Self.presentationScrollTranslation(
             scrollPresentation: presentation, scrollOffsetY: offsetY, scrollDeltaY: -offsetY,
@@ -2804,31 +2859,6 @@ final class EditorNSView: MTKView {
         return pointerWindowId != currentTargetWindowId
     }
 
-    nonisolated static func presentationNormalizedGutterPoint(
-        _ point: NSPoint,
-        presentation: LocalScrollPresentation?,
-        targetGutterRect: GUICellRect?,
-        cellWidth: CGFloat,
-        cellHeight: CGFloat
-    ) -> NSPoint {
-        guard let presentation, let targetGutterRect else { return point }
-        guard cellWidth > 0, cellHeight > 0 else { return point }
-
-        let rawCol = Int(point.x / cellWidth)
-        let rawRow = Int(point.y / cellHeight)
-        let startRow = Int(targetGutterRect.row)
-        let endRow = startRow + Int(targetGutterRect.height)
-        let startCol = Int(targetGutterRect.col)
-        let endCol = startCol + Int(targetGutterRect.width)
-        guard rawRow >= startRow && rawRow < endRow && rawCol >= startCol && rawCol < endCol else { return point }
-        guard presentation.offset.y != 0 else { return point }
-
-        let minY = CGFloat(startRow) * cellHeight
-        let maxY = CGFloat(endRow) * cellHeight - 0.001
-        let normalizedY = min(max(point.y + presentation.offset.y, minY), maxY)
-        return NSPoint(x: point.x, y: normalizedY)
-    }
-
     /// Result of classifying a vertical scroll delta against the pane's content and boundaries.
     enum ScrollTranslation: Equatable {
         case content(offsetY: CGFloat)
@@ -2896,6 +2926,15 @@ final class EditorNSView: MTKView {
         scrollPresentation: GUIScrollPresentation?
     ) -> PresentationScrollBounds {
         guard let scrollPresentation else { return .zero }
+        if scrollPresentation.isWrapped {
+            guard let anchor = windowContent?.wrappedResidentAnchor,
+                  let maxTop = windowContent?.wrappedResidentMaxTop else { return .zero }
+            let after = maxTop - anchor
+            return PresentationScrollBounds(
+                payloadBefore: anchor, payloadAfter: after,
+                boundaryBefore: anchor > 0 ? 1 : 0, boundaryAfter: after > 0 ? 1 : 0
+            )
+        }
 
         let before = windowContent.map {
             CoreTextMetalRenderer.presentationOverscanBeforeRows($0)
@@ -3001,11 +3040,13 @@ final class EditorNSView: MTKView {
     /// Discrete mouse wheel: one event per click, no accumulation.
     private func handleDiscreteScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.scrollingDeltaY > 0 {
-            encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_UP, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
-            seedDiscreteScrollAnimation(row: row, col: col, lineDelta: -1)
+            if encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_UP, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1)).wasAccepted {
+                seedDiscreteScrollAnimation(row: row, col: col, lineDelta: -1)
+            }
         } else if event.scrollingDeltaY < 0 {
-            encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_DOWN, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
-            seedDiscreteScrollAnimation(row: row, col: col, lineDelta: 1)
+            if encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_DOWN, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1)).wasAccepted {
+                seedDiscreteScrollAnimation(row: row, col: col, lineDelta: 1)
+            }
         }
         if event.scrollingDeltaX > 0 {
             encoder.send(.mouse(row: row, column: col, button: MOUSE_SCROLL_LEFT, modifiers: mods, eventType: MOUSE_PRESS, clickCount: 1))
@@ -3040,18 +3081,30 @@ final class EditorNSView: MTKView {
         guard effectiveCellHeight > 0 else { return }
         guard let windowId = smoothScrollTargetWindowId(row: row, col: col) else { return }
 
-        // A tick into a document boundary can't be committed by the BEAM, so predicting it would
-        // park content one cell off-grid; suppress the seed (the scroll intent already sent above).
         let windowContent = dispatcher.committedEditorSnapshot?.content(for: windowId)
-        let boundary = Self.presentationScrollBoundaryAvailability(
-            for: windowContent,
-            scrollPresentation: windowContent?.scrollPresentation
-        )
-        guard Self.discreteTickSeedsPrediction(
-            lineDelta: lineDelta,
-            boundaryBefore: boundary.before,
-            boundaryAfter: boundary.after
-        ) else { return }
+        if scrollSettleWindowId != windowId {
+            scrollSettleAnimator.cancel()
+            scrollSettleWindowId = nil
+            scrollPixelOffset.y = 0
+            scrollUnconfirmedLines = 0
+            scrollLastConfirmedAnchor = nil
+            scrollWrappedTurningRank = nil
+        }
+        let reachable: Int
+        if let windowContent, windowContent.scrollPresentation?.isWrapped == true {
+            guard windowContent.wrappedResidentAnchor != nil else { return }
+            reconcileUnconfirmedLines(against: windowContent)
+            reachable = wrappedScrollPrediction(lineDelta, content: windowContent)
+            guard reachable != 0 else { return }
+        } else {
+            let boundary = Self.presentationScrollBoundaryAvailability(
+                for: windowContent, scrollPresentation: windowContent?.scrollPresentation
+            )
+            guard Self.discreteTickSeedsPrediction(
+                lineDelta: lineDelta, boundaryBefore: boundary.before, boundaryAfter: boundary.after
+            ) else { return }
+            reachable = lineDelta
+        }
 
         // A discrete tick supersedes an elastic rebound. Clear it before seeding the settle so a
         // rebound owned by another pane cannot be combined with this pane's presentation offset.
@@ -3062,8 +3115,8 @@ final class EditorNSView: MTKView {
 
         // Extend any in-flight settle from its current position so rapid ticks accumulate smoothly.
         let residualNow = scrollSettleAnimator.offset()
-        scrollUnconfirmedLines += lineDelta
-        let residual = residualNow - CGFloat(lineDelta) * effectiveCellHeight
+        scrollUnconfirmedLines += reachable
+        let residual = residualNow - CGFloat(reachable) * effectiveCellHeight
         beginScrollSettle(windowId: windowId, residual: residual, duration: Self.scrollDiscreteTickDuration)
     }
 
@@ -3346,19 +3399,8 @@ final class EditorNSView: MTKView {
     }
 
     private func foldChevronEntry(at point: NSPoint) -> (gutter: Wire.WindowGutter, entry: Wire.GutterEntry)? {
-        let presentation = visibleLocalScrollPresentation
-        let point = Self.presentationNormalizedGutterPoint(
-            point,
-            presentation: presentation,
-            targetGutterRect: presentation.flatMap { interactionContent(windowId: $0.windowId)?.paneGeometry?.gutterRect },
-            cellWidth: cellWidth,
-            cellHeight: effectiveCellHeight
-        )
-        guard let (gutter, rowIndex) = gutterHit(at: point) else { return nil }
+        guard let (gutter, _, entry) = resolvedGutterHit(at: point) else { return nil }
         guard Int(gutter.signColWidth) >= 3 else { return nil }
-
-        guard let surface = editorPresentationSnapshot?.surface(for: gutter.windowId),
-              let entry = surface.gutterEntry(atPresentationRow: rowIndex) else { return nil }
 
         let gutterX = CGFloat(gutter.contentCol) * cellWidth + CoreTextMetalRenderer.gutterLeftMarginPt
         let foldColumnOffset = CGFloat(Int(gutter.signColWidth) - 1)
@@ -3374,52 +3416,55 @@ final class EditorNSView: MTKView {
     }
 
     private func updateGutterHover(at point: NSPoint) {
-        let presentation = visibleLocalScrollPresentation
-        let point = Self.presentationNormalizedGutterPoint(
-            point,
-            presentation: presentation,
-            targetGutterRect: presentation.flatMap { interactionContent(windowId: $0.windowId)?.paneGeometry?.gutterRect },
-            cellWidth: cellWidth,
-            cellHeight: effectiveCellHeight
-        )
-        let next: (Bool, UInt16?, UInt16?)
-        if let (gutter, rowIndex) = gutterHit(at: point),
-           editorPresentationSnapshot?.surface(for: gutter.windowId)?.gutterEntry(
-               atPresentationRow: rowIndex
-           ) != nil {
-            next = (true, gutter.windowId, gutter.contentRow + UInt16(rowIndex))
-        } else {
-            next = (false, nil, nil)
-        }
+        let hit = resolvedGutterHit(at: point)
+        let nextInGutter = hit != nil
+        let nextWindowId = hit?.gutter.windowId
+        let nextRowIndex = hit?.rowIndex
 
-        guard next.0 != isMouseInGutter || next.1 != gutterHoverWindowId || next.2 != gutterHoverRow else { return }
-        isMouseInGutter = next.0
-        gutterHoverWindowId = next.1
-        gutterHoverRow = next.2
+        guard nextInGutter != isMouseInGutter || nextWindowId != gutterHoverWindowId || nextRowIndex != gutterHoverRowIndex else { return }
+        isMouseInGutter = nextInGutter
+        gutterHoverWindowId = nextWindowId
+        gutterHoverRowIndex = nextRowIndex
         needsDisplay = true
     }
 
     private func clearGutterHover() {
-        guard isMouseInGutter || gutterHoverWindowId != nil || gutterHoverRow != nil else { return }
+        guard isMouseInGutter || gutterHoverWindowId != nil || gutterHoverRowIndex != nil else { return }
         isMouseInGutter = false
         gutterHoverWindowId = nil
-        gutterHoverRow = nil
+        gutterHoverRowIndex = nil
         needsDisplay = true
     }
 
-    private func gutterHit(at point: NSPoint) -> (gutter: Wire.WindowGutter, rowIndex: Int)? {
+    private func resolvedGutterHit(at point: NSPoint) -> (gutter: Wire.WindowGutter, rowIndex: Int, entry: Wire.GutterEntry)? {
+        guard let (surface, gutter) = gutterHit(at: point) else { return nil }
+
+        // Clip the physical point first, then invert the displayed vertical transform.
+        // Rows just outside the committed viewport may now be visible at either edge.
+        var y = point.y
+        if let presentation = visibleLocalScrollPresentation, presentation.windowId == gutter.windowId {
+            y += presentation.offset.y
+        }
+        let presentationRow = Int(floor(y / effectiveCellHeight)) - Int(gutter.contentRow)
+        let rowIndex = surface.content.presentationRowOrigin + presentationRow
+        guard let entry = surface.gutterEntry(atRowIndex: rowIndex) else { return nil }
+        return (gutter, rowIndex, entry)
+    }
+
+    private func gutterHit(at point: NSPoint) -> (surface: PresentedWindowSurface, gutter: Wire.WindowGutter)? {
+        guard point.x >= 0, point.y >= 0 else { return nil }
         let screenRow = Int(point.y / effectiveCellHeight)
 
         guard let snapshot = editorPresentationSnapshot else { return nil }
-        let gutters = snapshot.windowGutters
 
         if let geometry = paneGeometryGutterHit(at: point, screenRow: screenRow),
-           let gutter = gutters[geometry.windowId] {
-            return (gutter, screenRow - Int(geometry.gutterRect.row))
+           let surface = snapshot.surface(for: geometry.windowId),
+           let gutter = surface.gutter.gutter {
+            return (surface, gutter)
         }
 
-        for windowId in snapshot.windowIds {
-            guard let gutter = gutters[windowId] else { continue }
+        for surface in snapshot.surfaces {
+            guard let gutter = surface.gutter.gutter else { continue }
             let startRow = Int(gutter.contentRow)
             let endRow = startRow + Int(gutter.contentHeight)
             guard screenRow >= startRow && screenRow < endRow else { continue }
@@ -3429,7 +3474,7 @@ final class EditorNSView: MTKView {
             let gutterEndX = gutterX + gutterWidth * cellWidth
             guard point.x >= gutterX && point.x < gutterEndX else { continue }
 
-            return (gutter, screenRow - startRow)
+            return (surface, gutter)
         }
 
         return nil

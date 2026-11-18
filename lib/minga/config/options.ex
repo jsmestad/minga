@@ -435,7 +435,7 @@ defmodule Minga.Config.Options do
     {:picker_backdrop, :boolean, true,
      "Whether centered floating pickers render a dimmed backdrop overlay."},
     {:resident_store_max_lines, :non_neg_integer, 65_536,
-     "Maximum buffer line count that still receives full-document row residence (glitch-free fast scrolling). Defaults to the reviewed 65,536-line ceiling; resident row counts and row-delta counts use u32 on the wire. Real exposure is bounded by :resident_store_max_bytes and :max_file_size. Set to 0 to disable full residence entirely; over-ceiling or over-byte buffers fall back to viewport-windowed emit. Wrapped and folded buffers always use the windowed path."},
+     "Maximum laid-out row count that receives full-document row residence. Soft-wrap continuations count toward the limit. The byte gate also applies, and folded buffers remain windowed. Set to 0 to disable full residence."},
     {:resident_store_max_bytes, :pos_integer, 10_485_760,
      "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines; set :resident_store_max_lines to 0 to disable residence regardless of byte size."},
     {:agent_transcript_resident_max_bytes, :pos_integer, 8_388_608,
