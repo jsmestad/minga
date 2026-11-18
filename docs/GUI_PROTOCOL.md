@@ -225,7 +225,7 @@ Flags bits:
   bit 2: is_agent (always 0 in the active-workspace projection)
   bit 3: has_attention
   bits 4-6: kind-scoped status. When is_agent=1: agent_status (0=idle,
-            1=thinking, 2=tool_executing, 3=error, 4=plan). When is_agent=0:
+            1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting). When is_agent=0:
             bit 4 = is_ephemeral (file tab backed by no file on disk, e.g.
             Untitled-1); bits 5-6 reserved.
   bit 7: is_pinned
@@ -355,7 +355,7 @@ The optional Review section identifies a read-only review, not an editable buffe
 
 Back resumes the retained draft without changing its text, cursor, selection or editing mode. It restores input focus through the BEAM owner; frontends do not infer draft focus from the displayed mode label.
 
-`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` is the currently running tool label when the agent status is `tool_executing`; it is empty otherwise.
+`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` names the executing tool for `tool_executing` or the waiting invocation for `approval_waiting`; it is empty otherwise.
 
 `cursor_line` and `cursor_col` are 1-indexed on the wire.
 
@@ -369,11 +369,11 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
 Parser status: 0=available, 1=unavailable, 2=restarting
 
-Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting
 
 Workspace kind: 0=manual, 1=agent. Workspace status uses the same values as agent status. Workspace flags: bit 0=attention, bit 1=closeable.
 
-Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
+Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting
 
 Macro recording: 0=not recording, 1-26=recording register a-z
 
@@ -496,7 +496,9 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 | 0x09 | InputFocused | `input_focused(1)` |
 
-Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
+Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
+
+Approval waiting is a presentation status, not a new execution or busy state. Render it without an execution animation, but keep Stop available because the turn is still active.
 
 Pending approval payload:
 ```
@@ -1048,6 +1050,8 @@ Typed body payloads:
 0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
 ```
 
+For `tool_call` (`0x04`) and `styled_tool_call` (`0x08`), `status` is authoritative: 0 = running, 1 = complete, 2 = error, 3 = denied, 4 = cancelled, 5 = approval_expired. The retained `error` flag does not override this outcome. Denial, known cancellation, and approval expiry carry no execution duration (`duration_ms = 0`); a human approval wait must not appear as tool execution time. An error known to have occurred without execution also carries no execution duration. An admitted effect with an unknown result is an error with its retained explanation and output, not a fabricated cancellation or completion.
+
 Markdown block payloads are BEAM-authored semantic structure. Frontends must render these blocks directly and must not infer code cards from styled-run flags, decorative rails, or all-code lines. Each block starts with `block_id(4) + kind(1) + flags(1)` and then a kind-specific payload:
 
 - `0x01 paragraph`: `line_count(2) + styled_lines`
@@ -1104,8 +1108,8 @@ Per todo:
 ```
 
 `status`: 0 = idle, 1 = working, 2 = iterating, 3 = needs_you, 4 = done, 5 = errored.
-`can_approve` means the agent is waiting on the user to approve or reject the current work. Frontends should treat it as the source of truth for the review affordance, and render the needs-you state when it is set.
-`dispatch_timestamp` is Unix seconds. `review_hint` is the short review copy shown next to the progress summary.
+`can_approve` is currently false. Tool decisions belong to request-bound `approval_tool_call` cards, not the context bar. A pending approval projects `status = needs_you` and names the waiting tool in `active_action`.
+`dispatch_timestamp` is Unix seconds. `review_hint` is currently empty; Review and tool approval have separate controls.
 `todo_count` is the number of visible todo items in the snapshot. The todo list is the editor's live projection of the provider plan, not a separate provider-only state. A hidden context may omit the progress and todo tail after `can_approve`; frontends must treat missing tail fields as empty progress and no todos for legacy compatibility.
 
 ### 0x98 — gui_workspaces
@@ -1130,7 +1134,7 @@ Per visible tab:
   + path_len(2) + path(path_len) + tint_color_rgb(4)
 ```
 
-`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned, bit 6 = ephemeral (file tab backed by no file on disk, e.g. Untitled-1). `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
+`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned, bit 6 = ephemeral (file tab backed by no file on disk, e.g. Untitled-1). `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes the active workspace's agent tab first when present, followed by its file tabs. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 

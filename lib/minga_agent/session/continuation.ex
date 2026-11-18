@@ -13,6 +13,8 @@ defmodule MingaAgent.Session.Continuation do
   alias MingaAgent.Session.Prefix
   alias MingaAgent.Session.PrefixStore
   alias MingaAgent.Session.PortableHistory
+  alias MingaAgent.Session.Transcript
+  alias MingaAgent.ToolCall, as: DisplayToolCall
   alias ReqLLM.Context
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
@@ -98,6 +100,162 @@ defmodule MingaAgent.Session.Continuation do
       provenance: :lossless
     }
   end
+
+  @doc "Restores versioned host outcomes; only supported legacy records receive legacy defaults."
+  @spec restore_tool_outcomes(t(), 2 | 3 | 4 | 5 | 6, Transcript.t()) ::
+          {:ok, t()} | {:error, :invalid_tool_outcome}
+  def restore_tool_outcomes(%__MODULE__{} = continuation, 6, %Transcript{}) do
+    if Enum.all?(continuation.messages, &valid_result_outcome?/1) and
+         Enum.all?(continuation.branch_messages, fn {_name, branch} ->
+           Enum.all?(branch.messages, &valid_result_outcome?/1)
+         end) and valid_request_outcomes?(continuation.active_request) and
+         valid_checkpoint_outcomes?(continuation.tool_checkpoint),
+       do: {:ok, continuation},
+       else: {:error, :invalid_tool_outcome}
+  end
+
+  def restore_tool_outcomes(%__MODULE__{} = continuation, version, %Transcript{} = transcript)
+      when version in [2, 3, 4, 5] do
+    with {:ok, messages} <- restore_tool_messages(continuation.messages, version),
+         {:ok, branches} <- restore_tool_branches(continuation.branch_messages, version),
+         {:ok, request} <- restore_tool_request(continuation.active_request, version),
+         {:ok, checkpoint} <-
+           restore_checkpoint_outcomes(continuation.tool_checkpoint, version, transcript) do
+      {:ok,
+       %{
+         continuation
+         | messages: messages,
+           branch_messages: branches,
+           active_request: request,
+           tool_checkpoint: checkpoint
+       }}
+    end
+  end
+
+  defp restore_tool_messages(messages, version) do
+    Enum.reduce_while(messages, {:ok, []}, fn message, {:ok, reversed} ->
+      case restore_tool_message(message, version, nil) do
+        {:ok, message} -> {:cont, {:ok, [message | reversed]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> reverse_restored_messages()
+  end
+
+  defp reverse_restored_messages({:ok, reversed}), do: {:ok, Enum.reverse(reversed)}
+  defp reverse_restored_messages({:error, _} = error), do: error
+
+  defp valid_result_outcome?(%Message{role: :tool, metadata: metadata}),
+    do: match?({:ok, _outcome, _reason}, DisplayToolCall.saved_outcome(metadata))
+
+  defp valid_result_outcome?(_message), do: true
+
+  defp valid_request_outcomes?(nil), do: true
+
+  defp valid_request_outcomes?(%Request{messages: messages}),
+    do: Enum.all?(messages, &valid_result_outcome?/1)
+
+  defp valid_checkpoint_outcomes?(nil), do: true
+
+  defp valid_checkpoint_outcomes?(checkpoint) do
+    Enum.all?(checkpoint.messages, &valid_result_outcome?/1) and
+      Enum.all?(checkpoint.calls, &valid_checkpoint_call_outcome?/1)
+  end
+
+  defp valid_checkpoint_call_outcome?(%{status: {:completed, result}}),
+    do: valid_result_outcome?(result)
+
+  defp valid_checkpoint_call_outcome?(%{status: status}) when status in [:pending, :admitted],
+    do: true
+
+  defp restore_tool_message(
+         %Message{role: :tool, metadata: metadata} = message,
+         version,
+         fallback
+       )
+       when version in [2, 3, 4, 5] do
+    case legacy_tool_outcome(metadata, fallback) do
+      {:ok, outcome} ->
+        metadata =
+          metadata
+          |> Map.put(:tool_outcome, outcome)
+          |> Map.put(:is_error, outcome != :complete)
+          |> Map.delete(:tool_outcome_reason)
+
+        {:ok, %{message | metadata: metadata}}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp restore_tool_message(message, _version, _fallback), do: {:ok, message}
+
+  defp legacy_tool_outcome(%{minga_effect_status: status}, _fallback)
+       when status in [:indeterminate, :not_executed], do: {:ok, :error}
+
+  defp legacy_tool_outcome(%{is_error: true}, _fallback), do: {:ok, :error}
+  defp legacy_tool_outcome(%{is_error: false}, _fallback), do: {:ok, :complete}
+  defp legacy_tool_outcome(%{is_error: _invalid}, _fallback), do: {:error, :invalid_tool_outcome}
+
+  defp legacy_tool_outcome(_metadata, %DisplayToolCall{status: status})
+       when status in [:complete, :denied, :cancelled, :error], do: {:ok, status}
+
+  defp legacy_tool_outcome(_metadata, _no_terminal_fact), do: {:ok, :complete}
+
+  defp restore_tool_branches(branches, version) do
+    Enum.reduce_while(branches, {:ok, %{}}, fn {name, snapshot}, {:ok, restored} ->
+      case restore_tool_messages(snapshot.messages, version) do
+        {:ok, messages} ->
+          {:cont, {:ok, Map.put(restored, name, %{snapshot | messages: messages})}}
+
+        {:error, _} = error ->
+          {:halt, error}
+      end
+    end)
+  end
+
+  defp restore_tool_request(nil, _version), do: {:ok, nil}
+
+  defp restore_tool_request(%Request{} = request, version) do
+    with {:ok, messages} <- restore_tool_messages(request.messages, version),
+         do: {:ok, Request.restore_messages(request, messages)}
+  end
+
+  defp restore_checkpoint_outcomes(nil, _version, _transcript), do: {:ok, nil}
+
+  defp restore_checkpoint_outcomes(checkpoint, version, transcript) do
+    with {:ok, messages} <- restore_tool_messages(checkpoint.messages, version),
+         {:ok, calls} <- restore_checkpoint_call_outcomes(checkpoint.calls, version, transcript) do
+      {:ok, %{checkpoint | messages: messages, calls: calls}}
+    end
+  end
+
+  defp restore_checkpoint_call_outcomes(calls, version, transcript) do
+    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, reversed} ->
+      case restore_checkpoint_call_outcome(call, version, transcript) do
+        {:ok, call} -> {:cont, {:ok, [call | reversed]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> reverse_restored_messages()
+  end
+
+  defp restore_checkpoint_call_outcome(
+         %{status: {:completed, result}} = call,
+         version,
+         transcript
+       ) do
+    fallback = legacy_checkpoint_tool(version, transcript, call.tool_call_id)
+
+    with {:ok, result} <- restore_tool_message(result, version, fallback),
+         do: {:ok, %{call | status: {:completed, result}}}
+  end
+
+  defp restore_checkpoint_call_outcome(call, _version, _transcript), do: {:ok, call}
+
+  defp legacy_checkpoint_tool(version, transcript, id) when version in [2, 3, 4, 5],
+    do: Transcript.current_tool_call(transcript, id)
 
   @doc "Admits prefix changes only at a whole-request idle boundary."
   @spec change_prefix(t(), Prefix.t()) ::
@@ -829,6 +987,49 @@ defmodule MingaAgent.Session.Continuation do
       ),
       do: {:error, :missing_tool_checkpoint}
 
+  @doc "Records explicit Stop only for the exact still-unadmitted checkpoint call."
+  @spec cancel_unadmitted_tool(t(), String.t(), String.t(), String.t()) ::
+          {:ok, t()} | {:already_completed, Message.t()} | {:error, term()}
+  def cancel_unadmitted_tool(
+        %__MODULE__{
+          active_request: %Request{request_id: request_id},
+          tool_checkpoint: %{request_id: request_id, checkpoint_id: checkpoint_id} = checkpoint
+        } = continuation,
+        request_id,
+        checkpoint_id,
+        tool_call_id
+      ) do
+    with {:ok, _index, call} <- find_checkpoint_call(checkpoint.calls, tool_call_id) do
+      cancel_checkpoint_call(continuation, checkpoint, call)
+    end
+  end
+
+  def cancel_unadmitted_tool(%__MODULE__{}, _request, _checkpoint, _tool),
+    do: {:error, :stale_checkpoint}
+
+  defp cancel_checkpoint_call(continuation, checkpoint, %{status: :pending} = call) do
+    result =
+      Context.tool_result_message(call.name, call.tool_call_id, "Cancelled before approval", %{
+        tool_outcome: :cancelled,
+        is_error: true,
+        minga_effect_status: :not_executed
+      })
+
+    complete_tool_effect(
+      continuation,
+      checkpoint.request_id,
+      checkpoint.checkpoint_id,
+      call.tool_call_id,
+      result
+    )
+  end
+
+  defp cancel_checkpoint_call(_continuation, _checkpoint, %{status: :admitted}),
+    do: {:error, :effect_already_admitted}
+
+  defp cancel_checkpoint_call(_continuation, _checkpoint, %{status: {:completed, result}}),
+    do: {:already_completed, result}
+
   @doc "Finds terminal calls in the active Request without treating historical results as current approvals."
   @spec tool_call_completed?(t(), String.t()) :: boolean()
   def tool_call_completed?(
@@ -1284,7 +1485,7 @@ defmodule MingaAgent.Session.Continuation do
 
   defp reconciliation_result(%{status: :admitted} = call, output) do
     metadata =
-      %{is_error: true, minga_effect_status: :indeterminate}
+      %{is_error: true, tool_outcome: :error, minga_effect_status: :indeterminate}
       |> maybe_put_output(output)
 
     message =
@@ -1304,7 +1505,7 @@ defmodule MingaAgent.Session.Continuation do
         call.name,
         call.tool_call_id,
         "Tool call was not executed because interruption occurred before durable effect admission.",
-        %{is_error: true, minga_effect_status: :not_executed}
+        %{is_error: true, tool_outcome: :error, minga_effect_status: :not_executed}
       )
 
     {message, :not_executed}

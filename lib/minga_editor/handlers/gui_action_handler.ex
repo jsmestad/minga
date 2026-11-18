@@ -1244,6 +1244,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        ),
        do: PickerUI.activate_action(state, generation, id)
 
+  defp apply_semantic_target(state, %Target{}, :accept, {:prompt, generation, id}),
+    do: MingaEditor.PromptUI.activate(state, generation, id)
+
   defp apply_semantic_target(state, %Target{} = _target, :accept, {:command_completion, label}) do
     mode_state = CommandState.replace_input(state.workspace.editing.mode_state, label)
 

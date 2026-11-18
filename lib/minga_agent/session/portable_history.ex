@@ -88,6 +88,8 @@ defmodule MingaAgent.Session.PortableHistory do
   defp portable_metadata(%Message{role: :tool, metadata: metadata}) do
     Map.take(metadata, [
       :is_error,
+      :tool_outcome,
+      :tool_outcome_reason,
       :output,
       :minga_effect_status,
       :image_tool_result_delivery,

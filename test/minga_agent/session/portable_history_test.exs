@@ -15,6 +15,8 @@ defmodule MingaAgent.Session.PortableHistoryTest do
 
     tool_metadata = %{
       is_error: true,
+      tool_outcome: :error,
+      tool_outcome_reason: :approval_timeout,
       minga_effect_status: :not_executed,
       tool_output: %{error: "denied"},
       response_id: "private"

@@ -733,7 +733,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       |> put_active_shell_fields(%{agent: %AgentState{}, session: session, tab_bar: nil})
       |> stash_shell_state(fake_entry, %{session: session})
 
-    matching = Events.dispatch(state, session, {:status_changed, :thinking})
+    matching = Events.dispatch(state, session, {:display_status_changed, :thinking})
     assert Runtime.state(matching.shell_runtime).synced_agent_status == :thinking
     assert stashed(matching.shell_runtime, fake_entry).state.synced_agent_status == :thinking
 
@@ -748,7 +748,7 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    stale = Events.dispatch(matching, session, {:status_changed, :idle})
+    stale = Events.dispatch(matching, session, {:display_status_changed, :idle})
     assert Runtime.state(stale.shell_runtime).synced_agent_status == :idle
     assert stashed(stale.shell_runtime, fake_entry).state.synced_agent_status == :thinking
   end

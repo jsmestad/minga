@@ -8,6 +8,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   alias MingaAgent.ProjectView
   alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Credentials
+  alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.OAuth
   alias MingaAgent.Providers.Native
@@ -327,7 +328,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert :ok = ToolRegistry.unregister_source(context.registry, @source)
     send(worker, :continue_start)
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
     await_idle(session)
@@ -1458,7 +1459,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     assert_receive :callback_built, @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
     assert File.read!(target(context)) == "written\n"
@@ -1482,7 +1483,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     refute_received {:agent_event, ^session, {:approval_pending, _}}
     refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
     refute_received {:agent_event, ^session, {:tool_started, "prefix_write", _}}
-    refute_received {:agent_event, ^session, {:tool_ended, "prefix_write", _, _}}
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}}
 
     session_id = Session.session_id(session)
     assert :ok = Session.load_session(session, session_id)
@@ -1545,7 +1546,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert_receive {:allowed_started, worker}, @timeout
     assert :ok = Session.respond_to_approval(session, approval_target, :approve)
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
     assert File.read!(target(context)) == "written\n"
@@ -1593,7 +1594,14 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert :ok = Session.send_prompt(session, "write")
     assert_receive {:allowed_started, worker}, @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", result, :error}},
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended,
+                     %Event.ToolEnd{
+                       name: "prefix_write",
+                       result: result,
+                       outcome: :error,
+                       reason: :approval_timeout
+                     }}},
                    @timeout
 
     assert result =~ "approval timed out"
@@ -1612,6 +1620,9 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     assert Session.editor_snapshot(session).pending_approval == nil
 
+    assert {:tool_call, %{status: :error, terminal_reason: :approval_timeout, duration_ms: nil}} =
+             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
     assert {:error, :approval_not_found} =
              Session.respond_to_approval(session, target, :approve_session)
 
@@ -1625,7 +1636,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert saved_tool_result(context, session).metadata.is_error
   end
 
-  test "completion snapshot retry retires an expired approval without reopening its effect",
+  test "Native retries saving expiry without reopening its effect or granting trust",
        context do
     owner = self()
     install_write_tool(context)
@@ -1701,15 +1712,66 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert_receive {:after_timeout, continuation_worker}, @timeout
     target = Target.new(Session.session_id(session), request_id, "prefix-call")
     assert Session.editor_snapshot(session).pending_approval == nil
+    assert result.metadata.tool_outcome == :error
+    assert result.metadata.tool_outcome_reason == :approval_timeout
+
+    output = result.metadata.output
+
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended,
+                     %Event.ToolEnd{
+                       tool_call_id: "prefix-call",
+                       name: "prefix_write",
+                       outcome: :error,
+                       reason: :approval_timeout,
+                       output: ^output,
+                       is_error: true
+                     }}},
+                   @timeout
+
+    refute_received {:agent_event, ^session, {:approval_resolved, ^target, :reject}}
 
     assert {:error, :approval_not_found} =
              Session.respond_to_approval(session, target, :approve_session)
 
     assert Session.list_tool_trust(session) == %{}
     refute File.exists?(target(context))
+    refute_received :callback_built
     send(continuation_worker, :finish)
     await_idle(session)
     assert saved_tool_result(context, session).metadata.is_error
+    assert saved_tool_result(context, session).metadata.tool_outcome == :error
+    assert saved_tool_result(context, session).metadata.tool_outcome_reason == :approval_timeout
+  end
+
+  test "Stop before approval saves the same cancellation outcome without admitting an effect",
+       context do
+    install_write_tool(context)
+    assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :all)
+    session = start_session(context)
+    assert :ok = Session.send_prompt(session, "write")
+
+    assert_receive {:agent_event, ^session, {:approval_pending, %Public{target: target}}},
+                   @timeout
+
+    assert :ok = Session.abort(session)
+    assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :interrupted}}, @timeout
+    assert Session.editor_snapshot(session).pending_approval == nil
+    assert {:error, _stale} = Session.respond_to_approval(session, target, :approve)
+
+    assert {:tool_call, %{status: :cancelled, terminal_reason: nil, duration_ms: nil}} =
+             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+    result = saved_tool_result(context, session)
+    assert result.metadata.tool_outcome == :cancelled
+    assert result.metadata.is_error
+    assert result.metadata.minga_effect_status == :not_executed
+    assert Map.get(result.metadata, :tool_outcome_reason) == nil
+    refute File.exists?(target(context))
+    refute_received :callback_built
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{}}}
+    assert :ok = Session.abort(session)
+    refute_received {:agent_event, ^session, {:approval_resolved, ^target, _resolution}}
   end
 
   test "an allowed sibling settles while another call awaits approval and can be rejected",
@@ -1738,7 +1800,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
                     {:approval_pending, %Public{target: %Target{} = approval_target}}},
                    @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "allowed_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "allowed_write"}}},
                    @timeout
 
     assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
@@ -1804,7 +1866,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert is_pid(store)
     assert :ok = Session.send_prompt(session, "forked\n")
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "read_file", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "read_file"}}},
                    @timeout
 
     await_done(session, "write_file")
@@ -1816,12 +1878,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert Native.fork_store(provider) == nil
     assert :ok = Session.send_prompt(session, "direct\n")
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "read_file", failure, _status}},
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended, %Event.ToolEnd{name: "read_file", result: failure}}},
                    @timeout
 
     assert failure =~ "unavailable"
     await_idle(session)
-    refute_received {:agent_event, ^session, {:tool_ended, "write_file", _result, _status}}
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "write_file"}}}
     assert File.read!(path) == "original\n"
     assert Minga.Buffer.content(buffer) == "original\n"
   end
@@ -2153,7 +2216,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   end
 
   defp await_done(session, name \\ "prefix_write") do
-    assert_receive {:agent_event, ^session, {:tool_ended, ^name, _result, _status}}, @timeout
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: ^name}}}, @timeout
     await_idle(session)
   end
 

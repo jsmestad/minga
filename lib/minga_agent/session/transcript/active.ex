@@ -104,6 +104,15 @@ defmodule MingaAgent.Session.Transcript.Active do
   @spec tool_ordinals(t(), String.t()) :: [non_neg_integer()]
   def tool_ordinals(%__MODULE__{} = active, id), do: occurrences(active.tools, id)
 
+  @doc "Returns the latest tool occurrence directly from its ordered index."
+  @spec latest_tool_ordinal(t(), String.t()) :: non_neg_integer() | nil
+  def latest_tool_ordinal(%__MODULE__{} = active, id) do
+    case Map.fetch(active.tools, id) do
+      :error -> nil
+      {:ok, ordinals} -> :gb_sets.largest(ordinals)
+    end
+  end
+
   @doc "Returns matching stable-ID occurrences in source order."
   @spec id_ordinals(t(), pos_integer()) :: [non_neg_integer()]
   def id_ordinals(%__MODULE__{} = active, id), do: occurrences(active.ids, id)

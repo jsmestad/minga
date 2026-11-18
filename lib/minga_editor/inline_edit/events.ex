@@ -58,7 +58,12 @@ defmodule MingaEditor.InlineEdit.Events do
   defp apply_event(
          %InlineEdit{} = edit,
          _session_pid,
-         {:tool_ended, "produce_rewrite", replacement, :done}
+         {:tool_ended,
+          %MingaAgent.Event.ToolEnd{
+            name: "produce_rewrite",
+            result: replacement,
+            outcome: :complete
+          }}
        )
        when is_binary(replacement), do: InlineEdit.install_proposal(edit, replacement)
 

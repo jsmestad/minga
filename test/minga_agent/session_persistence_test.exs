@@ -7,6 +7,10 @@ defmodule MingaAgent.SessionPersistenceTest do
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.Session.Continuation
   alias MingaAgent.ToolCall
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.ToolApproval.Public
+  alias MingaAgent.ToolApproval.Target
 
   describe "session persistence" do
     test "session has a unique ID" do
@@ -195,6 +199,8 @@ defmodule MingaAgent.SessionPersistenceTest do
           session_store_dir: dir
         )
 
+      assert :ok = Session.subscribe(session)
+
       assert :ok =
                SessionStore.save(
                  %{
@@ -214,6 +220,22 @@ defmodule MingaAgent.SessionPersistenceTest do
                  dir
                )
 
+      assert :ok = Session.send_prompt(session, "keep this wait")
+      assert_receive {:continuation_request, request}, @event_timeout
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "restore-wait",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      })
+
+      target = Target.new(Session.session_id(session), request.request_id, "restore-wait")
+
+      assert_receive {:agent_event, ^session,
+                      {:approval_pending, %Public{target: ^target} = public}},
+                     @event_timeout
+
       original_messages = Session.messages(session)
       original_session_id = Session.session_id(session)
 
@@ -222,6 +244,18 @@ defmodule MingaAgent.SessionPersistenceTest do
 
       assert Session.session_id(session) == original_session_id
       assert Session.messages(session) == original_messages
+      assert Session.editor_snapshot(session).pending_approval === public
+      assert Session.editor_snapshot(session).display_status == :approval_waiting
+      assert Session.list_tool_trust(session) == %{}
+      refute_received {:tool_approval_response, "restore-wait", _decision}
+      refute_received {:agent_event, ^session, {:approval_resolved, ^target, _resolution}}
+      assert :ok = Session.respond_to_approval(session, target, :approve)
+      assert_receive {:tool_approval_response, "restore-wait", :approve}, @event_timeout
+
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :approve}},
+                     @event_timeout
+
+      assert Session.list_tool_trust(session) == %{}
     end
 
     @tag :tmp_dir
@@ -1095,7 +1129,149 @@ defmodule MingaAgent.SessionPersistenceTest do
   end
 
   @tag :tmp_dir
-  test "restart completes the display tool call when its durable result preceded ToolEnd", %{
+  test "saved expiry retires an actually admitted approval target once", %{tmp_dir: dir} do
+    %{
+      session: session,
+      request: request,
+      checkpoint_id: checkpoint_id,
+      target: target,
+      result: result,
+      output: output,
+      waiter: waiter,
+      raw_status: raw_status
+    } =
+      start_live_expiry(dir)
+
+    send(waiter.pid, :expire)
+    assert :ok = Task.await(waiter, @event_timeout)
+
+    assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :approval_timeout}},
+                   @event_timeout
+
+    assert_receive {:agent_event, ^session, {:display_status_changed, ^raw_status}},
+                   @event_timeout
+
+    assert Session.editor_snapshot(session).pending_approval == nil
+    assert Session.status(session) == raw_status
+    assert Session.editor_snapshot(session).display_status == raw_status
+
+    assert {:tool_call,
+            %ToolCall{
+              status: :error,
+              terminal_reason: :approval_timeout,
+              duration_ms: nil,
+              output: ^output
+            }} =
+             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+    assert {:ok, saved} = SessionStore.load(Session.session_id(session), dir)
+    assert [%{status: {:completed, ^result}}] = saved.continuation.tool_checkpoint.calls
+
+    assert :ok =
+             GenServer.call(
+               session,
+               {:complete_tool_effect, request.request_id, checkpoint_id, "expiry-call", result}
+             )
+
+    send_provider_event(session, %Event.ToolEnd{
+      tool_call_id: "expiry-call",
+      name: "shell",
+      outcome: :error,
+      reason: :approval_timeout,
+      result: "Tool approval timed out",
+      output: output,
+      is_error: true
+    })
+
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended,
+                     %Event.ToolEnd{outcome: :error, reason: :approval_timeout, output: ^output}}},
+                   @event_timeout
+
+    refute_received {:agent_event, ^session, {:approval_resolved, ^target, :approval_timeout}}
+    refute_received {:agent_event, ^session, {:approval_resolved, ^target, :reject}}
+    refute_received {:agent_event, ^session, {:display_status_changed, ^raw_status}}
+    refute_received {:agent_event, ^session, {:display_status_changed, :approval_waiting}}
+
+    assert {:error, :approval_not_found} =
+             Session.respond_to_approval(session, target, :approve_session)
+
+    assert Session.list_tool_trust(session) == %{}
+  end
+
+  @tag :tmp_dir
+  test "failed expiry save retires the live target without publishing a durable outcome",
+       %{tmp_dir: dir} do
+    %{session: session, target: target, output: output, waiter: waiter, raw_status: raw_status} =
+      start_live_expiry(dir)
+
+    sessions_dir = SessionStore.sessions_dir(dir)
+    backup = sessions_dir <> ".before-expiry"
+    assert :ok = File.rename(sessions_dir, backup)
+    assert :ok = File.write(sessions_dir, "unavailable snapshot directory")
+
+    try do
+      send(waiter.pid, :expire)
+
+      assert {:error, {:tool_outcome_persistence_failed, _reason}} =
+               Task.await(waiter, @event_timeout)
+
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :approval_timeout}},
+                     @event_timeout
+
+      assert_receive {:agent_event, ^session, {:display_status_changed, ^raw_status}},
+                     @event_timeout
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.pending_approval == nil
+      assert snapshot.status == raw_status
+      assert snapshot.display_status == raw_status
+
+      assert {:error, :no_pending_approval} =
+               Session.respond_to_approval(session, target, :approve_session)
+
+      assert {:tool_call,
+              %ToolCall{
+                status: :error,
+                terminal_reason: nil,
+                duration_ms: nil,
+                output: ^output,
+                result: explanation
+              }} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      assert explanation =~ "result persistence is uncertain"
+      assert explanation =~ "Tool approval timed out"
+      refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{}}}
+      refute_received {:agent_event, ^session, {:approval_resolved, ^target, :reject}}
+      refute_received {:agent_event, ^session, {:approval_resolved, ^target, :approval_timeout}}
+      refute_received {:agent_event, ^session, {:display_status_changed, ^raw_status}}
+      assert Session.list_tool_trust(session) == %{}
+    after
+      assert :ok = File.rm(sessions_dir)
+      assert :ok = File.rename(backup, sessions_dir)
+    end
+
+    assert {:ok, saved} = SessionStore.load(Session.session_id(session), dir)
+    assert [%{status: :pending}] = saved.continuation.tool_checkpoint.calls
+
+    send_provider_event(session, %Event.Error{
+      kind: :provider_error,
+      message: "Tool outcome persistence failed"
+    })
+
+    assert Session.editor_snapshot(session).pending_approval == nil
+    assert Session.editor_snapshot(session).display_status == :error
+    assert_receive {:agent_event, ^session, {:display_status_changed, :error}}, @event_timeout
+
+    assert {:tool_call, %ToolCall{terminal_reason: nil, output: ^output}} =
+             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{}}}
+  end
+
+  @tag :tmp_dir
+  test "restart installs each saved outcome before ToolEnd without reviving approvals", %{
     tmp_dir: dir
   } do
     {:ok, request, continuation} =
@@ -1133,31 +1309,6 @@ defmodule MingaAgent.SessionPersistenceTest do
                arguments
              )
 
-    result = ReqLLM.Context.tool_result_message("write_file", "call-display", "Created a.txt")
-
-    assert {:ok, completed} =
-             Continuation.complete_tool_effect(
-               admitted,
-               request.request_id,
-               checkpoint_id,
-               "call-display",
-               result
-             )
-
-    assert :ok =
-             SessionStore.save(
-               %{
-                 id: "completed-before-display",
-                 timestamp: "2026-01-01T00:00:00Z",
-                 model_name: "test-model",
-                 provider_name: "test",
-                 messages: [{:tool_call, ToolCall.new("call-display", "write_file", arguments)}],
-                 continuation: completed,
-                 usage: %MingaAgent.TurnUsage{}
-               },
-               dir
-             )
-
     session =
       start_test_session(
         provider: Minga.Test.SessionContinuationProvider,
@@ -1166,10 +1317,65 @@ defmodule MingaAgent.SessionPersistenceTest do
         persist?: true
       )
 
-    assert :ok = Session.load_session(session, "completed-before-display")
+    for {outcome, reason} <- [
+          {:complete, nil},
+          {:denied, nil},
+          {:cancelled, nil},
+          {:error, nil},
+          {:error, :approval_timeout}
+        ] do
+      metadata = %{is_error: outcome != :complete, tool_outcome: outcome}
+      metadata = if reason, do: Map.put(metadata, :tool_outcome_reason, reason), else: metadata
 
-    assert {:tool_call, %ToolCall{status: :complete, result: "Created a.txt"}} =
-             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+      result =
+        ReqLLM.Context.tool_result_message(
+          "write_file",
+          "call-display",
+          "retained explanation",
+          metadata
+        )
+
+      source =
+        if outcome == :denied or reason == :approval_timeout, do: checkpoint, else: admitted
+
+      assert {:ok, completed} =
+               Continuation.complete_tool_effect(
+                 source,
+                 request.request_id,
+                 checkpoint_id,
+                 "call-display",
+                 result
+               )
+
+      record_id = "saved-before-display-#{outcome}-#{reason}"
+
+      assert :ok =
+               SessionStore.save(
+                 %{
+                   id: record_id,
+                   timestamp: "2026-01-01T00:00:00Z",
+                   model_name: "test-model",
+                   provider_name: "test",
+                   messages: [{:tool_call, ToolCall.new("call-display", "write_file", arguments)}],
+                   continuation: completed,
+                   usage: %MingaAgent.TurnUsage{}
+                 },
+                 dir
+               )
+
+      assert :ok = Session.load_session(session, record_id)
+
+      assert {:tool_call,
+              %ToolCall{
+                status: ^outcome,
+                terminal_reason: ^reason,
+                result: "retained explanation"
+              }} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      assert Session.editor_snapshot(session).pending_approval == nil
+      assert Session.editor_snapshot(session).display_status == :idle
+    end
   end
 
   @tag :tmp_dir
@@ -1231,7 +1437,235 @@ defmodule MingaAgent.SessionPersistenceTest do
   end
 
   @tag :tmp_dir
-  test "restart reconciles an admitted checkpoint without replay and preserves opaque provider content",
+  test "live Stop and provider death reconcile retained output without replacing a saved winner",
+       %{tmp_dir: dir} do
+    for interruption <- [:stop, :provider_death] do
+      session =
+        start_test_session(
+          provider_restart_backoff_base_ms: 30_000,
+          provider_restart_backoff_max_ms: 30_000,
+          provider: Minga.Test.SessionContinuationProvider,
+          provider_opts: [test_pid: self()],
+          session_store_dir: dir,
+          persist?: true
+        )
+
+      assert :ok = Session.subscribe(session)
+
+      record_id = Session.session_id(session)
+      on_exit(fn -> ArtifactStores.delete_record(record_id) end)
+      assert :ok = Session.send_prompt(session, "inspect")
+      assert_receive {:continuation_request, request}, @event_timeout
+      args = %{"command" => "pwd"}
+      call_ids = ["retained-stop", "legacy-stop", "unadmitted-stop", "saved-stop"]
+      calls = Enum.map(call_ids, &%{tool_call_id: &1, name: "shell", arguments: args})
+
+      assistant =
+        ReqLLM.Context.assistant("",
+          tool_calls: Enum.map(call_ids, &ReqLLM.ToolCall.new(&1, "shell", JSON.encode!(args)))
+        )
+
+      assert {:ok, checkpoint_id} =
+               GenServer.call(
+                 session,
+                 {:checkpoint_tool_group, request.request_id, request.messages ++ [assistant],
+                  calls}
+               )
+
+      for id <- call_ids do
+        send_provider_event(session, %Event.ToolStart{tool_call_id: id, name: "shell", args: args})
+      end
+
+      assert Session.status(session) == :tool_executing
+
+      assert {:ok, store} =
+               GenServer.call(
+                 session,
+                 {:admit_tool_effect, request.request_id, checkpoint_id, "retained-stop", "shell",
+                  args}
+               )
+
+      for id <- ["legacy-stop", "saved-stop"] do
+        assert {:ok, ^store} =
+                 GenServer.call(
+                   session,
+                   {:admit_tool_effect, request.request_id, checkpoint_id, id, "shell", args}
+                 )
+      end
+
+      {:ok, retained} =
+        MingaAgent.Tools.OutputCapture.bytes(
+          store,
+          {:delivery, checkpoint_id, "retained-stop"},
+          "exact pre-Stop bytes",
+          []
+        )
+
+      {:ok, saved_output} =
+        MingaAgent.Tools.OutputCapture.bytes(
+          store,
+          {:delivery, checkpoint_id, "saved-stop"},
+          "exact saved result",
+          []
+        )
+
+      send_provider_event(session, %Event.ToolUpdate{
+        tool_call_id: "retained-stop",
+        name: "shell",
+        partial_result: "exact pre-Stop bytes"
+      })
+
+      send_provider_event(session, %Event.ToolUpdate{
+        tool_call_id: "legacy-stop",
+        name: "shell",
+        partial_result: "legacy captured chunk\n"
+      })
+
+      saved_result =
+        ReqLLM.Context.tool_result_message("shell", "saved-stop", saved_output.view, %{
+          tool_outcome: :complete,
+          is_error: false,
+          output: saved_output
+        })
+
+      assert :ok =
+               GenServer.call(
+                 session,
+                 {:complete_tool_effect, request.request_id, checkpoint_id, "saved-stop",
+                  saved_result}
+               )
+
+      message_ids =
+        Map.new(
+          for {message_id, {:tool_call, call}} <- Session.messages_with_ids(session),
+              do: {call.id, message_id}
+        )
+
+      assert :ok = Session.toggle_tool_collapse(session, message_ids["retained-stop"])
+      assert :ok = Session.toggle_tool_collapse(session, message_ids["retained-stop"])
+      assert :ok = Session.toggle_tool_collapse(session, message_ids["saved-stop"])
+
+      if interruption == :provider_death do
+        send_provider_event(session, %Event.ToolUpdate{
+          tool_call_id: "unadmitted-stop",
+          name: "shell",
+          partial_result: "legacy pre-approval bytes"
+        })
+      end
+
+      send_provider_event(session, %Event.ToolApproval{
+        tool_call_id: "unadmitted-stop",
+        name: "shell",
+        args: args,
+        reply_to: self()
+      })
+
+      target = Target.new(record_id, request.request_id, "unadmitted-stop")
+
+      assert_receive {:agent_event, ^session, {:approval_pending, %Public{target: ^target}}},
+                     @event_timeout
+
+      assert Session.editor_snapshot(session).display_status == :approval_waiting
+
+      before_stop =
+        Map.new(for {:tool_call, call} <- Session.messages(session), do: {call.id, call})
+
+      refute before_stop["retained-stop"].collapsed
+      refute before_stop["saved-stop"].collapsed
+      assert before_stop["saved-stop"].status == :complete
+      assert is_integer(before_stop["unadmitted-stop"].started_at)
+
+      expected_status =
+        case interruption do
+          :stop ->
+            assert :ok = Session.abort(session)
+            :idle
+
+          :provider_death ->
+            Process.exit(Session.get_provider(session), :kill)
+            assert_receive {:agent_event, ^session, {:status_changed, :error}}, @event_timeout
+            :error
+        end
+
+      assert Session.status(session) == expected_status
+      assert_receive {:tool_approval_response, "unadmitted-stop", :reject}, @event_timeout
+
+      assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :interrupted}},
+                     @event_timeout
+
+      assert Session.editor_snapshot(session).pending_approval == nil
+      stopped = Map.new(for {:tool_call, call} <- Session.messages(session), do: {call.id, call})
+      assert {:ok, saved} = SessionStore.load(record_id, dir)
+      assert saved.continuation.tool_checkpoint == nil
+
+      results =
+        Map.new(
+          for %ReqLLM.Message{role: :tool, tool_call_id: id} = message <-
+                saved.continuation.messages,
+              do: {id, message}
+        )
+
+      for id <- ["retained-stop", "legacy-stop"] do
+        assert stopped[id].status == :error
+        assert stopped[id].terminal_reason == nil
+        assert stopped[id].is_error
+        refute stopped[id].collapsed
+        assert results[id].metadata.tool_outcome == :error
+        assert results[id].metadata.is_error
+        assert results[id].metadata.minga_effect_status == :indeterminate
+        assert Map.get(results[id].metadata, :tool_outcome_reason) == nil
+
+        assert stopped[id].result =~
+                 "Tool effect outcome is indeterminate after interruption. The call was not rerun."
+      end
+
+      assert stopped["retained-stop"].output.reference == retained.reference
+      assert results["retained-stop"].metadata.output === stopped["retained-stop"].output
+
+      assert results["retained-stop"].content ==
+               [ReqLLM.Message.ContentPart.text(stopped["retained-stop"].result)]
+
+      assert {:ok, %{bytes: "exact pre-Stop bytes"}} =
+               ArtifactStore.fetch(
+                 store,
+                 retained.reference,
+                 stopped["retained-stop"].output.selection
+               )
+
+      assert stopped["legacy-stop"].output == nil
+      assert stopped["legacy-stop"].result =~ "legacy captured chunk\n"
+      assert Map.get(results["legacy-stop"].metadata, :output) == nil
+      expected_outcome = if interruption == :stop, do: :cancelled, else: :error
+      assert stopped["unadmitted-stop"].status == expected_outcome
+      assert stopped["unadmitted-stop"].duration_ms == nil
+      assert stopped["unadmitted-stop"].terminal_reason == nil
+      assert stopped["unadmitted-stop"].collapsed == before_stop["unadmitted-stop"].collapsed
+      assert results["unadmitted-stop"].metadata.tool_outcome == expected_outcome
+      assert results["unadmitted-stop"].metadata.is_error
+      assert results["unadmitted-stop"].metadata.minga_effect_status == :not_executed
+
+      if interruption == :provider_death do
+        assert stopped["unadmitted-stop"].result =~
+                 "Tool call was not executed because interruption occurred before durable effect admission."
+
+        assert stopped["unadmitted-stop"].result =~ "legacy pre-approval bytes"
+      end
+
+      assert stopped["saved-stop"] === before_stop["saved-stop"]
+      assert results["saved-stop"] === saved_result
+
+      assert {:ok, %{bytes: "exact saved result"}} =
+               ArtifactStore.fetch(store, saved_output.reference, saved_output.selection)
+
+      assert :ok = Session.abort(session)
+
+      assert Map.new(for {:tool_call, call} <- Session.messages(session), do: {call.id, call}) ===
+               stopped
+    end
+  end
+
+  @tag :tmp_dir
+  test "restart reconciles admitted and pending calls without replay and preserves opaque provider content",
        %{tmp_dir: dir} do
     record_id =
       "interrupted-checkpoint-" <>
@@ -1259,6 +1693,11 @@ defmodule MingaAgent.SessionPersistenceTest do
           "call-interrupted",
           "write_file",
           ~s({"path":"a","content":"b","mode":"create"})
+        ),
+        ReqLLM.ToolCall.new(
+          "call-pending",
+          "write_file",
+          ~s({"path":"a","content":"b","mode":"create"})
         )
       ],
       reasoning_details: [
@@ -1284,6 +1723,11 @@ defmodule MingaAgent.SessionPersistenceTest do
         [
           %{
             tool_call_id: "call-interrupted",
+            name: "write_file",
+            arguments: arguments
+          },
+          %{
+            tool_call_id: "call-pending",
             name: "write_file",
             arguments: arguments
           }
@@ -1324,7 +1768,11 @@ defmodule MingaAgent.SessionPersistenceTest do
                  timestamp: "2026-01-01T00:00:00Z",
                  model_name: "test-model",
                  provider_name: "test",
-                 messages: [{:user, "inspect"}],
+                 messages: [
+                   {:user, "inspect"},
+                   {:tool_call, ToolCall.new("call-interrupted", "write_file", arguments)},
+                   {:tool_call, ToolCall.new("call-pending", "write_file", arguments)}
+                 ],
                  continuation: admitted,
                  usage: %MingaAgent.TurnUsage{}
                },
@@ -1351,11 +1799,28 @@ defmodule MingaAgent.SessionPersistenceTest do
 
     assert {:ok, recovered} = SessionStore.load(record_id, dir)
     assert recovered.continuation.tool_checkpoint == nil
-    assert Enum.at(recovered.continuation.messages, -2) === assistant
+    assert Enum.at(recovered.continuation.messages, -3) === assistant
 
-    assert [indeterminate_result | _rest] = Enum.reverse(recovered.continuation.messages)
+    assert [not_executed_result, indeterminate_result | _rest] =
+             Enum.reverse(recovered.continuation.messages)
+
     assert indeterminate_result.metadata.minga_effect_status == :indeterminate
     assert indeterminate_result.metadata.output.reference == retained.reference
+    assert indeterminate_result.metadata.tool_outcome == :error
+    assert indeterminate_result.metadata.is_error
+    assert not_executed_result.metadata.tool_outcome == :error
+    assert not_executed_result.metadata.is_error
+    assert not_executed_result.metadata.minga_effect_status == :not_executed
+    assert Session.editor_snapshot(session).pending_approval == nil
+    restored = Map.new(for {:tool_call, call} <- Session.messages(session), do: {call.id, call})
+    assert restored["call-interrupted"].status == :error
+    assert restored["call-interrupted"].terminal_reason == nil
+    assert restored["call-interrupted"].output === indeterminate_result.metadata.output
+    assert restored["call-pending"].status == :error
+    assert restored["call-pending"].terminal_reason == nil
+
+    assert not_executed_result.content ==
+             [ReqLLM.Message.ContentPart.text(restored["call-pending"].result)]
 
     assert {:ok, %{bytes: "exact pre-crash output"}} =
              ArtifactStore.fetch(
@@ -1364,9 +1829,9 @@ defmodule MingaAgent.SessionPersistenceTest do
                indeterminate_result.metadata.output.selection
              )
 
-    recovery_turn_id =
+    recovery_boundary_id =
       Enum.find_value(Session.messages_with_ids(session), fn
-        {id, {:user, "inspect"}} -> id
+        {id, {:tool_call, %ToolCall{id: "call-pending"}}} -> id
         _message -> nil
       end)
 
@@ -1374,14 +1839,15 @@ defmodule MingaAgent.SessionPersistenceTest do
              Continuation.branch_at(
                recovered.continuation,
                "recovered-effects",
-               recovery_turn_id
+               recovery_boundary_id
              )
 
     assert branch.messages == recovered.continuation.messages
     assert :ok = Session.send_prompt(session, "continue safely")
     assert_receive {:continuation_request, resumed_request}, @event_timeout
-    assert Enum.at(resumed_request.messages, -3) === assistant
-    assert Enum.at(resumed_request.messages, -2).metadata.minga_effect_status == :indeterminate
+    assert Enum.at(resumed_request.messages, -4) === assistant
+    assert Enum.at(resumed_request.messages, -3).metadata.minga_effect_status == :indeterminate
+    assert Enum.at(resumed_request.messages, -2).metadata.minga_effect_status == :not_executed
     assert [last_message | _rest] = Enum.reverse(resumed_request.messages)
     assert last_message == ReqLLM.Context.user("continue safely")
   end
@@ -1441,6 +1907,7 @@ defmodule MingaAgent.SessionPersistenceTest do
         [
           assistant_tool_message,
           ReqLLM.Context.tool_result_message("read_file", "call_resume", "captured source", %{
+            tool_outcome: :complete,
             is_error: false
           }),
           ReqLLM.Context.assistant("The attachment and source are readable.")
@@ -1485,5 +1952,100 @@ defmodule MingaAgent.SessionPersistenceTest do
 
     assert resumed_request.messages ==
              Enum.concat(messages, [ReqLLM.Context.user("Follow-up")])
+  end
+
+  defp start_live_expiry(dir) do
+    session =
+      start_test_session(
+        provider: Minga.Test.SessionContinuationProvider,
+        provider_opts: [test_pid: self()],
+        session_store_dir: dir,
+        persist?: true
+      )
+
+    assert :ok = Session.subscribe(session)
+    assert :ok = Session.send_prompt(session, "inspect")
+    assert_receive {:continuation_request, request}, @event_timeout
+    args = %{"command" => "pwd"}
+
+    assistant =
+      ReqLLM.Context.assistant("",
+        tool_calls: [ReqLLM.ToolCall.new("expiry-call", "shell", JSON.encode!(args))]
+      )
+
+    assert {:ok, checkpoint_id} =
+             GenServer.call(
+               session,
+               {:checkpoint_tool_group, request.request_id, request.messages ++ [assistant],
+                [%{tool_call_id: "expiry-call", name: "shell", arguments: args}]}
+             )
+
+    send_provider_event(session, %Event.ToolStart{
+      tool_call_id: "expiry-call",
+      name: "shell",
+      args: args
+    })
+
+    raw_status = Session.status(session)
+    assert raw_status == :tool_executing
+
+    assert_receive {:agent_event, ^session, {:display_status_changed, ^raw_status}},
+                   @event_timeout
+
+    text = "Tool approval timed out"
+    {:ok, selection} = Range.new(:full, :bytes, 0, byte_size(text), byte_size(text))
+    {:ok, output} = Output.new(text, :complete, selection)
+
+    result =
+      ReqLLM.Context.tool_result_message("shell", "expiry-call", text, %{
+        tool_outcome: :error,
+        tool_outcome_reason: :approval_timeout,
+        is_error: true,
+        output: output
+      })
+
+    waiter =
+      Task.async(fn ->
+        receive do
+          :expire ->
+            GenServer.call(
+              session,
+              {:complete_tool_effect, request.request_id, checkpoint_id, "expiry-call", result}
+            )
+        end
+      end)
+
+    on_exit(fn -> Process.exit(waiter.pid, :kill) end)
+
+    send_provider_event(session, %Event.ToolApproval{
+      tool_call_id: "expiry-call",
+      name: "shell",
+      args: args,
+      reply_to: waiter.pid
+    })
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: target} = approval}},
+                   @event_timeout
+
+    assert target == Target.new(Session.session_id(session), request.request_id, "expiry-call")
+    assert Session.editor_snapshot(session).pending_approval == approval
+    assert Session.editor_snapshot(session).display_status == :approval_waiting
+
+    assert_receive {:agent_event, ^session, {:display_status_changed, :approval_waiting}},
+                   @event_timeout
+
+    assert Process.alive?(waiter.pid)
+
+    %{
+      session: session,
+      request: request,
+      checkpoint_id: checkpoint_id,
+      target: target,
+      result: result,
+      output: output,
+      waiter: waiter,
+      raw_status: raw_status
+    }
   end
 end

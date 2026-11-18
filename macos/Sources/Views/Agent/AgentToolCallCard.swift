@@ -38,6 +38,30 @@ public struct AgentToolCallCard: View {
     /// with assistant message rendering.
     public let styledLineView: ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView
 
+    private var outcome: ToolCallStatus { ToolCallStatus(rawValue: status) }
+
+    private var statusLabel: String {
+        switch outcome {
+        case .running: "running"
+        case .complete: "done"
+        case .error: "error"
+        case .denied: "Denied"
+        case .cancelled: "Cancelled"
+        case .approvalExpired: "Expired"
+        case .unknown: isError ? "error" : "unknown"
+        }
+    }
+
+    private var statusColor: Color {
+        switch outcome {
+        case .running, .denied, .approvalExpired: .orange
+        case .complete: .green
+        case .error: .red
+        case .cancelled: theme.agentMutedFg
+        case .unknown: isError ? .red : theme.agentToolHeader
+        }
+    }
+
     public var body: some View {
         let hasResult = result?.isEmpty == false || resultLines?.isEmpty == false
         let visiblePreviewLines = Array(previewLines.prefix(8))
@@ -53,14 +77,14 @@ public struct AgentToolCallCard: View {
                 }
 
                 // Running spinner or status icon
-                if status == 0 {
+                if outcome == .running {
                     ProgressView()
                         .controlSize(.mini)
                         .scaleEffect(0.6)
                 } else {
-                    Image(systemName: toolIcon(status))
+                    Image(systemName: toolIcon)
                         .font(Typography.font(.caption))
-                        .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.agentToolHeader)
+                        .foregroundStyle(statusColor.opacity(0.8))
                 }
 
                 Text(name)
@@ -75,13 +99,13 @@ public struct AgentToolCallCard: View {
 
                 Spacer(minLength: 8)
 
-                if durationMs > 0 {
+                if durationMs > 0 && outcome != .denied && outcome != .approvalExpired {
                     Text(formatDuration(durationMs))
                         .font(Typography.font(.caption))
                         .foregroundStyle(theme.agentTextFg.opacity(0.3))
                 }
 
-                statusBadge(status, isError: isError)
+                statusBadge
 
                 if let autoApprovedLabel = autoApprovedScopeLabel(autoApprovedScope) {
                     autoApprovedPill(label: autoApprovedLabel)
@@ -90,6 +114,8 @@ public struct AgentToolCallCard: View {
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
             .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(name): \(statusLabel). \(summary)")
             .onTapGesture {
                 if hasResult, let messageID = UInt32(exactly: messageID), messageID != 0 {
                     sendAction?(.toggle(messageID: messageID))
@@ -140,7 +166,7 @@ public struct AgentToolCallCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg)
-                .strokeBorder(isError ? Color.red.opacity(0.3) : theme.agentToolBorder.opacity(0.3), lineWidth: 1)
+                .strokeBorder(statusColor.opacity(0.3), lineWidth: 1)
         )
     }
 
@@ -208,28 +234,16 @@ public struct AgentToolCallCard: View {
     // MARK: - Badges & helpers
 
     @ViewBuilder
-    private func statusBadge(_ status: UInt8, isError: Bool) -> some View {
-        let (text, color): (String, Color) = {
-            if isError { return ("error", Color.red) }
-            switch status {
-            case 0: return ("running", Color.orange)
-            case 1: return ("done", Color.green)
-            case 2: return ("error", Color.red)
-            default: return ("", Color.clear)
-            }
-        }()
-
-        if !text.isEmpty {
-            Text(text)
-                .font(Typography.font(.micro, weight: .medium))
-                .foregroundStyle(color.opacity(0.8))
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.hairline)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm)
-                        .fill(color.opacity(0.1))
-                )
-        }
+    private var statusBadge: some View {
+        Text(statusLabel)
+            .font(Typography.font(.micro, weight: .medium))
+            .foregroundStyle(statusColor.opacity(0.8))
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.hairline)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm)
+                    .fill(statusColor.opacity(0.1))
+            )
     }
 
     private func autoApprovedPill(label: String) -> some View {
@@ -252,12 +266,15 @@ public struct AgentToolCallCard: View {
         return String(format: "%.1fs", Double(ms) / 1000.0)
     }
 
-    private func toolIcon(_ status: UInt8) -> String {
-        switch status {
-        case 0: return "gearshape"
-        case 1: return "checkmark.circle"
-        case 2: return "exclamationmark.triangle"
-        default: return "gearshape"
+    private var toolIcon: String {
+        switch outcome {
+        case .running: "gearshape"
+        case .complete: "checkmark.circle"
+        case .error: "exclamationmark.triangle"
+        case .denied: "hand.raised"
+        case .cancelled: "stop.circle"
+        case .approvalExpired: "clock.badge.exclamationmark"
+        case .unknown: isError ? "exclamationmark.triangle" : "questionmark.circle"
         }
     }
 }

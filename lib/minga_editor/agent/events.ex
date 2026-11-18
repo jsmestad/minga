@@ -20,6 +20,9 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, _session_pid, {:status_changed, status}),
     do: StatusEventWorkflow.status_changed(state, status)
 
+  def dispatch(%EditorState{} = state, session_pid, {:display_status_changed, status}),
+    do: StatusEventWorkflow.display_status_changed(state, session_pid, status)
+
   def dispatch(%EditorState{} = state, _session_pid, {:text_delta, _delta} = event),
     do: StreamEventWorkflow.delta(state, event)
 
@@ -40,20 +43,10 @@ defmodule MingaEditor.Agent.Events do
 
   def dispatch(
         %EditorState{} = state,
-        _session_pid,
-        {:tool_ended, tool_call_id, name, result, status, _output}
+        session_pid,
+        {:tool_ended, %MingaAgent.Event.ToolEnd{} = event}
       ),
-      do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
-
-  def dispatch(
-        %EditorState{} = state,
-        _session_pid,
-        {:tool_ended, tool_call_id, name, result, status}
-      ),
-      do: ToolEventWorkflow.ended(state, tool_call_id, name, result, status)
-
-  def dispatch(%EditorState{} = state, _session_pid, {:tool_ended, name, result, status}),
-    do: ToolEventWorkflow.ended(state, name, result, status)
+      do: ToolEventWorkflow.ended(state, session_pid, event)
 
   def dispatch(%EditorState{} = state, _session_pid, {:tool_interrupted, tool_call_id}),
     do: ToolEventWorkflow.interrupted(state, tool_call_id)

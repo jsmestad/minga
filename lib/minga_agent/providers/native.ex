@@ -2287,6 +2287,8 @@ defmodule MingaAgent.Providers.Native do
            required(:result_text) => String.t(),
            required(:output) => Output.t(),
            required(:is_error) => boolean(),
+           optional(:outcome) => MingaAgent.ToolCall.outcome(),
+           optional(:reason) => MingaAgent.ToolCall.terminal_reason(),
            optional(:persistence_error) => term()
          }
 
@@ -2532,7 +2534,7 @@ defmodule MingaAgent.Providers.Native do
             ModelSelection.image_tool_result_delivery(lctx.selection)
           )
 
-        {result_text, is_error, post_dispatched?, output} =
+        {result_text, outcome, reason, post_dispatched?, output} =
           execute_with_approval(
             lctx,
             tool_call,
@@ -2540,6 +2542,7 @@ defmodule MingaAgent.Providers.Native do
           )
 
         output = output || deterministic_output(result_text)
+        is_error = outcome != :complete
 
         unless post_dispatched? do
           dispatch_post_tool_use(tool_call, result_text, is_error, output, lctx.config)
@@ -2551,7 +2554,9 @@ defmodule MingaAgent.Providers.Native do
           tool_call: tool_call,
           result_text: result_text,
           output: output,
-          is_error: is_error
+          is_error: is_error,
+          outcome: outcome,
+          reason: reason
         }
       rescue
         e ->
@@ -2606,7 +2611,7 @@ defmodule MingaAgent.Providers.Native do
       %{tool_call: tool_call} ->
         case persist_tool_execution_result(lctx, checkpoint_id, result, 3) do
           :ok ->
-            emit_tool_end(lctx, tool_call, result.result_text, result.output, result.is_error)
+            emit_tool_end(lctx, tool_call, result)
             result
 
           {:error, reason} ->
@@ -2651,14 +2656,16 @@ defmodule MingaAgent.Providers.Native do
       {:error, {:tool_outcome_call_failed, reason}}
   end
 
-  @spec emit_tool_end(loop_ctx(), map(), String.t(), Output.t(), boolean()) :: :ok
-  defp emit_tool_end(lctx, tool_call, result_text, output, is_error) do
+  @spec emit_tool_end(loop_ctx(), map(), tool_execution_result()) :: :ok
+  defp emit_tool_end(lctx, tool_call, result) do
     emit(lctx, %Event.ToolEnd{
       tool_call_id: tool_call.id,
       name: tool_call.name,
-      result: result_text,
-      output: output,
-      is_error: is_error
+      result: result.result_text,
+      output: result.output,
+      outcome: result.outcome,
+      reason: result.reason,
+      is_error: result.outcome != :complete
     })
   end
 
@@ -2667,25 +2674,33 @@ defmodule MingaAgent.Providers.Native do
          tool_call: tool_call,
          result_text: result_text,
          output: output,
-         is_error: is_error
+         outcome: outcome,
+         reason: reason
        }) do
-    meta = %{is_error: is_error, output: output}
+    meta = %{is_error: outcome != :complete, output: output, tool_outcome: outcome}
+    meta = tool_result_reason(meta, reason)
     Context.tool_result_message(tool_call.name, tool_call.id, result_text, meta)
   end
+
+  defp tool_result_reason(meta, nil), do: meta
+
+  defp tool_result_reason(meta, :approval_timeout),
+    do: Map.put(meta, :tool_outcome_reason, :approval_timeout)
 
   @spec execute_with_approval(
           loop_ctx(),
           map(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp execute_with_approval(lctx, tool_call, tool_context) do
     invocation = Invocation.new(lctx.request, tool_call.effect_checkpoint_id, tool_call)
 
     case GenServer.call(lctx.session_pid, {:prepare_tool_invocation, invocation}) do
       {:ok, :ready} -> execute_live_tool(lctx, tool_call, invocation, tool_context)
       {:ok, :approval_required} -> request_approval(lctx, tool_call, invocation, tool_context)
-      {:refused, reason} -> {"Tool refused: #{inspect(reason)}", true, false, nil}
+      {:refused, reason} -> {"Tool refused: #{inspect(reason)}", :denied, nil, false, nil}
       {:error, reason} -> throw({:effect_admission_failed, reason})
     end
   end
@@ -2774,7 +2789,8 @@ defmodule MingaAgent.Providers.Native do
           Invocation.t(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp request_approval(lctx, tool_call, invocation, tool_context) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send_agent_event(lctx.provider_pid, lctx.request, %Event.ToolApproval{
@@ -2792,18 +2808,19 @@ defmodule MingaAgent.Providers.Native do
         execute_live_tool(lctx, tool_call, invocation, tool_context)
 
       {:tool_approval_response, ^call_id, :reject} ->
-        {"Tool rejected by user", true, false, nil}
+        {"Tool rejected by user", :denied, nil, false, nil}
 
       {:tool_approval_response, ^call_id, {:reject, message}} ->
-        {message, true, false, nil}
+        {message, :denied, nil, false, nil}
     after
       lctx.config.approval_timeout_ms ->
-        {"Tool approval timed out", true, false, nil}
+        {"Tool approval timed out", :error, :approval_timeout, false, nil}
     end
   end
 
   @spec execute_live_tool(loop_ctx(), map(), Invocation.t(), ToolContext.t()) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp execute_live_tool(lctx, tool_call, invocation, tool_context) do
     tool_context =
       tool_context_with_call_metadata(tool_context, tool_call, lctx.provider_pid, lctx.request)
@@ -2974,24 +2991,29 @@ defmodule MingaAgent.Providers.Native do
        do: context
 
   @spec format_executor_result(ToolExecutor.result()) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp format_executor_result({:storage_error, reason}),
     do: throw({:tool_storage_failed, reason})
 
   defp format_executor_result({:ok, %Output{} = output}),
-    do: {format_output(output), false, false, output}
+    do: {format_output(output), :complete, nil, false, output}
 
   defp format_executor_result({:error, %Output{} = output}),
-    do: {format_output(output), true, false, output}
+    do: {format_output(output), :error, nil, false, output}
 
   defp format_executor_result({:error, %Limitation{} = limitation}),
-    do: {Limitation.message(limitation), true, false, nil}
+    do: {Limitation.message(limitation), :error, nil, false, nil}
 
   defp format_executor_result({:ok, result}),
-    do: {format_tool_result(result), false, false, nil}
+    do: {format_tool_result(result), :complete, nil, false, nil}
+
+  defp format_executor_result({:error, {kind, _detail} = reason})
+       when kind in [:tool_refused, :tool_denied, :hook_veto],
+       do: {format_error(reason), :denied, nil, false, nil}
 
   defp format_executor_result({:error, reason}),
-    do: {format_error(reason), true, false, nil}
+    do: {format_error(reason), :error, nil, false, nil}
 
   @spec format_output(Output.t()) :: String.t()
   defp format_output(

@@ -18,7 +18,7 @@ defmodule MingaEditor.Remote.EventReplay do
           acc
 
         event ->
-          Events.dispatch(acc, session_pid, event)
+          replay_event(acc, session_pid, event)
       end
     end)
   end
@@ -37,13 +37,22 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   def to_agent_event(%EventRecord{event_type: :tool_call_finished, payload: payload}) do
-    event =
-      {:tool_ended, string_payload(payload, "tool_call_id"), string_payload(payload, "name"),
-       string_payload(payload, "result"), tool_status(payload)}
-
-    case output_payload(payload) do
-      nil -> event
-      output -> Tuple.insert_at(event, tuple_size(event), output)
+    with {:ok, outcome, reason} <- tool_status(payload),
+         {:ok, output} <- output_payload(payload) do
+      {:tool_ended,
+       %MingaAgent.Event.ToolEnd{
+         tool_call_id: string_payload(payload, "tool_call_id"),
+         name: string_payload(payload, "name"),
+         result: string_payload(payload, "result"),
+         outcome: outcome,
+         reason: reason,
+         is_error: outcome != :complete,
+         output: output
+       }}
+    else
+      {:error, reason} ->
+        {:error,
+         "Remote tool result could not be replayed: #{inspect(reason, limit: 4, printable_limit: 200)}"}
     end
   end
 
@@ -96,6 +105,12 @@ defmodule MingaEditor.Remote.EventReplay do
 
   def to_agent_event(%EventRecord{}), do: nil
 
+  @spec replay_event(EditorState.t(), pid(), event()) :: EditorState.t()
+  defp replay_event(state, session, {:status_changed, status}),
+    do: MingaEditor.Agent.StatusEventWorkflow.replay_status_changed(state, session, status)
+
+  defp replay_event(state, session, event), do: Events.dispatch(state, session, event)
+
   @spec payload_value(map(), String.t()) :: term()
   defp payload_value(payload, key) when is_map(payload) do
     case Map.fetch(payload, key) do
@@ -104,25 +119,42 @@ defmodule MingaEditor.Remote.EventReplay do
     end
   end
 
-  @spec tool_status(map()) :: :done | :error
+  @spec tool_status(map()) ::
+          {:ok, MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason()}
+          | {:error, :invalid_tool_outcome}
   defp tool_status(payload) do
-    case string_payload(payload, "status") do
-      "done" -> :done
-      _ -> :error
+    with {:ok, outcome} <- tool_outcome(string_payload(payload, "status")),
+         {:ok, reason} <- tool_reason(payload_value(payload, "reason")) do
+      MingaAgent.ToolCall.saved_outcome(%{
+        tool_outcome: outcome,
+        tool_outcome_reason: reason,
+        is_error: outcome != :complete
+      })
     end
   end
 
-  @spec output_payload(map()) :: MingaAgent.Tool.Output.t() | nil
+  @spec tool_outcome(String.t()) ::
+          {:ok, MingaAgent.ToolCall.outcome()} | {:error, :invalid_tool_outcome}
+  defp tool_outcome("done"), do: {:ok, :complete}
+  defp tool_outcome("complete"), do: {:ok, :complete}
+  defp tool_outcome("denied"), do: {:ok, :denied}
+  defp tool_outcome("cancelled"), do: {:ok, :cancelled}
+  defp tool_outcome("error"), do: {:ok, :error}
+  defp tool_outcome(_unknown), do: {:error, :invalid_tool_outcome}
+
+  @spec tool_reason(term()) ::
+          {:ok, MingaAgent.ToolCall.terminal_reason()} | {:error, :invalid_tool_outcome}
+  defp tool_reason(nil), do: {:ok, nil}
+  defp tool_reason(:approval_timeout), do: {:ok, :approval_timeout}
+  defp tool_reason("approval_timeout"), do: {:ok, :approval_timeout}
+  defp tool_reason(_unknown), do: {:error, :invalid_tool_outcome}
+
+  @spec output_payload(map()) :: {:ok, MingaAgent.Tool.Output.t() | nil} | {:error, term()}
   defp output_payload(payload) do
     case payload_value(payload, "output") do
-      value when is_map(value) ->
-        case OutputCodec.decode(value) do
-          {:ok, output} -> output
-          {:error, _reason} -> nil
-        end
-
-      _value ->
-        nil
+      nil -> {:ok, nil}
+      value when is_map(value) -> OutputCodec.decode(value)
+      _invalid -> {:error, :invalid_tool_output}
     end
   end
 
