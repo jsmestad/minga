@@ -883,6 +883,73 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 	}
 }
 
+func TestFloatingPickerPointerUsesPaintedItems(t *testing.T) {
+	for _, tc := range []struct {
+		width   uint16
+		preview bool
+	}{
+		{width: 60},
+		{width: 100},
+		{width: 140, preview: true},
+	} {
+		t.Run(fmt.Sprint(tc.width), func(t *testing.T) {
+			out := make(chan []byte, 2)
+			model := New(tc.width, 24, out)
+			items := make([]protocol.PickerItem, 20)
+			for i := range items {
+				items[i] = protocol.PickerItem{
+					Label:        fmt.Sprintf("界 item-%02d", i),
+					Description:  "Create a new empty buffer in the current editor workspace",
+					ActivationID: uint32(200 + i),
+				}
+			}
+			picker := protocol.Picker{Visible: true, Title: "Choose test item", Generation: 43, Selected: 13, Items: items}
+			model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: picker}
+			if tc.preview {
+				model.chrome[generated.OPGuiPickerPreview] = protocol.ChromePayload{Preview: protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "preview details"}}}}}}
+			}
+			lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+			cell := func(label string) tea.MouseClickMsg {
+				t.Helper()
+				for y, line := range lines {
+					if i := strings.Index(line, label); i >= 0 {
+						return tea.MouseClickMsg(tea.Mouse{X: ansi.StringWidth(line[:i]), Y: y, Button: tea.MouseLeft})
+					}
+				}
+				t.Fatalf("picker did not draw %q", label)
+				return tea.MouseClickMsg{}
+			}
+			click := func(msg tea.MouseClickMsg, want []byte) {
+				t.Helper()
+				updated, _ := model.Update(msg)
+				model = updated.(Model)
+				select {
+				case got := <-out:
+					if !bytes.Equal(got, want) {
+						t.Fatalf("click (%d,%d): packet %x, want %x", msg.X, msg.Y, got, want)
+					}
+				default:
+					if want != nil {
+						t.Fatalf("click (%d,%d): no packet, want %x", msg.X, msg.Y, want)
+					}
+				}
+			}
+			target := cell("item-13")
+			click(target, protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 1, 43, []byte{0, 0, 0, 213}))
+			click(cell("Choose test item"), nil)
+			if tc.preview {
+				click(cell("preview details"), nil)
+			}
+			click(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft}), protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 3, 43, nil))
+
+			picker.Generation++
+			picker.Items[13].ActivationID++
+			model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: picker}
+			click(target, nil)
+		})
+	}
+}
+
 func TestHiddenWindowCursorDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 	model := New(80, 24, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})

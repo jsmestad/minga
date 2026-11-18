@@ -333,6 +333,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
+		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft {
+			if packet, handled := m.pickerPointerPacket(click); handled {
+				if packet != nil {
+					m.send(packet)
+				}
+				break
+			}
+		}
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
@@ -1502,7 +1510,7 @@ func (m Model) bodyHeight() int {
 }
 
 func (m Model) maxOverlayHeight() int {
-	return min(max(m.height/3, 4), 12)
+	return min(max(m.height/3, 4), maxPopupRows)
 }
 
 func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {

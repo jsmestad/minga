@@ -647,7 +647,13 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	}
 	end := min(start+rowBudget, len(picker.Items))
 	for index := start; index < end; index++ {
-		lines = append(lines, m.renderPickerItemRow(title, picker.Items[index], index == selected, width))
+		item := picker.Items[index]
+		row := m.renderPickerItemRow(title, item, index == selected, width)
+		if slot := index - start; slot < len(m.zones.picker.items) && item.ActivationID != 0 {
+			m.zones.picker.items[slot] = item.ActivationID
+			row = m.zones.Mark(pickerPointerZone(slot), row)
+		}
+		lines = append(lines, row)
 	}
 	for len(lines) < height {
 		lines = append(lines, panelStyle.Render(strings.Repeat(" ", max(width, 1))))
