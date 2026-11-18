@@ -271,9 +271,9 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(18)...)
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
-	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
+	scrollPayload = append(scrollPayload, u32Bytes(3)...)          // scroll_seq (#2661)
 	scrollPayload = append(scrollPayload, u32Bytes(0x12345678)...) // horizontal_pan_ack
-	scrollPayload = append(scrollPayload, 0x9A, 0xBC) // horizontal_pan_limit
+	scrollPayload = append(scrollPayload, 0x9A, 0xBC)              // horizontal_pan_limit
 
 	packet := windowContentPacket(
 		section32(0x01, headerPayload),
@@ -324,7 +324,7 @@ func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
 	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
 	scrollPayload = append(scrollPayload, u32Bytes(0)...) // horizontal_pan_ack
-	scrollPayload = append(scrollPayload, 0, 0) // horizontal_pan_limit
+	scrollPayload = append(scrollPayload, 0, 0)           // horizontal_pan_limit
 
 	packet := windowContentPacket(
 		section32(0x01, headerPayload),
