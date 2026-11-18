@@ -1,6 +1,7 @@
 defmodule MingaAgent.ModelResolverTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.CodexModels
   alias MingaAgent.Config
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelResolver
@@ -210,6 +211,50 @@ defmodule MingaAgent.ModelResolverTest do
     assert oauth.selection.route.execution.wire_protocol == "openai_codex_responses"
     assert oauth.selection.route.execution.base_url == "https://chatgpt.com/backend-api"
     refute ModelSelection.id(api_key.selection) == ModelSelection.id(oauth.selection)
+  end
+
+  test "account discovery exposes only listed wire IDs without hiding API-key routes" do
+    credential = OAuth.new("account-a", "/tmp/model-discovery-a.json")
+    snapshot = Snapshot.new(%{"openai" => :env}, credential)
+
+    daybreak = %{
+      @catalog_model
+      | id: "gpt-daybreak-blue-latest",
+        provider_model_id: "gpt-daybreak-blue-latest"
+    }
+
+    assert {:ok, inventory} =
+             CodexModels.from_response(credential, %{
+               "models" => [
+                 %{"slug" => "not-a-codex-name", "visibility" => "list"},
+                 %{"slug" => "gpt-daybreak-blue-latest", "visibility" => "hide"}
+               ]
+             })
+
+    opts = Keyword.merge(resolver_opts(snapshot), models: [@catalog_model, daybreak])
+
+    route_keys = fn evidence ->
+      opts
+      |> Keyword.put(:codex_models, evidence)
+      |> ModelResolver.candidates()
+      |> MapSet.new(&{&1.selection.route.request_provider, &1.selection.route.model_id})
+    end
+
+    api_key_routes = [
+      {:openai, "not-a-codex-name"},
+      {:openai, "gpt-daybreak-blue-latest"}
+    ]
+
+    assert route_keys.({:ok, inventory}) ==
+             MapSet.new([{:openai_codex, "not-a-codex-name"} | api_key_routes])
+
+    assert route_keys.({:error, {:http_status, 401}}) == MapSet.new(api_key_routes)
+
+    other_credential = OAuth.new("account-b", "/tmp/model-discovery-a.json")
+    other_opts = Keyword.put(opts, :credential_snapshot, Snapshot.new(%{}, other_credential))
+
+    assert ModelResolver.candidates(Keyword.put(other_opts, :codex_models, {:ok, inventory})) ==
+             []
   end
 
   test "restore rejects imported catalog execution and credential-owner substitution" do

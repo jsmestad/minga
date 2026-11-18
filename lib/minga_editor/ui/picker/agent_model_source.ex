@@ -24,6 +24,53 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   def layout, do: :centered
 
   @impl true
+  @spec async?() :: boolean()
+  def async?, do: true
+
+  @impl true
+  @spec async_fetch(Context.t()) ::
+          {:ok, [Item.t()], MingaEditor.UI.Picker.Source.fetch_meta()} | {:error, String.t()}
+  def async_fetch(%Context{agent_session: session}) when is_pid(session) do
+    case Session.discover_available_models(session) do
+      {:ok, candidates, notice, validity} when is_list(candidates) ->
+        meta = discovery_meta(session, notice, validity)
+        {:ok, Enum.map(candidates, &format_candidate/1), meta}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      _unavailable ->
+        {:error, "Agent models are unavailable."}
+    end
+  catch
+    :exit, _ -> {:error, "The agent session is unavailable. Reopen /model."}
+  end
+
+  def async_fetch(%Context{}), do: {:error, "No active agent session."}
+
+  @doc "Keeps only account-independent rows when a Codex discovery was superseded."
+  @spec for_publication(
+          {:ok, [Item.t()], [MingaEditor.UI.Picker.Candidate.t()],
+           MingaEditor.UI.Picker.Source.fetch_meta()},
+          pid() | nil
+        ) ::
+          {:ok, [Item.t()], [MingaEditor.UI.Picker.Candidate.t()],
+           MingaEditor.UI.Picker.Source.fetch_meta()}
+  def for_publication(
+        {:ok, items, candidates, %{model_discovery: {owner, validity}}} = result,
+        session
+      ) do
+    if owner == session and Session.model_discovery_current?(owner, validity) do
+      result
+    else
+      {:ok, Enum.reject(items, &codex_item?/1), Enum.reject(candidates, &codex_item?(&1.item)),
+       %{}}
+    end
+  end
+
+  def for_publication(result, _session), do: result
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{agent_session: session}) do
     with true <- is_pid(session),
@@ -41,6 +88,20 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec discovery_meta(pid(), String.t() | nil, :atomics.atomics_ref() | nil) ::
+          MingaEditor.UI.Picker.Source.fetch_meta()
+  defp discovery_meta(_session, nil, nil), do: %{}
+  defp discovery_meta(session, nil, validity), do: %{model_discovery: {session, validity}}
+
+  defp discovery_meta(session, notice, validity),
+    do: %{model_discovery: {session, validity}, status: notice}
+
+  @spec codex_item?(Item.t()) :: boolean()
+  defp codex_item?(%Item{meta: %{selection: %{route: %{request_provider: :openai_codex}}}}),
+    do: true
+
+  defp codex_item?(%Item{}), do: false
 
   @spec fetch_models(pid()) :: {:ok, [ModelCandidate.t()]} | {:error, term()}
   defp fetch_models(session), do: Session.get_available_models(session)

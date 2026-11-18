@@ -21,6 +21,7 @@ defmodule MingaAgent.Session do
   alias Minga.Config.Options
   alias MingaAgent.Branch
   alias Minga.Extension.CodeLease
+  alias MingaAgent.CodexModels
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
@@ -123,6 +124,8 @@ defmodule MingaAgent.Session do
           idle_gc_timeout_ms: non_neg_integer(),
           persistence: Persistence.t(),
           model_selection: ModelSelection.t() | nil,
+          codex_discovery: {:atomics.atomics_ref(), CodexModels.result()} | nil,
+          codex_discovery_request: reference() | nil,
           selection_error: String.t() | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
           pending_thinking_level: String.t() | nil,
@@ -504,6 +507,26 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :get_available_models, 10_000)
   end
 
+  @doc "Refreshes the Codex account catalog in the calling worker and lists available routes."
+  @spec discover_available_models(GenServer.server()) ::
+          {:ok, term(), String.t() | nil, :atomics.atomics_ref() | nil} | {:error, term()}
+  def discover_available_models(session) do
+    case GenServer.call(session, :begin_model_discovery) do
+      {:codex, ref, credential, opts} ->
+        result = CodexModels.fetch(credential, opts)
+        GenServer.call(session, {:finish_model_discovery, ref, credential, result})
+
+      :local ->
+        with {:ok, candidates} <- get_available_models(session), do: {:ok, candidates, nil, nil}
+    end
+  end
+
+  @doc "Checks discovery publication without calling the Session process."
+  @spec model_discovery_current?(pid(), :atomics.atomics_ref()) :: boolean()
+  def model_discovery_current?(session, validity) do
+    Process.alive?(session) and :atomics.get(validity, 1) == 1
+  end
+
   @doc "Fetches available commands from the provider."
   @spec get_commands(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
   def get_commands(session) do
@@ -858,6 +881,8 @@ defmodule MingaAgent.Session do
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
       model_selection: model_selection,
+      codex_discovery: nil,
+      codex_discovery_request: nil,
       selection_error: selection_error,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
@@ -1314,12 +1339,55 @@ defmodule MingaAgent.Session do
     {:reply, state.model_selection, state}
   end
 
+  def handle_call(:begin_model_discovery, _from, state)
+      when state.provider.module == MingaAgent.Providers.Native do
+    case state.credentials_snapshot_fn.().oauth_ref do
+      %ModelSelection.Credential.OAuth{} = credential ->
+        ref = make_ref()
+        opts = Keyword.get(state.provider.opts, :credential_opts, [])
+
+        {:reply, {:codex, ref, credential, opts}, %{state | codex_discovery_request: ref}}
+
+      nil ->
+        {:reply, :local, invalidate_model_discovery(state)}
+    end
+  end
+
+  def handle_call(:begin_model_discovery, _from, state), do: {:reply, :local, state}
+
+  def handle_call(
+        {:finish_model_discovery, ref, credential, result},
+        _from,
+        %{codex_discovery_request: ref} = state
+      )
+      when is_reference(ref) do
+    snapshot = state.credentials_snapshot_fn.()
+
+    if credential == snapshot.oauth_ref do
+      state = invalidate_model_discovery(state)
+      validity = :atomics.new(1, [])
+      :atomics.put(validity, 1, 1)
+      state = %{state | codex_discovery: {validity, result}}
+
+      notice =
+        case result do
+          {:ok, _inventory} -> nil
+          {:error, reason} -> CodexModels.message(reason)
+        end
+
+      {:reply, {:ok, discovered_model_candidates(state, snapshot), notice, validity}, state}
+    else
+      {:reply, local_model_discovery(state, snapshot), invalidate_model_discovery(state)}
+    end
+  end
+
+  def handle_call({:finish_model_discovery, _ref, _credential, _result}, _from, state) do
+    {:reply, local_model_discovery(state, state.credentials_snapshot_fn.()), state}
+  end
+
   def handle_call(:get_available_models, _from, state)
       when state.provider.module == MingaAgent.Providers.Native do
-    candidates =
-      ModelResolver.candidates(model_resolution_opts(state, current: state.model_selection))
-
-    {:reply, {:ok, candidates}, state}
+    {:reply, {:ok, discovered_model_candidates(state, state.credentials_snapshot_fn.())}, state}
   end
 
   def handle_call(
@@ -1419,15 +1487,15 @@ defmodule MingaAgent.Session do
         _from,
         %{provider: %{module: MingaAgent.Providers.Native}} = state
       ) do
-    opts = model_resolution_opts(state, current: state.model_selection)
-    candidates = ModelResolver.candidates(opts)
+    snapshot = state.credentials_snapshot_fn.()
+    candidates = discovered_model_candidates(state, snapshot)
 
     case next_model_candidate(candidates, state.model_selection) do
       %ModelCandidate{selection: selection} ->
         case apply_resolved_model_selection(
                state,
                selection,
-               Keyword.fetch!(opts, :credential_snapshot)
+               snapshot
              ) do
           {:ok, state} ->
             reply = %{
@@ -2408,7 +2476,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_cast(:refresh_credentials, state) do
-    {:noreply, refresh_credentials_state(state)}
+    {:noreply, state |> invalidate_model_discovery() |> refresh_credentials_state()}
   end
 
   @impl GenServer
@@ -5250,6 +5318,40 @@ defmodule MingaAgent.Session do
 
   defp maybe_put_model_selection(opts, %ModelSelection{} = selection),
     do: opts |> Keyword.delete(:thinking_level) |> Keyword.put(:model_selection, selection)
+
+  @spec invalidate_model_discovery(state()) :: state()
+  defp invalidate_model_discovery(state) do
+    case state.codex_discovery do
+      {validity, _result} -> :atomics.put(validity, 1, 0)
+      nil -> :ok
+    end
+
+    %{state | codex_discovery: nil, codex_discovery_request: nil}
+  end
+
+  @spec local_model_discovery(state(), CredentialSnapshot.t()) ::
+          {:ok, [ModelCandidate.t()], nil, nil}
+  defp local_model_discovery(state, snapshot) do
+    candidates = discovered_model_candidates(%{state | codex_discovery: nil}, snapshot)
+    {:ok, candidates, nil, nil}
+  end
+
+  @spec discovered_model_candidates(state(), CredentialSnapshot.t()) :: [ModelCandidate.t()]
+  defp discovered_model_candidates(state, snapshot) do
+    inventory =
+      case state.codex_discovery do
+        {_ref, result} -> result
+        nil -> {:error, :not_loaded}
+      end
+
+    ModelResolver.candidates(
+      model_resolution_opts(state,
+        current: state.model_selection,
+        credential_snapshot: snapshot,
+        codex_models: inventory
+      )
+    )
+  end
 
   @spec model_resolution_opts(state(), keyword()) :: keyword()
   defp model_resolution_opts(state, extra \\ []) do

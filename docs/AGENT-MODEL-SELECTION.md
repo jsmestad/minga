@@ -27,6 +27,8 @@ set :agent_model, "anthropic:claude-sonnet-4-20250514"
 
 Configure the matching credential with `/auth`, `/login` for OpenAI Codex, or the provider environment variable. Open `/model` to list the routes available for the credentials configured on the current machine.
 
+For a Codex subscription, `/model` checks the signed-in account's model list. A model in OpenAI's API catalog is not automatically available through Codex OAuth. If the check fails, the picker explains why it omitted Codex models and still shows routes for configured API keys. Reopen `/model` to refresh the account list used by slash completion.
+
 The picker and slash completion show:
 
 - model provider and wire protocol;
