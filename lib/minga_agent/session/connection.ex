@@ -12,7 +12,7 @@ defmodule MingaAgent.Session.Connection do
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
 
-  @type method :: {:api_key, String.t()}
+  @type method :: {:api_key, String.t()} | :oauth_browser | :oauth_manual
   @type dependency :: {pid(), reference()}
   @type notification :: {pid(), term()} | nil
   @type admission :: {dependency(), notification()}
@@ -93,7 +93,11 @@ defmodule MingaAgent.Session.Connection do
   def authorize(%__MODULE__{}, _target, _ref, _current), do: {:error, :superseded}
 
   @doc "Checks the credential writer against the method that was admitted."
-  @spec match_method(t(), method()) :: :ok | {:error, :method_mismatch}
+  @spec match_method(t(), method() | :oauth) :: :ok | {:error, :method_mismatch}
+  def match_method(%__MODULE__{operation: {:pending, _, _, method, _, _}}, :oauth)
+      when method in [:oauth_browser, :oauth_manual],
+      do: :ok
+
   def match_method(%__MODULE__{operation: {:pending, _, _, method, _, _}}, method), do: :ok
   def match_method(%__MODULE__{}, _method), do: {:error, :method_mismatch}
 

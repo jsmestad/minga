@@ -1620,6 +1620,36 @@ defmodule MingaEditor do
     {:noreply, schedule_render(state, 16)}
   end
 
+  defp route_agent_event(
+         state,
+         session,
+         {:oauth_manual_requested, id,
+          %MingaAgent.OAuth.ManualReady{target: %{session: session}} = ready}
+       ) do
+    state =
+      MingaEditor.Agent.ConnectionSetup.offer_oauth(state, id, ready)
+
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:oauth_acquisition_failed, id, %{session: session} = target, _operation_ref, reason}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.oauth_failed(state, id, target, reason)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:connection_oauth_saved, id, %{session: session} = target, _ref}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.oauth_saved(state, id, target)
+    {:noreply, schedule_render(state, 16)}
+  end
+
   defp route_agent_event(state, session_pid, event) do
     route_agent_event(state, session_pid, event, agent_event_owner(state, session_pid))
   end
