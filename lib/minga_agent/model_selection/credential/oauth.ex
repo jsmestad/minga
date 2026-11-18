@@ -40,6 +40,7 @@ defmodule MingaAgent.ModelSelection.Credential.OAuth do
   defp source_id(nil), do: nil
 
   defp source_id(path) do
-    :crypto.hash(:sha256, Path.expand(path)) |> Base.encode16(case: :lower)
+    # Keep parent segments until the filesystem follows any preceding symlink.
+    :crypto.hash(:sha256, Path.absname(path)) |> Base.encode16(case: :lower)
   end
 end

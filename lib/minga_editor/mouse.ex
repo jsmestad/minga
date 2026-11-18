@@ -40,6 +40,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.Layout.SurfaceRegistry
+  alias MingaEditor.Mouse.BufferScroll
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Mouse.Target.Text, as: TextTarget
@@ -594,7 +595,7 @@ defmodule MingaEditor.Mouse do
     updated =
       window
       |> Window.set_viewport(Viewport.put_top(window.viewport, preview.scroll.offset))
-      |> Window.mark_scroll_echo(preview.scroll.offset)
+      |> Window.mark_scroll_echo()
 
     windows = Windows.replace_window(state.workspace.windows, window.id, updated)
     %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
@@ -610,9 +611,8 @@ defmodule MingaEditor.Mouse do
   # existing cursor-follow. Explicit scroll commands (ctrl-e/ctrl-y, ctrl-d/u/f/b,
   # zz family) keep their vim cursor semantics — this path is mouse-wheel only.
   #
-  # `Window.mark_scroll_echo/2` records the committed top of this move as a
-  # frontend-reported free-scroll top so the render pipeline's
-  # `Window.settle_scroll_seq/1` does not bump `scroll_seq` for it — only
+  # `Window.mark_scroll_echo/1` records the full vertical anchor so the render
+  # pipeline does not bump `scroll_seq` for this frontend-reported move. Only
   # BEAM-initiated jumps and the cursor-must-stay-visible re-attach do, which is
   # the "no re-anchor storm" contract from #2661. The echo top is sticky and
   # editor-owned (never written back), so the async render round trip cannot
@@ -630,14 +630,11 @@ defmodule MingaEditor.Mouse do
 
       {:ok, %Window{content: {:buffer, buf}} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
-        total_lines = Buffer.line_count(buf)
-        cursor_pos = Buffer.cursor(buf)
-
-        scrolled = Window.scroll_viewport(window, delta_lines, total_lines)
+        {scrolled, cursor_pos} = BufferScroll.advance(state, window, buf, delta_lines)
 
         updated =
           scrolled
-          |> Window.mark_scroll_echo(scrolled.viewport.top)
+          |> Window.mark_scroll_echo()
           |> Window.record_scroll_event(now, cursor_pos)
 
         %{
@@ -1229,15 +1226,11 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  # Discrete physical-wheel scroll on the active window. A resident GUI window
-  # free-scrolls through `apply_scroll_intent` (viewport-only + echo-mark, no
-  # cursor drag per #2684), so the wheel never moves the cursor and the committed
-  # top is marked as a scroll echo. Every non-GUI frontend and every non-resident
-  # window keeps the viewport-only `scroll_viewport` path byte-identically, so
-  # residence-off configs and the TUI are unchanged.
+  # Native wheel events and the terminal's wrapped fallback use the same
+  # targeted vertical movement as a scroll batch.
   @spec scroll_active_window_vertical(state(), pid(), integer(), :down | :up) :: state()
   defp scroll_active_window_vertical(state, buf, delta_lines, direction) do
-    case active_resident_gui_window(state) do
+    case active_wheel_window(state, buf) do
       {:ok, win_id} ->
         apply_scroll_intent(state, win_id, delta_lines, direction)
 
@@ -1249,9 +1242,9 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec active_resident_gui_window(state()) :: {:ok, Window.id()} | :error
-  defp active_resident_gui_window(%{workspace: %{windows: %{active: win_id, map: map}}} = state) do
-    with true <- native_gui?(state),
+  @spec active_wheel_window(state(), pid()) :: {:ok, Window.id()} | :error
+  defp active_wheel_window(%{workspace: %{windows: %{active: win_id, map: map}}} = state, buffer) do
+    with true <- native_gui?(state) or Buffer.get_option(buffer, :wrap) == true,
          {:ok, %Window{}} <- Map.fetch(map, win_id) do
       {:ok, win_id}
     else
@@ -1259,7 +1252,7 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  defp active_resident_gui_window(_state), do: :error
+  defp active_wheel_window(_state, _buffer), do: :error
 
   # ── Left press dispatcher ──────────────────────────────────────────────────
 

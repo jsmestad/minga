@@ -19,19 +19,7 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
 
   @spec build([VisualRow.t()], pos_integer()) :: t()
   def build(entries, tab_width) when is_list(entries) and tab_width > 0 do
-    root =
-      Enum.reduce(entries, nil, fn %VisualRow{} = entry, tree ->
-        if blank?(entry.source_text) do
-          tree
-        else
-          LazyRowTree.insert(
-            tree,
-            leaf(entry.buf_line, IndentGuide.indent_level(entry.source_text, tab_width)),
-            &summarize/4,
-            &shift_summary/2
-          )
-        end
-      end)
+    root = insert_rows(entries, 0, tab_width)
 
     %__MODULE__{root: root, row_count: length(entries)}
   end
@@ -47,19 +35,7 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
     shift = length(inserted) - delete_count
     right = LazyRowTree.shift(right, shift, &shift_summary/2)
 
-    inserted_tree =
-      Enum.reduce(inserted, nil, fn %VisualRow{} = entry, tree ->
-        if blank?(entry.source_text) do
-          tree
-        else
-          LazyRowTree.insert(
-            tree,
-            leaf(entry.buf_line, IndentGuide.indent_level(entry.source_text, tab_width)),
-            &summarize/4,
-            &shift_summary/2
-          )
-        end
-      end)
+    inserted_tree = insert_rows(inserted, start_row, tab_width)
 
     %__MODULE__{
       root:
@@ -71,6 +47,29 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
         ),
       row_count: index.row_count - delete_count + length(inserted)
     }
+  end
+
+  defp insert_rows(entries, start_row, tab_width) do
+    {tree, _} =
+      Enum.reduce(entries, {nil, start_row}, fn %VisualRow{} = entry, {tree, rank} ->
+        text = VisualRow.guide_source_line(entry)
+
+        tree =
+          if blank?(text) do
+            tree
+          else
+            LazyRowTree.insert(
+              tree,
+              leaf(rank, IndentGuide.indent_level(text, tab_width)),
+              &summarize/4,
+              &shift_summary/2
+            )
+          end
+
+        {tree, rank + 1}
+      end)
+
+    tree
   end
 
   @doc "Returns the smallest final half-open range whose blank continuity can change at a splice."

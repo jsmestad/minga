@@ -30,6 +30,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           | {:splice, non_neg_integer(), non_neg_integer(), non_neg_integer()}
           | {:splices, [non_neg_integer()]}
   @type source :: {:complete, [String.t()]} | {:range, non_neg_integer(), [String.t()]}
+  @type source_splice :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
   @type inputs :: %{
           required(:source) => source(),
@@ -45,7 +46,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           required(:font_registry) => FontRegistry.t(),
           required(:build_all) => (FontRegistry.t() -> {[payload()], FontRegistry.t()}),
           required(:build_dirty) => (MapSet.t(non_neg_integer()), FontRegistry.t() ->
-                                       {%{non_neg_integer() => payload()}, FontRegistry.t()})
+                                       {%{non_neg_integer() => [payload()]}, FontRegistry.t()})
         }
 
   @spec run(t() | nil, inputs()) :: {t(), map(), FontRegistry.t()}
@@ -61,10 +62,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           reuse(prev, inputs.font_registry)
 
         {:splice, start, delete_count, insert_count} ->
-          splice(prev, inputs, start, delete_count, insert_count)
+          splice(prev, inputs, [{start, delete_count, insert_count}])
 
         {:splices, lines} ->
-          splice_lines(prev, inputs, lines)
+          splice(prev, inputs, Enum.map(lines, &{&1, 1, 1}))
       end
 
     {state, result} =
@@ -163,10 +164,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
     {payloads, font_registry} = inputs.build_all.(inputs.font_registry)
     store = ResidentStore.from_entries(Enum.map(payloads, &to_store_entry/1))
 
-    if ResidentStore.size(store) != count do
-      raise ArgumentError,
-            "resident hydration produced #{ResidentStore.size(store)} rows for #{count} lines"
-    end
+    validate_line_count!(store, count)
 
     state = %__MODULE__{
       store: store,
@@ -181,6 +179,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
        payloads: payloads,
        inserted_payloads: payloads,
        row_delta: nil,
+       source_splices: [],
        digest: ResidentStore.digest(store),
        retained_rows: retained_of(payloads),
        rasterized: rasterized_of(payloads),
@@ -197,7 +196,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
      %{
        payloads: [],
        inserted_payloads: [],
-       row_delta: empty_delta(prev.line_count),
+       row_delta: empty_delta(ResidentStore.size(prev.store)),
+       source_splices: [],
        digest: ResidentStore.digest(prev.store),
        retained_rows: %{},
        rasterized: 0,
@@ -226,78 +226,86 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
      }}
   end
 
-  defp splice(prev, inputs, start, delete_count, insert_count) do
+  defp splice(prev, inputs, source_splices) do
     dirty =
-      if insert_count == 0, do: MapSet.new(), else: MapSet.new(start..(start + insert_count - 1))
+      Enum.reduce(source_splices, MapSet.new(), fn {start, _, insert_count}, dirty ->
+        Enum.reduce(start..(start + insert_count - 1)//1, dirty, &MapSet.put(&2, &1))
+      end)
 
-    {dirty_payloads, font_registry} =
-      if insert_count == 0,
-        do: {%{}, inputs.font_registry},
-        else: inputs.build_dirty.(dirty, inputs.font_registry)
+    {groups, font_registry} = inputs.build_dirty.(dirty, inputs.font_registry)
 
-    inserted_payloads =
-      if insert_count == 0,
-        do: [],
-        else: Enum.map(start..(start + insert_count - 1), &Map.fetch!(dirty_payloads, &1))
+    {store, payloads, splices, _shift, work} =
+      Enum.reduce(
+        source_splices,
+        {prev.store, [], [], 0,
+         %{rows_visited: 0, rows_copied: 0, rows_emitted: 0, chunks_touched: 0}},
+        fn {start, delete_count, insert_count}, {store, payloads, splices, shift, work} ->
+          inserted =
+            Enum.flat_map(start..(start + insert_count - 1)//1, &Map.fetch!(groups, &1))
 
-    inserted = Enum.map(inserted_payloads, &to_store_entry/1)
-    store = ResidentStore.replace_range(prev.store, start, delete_count, inserted)
-    work = ResidentStore.work(store)
-    Minga.Telemetry.execute([:minga, :render, :resident_work], work, %{operation: :splice})
-    result_count = prev.line_count - delete_count + insert_count
+          first = ResidentStore.visual_rank(prev.store, start)
+          last = ResidentStore.visual_rank(prev.store, start + delete_count)
+          removed = last - first
+
+          next =
+            ResidentStore.replace_range(
+              store,
+              first + shift,
+              removed,
+              Enum.map(inserted, &to_store_entry/1)
+            )
+
+          splice = RowSplice.new(first, removed, Enum.map(inserted, & &1.row))
+
+          {next, Enum.reverse(inserted, payloads), [splice | splices],
+           shift + RowSplice.insert_count(splice) - removed,
+           Map.merge(work, ResidentStore.work(next), fn _key, a, b -> a + b end)}
+        end
+      )
+
+    validate_line_count!(store, inputs.line_count)
 
     {:ok, row_delta} =
-      RowDelta.new(prev.line_count, result_count, [
-        RowSplice.new(start, delete_count, Enum.map(inserted_payloads, & &1.row))
-      ])
+      RowDelta.new(
+        ResidentStore.size(prev.store),
+        ResidentStore.size(store),
+        Enum.reverse(splices)
+      )
 
-    state = %{prev | store: store, line_count: result_count, revision: prev.revision + 1}
+    inserted_payloads = Enum.reverse(payloads)
+    Minga.Telemetry.execute([:minga, :render, :resident_work], work, %{operation: :splices})
+
+    state = %{
+      prev
+      | store: store,
+        highlight_fp: inputs.highlight_fp,
+        line_count: inputs.line_count,
+        revision: prev.revision + 1
+    }
 
     {state,
      %{
        payloads: inserted_payloads,
        inserted_payloads: inserted_payloads,
        row_delta: row_delta,
+       source_splices: source_splices,
        digest: ResidentStore.digest(store),
        retained_rows: retained_of(inserted_payloads),
-       rasterized: length(inserted_payloads),
-       spliced: max(delete_count, insert_count),
+       rasterized: rasterized_of(inserted_payloads),
+       spliced:
+         Enum.reduce(row_delta.splices, 0, fn splice, count ->
+           count + max(splice.delete_count, RowSplice.insert_count(splice))
+         end),
        work: work
      }, font_registry}
   end
 
-  @spec splice_lines(t(), inputs(), [non_neg_integer()]) ::
-          {t(), map(), FontRegistry.t()}
-  defp splice_lines(prev, inputs, lines) do
-    {dirty_payloads, font_registry} =
-      inputs.build_dirty.(MapSet.new(lines), inputs.font_registry)
+  defp validate_line_count!(store, expected) do
+    count = ResidentStore.line_count(store)
 
-    {store, inserted_payloads, splices} =
-      Enum.reduce(lines, {prev.store, [], []}, fn line, {store, payloads, splices} ->
-        payload = Map.fetch!(dirty_payloads, line)
-        entry = to_store_entry(payload)
-        store = ResidentStore.replace_at(store, line, entry)
-        splice = RowSplice.new(line, 1, [payload.row])
-        {store, [payload | payloads], [splice | splices]}
-      end)
-
-    inserted_payloads = Enum.reverse(inserted_payloads)
-    {:ok, row_delta} = RowDelta.new(prev.line_count, prev.line_count, Enum.reverse(splices))
-    work = ResidentStore.work(store)
-    Minga.Telemetry.execute([:minga, :render, :resident_work], work, %{operation: :splices})
-    state = %{prev | store: store, revision: prev.revision + 1}
-
-    {state,
-     %{
-       payloads: inserted_payloads,
-       inserted_payloads: inserted_payloads,
-       row_delta: row_delta,
-       digest: ResidentStore.digest(store),
-       retained_rows: retained_of(inserted_payloads),
-       rasterized: rasterized_of(inserted_payloads),
-       spliced: length(lines),
-       work: work
-     }, font_registry}
+    if count != expected do
+      raise ArgumentError, "resident build produced #{count} source starts for #{expected} lines"
+    end
   end
 
   defp empty_delta(count) do

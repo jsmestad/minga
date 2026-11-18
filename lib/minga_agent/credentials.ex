@@ -24,6 +24,7 @@ defmodule MingaAgent.Credentials do
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth}
   alias MingaAgent.Credentials.Binding
+  alias MingaAgent.OAuth, as: OAuthFile
 
   @typedoc "Owner-visible credential readiness."
   @type readiness :: :checking | :configured | :unconfigured
@@ -154,15 +155,19 @@ defmodule MingaAgent.Credentials do
   end
 
   @doc """
-  Removes a stored API key for a provider.
-
-  Only removes from the credentials file. Environment variables are
-  unaffected (and will still be used if set).
+  Removes a stored API key, or the local OAuth entry for Codex.
+  Environment variables are unaffected.
   """
   @spec revoke(provider(), keyword()) :: :ok | {:error, term()}
-  def revoke(provider, opts \\ []) when is_binary(provider) do
-    revoke_api_key(provider, opts)
-    |> merge_revoke_result(revoke_oauth_entry(provider))
+  def revoke(provider, opts \\ [])
+
+  def revoke("openai_codex", opts) do
+    OAuthFile.revoke_oauth_file(Keyword.get(opts, :oauth_path, oauth_path()))
+  end
+
+  def revoke(provider, opts) when is_binary(provider) do
+    path = credentials_path(opts)
+    update_api_keys(path, &Map.delete(&1, provider))
   end
 
   @doc """
@@ -316,19 +321,18 @@ defmodule MingaAgent.Credentials do
   @doc """
   Pins the exact OpenAI Codex account in Minga's explicit OAuth file.
 
-  ReqLLM owns refresh locking and persistence. Tokens returned while pinning are
-  discarded; only the provider, provider key, account id, and exact path remain.
+  ReqLLM performs refresh within Minga's OAuth file guard. Tokens returned while pinning are discarded; only the provider, provider key, account id, and exact configured path remain.
   """
   @spec pin_oauth(:openai_codex, String.t()) :: {:ok, OAuth.t()} | {:error, term()}
   def pin_oauth(:openai_codex, path) when is_binary(path) do
-    expanded_path = Path.expand(path)
+    configured = Path.absname(path)
 
-    with {:ok, resolved} <- ReqLLM.OAuth.resolve(:openai_codex, oauth_file: expanded_path),
+    with {:ok, resolved} <- OAuthFile.resolve_oauth_file(configured),
          "openai-codex" <- Map.get(resolved, :provider_key),
-         ^expanded_path <- Map.get(resolved, :oauth_file),
+         ^configured <- Map.get(resolved, :oauth_file),
          account_id when is_binary(account_id) and account_id != "" <-
            Map.get(resolved, :account_id) do
-      {:ok, OAuth.new(account_id, expanded_path)}
+      {:ok, OAuth.new(account_id, configured)}
     else
       {:error, _reason} = error -> error
       _mismatch -> {:error, :oauth_identity_mismatch}
@@ -337,16 +341,16 @@ defmodule MingaAgent.Credentials do
 
   @spec local_oauth_identity(String.t()) :: OAuth.t() | nil
   defp local_oauth_identity(path) do
-    expanded_path = Path.expand(path)
+    configured = Path.absname(path)
     provider_key = MingaAgent.OAuth.provider_key()
 
-    with {:ok, content} when content != "" <- File.read(expanded_path),
+    with {:ok, content} when content != "" <- File.read(configured),
          {:ok, data} when is_map(data) <- JSON.decode(content),
          entry when is_map(entry) <- Map.get(data, provider_key),
          account_id when is_binary(account_id) and account_id != "" <-
            Map.get(entry, "accountId") || Map.get(entry, "account_id") ||
              oauth_account_from_entry(entry) do
-      OAuth.new(account_id, expanded_path)
+      OAuth.new(account_id, configured)
     else
       _missing -> nil
     end
@@ -362,10 +366,10 @@ defmodule MingaAgent.Credentials do
   defp resolve_req_llm_oauth(path, opts) do
     case Keyword.get(opts, :oauth_resolver) do
       resolver when is_function(resolver, 2) ->
-        resolver.(:openai_codex, oauth_file: Path.expand(path))
+        resolver.(:openai_codex, oauth_file: Path.absname(path))
 
       nil ->
-        ReqLLM.OAuth.resolve(:openai_codex, oauth_file: Path.expand(path))
+        OAuthFile.resolve_oauth_file(path)
     end
   end
 
@@ -374,7 +378,7 @@ defmodule MingaAgent.Credentials do
     credential.provider == :openai_codex and
       Map.get(resolved, :provider_key) == credential.provider_key and
       Map.get(resolved, :account_id) == credential.account_id and
-      Map.get(resolved, :oauth_file) == Path.expand(path)
+      Map.get(resolved, :oauth_file) == Path.absname(path)
   end
 
   @spec credential_error(ModelSelection.credential_ref()) ::
@@ -395,37 +399,6 @@ defmodule MingaAgent.Credentials do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec revoke_api_key(provider(), keyword()) :: :ok | {:error, term()}
-  defp revoke_api_key(provider, opts) do
-    path = credentials_path(opts)
-    update_api_keys(path, &Map.delete(&1, provider))
-  end
-
-  @spec revoke_oauth_entry(provider()) :: :ok | {:error, term()}
-  defp revoke_oauth_entry("openai_codex") do
-    path = oauth_path()
-
-    with {:ok, content} when content != "" <- File.read(path),
-         {:ok, existing} when is_map(existing) <- JSON.decode(content) do
-      updated = Map.delete(existing, MingaAgent.OAuth.provider_key())
-      json = :json.format(updated)
-
-      case File.write(path, json) do
-        :ok -> File.chmod(path, 0o600)
-        error -> error
-      end
-    else
-      {:error, :enoent} -> :ok
-      _ -> :ok
-    end
-  end
-
-  defp revoke_oauth_entry(_provider), do: :ok
-
-  defp merge_revoke_result(:ok, :ok), do: :ok
-  defp merge_revoke_result({:error, _} = err, _), do: err
-  defp merge_revoke_result(_, {:error, _} = err), do: err
 
   @spec resolve_from_env(provider(), keyword()) :: {:ok, String.t()} | :error
   defp resolve_from_env(provider, opts) do

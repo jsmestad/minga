@@ -95,6 +95,51 @@ func applyTo(t *testing.T, model Model, commands ...protocol.Command) Model {
 	return updated.(Model)
 }
 
+func (m *Model) putWindow(window protocol.WindowContent) {
+	store, err := buildWindowRowStore(window)
+	if err != nil {
+		m.removeWindow(window.ID)
+		return
+	}
+	window.Rows = compatibilityRows(store)
+	m.publishWindow(window, store)
+	m.refreshCursorFromWindows()
+}
+
+func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
+	window, ok := m.windows[delta.ID]
+	if !ok || window.ContentEpoch != delta.ContentEpoch {
+		return
+	}
+	next := m.residentRows[delta.ID]
+	var err error
+	if delta.RowSplicesSet {
+		next, _, err = next.splice(delta, m.renderWork)
+	} else if delta.Rows != nil {
+		next, _, err = next.resolveRows(delta.Rows)
+	}
+	if err != nil {
+		m.removeWindow(delta.ID)
+		return
+	}
+	if delta.Rows != nil || delta.RowSplicesSet {
+		window.Rows = compatibilityRows(next)
+	}
+	m.publishWindow(mergeWindowDelta(window, delta), next)
+	m.refreshCursorFromWindows()
+}
+
+func (m *Model) removeWindow(id uint16) {
+	m.discardWindowState(id)
+	m.lineCache.dropWindow(id)
+	for index, windowID := range m.windowOrder {
+		if windowID == id {
+			m.windowOrder = append(m.windowOrder[:index], m.windowOrder[index+1:]...)
+			return
+		}
+	}
+}
+
 // Automatic invalidation emits typed rejection only. Stale in-flight frames may
 // reject too, but none may duplicate recovery with request_keyframe.
 func TestInvalidationNeverAutomaticallyRequestsKeyframe(t *testing.T) {

@@ -52,13 +52,17 @@ The `ms2` selection ID still identifies the configured route, not an API-key pri
 
 API-key continuity cannot be established across a runtime restart from the provider and source alone. Its saved opaque binding is not a durable credential proof. OAuth continuity uses the selected account and source identity and still validates the current credential through its owner.
 
-Native replay also requires an exact qualified transport contract; equal identities do not establish vendor compatibility. Minga qualifies the official `openai_codex_responses` route at `https://chatgpt.com/backend-api/codex/responses` only when the provider-facing model ID matches the selected model. This covers the ordinary Responses encoder and the Responses Lite encoder used by models such as GPT-5.6 Luna. Other protocols, endpoints, or mismatched model IDs retain explicit unknown replay support rather than inheriting compatibility from a provider name.
+Exact native replay requires a qualified transport contract. Minga qualifies the official `openai_codex_responses` route at `https://chatgpt.com/backend-api/codex/responses` when the provider-facing model ID matches the selected model. This covers the ordinary Responses encoder and the Responses Lite encoder used by models such as GPT-5.6 Luna. Other supported routes adapt completed history for each request instead of requiring native replay qualification. New reasoning and tool exchanges remain exact throughout the active request.
 
 An older record can contain complete, unchanged inputs that were previously classified as unknown. Minga can requalify that record only when the selection, authentication, instructions, schemas, and selected skills match exactly and transport qualification is the sole difference. It preserves the recorded epochs and messages; it does not reconstruct missing evidence or rewrite the record as if it had always been qualified.
 
-Changing instructions, advertised schemas, route, or authentication identity while native history is retained returns `portable_context_transition_required` before transport. Missing historical evidence has the same safe outcome. Cancel to keep the current record, or use `/new` to start a fresh conversation while preserving the saved record, then choose the desired inputs. This does not convert history or perform a portable handoff.
+Use `/model` or the model picker to change models between turns without starting another conversation. Minga preserves visible history, text, supported attachments, and completed tool calls and results. It removes provider-specific reasoning signatures, opaque replay blocks, and continuation IDs from the active model history, then saves that history and the new selection together. Saved branch snapshots remain unchanged; boundaries on the active branch now refer to the converted history.
 
-Default editor model cycling has been removed. Use `/model` or the model picker to select an exact route; a retained conversation still requires the transition described above.
+To reopen a branch captured under a different model, first select that model, then switch branches. A mismatched branch switch leaves the active conversation unchanged and names the required route.
+
+Model changes are rejected while a request or unsettled tool group is active. A provider-owned file without portable bytes cannot cross authentication namespaces, and an opaque compaction cannot be discarded if it represents prior context. These failures leave the previous model and history active. The target must also support the conversation's required tool and image capabilities.
+
+Instruction, advertised-schema, and authentication changes still require an explicit transition before native history can be replayed. Missing historical evidence is not reconstructed from today's configuration. Default editor model cycling remains removed.
 
 Successful submission clears the composer. A rejected submission preserves the draft, shows a conversation error, and logs the failure. Rejection before request admission does not add another user entry. A failure after admission preserves the recorded prompt instead of discarding it.
 

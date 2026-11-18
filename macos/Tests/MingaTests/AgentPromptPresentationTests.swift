@@ -88,7 +88,7 @@ struct AgentPromptPresentationTests {
     private let generation: UInt64 = 0x0102030405060708
 
     /// These are already composed BEAM visual rows, not strings for the frontend to wrap.
-    private func content(_ texts: [String], selection: Bool = false, cursorRow: UInt16 = 0, viewportTop: UInt32 = 0, visualRowOffset: UInt16 = 0, bufferLines: [UInt32]? = nil, sourceRow: UInt16 = 2) throws -> GUIWindowContent {
+    private func content(_ texts: [String], selection: Bool = false, cursorRow: UInt16 = 0, viewportTop: UInt32 = 0, visualRowOffset: UInt32 = 0, bufferLines: [UInt32]? = nil, sourceRow: UInt16 = 2) throws -> GUIWindowContent {
         let rect = GUICellRect(row: sourceRow, col: 3, width: 24, height: UInt16(texts.count))
         let geometry = GUIPaneGeometry(
             windowId: 65534, totalRect: rect, contentRect: rect, textRect: rect,

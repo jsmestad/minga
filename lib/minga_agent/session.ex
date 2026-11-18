@@ -2295,13 +2295,16 @@ defmodule MingaAgent.Session do
   @spec commit_branch_at(state(), state(), pos_integer(), String.t()) ::
           {:reply, term(), state()}
   defp commit_branch_at(state, candidate, turn_index, branch_name) do
-    case commit_session_transition(state, candidate) do
-      {:ok, committed} ->
-        {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
-         committed}
-
+    with :ok <- validate_branch_model(candidate),
+         {:ok, committed} <- commit_session_transition(state, candidate) do
+      {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
+       committed}
+    else
       {:error, reason, failed} ->
         {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -2333,14 +2336,34 @@ defmodule MingaAgent.Session do
 
   @spec commit_branch_switch(state(), state()) :: {:reply, term(), state()}
   defp commit_branch_switch(state, candidate) do
-    case commit_session_transition(state, candidate) do
-      {:ok, committed} ->
-        {:reply, :ok, committed}
-
+    with :ok <- validate_branch_model(candidate),
+         {:ok, committed} <- commit_session_transition(state, candidate) do
+      {:reply, :ok, committed}
+    else
       {:error, reason, failed} ->
         {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
+
+  @spec validate_branch_model(state()) :: :ok | {:error, String.t()}
+  defp validate_branch_model(%{model_selection: %ModelSelection{} = selection} = state) do
+    case PrefixStore.resolve(state.continuation.prefixes, state.continuation.prefixes.selected) do
+      %Prefix{identity: %{selection_id: branch_model}} ->
+        if branch_model == ModelSelection.id(selection),
+          do: :ok,
+          else:
+            {:error,
+             "This branch uses another model. Select it with /model #{branch_model}, then switch branches."}
+
+      _legacy ->
+        :ok
+    end
+  end
+
+  defp validate_branch_model(_state), do: :ok
 
   @spec reset_new_session(state(), String.t()) :: state()
   defp reset_new_session(state, session_id) do
@@ -5262,15 +5285,6 @@ defmodule MingaAgent.Session do
     |> Keyword.put_new_lazy(:credential_snapshot, state.credentials_snapshot_fn)
   end
 
-  @spec apply_selection_to_attached_provider(state(), ModelSelection.t()) ::
-          :ok | {:error, term()}
-  defp apply_selection_to_attached_provider(state, selection) do
-    case ProviderLifecycle.pid(state.provider) do
-      nil -> :ok
-      provider -> dispatch_optional(state.provider.module, :set_model, [provider, selection])
-    end
-  end
-
   @spec apply_resolved_model_selection(state(), ModelSelection.t(), CredentialSnapshot.t()) ::
           {:ok, state()} | {:error, term()}
   defp apply_resolved_model_selection(state, selection, _snapshot),
@@ -5278,41 +5292,68 @@ defmodule MingaAgent.Session do
 
   @spec do_apply_resolved_model_selection(state(), ModelSelection.t()) ::
           {:ok, state()} | {:error, term()}
+  defp do_apply_resolved_model_selection(
+         %{continuation: %{active_request: %Request{}}},
+         _selection
+       ),
+       do: {:error, :request_active}
+
+  defp do_apply_resolved_model_selection(%{continuation: %{tool_checkpoint: %{}}}, _selection),
+    do: {:error, :effect_reconciliation_required}
+
   defp do_apply_resolved_model_selection(%{provider: provider} = state, selection)
        when ProviderLifecycle.is_detached(provider) do
-    with :ok <- Continuation.check_model_change(state.continuation, ModelSelection.id(selection)) do
-      apply_compatible_model_selection(state, selection)
+    prepared =
+      state |> install_model_selection(selection) |> install_credential_readiness(:configured)
+
+    case start_loaded_provider(prepared) do
+      {:ok, staged} ->
+        case commit_model_selection(staged, state.model_selection, selection) do
+          {:ok, committed} ->
+            {:ok, finish_loaded_provider_attachment(committed, state.provider)}
+
+          {:error, _reason} = error ->
+            stop_provider_lifecycle(staged)
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
   defp do_apply_resolved_model_selection(state, selection) do
-    with {:ok, committed, :ok} <- refresh_continuation_prefix(state, {:model, selection}) do
+    commit_model_selection(state, state.model_selection, selection)
+  end
+
+  @spec commit_model_selection(state(), ModelSelection.t() | nil, ModelSelection.t()) ::
+          {:ok, state()} | {:error, term()}
+  defp commit_model_selection(state, previous, selection) do
+    operation = {:model, selection, model_transition(previous, selection)}
+
+    with {:ok, committed, :ok} <- refresh_continuation_prefix(state, operation) do
       {:ok,
        committed |> install_credential_readiness(:configured) |> broadcast_credential_readiness()}
     end
   end
 
-  @spec apply_compatible_model_selection(state(), ModelSelection.t()) ::
-          {:ok, state()} | {:error, term()}
-  defp apply_compatible_model_selection(state, selection) do
-    case apply_selection_to_attached_provider(state, selection) do
-      :ok ->
-        state =
-          state
-          |> install_model_selection(selection)
-          |> install_credential_readiness(:configured)
+  @spec model_transition(ModelSelection.t() | nil, ModelSelection.t()) ::
+          :exact | {:handoff, :retain | :reject}
+  defp model_transition(%ModelSelection{route: route}, %ModelSelection{route: route}), do: :exact
 
-        {state, result} = maybe_start_provider_result(state)
+  defp model_transition(
+         %ModelSelection{
+           route: %{request_provider: provider, execution: %{base_url: endpoint}},
+           credential: credential
+         },
+         %ModelSelection{
+           route: %{request_provider: provider, execution: %{base_url: endpoint}},
+           credential: credential
+         }
+       ),
+       do: {:handoff, :retain}
 
-        case result do
-          :ok -> {:ok, broadcast_credential_readiness(state)}
-          {:error, reason} -> {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  defp model_transition(_previous, _selection), do: {:handoff, :reject}
 
   @spec install_model_selection(state(), ModelSelection.t()) :: state()
   defp install_model_selection(state, selection) do
@@ -6002,7 +6043,7 @@ defmodule MingaAgent.Session do
         :unknown -> operation
       end
 
-    case GenServer.call(provider_pid, {:preview_prefix, preview_operation}) do
+    case preview_native_prefix(provider_pid, preview_operation) do
       {:ok, candidate, token, result} ->
         commit_native_prefix_preview(state, operation, candidate, token, result)
 
@@ -6032,6 +6073,32 @@ defmodule MingaAgent.Session do
   defp refresh_continuation_prefix(_state, _operation),
     do: {:error, :provider_prefix_transition_unavailable}
 
+  @spec preview_native_prefix(pid(), term()) :: term()
+  defp preview_native_prefix(provider, operation) do
+    token = make_ref()
+
+    try do
+      GenServer.call(provider, {:preview_prefix, token, operation})
+    catch
+      :exit, reason ->
+        discard_native_prefix_preview(provider, token)
+        {:error, {:provider_unavailable, reason}}
+    end
+  end
+
+  @spec validate_native_prefix_preview(pid(), reference(), [ReqLLM.Message.t()]) ::
+          :ok | {:error, term()}
+  defp validate_native_prefix_preview(provider, token, messages) do
+    GenServer.call(provider, {:validate_prefix_preview, token, messages})
+  catch
+    :exit, reason -> {:error, {:provider_unavailable, reason}}
+  end
+
+  @spec discard_native_prefix_preview(pid(), reference()) :: :ok
+  defp discard_native_prefix_preview(provider, token) do
+    GenServer.cast(provider, {:discard_prefix_preview, token, self()})
+  end
+
   @spec commit_native_prefix_preview(
           state(),
           term(),
@@ -6043,20 +6110,53 @@ defmodule MingaAgent.Session do
   defp commit_native_prefix_preview(state, operation, prefix, token, result) do
     provider = ProviderLifecycle.pid(state.provider)
 
-    with {:ok, status, continuation} <- Continuation.change_prefix(state.continuation, prefix),
+    with {:ok, status, continuation} <-
+           transition_model_prefix(state.continuation, operation, prefix),
+         :ok <- validate_native_prefix_preview(provider, token, continuation.messages),
          candidate = prefix_transition_candidate(state, operation, continuation),
          {:ok, committed} <- commit_prefix_transition(state, candidate, status),
          :ok <- GenServer.call(provider, {:commit_prefix_preview, token}) do
       {:ok, announce_prefix_transition(committed, status), result}
     else
       {:error, _reason} = error ->
-        GenServer.call(provider, {:discard_prefix_preview, token})
+        discard_native_prefix_preview(provider, token)
         error
     end
   end
 
+  @spec transition_model_prefix(Continuation.t(), term(), Prefix.t()) ::
+          {:ok, :applied | :unchanged, Continuation.t()} | {:error, term()}
+  defp transition_model_prefix(
+         continuation,
+         {:model, _selection, {:handoff, file_policy}},
+         prefix
+       ) do
+    case Continuation.change_prefix(continuation, prefix) do
+      {:ok, :unchanged, _continuation} = unchanged ->
+        unchanged
+
+      _handoff_required ->
+        case Continuation.change_model_prefix(continuation, prefix, file_policy) do
+          {:error, reason}
+          when reason in [
+                 :unportable_attachment,
+                 :unportable_compaction,
+                 :unportable_content,
+                 :incomplete_tool_exchange
+               ] ->
+            {:error, MingaAgent.Session.PortableHistory.message(reason)}
+
+          result ->
+            result
+        end
+    end
+  end
+
+  defp transition_model_prefix(continuation, _operation, prefix),
+    do: Continuation.change_prefix(continuation, prefix)
+
   @spec prefix_transition_candidate(state(), term(), Continuation.t()) :: state()
-  defp prefix_transition_candidate(state, {:model, selection}, continuation) do
+  defp prefix_transition_candidate(state, {:model, selection, _changed?}, continuation) do
     candidate = install_model_selection(state, selection)
     %{candidate | continuation: continuation}
   end

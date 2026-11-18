@@ -236,12 +236,18 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:"$gen_call", from, {:prefix_preview, provider}} ->
         Process.put(:native_provider, provider)
-        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, :current}))
+        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, make_ref(), :current}))
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {action, provider, token}}
       when action in [:commit_prefix_preview, :discard_prefix_preview] ->
-        GenServer.reply(from, GenServer.call(provider, {action, token}))
+        result =
+          case action do
+            :commit_prefix_preview -> GenServer.call(provider, {action, token})
+            :discard_prefix_preview -> GenServer.cast(provider, {action, token, self()})
+          end
+
+        GenServer.reply(from, result)
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:prepare_tool_invocation, _invocation}} ->
@@ -281,8 +287,9 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   defp start_retention_store(root) do
-    identity = Integer.to_string(System.unique_integer([:positive, :monotonic]))
+    identity = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
     artifact_root = Path.join(root, "native-test-artifacts-" <> identity)
+    on_exit(fn -> File.rm_rf!(artifact_root) end)
 
     quota =
       start_supervised!(
@@ -380,7 +387,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:"$gen_call", from, {:prefix_preview, provider}} ->
         Process.put(:native_provider, provider)
-        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, :current}))
+        GenServer.reply(from, GenServer.call(provider, {:preview_prefix, make_ref(), :current}))
 
         effect_barrier_subscriber_loop(
           owner,
@@ -392,7 +399,13 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:"$gen_call", from, {action, provider, token}}
       when action in [:commit_prefix_preview, :discard_prefix_preview] ->
-        GenServer.reply(from, GenServer.call(provider, {action, token}))
+        result =
+          case action do
+            :commit_prefix_preview -> GenServer.call(provider, {action, token})
+            :discard_prefix_preview -> GenServer.cast(provider, {action, token, self()})
+          end
+
+        GenServer.reply(from, result)
 
         effect_barrier_subscriber_loop(
           owner,

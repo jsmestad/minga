@@ -13,7 +13,7 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
     :popup_meta,
     :scroll_velocity,
     :scroll_detach_cursor,
-    :scroll_echo_top,
+    :scroll_echo_anchor,
     :authoritative_scroll_seq
   ]
   @enforce_keys @fields
@@ -29,7 +29,7 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
           popup_meta: MingaEditor.UI.Popup.Active.t() | nil,
           scroll_velocity: MingaEditor.Window.ScrollVelocity.t(),
           scroll_detach_cursor: Minga.Buffer.position() | nil,
-          scroll_echo_top: integer() | nil,
+          scroll_echo_anchor: {non_neg_integer(), non_neg_integer()} | nil,
           authoritative_scroll_seq: non_neg_integer()
         }
 
@@ -45,7 +45,7 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
       popup_meta: window.popup_meta,
       scroll_velocity: window.scroll_velocity,
       scroll_detach_cursor: window.scroll_detach_cursor,
-      scroll_echo_top: window.scroll_echo_top,
+      scroll_echo_anchor: window.scroll_echo_anchor,
       authoritative_scroll_seq: window.authoritative_scroll_seq
     }
   end

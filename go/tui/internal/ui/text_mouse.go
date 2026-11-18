@@ -4,7 +4,6 @@ import (
 	"unicode/utf16"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/rivo/uniseg"
 )
@@ -21,6 +20,7 @@ type editorTextTarget struct {
 	utf16Offset    uint32
 	scrollX        int8
 	scrollY        int8
+	onFill         bool
 }
 
 func isEditorTextDragContinuation(msg tea.MouseMsg) bool {
@@ -52,10 +52,9 @@ func (m Model) handleEditorTextMouse(msg tea.MouseMsg) (Model, []byte, bool) {
 		}
 	}
 	if !ok {
-		if capturedWindowID != 0 {
-			// An active text drag keeps direct ownership until release. Never fall
-			// back to the legacy coordinate packet when its immutable target is
-			// temporarily unavailable.
+		if capturedWindowID != 0 || target.onFill {
+			// Captured drags and wrapped EOF fill must not fall through to
+			// legacy coordinates, which could pick a different source row.
 			return m, nil, true
 		}
 		return m, nil, false
@@ -132,32 +131,32 @@ func (m Model) editorTextTargetAt(screenX, screenY int, capturedWindowID uint16)
 		return editorTextTarget{}, false
 	}
 
+	sourceStart := m.presentationSourceStart(window, height)
+	width, _, _ = windowRowComposition(window, width, height, sourceStart)
+	gutterWidth := 0
+	if hasGutter {
+		gutterWidth = gutterRenderWidth(gutter)
+	}
+	contentWidth := max(width-gutterWidth, 1)
+	textStart := placement.col + gutterWidth
+	textEnd := textStart + contentWidth
+	if capturedWindowID == 0 && (bodyX < textStart || bodyX >= textEnd || bodyY < placement.row || bodyY >= placement.row+height) {
+		return editorTextTarget{}, false
+	}
 	scrollY := edgeDirection(bodyY, placement.row, placement.row+height)
 	localRow := clampInt(bodyY-placement.row, 0, height-1)
 	rowCount := m.windowRowCount(window)
-	if rowCount == 0 {
-		return editorTextTarget{}, false
+	sourceRowIndex := sourceStart + localRow
+	if capturedWindowID == 0 && window.Scroll.Wrapped && sourceRowIndex >= rowCount {
+		return editorTextTarget{onFill: true}, false
 	}
-	sourceRowIndex := min(m.presentationSourceStart(window, height)+localRow, rowCount-1)
+	sourceRowIndex = min(sourceRowIndex, rowCount-1)
 	row, ok := m.windowRow(window, sourceRowIndex)
 	if !ok || row.ID == 0 {
 		return editorTextTarget{}, false
 	}
 
-	width, _, _ = windowRowComposition(window, width, height)
-	contentRowIndex := sourceRowIndex - m.presentationPayloadStart(window)
-	cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
-	gutterWidth := 0
-	if hasGutter {
-		gutterWidth = lipgloss.Width(m.renderGutterEntry(gutter, sourceRowIndex, cursorline, window.Cursorline.BG))
-	}
-	contentWidth := max(width-gutterWidth, 1)
-	textStart := placement.col + gutterWidth
-	textEnd := textStart + contentWidth
 	scrollX := edgeDirection(bodyX, textStart, textEnd)
-	if capturedWindowID == 0 && (bodyX < textStart || bodyX >= textEnd || bodyY < placement.row || bodyY >= placement.row+height) {
-		return editorTextTarget{}, false
-	}
 	textCol := clampInt(bodyX-textStart, 0, contentWidth-1)
 	offset := composedUTF16OffsetAtCell(row.Text, m.presentationScrollEffectiveLeft(window), textCol)
 	return editorTextTarget{

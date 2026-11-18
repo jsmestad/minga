@@ -11,35 +11,48 @@ import (
 // path-copied, so a splice copies metadata proportional to tree depth rather
 // than copying or scanning the resident document.
 type residentRows struct {
-	root       *rowRope
-	locator    *rowLocator
-	sequential bool
+	root    *rowRope
+	locator *rowLocator
+	mode    rowStoreMode
 }
+
+type rowStoreMode byte
+
+const (
+	windowedRows rowStoreMode = iota
+	sequentialRows
+	wrappedRows
+)
+
+func (s residentRows) complete() bool { return s.mode != windowedRows }
 
 type rowRope struct {
 	left, right *rowRope
 	rows        []protocol.WindowRow
 	count       int
+	starts      int
 	height      int
 }
 
 const residentLeafRows = 256
 
-func newResidentRows(rows []protocol.WindowRow) (residentRows, error) {
-	return newResidentRowsWithMode(rows, false)
-}
-
-func newResidentRowsWithMode(rows []protocol.WindowRow, sequential bool) (residentRows, error) {
-	store := residentRows{sequential: sequential}
+func newResidentRows(rows []protocol.WindowRow, mode rowStoreMode) (residentRows, error) {
+	if mode == wrappedRows && len(rows) > 0 && rows[0].Kind != protocol.WindowRowNormal {
+		return residentRows{}, fmt.Errorf("wrapped rows must begin with a source line start")
+	}
+	store := residentRows{mode: mode}
 	leaves := make([]*rowRope, 0, (len(rows)+residentLeafRows-1)/residentLeafRows)
 	var previousBufferLine uint32
 	hasPreviousBufferLine := false
 	for start := 0; start < len(rows); start += residentLeafRows {
 		end := min(start+residentLeafRows, len(rows))
 		owned := append([]protocol.WindowRow(nil), rows[start:end]...)
-		leaves = append(leaves, ropeLeaf(owned))
+		leaves = append(leaves, ropeLeaf(owned, mode == wrappedRows))
 		for _, row := range owned {
-			if !sequential && hasPreviousBufferLine && row.BufferLine < previousBufferLine {
+			if mode == wrappedRows && !wrappedRowKind(row.Kind) {
+				return residentRows{}, fmt.Errorf("invalid wrapped row kind")
+			}
+			if mode == windowedRows && hasPreviousBufferLine && row.BufferLine < previousBufferLine {
 				return residentRows{}, fmt.Errorf("resident rows out of buffer-line order")
 			}
 			previousBufferLine = row.BufferLine
@@ -57,6 +70,10 @@ func newResidentRowsWithMode(rows []protocol.WindowRow, sequential bool) (reside
 	}
 	store.root = buildRope(leaves)
 	return store, nil
+}
+
+func wrappedRowKind(kind byte) bool {
+	return kind == protocol.WindowRowNormal || kind == protocol.WindowRowWrapContinuation
 }
 
 func buildRope(nodes []*rowRope) *rowRope {
@@ -77,11 +94,19 @@ func buildRope(nodes []*rowRope) *rowRope {
 	return nodes[0]
 }
 
-func ropeLeaf(rows []protocol.WindowRow) *rowRope {
+func ropeLeaf(rows []protocol.WindowRow, wrapped bool) *rowRope {
 	if len(rows) == 0 {
 		return nil
 	}
-	return &rowRope{rows: rows, count: len(rows), height: 1}
+	starts := 0
+	if wrapped {
+		for i := range rows {
+			if rows[i].Kind == protocol.WindowRowNormal {
+				starts++
+			}
+		}
+	}
+	return &rowRope{rows: rows, count: len(rows), starts: starts, height: 1}
 }
 func ropeCount(n *rowRope) int {
 	if n == nil {
@@ -102,7 +127,7 @@ func ropeBranch(left, right *rowRope) *rowRope {
 	if right == nil {
 		return left
 	}
-	return &rowRope{left: left, right: right, count: left.count + right.count, height: max(left.height, right.height) + 1}
+	return &rowRope{left: left, right: right, count: left.count + right.count, starts: left.starts + right.starts, height: max(left.height, right.height) + 1}
 }
 func ropeBalance(n *rowRope) int {
 	if n == nil || n.rows != nil {
@@ -140,7 +165,7 @@ func rebalance(n *rowRope) *rowRope {
 	}
 	return n
 }
-func ropeSplit(n *rowRope, index int) (*rowRope, *rowRope) {
+func ropeSplit(n *rowRope, index int, wrapped bool) (*rowRope, *rowRope) {
 	if n == nil {
 		return nil, nil
 	}
@@ -151,17 +176,17 @@ func ropeSplit(n *rowRope, index int) (*rowRope, *rowRope) {
 		return n, nil
 	}
 	if n.rows != nil {
-		return ropeLeaf(n.rows[:index]), ropeLeaf(n.rows[index:])
+		return ropeLeaf(n.rows[:index], wrapped), ropeLeaf(n.rows[index:], wrapped)
 	}
 	leftCount := ropeCount(n.left)
 	if index < leftCount {
-		a, b := ropeSplit(n.left, index)
+		a, b := ropeSplit(n.left, index, wrapped)
 		return a, ropeJoin(b, n.right)
 	}
 	if index == leftCount {
 		return n.left, n.right
 	}
-	a, b := ropeSplit(n.right, index-leftCount)
+	a, b := ropeSplit(n.right, index-leftCount, wrapped)
 	return ropeJoin(n.left, a), b
 }
 func ropeGet(n *rowRope, index int) (protocol.WindowRow, bool) {
@@ -192,8 +217,87 @@ func ropeRange(n *rowRope, start, end int, out *[]protocol.WindowRow) {
 
 func (s residentRows) count() int { return ropeCount(s.root) }
 
+func (s residentRows) lineCount() int {
+	if s.mode != wrappedRows {
+		return s.count()
+	}
+	if s.root == nil {
+		return 0
+	}
+	return s.root.starts
+}
+
+// wrappedLineStart selects a source start by zero-based logical line. The
+// end sentinel also gives the exclusive end of the final line group.
+func (s residentRows) wrappedLineStart(line int) int {
+	if line >= s.lineCount() {
+		return s.count()
+	}
+	index := 0
+	node := s.root
+	for node.rows == nil {
+		if line < node.left.starts {
+			node = node.left
+		} else {
+			line -= node.left.starts
+			index += node.left.count
+			node = node.right
+		}
+	}
+	for i := range node.rows {
+		if node.rows[i].Kind == protocol.WindowRowNormal {
+			if line == 0 {
+				return index + i
+			}
+			line--
+		}
+	}
+	panic("inconsistent wrapped row start count")
+}
+
+// wrappedAnchor translates a logical line and its continuation offset to an
+// absolute visual rank without borrowing rows from the next line group.
+func (s residentRows) wrappedAnchor(scroll protocol.ScrollPresentation) (int, bool) {
+	line, offset := int(scroll.AnchorTop), int(scroll.AnchorVisualRowOffset)
+	if s.count() == 0 {
+		return 0, line == 0 && offset == 0
+	}
+	if line >= s.lineCount() {
+		return 0, false
+	}
+	start := s.wrappedLineStart(line)
+	end := s.wrappedLineStart(line + 1)
+	return start + offset, offset < end-start
+}
+
+// wrappedRow projects the source line from the retained row's current rank;
+// its raw BufferLine may belong to the document before a splice.
+func (s residentRows) wrappedRow(index int) protocol.WindowRow {
+	node, starts := s.root, 0
+	for node.rows == nil {
+		if index < node.left.count {
+			node = node.left
+		} else {
+			index -= node.left.count
+			starts += node.left.starts
+			node = node.right
+		}
+	}
+	for i := range node.rows[:index+1] {
+		if node.rows[i].Kind == protocol.WindowRowNormal {
+			starts++
+		}
+	}
+	row := node.rows[index]
+	row.BufferLine = uint32(starts - 1)
+	return row
+}
+
 func (s residentRows) lowerBoundBufferLine(line uint32) int {
-	if s.sequential {
+	switch s.mode {
+	case wrappedRows:
+		return s.wrappedLineStart(int(line))
+	case sequentialRows:
 		return min(int(line), s.count())
 	}
 	low, high := 0, s.count()
@@ -209,8 +313,11 @@ func (s residentRows) lowerBoundBufferLine(line uint32) int {
 	return low
 }
 func (s residentRows) get(index int) (protocol.WindowRow, bool) {
+	if s.mode == wrappedRows && index >= 0 && index < s.count() {
+		return s.wrappedRow(index), true
+	}
 	row, ok := ropeGet(s.root, index)
-	if ok && s.sequential {
+	if ok && s.mode == sequentialRows {
 		row.BufferLine = uint32(index)
 	}
 	return row, ok
@@ -218,10 +325,21 @@ func (s residentRows) get(index int) (protocol.WindowRow, bool) {
 func (s residentRows) rangeRows(start, count int) []protocol.WindowRow {
 	out := make([]protocol.WindowRow, 0, max(count, 0))
 	ropeRange(s.root, start, start+count, &out)
-	if s.sequential {
-		base := max(start, 0)
+	base := max(start, 0)
+	switch s.mode {
+	case sequentialRows:
 		for index := range out {
 			out[index].BufferLine = uint32(base + index)
+		}
+	case wrappedRows:
+		if len(out) > 0 {
+			line := s.wrappedRow(base).BufferLine
+			for index := range out {
+				if index > 0 && out[index].Kind == protocol.WindowRowNormal {
+					line++
+				}
+				out[index].BufferLine = line
+			}
 		}
 	}
 	return out
@@ -249,7 +367,7 @@ func (s residentRows) resolveRows(rows []protocol.WindowRow) (residentRows, bool
 		}
 		resolved[i] = row
 	}
-	next, err := newResidentRowsWithMode(resolved, s.sequential)
+	next, err := newResidentRows(resolved, s.mode)
 	return next, false, err
 }
 
@@ -279,6 +397,9 @@ func (s residentRows) splice(delta protocol.WindowContent, work *renderWorkColle
 				}
 				row = *found
 			}
+			if s.mode == wrappedRows && !wrappedRowKind(row.Kind) {
+				return s, false, fmt.Errorf("invalid wrapped row kind")
+			}
 			if row.ID != 0 {
 				if _, exists := seen[row.ID]; exists {
 					return s, false, fmt.Errorf("duplicate inserted row id")
@@ -288,8 +409,9 @@ func (s residentRows) splice(delta protocol.WindowContent, work *renderWorkColle
 			resolved[i] = row
 		}
 		actual := start + offset
-		left, tail := ropeSplit(result.root, actual)
-		removed, right := ropeSplit(tail, deleteCount)
+		wrapped := s.mode == wrappedRows
+		left, tail := ropeSplit(result.root, actual, wrapped)
+		removed, right := ropeSplit(tail, deleteCount, wrapped)
 		removedRows := make([]protocol.WindowRow, 0, deleteCount)
 		ropeRange(removed, 0, deleteCount, &removedRows)
 		locator := result.locator
@@ -307,14 +429,11 @@ func (s residentRows) splice(delta protocol.WindowContent, work *renderWorkColle
 			}
 			locator = locator.put(row.ID, row)
 		}
-		inserted, err := newRopeOnly(resolved)
-		if err != nil {
-			return s, false, err
-		}
-		result = residentRows{root: ropeJoin(ropeJoin(left, inserted), right), locator: locator, sequential: s.sequential}
+		inserted := newRopeOnly(resolved, wrapped)
+		result = residentRows{root: ropeJoin(ropeJoin(left, inserted), right), locator: locator, mode: s.mode}
 		checkStart := max(actual-1, 0)
 		checkEnd := min(actual+len(resolved)+1, result.count())
-		if !s.sequential {
+		if s.mode == windowedRows {
 			for index := checkStart + 1; index < checkEnd; index++ {
 				previous, _ := result.get(index - 1)
 				current, _ := result.get(index)
@@ -334,18 +453,25 @@ func (s residentRows) splice(delta protocol.WindowContent, work *renderWorkColle
 	if result.count() != int(delta.ResultRowCount) {
 		return s, false, fmt.Errorf("row splice result count mismatch")
 	}
+	if result.mode == wrappedRows && result.count() > 0 {
+		first, _ := ropeGet(result.root, 0)
+		if first.Kind != protocol.WindowRowNormal {
+			return s, false, fmt.Errorf("wrapped rows must begin with a source line start")
+		}
+	}
 	return result, false, nil
 }
-func newRopeOnly(rows []protocol.WindowRow) (*rowRope, error) {
+
+// rows is the owned, ref-resolved splice payload.
+func newRopeOnly(rows []protocol.WindowRow, wrapped bool) *rowRope {
 	if len(rows) == 0 {
-		return nil, nil
+		return nil
 	}
-	owned := append([]protocol.WindowRow(nil), rows...)
-	leaves := make([]*rowRope, 0, (len(owned)+residentLeafRows-1)/residentLeafRows)
-	for i := 0; i < len(owned); i += residentLeafRows {
-		leaves = append(leaves, ropeLeaf(owned[i:min(i+residentLeafRows, len(owned))]))
+	leaves := make([]*rowRope, 0, (len(rows)+residentLeafRows-1)/residentLeafRows)
+	for i := 0; i < len(rows); i += residentLeafRows {
+		leaves = append(leaves, ropeLeaf(rows[i:min(i+residentLeafRows, len(rows))], wrapped))
 	}
-	return buildRope(leaves), nil
+	return buildRope(leaves)
 }
 
 // rowLocator is a persistent 16-way radix trie over uint64 IDs. Updating one

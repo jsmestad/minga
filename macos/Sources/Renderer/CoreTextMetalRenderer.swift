@@ -519,7 +519,7 @@ final class CoreTextMetalRenderer {
                 cursorBlinkVisible: Bool = true,
                 isMouseInGutter: Bool = false,
                 gutterHoverWindowId: UInt16? = nil,
-                gutterHoverRow: UInt16? = nil,
+                gutterHoverRowIndex: Int? = nil,
                 drawableProvider: @escaping @MainActor () -> CAMetalDrawable?, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
                 presentationWindowId: UInt16? = nil,
@@ -1131,7 +1131,7 @@ final class CoreTextMetalRenderer {
                 viewportWidthPx: Float(sourceClipExtentPx.width),
                 isMouseInGutter: isMouseInGutter,
                 gutterHoverWindowId: gutterHoverWindowId,
-                gutterHoverRow: gutterHoverRow,
+                gutterHoverRowIndex: gutterHoverRowIndex,
                 scrollOffsetY: CoreTextMetalRenderer.smoothScrollOffset(
                     for: windowGutter.windowId,
                     targetWindowId: scrollTargetWindowId,
@@ -2097,7 +2097,7 @@ final class CoreTextMetalRenderer {
         viewportWidthPx: Float,
         isMouseInGutter: Bool,
         gutterHoverWindowId: UInt16?,
-        gutterHoverRow: UInt16?,
+        gutterHoverRowIndex: Int?,
         scrollOffsetY: Float,
         slice: RendererRowSlice,
         atlas: LineTextureAtlas,
@@ -2112,12 +2112,10 @@ final class CoreTextMetalRenderer {
         let clipTop = Float(gutter.contentRow) * cellH * scale
         let clipBottom = Float(gutter.contentRow + gutter.contentHeight) * cellH * scale
 
-        for (offset, _) in slice.rows.enumerated() {
+        for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
-            guard let entry = gutter.entries.entry(rowIndex: rowIndex) else { continue }
+            guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }
             let presentationRow = offset - slice.overscanBeforeRows
-            let screenRowInt = Int(baseRow) + presentationRow
-            let screenRow = UInt16(clamping: screenRowInt)
             let atlasRow = UInt16(clamping: offset)
             let rowY = (Float(baseRow) + Float(presentationRow)) * cellH * scale - scrollOffsetY
             guard CoreTextMetalRenderer.clipVerticalQuad(y: rowY, height: cellH * scale, top: clipTop, bottom: clipBottom) != nil else { continue }
@@ -2139,7 +2137,7 @@ final class CoreTextMetalRenderer {
             // Fold indicator (dedicated cell after the diagnostic/git sign column)
             if signColWidth >= 3 {
                 appendFoldRangeHighlight(
-                    entry: entry, presentationRow: presentationRow, screenRow: screenRow, yPos: yPos,
+                    entry: entry, rowIndex: rowIndex, yPos: yPos,
                     gutter: gutter, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
@@ -2147,7 +2145,7 @@ final class CoreTextMetalRenderer {
                     gutterPaddingPx: gutterPaddingPx,
                     viewportWidthPx: viewportWidthPx,
                     gutterHoverWindowId: gutterHoverWindowId,
-                    gutterHoverRow: gutterHoverRow,
+                    gutterHoverRowIndex: gutterHoverRowIndex,
                             clipTop: clipTop, clipBottom: clipBottom,
                     bgQuads: &bgQuads,
                 )
@@ -2270,7 +2268,7 @@ final class CoreTextMetalRenderer {
 
     /// Draws a subtle range highlight while hovering an unfolded fold chevron.
     private func appendFoldRangeHighlight(
-        entry: Wire.GutterEntry, presentationRow: Int, screenRow: UInt16, yPos: Float,
+        entry: Wire.GutterEntry, rowIndex: Int, yPos: Float,
         gutter: Wire.WindowGutter, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
@@ -2278,18 +2276,16 @@ final class CoreTextMetalRenderer {
         gutterPaddingPx: Float,
         viewportWidthPx: Float,
         gutterHoverWindowId: UInt16?,
-        gutterHoverRow: UInt16?,
+        gutterHoverRowIndex: Int?,
         clipTop: Float, clipBottom: Float,
         bgQuads: inout [QuadGPU],
     ) {
         guard gutterHoverWindowId == gutter.windowId else { return }
-        guard gutterHoverRow == screenRow else { return }
+        guard gutterHoverRowIndex == rowIndex else { return }
         guard entry.displayType == .foldOpen else { return }
         guard let foldEndLine = entry.foldEndLine, foldEndLine > entry.bufLine else { return }
 
         let rowsInRange = Int(foldEndLine - entry.bufLine + 1)
-        let visibleRows = max(0, min(rowsInRange, Int(gutter.contentHeight) - presentationRow))
-        guard visibleRows > 0 else { return }
 
         let gutterWidth = Float(gutter.lineNumberWidth) + Float(signColWidth)
         let contentX = xOffset + gutterWidth * cellW * scale + gutterPaddingPx
@@ -2297,7 +2293,7 @@ final class CoreTextMetalRenderer {
         let width = max(0, min(windowRightX, viewportWidthPx) - contentX)
         guard width > 0 else { return }
 
-        appendClippedGutterQuad(x: contentX, y: yPos, width: width, height: Float(visibleRows) * cellH * scale, color: colorFromU24(frameState.gutterColors.foldFg, default: SIMD3<Float>(0.33, 0.33, 0.33)), alpha: 0.10, clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
+        appendClippedGutterQuad(x: contentX, y: yPos, width: width, height: Float(rowsInRange) * cellH * scale, color: colorFromU24(frameState.gutterColors.foldFg, default: SIMD3<Float>(0.33, 0.33, 0.33)), alpha: 0.10, clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
     }
 
     /// Renders the fold indicator for one gutter row as a path-style chevron.
@@ -2669,9 +2665,9 @@ final class CoreTextMetalRenderer {
         slice: RendererRowSlice
     ) -> Int {
         var demand = 0
-        for (offset, _) in slice.rows.enumerated() {
+        for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
-            guard let entry = gutter.entries.entry(rowIndex: rowIndex) else { continue }
+            guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }
             demand += lineNumberTextureDemand(gutter) + signTextureDemand(entry.signType)
         }
         return demand
@@ -2817,14 +2813,7 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func presentationOverscanBeforeRows(_ content: GUIWindowContent) -> Int {
-        guard let presentation = content.scrollPresentation else { return 0 }
-        let anchor = content.rowStore.lowerBound(bufferLine: presentation.anchorTop)
-        let anchoredVisualOrigin = min(
-            anchor + Int(presentation.anchorVisualRowOffset), content.rowStore.count
-        )
-        if anchoredVisualOrigin < content.rowStore.count { return anchoredVisualOrigin }
-        let visible = content.rowStore.lowerBound(bufferLine: presentation.visibleStartLine)
-        return visible < content.rowStore.count ? visible : scrollOverscanBefore(presentation)
+        content.presentationRowOrigin
     }
 
     nonisolated static func presentationPayloadOverscanBeforeRows(rows: [GUIVisualRow], scrollPresentation: GUIScrollPresentation?) -> Int {
