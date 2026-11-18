@@ -41,7 +41,7 @@ func (m Model) headerLines() []string {
 		if title == "" {
 			title = "Minga"
 		}
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(mainWidth).Render(title))
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(mainWidth).Render(fitStyled(title, mainWidth)))
 	}
 
 	if sidebarWidth > 0 {
@@ -458,6 +458,9 @@ func (m Model) renderGitStatus(git protocol.GitStatus) string {
 }
 
 func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
+	if mini.Mode == 10 && len(mini.Items) > 0 {
+		return m.renderPromptChoices(mini)
+	}
 	prompt := mini.Prompt
 	if prompt == "" {
 		prompt = "> "

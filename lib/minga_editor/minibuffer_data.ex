@@ -12,6 +12,7 @@ defmodule MingaEditor.MinibufferData do
   """
 
   alias Minga.Command
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Prompt, as: PromptState
@@ -165,9 +166,13 @@ defmodule MingaEditor.MinibufferData do
     text_prompt(prompt_state)
   end
 
-  def from_state(%{
-        shell_state: %{
-          modal: {:prompt, %{prompt_ui: %PromptState{handler: handler} = prompt_state}}
+  def from_state(%Input{
+        intent: %{
+          frame: %{
+            shell_state: %{
+              modal: {:prompt, %{prompt_ui: %PromptState{handler: handler} = prompt_state}}
+            }
+          }
         }
       })
       when handler != nil do
@@ -346,14 +351,30 @@ defmodule MingaEditor.MinibufferData do
   defp text_prompt(prompt_state) do
     %__MODULE__{
       visible: true,
+      generation: prompt_state.generation,
       mode: @mode_text_prompt,
       cursor_pos: prompt_state.cursor,
       prompt: prompt_state.label,
       input: prompt_state.text,
       context: "",
       selected_index: 0,
-      candidates: [],
-      total_candidates: 0
+      candidates: [
+        %{
+          label: "Submit",
+          description: "Submit prompt",
+          match_score: 0,
+          match_positions: [],
+          annotation: "Enter"
+        },
+        %{
+          label: "Cancel",
+          description: "Cancel prompt",
+          match_score: 0,
+          match_positions: [],
+          annotation: "Escape"
+        }
+      ],
+      total_candidates: 2
     }
   end
 

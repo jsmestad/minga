@@ -140,20 +140,16 @@ defmodule MingaAgent.Credentials do
   @doc """
   Stores an API key for a provider in the credentials file.
 
-  Creates the config directory and file if they don't exist. Sets
-  file permissions to 0600 (owner read/write only).
+  Creates the config directory and atomically replaces the existing file with mode 0600, following final symlinks without replacing the links.
+  API-key updates are serialized within this BEAM node, including updates through different paths to the same file.
+  Failures before rename leave the previous credentials intact.
   """
   @spec store(provider(), String.t(), keyword()) :: :ok | {:error, term()}
   def store(provider, key, opts \\ []) when is_binary(provider) and is_binary(key) do
-    path = credentials_path(opts)
-    dir = Path.dirname(path)
+    configured_path = credentials_path(opts)
 
-    with :ok <- ensure_directory(dir),
-         {:ok, existing} <- read_credentials_file(path),
-         updated = Map.put(existing, provider, key),
-         json = :json.format(updated),
-         :ok <- File.write(path, json) do
-      File.chmod(path, 0o600)
+    with :ok <- ensure_directory(Path.dirname(configured_path)) do
+      update_api_keys(configured_path, &Map.put(&1, provider, key))
     end
   end
 
@@ -403,22 +399,7 @@ defmodule MingaAgent.Credentials do
   @spec revoke_api_key(provider(), keyword()) :: :ok | {:error, term()}
   defp revoke_api_key(provider, opts) do
     path = credentials_path(opts)
-
-    case read_credentials_file(path) do
-      {:ok, existing} ->
-        updated = Map.delete(existing, provider)
-        json = :json.format(updated)
-
-        with :ok <- File.write(path, json) do
-          File.chmod(path, 0o600)
-        end
-
-      {:error, :enoent} ->
-        :ok
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    update_api_keys(path, &Map.delete(&1, provider))
   end
 
   @spec revoke_oauth_entry(provider()) :: :ok | {:error, term()}
@@ -489,11 +470,109 @@ defmodule MingaAgent.Credentials do
   defp read_credentials_file(path) do
     case File.read(path) do
       {:ok, ""} -> {:ok, %{}}
-      {:ok, content} -> JSON.decode(content)
+      {:ok, content} -> decode_credentials_file(content)
       {:error, :enoent} -> {:ok, %{}}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  @spec decode_credentials_file(String.t()) :: {:ok, map()} | {:error, :invalid_credentials_file}
+  defp decode_credentials_file(content) do
+    case JSON.decode(content) do
+      {:ok, data} when is_map(data) -> {:ok, data}
+      _invalid -> {:error, :invalid_credentials_file}
+    end
+  end
+
+  # Preserve filesystem traversal order, including `..` after symlinked directories.
+  @spec credential_write_target(String.t(), non_neg_integer()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp credential_write_target(_path, 40), do: {:error, :eloop}
+
+  defp credential_write_target(path, depth) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        with {:ok, link} <- File.read_link(path) do
+          credential_write_target(link_target(path, link), depth + 1)
+        end
+
+      {:ok, _metadata} ->
+        {:ok, path}
+
+      {:error, :enoent} ->
+        {:ok, path}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec link_target(String.t(), String.t()) :: String.t()
+  defp link_target(path, link) do
+    if Path.type(link) == :absolute, do: link, else: Path.dirname(path) <> "/" <> link
+  end
+
+  @spec update_api_keys(String.t(), (map() -> map())) :: :ok | {:error, term()}
+  defp update_api_keys(configured_path, update) do
+    :global.trans(
+      {{__MODULE__, :api_key_updates}, self()},
+      fn -> merge_api_keys(configured_path, update) end,
+      [node()],
+      :infinity
+    )
+    |> lock_result()
+  end
+
+  @spec lock_result(:ok | {:error, term()} | :aborted) :: :ok | {:error, term()}
+  defp lock_result(:aborted), do: {:error, :credential_file_lock_aborted}
+  defp lock_result(result), do: result
+
+  @spec merge_api_keys(String.t(), (map() -> map())) :: :ok | {:error, term()}
+  defp merge_api_keys(configured_path, update) do
+    with {:ok, path} <- credential_write_target(configured_path, 0),
+         {:ok, existing} <- read_credentials_file(path) do
+      replace_credentials_file(path, :json.format(update.(existing)))
+    end
+  end
+
+  @spec replace_credentials_file(String.t(), iodata()) :: :ok | {:error, term()}
+  defp replace_credentials_file(path, contents) do
+    temporary = path <> ".#{System.unique_integer([:positive, :monotonic])}.tmp"
+
+    case :file.open(String.to_charlist(temporary), [:write, :binary, :raw, :exclusive]) do
+      {:ok, io} ->
+        result =
+          with :ok <- File.chmod(temporary, 0o600),
+               :ok <- :file.write(io, contents) do
+            :file.sync(io)
+          end
+
+        closed = :file.close(io)
+
+        case publish_credentials_file(result, closed, temporary, path) do
+          :ok ->
+            :ok
+
+          {:error, _reason} = error ->
+            File.rm(temporary)
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec publish_credentials_file(
+          :ok | {:error, term()},
+          :ok | {:error, term()},
+          String.t(),
+          String.t()
+        ) ::
+          :ok | {:error, term()}
+  defp publish_credentials_file(:ok, :ok, temporary, path), do: File.rename(temporary, path)
+  defp publish_credentials_file({:error, _reason} = error, _closed, _temporary, _path), do: error
+  defp publish_credentials_file(:ok, {:error, _reason} = error, _temporary, _path), do: error
 
   @spec ensure_directory(String.t()) :: :ok | {:error, term()}
   defp ensure_directory(dir) do
