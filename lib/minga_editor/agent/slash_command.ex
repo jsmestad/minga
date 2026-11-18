@@ -868,7 +868,10 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp do_auth_revoke(state, "openai_codex") do
     case Credentials.revoke("openai_codex") do
       :ok ->
-        emit_system_message(state, "ChatGPT subscription disconnected.")
+        emit_system_message(state, "ChatGPT disconnected.")
+
+      {:error, :oauth_file_busy} ->
+        emit_system_message(state, "Retry disconnect after refresh.")
 
       {:error, reason} ->
         emit_system_message(state, "✗ Failed to revoke: #{inspect(reason)}")
