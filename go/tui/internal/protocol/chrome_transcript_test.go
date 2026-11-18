@@ -378,3 +378,42 @@ func TestDecodeAgentTranscriptRoutesThroughChrome(t *testing.T) {
 		t.Fatalf("chrome.Bytes = %d, want %d", chrome.Bytes, len(frame))
 	}
 }
+
+func TestDecodeCommittedToolOutcomeBytes(t *testing.T) {
+	for _, status := range []byte{0, 1, 2, 3, 4, 5} {
+		for _, kind := range []byte{0x04, 0x08} {
+			for _, isError := range []bool{false, true} {
+				explanation := "Approval expired before execution"
+				body := []byte{kind, status, boolByte(isError), 0}
+				body = append(body, u32Bytes(0)...)
+				body = append(body, string16("shell")...)
+				body = append(body, string16("echo example")...)
+				if kind == 0x08 {
+					body = append(body, 0, 1, 0, 1) // one styled line and run
+					body = append(body, string16(explanation)...)
+					body = append(body, 255, 255, 255, 0, 0, 0, 0)
+				} else {
+					body = append(body, u32Bytes(uint32(len(explanation)))...)
+					body = append(body, explanation...)
+				}
+				body = append(body, 0) // auto-approved scope
+				got, _, _ := decodeAgentTranscript(replaceFrameBytes(1, false, []transcriptEntry{{id: 1, body: body}}))
+				if !got.Present || len(got.Messages) != 1 {
+					t.Fatalf("kind %d status %d was rejected: %+v", kind, status, got)
+				}
+				message := got.Messages[0]
+				if message.Status != status || message.IsError != isError || message.Result != explanation || message.DurationMS != 0 {
+					t.Fatalf("committed outcome fields changed: %+v", message)
+				}
+			}
+		}
+	}
+}
+
+func TestDecodeApprovalWaitingChatStatus(t *testing.T) {
+	// gui_agent_chat with one base section: visibility and status.
+	chat, _, consumed := decodeAgentChat([]byte{generated.OPGuiAgentChat, 1, 1, 0, 2, 1, 5})
+	if !chat.Visible || chat.Status != 5 || consumed != 7 {
+		t.Fatalf("approval_waiting byte was not retained: %+v, consumed=%d", chat, consumed)
+	}
+}

@@ -54,6 +54,11 @@ defmodule MingaAgent.Session.Request do
     %{request | epoch_id: epoch_id, prefix: PrefixStore.resolve(store, epoch_id)}
   end
 
+  @doc "Restores version-migrated message values without changing request identity or epoch."
+  @spec restore_messages(t(), [Message.t()]) :: t()
+  def restore_messages(%__MODULE__{} = request, messages) when is_list(messages),
+    do: %{request | messages: messages}
+
   @spec epoch_id(Prefix.t() | :unknown) :: PrefixStore.epoch_ref()
   defp epoch_id(:unknown), do: :unknown
   defp epoch_id(%Prefix{epoch_id: id}), do: id

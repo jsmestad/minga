@@ -71,7 +71,8 @@ version = "2.0.0"
 # protocol_version 32 separates Agent Help from chat visibility and adds source-bound Review actions.
 # protocol_version 33 binds tool approval decisions to the displayed session,
 # admitted request and tool call, independently of text-entry focus.
-protocol_version = 33
+# protocol_version 34 adds authoritative approval-wait presentation and distinct denied, cancelled and approval-expired tool statuses.
+protocol_version = 34
 description = "Minga port protocol opcode registry"
 
 # Directions:

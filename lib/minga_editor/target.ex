@@ -14,6 +14,7 @@ defmodule MingaEditor.Target do
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Prompt, as: PromptState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Window
@@ -43,6 +44,7 @@ defmodule MingaEditor.Target do
           | {:picker_action, non_neg_integer(), non_neg_integer()}
           | {:file_tree, FileTree.t(), FileTree.entry() | nil}
           | {:command_completion, String.t()}
+          | {:prompt, non_neg_integer(), binary()}
           | {:timeline_entry, String.t(), EditTimeline.Entry.t()}
           | {:timeline_file, non_neg_integer(), String.t()}
           | {:review, ReviewTarget.t()}
@@ -115,6 +117,23 @@ defmodule MingaEditor.Target do
 
       nil ->
         {:error, :not_found}
+    end
+  end
+
+  # The existing minibuffer selection surface also carries generic text-prompt
+  # choices. Resolve the modal owner first, independently of the editing mode;
+  # ordinary command completion retains its stricter input/candidate fence.
+  def resolve(
+        %{shell_runtime: %{state: %{modal: {:prompt, %{prompt_ui: prompt}}}}},
+        %__MODULE__{
+          surface: :command_completion,
+          intent: :accept,
+          generation: generation,
+          item_id: id
+        }
+      ) do
+    with {:ok, _action} <- PromptState.resolve_activation(prompt, generation, id) do
+      {:ok, {:prompt, generation, id}}
     end
   end
 

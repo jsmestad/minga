@@ -1102,11 +1102,15 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       assert :ok = send_prompt(pid, "run it")
-      _events = collect_run_events()
+      events = collect_run_events()
+      assert Enum.any?(events, &match?(%Event.ToolEnd{outcome: :complete, reason: nil}, &1))
 
       assert_receive {:terminal_persistence_attempt, _, "checkpoint-outcome-retry",
-                      "tc_outcome_retry", _},
+                      "tc_outcome_retry", result_message},
                      1_000
+
+      assert result_message.metadata.tool_outcome == :complete
+      refute result_message.metadata.is_error
 
       assert_receive {:terminal_persistence_attempt, _, "checkpoint-outcome-retry",
                       "tc_outcome_retry", _},
@@ -1117,6 +1121,120 @@ defmodule MingaAgent.Providers.NativeTest do
                      1_000
 
       assert :counters.get(invocation_count, 1) == 1
+    end
+
+    test "uncertain terminal saves withhold ToolEnd and the next model request", %{tmp_dir: dir} do
+      invocations = :counters.new(1, [:atomics])
+      requests = :counters.new(1, [:atomics])
+
+      tool =
+        ReqLLM.Tool.new!(
+          name: "unsaved_effect",
+          description: "Keeps an admitted result unsaved",
+          parameter_schema: [],
+          callback: fn _ ->
+            :counters.add(invocations, 1, 1)
+            {:ok, "retained bytes"}
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        :counters.add(requests, 1, 1)
+
+        build_stream_response([
+          ReqLLM.StreamChunk.tool_call("unsaved_effect", %{}, %{id: "unsaved-call", index: 0}),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+        ])
+      end
+
+      subscriber =
+        start_effect_barrier_subscriber(
+          self(),
+          {:ok, "unsaved-checkpoint"},
+          {:ok, start_retention_store(dir)},
+          List.duplicate({:error, {:tool_outcome_persistence_failed, :disk_busy}}, 3)
+        )
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, subscriber: subscriber, llm_client: client, tools: [tool])
+
+      assert :ok = send_prompt(pid, "run once")
+      events = collect_run_events()
+      refute Enum.any?(events, &match?(%Event.ToolEnd{}, &1))
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+      assert Enum.any?(events, &match?(%Event.AgentEnd{outcome: nil}, &1))
+      assert :counters.get(invocations, 1) == 1
+      assert :counters.get(requests, 1) == 1
+
+      for _ <- 1..3 do
+        assert_receive {:terminal_persistence_attempt, _, "unsaved-checkpoint", "unsaved-call",
+                        message}
+
+        assert message.metadata.tool_outcome == :complete
+        assert message.metadata.output.view == "retained bytes"
+      end
+    end
+
+    test "structured final-start refusal retains denial in events and durable metadata",
+         %{tmp_dir: dir} do
+      owner = self()
+      requests = :counters.new(1, [:atomics])
+
+      tool =
+        ReqLLM.Tool.new!(
+          name: "refused_effect",
+          description: "Must not execute",
+          parameter_schema: [],
+          callback: fn _ ->
+            send(owner, :unexpected_execution)
+            {:ok, "executed"}
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        :counters.add(requests, 1, 1)
+
+        if :counters.get(requests, 1) == 1 do
+          build_stream_response([
+            ReqLLM.StreamChunk.tool_call("refused_effect", %{}, %{id: "refused-call", index: 0}),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ])
+        else
+          send(owner, {:projected_messages, messages})
+          build_stream_response([ReqLLM.StreamChunk.text("refusal received")])
+        end
+      end
+
+      subscriber =
+        start_effect_barrier_subscriber(
+          self(),
+          {:ok, "refused-checkpoint"},
+          {:refused, :declaration_revoked}
+        )
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, subscriber: subscriber, llm_client: client, tools: [tool])
+
+      assert :ok = send_prompt(pid, "request")
+      events = collect_run_events()
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{outcome: :denied, reason: nil, is_error: true}, &1)
+             )
+
+      refute_received :unexpected_execution
+
+      assert_receive {:terminal_persistence_attempt, _, "refused-checkpoint", "refused-call",
+                      saved}
+
+      assert saved.metadata.tool_outcome == :denied
+      assert saved.metadata.is_error
+      assert_receive {:projected_messages, messages}
+      result = Enum.find(messages, &(&1.role == :tool))
+      refute Map.has_key?(result.metadata, :tool_outcome)
+      refute Map.has_key?(result.metadata, :tool_outcome_reason)
+      assert result.metadata.is_error
     end
 
     test "executes tools and emits tool events", %{tmp_dir: dir} do
@@ -1417,7 +1535,11 @@ defmodule MingaAgent.Providers.NativeTest do
           Context.assistant("",
             tool_calls: [ReqLLM.ToolCall.new("image", "read_file", ~s({"path":"fixture.png"}))]
           ),
-          Context.tool_result_message("read_file", "image", "[image retained]", %{output: output}),
+          Context.tool_result_message("read_file", "image", "[image retained]", %{
+            output: output,
+            tool_outcome: :complete,
+            is_error: false
+          }),
           Context.user("Continue")
         ]
 
@@ -2739,19 +2861,23 @@ defmodule MingaAgent.Providers.NativeTest do
       results = [
         Context.tool_result_message("read_file", "completed", "completed result", %{
           is_error: false,
+          tool_outcome: :complete,
           output: nil
         }),
         Context.tool_result_message("read_file", "pending", "not executed", %{
           is_error: true,
+          tool_outcome: :error,
           minga_effect_status: :not_executed,
           image_tool_result_delivery: {:unsupported, :tool_result_transport}
         }),
         Context.tool_result_message("read_file", "admitted", "indeterminate effect", %{
           is_error: true,
+          tool_outcome: :error,
           minga_effect_status: :indeterminate
         }),
         Context.tool_result_message("read_file", "provider", "provider result", %{
           is_error: false,
+          tool_outcome: :complete,
           output: %{"provider_field" => ["kept", 7]},
           tool_output: %{"sdk_field" => "kept"},
           provider_metadata: %{"opaque" => "kept"}

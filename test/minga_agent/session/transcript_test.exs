@@ -11,6 +11,35 @@ defmodule MingaAgent.Session.TranscriptTest do
   @now ~U[2026-07-17 12:00:00Z]
   @later ~U[2026-07-17 12:01:00Z]
 
+  test "reused tool IDs update only the latest indexed occurrence and keep stable IDs" do
+    first = ToolCall.new("reused", "shell") |> ToolCall.complete("old result")
+    current = ToolCall.new("reused", "shell")
+
+    transcript =
+      Transcript.new(
+        [{:tool_call, first}, {:user, "again"}, {:tool_call, current}],
+        @now,
+        make_ref()
+      )
+
+    assert Transcript.current_tool_call(transcript, "reused") == current
+    assert Transcript.current_tool_call(transcript, "missing") == nil
+    changed = Transcript.update_tool_call(transcript, "reused", &ToolCall.deny(&1, "denied"))
+
+    assert [
+             {1, {:tool_call, ^first}},
+             {2, {:user, "again"}},
+             {3, {:tool_call, %{status: :denied, result: "denied"}}}
+           ] =
+             Transcript.messages_with_ids(changed)
+
+    assert Transcript.update_tool_call(changed, "reused", &ToolCall.update_partial(&1, "late")) ===
+             changed
+
+    assert Transcript.update_tool_call(changed, "reused", &ToolCall.deny(&1, "denied")) ===
+             changed
+  end
+
   test "streaming replaces the matching tail without changing its identity" do
     transcript =
       Transcript.new([{:system, "started", :info}], @now, make_ref())

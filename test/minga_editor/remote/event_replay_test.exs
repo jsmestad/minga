@@ -23,7 +23,14 @@ defmodule MingaEditor.Remote.EventReplayTest do
     {:ok, range} = Range.new(:full, :bytes, 0, 2, 2)
     {:ok, output} = Output.new("ok", :complete, range)
 
-    assert {:tool_ended, "tc-output", "read_file", "ok", :done, ^output} =
+    assert {:tool_ended,
+            %MingaAgent.Event.ToolEnd{
+              tool_call_id: "tc-output",
+              name: "read_file",
+              result: "ok",
+              outcome: :complete,
+              output: ^output
+            }} =
              EventReplay.to_agent_event(
                record(:tool_call_finished, %{
                  "tool_call_id" => "tc-output",
@@ -33,6 +40,45 @@ defmodule MingaEditor.Remote.EventReplayTest do
                  "output" => OutputCodec.encode(output)
                })
              )
+  end
+
+  test "replay preserves explicit terminal outcomes and approval expiry without text inference" do
+    for {encoded, outcome, encoded_reason, reason} <- [
+          {"complete", :complete, nil, nil},
+          {"denied", :denied, nil, nil},
+          {"cancelled", :cancelled, nil, nil},
+          {"error", :error, nil, nil},
+          {"error", :error, "approval_timeout", :approval_timeout}
+        ] do
+      assert {:tool_ended, %MingaAgent.Event.ToolEnd{outcome: ^outcome, reason: ^reason} = event} =
+               EventReplay.to_agent_event(
+                 record(:tool_call_finished, %{
+                   "tool_call_id" => "replayed",
+                   "name" => "shell",
+                   "result" => "The original explanation",
+                   "status" => encoded,
+                   "reason" => encoded_reason
+                 })
+               )
+
+      assert event.result == "The original explanation"
+      assert event.is_error == (outcome != :complete)
+    end
+  end
+
+  test "invalid retained output reports replay failure instead of an output-free completion" do
+    assert {:error, message} =
+             EventReplay.to_agent_event(
+               record(:tool_call_finished, %{
+                 "tool_call_id" => "corrupt-output",
+                 "name" => "shell",
+                 "result" => "original text",
+                 "status" => "complete",
+                 "output" => %{"invalid" => true}
+               })
+             )
+
+    assert message =~ "could not be replayed"
   end
 
   test "canonical conversion contract covers every persisted event family" do
@@ -46,14 +92,17 @@ defmodule MingaEditor.Remote.EventReplayTest do
   end
 
   test "canonical conversion normalizes malformed replay payloads without crashing" do
-    assert EventReplay.to_agent_event(
-             record(:tool_call_finished, %{
-               "tool_call_id" => "tc1",
-               "name" => "shell",
-               "result" => "failed",
-               "status" => "failed"
-             })
-           ) == {:tool_ended, "tc1", "shell", "failed", :error}
+    assert {:error, message} =
+             EventReplay.to_agent_event(
+               record(:tool_call_finished, %{
+                 "tool_call_id" => "tc1",
+                 "name" => "shell",
+                 "result" => "failed",
+                 "status" => "failed"
+               })
+             )
+
+    assert message =~ "invalid_tool_outcome"
 
     assert EventReplay.to_agent_event(record(:status_changed, %{"status" => "not_existing"})) ==
              {:status_changed, :unknown}
@@ -244,7 +293,13 @@ defmodule MingaEditor.Remote.EventReplayTest do
        {:tool_update, "tc1", "shell", "out"}},
       {:tool_call_finished,
        %{"tool_call_id" => "tc1", "name" => "read_file", "result" => "ok", "status" => "done"},
-       {:tool_ended, "tc1", "read_file", "ok", :done}},
+       {:tool_ended,
+        %MingaAgent.Event.ToolEnd{
+          tool_call_id: "tc1",
+          name: "read_file",
+          result: "ok",
+          outcome: :complete
+        }}},
       {:tool_call_interrupted, %{"tool_call_id" => "tc2"}, {:tool_interrupted, "tc2"}},
       {:file_edit_proposed,
        %{

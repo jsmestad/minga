@@ -315,25 +315,32 @@ defmodule MingaAgent.Session.Transcript do
     end)
   end
 
-  @doc "Updates every matching tool-call occurrence in source order at one revision."
+  @doc "Fetches the current/latest tool occurrence without traversing retained history."
+  @spec current_tool_call(t(), String.t()) :: ToolCall.t() | nil
+  def current_tool_call(%__MODULE__{} = transcript, id) when is_binary(id) do
+    case Active.latest_tool_ordinal(transcript.active, id) do
+      nil ->
+        nil
+
+      ordinal ->
+        {:tool_call, tool} = Active.at(transcript.active, ordinal).message
+        tool
+    end
+  end
+
+  @doc "Updates only the current/latest indexed occurrence of a tool-call ID."
   @spec update_tool_call(t(), String.t(), (ToolCall.t() -> ToolCall.t())) :: t()
   def update_tool_call(%__MODULE__{} = transcript, tool_call_id, update)
       when is_binary(tool_call_id) and is_function(update, 1) do
-    active =
-      Enum.reduce(
-        Active.tool_ordinals(transcript.active, tool_call_id),
-        transcript.active,
-        fn ordinal, active ->
-          Active.update_at(
-            active,
-            ordinal,
-            fn {:tool_call, tool} -> {:tool_call, update.(tool)} end,
-            transcript.revision + 1
-          )
-        end
-      )
+    case Active.latest_tool_ordinal(transcript.active, tool_call_id) do
+      nil ->
+        transcript
 
-    install_active(transcript, active)
+      ordinal ->
+        update_at(transcript, ordinal, fn {:tool_call, tool} ->
+          {:tool_call, update.(tool)}
+        end)
+    end
   end
 
   @doc "Collapses every expanded thinking entry without changing identity."

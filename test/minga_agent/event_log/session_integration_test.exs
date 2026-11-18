@@ -130,7 +130,10 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
       )
 
       result_message =
-        ReqLLM.Context.tool_result_message("read_file", "tool-1", "ok", %{is_error: false})
+        ReqLLM.Context.tool_result_message("read_file", "tool-1", "ok", %{
+          is_error: false,
+          tool_outcome: :complete
+        })
 
       :ok =
         GenServer.call(
@@ -144,6 +147,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
         %Event.ToolEnd{
           tool_call_id: "tool-1",
           name: "read_file",
+          outcome: :complete,
           result: "ok",
           is_error: false
         }

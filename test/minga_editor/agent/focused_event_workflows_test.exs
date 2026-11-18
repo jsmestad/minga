@@ -160,9 +160,40 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     assert state.workspace.agent_ui.view.preview.content == {:file, "lib/a.ex", ""}
 
-    state = ToolEventWorkflow.ended(state, "tc1", "read_file", "contents", :done)
+    state =
+      ToolEventWorkflow.ended(state, nil, %MingaAgent.Event.ToolEnd{
+        tool_call_id: "tc1",
+        name: "read_file",
+        result: "contents",
+        outcome: :complete
+      })
+
     assert AgentState.active_tool_name(TraditionalState.agent(state.shell_runtime.state)) == nil
     assert state.workspace.agent_ui.view.preview.content == {:file, "lib/a.ex", "contents"}
+  end
+
+  test "unsuccessful file and directory tools do not replace previews with failure text" do
+    for {name, args} <- [
+          {"read_file", %{"path" => "lib/a.ex"}},
+          {"list_directory", %{"path" => "lib"}}
+        ],
+        outcome <- [:denied, :cancelled, :error] do
+      started = ToolEventWorkflow.started(event_state(), "rejected", name, args)
+
+      finished =
+        ToolEventWorkflow.ended(started, nil, %MingaAgent.Event.ToolEnd{
+          tool_call_id: "rejected",
+          name: name,
+          result: "The tool did not produce file contents or directory entries",
+          outcome: outcome,
+          is_error: true
+        })
+
+      assert finished.workspace.agent_ui.view.preview == started.workspace.agent_ui.view.preview
+
+      assert AgentState.active_tool_name(TraditionalState.agent(finished.shell_runtime.state)) ==
+               nil
+    end
   end
 
   test "tool workflow preserves batched shell output before interruption clears live activity" do
@@ -204,7 +235,15 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
       updated = ToolEventWorkflow.updated(started, "tc1", tool, "partial output")
       assert updated.workspace.agent_ui.view.preview == preview
-      ended = ToolEventWorkflow.ended(updated, "tc1", tool, result, :done)
+
+      ended =
+        ToolEventWorkflow.ended(updated, nil, %MingaAgent.Event.ToolEnd{
+          tool_call_id: "tc1",
+          name: tool,
+          result: result,
+          outcome: :complete
+        })
+
       assert ended.workspace.agent_ui.view.preview == preview
       assert AgentState.active_tool_name(TraditionalState.agent(ended.shell_runtime.state)) == nil
       interrupted = ToolEventWorkflow.interrupted(ended, "tc1")
@@ -379,7 +418,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert state.workspace.agent_ui.panel.transcript.messages != []
   end
 
-  test "session workflow clears a resolved approval and synchronizes the transcript" do
+  test "every approval retirement releases waiting presentation and synchronizes the transcript" do
     session =
       start_test_session(
         provider: Minga.Test.SessionContinuationProvider,
@@ -388,19 +427,51 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     approval = admit_approval(session)
 
+    agent_ui =
+      UIState.new()
+      |> PromptBuffer.ensure()
+      |> PromptBuffer.set_prompt_text("unfinished draft\nkeep caret")
+      |> UIState.set_input_focused(true)
+
+    prompt = agent_ui.panel.prompt_buffer
+    Minga.Buffer.move_to(prompt, {1, 3})
+
     state =
       event_state(session)
+      |> TraditionalWorkflow.install_agent_ui(agent_ui)
+      |> TraditionalWorkflow.install_agent_status(:idle)
       |> SessionEventWorkflow.approval_pending(session, approval)
+
+    assert AgentState.display_status(TraditionalState.agent(state.shell_runtime.state)) ==
+             :approval_waiting
 
     assert :ok = Session.respond_to_approval(session, approval.target, :approve)
     assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
 
-    state =
-      SessionEventWorkflow.approval_resolved(state, session, approval.target, :approve)
+    for resolution <- [
+          :approve,
+          :approve_session,
+          :approve_turn,
+          :reject,
+          :approval_timeout,
+          :interrupted
+        ] do
+      resolved =
+        SessionEventWorkflow.approval_resolved(state, session, approval.target, resolution)
 
-    assert TraditionalState.agent(state.shell_runtime.state).pending_approval == nil
-    assert state.workspace.agent_ui.panel.transcript.messages != []
-    assert RenderCorrelation.scheduled?(state.render.render_correlation)
+      agent = TraditionalState.agent(resolved.shell_runtime.state)
+      assert agent.pending_approval == nil
+      assert AgentState.display_status(agent) == :idle
+      assert resolved.workspace.agent_ui.panel.transcript.messages != []
+      assert RenderCorrelation.scheduled?(resolved.render.render_correlation)
+      assert resolved.workspace.agent_ui.panel.prompt_buffer == prompt
+
+      assert PromptBuffer.prompt_text(resolved.workspace.agent_ui) ==
+               "unfinished draft\nkeep caret"
+
+      assert Minga.Buffer.cursor(prompt) == {1, 3}
+      assert resolved.workspace.agent_ui.panel.input_focused
+    end
   end
 
   test "late resolution events preserve a newer request or a different source attachment" do
@@ -417,15 +488,33 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     second = admit_approval(session)
     refute first.target.request_id == second.target.request_id
 
+    agent_ui =
+      UIState.new()
+      |> PromptBuffer.ensure()
+      |> PromptBuffer.set_prompt_text("new request draft\nkeep caret")
+      |> UIState.set_input_focused(true)
+
+    prompt = agent_ui.panel.prompt_buffer
+    Minga.Buffer.move_to(prompt, {1, 3})
+
     state =
       event_state(session)
+      |> TraditionalWorkflow.install_agent_ui(agent_ui)
       |> SessionEventWorkflow.approval_pending(session, second)
 
     pending = TraditionalState.agent(state.shell_runtime.state).pending_approval
 
-    for {source, target} <- [{session, first.target}, {idle_process(), second.target}] do
-      updated = SessionEventWorkflow.approval_resolved(state, source, target, :approve)
+    for {source, target} <- [{session, first.target}, {idle_process(), second.target}],
+        resolution <- [:approve, :approval_timeout, :interrupted] do
+      updated = SessionEventWorkflow.approval_resolved(state, source, target, resolution)
       assert TraditionalState.agent(updated.shell_runtime.state).pending_approval == pending
+      assert updated.workspace.agent_ui.panel.prompt_buffer == prompt
+
+      assert PromptBuffer.prompt_text(updated.workspace.agent_ui) ==
+               "new request draft\nkeep caret"
+
+      assert Minga.Buffer.cursor(prompt) == {1, 3}
+      assert updated.workspace.agent_ui.panel.input_focused
     end
   end
 

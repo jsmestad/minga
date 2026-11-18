@@ -19,8 +19,8 @@ defmodule MingaEditor.Agent.View.Preview do
   alias MingaEditor.Agent.EditTimeline
   alias Minga.Editing.Scroll
 
-  @typedoc "Shell command execution status."
-  @type shell_status :: :running | :done | :error
+  @typedoc "Shell activity and terminal outcomes."
+  @type shell_status :: :running | :done | :error | :denied | :cancelled | :approval_expired
 
   @typedoc "The content currently displayed in the preview pane."
   @type content ::
@@ -82,14 +82,14 @@ defmodule MingaEditor.Agent.View.Preview do
 
   def update_shell_output(%__MODULE__{} = preview, _output), do: preview
 
-  @doc "Marks the shell command as complete."
+  @doc "Records the terminal shell outcome without treating refusal as execution success."
   @spec finish_shell(t(), String.t(), shell_status()) :: t()
   def finish_shell(
         %__MODULE__{content: {:shell, cmd, _old, :running}} = preview,
         final_output,
         status
       )
-      when status in [:done, :error] do
+      when status in [:done, :error, :denied, :cancelled, :approval_expired] do
     commit_content(preview, {:shell, cmd, final_output, status}, preview.scroll)
   end
 

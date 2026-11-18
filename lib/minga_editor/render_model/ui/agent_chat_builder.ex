@@ -74,7 +74,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     %AgentChat{
       visible?: true,
-      status: shell_agent.runtime.status || :idle,
+      status: MingaEditor.State.Agent.display_status(shell_agent),
       model_name: Panel.model_label(panel),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
@@ -321,7 +321,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       name: tc.name,
       summary: tool_call_summary(tc),
       result: tc.result,
-      status: tc.status,
+      status: tool_call_status(tc),
       is_error: tc.is_error,
       collapsed: tc.collapsed,
       duration_ms: tc.duration_ms,
@@ -330,6 +330,14 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       preview_lines: Map.get(preview, :lines, [])
     }
   end
+
+  @spec tool_call_status(ToolCall.t()) :: ToolCallView.status()
+  defp tool_call_status(%ToolCall{status: :error, terminal_reason: :approval_timeout}),
+    do: :approval_expired
+
+  defp tool_call_status(%ToolCall{status: status})
+       when status in [:running, :complete, :error, :denied, :cancelled],
+       do: status
 
   @spec approval_view(ToolCall.t(), approval()) :: ApprovalView.t()
   defp approval_view(

@@ -20,6 +20,27 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     }
   end
 
+  test "host outcome metadata never reaches a provider and opaque provider metadata survives" do
+    for output <- [nil, %{"opaque" => "provider-owned"}] do
+      metadata = %{
+        output: output,
+        is_error: true,
+        tool_outcome: :error,
+        tool_outcome_reason: :approval_timeout,
+        provider_payload: %{"opaque" => [1, 2]}
+      }
+
+      message = ReqLLM.Context.tool_result_message("shell", "tool", "expired", metadata)
+      projected = ReqLLMAdapter.request_message(message)
+      refute Map.has_key?(projected.metadata, :tool_outcome)
+      refute Map.has_key?(projected.metadata, :tool_outcome_reason)
+      assert projected.metadata.is_error
+      assert projected.metadata.provider_payload == metadata.provider_payload
+      assert message.metadata == metadata
+      if is_map(output), do: assert(projected.metadata.output == output)
+    end
+  end
+
   test "builds request-local credential, cache, token, and reasoning options" do
     config = %AgentConfig{prompt_cache: true}
     selection = selection()
@@ -202,7 +223,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
 
       results =
         Enum.map(tool_ids, fn id ->
-          ReqLLM.Context.tool_result_message("grep", id, "result " <> id)
+          ReqLLM.Context.tool_result_message("grep", id, "result " <> id, %{
+            tool_outcome: :complete,
+            is_error: false
+          })
         end)
 
       request =

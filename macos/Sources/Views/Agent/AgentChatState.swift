@@ -519,11 +519,13 @@ public final class AgentChatState {
         case .executingTool: return "running tool"
         case .error: return "error"
         case .planning: return "planning"
+        case .approvalWaiting: return "Awaiting approval"
         case .unknown: return "unknown"
         }
     }
 
     public var isThinking: Bool { status.isWorking }
+    public var hasActiveTurn: Bool { status.hasActiveTurn }
 
     public var displayModel: String {
         guard let separator = model.firstIndex(of: ":") else { return model }

@@ -103,7 +103,7 @@ public struct AgentChatView: View {
                     }
                     .onChange(of: state.promptVersion) { _, _ in
                         // Triggers on every BEAM frame update (streaming content growth)
-                        if shouldAutoScroll && state.isThinking {
+                        if shouldAutoScroll && state.hasActiveTurn {
                             scrollToBottom(proxy: proxy)
                         }
                     }

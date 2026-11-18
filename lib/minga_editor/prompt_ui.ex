@@ -64,6 +64,7 @@ defmodule MingaEditor.PromptUI do
 
     prompt_state = %PromptState{
       handler: handler_module,
+      generation: Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1,
       text: default_text,
       cursor: String.length(default_text),
       label: label,
@@ -84,6 +85,18 @@ defmodule MingaEditor.PromptUI do
   """
   @spec open?(state()) :: boolean()
   def open?(state), do: ModalOverlay.match(state.shell_runtime.state.modal, :prompt)
+
+  @doc "Invokes the existing submit or cancel operation for the exact offered prompt."
+  @spec activate(state(), non_neg_integer(), binary()) :: state()
+  def activate(state, generation, item_id) do
+    prompt = current_prompt(state)
+
+    case PromptState.resolve_activation(prompt, generation, item_id) do
+      {:ok, :submit} -> do_submit(state, prompt)
+      {:ok, :cancel} -> do_cancel(state, prompt)
+      {:error, _reason} -> state
+    end
+  end
 
   @doc """
   Handles a key event while the prompt is active.

@@ -51,20 +51,33 @@ defmodule MingaEditor.Session.ChromeStateTest do
       assert Enum.any?(chrome.workspaces, &(&1.id == group.id and &1.kind == :agent))
     end
 
-    test "tracks background and attention counts", %{tmp_dir: tmp_dir} do
+    test "counts executing work without treating plan mode or approval waiting as running",
+         %{tmp_dir: tmp_dir} do
       {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
 
-      tb =
-        tb
-        |> TabBar.set_workspace_agent_status(group.id, :thinking)
-        |> TabBar.set_tab_attention(2, true)
-        |> TabBar.switch_to(1)
+      for {status, running_count} <- [
+            {:idle, 0},
+            {:thinking, 1},
+            {:tool_executing, 1},
+            {:error, 0},
+            {:plan, 0},
+            {:approval_waiting, 0}
+          ] do
+        tb =
+          tb
+          |> TabBar.set_workspace_agent_status(group.id, status)
+          |> TabBar.set_tab_attention(2, true)
+          |> TabBar.switch_to(1)
 
-      chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+        chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+        workspace = Enum.find(chrome.workspaces, &(&1.id == group.id))
 
-      assert chrome.active_workspace_id == 0
-      assert chrome.background_count == 1
-      assert chrome.attention_count == 1
+        assert workspace.status == status
+        assert workspace.running_background_count == running_count
+        assert chrome.active_workspace_id == 0
+        assert chrome.background_count == running_count
+        assert chrome.attention_count == 1
+      end
     end
   end
 

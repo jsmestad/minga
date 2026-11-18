@@ -20,6 +20,9 @@ func (m Model) agentAnimating(chat protocol.AgentChat) bool {
 	if !chat.Visible {
 		return false
 	}
+	if chat.Status == 5 {
+		return false
+	}
 	if chat.Status == 1 || chat.Status == 2 || chat.Pending != "" {
 		return true
 	}
@@ -502,12 +505,10 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 	case 2: // iterating
 		label = m.agentSpinner() + " " + label
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusIterating())
-	case 3: // needs you
-		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou())
-	case 4: // done
-		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusDone())
-	case 5: // errored
+	case 3: // error
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusErrored())
+	case 4, 5: // planning, awaiting approval
+		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou())
 	default: // idle
 		style = style.Foreground(p.AgentStatusIdle()).Background(p.SurfaceAlt())
 	}
@@ -521,17 +522,26 @@ func (m Model) agentSpinner() string {
 func agentChatStatusLabel(status byte) string {
 	switch status {
 	case 1:
-		return "working"
+		return "thinking"
 	case 2:
-		return "iterating"
+		return "using tools"
 	case 3:
-		return "needs you"
+		return "error"
 	case 4:
-		return "done"
+		return "planning"
 	case 5:
-		return "errored"
+		return "Awaiting approval"
 	default:
 		return "idle"
+	}
+}
+
+func agentHasActiveTurn(status byte) bool {
+	switch status {
+	case 1, 2, 5:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -864,7 +874,7 @@ func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) 
 	surface := p.AgentPanel()
 	toolHeader := p.AgentToolHeader()
 	railStyle := lipgloss.NewStyle().Foreground(statusColor).Background(surface)
-	status := lipgloss.NewStyle().Bold(true).Foreground(statusColor).Background(surface).Render(statusIcon)
+	status := lipgloss.NewStyle().Bold(true).Foreground(statusColor).Background(surface).Render(statusIcon + " " + agentToolStatusLabel(msg))
 	title := lipgloss.NewStyle().Bold(true).Foreground(toolHeader).Background(surface).Render(presentation.Icon + " " + presentation.Title)
 	rawName := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(name)
 	meta := agentToolMeta(msg)
@@ -885,8 +895,8 @@ func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) 
 		lines = append(lines, m.renderAgentToolPreviewLines(msg.PreviewKind, msg.PreviewLines, width, statusColor)...)
 	}
 
-	if msg.IsError && msg.Result != "" {
-		lines = append(lines, m.renderAgentToolTextLines("ERROR", msg.Result, width, agentToolExpandedLines, statusColor)...)
+	if agentToolIsError(msg) && hasAgentToolResult(msg) {
+		lines = append(lines, m.renderAgentToolResultLines(agentToolStatusLabel(msg), msg, width, statusColor)...)
 	} else if hasAgentToolResult(msg) && msg.Collapsed {
 		lines = append(lines, m.renderAgentToolCollapsedHint(width, statusColor))
 	} else if !msg.Collapsed {
@@ -929,18 +939,63 @@ func agentToolPresentationFor(name string) agentToolPresentation {
 
 func (m Model) agentToolStatus(msg protocol.AgentChatMessage) (string, color.Color) {
 	p := m.palette()
-	if msg.IsError || msg.Status == 2 {
-		return "×", p.Diagnostic(0)
-	}
-	if msg.Status == 1 {
+	switch msg.Status {
+	case 0:
+		return m.agentSpinner(), p.Warning()
+	case 1:
 		return "✓", p.Diagnostic(3)
+	case 2:
+		return "×", p.Diagnostic(0)
+	case 3:
+		return "⊘", p.Warning()
+	case 4:
+		return "■", p.Muted()
+	case 5:
+		return "◷", p.Warning()
+	default:
+		if msg.IsError {
+			return "×", p.Diagnostic(0)
+		}
+		return "?", p.Muted()
 	}
-	return m.agentSpinner(), p.Warning()
+}
+
+func agentToolStatusLabel(msg protocol.AgentChatMessage) string {
+	switch msg.Status {
+	case 0:
+		return "running"
+	case 1:
+		return "done"
+	case 2:
+		return "ERROR"
+	case 3:
+		return "Denied"
+	case 4:
+		return "Cancelled"
+	case 5:
+		return "Expired"
+	default:
+		if msg.IsError {
+			return "ERROR"
+		}
+		return "unknown"
+	}
+}
+
+func agentToolIsError(msg protocol.AgentChatMessage) bool {
+	switch msg.Status {
+	case 0, 1, 3, 4:
+		return false
+	case 2, 5:
+		return true
+	default:
+		return msg.IsError
+	}
 }
 
 func agentToolMeta(msg protocol.AgentChatMessage) string {
 	parts := make([]string, 0, 2)
-	if msg.DurationMS > 0 {
+	if msg.DurationMS > 0 && msg.Status != 3 && msg.Status != 5 {
 		parts = append(parts, fmt.Sprintf("%dms", msg.DurationMS))
 	}
 	switch msg.AutoApprovedScope {
@@ -1166,6 +1221,9 @@ func agentPromptModeName(mode byte) string {
 }
 
 func agentComposerTitle(chat protocol.AgentChat) string {
+	if chat.Status == 5 {
+		return "Awaiting approval"
+	}
 	if chat.Pending != "" {
 		return "Approval needed"
 	}
