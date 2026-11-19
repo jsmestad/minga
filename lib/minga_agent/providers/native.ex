@@ -50,7 +50,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Hooks.Registry, as: HookRegistry
   alias MingaAgent.Instructions
-  alias MingaAgent.InternalState
   alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.MCP.ServerRegistry, as: MCPServerRegistry
@@ -82,7 +81,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tool.Spec, as: ToolSpec
   alias MingaAgent.Tools
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
-  alias MingaAgent.Tools.Todo
   alias Minga.Config
   alias ReqLLM.Context
   alias ReqLLM.Message.ContentPart
@@ -125,7 +123,6 @@ defmodule MingaAgent.Providers.Native do
           streaming: boolean(),
           interrupted: boolean(),
           active_skills: [Skills.skill()],
-          internal_state: InternalState.t(),
           max_turns: pos_integer(),
           max_cost: float() | nil,
           session_cost: float(),
@@ -133,7 +130,6 @@ defmodule MingaAgent.Providers.Native do
           changeset: pid() | nil,
           base_tools: [term()],
           mcp_tools: [term()],
-          internal_tools: [term()],
           tool_metadata: map(),
           custom_tool_declarations: [Tool.t() | ToolSpec.t()],
           custom_tools?: boolean(),
@@ -294,6 +290,7 @@ defmodule MingaAgent.Providers.Native do
 
     tool_metadata = %{
       parent_session: subscriber,
+      session_checklist?: Keyword.get(opts, :session_checklist?, false),
       shell_output_callback: Keyword.get(opts, :shell_output_callback),
       process_backend: Keyword.get(opts, :process_backend, SystemProcessBackend),
       tool_registry: Keyword.get(opts, :tool_registry, ToolRegistry)
@@ -324,7 +321,6 @@ defmodule MingaAgent.Providers.Native do
 
     base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
-    internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
 
     configured_mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
     config = %{config | mcp_servers: configured_mcp_configs}
@@ -342,7 +338,7 @@ defmodule MingaAgent.Providers.Native do
     tool_allowlist = Keyword.get(opts, :tool_allowlist, :all)
 
     tools =
-      (base_tools ++ mcp_tools ++ internal_tools)
+      (base_tools ++ mcp_tools)
       |> filter_tool_allowlist(tool_allowlist)
 
     subscriber_ref = Process.monitor(subscriber)
@@ -370,7 +366,6 @@ defmodule MingaAgent.Providers.Native do
       streaming: false,
       interrupted: false,
       active_skills: active_skills,
-      internal_state: InternalState.new(),
       max_turns: max_turns,
       max_cost: max_cost,
       session_cost: 0.0,
@@ -380,7 +375,6 @@ defmodule MingaAgent.Providers.Native do
       owned_project_view?: requested_view == nil,
       base_tools: base_tools,
       mcp_tools: mcp_tools,
-      internal_tools: internal_tools,
       custom_tools?: custom_tools?,
       custom_tool_declarations: custom_tool_declarations,
       configured_mcp_configs: configured_mcp_configs,
@@ -462,9 +456,16 @@ defmodule MingaAgent.Providers.Native do
   @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [Tool.t()]
   defp registry_tools(%ToolContext{} = tool_context, %AgentConfig{} = config, hook_runner) do
     ToolRegistry.all(Map.get(tool_context.metadata, :tool_registry, ToolRegistry))
+    |> filter_session_tools(tool_context.metadata)
     |> filter_git_tools(tool_context.project_root)
     |> provider_tools(tool_context, config, hook_runner)
   end
+
+  @spec filter_session_tools([ToolSpec.t()], map()) :: [ToolSpec.t()]
+  defp filter_session_tools(specs, %{session_checklist?: true}), do: specs
+
+  defp filter_session_tools(specs, _metadata),
+    do: Enum.reject(specs, &(&1.name in ["todo_read", "todo_write"]))
 
   @spec filter_git_tools([Tool.t() | ToolSpec.t()], String.t()) :: [Tool.t() | ToolSpec.t()]
   defp filter_git_tools(specs, project_root) do
@@ -562,7 +563,7 @@ defmodule MingaAgent.Providers.Native do
           mcp_errors: %{},
           local_registration: %{state.local_registration | mcp: make_ref()},
           tools:
-            (state.base_tools ++ mcp_tools ++ state.internal_tools)
+            (state.base_tools ++ mcp_tools)
             |> filter_tool_allowlist(state.tool_allowlist)
       }
     end
@@ -1174,15 +1175,6 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  def handle_call({:update_internal_state, fun}, _from, state) when is_function(fun, 1) do
-    new_internal = fun.(state.internal_state)
-    {:reply, :ok, %{state | internal_state: new_internal}}
-  end
-
-  def handle_call(:get_internal_state, _from, state) do
-    {:reply, {:ok, state.internal_state}, state}
-  end
-
   def handle_call(:get_budget, _from, state) do
     budget = %{
       session_cost: state.session_cost,
@@ -1742,13 +1734,11 @@ defmodule MingaAgent.Providers.Native do
       |> refresh_base_tools(state.project_view)
       |> filter_base_tools_for_read_only(state.read_only?)
 
-    internal_tools = build_internal_tools(self())
-
     tools =
-      (base_tools ++ state.mcp_tools ++ internal_tools)
+      (base_tools ++ state.mcp_tools)
       |> filter_tool_allowlist(state.tool_allowlist)
 
-    %{state | base_tools: base_tools, internal_tools: internal_tools, tools: tools}
+    %{state | base_tools: base_tools, tools: tools}
   end
 
   # ── Terminate cleanup ──────────────────────────────────────────────────────
@@ -1825,7 +1815,7 @@ defmodule MingaAgent.Providers.Native do
       |> filter_base_tools_for_read_only(state.read_only?)
 
     tools =
-      (base_tools ++ state.mcp_tools ++ state.internal_tools)
+      (base_tools ++ state.mcp_tools)
       |> filter_tool_allowlist(state.tool_allowlist)
 
     {:ok, %{state | base_tools: base_tools, tools: tools}}
@@ -3178,12 +3168,13 @@ defmodule MingaAgent.Providers.Native do
 
           base_tools =
             specs
+            |> filter_session_tools(state.tool_metadata)
             |> filter_git_tools(state.project_root)
             |> provider_tools(context, state.config, state.hook_runner)
             |> filter_base_tools_for_read_only(state.read_only?)
 
           tools =
-            (base_tools ++ state.mcp_tools ++ state.internal_tools)
+            (base_tools ++ state.mcp_tools)
             |> filter_tool_allowlist(state.tool_allowlist)
 
           {:ok, %{state | base_tools: base_tools, tools: tools, registry_revision: revision}}
@@ -3235,56 +3226,6 @@ defmodule MingaAgent.Providers.Native do
     project_root
     |> native_tool_context(project_view, fork_store, changeset, tool_metadata)
     |> registry_tools(config, hook_runner)
-  end
-
-  # Builds the provider-owned checklist tools.
-  #
-  # NOTE: Tool callbacks close over `provider_pid` and make GenServer.call back
-  # to the provider. This works because tools run in a spawned Task, not in the
-  # provider's own process. If the provider ever awaits the task synchronously
-  # (blocking its mailbox), these calls will deadlock.
-  @spec build_internal_tools(pid()) :: [Tool.t()]
-  defp build_internal_tools(provider_pid) do
-    [
-      Tool.new!(
-        name: "todo_write",
-        description: """
-        Create or update a task checklist for tracking multi-step work.
-        Each task has a description and status (pending, in_progress, done).
-        Use this to plan before executing, and update status as you complete tasks.
-        """,
-        parameter_schema: %{
-          "type" => "object",
-          "properties" => %{
-            "tasks" => %{
-              "type" => "array",
-              "description" => "List of tasks",
-              "items" => %{
-                "type" => "object",
-                "properties" => %{
-                  "id" => %{"type" => "string", "description" => "Short task ID"},
-                  "description" => %{"type" => "string", "description" => "What to do"},
-                  "status" => %{
-                    "type" => "string",
-                    "enum" => ["pending", "in_progress", "done"],
-                    "description" => "Task status (default: pending)"
-                  }
-                },
-                "required" => ["description"]
-              }
-            }
-          },
-          "required" => ["tasks"]
-        },
-        callback: fn args -> Todo.write(provider_pid, args["tasks"] || []) end
-      ),
-      Tool.new!(
-        name: "todo_read",
-        description: "Read the current task checklist to see what's done and what remains.",
-        parameter_schema: %{"type" => "object", "properties" => %{}},
-        callback: fn _args -> Todo.read(provider_pid) end
-      )
-    ]
   end
 
   @spec load_active_skills(String.t(), [String.t()]) :: [Skills.skill()]

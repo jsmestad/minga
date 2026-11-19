@@ -291,6 +291,8 @@ func todoStatusName(status byte) string {
 		return "doing"
 	case 2:
 		return "done"
+	case 3:
+		return "blocked"
 	default:
 		return "todo"
 	}

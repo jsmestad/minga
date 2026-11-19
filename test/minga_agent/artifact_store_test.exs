@@ -139,10 +139,13 @@ defmodule MingaAgent.ArtifactStoreTest do
     assert {:ok, %{reference: reference}} = ArtifactStore.finish(store, capture, :complete)
     {:ok, full} = Range.new(:full, :bytes, 0, 8, 8)
 
+    assert {:ok, ^reference} = ArtifactStore.reference(store, reference.token)
+    assert {:error, :unauthorized} = ArtifactStore.reference(foreign, reference.token)
     assert {:error, :unauthorized} = ArtifactStore.fetch(foreign, reference, full)
 
     unknown = unknown_reference("authorized-session")
     assert {:error, :unknown_reference} = ArtifactStore.fetch(store, unknown, full)
+    assert {:error, :unknown_reference} = ArtifactStore.reference(store, unknown.token)
 
     assert :ok =
              ArtifactStore.pin(store, {:snapshot, "generation-1"}, [reference],
@@ -152,6 +155,7 @@ defmodule MingaAgent.ArtifactStoreTest do
     assert :ok = ArtifactStore.release(store, {:snapshot, "generation-1"})
     assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
     assert {:error, :expired} = ArtifactStore.fetch(store, reference, full)
+    assert {:error, :expired} = ArtifactStore.reference(store, reference.token)
   end
 
   test "pin replacement is atomic and cleanup never deletes referenced content", %{tmp_dir: root} do

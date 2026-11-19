@@ -208,6 +208,16 @@ defmodule MingaAgent.ArtifactStore.State do
 
   def fetch(state, _reference, _range), do: {{:error, :invalid_range}, state}
 
+  @doc "Reads canonical reference metadata without reading retained bytes."
+  @spec reference(t(), String.t()) :: {:ok, Reference.t()} | {:error, term()}
+  def reference(%__MODULE__{} = state, token) do
+    with {:ok, id} <- authorize_token(state, token),
+         {:ok, row} <- fetch_terminal_row(state, id),
+         {:ok, %Stored{reference: reference}} <- stored(state, row) do
+      {:ok, reference}
+    end
+  end
+
   @doc "Looks up a capture only by its canonical stable delivery key."
   @spec lookup_delivery(t(), {:delivery, PinKey.component(), PinKey.component()}) ::
           {{:ok, Stored.t()} | {:error, term()}, t()}
@@ -1069,8 +1079,11 @@ defmodule MingaAgent.ArtifactStore.State do
   end
 
   @spec authorize_reference(t(), Reference.t()) :: {:ok, String.t()} | {:error, term()}
-  defp authorize_reference(state, reference) do
-    case Reference.parse(reference.token) do
+  defp authorize_reference(state, %Reference{token: token}), do: authorize_token(state, token)
+
+  @spec authorize_token(t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp authorize_token(state, token) do
+    case Reference.parse(token) do
       {:ok, namespace, id} when namespace == state.namespace -> {:ok, id}
       {:ok, _foreign, _id} -> {:error, :unauthorized}
       {:error, _reason} -> {:error, :invalid_reference}

@@ -97,4 +97,5 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoder do
   defp todo_status_to_byte(:pending), do: 0
   defp todo_status_to_byte(:in_progress), do: 1
   defp todo_status_to_byte(:done), do: 2
+  defp todo_status_to_byte(:blocked), do: 3
 end

@@ -59,6 +59,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     %Command{name: "exec", description: "Leave plan mode and allow execution"},
     %Command{name: "resume", description: "Resume a saved agent session"},
     %Command{name: "sessions", description: "Browse and switch between sessions"},
+    %Command{name: "tasks", description: "Inspect the conversation checklist"},
     %Command{
       name: "auth",
       description: "Manage API keys: /auth, /auth <provider>, /auth revoke <provider>"
@@ -470,6 +471,10 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "skill:off:plan", _args, _config_dir), do: do_exec(state)
   defp dispatch(state, "resume", _args, config_dir), do: {:ok, do_resume(state, config_dir)}
   defp dispatch(state, "sessions", _args, _config_dir), do: {:ok, do_sessions(state)}
+
+  defp dispatch(state, "tasks", _args, _config_dir),
+    do: {:ok, MingaEditor.UI.Picker.AgentChecklistSource.open(state)}
+
   defp dispatch(state, "auth", args, _config_dir), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args, _config_dir), do: {:ok, do_instructions(state)}
   defp dispatch(state, "system-prompt", _args, _config_dir), do: {:ok, do_system_prompt(state)}

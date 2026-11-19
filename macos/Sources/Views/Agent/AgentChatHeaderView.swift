@@ -46,6 +46,18 @@ public struct AgentChatHeaderView: View {
                 .foregroundStyle(theme.agentMutedFg)
 
             Button {
+                sendAction?(.executeCommand(name: "agent_checklist"))
+            } label: {
+                Label("Tasks", systemImage: "checklist")
+                    .font(Typography.font(.small))
+                    .foregroundStyle(theme.agentMutedFg)
+                    .padding(Spacing.xs)
+            }
+            .buttonStyle(.plain)
+            .help("Inspect Agent checklist (SPC a k)")
+            .accessibilityLabel("Agent checklist")
+
+            Button {
                 sendAction?(.executeCommand(name: "agent_retained_history"))
             } label: {
                 Image(systemName: "clock.arrow.circlepath")

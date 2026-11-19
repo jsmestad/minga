@@ -148,6 +148,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a c), :workspace_copy_file, "Copy file to workspace…"},
     {~k(a h), :agent_session_history, "Resume session"},
     {~k(a H), :agent_retained_history, "Read retained Agent messages"},
+    {~k(a k), :agent_checklist, "Inspect Agent checklist"},
     {~k(a r), :workspace_pending_reviews, "Pending reviews"},
     {~k(a o), :remote_find_file, "Open remote file"},
     {~k(a T), :agent_pick_thinking, "Pick thinking level"},

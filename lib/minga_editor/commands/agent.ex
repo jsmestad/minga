@@ -2382,6 +2382,12 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.AgentHistorySource.open/1
       },
       %Minga.Command{
+        name: :agent_checklist,
+        description: "Inspect Agent checklist",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentChecklistSource.open/1
+      },
+      %Minga.Command{
         name: :agent_pick_thinking,
         description: "Pick AI thinking level",
         requires_buffer: false,

@@ -110,10 +110,11 @@ defmodule MingaAgent.Tool.Output.Codec do
     }
   end
 
+  @doc "Encodes a retained reference without changing its namespace or identity."
   @spec encode_reference(Reference.t() | nil) :: map() | nil
-  defp encode_reference(nil), do: nil
+  def encode_reference(nil), do: nil
 
-  defp encode_reference(%Reference{} = reference) do
+  def encode_reference(%Reference{} = reference) do
     %{
       "token" => reference.token,
       "media_type" => reference.media_type,
@@ -183,13 +184,14 @@ defmodule MingaAgent.Tool.Output.Codec do
 
   defp decode_range(_), do: {:error, :invalid_output}
 
+  @doc "Decodes a persisted reference through the owning constructor."
   @spec decode_reference(term()) :: {:ok, Reference.t() | nil} | {:error, term()}
-  defp decode_reference(nil), do: {:ok, nil}
+  def decode_reference(nil), do: {:ok, nil}
 
-  defp decode_reference(
-         %{"token" => token, "media_type" => media_type, "bytes" => bytes, "sha256" => digest} =
-           encoded
-       ) do
+  def decode_reference(
+        %{"token" => token, "media_type" => media_type, "bytes" => bytes, "sha256" => digest} =
+          encoded
+      ) do
     Reference.new(
       token: token,
       media_type: media_type,
@@ -199,7 +201,7 @@ defmodule MingaAgent.Tool.Output.Codec do
     )
   end
 
-  defp decode_reference(_), do: {:error, :invalid_output}
+  def decode_reference(_), do: {:error, :invalid_output}
 
   @spec decode_revision(term()) :: {:ok, Revision.t() | nil} | {:error, term()}
   defp decode_revision(nil), do: {:ok, nil}

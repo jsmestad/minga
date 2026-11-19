@@ -42,7 +42,17 @@ The final gate reads versioned policy before Registry resolution and validates t
 
 Automatic memory injection, the built-in memory-write tool, default introspection tools, model-cycling commands, and backend choice in the default child-agent tool have been removed. Legacy `pi_rpc` configuration is rejected rather than resolved to an executable provider. Project/global instructions, selected skills, existing memory files, saved history, registered providers, and Runtime/Gateway introspection remain owned by their existing sources.
 
-After the runtime starts, opt in to read-only memory discovery with `MingaAgent.ToolPacks.Memory.register()` or introspection with `MingaAgent.ToolPacks.Introspection.register()`. These packs are not registered automatically. The existing todo tools still manage the running provider's checklist. New requests do not offer the hidden notebook tools. Existing notebook tool results remain readable in saved conversations.
+After the runtime starts, opt in to read-only memory discovery with `MingaAgent.ToolPacks.Memory.register()` or introspection with `MingaAgent.ToolPacks.Introspection.register()`. These packs are not registered automatically. New requests do not offer the hidden notebook tools. Existing notebook tool results remain readable in saved conversations.
+
+## Resume unfinished tasks
+
+Open **Tasks** in the Agent workspace, press `SPC a k` in Normal mode, or run `/tasks` in the composer. Choose a row to inspect its status, blocker or result note, and any retained result. Enter copies the selected task details, including the reference token when one is available. An empty checklist reports that there are no tasks in this conversation. An active task remains active after cancellation or restart; that status does not mean the agent is currently working on it.
+
+The model uses `todo_read` with no arguments to get the first page and its revision. If the result includes `next_offset`, pass it as `offset` with the same `expected_revision`. A null `next_offset` ends the list. If a revision changes while reading, start again at the first page.
+
+To change the checklist, call `todo_write` with `expected_revision` and the complete `tasks` array. Keep each task's `id` and reuse its `result_ref` token when the evidence is unchanged. An empty array clears the list. A successful write returns the new revision and task count. A stale write or save failure does not publish the proposed update. These tools record task facts. They do not start or schedule work.
+
+The checklist survives later prompts, compaction, and restart. Branching at an earlier resumable turn restores the task facts at that turn. Switching to the saved branch restores its own list. Changes do not carry across branches.
 
 ## Interrupted requests and tools
 
@@ -63,7 +73,7 @@ Managed Session restart also waits for the prior provider and every registered e
 
 Tool results keep two separate facts: a bounded model-visible `view` and, when admitted, a record-scoped reference to the exact captured bytes. A complete capture, a requested range, presentation truncation, and an incomplete capture are distinct states. A visible truncation does not mean retained bytes were discarded, while an incomplete capture never claims that omitted bytes exist.
 
-References are authorized to one durable session record. They survive compaction, Session process exit, and application restart because snapshots pin the union reachable from the transcript, same-record branches, and the complete provider continuation, including pending tool arguments. Candidate pins are installed before a snapshot rename. Definite pre-rename failures release only candidate pins; ambiguous post-rename failures preserve all possible owners until a synchronized save or load validates the durable JSON authority.
+References are authorized to one durable session record. They survive compaction, Session process exit, and application restart because snapshots pin the union reachable from the transcript, same-record branches, the checklist and its branch history, and the complete provider continuation, including pending tool arguments. Candidate pins are installed before a snapshot rename. Definite pre-rename failures release only candidate pins; ambiguous post-rename failures preserve all possible owners until a synchronized save or load validates the durable JSON authority.
 
 Delivery ownership transfers only after the renamed snapshot and its parent directory are durable. A failure to release an obsolete pin after that point is logged and leaves a conservative pin, not a false report that the committed save failed. Malformed, unreadable, or schema-invalid prior JSON blocks replacement and cannot authorize cleanup.
 
