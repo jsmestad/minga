@@ -82,6 +82,31 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.preview_lines == [[{"preview: One", 0xABCDEF, true}]]
     end
 
+    test "presents and offers activation for the selected command past the first results page" do
+      items = for id <- 1..240, do: %Item{id: id, label: "Command #{id}"}
+
+      picker =
+        PickerState.new(items, results: :all)
+        |> PickerState.filter("command")
+        |> PickerState.move_up()
+
+      {:picker, %{picker_ui: picker_ui}} = modal = picker_modal(picker, nil, nil, "", :ready)
+      model = PickerBuilder.build(build_context(modal))
+      activation_id = model.selected_item_id
+
+      assert model.filtered_count == 240
+
+      assert %{label: "Command 240", activation_id: ^activation_id} =
+               Enum.at(model.items, model.selected_index)
+
+      assert {:ok, 239, %Item{id: 240}} =
+               PickerUIState.resolve_item_activation(
+                 picker_ui,
+                 model.activation_generation,
+                 activation_id
+               )
+    end
+
     test "normalizes item nil defaults without dropping match_positions" do
       # Source item with nil icon_color/annotation and a match_positions list
       # larger than the wire count. The semantic builder preserves it exactly;
