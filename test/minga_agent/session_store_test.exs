@@ -749,6 +749,26 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.output == nil
     end
 
+    test "old notebook tool results remain readable as conversation history", %{tmp_dir: dir} do
+      call =
+        ToolCall.new("old-notebook", "notebook_read") |> ToolCall.complete("Historical notes")
+
+      data = %{
+        sample_data()
+        | messages: [{:tool_call, call}],
+          message_ids: [41],
+          pinned_ids: MapSet.new()
+      }
+
+      assert :ok = SessionStore.save(data, dir)
+
+      assert {:ok,
+              %{
+                messages: [{:tool_call, %{name: "notebook_read", result: "Historical notes"}}],
+                message_ids: [41]
+              }} = SessionStore.load(data.id, dir)
+    end
+
     test "round-trips complete and incomplete typed output without reclassifying legacy text", %{
       tmp_dir: dir
     } do

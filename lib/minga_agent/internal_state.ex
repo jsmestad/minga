@@ -1,19 +1,8 @@
 defmodule MingaAgent.InternalState do
   @moduledoc """
-  Internal agent state for todo tracking and scratchpad notes.
+  Volatile Native provider state for the task checklist.
 
-  This module manages two pieces of ephemeral state that persist across
-  tool-calling turns within a single prompt but are cleared on new prompts:
-
-  - **Todo list**: A structured task checklist the agent uses to track
-    progress on multi-step operations. Each task has a description and
-    status (pending, in_progress, done).
-
-  - **Notebook**: An unstructured scratchpad for planning, intermediate
-    reasoning, and working notes. Content is not shown to the user in chat.
-
-  Both are stored in the Native provider's GenServer state and accessed
-  via tool calls during the agent loop.
+  The provider owns the checklist while it is running. It is not part of the saved conversation.
   """
 
   alias MingaAgent.TodoItem
@@ -25,12 +14,9 @@ defmodule MingaAgent.InternalState do
   @type todo_item :: TodoItem.t()
 
   @typedoc "The full internal state."
-  @type t :: %__MODULE__{
-          todos: [todo_item()],
-          notebook: String.t()
-        }
+  @type t :: %__MODULE__{todos: [todo_item()]}
 
-  defstruct todos: [], notebook: ""
+  defstruct todos: []
 
   @doc "Creates a new empty internal state."
   @spec new() :: t()
@@ -79,22 +65,6 @@ defmodule MingaAgent.InternalState do
       "#{icon} [#{item.id}] #{item.description} (#{item.status})"
     end)
   end
-
-  # ── Notebook operations ─────────────────────────────────────────────────────
-
-  @doc "Writes (replaces) the notebook content."
-  @spec write_notebook(t(), String.t()) :: t()
-  def write_notebook(%__MODULE__{} = state, content) when is_binary(content) do
-    %{state | notebook: content}
-  end
-
-  @doc "Returns the current notebook content."
-  @spec read_notebook(t()) :: String.t()
-  def read_notebook(%__MODULE__{notebook: ""}) do
-    "Notebook is empty. Use notebook_write to add planning notes."
-  end
-
-  def read_notebook(%__MODULE__{notebook: content}), do: content
 
   # ── Private ─────────────────────────────────────────────────────────────────
 

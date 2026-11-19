@@ -3,14 +3,6 @@ defmodule MingaAgent.InternalStateTest do
 
   alias MingaAgent.InternalState
 
-  describe "new/0" do
-    test "creates empty state" do
-      state = InternalState.new()
-      assert state.todos == []
-      assert state.notebook == ""
-    end
-  end
-
   describe "todo operations" do
     test "write_todos replaces the task list" do
       state = InternalState.new()
@@ -56,25 +48,6 @@ defmodule MingaAgent.InternalStateTest do
     test "read_todos on empty state shows help message" do
       state = InternalState.new()
       assert InternalState.read_todos(state) =~ "No tasks"
-    end
-  end
-
-  describe "notebook operations" do
-    test "write_notebook replaces content" do
-      state = InternalState.new()
-      state = InternalState.write_notebook(state, "My plan:\n1. Do thing\n2. Do other thing")
-      assert state.notebook =~ "My plan"
-    end
-
-    test "read_notebook returns content" do
-      state = InternalState.new()
-      state = InternalState.write_notebook(state, "planning notes")
-      assert InternalState.read_notebook(state) == "planning notes"
-    end
-
-    test "read_notebook on empty state shows help message" do
-      state = InternalState.new()
-      assert InternalState.read_notebook(state) =~ "empty"
     end
   end
 end
