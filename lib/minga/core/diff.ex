@@ -240,7 +240,7 @@ defmodule Minga.Core.Diff do
       "@@ -#{old_start + 1},#{old_count} +#{new_start + 1},#{new_count} @@\n"
     ]
 
-    IO.iodata_to_binary([header | diff_body])
+    :binary.list_to_bin([header | diff_body])
   end
 
   # ── Private: word-level diff helpers ────────────────────────────────────────

@@ -282,7 +282,7 @@ def capture_size(binary, size, corpus, pyte, artifacts, args, deadline, report):
 
     try:
         child = RendererProcess(binary, size["columns"], size["rows"], on_data)
-        ready = child.ready(size["columns"], size["rows"], min(deadline, time.monotonic() + args.step_timeout))
+        ready = child.ready(min(deadline, time.monotonic() + args.step_timeout))
         report["ready_payload_base64"] = base64.b64encode(ready).decode()
         for step in size["steps"]:
             current_step = step["label"]

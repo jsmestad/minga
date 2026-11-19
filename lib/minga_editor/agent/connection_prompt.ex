@@ -10,13 +10,14 @@ defmodule MingaEditor.Agent.ConnectionPrompt do
   alias MingaEditor.State, as: EditorState
 
   @enforce_keys [:workspace_id, :target, :operation_ref, :kind]
-  defstruct [:workspace_id, :target, :operation_ref, :kind]
+  defstruct [:workspace_id, :target, :operation_ref, :kind, :authorization_url]
 
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
           target: ConnectionTarget.t(),
           operation_ref: reference(),
-          kind: ConnectionInput.input_kind()
+          kind: ConnectionInput.input_kind(),
+          authorization_url: String.t() | nil
         }
 
   @doc "Checks whether the derived Session connection still owns this input request."

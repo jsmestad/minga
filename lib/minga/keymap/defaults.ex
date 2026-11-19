@@ -83,6 +83,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(q q), :quit_all, "Quit editor"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
+    {~k(h a), :describe_command, "Search command help"},
     {~k(h b), :describe_bindings, "Describe bindings"},
     {~k(h c), :describe_command, "Describe command"},
     {~k(h f), :describe_function, "Describe function"},

@@ -348,12 +348,15 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:register_connection_worker, target, operation_ref, worker_pid})
   end
 
-  @doc "Binds an API-key holder from the original Editor without waiting on Session."
-  @spec request_api_key_worker(GenServer.server(), ConnectionTarget.t(), reference(), pid()) ::
+  @doc "Binds an acquisition worker from the original owner without waiting on Session."
+  @spec request_connection_worker(GenServer.server(), ConnectionTarget.t(), reference(), pid()) ::
           :ok
-  def request_api_key_worker(session, target, operation_ref, worker_pid)
+  def request_connection_worker(session, target, operation_ref, worker_pid)
       when is_pid(worker_pid) do
-    GenServer.cast(session, {:request_api_key_worker, target, operation_ref, worker_pid, self()})
+    GenServer.cast(
+      session,
+      {:request_connection_worker, target, operation_ref, worker_pid, self()}
+    )
   end
 
   @doc "Cancels only the captured setup operation; committed storage is never rolled back."
@@ -386,6 +389,19 @@ defmodule MingaAgent.Session do
           {:ok, ConnectionSnapshot.t()} | {:error, atom()}
   def commit_api_key(session, target, operation_ref, provider, secret) do
     GenServer.call(session, {:commit_api_key, target, operation_ref, provider, secret})
+  end
+
+  @doc "Commits acquired OAuth credentials for the original target and authorized worker."
+  @spec commit_oauth(GenServer.server(), ConnectionTarget.t(), reference(), Secret.t()) ::
+          {:ok, ConnectionSnapshot.t()} | {:error, atom()}
+  def commit_oauth(session, target, operation_ref, secret) do
+    GenServer.call(session, {:commit_oauth, target, operation_ref, secret})
+  end
+
+  @doc "Reports failure only for the current OAuth operation and its authorized actor."
+  @spec report_oauth_failure(GenServer.server(), ConnectionTarget.t(), reference(), atom()) :: :ok
+  def report_oauth_failure(session, target, ref, reason) do
+    GenServer.cast(session, {:report_oauth_failure, target, ref, reason, self()})
   end
 
   @doc "Retries the captured connection without submitting or replaying any draft."
@@ -1253,6 +1269,10 @@ defmodule MingaAgent.Session do
 
   def handle_call({:commit_api_key, target, ref, provider, secret}, {caller, _}, state) do
     commit_api_key_workflow(state, target, ref, provider, secret, caller)
+  end
+
+  def handle_call({:commit_oauth, target, ref, secret}, {caller, _}, state) do
+    commit_oauth_workflow(state, target, ref, secret, caller)
   end
 
   def handle_call({:retry_connection, target}, _from, state) do
@@ -2515,16 +2535,20 @@ defmodule MingaAgent.Session do
 
   @impl GenServer
   @spec handle_cast(term(), state()) :: {:noreply, state()}
+  def handle_cast({:report_oauth_failure, target, ref, reason, caller}, state) do
+    {:noreply, fail_oauth_workflow(state, target, ref, reason, caller)}
+  end
+
   def handle_cast({:request_connection_cancel, target, operation_ref, caller}, state) do
     {:reply, _result, state} = cancel_connection_workflow(state, target, operation_ref, caller)
     {:noreply, state}
   end
 
-  def handle_cast({:request_api_key_worker, target, ref, worker, caller}, state) do
+  def handle_cast({:request_connection_worker, target, ref, worker, caller}, state) do
     {:reply, result, state} =
       register_connection_worker_workflow(state, target, ref, worker, caller)
 
-    send(worker, {:api_key_worker_binding, ref, result})
+    send(worker, {:connection_worker_binding, ref, result})
     {:noreply, state}
   end
 
@@ -4489,6 +4513,8 @@ defmodule MingaAgent.Session do
     end
   end
 
+  defp validate_connection_method(method) when method in [:oauth_browser, :oauth_manual], do: :ok
+
   defp validate_connection_method(_method), do: {:error, :unsupported_method}
 
   @spec begin_connection_workflow(
@@ -4644,13 +4670,54 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec commit_oauth_workflow(state(), ConnectionTarget.t(), reference(), Secret.t(), pid()) ::
+          {:reply, term(), state()}
+  defp commit_oauth_workflow(state, target, ref, secret, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- authorize_connection_actor(state, caller, :writer),
+         :ok <- Connection.match_method(state.connection, :oauth) do
+      result =
+        Secret.write_oauth(secret, connection_oauth_path(state), connection_oauth_account(state))
+
+      {state, result}
+      |> finish_connection_writer()
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec connection_oauth_account(state()) :: String.t() | nil
+  defp connection_oauth_account(%{
+         model_selection: %ModelSelection{
+           credential: %MingaAgent.ModelSelection.Credential.OAuth{account_id: account}
+         }
+       }),
+       do: account
+
+  defp connection_oauth_account(_state), do: nil
+
+  @spec connection_oauth_path(state()) :: String.t()
+  defp connection_oauth_path(%{
+         model_selection: %ModelSelection{
+           credential: %MingaAgent.ModelSelection.Credential.OAuth{oauth_path: path}
+         }
+       })
+       when is_binary(path),
+       do: path
+
+  defp connection_oauth_path(state) do
+    state
+    |> connection_credential_opts()
+    |> Keyword.get_lazy(:oauth_path, &Credentials.oauth_path/0)
+  end
+
   @spec connection_credential_opts(state()) :: keyword()
   defp connection_credential_opts(state),
     do: Keyword.get(state.provider.opts, :credential_opts, [])
 
   @spec finish_connection_writer({state(), :ok | {:error, atom()}}) :: {:reply, term(), state()}
   defp finish_connection_writer({state, :ok}) do
-    {ref, _target, _method, {_owner, notify}, _worker} = Connection.pending(state.connection)
+    {ref, _target, method, {_owner, notify}, _worker} = Connection.pending(state.connection)
     retire_connection_dependencies(state.connection, :committed)
     {:committed, connection} = Connection.committed(state.connection)
 
@@ -4659,23 +4726,65 @@ defmodule MingaAgent.Session do
 
     state = publish_connection(state)
     snapshot = connection_snapshot(state)
-    notify_api_key_saved(notify, snapshot.target, ref)
+    notify_connection_saved(method, notify, snapshot.target, ref)
     {:reply, {:ok, snapshot}, state}
   end
 
   defp finish_connection_writer({state, {:error, reason}}) do
-    retire_connection_dependencies(state.connection, :committed)
+    {ref, target, method, {_owner, notify}, _worker} = Connection.pending(state.connection)
+
+    if method in [:oauth_browser, :oauth_manual],
+      do: notify_oauth_failure(notify, target, ref, reason)
+
+    retire_connection_dependencies(state.connection, :cancel)
     {:failed, connection} = Connection.failed(state.connection)
     {:reply, {:error, reason}, publish_connection(%{state | connection: connection})}
   end
 
-  @spec notify_api_key_saved(Connection.notification(), ConnectionTarget.t(), reference()) :: :ok
-  defp notify_api_key_saved(nil, _target, _ref), do: :ok
+  @spec fail_oauth_workflow(state(), ConnectionTarget.t(), reference(), atom(), pid()) :: state()
+  defp fail_oauth_workflow(state, target, ref, reason, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- Connection.match_method(state.connection, :oauth),
+         true <-
+           authorize_connection_actor(state, caller, :writer) == :ok or
+             authorize_connection_actor(state, caller, :owner) == :ok do
+      {:reply, {:error, ^reason}, state} = finish_connection_writer({state, {:error, reason}})
+      state
+    else
+      _refused -> state
+    end
+  end
 
-  defp notify_api_key_saved({subscriber, correlation}, target, ref) do
+  @spec notify_oauth_failure(Connection.notification(), ConnectionTarget.t(), reference(), atom()) ::
+          :ok
+  defp notify_oauth_failure(nil, _target, _ref, _reason), do: :ok
+
+  defp notify_oauth_failure({subscriber, correlation}, target, ref, reason) do
     send(
       subscriber,
-      {:agent_event, self(), {:connection_api_key_saved, correlation, target, ref}}
+      {:agent_event, self(), {:oauth_acquisition_failed, correlation, target, ref, reason}}
+    )
+
+    :ok
+  end
+
+  @spec notify_connection_saved(
+          Connection.method(),
+          Connection.notification(),
+          ConnectionTarget.t(),
+          reference()
+        ) :: :ok
+  defp notify_connection_saved(_method, nil, _target, _ref), do: :ok
+
+  defp notify_connection_saved(method, {subscriber, correlation}, target, ref) do
+    event =
+      if match?({:api_key, _}, method),
+        do: :connection_api_key_saved,
+        else: :connection_oauth_saved
+
+    send(
+      subscriber,
+      {:agent_event, self(), {event, correlation, target, ref}}
     )
 
     :ok
@@ -4718,7 +4827,11 @@ defmodule MingaAgent.Session do
   @spec retire_connection_dependencies(Connection.t(), :cancel | :committed) :: :ok
   defp retire_connection_dependencies(connection, disposition) do
     case Connection.pending(connection) do
-      {ref, _target, _method, {{_owner, owner_monitor}, _notify}, worker} ->
+      {ref, target, method, {{owner, owner_monitor}, _notify}, worker} ->
+        if disposition == :cancel and method in [:oauth_browser, :oauth_manual] do
+          MingaAgent.OAuth.PendingFlow.cancel_operation(ref, {target.session_id, owner})
+        end
+
         Process.demonitor(owner_monitor, [:flush])
         retire_connection_worker(worker, ref, disposition)
 

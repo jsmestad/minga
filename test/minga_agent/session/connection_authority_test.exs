@@ -5,6 +5,7 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
   alias MingaAgent.Credentials.Secret
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.Event
+  alias MingaAgent.OAuth.Flow
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.Continuation
@@ -76,6 +77,82 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
     refute_receive {:worker_cancelled, ^next_worker, _}
     assert :ok = Session.cancel_connection(session, target, next)
     assert_receive {:worker_cancelled, ^next_worker, ^next}
+  end
+
+  test "a stale OAuth failure cannot report an outcome for a replacement setup", context do
+    session = start_session(context)
+    assert :ok = Session.subscribe(session)
+    target = target(session)
+
+    assert {:ok, first} =
+             Session.begin_connection(session, target, :oauth_manual, self(), {self(), :first})
+
+    assert {:ok, next} =
+             Session.begin_connection(session, target, :oauth_manual, self(), {self(), :next})
+
+    assert :ok = Session.report_oauth_failure(session, target, first, :authorization_failed)
+    assert Session.editor_snapshot(session).connection.operation == {:connecting, next}
+    refute_received {:agent_event, ^session, {:oauth_acquisition_failed, :first, _, _, _}}
+
+    assert :ok = Session.report_oauth_failure(session, target, next, :authorization_failed)
+
+    assert_receive {:agent_event, ^session,
+                    {:oauth_acquisition_failed, :next, ^target, ^next, :authorization_failed}}
+
+    assert Session.editor_snapshot(session).connection.operation == :idle
+  end
+
+  test "manual OAuth retries malformed input and commits only from the admitted worker",
+       context do
+    session = start_session(context)
+    target = target(session)
+    owner = self()
+    path = Keyword.fetch!(context.credential_opts, :oauth_path)
+    assert {:ok, ref} = Session.begin_connection(session, target, :oauth_manual, owner)
+
+    notify = fn notice -> send(owner, {:manual_ready, notice}) end
+
+    exchange = fn "synthetic-code", verifier, _port when is_binary(verifier) ->
+      {:ok,
+       %{access: "synthetic-access", refresh: "synthetic-refresh", expires: nil, account_id: nil}}
+    end
+
+    worker =
+      start_supervised!(
+        {Task,
+         fn ->
+           Flow.run_connection(target, ref, :oauth_manual, owner, notify, exchange_fun: exchange)
+         end},
+        id: make_ref()
+      )
+
+    assert {:error, :not_connection_actor} =
+             Session.commit_oauth(session, target, ref, Secret.new(%{}))
+
+    assert :ok = Session.request_connection_worker(session, target, ref, worker)
+
+    assert_receive {:manual_ready,
+                    %MingaAgent.OAuth.ManualReady{
+                      target: ^target,
+                      operation_ref: ^ref,
+                      worker: ^worker,
+                      flow_ref: flow_ref
+                    }},
+                   1_000
+
+    assert {:error, :invalid_input} =
+             Flow.complete_connection(worker, ref, flow_ref, Secret.new(""))
+
+    assert {:error, :refused} =
+             Flow.complete_connection(worker, make_ref(), flow_ref, Secret.new("synthetic-code"))
+
+    assert {:error, :enoent} = File.read(path)
+
+    assert {:ok, :openai} =
+             Flow.complete_connection(worker, ref, flow_ref, Secret.new("synthetic-code"))
+
+    assert File.read!(path) =~ "synthetic-access"
+    assert Session.editor_snapshot(session).connection.operation == :idle
   end
 
   test "supersession fences the old writer before any credential bytes change", context do
@@ -406,6 +483,65 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
 
     assert next_connection_event(session) == {:connection_changed, snapshot}
     assert next_connection_event(session) == {:connection_api_key_saved, 1, snapshot.target, ref}
+  end
+
+  test "a different OAuth account cannot overwrite the pinned route credential", context do
+    path = Keyword.fetch!(context.credential_opts, :oauth_path)
+
+    tokens = %{
+      access: "original-access",
+      refresh: "original-refresh",
+      expires: System.system_time(:millisecond) + 3_600_000,
+      account_id: "original-account"
+    }
+
+    assert :ok = MingaAgent.OAuth.write_oauth_file(tokens, path)
+    original = File.read!(path)
+    resolver = ModelSelectionFixture.resolver_opts(model_id: "gpt-5.5")
+    [model] = resolver[:models]
+
+    model =
+      update_in(
+        model.execution.text,
+        &%{
+          &1
+          | family: "openai_responses_compatible",
+            wire_protocol: "openai_responses",
+            path: "/v1/responses"
+        }
+      )
+
+    resolver =
+      resolver
+      |> Keyword.put(:models, [model])
+      |> Keyword.put(:credential_snapshot, Credentials.snapshot(context.credential_opts))
+
+    session =
+      start_session(context,
+        provider: MingaAgent.Providers.Native,
+        provider_opts: [
+          model: "openai_codex:gpt-5.5",
+          credential_opts: context.credential_opts,
+          config: %MingaAgent.Config{},
+          model_resolver_opts: resolver
+        ]
+      )
+
+    before = Session.editor_snapshot(session).connection
+    assert %{credential: %{account_id: "original-account"}} = before.model_selection
+    assert {:ok, ref} = Session.begin_connection(session, before.target, :oauth_manual, self())
+    assert :ok = Session.register_connection_worker(session, before.target, ref, self())
+
+    replacement =
+      Secret.new(%{tokens | access: "replacement-access", account_id: "other-account"})
+
+    assert {:error, :account_mismatch} =
+             Session.commit_oauth(session, before.target, ref, replacement)
+
+    assert File.read!(path) == original
+    after_failure = Session.editor_snapshot(session).connection
+    assert after_failure.model_selection == before.model_selection
+    assert after_failure.operation == :idle
   end
 
   test "native unconfigured readiness preserves typed resolver failure, without startup or provider requests",

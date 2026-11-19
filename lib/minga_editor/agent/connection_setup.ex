@@ -4,6 +4,7 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   @behaviour MingaEditor.Effect
 
   alias MingaAgent.Credentials
+  alias MingaAgent.OAuth.Flow
   alias MingaAgent.Credentials.Secret
   alias MingaAgent.Session
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
@@ -17,10 +18,11 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.{Prompt, TabBar, Workspace}
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
-
+  @typep setup_method :: {:api_key, String.t()} | :oauth_browser | :oauth_manual
   @typep intent ::
-           {:begin, ConnectionInput.input_kind(), pid(), pid()}
+           {:begin, setup_method(), pid(), pid()}
            | {:submit, ConnectionPrompt.t(), pid(), ConnectionInput.receipt()}
+           | {:authorization_url, :open | :copy, ConnectionPrompt.t()}
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
           target: ConnectionTarget.t(),
@@ -29,13 +31,9 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   @enforce_keys [:workspace_id, :target, :intent]
   defstruct [:workspace_id, :target, :intent]
 
-  @doc "Begins local API-key setup for the workspace that offered the action."
-  @spec start(
-          EditorState.t(),
-          non_neg_integer(),
-          ConnectionTarget.t(),
-          ConnectionInput.input_kind()
-        ) :: EditorState.t()
+  @doc "Begins local credential setup for the workspace that offered the action."
+  @spec start(EditorState.t(), non_neg_integer(), ConnectionTarget.t(), setup_method()) ::
+          EditorState.t()
   def start(
         state,
         workspace_id,
@@ -58,19 +56,56 @@ defmodule MingaEditor.Agent.ConnectionSetup do
     end
   end
 
+  def start(state, workspace_id, %ConnectionTarget{session: session} = target, method)
+      when node(session) == node() and method in [:oauth_browser, :oauth_manual] do
+    subscriber = state.agent_connection.agent_ingest || self()
+
+    effect = %__MODULE__{
+      workspace_id: workspace_id,
+      target: target,
+      intent: {:begin, method, self(), subscriber}
+    }
+
+    admit(state, Request.new(effect, {:agent_connection, session}, Policy.fifo(0)))
+  end
+
   def start(state, _workspace_id, %ConnectionTarget{}, {:api_key, _provider}) do
     NoticeWorkflow.publish(state, "Add API keys on the host running this agent session.")
   end
 
-  @doc "Captures the original workspace for an explicit API-key command."
-  @spec start_current(EditorState.t(), String.t()) :: EditorState.t()
-  def start_current(state, provider) do
+  @doc "Captures the original workspace for an explicit credential setup command."
+  @spec start_current(EditorState.t(), String.t() | setup_method()) ::
+          EditorState.t()
+  def start_current(state, provider) when is_binary(provider),
+    do: start_current(state, {:api_key, provider})
+
+  def start_current(state, method) do
     case ConnectionAction.origin(state) do
       {:ok, workspace_id, %{target: target}} ->
-        start(state, workspace_id, target, {:api_key, provider})
+        start(state, workspace_id, target, method)
 
       {:error, _reason} ->
-        NoticeWorkflow.publish(state, "Open an agent session before entering an API key.")
+        NoticeWorkflow.publish(state, "Open an agent session before configuring a connection.")
+    end
+  end
+
+  @doc "Opens or copies the public link for the exact current sign-in operation."
+  @spec authorization_url(EditorState.t(), ConnectionPrompt.t(), :open | :copy) :: EditorState.t()
+  def authorization_url(state, %ConnectionPrompt{authorization_url: url} = prompt, action)
+      when is_binary(url) do
+    if current_input?(state, prompt) do
+      effect = %__MODULE__{
+        workspace_id: prompt.workspace_id,
+        target: prompt.target,
+        intent: {:authorization_url, action, prompt}
+      }
+
+      admit(
+        state,
+        Request.new(effect, {:connection_authorization, prompt.target.session}, Policy.fifo(0))
+      )
+    else
+      state
     end
   end
 
@@ -117,11 +152,106 @@ defmodule MingaEditor.Agent.ConnectionSetup do
           non_neg_integer(),
           ConnectionTarget.t(),
           reference(),
-          ConnectionInput.input_kind()
-        ) :: EditorState.t()
-  def offer(state, id, %ConnectionTarget{} = target, ref, {:api_key, _provider} = kind) do
-    prompt = %ConnectionPrompt{workspace_id: id, target: target, operation_ref: ref, kind: kind}
+          setup_method()
+        ) ::
+          EditorState.t()
+  def offer(state, id, %ConnectionTarget{} = target, ref, method)
+      when method in [:oauth_browser, :oauth_manual] do
+    owner = self()
+    session = target.session
 
+    notify = fn notice ->
+      send(owner, {:agent_event, session, {:oauth_manual_requested, id, notice}})
+    end
+
+    acquire = fn ->
+      case Flow.run_connection(target, ref, method, owner, notify) do
+        {:ok, :openai} ->
+          :ok
+
+        {:error, reason} ->
+          Session.report_oauth_failure(session, target, ref, reason)
+      end
+    end
+
+    with {:ok, supervisor} <- submission_supervisor(state.effect_scheduler),
+         {:ok, worker} <- Task.Supervisor.start_child(supervisor, acquire) do
+      :ok = Session.request_connection_worker(session, target, ref, worker)
+      state
+    else
+      {:error, _reason} ->
+        Session.report_oauth_failure(session, target, ref, :worker_unavailable)
+        state
+    end
+  end
+
+  def offer(state, id, %ConnectionTarget{} = target, ref, {:api_key, _provider} = kind) do
+    offer_prompt(state, %ConnectionPrompt{
+      workspace_id: id,
+      target: target,
+      operation_ref: ref,
+      kind: kind
+    })
+  end
+
+  @doc "Offers the masked fallback for the exact local acquisition worker."
+  @spec offer_oauth(EditorState.t(), non_neg_integer(), MingaAgent.OAuth.ManualReady.t()) ::
+          EditorState.t()
+  def offer_oauth(state, id, %MingaAgent.OAuth.ManualReady{} = ready) do
+    target = ready.target
+
+    prompt = %ConnectionPrompt{
+      workspace_id: id,
+      target: target,
+      operation_ref: ready.operation_ref,
+      kind: {:oauth_manual, ready.worker, ready.flow_ref},
+      authorization_url: ready.url
+    }
+
+    case project_workspace(state, id, target, &UIState.offer_connection_prompt(&1, prompt)) do
+      {:active, updated} ->
+        if current_input?(updated, prompt) do
+          NoticeWorkflow.publish(
+            updated,
+            "Open or copy the OpenAI authorization link from Models and connections, then resume sign-in to paste the redirect."
+          )
+        else
+          updated
+        end
+
+      {:background, updated} ->
+        updated
+
+      :unowned ->
+        request_cancel(prompt)
+        state
+    end
+  end
+
+  @doc "Projects an OAuth failure only to the original workspace."
+  @spec oauth_failed(EditorState.t(), non_neg_integer(), ConnectionTarget.t(), atom()) ::
+          EditorState.t()
+  def oauth_failed(state, id, target, reason) do
+    message =
+      case reason do
+        :account_mismatch ->
+          "OpenAI sign-in used a different account. Sign in with the original account."
+
+        _other ->
+          "Could not complete OpenAI sign-in. Open Models and connections to retry."
+      end
+
+    project_notice(
+      state,
+      id,
+      target,
+      message,
+      :error
+    )
+  end
+
+  @spec offer_prompt(EditorState.t(), ConnectionPrompt.t()) :: EditorState.t()
+  defp offer_prompt(state, %ConnectionPrompt{workspace_id: id, target: target} = prompt) do
     case project_workspace(state, id, target, &UIState.offer_connection_prompt(&1, prompt)) do
       {:active, updated} ->
         maybe_open_prompt(updated, prompt)
@@ -142,6 +272,12 @@ defmodule MingaEditor.Agent.ConnectionSetup do
     project_notice(state, workspace_id, target, "API key saved.", :info)
   end
 
+  @doc "Projects the post-commit OpenAI result to its original conversation."
+  @spec oauth_saved(EditorState.t(), non_neg_integer(), ConnectionTarget.t()) :: EditorState.t()
+  def oauth_saved(state, workspace_id, target) do
+    project_notice(state, workspace_id, target, "OpenAI sign-in saved.", :info)
+  end
+
   @doc "Passes sealed input directly to its private worker, then admits a secret-free join."
   @spec submit(EditorState.t(), ConnectionPrompt.t(), Secret.t()) :: EditorState.t()
   def submit(state, %ConnectionPrompt{} = prompt, secret) do
@@ -153,7 +289,7 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   end
 
   @impl true
-  @spec run(t()) :: {:ok, reference() | :saved} | {:error, term()}
+  @spec run(t()) :: {:ok, reference() | :saved | :open | :copy} | {:error, term()}
   def run(%__MODULE__{
         workspace_id: id,
         target: target,
@@ -165,7 +301,18 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   end
 
   def run(%__MODULE__{intent: {:submit, _prompt, worker, receipt}}) do
-    with {:ok, %ConnectionSnapshot{}} <- ConnectionInput.await(worker, receipt), do: {:ok, :saved}
+    with {:ok, _receipt} <- ConnectionInput.await(worker, receipt), do: {:ok, :saved}
+  end
+
+  def run(%__MODULE__{
+        intent: {:authorization_url, action, %ConnectionPrompt{authorization_url: url}}
+      }) do
+    result = if action == :open, do: Flow.open_browser(url), else: Minga.Clipboard.write(url)
+
+    case result do
+      :ok -> {:ok, action}
+      {:error, _reason} -> {:error, :authorization_link_unavailable}
+    end
   end
 
   @impl true
@@ -179,6 +326,50 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   def render?(outcome), do: Outcome.terminal?(outcome)
 
   @spec apply_result(EditorState.t(), t(), Outcome.value()) :: EditorState.t()
+  defp apply_result(
+         state,
+         %__MODULE__{
+           intent: {:submit, %ConnectionPrompt{kind: {:oauth_manual, _, _}} = prompt, _, _}
+         },
+         {:failed, :invalid_input}
+       ) do
+    updated = offer_prompt(state, prompt)
+
+    if current_input?(updated, prompt),
+      do: NoticeWorkflow.publish(updated, "Paste the authorization redirect URL or code."),
+      else: updated
+  end
+
+  defp apply_result(
+         state,
+         %__MODULE__{
+           intent:
+             {:submit, %ConnectionPrompt{kind: {:oauth_manual, _, _}} = prompt, worker, receipt}
+         },
+         {status, reason}
+       )
+       when status in [:failed, :canceled, :stale] do
+    ConnectionInput.abort(worker, receipt)
+
+    Session.report_oauth_failure(
+      prompt.target.session,
+      prompt.target,
+      prompt.operation_ref,
+      reason
+    )
+
+    state
+  end
+
+  defp apply_result(state, %__MODULE__{intent: {:authorization_url, _, prompt}}, {status, reason})
+       when status in [:failed, :canceled, :stale] do
+    if current_input?(state, prompt) do
+      project_notice(state, prompt.workspace_id, prompt.target, result_message(reason), :error)
+    else
+      state
+    end
+  end
+
   defp apply_result(state, effect, {status, reason})
        when status in [:failed, :canceled, :stale] do
     retire_submission(effect)
@@ -197,6 +388,14 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   defp open_prompt(state, %ConnectionPrompt{kind: {:api_key, provider}} = prompt) do
     PromptUI.open(state, ConnectionPrompt,
       label: "#{String.capitalize(provider)} API key: ",
+      context: prompt,
+      sensitive: true
+    )
+  end
+
+  defp open_prompt(state, %ConnectionPrompt{kind: {:oauth_manual, _, _}} = prompt) do
+    PromptUI.open(state, ConnectionPrompt,
+      label: "OpenAI authorization redirect: ",
       context: prompt,
       sensitive: true
     )
@@ -295,7 +494,7 @@ defmodule MingaEditor.Agent.ConnectionSetup do
     request_cancel(prompt)
   end
 
-  defp retire_submission(%__MODULE__{intent: {:begin, _kind, _owner, _subscriber}}), do: :ok
+  defp retire_submission(%__MODULE__{}), do: :ok
 
   @spec request_cancel(ConnectionPrompt.t()) :: :ok
   defp request_cancel(%ConnectionPrompt{target: target, operation_ref: ref}) do
@@ -408,6 +607,10 @@ defmodule MingaEditor.Agent.ConnectionSetup do
   defp result_message(reason) when reason in [:credential_result_unknown, :input_worker_timeout],
     do:
       "Could not confirm whether the key was saved. Check Models and connections before retrying."
+
+  defp result_message(:authorization_link_unavailable),
+    do:
+      "Could not open or copy the authorization link. Try the other action in Models and connections."
 
   defp result_message(_reason),
     do: "Connection did not finish. Open Models and connections to try again."

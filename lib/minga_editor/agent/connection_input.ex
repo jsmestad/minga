@@ -6,15 +6,16 @@ defmodule MingaEditor.Agent.ConnectionInput do
   """
 
   alias MingaAgent.Credentials.Secret
+  alias MingaAgent.OAuth.Flow
   alias MingaAgent.Session
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
 
   @join_window 5_000
   @await_time 160_000
 
-  @type input_kind :: {:api_key, String.t()}
+  @type input_kind :: {:api_key, String.t()} | {:oauth_manual, pid(), String.t()}
   @type receipt :: reference()
-  @type result :: {:ok, ConnectionSnapshot.t()} | {:error, atom()}
+  @type result :: {:ok, ConnectionSnapshot.t() | :openai} | {:error, atom()}
   @typep input_context :: {ConnectionTarget.t(), reference(), input_kind(), receipt()}
 
   @doc "Starts a supervised holder and delivers the secret directly to it."
@@ -40,7 +41,7 @@ defmodule MingaEditor.Agent.ConnectionInput do
 
     case Task.Supervisor.start_child(task_supervisor, __MODULE__, :run, [owner, context]) do
       {:ok, worker} ->
-        :ok = Session.request_api_key_worker(target.session, target, operation_ref, worker)
+        :ok = bind_input_worker(kind, target, operation_ref, worker)
         send(worker, {:sealed_input, receipt, secret})
         {:ok, worker, receipt}
 
@@ -178,12 +179,12 @@ defmodule MingaEditor.Agent.ConnectionInput do
          secret
        ) do
     receive do
-      {:api_key_worker_binding, ^operation_ref, :ok} ->
+      {:connection_worker_binding, ^operation_ref, :ok} ->
         with :ok <- prepare_model_catalog() do
           Session.commit_api_key(session, target, operation_ref, provider, secret)
         end
 
-      {:api_key_worker_binding, ^operation_ref, {:error, reason}} ->
+      {:connection_worker_binding, ^operation_ref, {:error, reason}} ->
         {:error, reason}
 
       {:connection_cancelled, ^operation_ref} ->
@@ -195,6 +196,19 @@ defmodule MingaEditor.Agent.ConnectionInput do
     :exit, {:timeout, _call} -> {:error, :credential_result_unknown}
     :exit, _reason -> {:error, :session_unavailable}
   end
+
+  defp submit(
+         {_target, ref, {:oauth_manual, acquisition, flow_ref}, _receipt},
+         secret
+       ),
+       do: Flow.complete_connection(acquisition, ref, flow_ref, secret)
+
+  @spec bind_input_worker(input_kind(), ConnectionTarget.t(), reference(), pid()) :: :ok
+  defp bind_input_worker({:api_key, _provider}, target, ref, worker),
+    do: Session.request_connection_worker(target.session, target, ref, worker)
+
+  defp bind_input_worker({:oauth_manual, _acquisition, _flow_ref}, _target, _ref, _worker),
+    do: :ok
 
   @spec prepare_model_catalog() :: :ok | {:error, :model_catalog_unavailable}
   defp prepare_model_catalog do

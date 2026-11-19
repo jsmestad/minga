@@ -87,7 +87,7 @@ defmodule Minga.Buffer.FileMutation do
       suffix_start = start + old_size
 
       prepared =
-        IO.iodata_to_binary([
+        :binary.list_to_bin([
           binary_part(content, 0, start),
           new,
           binary_part(content, suffix_start, byte_size(content) - suffix_start)

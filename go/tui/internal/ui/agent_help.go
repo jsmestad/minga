@@ -22,15 +22,15 @@ func (m Model) agentHelp() (protocol.AgentHelp, bool) {
 
 // This is a placement query, never an inferred editor/body rectangle or a focus decision.
 // Modal ordering remains the existing compositor's responsibility.
-func (m Model) activeAgentHelpRect() (generated.Rect, bool) {
+func (m Model) activeAgentHelpRect() (uiRect, bool) {
 	if help, ok := m.agentHelp(); !ok || !help.Visible {
-		return generated.Rect{}, false
+		return uiRect{}, false
 	}
 	winner, ok := m.overlayWinner()
 	if !ok || winner.surfaceID != surfaceIDAgentHelp {
-		return generated.Rect{}, false
+		return uiRect{}, false
 	}
-	rect, ok := m.surfacePlacementFor(surfaceIDAgentHelp)
+	rect, ok := m.surfaceScreenRect(surfaceIDAgentHelp)
 	return rect, ok && rect.Width > 0 && rect.Height > 0
 }
 
@@ -60,11 +60,11 @@ func (m Model) agentHelpContent(help protocol.AgentHelp, width int) []string {
 }
 
 func (m Model) renderAgentHelp(help protocol.AgentHelp) []string {
-	rect, ok := m.surfacePlacementFor(surfaceIDAgentHelp)
+	rect, ok := m.surfaceScreenRect(surfaceIDAgentHelp)
 	if !ok || rect.Width == 0 || rect.Height == 0 {
 		return nil
 	}
-	width, height := int(rect.Width), int(rect.Height)
+	width, height := rect.Width, rect.Height
 	style := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().PopupSurface())
 	closeLabel := "[Close Help]"
 	if width < len(closeLabel) {
@@ -100,18 +100,18 @@ func (m *Model) scrollAgentHelp(delta int) {
 	m.agentHelpScroll = min(max(m.agentHelpScroll+delta, 0), m.maxAgentHelpScroll(rect))
 }
 
-func (m Model) maxAgentHelpScroll(rect generated.Rect) int {
-	rows := int(rect.Height) - 1
+func (m Model) maxAgentHelpScroll(rect uiRect) int {
+	rows := rect.Height - 1
 	if rows <= 0 {
 		return 0
 	}
 	help, _ := m.agentHelp()
-	return max(len(m.agentHelpContent(help, int(rect.Width)))-rows, 0)
+	return max(len(m.agentHelpContent(help, rect.Width))-rows, 0)
 }
 
 func (m *Model) agentHelpWheel(mouse tea.Mouse) bool {
 	rect, ok := m.activeAgentHelpRect()
-	if !ok || !pointInHelpRect(rect, mouse.X, mouse.Y) {
+	if !ok || !rect.Contains(mouse.X, mouse.Y) {
 		return false
 	}
 	delta := bottomPanelWheelLines
@@ -122,15 +122,10 @@ func (m *Model) agentHelpWheel(mouse tea.Mouse) bool {
 	return true
 }
 
-func pointInHelpRect(rect generated.Rect, x, y int) bool {
-	return x >= int(rect.Col) && x < int(rect.Col)+int(rect.Width) &&
-		y >= int(rect.Row) && y < int(rect.Row)+int(rect.Height)
-}
-
 func (m Model) agentHelpMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	rect, ok := m.activeAgentHelpRect()
 	mouse := msg.Mouse()
-	if !ok || !pointInHelpRect(rect, mouse.X, mouse.Y) {
+	if !ok || !rect.Contains(mouse.X, mouse.Y) {
 		return nil, false
 	}
 	if zone := m.zones.Get(zoneIDAgentHelpClose); zone != nil && zone.InBounds(msg) {
@@ -157,9 +152,9 @@ func (m *Model) presentAgentHelpKey(msg tea.KeyPressMsg, component string) bool 
 		case tea.KeyUp, 'k':
 			m.scrollAgentHelp(-1)
 		case tea.KeyPgDown:
-			m.scrollAgentHelp(max(int(rect.Height)-1, 1))
+			m.scrollAgentHelp(max(rect.Height-1, 1))
 		case tea.KeyPgUp:
-			m.scrollAgentHelp(-max(int(rect.Height)-1, 1))
+			m.scrollAgentHelp(-max(rect.Height-1, 1))
 		case tea.KeyHome:
 			m.scrollAgentHelp(-m.agentHelpScroll)
 		case tea.KeyEnd:

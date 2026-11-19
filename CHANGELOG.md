@@ -6,10 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Added
+
+- `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
+
 ### Changed
 
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.
 - Models and connections opens a separate masked API key prompt from the Agent workspace. Saving or canceling does not send or replace the draft. `/auth <provider>` opens the same prompt and no longer accepts a key on the command line.
+- Local ChatGPT sign-in is available from Models and connections and `/login`. Cancel stops the current authorization attempt without changing credentials or the draft. The manual fallback uses masked input.
 - On macOS, pickers open below the window toolbar so the search field and results do not overlap the window controls. The selected row uses readable text on the selection background.
 - On narrow terminals, status notices stay readable when optional file and cursor information does not fit.
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
@@ -84,6 +89,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - macOS agent-workspace previews now capture readable, frozen production views at narrow and default widths, with full-window images, bounded failures and build-input receipts. A separate procedure covers real native keyboard and mouse evidence.
 - Native release preparation selects a Python build published for every host, fetches Linux prerequisites from the authenticated version-locked package index, reports bounded command failures and retains isolated build logs. CI checks changed release prerequisites on all four native hosts before the aggregate gate can pass.
 - Go terminal updates no longer erase the workspace header or retain trailing status text after a shorter replacement. Cursor presentation uses Bubble Tea's typed cursor metadata instead of embedding cursor-position controls in rendered cells.
+- The terminal reports the editor grid below its header, so wheel scrolling can show the final row of a windowed buffer instead of leaving it under the status bar.
 - The Go protocol reader skips valid length-framed unknown UI opcodes without losing later commands in the same committed frame, while still rejecting truncated payloads and unsupported required commands.
 - Standalone candidate builds now qualify a pinned native OTP/ERTS source input instead of requesting unavailable Burrito runtime archives. Build receipts, source hashes and final ERTS/NIF ABI checks fail closed without a host-runtime or download fallback.
 - The native streaming contract fixture supplies explicit synthetic SDK cost and checks completed usage and continuation, so its terminal-event deadline does not depend on cold pricing-catalog initialization.

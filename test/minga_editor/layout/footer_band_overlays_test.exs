@@ -104,6 +104,12 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       assert OverlayBand.rect({0, 0, 80, 9}, :max) == {5, 0, 80, 4}
     end
 
+    test "a tiny grid keeps every overlay row within the viewport" do
+      assert OverlayBand.rect({0, 0, 20, 0}, :max) == nil
+      assert OverlayBand.rect({0, 0, 20, 1}, :max) == {0, 0, 20, 1}
+      assert OverlayBand.rect({4, 0, 20, 3}, :max) == {4, 0, 20, 3}
+    end
+
     test "a content height smaller than the clamp shrinks the band to fit content" do
       # 3 content lines < clamp (8 for 24 rows): band is 3 tall.
       assert OverlayBand.rect({0, 0, 80, 24}, 3) == {21, 0, 80, 3}
