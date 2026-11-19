@@ -382,7 +382,7 @@ defmodule MingaAgent.Config do
       max_tokens: get(:agent_max_tokens, 16_384)
     }
 
-    case MingaAgent.ModelResolver.candidates(config: config) do
+    case MingaAgent.ModelResolver.candidates(config: config, codex_models: {:error, :not_loaded}) do
       [%MingaAgent.ModelCandidate{selection: selection} | _rest] ->
         MingaAgent.ModelSelection.id(selection)
 
