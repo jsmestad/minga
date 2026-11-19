@@ -90,7 +90,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     def init(selection), do: {:ok, selection}
 
     @impl GenServer
-    def handle_call({:load_session, _session_id}, _from, selection),
+    def handle_call({:load_session, _session_id, nil}, _from, selection),
       do: {:reply, :ok, selection}
 
     def handle_call(:model_selection, _from, selection),
