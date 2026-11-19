@@ -1,4 +1,5 @@
 Code.require_file(Path.expand("../../mix/release_erts.ex", __DIR__))
+Code.require_file(Path.expand("../../mix/tasks/release.tui.ex", __DIR__))
 
 defmodule Minga.ReleaseERTSTest do
   # Receipt selection is a process-global environment input.
