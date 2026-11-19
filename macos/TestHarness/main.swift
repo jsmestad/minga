@@ -258,7 +258,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             }
         ]
 
-    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary):
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer):
         let result: [String: Any] = [
             "type": "gui_agent_chat",
             "visible": visible,
@@ -272,6 +272,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "prompt_vim_mode": Int(promptVimMode.rawValue),
             "prompt_visible_rows": Int(promptVisibleRows),
             "has_completion": promptCompletion != nil,
+            "draft_attachment_count": Int(draftAttachmentCount),
+            "draft_attachment_offer": draftAttachmentOffer,
             "pending_tool_name": pendingToolName ?? "",
             "pending_tool_summary": pendingToolSummary
         ]

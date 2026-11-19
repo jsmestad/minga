@@ -95,7 +95,7 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32)
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String)
+    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0)
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
@@ -1559,6 +1559,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var promptCompletion: Wire.PromptCompletion? = nil
         var pendingToolName: String? = nil
         var pendingToolSummary: String = ""
+        var draftAttachmentCount: UInt8 = 0
+        var draftAttachmentOffer: UInt64 = 0
 
         for _ in 0..<chatSectionCount {
             guard data.count >= chatPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1635,13 +1637,18 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     pendingToolSummary = try decodeUTF8(data[pp..<(pp + psLen)]) ?? ""
                 }
 
+            case 0x0A:
+                guard csLen == 9 else { break }
+                draftAttachmentCount = data[csStart]
+                draftAttachmentOffer = try readU64(data, csStart + 1)
+
             default: break
             }
 
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer), chatPos - offset)
 
     case .guiAgentHelp:
         guard rest + 4 <= data.endIndex else { throw ProtocolDecodeError.malformed }

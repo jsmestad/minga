@@ -60,6 +60,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     %Command{name: "resume", description: "Resume a saved agent session"},
     %Command{name: "sessions", description: "Browse and switch between sessions"},
     %Command{name: "tasks", description: "Inspect the conversation checklist"},
+    %Command{name: "attachments", description: "Inspect unsent Agent draft attachments"},
     %Command{
       name: "auth",
       description: "Manage API keys: /auth, /auth <provider>, /auth revoke <provider>"
@@ -474,6 +475,9 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   defp dispatch(state, "tasks", _args, _config_dir),
     do: {:ok, MingaEditor.UI.Picker.AgentChecklistSource.open(state)}
+
+  defp dispatch(state, "attachments", _args, _config_dir),
+    do: {:ok, MingaEditor.UI.Picker.AgentDraftAttachmentSource.open(state)}
 
   defp dispatch(state, "auth", args, _config_dir), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args, _config_dir), do: {:ok, do_instructions(state)}

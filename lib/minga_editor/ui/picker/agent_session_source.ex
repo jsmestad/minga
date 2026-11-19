@@ -21,6 +21,9 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   alias MingaEditor.Commands.Agent
   alias MingaEditor.Agent.DraftWorkflow
 
+  @typep saved_kind :: :disk | :draft_only | :legacy_import
+  @typep saved_origin :: {non_neg_integer(), pid(), String.t()}
+
   @impl true
   @spec title() :: String.t()
   def title, do: "Sessions"
@@ -63,49 +66,60 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     Agent.connect_remote_session(state, server_name, session_id, remote_pid, token)
   end
 
-  def on_select(%Item{id: {session_id, kind}}, state) when kind in [:disk, :draft_only] do
-    with session_pid when is_pid(session_pid) <-
-           MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
+  def on_select(
+        %Item{id: {session_id, {kind, {owner, session, origin_id}}}},
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
+      )
+      when kind in [:disk, :draft_only, :legacy_import] do
+    with ^owner <- TabBar.active_workspace_id(tab_bar),
+         ^session <- MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
+         true <- current_tab_session?(origin_id, tab_bar.active_id, session),
          :ok <- DraftWorkflow.before_reopen(state, session_id) do
-      case Session.load_session(session_pid, session_id) do
-        :ok ->
-          DraftWorkflow.after_reopen(state, session_pid, session_id)
-
-        {:error, _reason} ->
-          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-            state,
-            "Could not open saved Agent session."
-          )
-      end
+      reopen_saved(state, session, origin_id, session_id, kind)
     else
       {:error, updated} -> updated
-      nil -> state
+      _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
     end
   end
 
-  def on_select(%Item{id: {session_id, :legacy_import}}, state) do
-    with session_pid when is_pid(session_pid) <-
-           MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
-         :ok <- DraftWorkflow.before_reopen(state, session_id) do
-      case Session.import_legacy_session(session_pid, session_id) do
-        :ok ->
-          DraftWorkflow.after_reopen(state, session_pid, session_id)
+  def on_select(%Item{id: {_id, {kind, nil}}}, state)
+      when kind in [:disk, :draft_only, :legacy_import],
+      do: NoticeWorkflow.publish(state, "Open an Agent workspace, then reopen Sessions.")
 
-        {:error, reason} ->
-          Minga.Log.warning(
-            :agent,
-            "[Agent.SessionSource] legacy import failed for #{session_id}: #{inspect(reason)}"
-          )
+  @spec reopen_saved(term(), pid(), String.t(), String.t(), saved_kind()) :: term()
+  defp reopen_saved(state, session, origin_id, id, kind) do
+    case restore_saved(session, id, origin_id, kind) do
+      :ok ->
+        DraftWorkflow.after_reopen(state, session, id)
 
-          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-            state,
-            legacy_import_failure_message(reason)
-          )
-      end
-    else
-      {:error, updated} -> updated
-      nil -> state
+      {:error, :stale_session} ->
+        NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
+
+      {:error, :restore_unconfirmed} ->
+        NoticeWorkflow.publish(state, "Could not confirm that the saved Agent session opened.")
+
+      {:error, reason} when kind == :legacy_import ->
+        Minga.Log.warning(
+          :agent,
+          "[Agent.SessionSource] legacy import failed for #{id}: #{inspect(reason)}"
+        )
+
+        NoticeWorkflow.publish(state, legacy_import_failure_message(reason))
+
+      {:error, _reason} ->
+        NoticeWorkflow.publish(state, "Could not open saved Agent session.")
     end
+  end
+
+  @spec restore_saved(pid(), String.t(), String.t(), saved_kind()) :: :ok | {:error, term()}
+  defp restore_saved(session, id, origin_id, kind) do
+    case kind do
+      :legacy_import -> Session.import_legacy_session(session, id, origin_id)
+      _saved -> Session.load_session(session, id, origin_id)
+    end
+  catch
+    :exit, {:timeout, _call} -> {:error, :restore_unconfirmed}
+    :exit, _reason -> {:error, :stale_session}
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
@@ -241,16 +255,28 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @spec disk_candidates(Context.t()) :: [Item.t()]
   defp disk_candidates(ctx) do
+    origin = saved_origin(ctx)
+
     ctx
     |> session_store_dir()
     |> SessionStore.list_recoverable()
-    |> Enum.map(&recovery_candidate/1)
+    |> Enum.map(&recovery_candidate(&1, origin))
   end
 
-  @spec recovery_candidate(SessionStore.recovery_entry()) :: Item.t()
-  defp recovery_candidate({:conversation, meta}) do
+  @spec saved_origin(Context.t()) :: saved_origin() | nil
+  defp saved_origin(%Context{tab_bar: %TabBar{} = tab_bar, agent_session: session})
+       when is_pid(session) do
+    {TabBar.active_workspace_id(tab_bar), session, Session.session_id(session)}
+  catch
+    :exit, _reason -> nil
+  end
+
+  defp saved_origin(_context), do: nil
+
+  @spec recovery_candidate(SessionStore.recovery_entry(), saved_origin() | nil) :: Item.t()
+  defp recovery_candidate({:conversation, meta}, origin) do
     %Item{
-      id: {meta.id, disk_candidate_kind(meta.continuation_kind)},
+      id: {meta.id, {disk_candidate_kind(meta.continuation_kind), origin}},
       label: disk_label(meta),
       description: disk_description(meta),
       annotation: format_turn_count(meta.turn_count),
@@ -258,9 +284,9 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     }
   end
 
-  defp recovery_candidate({:draft_only, id, timestamp}) do
+  defp recovery_candidate({:draft_only, id, timestamp}, origin) do
     %Item{
-      id: {id, :draft_only},
+      id: {id, {:draft_only, origin}},
       label: "Unsent Agent draft",
       description: "No conversation yet · #{format_disk_timestamp(timestamp)}"
     }

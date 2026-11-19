@@ -34,6 +34,7 @@ public struct AgentPromptView: View {
     public enum Action: Equatable, Sendable {
         case submit
         case abort
+        case attachments
     }
 
     public init(state: AgentChatState, isInsertMode: Bool, sendAction: ViewActionHandler<Action>?, maximumHeight: CGFloat = 0) {
@@ -99,6 +100,23 @@ public struct AgentPromptView: View {
     private var promptArea: some View {
         HStack(spacing: Spacing.md) {
             promptCapsule
+            Button {
+                sendAction?(.attachments)
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "paperclip")
+                    if state.draftAttachmentCount > 0 {
+                        Text(state.draftAttachmentCount, format: .number)
+                            .font(.caption.monospacedDigit())
+                    }
+                }
+                .frame(minWidth: 24, minHeight: 24)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.agentInputBorder)
+            .help("Draft attachments")
+            .accessibilityLabel("Draft attachments")
+            .accessibilityValue("\(state.draftAttachmentCount)")
             AgentPromptActionButton(state: state, sendAction: sendAction)
         }
         .padding(.horizontal, Spacing.lg)

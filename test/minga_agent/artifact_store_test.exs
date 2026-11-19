@@ -7,10 +7,30 @@ defmodule MingaAgent.ArtifactStoreTest do
   alias MingaAgent.ArtifactStore.Limits
   alias MingaAgent.ArtifactStore.Paths
   alias MingaAgent.ArtifactStore.CaptureSpec
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.Tool.Output.Range
   alias MingaAgent.Tool.Output.Reference
 
   @moduletag :tmp_dir
+
+  test "a composer selection reads its exact retained text only with the captured revision and owner",
+       %{tmp_dir: root} do
+    {quota, store} = start_pair(root, "composer-selection")
+    other = start_store(root, quota, "other-composer", {:store, make_ref()})
+    text = "selected e\u0301 and 日本語\nwith final newline\n"
+
+    assert {:ok, {:selection, source, label, _revision, captured} = attachment, _pin} =
+             DraftAttachment.capture_selection(store, "test.ex", "test.ex selection", text)
+
+    assert {:ok, ^text} = DraftAttachment.read_text(store, attachment)
+    assert {:error, :unauthorized} = DraftAttachment.read_text(other, attachment)
+
+    assert {:error, :invalid_attachment_snapshot} =
+             DraftAttachment.read_text(
+               store,
+               {:selection, source, label, "other-revision", captured}
+             )
+  end
 
   test "fetches exact binary, Unicode byte slices, and indexed item pages", %{tmp_dir: root} do
     {_quota, store} = start_pair(root, "exact-session")

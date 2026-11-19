@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
+  alias MingaEditor.Agent.DraftSave
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
@@ -86,6 +87,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_cursor_col: cursor_col,
       prompt_vim_mode: ctx.workspace.editing.mode,
       prompt_visible_rows: visible_rows,
+      draft_attachment_count: attachment_count(agent_ui.draft_save),
+      draft_attachment_offer: attachment_offer(agent_ui.draft_save),
       prompt_completion: build_prompt_completion(panel),
       input_focused:
         panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
@@ -95,6 +98,14 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       transcript_epoch: TranscriptProjection.presentation_epoch(panel.transcript, session)
     }
   end
+
+  @spec attachment_count(DraftSave.t() | nil) :: non_neg_integer()
+  defp attachment_count(%DraftSave{attachments: attachments}), do: length(attachments)
+  defp attachment_count(nil), do: 0
+
+  @spec attachment_offer(DraftSave.t() | nil) :: pos_integer() | nil
+  defp attachment_offer(%DraftSave{offer: offer}), do: offer
+  defp attachment_offer(nil), do: nil
 
   @spec retained_scope(term(), TraditionalState.t(), pid()) :: RetainedOutputTarget.scope() | nil
   defp retained_scope(%{target: %{session: session, epoch: epoch}}, shell_state, session) do
