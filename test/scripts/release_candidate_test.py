@@ -147,6 +147,23 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.assertNotIn("handle", self.manifest)
         self.assertLess((self.root / "receipt.json").stat().st_size, 8192)
 
+    def test_rolling_homebrew_round_trip_cannot_substitute_a_stable_inventory(self):
+        self.context.update(channel="homebrew", version="0.1.0-dev.10", source_sha=self.context["workflow_sha"])
+        self.metadata.clear()
+        names = ("Minga.dmg", "minga_macos_aarch64.tar.gz")
+        for name in names:
+            self.builds[name]["context"] = dict(self.context)
+            self.add_artifact(name, [self.entries[name][0], (name + ".build.json", json.dumps(self.builds[name]).encode())])
+        self.call("checksums", "--output", str(self.root / "SHA256SUMS.txt"), success=True)
+        self.add_artifact("checksums", [("SHA256SUMS.txt", (self.root / "SHA256SUMS.txt").read_bytes())])
+        self.call("create", "--output", str(self.root / "manifest.json"), success=True)
+        self.install_manifest((self.root / "manifest.json").read_bytes())
+        self.verify(success=True)
+        self.assertEqual(self.manifest["schema_version"], 3)
+        self.assertEqual([item["filename"] for item in self.manifest["payloads"]], list(names))
+        del self.context["channel"]
+        self.reject("missing, duplicate or unexpected artifacts")
+
     def test_verifies_historical_wrapper_manifest_without_creating_one(self):
         # Reproduce the previous on-wire manifest and checksum order independently
         # of today's creator or its supported-inventory map.

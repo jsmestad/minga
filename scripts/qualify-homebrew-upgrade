@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Run on a disposable Mac with a clean Homebrew installation.
+set -euo pipefail
+
+if [[ $# != 2 ]]; then
+  echo 'usage: qualify-homebrew-upgrade PREVIOUS_CANDIDATE NEXT_CANDIDATE' >&2
+  exit 64
+fi
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+previous=$(cd "$1" && pwd -P)
+next=$(cd "$2" && pwd -P)
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_DEVELOPER=1 HOMEBREW_NO_ANALYTICS=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_AUTOREMOVE=1
+export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+brew_version=$(brew --version)
+brew_version=${brew_version#Homebrew }
+if [[ $(printf '%s\n' 7.0.0 "$brew_version" | sort -V | head -1) != 7.0.0 ]]; then
+  echo 'Homebrew 7 or newer is required for the rehearsal.' >&2
+  exit 1
+fi
+
+tap=minga-rehearsal/packages
+formula=$tap/minga
+cask=$tap/minga-mac
+installed_formulae=$(brew list --formula --versions)
+installed_casks=$(brew list --cask)
+installed_taps=$(brew tap)
+if grep -Eq '^minga( |$)' <<< "$installed_formulae" ||
+   grep -Fxq 'minga-mac' <<< "$installed_casks" ||
+   grep -Fxq "$tap" <<< "$installed_taps"; then
+  echo 'Use a clean machine: Minga or the rehearsal tap already exists.' >&2
+  exit 1
+fi
+
+[[ $(uname -m) == arm64 ]] || { echo 'Apple Silicon is required.' >&2; exit 1; }
+archive=minga_macos_aarch64.tar.gz
+
+sandbox=$(mktemp -d)
+export HOMEBREW_CACHE="$sandbox/cache" XDG_CONFIG_HOME="$sandbox/config"
+cleanup() {
+  local result=$1 tidy=0 installed
+  trap - EXIT
+  if [[ -n ${tap_path:-} ]]; then
+    if brew list --cask "$cask" >/dev/null 2>&1; then brew uninstall --cask "$cask" || tidy=1; fi
+    if brew list --formula "$formula" >/dev/null 2>&1; then brew uninstall --force --formula "$formula" || tidy=1; fi
+    installed=$(brew list --formula --versions) || tidy=1
+    if grep -Eq '^minga( |$)' <<< "$installed"; then tidy=1; fi
+    installed=$(brew list --cask) || tidy=1
+    if grep -Fxq 'minga-mac' <<< "$installed"; then tidy=1; fi
+    if [[ $tidy == 0 ]]; then brew untap "$tap" || tidy=1; fi
+    if [[ $tidy != 0 ]]; then
+      echo "Rehearsal cleanup incomplete. Inspect the disposable tap $tap." >&2
+      exit 1
+    fi
+  fi
+  rm -rf "$sandbox"
+  return "$result"
+}
+trap 'cleanup "$?"' EXIT
+
+stage_verified_inputs() {
+  local source=$1 candidate=$2 receipt version name expected actual generated
+  mkdir "$candidate"
+  receipt="$candidate/verification-receipt.json"
+  cp "$source/verification-receipt.json" "$receipt"
+  version=$(jq -er 'select(.result == "verified") | .context.version' "$receipt")
+  jq -e '.handle | (.manifest_artifact_id | type == "number" and . > 0) and
+         (.manifest_sha256 | test("^[a-f0-9]{64}$"))' "$receipt" >/dev/null
+  for name in "$archive" Minga.dmg; do
+    cp "$source/$name" "$candidate/$name"
+    expected=$(jq -er --arg name "$name" '[.payloads[] | select(.filename == $name)] |
+      select(length == 1) | .[0] | [.sha256, .size] | @tsv' "$receipt")
+    actual=$(shasum -a 256 < "$candidate/$name")
+    actual="${actual%% *}"$'\t'"$(/usr/bin/stat -f %z "$candidate/$name")"
+    if [[ $actual != "$expected" ]]; then
+      printf 'Payload %s does not match the independent receipt for %s\n' "$name" "$version" >&2
+      return 1
+    fi
+  done
+  generated=$(mktemp -d "$sandbox/recipes.XXXXXX")
+  "$script_dir/render-tui-formula" --version "$version" \
+    --arm64 "$candidate/$archive" \
+    --dmg "$candidate/Minga.dmg" --output "$generated"
+  cmp "$generated/minga.rb" "$source/minga.rb"
+  cmp "$generated/minga-mac.rb" "$source/minga-mac.rb"
+  mv "$generated/"*.rb "$candidate/"
+}
+
+stage_verified_inputs "$previous" "$sandbox/previous"
+stage_verified_inputs "$next" "$sandbox/next"
+previous="$sandbox/previous"
+next="$sandbox/next"
+first_version=$(jq -er .context.version "$previous/verification-receipt.json")
+next_version=$(jq -er .context.version "$next/verification-receipt.json")
+[[ $first_version != "$next_version" ]]
+handles=$(jq -c .handle "$previous/verification-receipt.json" "$next/verification-receipt.json")
+mkdir "$sandbox/apps"
+brew tap-new --no-git "$tap"
+tap_path=$(brew --repository "$tap")
+brew trust --tap "$tap"
+mkdir -p "$tap_path/Formula" "$tap_path/Casks"
+
+stage() {
+  local candidate=$1 formula_cache cask_cache
+  cp "$candidate/minga.rb" "$tap_path/Formula/minga.rb"
+  formula_cache=$(brew --cache --formula --build-from-source "$formula")
+  [[ $formula_cache == "$HOMEBREW_CACHE"/* ]]
+  mkdir -p "$(dirname "$formula_cache")"
+  cp "$candidate/$archive" "$formula_cache"
+  cp "$candidate/minga-mac.rb" "$tap_path/Casks/minga-mac.rb"
+  cask_cache=$(brew --cache --cask "$cask")
+  [[ $cask_cache == "$HOMEBREW_CACHE"/* ]]
+  mkdir -p "$(dirname "$cask_cache")"
+  cp "$candidate/Minga.dmg" "$cask_cache"
+}
+
+check_installed() {
+  local candidate=$1 version actual app
+  version=$(jq -er .context.version "$candidate/verification-receipt.json")
+  actual=$("$(brew --prefix)/bin/minga" --version)
+  [[ $actual == "minga $version" ]]
+  brew test "$formula"
+  app="$sandbox/apps/Minga.app"
+  codesign --verify --deep --strict "$app"
+  spctl --assess --type execute "$app"
+  actual=$(MINGA_APP_PATH="$app" "$app/Contents/Resources/bin/minga-tui" --version)
+  [[ $actual == "minga $version" ]]
+}
+
+stage "$previous"
+brew install --formula "$formula"
+brew install --cask --appdir="$sandbox/apps" "$cask"
+check_installed "$previous"
+
+stage "$next"
+brew upgrade --formula "$formula"
+brew upgrade --cask --appdir="$sandbox/apps" "$cask"
+check_installed "$next"
+
+cleanup 0
+printf 'Homebrew install and upgrade checked: %s -> %s (%s)\n' "$first_version" "$next_version" "$(uname -m)"
+printf '%s\n' "$handles"

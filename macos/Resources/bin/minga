@@ -153,13 +153,16 @@ EOF
 }
 
 show_version() {
-  local app_path version
+  local app_path erts version=""
   app_path=$(resolve_app 2>/dev/null) || {
     echo "minga (version unknown, Minga.app not found)"
     return
   }
-  version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app_path/Contents/Info.plist" 2>/dev/null || echo "unknown")
-  echo "minga $version"
+  # Mix writes start_erl.data without a newline.
+  if [[ -r "$app_path/Contents/Resources/release/releases/start_erl.data" ]]; then
+    read -r erts version < "$app_path/Contents/Resources/release/releases/start_erl.data" || :
+  fi
+  echo "minga ${version:-unknown}"
 }
 
 absolute_path() {

@@ -124,7 +124,7 @@ def single(paths, description):
     return paths[0]
 
 
-def check(release, target, app=None):
+def check(release, target, app=None, *, rolling_version=None):
     release = release.resolve(strict=True)
     if not release.is_dir():
         raise ValueError(f"Not a release directory: {release}")
@@ -153,6 +153,8 @@ def check(release, target, app=None):
         raise ValueError("Release metadata does not match packaged ERTS")
     if priv.parent.name != "minga-" + app_version:
         raise ValueError("Release metadata does not match packaged application")
+    if rolling_version is not None and (app is None or rolling_version != app_version):
+        raise ValueError("Rolling GUI version differs from embedded release")
     require_file(single(release.glob("releases/*/start.boot"), "release boot file"))
     require_file(single(release.glob("lib/exqlite-*/priv/sqlite3_nif.so"), "SQLite NIF"))
     require_file(priv / "tutor.txt")
@@ -171,7 +173,12 @@ def check(release, target, app=None):
     if app:
         with (app / "Contents/Info.plist").open("rb") as stream:
             info = plistlib.load(stream)
-        if info.get("CFBundleShortVersionString") != app_version:
+        if rolling_version is not None:
+            version = re.fullmatch(r"(\d+\.\d+\.\d+)-dev\.([1-9][0-9]*)", rolling_version)
+            if (not version or info.get("CFBundleShortVersionString") != version[1]
+                    or info.get("CFBundleVersion") != version[2]):
+                raise ValueError("GUI app metadata differs from rolling release")
+        elif info.get("CFBundleShortVersionString") != app_version:
             raise ValueError("GUI app version differs from embedded release")
         if info.get("CFBundleExecutable") != "Minga":
             raise ValueError("Unexpected GUI executable identity")
@@ -370,12 +377,14 @@ def main():
     host_arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64"}.get(platform.machine(), "unsupported")
     parser.add_argument("--target", choices=TARGETS, default=f"{host_os}_{host_arch}")
     parser.add_argument("--app", type=Path)
+    parser.add_argument("--rolling-version")
     parser.add_argument("--runtime-receipt", type=Path)
     args = parser.parse_args()
     try:
         if args.target not in TARGETS:
             raise ValueError("Unsupported native host; pass an explicit supported --target")
-        release, erts, native = check(Path(args.release_dir), args.target, args.app)
+        release, erts, native = check(Path(args.release_dir), args.target, args.app,
+                                      rolling_version=args.rolling_version)
         if args.runtime_receipt is not None:
             _check_runtime_abi(release, erts, native, args.target, args.runtime_receipt)
     except (OSError, ValueError) as error:
