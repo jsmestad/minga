@@ -53,6 +53,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
     case {:os.type(), :erlang.system_info(:system_architecture) |> List.to_string()} do
       {{:unix, :darwin}, "aarch64" <> _rest} -> ["-Dtarget=aarch64-macos.15.0"]
       {{:unix, :darwin}, "x86_64" <> _rest} -> ["-Dtarget=x86_64-macos.15.0"]
+      {{:unix, :linux}, _arch} -> ["-Dcpu=baseline"]
       _other -> []
     end
   end

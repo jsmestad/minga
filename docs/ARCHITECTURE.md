@@ -1096,7 +1096,7 @@ Honest accounting of what this architecture costs:
 | Trade-off | Why we accept it |
 |-----------|-----------------|
 | **Serialization overhead** (every render frame crosses a process boundary) | Frames are semantic and delta-encoded inside a transaction, so a typical keystroke emits only the rows that changed, not a full repaint. Even a full keyframe is a few KB; steady-state editing is well under that. Trivial for a pipe, and the two-tier caches keep both sides from re-doing the work. |
-| **Multiple binaries to ship** (Elixir release + platform frontend + parser) | The BEAM release packages as a Burrito single binary; the macOS GUI ships as a `.app` bundle and Linux as Flatpak/AppImage; the terminal frontend is a Go binary and the parser is the Zig `minga-parser`, both spawned as Ports. |
+| **Multiple binaries to ship** (Elixir release + platform frontend + parser) | Standalone TUI archives ship a native Mix release with its runtime and helper binaries. The macOS GUI embeds a Mix release in its `.app` bundle. The Go terminal frontend and Zig parser run as Ports. |
 | **BEAM startup time** (the Erlang VM isn't instant) | ~200ms cold start. Acceptable for an editor you keep open. |
 | **Memory overhead** (the BEAM VM has a baseline footprint) | ~30MB for the VM + processes. Comparable to Neovim with plugins. |
 | **Latency floor** (message passing adds microseconds vs direct function calls) | Measured end-to-end keystroke latency is ~1.0–1.1ms p50 locally (`bench/baselines/keystroke_latency.json`), below human perception. The relative CI gate keeps it from regressing. See [Latency](#latency-measured-not-asserted). |

@@ -22,8 +22,6 @@ env:
   OTP_VERSION: "29.1.2"
   GO_VERSION: "1.26.4"
   NATIVE_ZIG_VERSION: "0.16.0"
-  # Qualified independently against the locked Burrito.get_versions/0 contract.
-  BURRITO_ZIG_VERSION: "0.16.0"
   RETENTION_DAYS: 14
 
 jobs:
@@ -59,6 +57,10 @@ jobs:
           git show "$SOURCE_SHA:mix.exs" > "$RUNNER_TEMP/source-mix.exs"
           git show "$SOURCE_SHA:.tool-versions" > "$RUNNER_TEMP/source-tool-versions"
           git show "$SOURCE_SHA:scripts/release_erts_sources.json" > "$RUNNER_TEMP/source-erts-inputs.json"
+          if ! cmp -s scripts/release_erts_sources.json "$RUNNER_TEMP/source-erts-inputs.json"; then
+            echo "Selected source does not match the trusted native release runtime pins" >&2
+            exit 1
+          fi
           python_version=$(jq -er '.build_python_version | select(type == "string")' "$RUNNER_TEMP/source-erts-inputs.json")
           [[ "$python_version" =~ ^3\.[0-9]+\.[0-9]+$ ]]
           python3 - <<'PY'
@@ -89,28 +91,28 @@ jobs:
             arch: x86_64
             uname: x86_64
             goarch: amd64
-            filename: minga_linux_x86_64
+            filename: minga_linux_x86_64.tar.gz
             gui: false
           - runner: ubuntu-24.04-arm
             os: linux
             arch: aarch64
             uname: aarch64
             goarch: arm64
-            filename: minga_linux_aarch64
+            filename: minga_linux_aarch64.tar.gz
             gui: false
           - runner: macos-15
             os: macos
             arch: aarch64
             uname: arm64
             goarch: arm64
-            filename: minga_macos_aarch64
+            filename: minga_macos_aarch64.tar.gz
             gui: false
           - runner: macos-15-intel
             os: macos
             arch: x86_64
             uname: x86_64
             goarch: amd64
-            filename: minga_macos_x86_64
+            filename: minga_macos_x86_64.tar.gz
             gui: false
           - runner: macos-15
             os: macos
@@ -198,10 +200,23 @@ jobs:
           python3 -c 'import os, platform, tarfile; assert platform.python_version() == os.environ["PYTHON_VERSION"]; assert callable(tarfile.data_filter)'
           jq --arg python "$(python3 -c 'import platform; print(platform.python_version())')" '. + {python:$python}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
           mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
+      - name: Install native Ubuntu build prerequisites
+        if: matrix.os == 'linux'
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 24.04
+          test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.39'
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential binutils perl ca-certificates
       - name: Build native Go and Zig with repository pins
         if: '!matrix.gui'
         run: |
           set -euo pipefail
+          # A present but empty value disables Exqlite's precompiler while its
+          # Makefile still builds the vendored SQLite sources, not system libsqlite3.
+          if [ "$TARGET_OS" = linux ]; then export EXQLITE_USE_SYSTEM=; fi
           mix native.build.tui
           mix compile --warnings-as-errors
       - name: Build and qualify the pinned local ERTS input
@@ -214,42 +229,47 @@ jobs:
           printf 'MINGA_RELEASE_ERTS_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
           jq --slurpfile runtime "$receipt" '. + {erts_source:$runtime[0]}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
           mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
-      - name: Select separately qualified Burrito wrapper compiler
-        if: '!matrix.gui'
-        uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.BURRITO_ZIG_VERSION }}
-      - name: Wrap exactly one intended native target
-        if: '!matrix.gui'
-        env:
-          BURRITO_TARGET: ${{ matrix.os }}_${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          actual=$(zig version)
-          required=$(mix run --no-compile --no-start -e 'IO.write(Version.to_string(Burrito.get_versions().zig))')
-          test "$actual" = "$BURRITO_ZIG_VERSION"
-          test "$actual" = "$required"
-          jq --arg wrapper "$actual" '. + {wrapper_zig:$wrapper}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
-          mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
-          mix release minga --no-compile --overwrite
-          test "$(find burrito_out -maxdepth 1 -type f | wc -l | tr -d ' ')" = 1
-          cp "burrito_out/$PAYLOAD" "$CANDIDATE_ROOT/out/$PAYLOAD"
-          chmod +x "$CANDIDATE_ROOT/out/$PAYLOAD"
-      - name: Boot final standalone bytes and inspect extracted package
+      - name: Archive exactly one native Mix release
         if: '!matrix.gui'
         run: |
           set -euo pipefail
-          export MINGA_INSTALL_DIR="$CANDIDATE_ROOT/unpacked"
+          mix release.tui --no-compile --overwrite
+          COPYFILE_DISABLE=1 tar -C _build/prod/rel -czf "$CANDIDATE_ROOT/out/$PAYLOAD" minga
+      - name: Extract, inspect, and boot final standalone tarball bytes
+        if: '!matrix.gui'
+        run: |
+          set -euo pipefail
+          unpacked="$CANDIDATE_ROOT/unpacked release"
+          mkdir "$unpacked"
+          python3 - "$CANDIDATE_ROOT/out/$PAYLOAD" "$unpacked" <<'PY'
+          import sys
+          import tarfile
+          from pathlib import PurePosixPath
+
+          def package_member(member, destination):
+              parts = PurePosixPath(member.name).parts
+              if parts[:1] != ("minga",) or ".." in parts:
+                  raise ValueError(f"Unexpected native release archive path: {member.name}")
+              if len(parts) == 1 and not member.isdir():
+                  raise ValueError("Native release archive root must be the minga directory")
+              return tarfile.data_filter(member, destination)
+
+          with tarfile.open(sys.argv[1], "r:gz") as archive:
+              archive.extractall(sys.argv[2], filter=package_member)
+          PY
+          package="$unpacked/minga"
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --runtime-receipt "$MINGA_RELEASE_ERTS_RECEIPT"
+          cd "$CANDIDATE_ROOT"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin "$package/launchers/minga" --version > version.txt
+          grep -Fx "minga $(jq -r .version context.json)" version.txt
+          if [[ "$TARGET_OS" == linux ]]; then
+            parser=$(find "$package/lib" -type f -path '*/priv/minga-parser' -print)
+            test -x "$parser"
+            env -i HOME="$HOME" PATH=/usr/bin:/bin "$parser" < /dev/null > /dev/null
+          fi
+          export RELEASE_DISTRIBUTION=none
           RELEASE_COOKIE=$(openssl rand -hex 32)
           export RELEASE_COOKIE
-          export RELEASE_DISTRIBUTION=none
-          "$CANDIDATE_ROOT/out/$PAYLOAD" --version > "$CANDIDATE_ROOT/version.txt"
-          grep -Fx "minga $(jq -r .version "$CANDIDATE_ROOT/context.json")" "$CANDIDATE_ROOT/version.txt"
-          shopt -s nullglob
-          releases=("$MINGA_INSTALL_DIR"/.burrito/minga_erts-*)
-          test "${#releases[@]}" = 1
-          package="${releases[0]}"
-          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --binary "$CANDIDATE_ROOT/out/$PAYLOAD" --runtime-receipt "$MINGA_RELEASE_ERTS_RECEIPT"
           "$package/bin/minga" eval 'erts = to_string(:erlang.system_info(:version)); arch = to_string(:erlang.system_info(:system_architecture)); if erts != System.fetch_env!("EXPECTED_ERTS") or not String.starts_with?(arch, System.fetch_env!("TARGET_ARCH") <> "-"), do: raise("Packaged ERTS version/architecture mismatch"); {:ok, _} = Application.ensure_all_started(:crypto); if :crypto.hash(:sha256, "minga-package-probe") != <<0x1b45baf6461706ab791b75f5a031660a827efc4f51980372da69e5217d1d5257::256>>, do: raise("Packaged crypto NIF result mismatch"); {:ok, db} = Exqlite.Sqlite3.open(":memory:"); :ok = Exqlite.Sqlite3.close(db); IO.puts("packaged ERTS, crypto and SQLite NIFs " <> erts <> " " <> arch)'
       - name: Install pinned XcodeGen
         if: matrix.gui
@@ -353,6 +373,8 @@ jobs:
           evidence='[{"id":"package-contents","result":"passed"},{"id":"native-architecture","result":"passed"},{"id":"package-boot","result":"passed","scope":"version command, packaged ERTS eval, fixed-result OTP crypto hash and in-memory SQLite NIF open/close; not installed/UI/X0 qualification"}]'
           if [ "$PAYLOAD" = Minga.dmg ]; then
             evidence=$(jq -c '. + [{id:"signature",result:"passed"},{id:"notarization",result:"passed"},{id:"stapling",result:"passed"}]' <<< "$evidence")
+          else
+            evidence=$(jq -c '. + [{id:"package-runtime-abi",result:"passed"}]' <<< "$evidence")
           fi
           jq -n --slurpfile context "$CANDIDATE_ROOT/context.json" --slurpfile tools "$CANDIDATE_ROOT/toolchains.json" --arg filename "$PAYLOAD" --arg os "$TARGET_OS" --arg arch "$TARGET_ARCH" --argjson evidence "$evidence" '{schema_version:1,context:$context[0],filename:$filename,target:{os:$os,arch:$arch},toolchains:$tools[0],evidence:$evidence}' > "$CANDIDATE_ROOT/out/$PAYLOAD.build.json"
       - name: Upload immutable payload and sanitized evidence

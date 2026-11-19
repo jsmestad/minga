@@ -527,6 +527,39 @@ defmodule Minga.MacOSLauncherTest do
     assert File.read!(release_log) == "args=[#{encode_args(["README.md"])}]\n[start]\n"
   end
 
+  test "a symlinked archive launcher starts its own Mix release", ctx do
+    root = Path.join(ctx.root, "unpacked path/minga")
+    File.mkdir_p!(Path.join(root, "bin"))
+    File.mkdir_p!(Path.join(root, "releases"))
+    File.mkdir_p!(Path.join(root, "launchers"))
+    File.write!(Path.join(root, "releases/start_erl.data"), "17.1.1 0.1.0\n")
+
+    write_script!(Path.join(root, "bin"), "minga", """
+    printf '%s:%s:%s\\n' "$1" "$RELEASE_DISTRIBUTION" "$MINGA_CLI_ARGS_B64"
+    """)
+
+    launcher = Path.join(root, "launchers/minga")
+    File.cp!(@tui_wrapper, launcher)
+    File.chmod!(launcher, 0o755)
+    installed = Path.join(ctx.root, "minga-tui")
+    File.ln_s!(launcher, installed)
+
+    expected = "start:none:#{encode_args(["--version"])}\n"
+
+    assert {^expected, 0} =
+             System.cmd(installed, ["--version"], env: [{"MINGA_APP_PATH", ctx.app}])
+
+    File.rm!(Path.join(root, "releases/start_erl.data"))
+
+    assert {message, 1} =
+             System.cmd(installed, ["--version"],
+               env: [{"MINGA_RELEASE_BIN", "/usr/bin/true"}],
+               stderr_to_stdout: true
+             )
+
+    assert message =~ "runtime is missing or damaged"
+  end
+
   defp encode_args(args) do
     Enum.map_join(args, ",", &Base.url_encode64(&1, padding: false))
   end

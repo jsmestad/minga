@@ -6,7 +6,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   - **Spawn mode** (default): BEAM is the parent process. Port.Manager
     spawns the GUI/TUI binary as a child via `Port.open({:spawn_executable, ...})`.
-    Used in development, TUI mode, and Burrito releases.
+    Used in development and standalone TUI releases.
 
   - **Connected mode** (`MINGA_PORT_MODE=connected`): BEAM is a child of
     the GUI process. The GUI set up stdin/stdout pipes before launching us.

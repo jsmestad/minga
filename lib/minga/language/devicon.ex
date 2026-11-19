@@ -157,7 +157,6 @@ defmodule Minga.Language.Devicon do
   def folder_icon_and_color(".minga"), do: {"\u{F10B5}", 0x7EC8E3}
 
   # Project-specific
-  def folder_icon_and_color("burrito_out"), do: {"\u{F10EB}", 0x90A4AE}
   def folder_icon_and_color("credo"), do: {"\u{F1354}", 0xFFCA28}
 
   def folder_icon_and_color(_name), do: {@default_folder_icon, @default_folder_color}
