@@ -5,7 +5,7 @@ defmodule MingaEditor.Layout.OverlayBand do
   Float popups, compact agent context, extension panels, observatory, notifications and extension overlays share this band.
   The edit timeline is persistent chrome with its own `Layout.edit_timeline` rectangle and does not compete for this band.
 
-  `rect/2` preserves the historical Go `maxOverlayHeight()` clamp: `min(max(height / 3, 4), 12)`.
+  `rect/2` preserves the historical Go `maxOverlayHeight()` clamp and caps it to the available rows.
   The rectangle spans the full terminal width and is bottom-anchored.
   `content_height` is the surface's BEAM-derived line count, or `:max` when wrapping determines the final height.
 
@@ -24,10 +24,9 @@ defmodule MingaEditor.Layout.OverlayBand do
   Returns the clamped footer-band height for a content line count.
 
   Ports the Go `maxOverlayHeight()` clamp: the band is `terminal_rows / 3`,
-  floored at #{@clamp_floor} and ceiled at #{@clamp_ceiling}, and never taller
-  than the content it must contain. Passing `:max` for `content_height` yields
-  the clamp ceiling directly, the conservative size for a text-wrap-dependent
-  surface whose exact wrapped line count the BEAM cannot know.
+  floored at #{@clamp_floor} and ceiled at #{@clamp_ceiling}, but never taller
+  than the grid or the content it must contain. Passing `:max` takes the full
+  available band for a surface with an unknown wrapped line count.
   """
   @spec band_height(non_neg_integer(), non_neg_integer() | :max) :: non_neg_integer()
   def band_height(terminal_rows, :max) do
@@ -45,9 +44,7 @@ defmodule MingaEditor.Layout.OverlayBand do
   `content_height` is the surface's content line count (or `:max` to take the
   clamp ceiling for a text-wrap-dependent surface). The rect spans the full
   terminal width and the lowest `band_height/2` rows, matching where the Go
-  compositor footer-appended the overlay. Returns `nil` when the band would be
-  empty (zero content and zero clamp floor never happens, but a degenerate
-  terminal can produce a zero-height band).
+  compositor footer-appended the overlay. Returns `nil` when the band is empty.
   """
   @spec rect(Layout.rect(), non_neg_integer() | :max) :: Layout.rect() | nil
   def rect({row, col, width, rows}, content_height) do
@@ -66,5 +63,6 @@ defmodule MingaEditor.Layout.OverlayBand do
     |> div(3)
     |> max(@clamp_floor)
     |> min(@clamp_ceiling)
+    |> min(terminal_rows)
   end
 end

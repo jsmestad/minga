@@ -2,7 +2,7 @@
 """Check production Go renderer protocol startup, not rendered output.
 
 The ready packet precedes Bubble Tea rendering.
-It proves only startup and terminal sizing.
+It proves only startup and the initial content grid below the title.
 Real terminal-output evidence is scripts/go_tui_capture.py; model-only coverage (#2101) and legacy Zig snapshots prove different contracts.
 
 Usage: python3 scripts/go_tui_boot_smoke.py [path/to/minga-renderer-go]
@@ -40,6 +40,8 @@ class RendererProcess:
     """
 
     def __init__(self, binary, columns=80, rows=24, on_data=None):
+        self.columns = columns
+        self.rows = rows
         self.proc = None
         self.master = self.slave = None
         self.close_error = None
@@ -116,7 +118,7 @@ class RendererProcess:
         if code is not None:
             raise RuntimeError(f"renderer exited unexpectedly (status {code})")
 
-    def ready(self, columns, rows, deadline):
+    def ready(self, deadline):
         while len(self.protocol) < 4:
             self.pump(deadline)
             self.check_alive()
@@ -134,8 +136,9 @@ class RendererProcess:
         if payload[0] != OP_READY:
             raise ValueError(f"first protocol opcode is 0x{payload[0]:02x}, not ready")
         width, height = struct.unpack(">HH", payload[1:5])
-        if (width, height) != (columns, rows):
-            raise ValueError(f"ready size {width}x{height}, expected {columns}x{rows}")
+        expected_rows = max(self.rows - 1, 1)  # The startup title occupies one physical row.
+        if (width, height) != (self.columns, expected_rows):
+            raise ValueError(f"ready size {width}x{height}, expected {self.columns}x{expected_rows}")
         return payload
 
     def send_packet(self, payload, deadline):
@@ -186,7 +189,7 @@ def main() -> int:
     child = None
     try:
         child = RendererProcess(binary)
-        child.ready(80, 24, time.monotonic() + READ_TIMEOUT_SECONDS)
+        child.ready(time.monotonic() + READ_TIMEOUT_SECONDS)
     except (OSError, ValueError, RuntimeError, EOFError, TimeoutError) as error:
         if child:
             child.close()
@@ -195,7 +198,7 @@ def main() -> int:
         return 1
     else:
         child.close()
-    print("[go-tui-boot-smoke] PASS: Go renderer emitted an 80x24 ready packet (protocol startup only)")
+    print("[go-tui-boot-smoke] PASS: Go renderer reported an 80x23 grid in an 80x24 terminal (startup only)")
     return 0
 
 

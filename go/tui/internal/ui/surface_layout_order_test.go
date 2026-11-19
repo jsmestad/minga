@@ -70,7 +70,7 @@ func TestOverlayPlacedSurfaceBeatsUnplacedSurface(t *testing.T) {
 		generated.OPGuiAgentContext: {Opcode: generated.OPGuiAgentContext, AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1}},
 	}
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDCompletionMenu, Z: 301, HitKind: 8},
+		{SurfaceID: surfaceIDCompletionMenu, Rect: generated.Rect{Row: 1, Col: 1, Width: 20, Height: 1}, Z: 301, HitKind: 8},
 	}
 
 	got := strings.Join(model.overlayLines(), "\n")
@@ -202,7 +202,7 @@ func TestOverlayBottomPanelOpenSignatureHelpWins(t *testing.T) {
 
 // Per-surface placement: each promoted footer-band overlay (#2281) renders only
 // when the BEAM emits its placement, and the overlayLayer positions it at the
-// placement rect (X=Col, Y=Row). One sub-test per surface proves the surface id
+// translated primary-grid rect. One sub-test per surface proves the surface id
 // wiring and the position-by-rect path.
 
 func TestPromotedFooterOverlaysRenderAtPlacementRect(t *testing.T) {
@@ -269,15 +269,15 @@ func TestPromotedFooterOverlaysRenderAtPlacementRect(t *testing.T) {
 
 			// With its placement, the surface wins the slot and renders.
 			model.surfacePlacements = []generated.SurfacePlacement{
-				{SurfaceID: tc.surfaceID, Rect: generated.Rect{Row: 16, Col: 0, Width: 80, Height: 8}, Z: tc.z, HitKind: 8},
+				{SurfaceID: tc.surfaceID, Rect: generated.Rect{Row: 15, Col: 0, Width: 80, Height: 8}, Z: tc.z, HitKind: 8},
 			}
 			if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, tc.needle) {
 				t.Fatalf("%s should render with its placement, got %q", tc.name, got)
 			}
 
 			// The overlay layer is bottom-aligned inside the placement band (#2281):
-			// its bottom edge sits at the rect's bottom edge (Row+Height) so a short
-			// overlay hugs the screen bottom instead of rendering at the band top.
+			// its bottom edge sits at the translated rect bottom, so short overlay
+			// content hugs the screen bottom instead of rendering at the band top.
 			layer := model.overlayLayer()
 			if layer == nil {
 				t.Fatalf("%s should produce an overlay layer when placed", tc.name)
@@ -313,7 +313,7 @@ func TestShortNotificationsHugBandBottom(t *testing.T) {
 	// bottom-anchored band is the lowest 3 rows of the screen (rows 21..23).
 	const bandRow, bandHeight = 21, 3
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: bandRow, Col: 0, Width: 80, Height: bandHeight}, Z: 160, HitKind: 8},
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: bandRow - 1, Col: 0, Width: 80, Height: bandHeight}, Z: 160, HitKind: 8},
 	}
 
 	layer := model.overlayLayer()
@@ -346,7 +346,7 @@ func TestWrapDependentOverlayBottomAlignsInMaxBand(t *testing.T) {
 	// :max band for a 24-row terminal clamps to 8 rows, bottom-anchored at 16..23.
 	const bandRow, bandHeight = 16, 8
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: bandRow, Col: 0, Width: 80, Height: bandHeight}, Z: 270, HitKind: 8},
+		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: bandRow - 1, Col: 0, Width: 80, Height: bandHeight}, Z: 270, HitKind: 8},
 	}
 
 	layer := model.overlayLayer()

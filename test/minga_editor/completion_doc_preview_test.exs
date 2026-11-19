@@ -229,6 +229,38 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       assert {12, 6, _width, 1} = CompletionUI.menu_rect(completion, opts)
     end
 
+    test "reserves bounded documentation rows without displacing completion items" do
+      items =
+        Enum.map(
+          [
+            %{"label" => "alpha", "documentation" => "alpha docs\nsecond line"},
+            %{"label" => "beta"},
+            %{"label" => "gamma", "documentation" => "  \n  "}
+          ],
+          &Completion.parse_item/1
+        )
+
+      completion = Completion.new(items, {0, 0})
+      opts = %{cursor_row: 0, cursor_col: 0, viewport_rows: 13, viewport_cols: 60}
+
+      assert CompletionUI.menu_rect(completion, opts) == {2, 1, 20, 9}
+      assert CompletionUI.menu_rect(completion, %{opts | viewport_rows: 24}) == {2, 1, 20, 9}
+      assert CompletionUI.menu_rect(completion, %{opts | viewport_rows: 7}) == {1, 1, 20, 5}
+      assert CompletionUI.menu_rect(completion, %{opts | viewport_rows: 6}) == {2, 1, 20, 3}
+      assert CompletionUI.menu_rect(completion, %{opts | viewport_rows: 4}) == {1, 1, 20, 2}
+
+      undocumented = Completion.move_down(completion)
+      assert CompletionUI.menu_rect(undocumented, opts) == {2, 1, 20, 3}
+      assert CompletionUI.menu_rect(Completion.move_down(undocumented), opts) == {2, 1, 20, 3}
+    end
+
+    test "keeps a completion item in the primary grid when borders do not fit" do
+      completion = Completion.new([Completion.parse_item(%{"label" => "alpha"})], {0, 0})
+      opts = %{cursor_row: 0, cursor_col: 0, viewport_rows: 1, viewport_cols: 1}
+
+      assert CompletionUI.menu_rect(completion, opts) == {0, 0, 1, 1}
+    end
+
     test "returns nil when there are no visible items" do
       completion = Completion.new([], {0, 0})
 

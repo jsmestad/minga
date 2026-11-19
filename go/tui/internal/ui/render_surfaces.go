@@ -7,26 +7,19 @@ import (
 
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
-	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
-// overlayLayer returns the single active overlay positioned at its BEAM
-// placement rect, or nil when no overlay is active this frame. This replaces the
-// old footer-append: instead of joining the overlay's lines into the bottom of
-// the vertical layout, the winning overlay is composited as its own lipgloss
-// layer at the X/Y the BEAM emitted (the same rect BEAM mouse hit-testing routes
-// against), via the NewLayer path the picker overlay already proves. The Z is
-// taken from the placement so the layer sits above the base content. When the
-// winning surface has no placement rect this frame the overlay does not render
-// (no silent fallback position).
+// overlayLayer renders the active overlay at its BEAM placement translated
+// to screen coordinates, above the base content. Frontend hit testing uses the
+// same translated rect. An overlay without a placement does not render.
 func (m Model) overlayLayer() *lipgloss.Layer {
 	winner, ok := m.overlayWinner()
 	if !ok {
 		return nil
 	}
-	rect, ok := m.surfacePlacementFor(winner.surfaceID)
-	if !ok {
+	rect, ok := m.surfaceScreenRect(winner.surfaceID)
+	if !ok || rect.Width == 0 || rect.Height == 0 {
 		return nil
 	}
 	lines := winner.render()
@@ -41,7 +34,7 @@ func (m Model) overlayLayer() *lipgloss.Layer {
 	// Cap the content to the band height so it can never paint outside the BEAM
 	// rect the hit-tester routes against. takeLines keeps the TOP rows (the title
 	// and the first items), the same rows the old footer-append showed.
-	lines = takeLines(lines, int(rect.Height))
+	lines = takeLines(lines, rect.Height)
 	if len(lines) == 0 {
 		return nil
 	}
@@ -52,21 +45,18 @@ func (m Model) overlayLayer() *lipgloss.Layer {
 	// already sizes the rect to the content, so this offset is ~0; for the wrap-
 	// dependent surfaces it pushes the content down to the bottom and leaves the
 	// residual phantom zone ABOVE the content (documented in FooterOverlays).
-	y := int(rect.Row) + int(rect.Height) - len(lines)
-	if y < int(rect.Row) {
-		y = int(rect.Row)
-	}
+	y := rect.Y + rect.Height - len(lines)
 	// Scan the overlay's content for zone markers and merge them into the frame's
 	// zone map at the placement offset, so chrome zone routing (completion items,
 	// hover action) keeps working even though the overlay is composited as its own
 	// layer instead of footer-appended (#2281). ScanInto returns the marker-
 	// stripped content for compositing; zones are offset by the bottom-aligned Y.
-	content := m.zones.ScanInto(strings.Join(lines, "\n"), int(rect.Col), y)
+	content := m.zones.ScanInto(strings.Join(lines, "\n"), rect.X, y)
 	// Z is offset above the base content/window layers (Z 0 and 1 in composeFrame)
 	// while staying below the picker/which-key floating layers; the placement z is
 	// a large band value (150..301), so add the base offset to keep it on top of
 	// content without colliding with the Z=0/1 base layers.
-	return lipgloss.NewLayer(content).X(int(rect.Col)).Y(y).Z(int(winner.order) + 2)
+	return lipgloss.NewLayer(content).X(rect.X).Y(y).Z(int(winner.order) + 2)
 }
 
 // trimTrailingBlankLines drops trailing lines whose visible content (ANSI escapes
@@ -181,7 +171,13 @@ func (m Model) overlayCandidates() []overlayCandidate {
 	help, helpOK := m.agentHelp()
 
 	return []overlayCandidate{
-		m.candidate(surfaceIDCompletionMenu, completionOK && completion.Visible && len(completion.Items) > 0, func() []string { return m.renderCompletion(completion) }),
+		m.candidate(surfaceIDCompletionMenu, completionOK && completion.Visible && len(completion.Items) > 0, func() []string {
+			rect, ok := m.surfaceScreenRect(surfaceIDCompletionMenu)
+			if !ok || rect.Width == 0 || rect.Height == 0 {
+				return nil
+			}
+			return m.renderCompletion(completion, rect.Width, rect.Height)
+		}),
 		m.candidate(surfaceIDHoverPopup, hoverOK && hover.Visible && len(hover.Lines) > 0, func() []string { return m.renderHover(hover) }),
 		m.candidate(surfaceIDSignatureHelp, sigOK && sig.Visible && len(sig.Signatures) > 0, func() []string { return m.renderSignature(sig) }),
 		m.candidate(surfaceIDFloatPopup, floatOK && float.Visible, func() []string { return m.renderFloat(float) }),
@@ -215,15 +211,17 @@ func (m Model) surfaceOrder(surfaceID uint16) (int, bool) {
 	return 0, false
 }
 
-// surfacePlacementFor returns the BEAM placement rect for a surface id, or
-// ok=false when the surface has no placement this frame.
-func (m Model) surfacePlacementFor(surfaceID uint16) (generated.Rect, bool) {
+func (m Model) surfaceScreenRect(surfaceID uint16) (uiRect, bool) {
+	return m.surfaceRectOnGrid(surfaceID, m.layout.grid)
+}
+
+func (m Model) surfaceRectOnGrid(surfaceID uint16, grid uiRect) (uiRect, bool) {
 	for _, p := range m.surfacePlacements {
 		if p.SurfaceID == surfaceID {
-			return p.Rect, true
+			return grid.screenRect(p.Rect), true
 		}
 	}
-	return generated.Rect{}, false
+	return uiRect{}, false
 }
 
 func (m Model) renderHover(hover protocol.HoverPopup) []string {
@@ -390,13 +388,14 @@ func (m Model) bottomPanelVisibleRows(panel protocol.BottomPanel) int {
 }
 
 func (m Model) bottomPanelHeight(panel protocol.BottomPanel) int {
-	maxHeight := max(m.height-1, 1)
+	rows := max(m.layout.grid.Height, 1)
+	maxHeight := max(rows-1, 1)
 	percent := int(panel.HeightPercent)
 	if percent <= 0 {
 		percent = 30
 	}
 	percent = min(max(percent, 1), 100)
-	return min(max(m.height*percent/100, 4), maxHeight)
+	return min(max(rows*percent/100, 4), maxHeight)
 }
 
 // visiblePanelCount counts only Visible extension panels, matching what
