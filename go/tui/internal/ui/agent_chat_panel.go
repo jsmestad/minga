@@ -649,18 +649,13 @@ func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) 
 }
 
 func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width int) []string {
+	if agentMessageHasStyledProse(msg) {
+		height, layout := measureAgentMessage(msg, width)
+		return m.renderAgentRichAssistantRows(msg, layout, width, 0, height)
+	}
+
 	p := m.palette()
 	out := []string{m.renderAgentAssistantHeader(width)}
-
-	if len(msg.MarkdownBlocks) > 0 {
-		out = append(out, m.renderAgentAssistantMarkdownBlocks(msg.MarkdownBlocks, width)...)
-		return out
-	}
-
-	if len(msg.StyledLines) > 0 {
-		out = append(out, m.renderAgentAssistantStyledLines(msg.StyledLines, width)...)
-		return out
-	}
 
 	lines := compactTextLines(msg.Text, max(width-12, 8), 3)
 	if len(lines) == 0 {
@@ -675,57 +670,18 @@ func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width 
 	return out
 }
 
-func (m Model) renderAgentAssistantMarkdownBlocks(blocks []protocol.AgentMarkdownBlock, width int) []string {
-	if len(blocks) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(blocks)*2)
-	for _, block := range blocks {
-		out = append(out, m.renderAgentMarkdownBlock(block, width)...)
-	}
-	return out
-}
-
 func (m Model) renderAgentMarkdownBlock(block protocol.AgentMarkdownBlock, width int) []string {
 	p := m.palette()
 	switch block.Kind {
-	case 0x01, 0x02, 0x03, 0x04:
-		return m.renderAgentAssistantStyledLines(block.Lines, width)
 	case 0x05:
 		surface := p.AgentPanel()
 		rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  ─" + strings.Repeat("─", max(width-4, 1)))
 		return []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rule, width))}
 	case 0x06:
 		return []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render("")}
-	case 0x07:
-		return m.renderAgentCodeCard(block, width)
 	default:
 		return nil
 	}
-}
-
-func (m Model) renderAgentCodeCard(block protocol.AgentMarkdownBlock, width int) []string {
-	p := m.palette()
-	surface := p.AgentCodeSurface()
-	codeBorder := p.AgentCodeBorder()
-	rail := lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Render("  │ ")
-	bodyWidth := max(width-lipgloss.Width(rail)-2, 8)
-	label := nonEmpty(block.Label, "Code")
-	if block.TargetPath != "" {
-		label += " · " + block.TargetPath
-	}
-	if !block.Complete() {
-		label += " · streaming"
-	}
-	header := rail + lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Bold(true).Render("╭─ "+label)
-	out := []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header, width))}
-	for _, line := range block.Lines {
-		body := m.renderAgentCodeCardLine(line, bodyWidth)
-		out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rail+"│ "+body, width)))
-	}
-	footer := rail + lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Render("╰"+strings.Repeat("─", max(min(bodyWidth, width-6), 1)))
-	out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(footer, width)))
-	return out
 }
 
 func (m Model) renderAgentCodeCardLine(line protocol.AgentStyledLine, width int) string {
@@ -734,27 +690,6 @@ func (m Model) renderAgentCodeCardLine(line protocol.AgentStyledLine, width int)
 	}
 	rendered := m.renderAgentStyledLine(line, width)
 	return fitStyled(rendered, width)
-}
-
-func (m Model) renderAgentAssistantStyledLines(lines []protocol.AgentStyledLine, width int) []string {
-	if len(lines) == 0 {
-		return nil
-	}
-	p := m.palette()
-	surface := p.AgentPanel()
-	rail := lipgloss.NewStyle().Foreground(p.AgentAssistantBorder()).Background(surface).Render("  │ ")
-	bodyWidth := max(width-lipgloss.Width(rail), 8)
-	visible := min(len(lines), agentAssistantStyledLines)
-	out := make([]string, 0, visible+1)
-	for _, line := range lines[:visible] {
-		rendered := rail + m.renderAgentStyledLine(line, bodyWidth)
-		out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rendered, width)))
-	}
-	if hidden := len(lines) - visible; hidden > 0 {
-		more := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(fmt.Sprintf("… +%d lines · ⏎ expand", hidden))
-		out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rail+more, width)))
-	}
-	return out
 }
 
 func (m Model) renderAgentStyledLine(line protocol.AgentStyledLine, width int) string {
