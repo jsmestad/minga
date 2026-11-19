@@ -4,7 +4,7 @@ defmodule Minga.Extension.ArtifactValidator do
   alias Minga.Extension.Artifact
   alias Minga.Extension.ArtifactInventory
   alias Minga.Extension.DisposableBeam
-  alias Minga.Extension.SecureFile
+  alias Minga.SecureFile
 
   @default_timeout 30_000
   @max_report_bytes 256 * 1024

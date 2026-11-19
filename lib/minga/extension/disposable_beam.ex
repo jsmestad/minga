@@ -3,7 +3,7 @@ defmodule Minga.Extension.DisposableBeam do
 
   alias Minga.Extension.ArtifactValidator
   alias Minga.Extension.IsolatedCompiler
-  alias Minga.Extension.SecureFile
+  alias Minga.SecureFile
 
   @max_request_bytes 256 * 1024
   @max_output_bytes 64 * 1024

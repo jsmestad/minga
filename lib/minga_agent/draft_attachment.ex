@@ -22,7 +22,7 @@ defmodule MingaAgent.DraftAttachment do
   def max_bytes, do: @max_bytes
 
   @type identity :: {String.t(), String.t()}
-  @type text_snapshot :: {:selection | :buffer, String.t(), String.t(), String.t()}
+  @type text_snapshot :: {:selection | :buffer | :file, String.t(), String.t(), String.t()}
 
   @doc "Labels how a retained text snapshot was captured."
   @spec snapshot_label(DraftSnapshot.source_kind()) :: String.t()
@@ -101,7 +101,7 @@ defmodule MingaAgent.DraftAttachment do
           {:ok, DraftSnapshot.attachment(), {:delivery, String.t(), String.t()}}
           | {:error, term()}
   def capture_text(store, {kind, source, label, text})
-      when kind in [:selection, :buffer] and is_binary(source) and is_binary(label) and
+      when kind in [:selection, :buffer, :file] and is_binary(source) and is_binary(label) and
              is_binary(text) and byte_size(text) in 1..@max_bytes do
     key =
       {:delivery, "composer-attachment",

@@ -25,14 +25,11 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
   @spec open(State.t()) :: State.t()
   def open(state) do
     case current_origin(state) do
-      {origin, [_ | _] = attachments} ->
+      {origin, attachments} ->
         PickerUI.open(state, __MODULE__, %{origin: origin, attachments: attachments})
 
-      _empty ->
-        NoticeWorkflow.publish(
-          state,
-          "No attachments in this draft. Select text in a file to attach a snapshot."
-        )
+      nil ->
+        NoticeWorkflow.publish(state, "Open a local Agent composer to inspect draft attachments.")
     end
   end
 
@@ -87,7 +84,8 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
         }
       end
 
-    {:ok, items, %{status: "Choose a snapshot to inspect or remove it."}}
+    add_file = %Item{id: {:add_file, origin}, label: "Attach project file…"}
+    {:ok, items ++ [add_file], %{status: "Add a project file or choose a snapshot."}}
   end
 
   def async_fetch(%Context{
@@ -174,6 +172,13 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
     if current_snapshot?(state, origin, identity),
       do: DraftWorkflow.remove_attachment(state, owner, target, identity),
       else: stale(state)
+  end
+
+  def on_select(%Item{id: {:add_file, origin}}, state) do
+    case current_origin(state) do
+      {^origin, _attachments} -> MingaEditor.UI.Picker.FileAttachmentSource.open(state, origin)
+      _changed -> stale(state)
+    end
   end
 
   def on_select(%Item{id: :list}, state), do: open(state)
