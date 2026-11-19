@@ -23,7 +23,6 @@ defmodule MingaAgent.Tools.PathIgnore do
                    ".venv",
                    "DerivedData",
                    "_build",
-                   "burrito_out",
                    "cover",
                    "deps",
                    "dist",

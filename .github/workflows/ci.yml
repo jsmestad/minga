@@ -516,7 +516,14 @@ jobs:
           set -euo pipefail
           changed=true
           if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            if git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/ci.yml .github/workflows/release.yml .tool-versions scripts/build-release-erts.py scripts/release-erts.Dockerfile scripts/release_erts_sources.json mix/release_erts.ex mix.exs mix.lock test/scripts/release_erts_producer_test.py; then
+            if git diff --quiet "$BASE_SHA" HEAD -- \
+              .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/verify-release-candidate.yml \
+              .tool-versions scripts/build-release-erts.py scripts/release_erts_sources.json \
+              scripts/check-release-contents scripts/release_candidate.py \
+              mix/release_erts.ex mix/tasks/release.tui.ex mix.exs mix.lock rel macos/Resources/bin/minga-tui \
+              test/scripts/release_erts_producer_test.py test/scripts/release_contents_test.py \
+              test/scripts/release_candidate_test.py scripts/render-tui-formula test/scripts/render_tui_formula_test.py \
+              scripts/build-tui-deb test/scripts/build_tui_deb_test.py; then
               changed=false
             fi
           fi
@@ -528,7 +535,17 @@ jobs:
         if: steps.inputs.outputs.changed == 'true'
         with:
           python-version: ${{ steps.inputs.outputs.python_version }}
-      - name: Verify the native Python and producer boundaries
+      - name: Install and verify native Ubuntu build prerequisites
+        if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 24.04
+          test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.39'
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential binutils perl ca-certificates
+      - name: Verify pinned Python and release producer/consumer boundaries
         if: steps.inputs.outputs.changed == 'true'
         env:
           PYTHON_VERSION: ${{ steps.inputs.outputs.python_version }}
@@ -536,15 +553,12 @@ jobs:
           set -euo pipefail
           python3 -c 'import os, platform, tarfile; assert platform.python_version() == os.environ["PYTHON_VERSION"]; assert callable(tarfile.data_filter)'
           python3 test/scripts/release_erts_producer_test.py
-      - name: Build the actual pinned Linux prerequisite image
+          python3 test/scripts/release_contents_test.py
+          python3 test/scripts/release_candidate_test.py
+          python3 -B test/scripts/render_tui_formula_test.py
+      - name: Verify Debian package assembly
         if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          context=$(mktemp -d "$RUNNER_TEMP/minga-erts-prerequisite.XXXXXX")
-          home=$(mktemp -d "$RUNNER_TEMP/minga-erts-prerequisite-home.XXXXXX")
-          trap 'rm -rf "$context" "$home"' EXIT
-          cp scripts/release-erts.Dockerfile "$context/Dockerfile"
-          env -i HOME="$home" PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C docker build --pull=false --progress=plain "$context"
+        run: python3 -B test/scripts/build_tui_deb_test.py
 
   ci-gate:
     name: CI gate

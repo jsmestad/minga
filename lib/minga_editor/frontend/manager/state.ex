@@ -11,7 +11,7 @@ defmodule MingaEditor.Frontend.Manager.State do
   @typedoc """
   Port connection mode.
 
-  - `:spawn` — BEAM is the parent; Port.Manager spawns the GUI as a child process (dev mode, TUI, Burrito).
+  - `:spawn`: BEAM owns the frontend as a child process in development and standalone TUI releases.
   - `:connected` — BEAM is the child; the GUI parent already set up stdin/stdout pipes. Port.Manager connects to fd 0/1 instead of spawning.
   """
   @type port_mode :: :spawn | :connected

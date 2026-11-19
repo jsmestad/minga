@@ -1,14 +1,13 @@
 Code.require_file(Path.expand("../../mix/release_erts.ex", __DIR__))
 
 defmodule Minga.ReleaseERTSTest do
-  # Receipt selection and Burrito resolver registration are process-global build inputs.
+  # Receipt selection is a process-global environment input.
   use ExUnit.Case, async: false
 
   import Bitwise, only: [band: 2]
 
-  alias Burrito.Builder.Context
-  alias Burrito.Builder.Target
   alias Minga.ReleaseERTS
+  alias Mix.Tasks.Release.Tui
 
   @repo Path.expand("../..", __DIR__)
   @moduletag :tmp_dir
@@ -16,44 +15,14 @@ defmodule Minga.ReleaseERTSTest do
   @files ~w(usr/include/ei.h usr/include/erl_nif.h usr/lib/libei.a erts-17.1.1/include/erl_nif.h lib/kernel-1/ebin/kernel.app lib/stdlib-1/ebin/stdlib.app lib/crypto-1/ebin/crypto.app lib/crypto-1/priv/lib/crypto.so)
 
   setup_all do
-    # Relocate the actual module, not a copy of its implementation in a test helper.
-    # The fixture checkout contains the actual trusted producer inputs.
     # Synthetic runtime files below prove only the consumer filesystem boundary.
-    source_root = System.get_env("MINGA_ERTS_TEST_SOURCE_ROOT", @repo)
-
-    repo =
-      Path.join(System.tmp_dir!(), "minga-erts-test-repo-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(Path.join(repo, "mix"))
-    File.mkdir_p!(Path.join(repo, "scripts"))
-
-    for file <- ~w(release_erts_sources.json build-release-erts.py) do
-      File.cp!(Path.join([source_root, "scripts", file]), Path.join([repo, "scripts", file]))
-    end
-
-    source = Path.join(@repo, "mix/release_erts.ex")
-    relocated = Path.join(repo, "mix/release_erts.ex")
-    File.cp!(source, relocated)
-    previous = Code.compiler_options()[:ignore_module_conflict]
-    Code.compiler_options(ignore_module_conflict: true)
-    Code.compile_file(relocated)
-    Code.compiler_options(ignore_module_conflict: previous)
-
-    on_exit(fn ->
-      previous = Code.compiler_options()[:ignore_module_conflict]
-      Code.compiler_options(ignore_module_conflict: true)
-      Code.compile_file(source)
-      Code.compiler_options(ignore_module_conflict: previous)
-      File.rm_rf!(repo)
-    end)
 
     manifest =
-      Path.join(repo, "scripts/release_erts_sources.json") |> File.read!() |> JSON.decode!()
+      Path.join(@repo, "scripts/release_erts_sources.json") |> File.read!() |> JSON.decode!()
 
     %{
       manifest: manifest,
-      manifest_path: Path.join(repo, "scripts/release_erts_sources.json"),
-      recipe_sha: sha(File.read!(Path.join(repo, "scripts/build-release-erts.py")))
+      recipe_sha: sha(File.read!(Path.join(@repo, "scripts/build-release-erts.py")))
     }
   end
 
@@ -63,7 +32,7 @@ defmodule Minga.ReleaseERTSTest do
     System.put_env("MINGA_RELEASE_ERTS_RECEIPT", path)
     on_exit(fn -> restore_env("MINGA_RELEASE_ERTS_RECEIPT", previous) end)
     target = native_target()
-    root = "otp-29.1.2-#{os_name(target.os)}-#{target.cpu}"
+    root = "otp-29.1.2-#{target.os}-#{target.arch}"
     tree = Path.join(context.tmp_dir, "tree")
     for dir <- ~w(releases misc), do: File.mkdir_p!(Path.join([tree, root, dir]))
 
@@ -83,56 +52,57 @@ defmodule Minga.ReleaseERTSTest do
     context
   end
 
-  test "returns the documented Target with a fresh private parent and complete OTP root",
+  test "supplies a fresh private ERTS path and complete OTP root only within the callback",
        context do
-    first = ReleaseERTS.do_resolve(context.target)
-    second = ReleaseERTS.do_resolve(context.target)
-    {:local_unpacked, path: first_parent} = first.erts_source
-    {:local_unpacked, path: second_parent} = second.erts_source
-    on_exit(fn -> Enum.each([first_parent, second_parent], &File.rm_rf!/1) end)
-    refute first_parent == second_parent
-    assert first == %{context.target | erts_source: {:local_unpacked, path: first_parent}}
-    assert File.ls!(first_parent) == [context.root]
-    assert band(File.stat!(first_parent).mode, 0o777) == 0o700
-    assert File.stat!(first_parent).uid == File.stat!(context.tmp_dir).uid
-    assert File.regular?(Path.join([first_parent, context.root, "usr/lib/libei.a"]))
+    first =
+      ReleaseERTS.with_verified_runtime(fn erts ->
+        otp = Path.dirname(erts)
+        parent = Path.dirname(otp)
+        assert Path.type(erts) == :absolute
+        assert Path.basename(erts) == "erts-17.1.1"
+        assert File.ls!(parent) == [context.root]
+        assert band(File.stat!(parent).mode, 0o777) == 0o700
+        assert File.stat!(parent).uid == File.stat!(context.tmp_dir).uid
 
-    File.write!(
-      Path.join([context.tree, context.root, "usr/lib/libei.a"]),
-      "mutated producer extraction"
-    )
+        File.write!(
+          Path.join([context.tree, context.root, "usr/lib/libei.a"]),
+          "mutated producer extraction"
+        )
 
-    assert File.read!(Path.join([first_parent, context.root, "usr/lib/libei.a"])) =~
-             "consumer filesystem fixture"
+        assert File.read!(Path.join(otp, "usr/lib/libei.a")) =~ "consumer filesystem fixture"
+
+        ReleaseERTS.with_verified_runtime(fn other ->
+          refute other == erts
+          assert File.dir?(erts)
+          assert File.dir?(other)
+        end)
+
+        assert File.dir?(erts)
+        erts
+      end)
+
+    refute File.exists?(first |> Path.dirname() |> Path.dirname())
   end
 
   test "requires an explicit absolute receipt and rejects absent or malformed inputs", context do
     for path <- [nil, "", "receipt.json", Path.join(context.tmp_dir, "absent.json")] do
       restore_env("MINGA_RELEASE_ERTS_RECEIPT", path)
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+      assert_invalid_runtime()
     end
 
     System.put_env("MINGA_RELEASE_ERTS_RECEIPT", context.path)
     File.write!(context.path, "{bad json")
-    assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+    assert_invalid_runtime()
   end
 
-  test "rejects runtime shortcuts and nonnative CPU or OS requests", context do
-    for source <- [
-          {:runtime, []},
-          {:local_unpacked, path: context.tree},
-          {:precompiled, version: "29.1.1"}
-        ] do
-      assert_raise Mix.Error, fn ->
-        ReleaseERTS.do_resolve(%{context.target | erts_source: source})
-      end
-    end
+  test "rejects nonnative receipts before invoking the callback", context do
+    base = read_receipt(context)
+    other_arch = if context.target.arch == "aarch64", do: "x86_64", else: "aarch64"
+    other_os = if context.target.os == "macos", do: "linux", else: "macos"
 
-    other_cpu = if context.target.cpu == :aarch64, do: :x86_64, else: :aarch64
-    other_os = if context.target.os == :darwin, do: :linux, else: :darwin
-
-    for target <- [%{context.target | cpu: other_cpu}, %{context.target | os: other_os}] do
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(target) end
+    for {key, other} <- [{"arch", other_arch}, {"os", other_os}] do
+      write_receipt(context, Map.put(base, key, other))
+      assert_invalid_runtime()
     end
   end
 
@@ -140,7 +110,7 @@ defmodule Minga.ReleaseERTSTest do
     base = read_receipt(context)
 
     for changed <- [
-          Map.put(base, "version", 2),
+          Map.put(base, "version", 1),
           Map.put(base, "kind", "precompiled"),
           Map.put(base, "arch", "wrong"),
           Map.put(base, "os", "wrong"),
@@ -155,7 +125,7 @@ defmodule Minga.ReleaseERTSTest do
           Map.put(base, "minimum_macos", "14.0")
         ] do
       write_receipt(context, changed)
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+      assert_invalid_runtime()
     end
   end
 
@@ -163,18 +133,18 @@ defmodule Minga.ReleaseERTSTest do
     base = read_receipt(context)
 
     keys =
-      if context.target.os == :darwin,
+      if context.target.os == "macos",
         do:
           ~w(kind host_arch developer_dir xcode_version xcode_build clang_version sdk_version host_os_version),
-        else: ~w(kind host_arch image musl_version cc_version container_os_version)
+        else: ~w(kind host_arch os_id os_version glibc_version cc_version)
 
     for key <- keys, value <- ["", "different", nil, String.duplicate("x", 4097)] do
       changed = put_in(base, ["build_environment", key], value)
       # Observed version strings are facts, not another compiler allowlist.
       if value != "different" or
-           key not in ~w(clang_version sdk_version host_os_version cc_version container_os_version) do
+           key not in ~w(clang_version sdk_version host_os_version cc_version) do
         write_receipt(context, changed)
-        assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+        assert_invalid_runtime()
       end
     end
   end
@@ -192,7 +162,7 @@ defmodule Minga.ReleaseERTSTest do
       archive = raw_member(context.root <> "/member", type, size, mode)
       File.write!(Path.join(context.tmp_dir, "erts.tar.gz"), :zlib.gzip(archive))
       update_archive_receipt!(context)
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+      assert_invalid_runtime()
     end
   end
 
@@ -208,14 +178,14 @@ defmodule Minga.ReleaseERTSTest do
           {"sha256", String.duplicate("0", 64)}
         ] do
       write_receipt(context, put_in(base, ["archive", key], value))
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+      assert_invalid_runtime()
     end
 
     write_receipt(context, base)
     File.write!(Path.join(context.tmp_dir, "erts.tar.gz"), "altered bytes")
-    assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+    assert_invalid_runtime()
     File.rm!(Path.join(context.tmp_dir, "erts.tar.gz"))
-    assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+    assert_invalid_runtime()
   end
 
   test "rejects unsafe paths, extra roots, duplicate members and invalid archives", context do
@@ -231,19 +201,19 @@ defmodule Minga.ReleaseERTSTest do
       path = Path.join(context.tmp_dir, "erts.tar.gz")
       :ok = :erl_tar.create(String.to_charlist(path), entries, [:compressed])
       update_archive_receipt!(context)
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+      assert_invalid_runtime()
     end
 
     File.write!(Path.join(context.tmp_dir, "erts.tar.gz"), "not a tar archive")
     update_archive_receipt!(context)
-    assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+    assert_invalid_runtime()
   end
 
   test "rejects symbolic links and missing or nonexecutable runtime inputs", context do
     full = Path.join([context.tree, context.root, "usr/lib/link"])
     File.ln_s!("libei.a", full)
     archive!(context)
-    assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+    assert_invalid_runtime()
     File.rm!(full)
 
     for file <- @executables ++ @files do
@@ -251,122 +221,112 @@ defmodule Minga.ReleaseERTSTest do
       bytes = File.read!(full)
       File.rm!(full)
       archive!(context)
-      assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+      assert_invalid_runtime()
       File.write!(full, bytes)
       File.chmod!(full, if(file in @executables, do: 0o755, else: 0o644))
     end
 
     File.chmod!(Path.join([context.tree, context.root, "erts-17.1.1/bin/beam.smp"]), 0o644)
     archive!(context)
-    assert_raise Mix.Error, fn -> ReleaseERTS.do_resolve(context.target) end
+    assert_invalid_runtime()
   end
 
-  test "post-fetch skips helper only for a qualified macOS target and returns context unchanged",
+  test "rejects missing qualification and ABI evidence", context do
+    base = read_receipt(context)
+    abi = base["abi"]
+
+    waivers =
+      if context.target.os == "linux" do
+        [first | rest] = abi["external_dependencies"]
+
+        [
+          {"interpreter", "/tmp/libc-musl-helper.so"},
+          {"interpreter", nil},
+          {"external_dependencies", []},
+          {"external_dependencies", [first, first | rest]},
+          {"external_dependencies", [%{first | "file" => "../beam.smp"} | rest]},
+          {"external_dependencies", [%{first | "libraries" => []} | rest]},
+          {"external_dependencies", [%{first | "libraries" => ["libssl.so.3"]} | rest]}
+        ]
+      else
+        [{"minimum_macos", "14.0"}, {"interpreter", "/unexpected/loader"}]
+      end
+
+    for {key, value} <- waivers do
+      write_receipt(context, put_in(base, ["abi", key], value))
+      assert_invalid_runtime()
+    end
+
+    extra_check = if context.target.os == "linux", do: "host-interpreter", else: "minimum-macos"
+    write_receipt(context, Map.update!(base, "checks", &List.delete(&1, extra_check)))
+    assert_invalid_runtime()
+  end
+
+  test "cleans the private path on callback failure without replacing its error" do
+    assert_raise RuntimeError, "assembly failed", fn ->
+      ReleaseERTS.with_verified_runtime(fn erts ->
+        send(self(), {:staging, erts |> Path.dirname() |> Path.dirname()})
+        raise "assembly failed"
+      end)
+    end
+
+    assert_received {:staging, path}
+    refute File.exists?(path)
+  end
+
+  test "rejects accessing the TUI task include_erts callback outside its scope" do
+    assert_raise Mix.Error, ~r/mix release.tui/, fn ->
+      Tui.erts_path!()
+    end
+  end
+
+  test "rejects Mix falling back to host OTP but accepts Elixir and normal dependency paths",
        context do
-    target = %{context.target | os: :darwin, erts_source: {:local_unpacked, path: context.tree}}
-    receipt = receipt(context, target, "otp-29.1.2-macos-#{target.cpu}")
-    write_receipt(context, receipt)
-    fetched = build_context(target, context.tmp_dir, [])
-    assert ReleaseERTS.execute(fetched) == fetched
-    write_receipt(context, Map.put(receipt, "minimum_macos", "14.0"))
-    assert_raise Mix.Error, fn -> ReleaseERTS.execute(fetched) end
+    otp_root = Path.join(context.tree, context.root)
 
-    assert_raise Mix.Error, fn ->
-      ReleaseERTS.execute(%{fetched | target: context.target})
-    end
-  end
-
-  test "Linux helper requires both completed checks, qualified bytes and one interpreter binding",
-       context do
-    helper_bytes = "consumer hash fixture; not a qualified musl runtime"
-    original_manifest = File.read!(context.manifest_path)
-    on_exit(fn -> File.write!(context.manifest_path, original_manifest) end)
-
-    manifest =
-      put_in(
-        context.manifest,
-        ["musl", "helpers", "linux_#{context.target.cpu}", "sha256"],
-        sha(helper_bytes)
-      )
-
-    File.write!(context.manifest_path, JSON.encode!(manifest))
-    context = %{context | manifest: manifest}
-    target = %{context.target | os: :linux, erts_source: {:local_unpacked, path: context.tree}}
-    receipt = receipt(context, target, "otp-29.1.2-linux-#{target.cpu}")
-    write_receipt(context, receipt)
-    binding = {"__BURRITO_MUSL_RUNTIME_PATH", receipt["abi"]["interpreter"]}
-    fetched = build_context(target, context.tmp_dir, [binding])
-    assert_raise Mix.Error, fn -> ReleaseERTS.execute(fetched) end
-    helper = Path.join([context.tmp_dir, "src", "musl-runtime.so"])
-    File.mkdir_p!(Path.dirname(helper))
-    File.write!(helper, helper_bytes)
-    assert ReleaseERTS.execute(fetched) == fetched
-
-    checks = receipt["checks"]
-
-    for incomplete <- [
-          List.delete(checks, "musl-interpreter"),
-          List.delete(checks, "musl-helper"),
-          (checks -- ["musl-interpreter", "musl-helper"]) ++ ["musl-interpreter/helper"]
-        ] do
-      write_receipt(context, Map.put(receipt, "checks", incomplete))
-      assert_raise Mix.Error, fn -> ReleaseERTS.execute(fetched) end
-    end
-
-    write_receipt(context, receipt)
-    File.write!(helper, "wrong helper")
-    assert_raise Mix.Error, fn -> ReleaseERTS.execute(fetched) end
-    File.write!(helper, helper_bytes)
-
-    for bindings <- [[], [{elem(binding, 0), "/tmp/wrong.so"}], [binding, binding]] do
-      assert_raise Mix.Error, fn ->
-        ReleaseERTS.execute(%{fetched | extra_build_env: bindings})
-      end
-    end
-  end
-
-  test "failed synchronous Burrito wrap restores a previous resolver or removes its registration" do
-    previous = Application.fetch_env(:burrito, :erts_resolver)
-
-    on_exit(fn ->
-      case previous do
-        {:ok, resolver} -> Application.put_env(:burrito, :erts_resolver, resolver)
-        :error -> Application.delete_env(:burrito, :erts_resolver)
-      end
-    end)
-
-    # Invalid wrapper configuration fails after resolver registration but before Burrito performs external work.
-
-    for prior <- [:error, {:ok, __MODULE__}] do
-      case prior do
-        :error -> Application.delete_env(:burrito, :erts_resolver)
-        {:ok, resolver} -> Application.put_env(:burrito, :erts_resolver, resolver)
-      end
-
-      release = %Mix.Release{
-        options: [burrito: [extra_steps: [fetch: [post: [ReleaseERTS]]]]]
+    release = %Mix.Release{
+      erts_source: String.to_charlist(Path.join(otp_root, "erts-17.1.1")),
+      applications: %{
+        crypto: [path: Path.join(otp_root, "lib/crypto-1")],
+        elixir: [path: :code.lib_dir(:elixir)],
+        req: [path: Path.join(context.tmp_dir, "_build/prod/lib/req")]
       }
+    }
 
-      assert_raise Mix.Error, fn -> ReleaseERTS.wrap(release) end
-      assert Application.fetch_env(:burrito, :erts_resolver) == prior
+    assert Tui.verify_otp_apps!(release) == release
+
+    fallback = put_in(release.applications[:crypto][:path], :code.lib_dir(:crypto))
+
+    assert_raise Mix.Error, ~r/Mix resolved them from the host: crypto/, fn ->
+      Tui.verify_otp_apps!(fallback)
+    end
+  end
+
+  defp assert_invalid_runtime do
+    assert_raise Mix.Error, fn ->
+      ReleaseERTS.with_verified_runtime(fn _ -> flunk("invalid runtime reached the callback") end)
     end
   end
 
   defp receipt(context, target, root) do
-    os = os_name(target.os)
-    linux? = os == "linux"
-    source_keys = if linux?, do: ~w(otp openssl musl), else: ~w(otp openssl)
-    helper = context.manifest["musl"]["helpers"]["linux_#{target.cpu}"]["sha256"]
+    linux? = target.os == "linux"
+
+    interpreter =
+      get_in(context.manifest, ["linux_build_environment", "interpreters", target.arch])
+
+    dependencies =
+      for name <- ~w(beam.smp erlexec) do
+        %{"file" => "erts-17.1.1/bin/#{name}", "libraries" => ["libc.so.6"]}
+      end
 
     %{
-      "version" => 1,
+      "version" => 2,
       "kind" => "local-source-build",
-      "os" => os,
-      "arch" => to_string(target.cpu),
+      "os" => target.os,
+      "arch" => target.arch,
       "otp_version" => "29.1.2",
       "erts_version" => "17.1.1",
       "openssl_version" => "3.5.1",
-      "musl_version" => if(linux?, do: "1.2.5", else: nil),
       "minimum_macos" => if(linux?, do: nil, else: "15.0"),
       "archive" => %{
         "file" => "erts.tar.gz",
@@ -375,39 +335,38 @@ defmodule Minga.ReleaseERTSTest do
         "sha256" => sha("fixture")
       },
       "recipe_sha256" => context.recipe_sha,
-      "sources" => Map.new(source_keys, &{&1, Map.take(context.manifest[&1], ~w(url sha256))}),
+      "sources" =>
+        Map.new(~w(otp openssl), &{&1, Map.take(context.manifest[&1], ~w(url sha256))}),
       "build_environment" => build_environment(context.manifest, target),
       "abi" => %{
-        "interpreter" => if(linux?, do: "/tmp/libc-musl-#{helper}.so", else: nil),
-        "musl_sha256" => if(linux?, do: helper, else: nil),
-        "external_dependencies" => [],
+        "interpreter" => if(linux?, do: interpreter, else: nil),
+        "external_dependencies" => if(linux?, do: dependencies, else: []),
         "minimum_macos" => if(linux?, do: nil, else: "15.0")
       },
       "checks" =>
         ~w(otp-version erts-version native-architecture crypto-result native-library-closure) ++
-          if(linux?, do: ~w(musl-interpreter musl-helper), else: ~w(minimum-macos))
+          if(linux?, do: ~w(host-interpreter), else: ~w(minimum-macos))
     }
   end
 
-  defp build_environment(manifest, %{os: :darwin, cpu: arch}) do
+  defp build_environment(manifest, %{os: "macos", arch: arch}) do
     Map.merge(manifest["macos_build_environment"], %{
       "kind" => "native-macos",
-      "host_arch" => to_string(arch),
+      "host_arch" => arch,
       "clang_version" => "filesystem fixture only",
       "sdk_version" => "filesystem fixture only",
       "host_os_version" => "filesystem fixture only"
     })
   end
 
-  defp build_environment(manifest, %{os: :linux, cpu: arch}) do
-    %{
-      "kind" => "native-alpine",
-      "host_arch" => to_string(arch),
-      "image" => manifest["linux_build_image"]["image"],
-      "musl_version" => "1.2.5",
-      "cc_version" => "filesystem fixture only",
-      "container_os_version" => "filesystem fixture only"
-    }
+  defp build_environment(manifest, %{os: "linux", arch: arch}) do
+    manifest["linux_build_environment"]
+    |> Map.take(~w(os_id os_version glibc_version))
+    |> Map.merge(%{
+      "kind" => "native-ubuntu",
+      "host_arch" => arch,
+      "cc_version" => "filesystem fixture only"
+    })
   end
 
   defp archive!(context) do
@@ -476,45 +435,18 @@ defmodule Minga.ReleaseERTSTest do
   defp octal(value, width),
     do: String.pad_leading(Integer.to_string(value, 8), width - 1, "0") <> <<0>>
 
-  defp build_context(target, self_dir, env) do
-    %Context{
-      target: target,
-      mix_release: %Mix.Release{},
-      work_dir: "",
-      self_dir: self_dir,
-      extra_build_env: env,
-      halted: false
-    }
-  end
-
   defp native_target do
-    cpu = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
-
-    cpu =
-      case cpu do
-        "aarch64" -> :aarch64
-        "x86_64" -> :x86_64
-      end
+    arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
 
     os =
       case :os.type() do
-        {:unix, :darwin} -> :darwin
-        {:unix, :linux} -> :linux
+        {:unix, :darwin} -> "macos"
+        {:unix, :linux} -> "linux"
       end
 
-    %Target{
-      alias: :fixture,
-      cpu: cpu,
-      os: os,
-      cross_build: false,
-      qualifiers: [],
-      erts_source: {:precompiled, version: "29.1.2"},
-      debug?: false
-    }
+    %{os: os, arch: arch}
   end
 
-  defp os_name(:darwin), do: "macos"
-  defp os_name(:linux), do: "linux"
   defp sha(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   defp read_receipt(context), do: context.path |> File.read!() |> JSON.decode!()
   defp write_receipt(context, receipt), do: File.write!(context.path, JSON.encode!(receipt))

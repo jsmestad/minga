@@ -124,7 +124,7 @@ def single(paths, description):
     return paths[0]
 
 
-def check(release, target, app=None, binary=None):
+def check(release, target, app=None):
     release = release.resolve(strict=True)
     if not release.is_dir():
         raise ValueError(f"Not a release directory: {release}")
@@ -145,6 +145,8 @@ def check(release, target, app=None, binary=None):
     require_file(erts / "bin/beam.smp", executable=True)
     entry_name = "minga_macos" if app else "minga"
     require_file(release / "bin" / entry_name, executable=True)
+    if app is None:
+        require_file(release / "launchers/minga", executable=True)
     require_file(release / "releases/start_erl.data")
     runtime_version, app_version = (release / "releases/start_erl.data").read_text().split()
     if erts.name != "erts-" + runtime_version:
@@ -183,14 +185,11 @@ def check(release, target, app=None, binary=None):
         if not list((app / "Contents/Resources/Fonts").rglob("*.ttf")):
             raise ValueError("Missing packaged GUI fonts")
         required_native.extend([app / "Contents/MacOS/Minga", app / "Contents/Resources/bin/minga-ipc"])
-    if binary:
-        require_file(binary, executable=True)
-        required_native.append(binary)
     for path in required_native:
         actual = native_targets(path)
         if actual is None or target not in actual:
             raise ValueError(f"Required executable does not contain {target}: {path}")
-    count = 0
+    native = []
     for root in roots:
         for path in root.rglob("*"):
             if path.is_file():
@@ -200,8 +199,9 @@ def check(release, target, app=None, binary=None):
                 if actual is not None:
                     if target not in actual:
                         raise ValueError(f"Wrong packaged native targets {sorted(actual)}, expected membership of {target}: {path}")
-                    count += 1
-    print(f"Package resources and {count} native headers passed for selected target {target}; not whole-package universal support; no installed/UI/X0 qualification claimed")
+                    native.append(path)
+    print(f"Package resources and {len(native)} native headers passed for selected target {target}; not whole-package universal support; no installed/UI/X0 qualification claimed")
+    return release, erts, native
 
 def _inspect_native(command, deadline):
     remaining = min(10.0, deadline - time.monotonic())
@@ -216,9 +216,9 @@ def _inspect_native(command, deadline):
     return result.stdout
 
 
-def _macos_version(value):
+def _version_triplet(value):
     if not isinstance(value, str) or not re.fullmatch(r"\d+(?:\.\d+){0,2}", value):
-        raise ValueError("Invalid packaged macOS deployment version")
+        raise ValueError("Invalid native ABI version")
     parts = [int(part) for part in value.split(".")]
     return tuple(parts + [0] * (3 - len(parts)))
 
@@ -240,7 +240,7 @@ def _check_macho_runtime(path, release, executable_dir, target, deadline):
                 platform_id = re.search(r"(?m)^\s*platform (\S+)\s*$", block)
                 if platform_id is None or platform_id[1] not in ("1", "MACOS"):
                     raise ValueError(f"Packaged runtime is not a macOS binary: {path}")
-            minimums.append(_macos_version(minimum[1]))
+            minimums.append(_version_triplet(minimum[1]))
         elif command in ("LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB", "LC_LOAD_UPWARD_DYLIB"):
             dependency = re.search(r"(?m)^\s*name (.+) \(offset \d+\)\s*$", block)
             if dependency is None:
@@ -273,51 +273,92 @@ def _check_macho_runtime(path, release, executable_dir, target, deadline):
             raise ValueError(f"Packaged runtime depends on an unbundled native library: {path}: {dependency}")
 
 
-def _check_elf_runtime(path, interpreter, libc, deadline):
-    output = _inspect_native(["readelf", "-W", "-l", "-d", str(path)], deadline)
+def _check_elf_runtime(path, interpreter, libraries, glibc, deadline):
+    output = _inspect_native(["readelf", "-W", "-l", "-d", "-V", str(path)], deadline)
     interpreters = re.findall(r"\[Requesting program interpreter: ([^\]]+)\]", output)
-    if any(value != interpreter for value in interpreters):
-        raise ValueError(f"Packaged ERTS uses an unqualified ELF interpreter: {path}")
+    vm = path.name in ("beam.smp", "erlexec")
+    sqlite = path.name == "sqlite3_nif.so"
+    if (vm or interpreters) and interpreters != [interpreter]:
+        raise ValueError(f"Packaged ELF uses an unqualified glibc interpreter: {path}")
+    if sqlite and interpreters:
+        raise ValueError(f"Packaged SQLite NIF is not a library: {path}")
     needed = re.findall(r"\(NEEDED\).*Shared library: \[([^\]]+)\]", output)
-    if any(value != libc for value in needed):
-        raise ValueError(f"Packaged ERTS/NIF has an unbundled or non-musl dependency: {path}: {needed}")
-    if path.name in ("beam.smp", "erlexec") and needed and interpreters != [interpreter]:
-        raise ValueError(f"Packaged ERTS has no qualified musl interpreter: {path}")
+    if not set(needed) <= libraries or ((vm or sqlite) and "libc.so.6" not in needed):
+        raise ValueError(f"Packaged ELF has an unqualified glibc dependency: {path}: {needed}")
+    if "(RPATH)" in output or "(RUNPATH)" in output:
+        raise ValueError(f"Packaged ELF uses a native library search path: {path}")
+    versions = re.findall(r"\bName: GLIBC_(\S+)", output)
+    if (vm or sqlite) and not versions:
+        raise ValueError(f"Packaged ELF has no versioned glibc ABI evidence: {path}")
+    for version in versions:
+        if version == "ABI_DT_RELR":  # Supported by glibc since 2.36.
+            continue
+        if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", version) or _version_triplet(version) > glibc:
+            raise ValueError(f"Packaged ELF exceeds the qualified glibc ABI: {path}: GLIBC_{version}")
+    return sorted(needed)
 
 
-def _check_runtime_abi(release, target, receipt_path):
+def _check_linux_runtime(release, erts, native, arch, receipt, abi, baseline, deadline):
+    interpreter = baseline["interpreters"][arch]
+    environment = receipt.get("build_environment")
+    required = {key: baseline[key] for key in ("os_id", "os_version", "glibc_version")}
+    required.update(kind="native-ubuntu", host_arch=arch)
+    if (not isinstance(environment, dict) or any(environment.get(key) != value for key, value in required.items())
+            or not isinstance(environment.get("cc_version"), str) or not environment["cc_version"].strip()
+            or abi.get("interpreter") != interpreter or abi["minimum_macos"] is not None):
+        raise ValueError("Source-runtime receipt has no qualified Ubuntu glibc interpreter/baseline")
+    libraries = set(baseline["libraries"]) | {Path(interpreter).name}
+    glibc = _version_triplet(baseline["glibc_version"])
+    records = abi["external_dependencies"]
+    if not isinstance(records, list) or not 1 <= len(records) <= 512:
+        raise ValueError("Invalid source-runtime ELF dependency inventory")
+    source_dependencies = {}
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {"file", "libraries"}:
+            raise ValueError("Invalid source-runtime ELF dependency record")
+        filename, needed = record["file"], record["libraries"]
+        if (not isinstance(filename, str) or not filename or filename in source_dependencies
+                or Path(filename).is_absolute() or ".." in Path(filename).parts
+                or not isinstance(needed, list) or any(not isinstance(name, str) or name not in libraries for name in needed)):
+            raise ValueError("Invalid source-runtime ELF dependency record")
+        source_dependencies[filename] = sorted(needed)
+    if erts / "bin/erlexec" not in native:
+        raise ValueError("Missing native ERTS launcher")
+    for path in native:
+        needed = _check_elf_runtime(path, interpreter, libraries, glibc, deadline)
+        name = path.relative_to(release).as_posix()
+        if (path.is_relative_to(erts) or name in source_dependencies) and source_dependencies.get(name) != needed:
+            raise ValueError(f"Packaged ELF dependency inventory differs from source receipt: {name}")
+
+
+def _check_runtime_abi(release, erts, native, target, receipt_path):
     if receipt_path.stat().st_size > 1024 * 1024:
         raise ValueError("Source-runtime receipt exceeds its size bound")
     receipt = json.loads(receipt_path.read_text())
     os_name, arch = target.split("_", 1)
-    if (not isinstance(receipt, dict) or receipt.get("version") != 1 or receipt.get("kind") != "local-source-build" or
+    pins = json.loads(Path(__file__).with_name("release_erts_sources.json").read_text())
+    if (not isinstance(receipt, dict) or type(receipt.get("version")) is not int or
+            receipt["version"] != pins["version"] or receipt.get("kind") != "local-source-build" or
             receipt.get("os") != os_name or receipt.get("arch") != arch):
         raise ValueError("Source-runtime receipt does not match the checked package target")
-    release = release.resolve(strict=True)
-    erts = single(release.glob("erts-*"), "packaged ERTS")
-    if receipt.get("otp_version") != "29.1.2" or receipt.get("erts_version") != "17.1.1" or erts.name != "erts-17.1.1":
+    if (receipt.get("otp_version") != pins["otp"]["version"] or receipt.get("erts_version") != pins["otp"]["erts_version"]
+            or erts.name != "erts-" + pins["otp"]["erts_version"]):
         raise ValueError("Source-runtime receipt or packaged ERTS differs from the required version")
     abi = receipt.get("abi", {})
-    if not isinstance(abi, dict):
+    if not isinstance(abi, dict) or set(abi) != {"interpreter", "external_dependencies", "minimum_macos"}:
         raise ValueError("Source-runtime receipt has no ABI evidence object")
-    if os_name == "linux":
-        helper_hash = abi.get("musl_sha256", "")
-        interpreter = abi.get("interpreter")
-        if (receipt.get("musl_version") != "1.2.5" or not isinstance(helper_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", helper_hash) or
-                interpreter != f"/tmp/libc-musl-{helper_hash}.so"):
-            raise ValueError("Source-runtime receipt has no qualified musl interpreter identity")
-    elif _macos_version(receipt.get("minimum_macos")) != (15, 0, 0):
-        raise ValueError("Source-runtime receipt does not preserve macOS 15.0")
     deadline = time.monotonic() + 60.0
-    paths = [path for path in erts.rglob("*") if path.is_file()]
-    paths.extend(path for path in (release / "lib").rglob("*") if path.is_file() and (".so" in path.suffixes or path.suffix == ".dylib"))
-    for path in paths:
-        if native_targets(path) is None:
-            continue
-        if os_name == "macos":
-            _check_macho_runtime(path, release, erts / "bin", target, deadline)
-        else:
-            _check_elf_runtime(path, interpreter, f"libc.musl-{arch}.so.1", deadline)
+    if os_name == "linux":
+        _check_linux_runtime(release, erts, native, arch, receipt, abi, pins["linux_build_environment"], deadline)
+    else:
+        minimum = _version_triplet(pins["minimum_macos"])
+        if (_version_triplet(receipt.get("minimum_macos")) != minimum or
+                abi["interpreter"] is not None or _version_triplet(abi["minimum_macos"]) != minimum):
+            raise ValueError("Source-runtime receipt does not preserve macOS 15.0")
+        for path in native:
+            if path.is_relative_to(erts) or (path.is_relative_to(release / "lib")
+                                            and (".so" in path.suffixes or path.suffix == ".dylib")):
+                _check_macho_runtime(path, release, erts / "bin", target, deadline)
     print(f"Packaged ERTS/NIF native ABI checks passed for {target}; no installed/UI/X0 qualification claimed")
 
 
@@ -329,15 +370,14 @@ def main():
     host_arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64"}.get(platform.machine(), "unsupported")
     parser.add_argument("--target", choices=TARGETS, default=f"{host_os}_{host_arch}")
     parser.add_argument("--app", type=Path)
-    parser.add_argument("--binary", type=Path)
     parser.add_argument("--runtime-receipt", type=Path)
     args = parser.parse_args()
     try:
         if args.target not in TARGETS:
             raise ValueError("Unsupported native host; pass an explicit supported --target")
-        check(Path(args.release_dir), args.target, args.app, args.binary)
+        release, erts, native = check(Path(args.release_dir), args.target, args.app)
         if args.runtime_receipt is not None:
-            _check_runtime_abi(Path(args.release_dir), args.target, args.runtime_receipt)
+            _check_runtime_abi(release, erts, native, args.target, args.runtime_receipt)
     except (OSError, ValueError) as error:
         print(f"Release contents check failed: {error}", file=sys.stderr)
         return 1

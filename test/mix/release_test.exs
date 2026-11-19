@@ -19,9 +19,11 @@ defmodule Minga.ReleaseTest do
     } do
       release = %{release(@release_name, dir) | path: dir}
       files = Enum.map(~w(bin/tool lib/other-1.0/data), &write_file(dir, &1))
-      [clean | _] = steps(@release_name)
 
-      assert_raise Mix.Error, ~r/Release output must be inside/, fn -> clean.(release) end
+      assert_raise Mix.Error, ~r/Release output must be inside/, fn ->
+        before_assemble(release)
+      end
+
       for file <- files, do: assert(File.read!(file) == "runtime asset")
     end
 
@@ -37,10 +39,7 @@ defmodule Minga.ReleaseTest do
       source = write_file(dir, "source/priv/minga-test-harness")
       unrelated = write_file(release.path, "notes.txt")
 
-      @release_name
-      |> steps()
-      |> Enum.take_while(&(&1 != :assemble))
-      |> Enum.reduce(release, fn step, release -> step.(release) end)
+      before_assemble(release)
 
       for path <- stale, do: refute(File.exists?(Path.join(release.path, path)))
       assert File.read!(source) == "runtime asset"
@@ -86,11 +85,19 @@ defmodule Minga.ReleaseTest do
       name: name,
       path: Path.join([dir, "[release]", Atom.to_string(name)]),
       version: "1.0.0",
-      applications: %{minga: [vsn: ~c"1.0.0"]}
+      erts_source: Path.join(dir, "qualified-otp/erts-17.1.1"),
+      applications: %{minga: [vsn: ~c"1.0.0", path: Path.join(dir, "source")]}
     }
   end
 
   defp steps(name), do: Minga.MixProject.project()[:releases][name][:steps]
+
+  defp before_assemble(release) do
+    release.name
+    |> steps()
+    |> Enum.take_while(&(&1 != :assemble))
+    |> Enum.reduce(release, fn step, release -> step.(release) end)
+  end
 
   defp after_assemble(name) do
     [_assemble, step | _] = Enum.drop_while(steps(name), &(&1 != :assemble))
