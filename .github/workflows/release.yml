@@ -20,7 +20,7 @@ env:
   MIX_ENV: prod
   ELIXIR_VERSION: "1.20.5-otp-29"
   OTP_VERSION: "29.1.2"
-  GO_VERSION: "1.26.4"
+  GO_VERSION: "1.26.11"
   NATIVE_ZIG_VERSION: "0.16.0"
   # Qualified independently against the locked Burrito.get_versions/0 contract.
   BURRITO_ZIG_VERSION: "0.16.0"
@@ -403,11 +403,13 @@ jobs:
           set -euo pipefail
           mkdir downloads
           printf '%s\n' "$CANDIDATE_CONTEXT" > context.json
+          source_sha=$(jq -er '.source_sha | select(test("^[0-9a-f]{40}$"))' context.json)
+          gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GITHUB_REPOSITORY/contents/.tool-versions?ref=$source_sha" > source.tool-versions
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" | jq --arg prefix "candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-" '[.[].artifacts[] | select(.name | startswith($prefix))]' > artifacts.json
           while IFS= read -r id; do
             gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "downloads/$id.zip"
           done < <(jq -r '.[].id' artifacts.json)
-          python3 scripts/release_candidate.py checksums --context context.json --artifacts artifacts.json --downloads downloads --output SHA256SUMS.txt
+          python3 scripts/release_candidate.py checksums --context context.json --artifacts artifacts.json --downloads downloads --source-tool-versions source.tool-versions --output SHA256SUMS.txt
       - name: Upload exact final-payload checksums
         id: checksums
         uses: actions/upload-artifact@v4
@@ -427,7 +429,7 @@ jobs:
           jq --slurpfile artifact checksum-artifact.json '. + $artifact' artifacts.json > artifacts.next.json
           mv artifacts.next.json artifacts.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CHECKSUM_ID/zip" > "downloads/$CHECKSUM_ID.zip"
-          python3 scripts/release_candidate.py create --context context.json --artifacts artifacts.json --downloads downloads --output manifest.json
+          python3 scripts/release_candidate.py create --context context.json --artifacts artifacts.json --downloads downloads --source-tool-versions source.tool-versions --output manifest.json
       - name: Upload immutable manifest (external handle; never self-hashed)
         id: manifest
         uses: actions/upload-artifact@v4
@@ -448,7 +450,7 @@ jobs:
           jq --slurpfile artifact manifest-artifact.json '. + $artifact' artifacts.json > artifacts.next.json
           mv artifacts.next.json artifacts.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID/zip" > "downloads/$MANIFEST_ID.zip"
-          python3 scripts/release_candidate.py verify --context context.json --artifacts artifacts.json --downloads downloads --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$manifest_sha" --receipt preparation-receipt.json
+          python3 scripts/release_candidate.py verify --context context.json --artifacts artifacts.json --downloads downloads --source-tool-versions source.tool-versions --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$manifest_sha" --receipt preparation-receipt.json
           {
             echo '### Complete immutable preparation (not installed/UI/X0 qualification)'
             printf 'Manifest artifact ID: %s\n\nManifest-file SHA256: %s\n\n' "$MANIFEST_ID" "$manifest_sha"

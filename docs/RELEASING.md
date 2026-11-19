@@ -31,7 +31,7 @@ Runner labels are configuration, not architecture evidence. Each job checks its 
 
 ### Toolchains and app construction
 
-`.tool-versions` is the source pin: Elixir `1.20.5-otp-29`, OTP `29.1.2`, Go `1.26.4` and native Zig `0.16.0`. Preparation selects Go explicitly; the `go/tui/go.mod` language directive is not a compiler-version pin. macOS jobs select Xcode 26.3 explicitly and verify the actual native host.
+`.tool-versions` is the source pin: Elixir `1.20.5-otp-29`, OTP `29.1.2`, Go `1.26.11` and native Zig `0.16.0`. Preparation selects Go explicitly; the `go/tui/go.mod` directive sets the minimum Go version for the terminal renderer. macOS jobs select Xcode 26.3 explicitly and verify the actual native host.
 
 The locked Burrito 1.6.0 declares wrapper Zig `0.16.0`. The workflow checks `Burrito.get_versions/0` before wrapping and records native-Zig and wrapper-Zig facts separately, even when their versions are equal. `BURRITO_TARGET` selects exactly one existing target per standalone job. The GUI embeds the plain `minga_macos` release instead of a Burrito wrapper.
 
@@ -93,7 +93,7 @@ Use the values recorded for the successful preparation, not values inferred from
 gh workflow run verify-release-candidate.yml --repo jsmestad/minga --ref main -f manifest_artifact_id="$MANIFEST_ID" -f manifest_sha256="$MANIFEST_SHA" -f source_sha="$SOURCE_SHA" -f version=0.1.0 -f workflow_sha="$WORKFLOW_SHA" -f run_id="$PREPARATION_RUN" -f run_attempt="$PREPARATION_ATTEMPT"
 ```
 
-The rehearsal uses trusted protected-main verifier code and read-only API access. It checks the producing workflow/run/attempt through GitHub, downloads by immutable artifact ID, and validates the expected context, raw ZIP digests, safe inventory, final-byte hashes and checksum file. It does not build, sign, repackage or execute the candidate. A successful run retains a `candidate-verification-<run>-<attempt>` receipt containing the exact handle, context, five hashes and checks performed.
+The rehearsal uses trusted protected-main verifier code and read-only API access. It checks the producing workflow/run/attempt through GitHub, reads the toolchain pins from the verified source revision, downloads by immutable artifact ID, and validates the expected context, raw ZIP digests, safe inventory, final-byte hashes and checksum file. It does not build, sign, repackage or execute the candidate. A successful run retains a `candidate-verification-<run>-<attempt>` receipt containing the exact handle, context, five hashes and checks performed.
 
 For a local download, take `PAYLOAD_ID`, `PAYLOAD_NAME`, `ZIP_DIGEST` and `PAYLOAD_SHA` from that verified manifest. Work in a fresh directory and verify the received archive before unpacking:
 
@@ -105,7 +105,7 @@ unzip -j candidate-payload.zip "$PAYLOAD_NAME" "$PAYLOAD_NAME.build.json" -d can
 printf '%s  candidate-payload/%s\n' "$PAYLOAD_SHA" "$PAYLOAD_NAME" | shasum -a 256 -c -
 ```
 
-The local-only `scripts/release_candidate.py` also supports the workflow's `checksums`, `create` and `verify` operations. Those operations require independently acquired context/API metadata and the original raw `<artifactID>.zip` downloads. Re-zipping extracted files does not reproduce the transport identity.
+The local-only `scripts/release_candidate.py` also supports the workflow's `checksums`, `create` and `verify` operations. Pass the `.tool-versions` file from the independently verified source revision via `--source-tool-versions`, along with independently acquired context/API metadata and the original raw `<artifactID>.zip` downloads. Re-zipping extracted files does not reproduce the transport identity.
 
 ## Separate package checks from release qualification
 

@@ -23,7 +23,7 @@ PAYLOADS = {
     "minga_linux_x86_64": {"os": "linux", "arch": "x86_64"},
     "minga_linux_aarch64": {"os": "linux", "arch": "aarch64"},
 }
-PINS = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": "1.26.4", "native_zig": "0.16.0"}
+TOOLCHAIN_KEYS = {"elixir": "elixir", "erlang": "otp", "golang": "go", "zig": "native_zig"}
 CONTEXT_KEYS = {"repository", "source_sha", "version", "workflow_path", "workflow_sha", "run_id", "run_attempt", "run_started_at"}
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -181,13 +181,25 @@ class Archive:
         return value
 
 
-def validate_build(build, context, filename):
+def read_toolchains(path):
+    """Read the toolchain pins acquired from the independently verified source revision."""
+    pins = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        fields = line.partition("#")[0].split()
+        if fields and (key := TOOLCHAIN_KEYS.get(fields[0])):
+            require(len(fields) == 2 and key not in pins, "invalid or duplicate source toolchain pin")
+            pins[key] = fields[1]
+    require(len(pins) == len(TOOLCHAIN_KEYS), "missing source toolchain pins")
+    return pins
+
+
+def validate_build(build, context, filename, pins):
     require(isinstance(build, dict) and set(build) == {"schema_version", "context", "filename", "target", "toolchains", "evidence"}, "invalid build facts inventory")
     require(type(build["schema_version"]) is int and build["schema_version"] == 1 and validate_context(build["context"]) == context, "wrong build provenance/generation")
     require(build["filename"] == filename and build["target"] == PAYLOADS[filename], "wrong build target")
     tools = build["toolchains"]
     require(isinstance(tools, dict), "missing toolchains")
-    require(all(tools.get(key) == value for key, value in PINS.items()), "wrong pinned toolchain")
+    require(all(tools.get(key) == value for key, value in pins.items()), "wrong pinned toolchain")
     extra_tool = "xcode" if filename == "Minga.dmg" else "wrapper_zig"
     require(isinstance(tools.get(extra_tool), str) and bool(tools[extra_tool].strip()), f"missing actual {extra_tool} version")
     evidence = build["evidence"]
@@ -205,14 +217,14 @@ def validate_build(build, context, filename):
     require(required <= ids, "missing required validation evidence")
 
 
-def payload_descriptors(context, artifacts, downloads):
+def payload_descriptors(context, artifacts, downloads, pins):
     descriptors = []
     for filename, target in PAYLOADS.items():
         artifact = artifacts[filename]
         build_name = filename + ".build.json"
         with Archive(downloads, artifact, {filename, build_name}) as archive:
             build = decode_json(archive.bounded(build_name))
-            validate_build(build, context, filename)
+            validate_build(build, context, filename, pins)
             payload = archive.identity(filename)
             require(payload["size"] > 0, "empty payload")
             facts = archive.identity(build_name)
@@ -226,8 +238,8 @@ def checksum_bytes(payloads):
     return "".join(f'{item["sha256"]}  {item["filename"]}\n' for item in payloads).encode("ascii")
 
 
-def candidate_manifest(context, artifacts, downloads):
-    payloads = payload_descriptors(context, artifacts, downloads)
+def candidate_manifest(context, artifacts, downloads, pins):
+    payloads = payload_descriptors(context, artifacts, downloads, pins)
     artifact = artifacts["checksums"]
     with Archive(downloads, artifact, {"SHA256SUMS.txt"}) as archive:
         require(archive.bounded("SHA256SUMS.txt", 2048) == checksum_bytes(payloads), "checksum inventory or payload hash mismatch")
@@ -236,7 +248,7 @@ def candidate_manifest(context, artifacts, downloads):
     return {"schema_version": 1, "context": context, "payloads": payloads, "checksums": checksums}
 
 
-def verify(context, metadata, downloads, manifest_artifact_id, manifest_sha256):
+def verify(context, metadata, downloads, manifest_artifact_id, manifest_sha256, pins):
     require(positive_int(manifest_artifact_id), "invalid manifest artifact ID")
     require(isinstance(manifest_sha256, str) and HEX.fullmatch(manifest_sha256), "invalid manifest-file SHA256")
     artifacts = validate_artifacts(metadata, context, [*PAYLOADS, "checksums", "manifest"])
@@ -247,7 +259,7 @@ def verify(context, metadata, downloads, manifest_artifact_id, manifest_sha256):
         manifest = decode_json(archive.bounded("manifest.json"))
     # Reconstruct from independently expected context, current immutable API
     # metadata and actual bytes. No self-asserted manifest provenance is trusted.
-    expected = candidate_manifest(context, artifacts, downloads)
+    expected = candidate_manifest(context, artifacts, downloads, pins)
     require(json.dumps(manifest, sort_keys=True) == json.dumps(expected, sort_keys=True), "manifest inventory, provenance, evidence or final-byte identity mismatch")
     return {
         "schema_version": 1,
@@ -268,6 +280,7 @@ def main(argv=None):
         command.add_argument("--context", required=True, type=Path)
         command.add_argument("--artifacts", required=True, type=Path)
         command.add_argument("--downloads", required=True, type=Path)
+        command.add_argument("--source-tool-versions", required=True, type=Path)
         if name == "verify":
             command.add_argument("--manifest-artifact-id", required=True, type=int)
             command.add_argument("--manifest-sha256", required=True)
@@ -281,17 +294,18 @@ def main(argv=None):
             args.receipt.unlink(missing_ok=True)
         context = validate_context(read_json(args.context))
         metadata = read_json(args.artifacts)
+        pins = read_toolchains(args.source_tool_versions)
         if args.command == "verify":
-            receipt = verify(context, metadata, args.downloads, args.manifest_artifact_id, args.manifest_sha256)
+            receipt = verify(context, metadata, args.downloads, args.manifest_artifact_id, args.manifest_sha256, pins)
             write_json(args.receipt, receipt)
             print(json.dumps(receipt, sort_keys=True))
         else:
             labels = list(PAYLOADS) + (["checksums"] if args.command == "create" else [])
             artifacts = validate_artifacts(metadata, context, labels)
             if args.command == "create":
-                write_json(args.output, candidate_manifest(context, artifacts, args.downloads))
+                write_json(args.output, candidate_manifest(context, artifacts, args.downloads, pins))
             else:
-                args.output.write_bytes(checksum_bytes(payload_descriptors(context, artifacts, args.downloads)))
+                args.output.write_bytes(checksum_bytes(payload_descriptors(context, artifacts, args.downloads, pins)))
     except (CandidateError, OSError, ValueError, TypeError, KeyError, AttributeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
         print(f"candidate unavailable: {error}", file=sys.stderr)
         return 1

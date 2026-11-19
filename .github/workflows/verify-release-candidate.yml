@@ -106,6 +106,9 @@ jobs:
               "run_attempt": attempt, "run_started_at": run["run_started_at"],
           }
           Path("context.json").write_text(json.dumps(context))
+          with Path("source.tool-versions").open("wb") as output:
+              subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json",
+                              f"{root}/contents/.tool-versions?ref={source}"], stdout=output, check=True)
           prefix = f"candidate-{run_id}-{attempt}-"
           artifacts = []
           page = 1
@@ -141,6 +144,7 @@ jobs:
           set -euo pipefail
           python3 scripts/release_candidate.py verify \
             --context context.json --artifacts artifacts.json --downloads downloads \
+            --source-tool-versions source.tool-versions \
             --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$MANIFEST_SHA" \
             --receipt receipt.json
           python3 - <<'PY'

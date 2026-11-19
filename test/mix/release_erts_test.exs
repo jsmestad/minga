@@ -146,7 +146,7 @@ defmodule Minga.ReleaseERTSTest do
           Map.put(base, "os", "wrong"),
           Map.put(base, "otp_version", "29.1.1"),
           Map.put(base, "erts_version", "17.1.0"),
-          Map.put(base, "openssl_version", "3.5.0"),
+          Map.put(base, "openssl_version", "3.5.1"),
           Map.put(base, "sources", %{}),
           Map.put(base, "recipe_sha256", String.duplicate("0", 64)),
           Map.put(base, "checks", []),
@@ -365,7 +365,7 @@ defmodule Minga.ReleaseERTSTest do
       "arch" => to_string(target.cpu),
       "otp_version" => "29.1.2",
       "erts_version" => "17.1.1",
-      "openssl_version" => "3.5.1",
+      "openssl_version" => "3.5.9",
       "musl_version" => if(linux?, do: "1.2.5", else: nil),
       "minimum_macos" => if(linux?, do: nil, else: "15.0"),
       "archive" => %{

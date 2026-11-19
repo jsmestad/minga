@@ -38,11 +38,21 @@ class ReleaseCandidateTest(unittest.TestCase):
         }
         self.created = now.isoformat()
         self.expires = (now + timedelta(days=7)).isoformat()
+        self.source_tool_versions = self.root / "source.tool-versions"
+        self.prepare_candidate("1.26.11")
+
+    def write_source_pins(self, go_version):
+        self.source_tool_versions.write_text(
+            f"erlang 29.1.2\nelixir 1.20.5-otp-29\nzig 0.16.0\ngolang {go_version}\n"
+        )
+
+    def prepare_candidate(self, go_version):
+        self.write_source_pins(go_version)
         self.metadata = []
         self.entries = {}
         self.builds = {}
         for filename, target in candidate.PAYLOADS.items():
-            tools = dict(candidate.PINS)
+            tools = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": go_version, "native_zig": "0.16.0"}
             tools["xcode" if filename == "Minga.dmg" else "wrapper_zig"] = "26.3" if filename == "Minga.dmg" else "0.16.0"
             ids = ["package-contents", "native-architecture", "package-boot"]
             if filename == "Minga.dmg":
@@ -93,6 +103,7 @@ class ReleaseCandidateTest(unittest.TestCase):
             sys.executable, str(SCRIPT), command,
             "--context", str(self.root / "context.json"),
             "--artifacts", str(self.root / "artifacts.json"),
+            "--source-tool-versions", str(self.source_tool_versions),
             "--downloads", str(self.downloads), *arguments,
         ], capture_output=True, text=True)
         if success:
@@ -133,6 +144,24 @@ class ReleaseCandidateTest(unittest.TestCase):
             self.assertEqual(payload["sha256"], hashlib.sha256(actual).hexdigest())
         self.assertNotIn("handle", self.manifest)
         self.assertLess((self.root / "receipt.json").stat().st_size, 8192)
+
+    def test_unexpired_candidates_use_their_source_generation_pins(self):
+        self.verify(success=True)
+        self.write_source_pins("1.26.4")
+        self.reject("wrong pinned toolchain")
+
+        self.context["source_sha"] = "c" * 40
+        self.prepare_candidate("1.26.4")
+        self.verify(success=True)
+        self.write_source_pins("1.26.11")
+        self.reject("wrong pinned toolchain")
+
+    def test_partial_or_ambiguous_source_pins_cannot_verify(self):
+        original = self.source_tool_versions.read_text()
+        self.source_tool_versions.write_text(original.replace("golang 1.26.11\n", ""))
+        self.reject("missing source toolchain pins")
+        self.source_tool_versions.write_text(original + "golang 1.26.4\n")
+        self.reject("invalid or duplicate source toolchain pin")
 
     def test_hashes_actual_raw_transport_not_api_digest_echo(self):
         path = self.downloads / f'{self.metadata[0]["id"]}.zip'
@@ -250,7 +279,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.builds[label]["toolchains"]["go"] = "1.25.0"
         self.replace_build(label)
         self.reject("wrong pinned toolchain")
-        self.builds[label]["toolchains"]["go"] = candidate.PINS["go"]
+        self.builds[label]["toolchains"]["go"] = "1.26.11"
         self.builds[label]["target"] = {"os": "linux", "arch": "aarch64"}
         self.replace_build(label)
         self.reject("wrong build target")

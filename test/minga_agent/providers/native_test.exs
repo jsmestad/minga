@@ -1686,7 +1686,7 @@ defmodule MingaAgent.Providers.NativeTest do
                }
              ] = assistant["reasoning_details"]
 
-      assert assistant["metadata"]["response_id"] == "resp_native_1"
+      refute Enum.any?(messages, &Map.has_key?(&1, "metadata"))
 
       assert Enum.map(assistant["tool_calls"], fn call ->
                {call["id"], call["function"]["name"], JSON.decode!(call["function"]["arguments"])}
@@ -1695,11 +1695,11 @@ defmodule MingaAgent.Providers.NativeTest do
                {"tc_second", "read_file", %{"path" => "test.txt"}}
              ]
 
-      for result <- [first_result, second_result] do
-        refute Map.has_key?(result["metadata"] || %{}, "output")
-      end
-
       completed = Enum.find(events, &match?(%Event.AgentEnd{outcome: %{}}, &1))
+
+      assert Enum.find(completed.outcome.messages, &(&1.role == :assistant)).metadata.response_id ==
+               "resp_native_1"
+
       durable_results = Enum.filter(completed.outcome.messages, &(&1.role == :tool))
 
       assert Enum.all?(durable_results, fn message ->
@@ -2948,7 +2948,7 @@ defmodule MingaAgent.Providers.NativeTest do
           |> IO.iodata_to_binary()
           |> JSON.decode!()
 
-        send(parent, {:encoded_recovery, encoded})
+        send(parent, {:encoded_recovery, messages, encoded})
 
         build_stream_response([
           ReqLLM.StreamChunk.text("Continued safely."),
@@ -3010,14 +3010,9 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :ok = Native.continue(pid, request)
       events = collect_run_events()
 
-      assert_received {:encoded_recovery, %{"messages" => encoded}}
-
-      assert Enum.at(encoded, 1)["metadata"] == %{
-               "response_id" => "restored-response",
-               "output" => %{"provider" => "assistant-kept"},
-               "minga_effect_status" => "provider-owned",
-               "image_tool_result_delivery" => "provider-owned"
-             }
+      assert_received {:encoded_recovery, request_messages, %{"messages" => encoded}}
+      refute Enum.any?(encoded, &Map.has_key?(&1, "metadata"))
+      assert Enum.at(request_messages, 1).metadata == assistant.metadata
 
       assert Enum.map(Enum.slice(encoded, 2, 4), & &1["tool_call_id"]) == [
                "completed",
@@ -3026,16 +3021,17 @@ defmodule MingaAgent.Providers.NativeTest do
                "provider"
              ]
 
-      assert Enum.at(encoded, 2)["metadata"] == %{"is_error" => false}
-      assert Enum.at(encoded, 3)["metadata"] == %{"is_error" => true}
-      assert Enum.at(encoded, 4)["metadata"] == %{"is_error" => true}
-
-      assert Enum.at(encoded, 5)["metadata"] == %{
-               "is_error" => false,
-               "output" => %{"provider_field" => ["kept", 7]},
-               "tool_output" => %{"sdk_field" => "kept"},
-               "provider_metadata" => %{"opaque" => "kept"}
-             }
+      assert Enum.map(Enum.slice(request_messages, 2, 4), & &1.metadata) == [
+               %{is_error: false},
+               %{is_error: true},
+               %{is_error: true},
+               %{
+                 is_error: false,
+                 output: %{"provider_field" => ["kept", 7]},
+                 tool_output: %{"sdk_field" => "kept"},
+                 provider_metadata: %{"opaque" => "kept"}
+               }
+             ]
 
       completed = Enum.find(events, &match?(%Event.AgentEnd{outcome: %{}}, &1))
       assert Enum.take(completed.outcome.messages, length(messages)) == messages
