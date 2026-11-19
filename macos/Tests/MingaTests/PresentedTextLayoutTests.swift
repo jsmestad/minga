@@ -21,6 +21,41 @@ struct PresentedTextLayoutTests {
         #expect(layout.hit(at: CGPoint(x: 239, y: 55))?.target.utf16Offset == 9)
     }
 
+    @Test("a retained continuation hit keeps its identity and UTF-16 offset at its new absolute rank")
+    func retainedWrappedContinuationHit() throws {
+        let fixture = WrappedScrollFixture()
+        var rows = fixture.rows
+        rows[5] = GUIVisualRow(
+            rowType: .wrapContinuation, rowId: 6, bufLine: 2, contentHash: 60,
+            text: "éé  界😀z", spans: []
+        )
+        let original = try fixture.content(top: 2, continuation: 1, rowPayload: rows)
+        let grown = WrappedScrollFixture(groups: [3, 1, 1, 4])
+        let inserted = GUIVisualRow(rowType: .normal, rowId: 20, bufLine: 1, contentHash: 20, text: "new", spans: [])
+        let adjusted = try original.applyingRowsDeltaChecked(grown.delta(
+            top: 3, continuation: 1, baseRowCount: 8,
+            rowSplices: [GUIWindowRowSplice(startIndex: 3, deleteCount: 0, insertEntries: [.full(inserted)])]
+        )).get()
+
+        for (content, lease, rank, sourceLine) in [
+            (original, UInt64(44), UInt32(5), UInt32(2)),
+            (adjusted, UInt64(45), UInt32(6), UInt32(3))
+        ] {
+            let prepared = ResidentRenderPreparation.prepare(content: content, fallbackVisibleRows: 3, overscanRows: 0)
+            let command = try #require(prepared.commands.first)
+            #expect(command.row.bufLine == sourceLine)
+            let displayed = row(
+                text: command.row.text, rank: command.rowIndex, id: command.row.rowId, start: command.composedUTF16Start
+            )
+            let layout = PresentedTextLayout(panes: [.init(
+                windowID: 1, presentationID: lease, rect: CGRect(x: 40, y: 20, width: 200, height: 60),
+                scrollOffset: .zero, rows: [displayed]
+            )])
+            let hit = try #require(layout.hit(at: CGPoint(x: displayed.x(at: 4) + 0.01, y: 25)))
+            #expect(hit.target == EditorTextTarget(windowID: 1, presentationID: lease, rowIndex: rank, rowID: 6, utf16Offset: 4))
+        }
+    }
+
     @Test("clipped row retains its original composed offset")
     func horizontalSlice() {
         let row = row(text: "界abc", start: 12)

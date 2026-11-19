@@ -168,8 +168,62 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticStateTest do
              semantics.annotations
   end
 
+  test "wrapped semantics count continuation rows and resolve guides and selection by visual rank" do
+    full = entry(0, "  start")
+    source_map = full.source_offset_map
+    normal = %{full.row | text: "  st"}
+
+    continuation = %{
+      full.row
+      | row_id: Row.stable_id(:wrap_continuation, 1, 1),
+        row_type: :wrap_continuation,
+        visual_index: 1,
+        text: "  art"
+    }
+
+    tail = entry(1, "tail")
+
+    rows = [
+      VisualRow.new(normal, SourceOffsetMap.slice(source_map, 0, 4, 0, 4), 0, 4, 0),
+      VisualRow.new(continuation, SourceOffsetMap.slice(source_map, 4, 7, 4, 7), 4, 7, 2),
+      tail
+    ]
+
+    resident = resident_rows(rows, 2, 1)
+    {_id, decorations} = Decorations.add_annotation(Decorations.new(), 1, "tail note")
+
+    {_state, semantics} =
+      ResidentSemanticState.build(
+        nil,
+        input(resident, hydration_result(), decorations,
+          wrapped?: true,
+          cursor_row: 1,
+          cursor_col: 2,
+          selection: {:line, 0, 0}
+        )
+      )
+
+    assert semantics.header.row_count == 3
+    assert semantics.header.first_row_id == normal.row_id
+    assert semantics.header.last_row_id == tail.row.row_id
+    assert %{row: 1, col: 2} = semantics.cursor
+    assert %{row: 1} = semantics.cursorline
+    assert %{start_row: 0, end_row: 1} = semantics.selection
+    assert {:replace, [%{row: 2, text: "tail note"}]} = semantics.annotations
+
+    assert [
+             %{
+               runs: [
+                 %{start_row: 0, end_row: 2, level: 1},
+                 %{start_row: 2, end_row: 3, level: 0}
+               ]
+             }
+           ] =
+             semantics.guide_replacements
+  end
+
   test "rejects resident extents above the supported cap" do
-    oversized = %{resident([], 1) | line_count: 65_537}
+    oversized = %{resident([], 1) | store: %ResidentStore{size: 65_537}}
 
     assert_raise ArgumentError, ~r/at most 65,536 rows/, fn ->
       ResidentSemanticState.build(nil, input(oversized, hydration_result(), Decorations.new()))
@@ -190,6 +244,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticStateTest do
         cursorline_bg: 0x112233,
         selection: nil,
         diagnostics_snapshot: {0, []},
+        wrapped?: false,
         annotations_revision: decorations.annotation_version,
         decorations: decorations,
         tab_width: 2,
@@ -210,8 +265,14 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticStateTest do
   defp hydration_result,
     do: %{row_delta: nil, inserted_payloads: []}
 
-  defp result(delta, inserted_payloads),
-    do: %{row_delta: delta, inserted_payloads: inserted_payloads}
+  defp result(delta, inserted_payloads) do
+    source_splices =
+      Enum.map(delta.splices, fn splice ->
+        {splice.start_index, splice.delete_count, RowSplice.insert_count(splice)}
+      end)
+
+    %{row_delta: delta, inserted_payloads: inserted_payloads, source_splices: source_splices}
+  end
 
   defp empty_delta(count), do: row_delta(count, [])
 
@@ -222,7 +283,10 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticStateTest do
 
   defp resident(lines, revision) do
     entries = Enum.with_index(lines, fn text, line -> entry(line, text) end)
+    resident_rows(entries, length(lines), revision)
+  end
 
+  defp resident_rows(entries, line_count, revision) do
     %ResidentBuild{
       store:
         ResidentStore.from_entries(
@@ -230,7 +294,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentSemanticStateTest do
             ResidentStore.entry(row.row_id, row.content_hash, payload)
           end)
         ),
-      line_count: length(lines),
+      line_count: line_count,
       revision: revision
     }
   end

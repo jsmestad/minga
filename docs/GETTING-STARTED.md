@@ -168,21 +168,9 @@ You don't need to know Elixir to write config. It's `set :option, value` for eve
 
 Minga has a built-in AI coding agent. Toggle the panel with `SPC a a`, or open a full-screen agent view with `SPC a t`.
 
-You'll need an API key. The quickest way is to set it in the agent chat:
+If your provider uses an API key, open **Models and connections** with `/model` and choose the API key action for that provider. For example, `/auth anthropic` opens the same masked prompt. Enter the key there, not in the chat composer. Submitting the key saves it locally without sending your draft. Cancel closes the prompt without saving.
 
-```
-/auth anthropic sk-ant-your-key-here
-```
-
-Or add it to your config for all sessions:
-
-```elixir
-# In ~/.config/minga/init.exs
-set :agent_provider, :native
-set :agent_model, "anthropic:claude-sonnet-4-20250514"
-```
-
-Opening `/model` without an argument lists exact executable routes for configured named hosted providers. Each entry shows the API protocol, hosted endpoint, credential profile, reasoning controls, capabilities, and catalog evidence. A saved session retains this secret-free route identity; if its selected credential is revoked, Minga asks you to correct the selection instead of silently choosing another credential. See [Agent model selection](AGENT-MODEL-SELECTION.md) for the provider list and exact selection behavior.
+Open `/model` again and choose a model for the provider you connected. Each hosted model entry shows its protocol, credential profile, and capabilities. A saved session remembers the route, not the key. If you revoke its credential, Minga asks you to correct the selection instead of switching to another credential. See [Agent model selection](AGENT-MODEL-SELECTION.md) for the provider list and selection behavior.
 
 Type a prompt, press Enter. The agent reads, edits, and creates files in your project. You review every change as an inline diff before it hits disk.
 

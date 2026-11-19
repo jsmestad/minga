@@ -2,33 +2,36 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
   @moduledoc """
   Persistent resident diagnostic index with lazy suffix shifts.
 
-  Diagnostics are grouped by start row. Each compact entry keeps its end-row offset plus source and projected columns. Structural row splices therefore shift an unchanged suffix in logarithmic work, while in-place edits reproject only groups whose start or end touches an edited row.
+  Diagnostics are keyed by logical source line and retain their original
+  endpoint columns. Projected continuation offsets are relative to each
+  endpoint's source group, so an untouched suffix shifts without reprojecting.
   """
 
   alias Minga.Diagnostics.Diagnostic
-  alias Minga.RenderModel.Window.{DiagnosticRange, RowSplice}
-  alias MingaEditor.RenderModel.Window.{LazyRowTree, ResidentBuild, ResidentStore, VisualRow}
+  alias Minga.RenderModel.Window.DiagnosticRange
+  alias MingaEditor.RenderModel.Window.{LazyRowTree, ResidentBuild, ResidentStore}
   alias MingaEditor.RenderModel.Window.LazyRowTree.View
 
   @type compact ::
-          {end_offset :: non_neg_integer(), start_source_col :: non_neg_integer(),
+          {end_line_offset :: non_neg_integer(), start_source_col :: non_neg_integer(),
            end_source_col :: non_neg_integer(), Diagnostic.encoding(), Diagnostic.severity(),
-           start_col :: non_neg_integer(), end_col :: non_neg_integer()}
+           {start_offset :: non_neg_integer(), start_col :: non_neg_integer()},
+           {end_offset :: non_neg_integer(), end_col :: non_neg_integer()}}
 
   @type tree_node :: LazyRowTree.t(tuple(), non_neg_integer())
 
   @type work :: %{groups_reprojected: non_neg_integer(), suffix_shifts: non_neg_integer()}
 
-  @enforce_keys [:root]
-  defstruct [:root]
+  @enforce_keys [:root, :store, :wrapped?]
+  defstruct @enforce_keys
 
-  @type t :: %__MODULE__{root: tree_node()}
+  @type t :: %__MODULE__{root: tree_node(), store: ResidentStore.t(), wrapped?: boolean()}
 
-  @spec build([Diagnostic.t()], ResidentBuild.t()) :: t()
-  def build(diagnostics, %ResidentBuild{} = resident) do
+  @spec build([Diagnostic.t()], ResidentBuild.t(), boolean()) :: t()
+  def build(diagnostics, %ResidentBuild{store: store}, wrapped? \\ false) do
     root =
       diagnostics
-      |> Enum.flat_map(&compact_diagnostic(&1, resident))
+      |> Enum.flat_map(&compact_diagnostic(&1, store, wrapped?))
       |> Enum.group_by(fn {line, _entry} -> line end, fn {_line, entry} -> entry end)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.reduce(nil, fn {line, entries}, tree ->
@@ -40,137 +43,202 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
         )
       end)
 
-    %__MODULE__{root: root}
+    %__MODULE__{root: root, store: store, wrapped?: wrapped?}
   end
 
   @spec to_ranges(t()) :: [DiagnosticRange.t()]
-  def to_ranges(%__MODULE__{root: root}), do: collect_ranges(root, [])
+  def to_ranges(%__MODULE__{root: root, store: store}), do: collect_ranges(root, store, [])
 
-  @doc "Applies immutable-base row splices and returns final start rows that need column replacement."
-  @spec apply_splices(t(), [RowSplice.t()], ResidentBuild.t()) ::
+  @doc "Applies logical source splices, returning final visual start ranks needing replacement."
+  @spec apply_splices(t(), [ResidentBuild.source_splice()], ResidentBuild.t()) ::
           {t(), [non_neg_integer()], work()}
-  def apply_splices(%__MODULE__{} = index, splices, %ResidentBuild{} = resident) do
+  def apply_splices(%__MODULE__{} = index, [], _resident), do: {index, [], empty_work()}
+
+  def apply_splices(%__MODULE__{} = index, splices, %ResidentBuild{store: store}) do
     {root, starts, _shift, work} =
-      Enum.reduce(splices, {index.root, MapSet.new(), 0, empty_work()}, fn splice,
-                                                                           {root, starts, shift,
-                                                                            work} ->
-        start_row = splice.start_index + shift
-        insert_count = RowSplice.insert_count(splice)
-        starts = shift_markers(starts, start_row, splice.delete_count, insert_count)
+      Enum.reduce(splices, {index.root, MapSet.new(), 0, empty_work()}, fn
+        {first, deleted, inserted}, {root, starts, shift, work} ->
+          start_line = first + shift
+          starts = shift_markers(starts, start_line, deleted, inserted)
 
-        {root, touched, splice_work} =
-          apply_splice(root, start_row, splice.delete_count, insert_count, resident)
+          {root, touched, splice_work} =
+            apply_splice(root, start_line, deleted, inserted, store, index.wrapped?)
 
-        {root, MapSet.union(starts, MapSet.new(touched)),
-         shift + insert_count - splice.delete_count, add_work(work, splice_work)}
+          {root, MapSet.union(starts, touched), shift + inserted - deleted,
+           add_work(work, splice_work)}
       end)
 
-    {%__MODULE__{root: root}, starts |> Enum.sort(), work}
+    updated = %{index | root: root, store: store}
+
+    ranks =
+      starts
+      |> Enum.flat_map(fn line ->
+        case fetch(root, line) do
+          nil -> []
+          entries -> entries |> compact_ranges(line, store) |> Enum.map(& &1.start_row)
+        end
+      end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    {updated, ranks, work}
   end
 
   @spec ranges_at(t(), [non_neg_integer()]) :: [DiagnosticRange.t()]
-  def ranges_at(%__MODULE__{} = index, starts) do
-    Enum.flat_map(starts, fn start_row ->
-      case fetch(index.root, start_row) do
-        nil -> []
-        entries -> compact_ranges(start_row, entries)
+  def ranges_at(%__MODULE__{root: root, store: store}, starts) do
+    starts
+    |> Enum.group_by(fn rank ->
+      {line, _offset} = ResidentStore.anchor_at(store, rank)
+      line
+    end)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.flat_map(fn {line, ranks} ->
+      selected = MapSet.new(ranks)
+
+      case fetch(root, line) do
+        nil ->
+          []
+
+        entries ->
+          Enum.filter(
+            compact_ranges(entries, line, store),
+            &MapSet.member?(selected, &1.start_row)
+          )
       end
     end)
   end
 
-  defp apply_splice(root, start_row, delete_count, insert_count, resident)
-       when delete_count == insert_count do
-    end_row = start_row + insert_count
-    starts = affected_starts(root, start_row, end_row)
+  defp apply_splice(root, first, count, count, store, wrapped?) do
+    end_line = first + count
+    candidates = affected_starts(root, first, end_line)
 
-    root =
-      Enum.reduce(starts, root, fn line, tree ->
-        update_group(tree, line, &reproject_group(line, &1, resident))
+    {root, starts} =
+      Enum.reduce(candidates, {root, MapSet.new()}, fn line, {root, starts} ->
+        entries = fetch(root, line)
+
+        if line >= first or group_end_in?(entries, line, first, end_line) do
+          next = update_group(root, line, &reproject_group(line, &1, store, wrapped?))
+          {next, MapSet.put(starts, line)}
+        else
+          {root, starts}
+        end
       end)
 
-    {root, starts, %{groups_reprojected: length(starts), suffix_shifts: 0}}
+    {root, starts, %{groups_reprojected: MapSet.size(starts), suffix_shifts: 0}}
   end
 
-  defp apply_splice(root, start_row, delete_count, insert_count, resident) do
-    delete_end = start_row + delete_count
-    crossing_starts = crossing_starts(root, start_row)
+  defp apply_splice(root, first, deleted, inserted, store, wrapped?) do
+    delete_end = first + deleted
+    crossing = crossing_starts(root, first)
 
-    root =
-      Enum.reduce(crossing_starts, root, fn line, tree ->
-        update_group(tree, line, fn entries ->
-          adjust_crossing_group(
-            line,
-            entries,
-            start_row,
-            delete_end,
-            insert_count,
-            resident.line_count
-          )
-        end)
+    {root, starts} =
+      Enum.reduce(crossing, {root, MapSet.new()}, fn line, {root, starts} ->
+        entries = fetch(root, line)
+
+        {updated, dirty?} =
+          entries
+          |> Tuple.to_list()
+          |> Enum.map_reduce(false, fn entry, dirty? ->
+            {updated, changed?} =
+              adjust_crossing(entry, line, first, delete_end, inserted, store, wrapped?)
+
+            {updated, dirty? or changed?}
+          end)
+
+        root = update_group(root, line, fn _ -> List.to_tuple(updated) end)
+        {root, if(dirty?, do: MapSet.put(starts, line), else: starts)}
       end)
 
-    {before, from_start} =
-      LazyRowTree.split(root, start_row, &summarize/4, &shift_summary/2)
+    {before, from_start} = LazyRowTree.split(root, first, &summarize/4, &shift_summary/2)
+    {_deleted, suffix} = LazyRowTree.split(from_start, delete_end, &summarize/4, &shift_summary/2)
+    suffix = LazyRowTree.shift(suffix, inserted - deleted, &shift_summary/2)
 
-    {_deleted, suffix} =
-      LazyRowTree.split(from_start, delete_end, &summarize/4, &shift_summary/2)
-
-    suffix = LazyRowTree.shift(suffix, insert_count - delete_count, &shift_summary/2)
-
-    {LazyRowTree.merge(before, suffix, &summarize/4, &shift_summary/2), [],
-     %{groups_reprojected: length(crossing_starts), suffix_shifts: 1}}
+    {LazyRowTree.merge(before, suffix, &summarize/4, &shift_summary/2), starts,
+     %{groups_reprojected: length(crossing), suffix_shifts: 1}}
   end
 
-  defp compact_diagnostic(diagnostic, resident) do
-    start_line = diagnostic.range.start_line
-    end_line = diagnostic.range.end_line
+  defp adjust_crossing({offset, _, _, _, _, _, _} = entry, line, first, _, _, _, _)
+       when line + offset < first,
+       do: {entry, false}
 
-    with true <- start_line < resident.line_count and end_line < resident.line_count,
-         {:ok, %VisualRow{source_text: start_text}} <-
-           ResidentStore.payload_at(resident.store, start_line),
-         {:ok, %VisualRow{source_text: end_text}} <-
-           ResidentStore.payload_at(resident.store, end_line) do
-      {_row, start_col} = Diagnostic.start_position(diagnostic, start_text)
-      {_row, end_col} = Diagnostic.end_position(diagnostic, end_text)
-
-      [
-        {start_line,
-         {end_line - start_line, diagnostic.range.start_col, diagnostic.range.end_col,
-          diagnostic.encoding, diagnostic.severity, start_col, end_col}}
-      ]
-    else
-      _ -> []
-    end
+  defp adjust_crossing(
+         {offset, a, b, encoding, severity, start_pos, end_pos},
+         line,
+         first,
+         delete_end,
+         inserted,
+         _store,
+         _wrapped?
+       )
+       when line + offset >= delete_end do
+    {{offset + inserted + first - delete_end, a, b, encoding, severity, start_pos, end_pos},
+     false}
   end
 
-  defp reproject_group(start_line, entries, resident) do
+  defp adjust_crossing(
+         {offset, a, b, encoding, severity, _, _},
+         line,
+         first,
+         _delete_end,
+         inserted,
+         store,
+         wrapped?
+       ) do
+    mapped_end = map_deleted_end(line + offset, first, inserted)
+    diagnostic = diagnostic(line, a, mapped_end, b, encoding, severity)
+    {project_diagnostic(diagnostic, store, wrapped?), true}
+  end
+
+  defp map_deleted_end(_line, first, 0), do: max(first - 1, 0)
+  defp map_deleted_end(line, first, inserted), do: min(line, first + inserted - 1)
+
+  defp compact_diagnostic(diagnostic, store, wrapped?) do
+    [first, last] = [diagnostic.range.start_line, diagnostic.range.end_line]
+
+    if first < ResidentStore.line_count(store) and last < ResidentStore.line_count(store),
+      do: [{first, project_diagnostic(diagnostic, store, wrapped?)}],
+      else: []
+  end
+
+  defp project_diagnostic(diagnostic, store, wrapped?) do
+    %{range: range, encoding: encoding, severity: severity} = diagnostic
+    start_line = range.start_line
+    end_line = range.end_line
+    {:ok, start_entry} = ResidentStore.source_row(store, start_line)
+    {:ok, end_entry} = ResidentStore.source_row(store, end_line)
+    {_, start_byte} = Diagnostic.start_position(diagnostic, start_entry.source_text)
+    {_, end_byte} = Diagnostic.end_position(diagnostic, end_entry.source_text)
+    start_pos = project_endpoint(store, start_line, start_byte, :start, wrapped?)
+    end_pos = project_endpoint(store, end_line, end_byte, :end, wrapped?)
+    end_pos = if start_line == end_line, do: max(start_pos, end_pos), else: end_pos
+
+    {end_line - start_line, range.start_col, range.end_col, encoding, severity, start_pos,
+     end_pos}
+  end
+
+  defp project_endpoint(_store, _line, byte, _affinity, false), do: {0, byte}
+
+  defp project_endpoint(store, line, byte, affinity, true) do
+    {rank, col} = ResidentStore.source_position(store, line, byte, affinity)
+    {rank - ResidentStore.visual_rank(store, line), col}
+  end
+
+  defp reproject_group(line, entries, store, wrapped?) do
     entries
     |> Tuple.to_list()
-    |> Enum.flat_map(fn {end_offset, source_start, source_end, encoding, severity, _start, _end} ->
-      end_line = start_line + end_offset
-
-      with {:ok, %VisualRow{source_text: start_text}} <-
-             ResidentStore.payload_at(resident.store, start_line),
-           {:ok, %VisualRow{source_text: end_text}} <-
-             ResidentStore.payload_at(resident.store, end_line) do
-        {_row, start_col} =
-          Diagnostic.start_position(
-            diagnostic(start_line, source_start, end_line, source_end, encoding, severity),
-            start_text
-          )
-
-        {_row, end_col} =
-          Diagnostic.end_position(
-            diagnostic(start_line, source_start, end_line, source_end, encoding, severity),
-            end_text
-          )
-
-        [{end_offset, source_start, source_end, encoding, severity, start_col, end_col}]
-      else
-        :error -> []
-      end
+    |> Enum.map(fn {end_offset, source_start, source_end, encoding, severity, _, _} ->
+      diagnostic(line, source_start, line + end_offset, source_end, encoding, severity)
+      |> project_diagnostic(store, wrapped?)
     end)
     |> List.to_tuple()
+  end
+
+  defp group_end_in?(entries, line, first, last) do
+    entries
+    |> Tuple.to_list()
+    |> Enum.any?(fn {offset, _, _, _, _, _, _} ->
+      line + offset >= first and line + offset < last
+    end)
   end
 
   defp diagnostic(start_line, start_col, end_line, end_col, encoding, severity) do
@@ -187,85 +255,20 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
     }
   end
 
-  defp adjust_crossing_group(
-         start_line,
-         entries,
-         splice_start,
-         delete_end,
-         insert_count,
-         row_count
-       ) do
-    entries
-    |> Tuple.to_list()
-    |> Enum.flat_map(
-      &adjust_crossing_entry(
-        &1,
-        {start_line, splice_start, delete_end, insert_count, row_count}
-      )
-    )
-    |> List.to_tuple()
-  end
+  defp shift_markers(markers, _first, count, count), do: markers
 
-  defp adjust_crossing_entry(
-         {end_offset, _source_start, _source_end, _encoding, _severity, _start_col, _end_col} =
-           entry,
-         {start_line, splice_start, _delete_end, _insert_count, _row_count}
-       )
-       when start_line + end_offset < splice_start,
-       do: [entry]
-
-  defp adjust_crossing_entry(
-         {end_offset, source_start, source_end, encoding, severity, start_col, end_col},
-         {start_line, splice_start, delete_end, insert_count, row_count}
-       ) do
-    mapped_end = map_row(start_line + end_offset, splice_start, delete_end, insert_count)
-
-    adjusted_crossing_entry(
-      mapped_end,
-      row_count,
-      start_line,
-      {source_start, source_end, encoding, severity, start_col, end_col}
-    )
-  end
-
-  defp adjusted_crossing_entry(
-         mapped_end,
-         row_count,
-         start_line,
-         {source_start, source_end, encoding, severity, start_col, end_col}
-       )
-       when mapped_end < row_count do
-    [
-      {mapped_end - start_line, source_start, source_end, encoding, severity, start_col, end_col}
-    ]
-  end
-
-  defp adjusted_crossing_entry(_mapped_end, _row_count, _start_line, _entry), do: []
-
-  defp map_row(row, start_row, delete_end, insert_count) when row >= delete_end,
-    do: row + insert_count - (delete_end - start_row)
-
-  defp map_row(_row, start_row, _delete_end, 0), do: start_row
-
-  defp map_row(row, start_row, _delete_end, insert_count),
-    do: start_row + min(row - start_row, insert_count - 1)
-
-  defp shift_markers(markers, start_row, delete_count, insert_count) do
-    delete_end = start_row + delete_count
-    shift = insert_count - delete_count
-
+  defp shift_markers(markers, first, deleted, inserted) do
     Enum.reduce(markers, MapSet.new(), fn line, acc ->
-      shift_marker(acc, line, start_row, delete_end, shift)
+      shift_marker(acc, line, first, first + deleted, inserted - deleted)
     end)
   end
 
-  defp shift_marker(acc, line, start_row, _delete_end, _shift) when line < start_row,
-    do: MapSet.put(acc, line)
+  defp shift_marker(acc, line, first, _, _) when line < first, do: MapSet.put(acc, line)
 
-  defp shift_marker(acc, line, _start_row, delete_end, shift) when line >= delete_end,
+  defp shift_marker(acc, line, _, last, shift) when line >= last,
     do: MapSet.put(acc, line + shift)
 
-  defp shift_marker(acc, _line, _start_row, _delete_end, _shift), do: acc
+  defp shift_marker(acc, _line, _first, _last, _shift), do: acc
 
   defp affected_starts(_root, start_row, end_row) when start_row >= end_row, do: []
 
@@ -318,30 +321,33 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
     end
   end
 
-  defp compact_ranges(start_row, entries) do
+  defp compact_ranges(entries, start_line, store) do
+    start_rank = ResidentStore.visual_rank(store, start_line)
+
     entries
     |> Tuple.to_list()
-    |> Enum.map(fn {end_offset, _source_start, _source_end, _encoding, severity, start_col,
-                    end_col} ->
+    |> Enum.map(fn {end_line_offset, _, _, _, severity, {start_offset, start_col},
+                    {end_offset, end_col}} ->
       %DiagnosticRange{
-        start_row: start_row,
+        start_row: start_rank + start_offset,
         start_col: start_col,
-        end_row: start_row + end_offset,
+        end_row: ResidentStore.visual_rank(store, start_line + end_line_offset) + end_offset,
         end_col: end_col,
         severity: severity
       }
     end)
+    |> Enum.sort_by(& &1.start_row)
   end
 
-  defp collect_ranges(nil, acc), do: acc
+  defp collect_ranges(nil, _store, acc), do: acc
 
-  defp collect_ranges(root, acc) do
+  defp collect_ranges(root, store, acc) do
     %View{key: line, value: entries, left: left, right: right} =
       LazyRowTree.view(root, &shift_summary/2)
 
-    acc = collect_ranges(right, acc)
-    acc = Enum.reduce(Enum.reverse(compact_ranges(line, entries)), acc, &[&1 | &2])
-    collect_ranges(left, acc)
+    acc = collect_ranges(right, store, acc)
+    acc = Enum.reduce(Enum.reverse(compact_ranges(entries, line, store)), acc, &[&1 | &2])
+    collect_ranges(left, store, acc)
   end
 
   defp fetch(nil, _line), do: nil

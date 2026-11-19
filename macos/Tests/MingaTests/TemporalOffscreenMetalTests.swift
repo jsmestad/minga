@@ -101,6 +101,224 @@ struct TemporalOffscreenMetalTests {
         }
     }
 
+    private func horizontalGeometry(cols: UInt16, rows: UInt16, left: UInt16) -> GUIPaneGeometry {
+        let pane = GUICellRect(row: 0, col: 0, width: cols, height: rows)
+        return GUIPaneGeometry(
+            windowId: 1, totalRect: pane, contentRect: pane,
+            textRect: GUICellRect(row: 0, col: 5, width: cols - 5, height: rows),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 5, height: rows), clipRect: pane,
+            viewport: GUIViewportSummary(top: 0, left: left, rows: rows, cols: cols - 5, totalLines: UInt32(rows),
+                visualRowOffset: 0, totalVisualRows: UInt32(rows)),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 1), hitRegions: []
+        )
+    }
+
+    @Test("windowed caret and line annotation follow their text across prediction and echo")
+    @MainActor
+    func horizontalPanKeepsWindowedCaretAndAnnotationAligned() async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let scale: Float = 2
+        let font = FontManager(name: "Menlo", size: 13, scale: CGFloat(scale))
+        let cellWidthPoints = Float(font.cellWidth)
+        let cellWidthPixels = cellWidthPoints * scale
+        let cellH = Float(font.cellHeight) * scale
+        let cols: UInt16 = 32, rowCount: UInt16 = 2
+        let width = Int(ceil(Float(cols) * cellWidthPixels))
+        let height = Int(ceil(Float(rowCount) * cellH))
+        var frameState = FrameState(cols: cols, rows: rowCount)
+        frameState.defaultBg = Self.neutral
+        let paneGutter = gutter(windowId: 1, cols: cols, rows: rowCount)
+        let rows = [
+            bandRow(rowId: 1, text: "        ABC", bg: 0xFFFFFF),
+            bandRow(rowId: 2, text: "short line", bg: 0xFFFFFF),
+        ]
+        let pillColor: UInt32 = 0x20_E0_20
+        let annotation = GUILineAnnotation(row: 1, kind: .inlinePill, fg: pillColor, bg: pillColor, text: "hint")
+        var metadata = EditorSnapshotMetadata.empty
+        metadata.textPresentations[1] = 1
+
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        let renderer = try #require(makeRenderer(factories: factories, fontManager: font))
+        renderer.setCursorAnimateConfigEnabled(true)
+        let animationGeneration = renderer.cursorAnimationGeneration
+        let color = renderer.cursorColor
+        let caretColor = PixelColor(r: Double(color.x), g: Double(color.y), b: Double(color.z), a: 1)
+
+        var caretXs: [Float] = []
+        var pillXs: [Int] = []
+        let states: [(left: UInt16, localColumns: Float)] = [(0, 0), (0, 2.5), (2, 0.5)]
+        for (index, state) in states.enumerated() {
+            let content = try GUIWindowContent(
+                windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 8, cursorShape: .beam,
+                scrollLeft: state.left, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
+                documentHighlights: [], lineAnnotations: [annotation],
+                paneGeometry: horizontalGeometry(cols: cols, rows: rowCount, left: state.left),
+                accessibilityCursor: GUIAccessibilityCursor(row: 0, utf16: 8)
+            )
+            let seq = UInt32(index + 1)
+            let snapshot = rendererSnapshot(frameSeq: seq, frameState: frameState, windowContents: [1: content],
+                windowGutters: [1: paneGutter], metadata: metadata)
+            let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+            let drawable = ReadbackDrawable(texture: texture, drawableID: index + 1)
+            var textLayout: PresentedTextLayout?
+            waiter.reset()
+            let outcome = await waiter.awaitOutcome {
+                renderer.render(snapshot: snapshot, fontManager: font, drawableProvider: { drawable },
+                    viewportSize: CGSize(width: width, height: height), contentScale: scale,
+                    scrollOffset: SIMD2<Float>(state.localColumns * cellWidthPoints, 0), presentationWindowId: 1, presentationInputSeq: seq,
+                    onTextPresented: { presented, layout in
+                        textLayout = layout
+                        waiter.succeed(presented)
+                    })
+            }
+            guard case .presented = outcome else {
+                Issue.record("Horizontal pan frame did not present: \(outcome)")
+                return
+            }
+            let image = try #require(await OffscreenReadback.read(texture: texture, queue: queue))
+            let layout = try #require(textLayout)
+            let row = try #require(layout.panes.first?.rows.first)
+            let glyphX = row.x(at: 8)
+            #expect(layout.hit(at: CGPoint(x: glyphX + 0.25, y: row.rect.midY))?.target.utf16Offset == 8)
+            let caretX = Float(glyphX) * scale
+            caretXs.append(caretX)
+            #expect(image.pixel(x: Int(caretX.rounded()) + 1, y: 2).rgbDistanceSquared(to: caretColor) < 0.02)
+            #expect(renderer.cursorAnimationGeneration == animationGeneration)
+            let pillX = try #require((0..<width).first { x in
+                image.matching(x0: x, y0: Int(cellH), x1: x + 1, y1: height,
+                    reference: Self.expectedColor(pillColor), thresholdSquared: 0.02) > 0
+            })
+            pillXs.append(pillX)
+        }
+        #expect(abs(caretXs[0] - caretXs[1] - 2.5 * cellWidthPixels) <= 1)
+        #expect(abs(caretXs[1] - caretXs[2]) <= 1)
+        #expect(abs(Float(pillXs[0] - pillXs[1]) - 2.5 * cellWidthPixels) <= 1)
+        #expect(abs(pillXs[1] - pillXs[2]) <= 1)
+    }
+
+    @Test("prediction reveals a windowed caret hidden by the committed horizontal slice")
+    @MainActor
+    func horizontalPredictionRevealsWindowedCaret() async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let font = FontManager(name: "Menlo", size: 13, scale: 1)
+        let cellW = Float(font.cellWidth)
+        let cols: UInt16 = 26
+        let width = Int(ceil(Float(cols) * cellW))
+        let height = font.cellHeight
+        var frameState = FrameState(cols: cols, rows: 1)
+        frameState.defaultBg = Self.neutral
+        let paneGutter = gutter(windowId: 1, cols: cols, rows: 1)
+        let row = bandRow(rowId: 1, text: "        A", bg: 0xFFFFFF)
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        let renderer = try #require(makeRenderer(factories: factories, fontManager: font))
+        let color = renderer.cursorColor
+        let caretColor = PixelColor(r: Double(color.x), g: Double(color.y), b: Double(color.z), a: 1)
+        let caretX = Int((5.5 * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt)).rounded())
+
+        let states: [(left: UInt16, localColumns: Float, committedVisible: Bool)] = [
+            (10, 0, false), (10, -2.5, false), (8, -0.5, true),
+        ]
+        for (index, state) in states.enumerated() {
+            let scroll = GUIScrollPresentation(
+                windowId: 1, resetRequired: false, anchorTop: 0, anchorLeft: state.left, anchorVisualRowOffset: 0,
+                visibleStartLine: 0, visibleEndLine: 1, overscanStartLine: 0, overscanEndLine: 1,
+                contentEpoch: 1, layoutGeneration: 1, canPanHorizontally: true
+            )
+            let content = try GUIWindowContent(
+                windowId: 1, fullRefresh: true, contentEpoch: 1, cursorVisible: state.committedVisible,
+                cursorRow: 0, cursorCol: state.committedVisible ? 8 : 0, cursorShape: .beam, scrollLeft: state.left,
+                rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+                paneGeometry: horizontalGeometry(cols: cols, rows: 1, left: state.left),
+                scrollPresentation: scroll, accessibilityCursor: GUIAccessibilityCursor(row: 0, utf16: 8)
+            )
+            let seq = UInt32(index + 1)
+            let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+            let drawable = ReadbackDrawable(texture: texture, drawableID: index + 1)
+            waiter.reset()
+            let outcome = await waiter.awaitOutcome {
+                renderer.render(frameState: frameState, fontManager: font, windowContents: [1: content],
+                    windowGutters: [1: paneGutter], drawableProvider: { drawable },
+                    viewportSize: CGSize(width: width, height: height), contentScale: 1,
+                    scrollOffset: SIMD2<Float>(state.localColumns * cellW, 0), presentationWindowId: 1,
+                    presentationInputSeq: seq, onPresented: { waiter.succeed($0) })
+            }
+            guard case .presented = outcome else {
+                Issue.record("Windowed caret frame did not present: \(outcome)")
+                return
+            }
+            let image = try #require(await OffscreenReadback.read(texture: texture, queue: queue))
+            let pixels = image.matching(x0: caretX - 1, y0: 1, x1: caretX + 3, y1: 3,
+                reference: caretColor, thresholdSquared: 0.02)
+            #expect((pixels > 0) == (index != 0))
+        }
+    }
+
+    @Test("resident character selection paints the exposed strip without crossing the pane clip", arguments: [-1, 1])
+    @MainActor
+    func horizontalPanClipsResidentSelectionAtPresentedEdges(direction: Int) async throws {
+        guard let (device, queue) = requireDevice() else { return }
+        let font = FontManager(name: "Menlo", size: 13, scale: 1)
+        let cellW = Float(font.cellWidth)
+        let cols: UInt16 = 18, rowCount: UInt16 = 1, left: UInt16 = 4
+        let paneRight = Int(Float(cols) * cellW)
+        let textLeft = Int(ceil(5 * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt)))
+        let width = paneRight + 8
+        let height = font.cellHeight
+        var frameState = FrameState(cols: cols, rows: rowCount)
+        frameState.defaultBg = Self.neutral
+        let theme = ThemeColors()
+        let red = Self.expectedColor(Self.colorA)
+        theme.selectionBgSIMD = SIMD3<Float>(Float(red.r), Float(red.g), Float(red.b))
+        let row = bandRow(rowId: 1, text: String(repeating: " ", count: 32), bg: Self.neutral)
+        let content = try GUIWindowContent(windowId: 1, fullRefresh: true, contentEpoch: 1,
+            cursorVisible: false, cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: left,
+            rowStoreMode: .sequential, rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], paneGeometry: horizontalGeometry(cols: cols, rows: rowCount, left: left))
+        let selection = GUIResidentSelection(type: .char, startRow: 0, startCol: direction > 0 ? 11 : 0,
+            endRow: 0, endCol: direction > 0 ? 23 : 8)
+        let semantics = try ResidentSemanticStore().applying(GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 1, contentEpoch: 1, baseRevision: 0, revision: 1,
+            targetRowRevision: 1, rowCount: 1, firstRowId: 1, lastRowId: 1,
+            cursor: GUIResidentCursor(eligible: false, row: 0, col: 0), cursorline: nil, selection: selection,
+            tabWidth: 4, activeGuideCol: 0, guideCols: [], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: 1, runs: [
+                GUIResidentGuideRun(start: 0, end: 1, level: 0)
+            ])],
+            diagnostics: .replace([]), annotations: .replace([])
+        ), content: content)
+        let snapshot = try CommittedEditorSnapshot.make(generation: 1, frameSeq: 1, frameState: frameState,
+            themeColors: theme, windowContents: [1: content], windowResidentSemantics: [1: semantics],
+            windowGutters: [1: gutter(windowId: 1, cols: cols, rows: rowCount)], windowIndentGuides: [:]).get()
+
+        let waiter = PresentationWaiter()
+        var factories = nativeTestFactories()
+        factories.reportFailure = { waiter.fail($0) }
+        let renderer = try #require(makeRenderer(factories: factories, fontManager: font))
+        let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
+        let drawable = ReadbackDrawable(texture: texture)
+        let outcome = await waiter.awaitOutcome {
+            renderer.render(snapshot: snapshot, fontManager: font, cursorBlinkVisible: false, drawableProvider: { drawable },
+                viewportSize: CGSize(width: width, height: height), contentScale: 1,
+                scrollOffset: SIMD2<Float>(Float(direction) * 1.5 * cellW, 0),
+                presentationWindowId: 1, presentationInputSeq: 1, onPresented: { waiter.succeed($0) })
+        }
+        guard case .presented = outcome else {
+            Issue.record("Selection pan frame did not present: \(outcome)")
+            return
+        }
+        let image = try #require(await OffscreenReadback.read(texture: texture, queue: queue))
+        let exposedX = direction > 0 ? paneRight - 2 : textLeft + 2
+        let unselectedX = direction > 0 ? textLeft + 2 : paneRight - 2
+        #expect(image.pixel(x: exposedX, y: height / 2).rgbDistanceSquared(to: red) < 0.02)
+        #expect(image.pixel(x: unselectedX, y: height / 2).rgbDistanceSquared(to: red) > 0.02)
+        #expect(image.pixel(x: textLeft - 2, y: height / 2).rgbDistanceSquared(to: red) > 0.02)
+        #expect(image.pixel(x: paneRight + 2, y: height / 2).rgbDistanceSquared(to: red) > 0.02)
+    }
+
     @Test("resident scrolling fills text and line numbers before the echo", arguments: [22, -22])
     @MainActor
     func residentScrollFillsViewport(offsetRows: Int) async throws {

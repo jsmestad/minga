@@ -953,6 +953,7 @@ defmodule MingaEditor.Commands.Movement do
           non_neg_integer()
         ) :: {Viewport.t(), {non_neg_integer(), non_neg_integer()}}
   defp wrapped_scroll_down_line(state, buf, vp, cursor, total_lines) do
+    vp = Viewport.source_rows(vp)
     content_w = content_width(state)
     oracle = width_oracle(state)
     top_rows = visual_row_count_for_line(buf, vp.top, content_w, oracle)
@@ -979,6 +980,7 @@ defmodule MingaEditor.Commands.Movement do
           non_neg_integer()
         ) :: {Viewport.t(), {non_neg_integer(), non_neg_integer()}}
   defp wrapped_scroll_up_line(state, buf, vp, cursor, total_lines) do
+    vp = Viewport.source_rows(vp)
     content_w = content_width(state)
     oracle = width_oracle(state)
     prev_rows = visual_row_count_for_line(buf, max(vp.top - 1, 0), content_w, oracle)

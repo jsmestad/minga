@@ -27,26 +27,52 @@ type presentationScroll struct {
 	anchorLeft       uint16
 	contentEpoch     uint32
 	layoutGeneration uint32
-	// scrollSeq is the scroll-authority sequence the committed frame carried when
-	// this local offset was captured (#2671). The reconciler discards the offset
-	// when a later frame reports a strictly-newer scroll_seq: an authoritative
-	// BEAM jump that raced the local scroll, even one that coincidentally landed
-	// on the same anchor key. It mirrors prev.scrollSeq of Swift's
-	// GUIScrollPresentation, compared inside shouldResetScrollPresentation.
-	scrollSeq uint32
-	rowOffset int
-	colOffset int
+	wrapped          bool
+	wrappedResident  bool
+	anchorOffset     uint16
+	anchorRank       int
+	// A zero offset is not an acknowledgement: a reversal can return to the
+	// original rank while earlier wheel frames are still in flight.
+	predictingWrapped bool
+	// scrollSeq is the last reconciled scroll-authority sequence, distinct from
+	// the horizontal input acknowledgement.
+	scrollSeq     uint32
+	rowOffset     int
+	colOffset     int
+	committedLeft uint16
+	pendingPanSeq uint32
 }
 
 func (s presentationScroll) keysMatch(scroll protocol.ScrollPresentation) bool {
+	return s.basisMatches(scroll) &&
+		s.anchorTop == scroll.AnchorTop &&
+		s.anchorLeft == scroll.AnchorLeft &&
+		(!s.wrapped || s.anchorOffset == scroll.AnchorVisualRowOffset)
+}
+
+func (s presentationScroll) basisMatches(scroll protocol.ScrollPresentation) bool {
 	return s.contentEpoch == scroll.ContentEpoch &&
 		s.layoutGeneration == scroll.LayoutGeneration &&
-		s.anchorTop == scroll.AnchorTop &&
-		s.anchorLeft == scroll.AnchorLeft
+		s.wrapped == scroll.Wrapped
+}
+
+func capturePresentationScroll(window protocol.WindowContent, anchorRank int) presentationScroll {
+	scroll := window.Scroll
+	return presentationScroll{
+		anchorTop: scroll.AnchorTop, anchorLeft: scroll.AnchorLeft,
+		contentEpoch: scroll.ContentEpoch, layoutGeneration: scroll.LayoutGeneration,
+		scrollSeq: scroll.ScrollSeq, wrapped: scroll.Wrapped,
+		wrappedResident: window.WrappedResidentRows, anchorOffset: scroll.AnchorVisualRowOffset,
+		anchorRank: anchorRank, committedLeft: window.ScrollLeft,
+	}
 }
 
 type localPresentation struct {
-	scrolls          map[uint16]presentationScroll
+	scrolls map[uint16]presentationScroll
+	// One client sequence across panes avoids reusing an outstanding sequence
+	// when a pane's presentation is reset, removed, or replaced.
+	horizontalPanSeq uint32
+
 	identityPreviews map[presentationSurface]presentationIdentity
 	// previewEmptyStateIndex is the locally-echoed launchpad focus row (#2689):
 	// an index into the ordered focusable items. It lets j/k/arrows move the
@@ -62,21 +88,12 @@ func newLocalPresentation() localPresentation {
 	}
 }
 
-// reconcileScroll decides whether an incoming committed frame discards the local
-// scroll offset. It follows the documented reconciliation rule (docs/GUI_PROTOCOL.md)
-// in the same order Swift's shouldResetScrollPresentation uses:
-//
-//  1. reset_required (or no scroll payload) always discards;
-//  2. a strictly-newer scroll_seq discards, checked AHEAD of the anchor-key
-//     check so an authoritative jump that landed on the same top is not mistaken
-//     for a routine echo (#2671);
-//  3. an anchor-key mismatch (content_epoch / layout_generation / anchor)
-//     discards.
-//
-// Everything else (echo commits: same scroll_seq, same anchor key) keeps the
-// offset, so a wheel report the BEAM committed as the same anchor does not
-// trigger a re-anchor storm.
-func (lp *localPresentation) reconcileScroll(window protocol.WindowContent) {
+// Reconcile authority and layout before rebasing a same-basis echo. Wrapped
+// resident rows rebase their visual rank; unwrapped panes rebase their left.
+func (lp *localPresentation) reconcileScroll(window protocol.WindowContent, anchorRank int) {
+	if window.ScrollSet && window.Scroll.HorizontalPanAck > lp.horizontalPanSeq {
+		lp.horizontalPanSeq = window.Scroll.HorizontalPanAck
+	}
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		delete(lp.scrolls, window.ID)
 		return
@@ -85,12 +102,50 @@ func (lp *localPresentation) reconcileScroll(window protocol.WindowContent) {
 	if !ok {
 		return
 	}
-	if window.Scroll.ScrollSeq > scroll.scrollSeq {
+	next := window.Scroll
+	// A regressed lineage is not a same-authority echo if the anchor moved.
+	if !scroll.basisMatches(next) || scroll.wrappedResident != window.WrappedResidentRows ||
+		next.ScrollSeq > scroll.scrollSeq ||
+		(next.ScrollSeq < scroll.scrollSeq && !scroll.keysMatch(next)) {
 		delete(lp.scrolls, window.ID)
 		return
 	}
-	if !scroll.keysMatch(window.Scroll) {
-		delete(lp.scrolls, window.ID)
+	scroll.scrollSeq = next.ScrollSeq
+	if scroll.predictingWrapped {
+		// Preserve the predicted absolute rank across same-authority echoes.
+		// Applying an old relative offset to the new continuation would scroll
+		// twice, and clearing on equal anchors would lose delayed reversals.
+		scroll.rowOffset += scroll.anchorRank - anchorRank
+		scroll.anchorRank = anchorRank
+		scroll.anchorTop = window.Scroll.AnchorTop
+		scroll.anchorOffset = window.Scroll.AnchorVisualRowOffset
+		scroll.anchorLeft = window.Scroll.AnchorLeft
+		lp.scrolls[window.ID] = scroll
+		return
+	}
+	if scroll.anchorTop != window.Scroll.AnchorTop {
+		scroll.anchorTop = window.Scroll.AnchorTop
+		scroll.anchorOffset = window.Scroll.AnchorVisualRowOffset
+		scroll.rowOffset = 0
+	}
+	if !next.CanPanHorizontally || scroll.pendingPanSeq <= next.HorizontalPanAck {
+		scroll.colOffset = 0
+		scroll.pendingPanSeq = 0
+	} else {
+		// Only the last sent sequence retires the prediction. Earlier echoes
+		// rebase its absolute left edge, even if one reaches the final column.
+		scroll.colOffset += int(scroll.committedLeft) - int(window.ScrollLeft)
+	}
+	scroll.committedLeft = window.ScrollLeft
+	scroll.anchorLeft = window.Scroll.AnchorLeft
+	lp.storeUnwrappedScroll(window.ID, scroll)
+}
+
+func (lp *localPresentation) storeUnwrappedScroll(windowID uint16, scroll presentationScroll) {
+	if scroll.rowOffset == 0 && scroll.pendingPanSeq == 0 {
+		delete(lp.scrolls, windowID)
+	} else {
+		lp.scrolls[windowID] = scroll
 	}
 }
 

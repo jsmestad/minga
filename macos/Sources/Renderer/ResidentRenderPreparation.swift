@@ -7,6 +7,8 @@ public struct ResidentPreparedRowCommand: Sendable, Equatable {
     public let rowIndex: UInt32
     public let composedUTF16Start: Int
     public let composedUTF16End: Int
+    /// Display-column origin of the first retained glyph, which may straddle the slice start.
+    public let composedStartColumn: Int
     public let displayRow: UInt16
     public let presentationRow: Int
     public let gutterBufferLine: UInt32
@@ -44,16 +46,7 @@ public enum ResidentRenderPreparation {
         viewportCols: Int = Int(UInt16.max)
     ) -> ResidentRenderPreparationResult {
         let store = content.rowStore
-        let visibleStart: Int
-
-        if let presentation = content.scrollPresentation {
-            let indexedStart = store.lowerBound(bufferLine: presentation.visibleStartLine)
-            let anchorStart = store.lowerBound(bufferLine: presentation.anchorTop)
-            let anchoredVisualStart = min(anchorStart + Int(presentation.anchorVisualRowOffset), store.count)
-            visibleStart = anchoredVisualStart < store.count ? anchoredVisualStart : min(indexedStart, store.count)
-        } else {
-            visibleStart = 0
-        }
+        let visibleStart = content.presentationRowOrigin
 
         let overscan = max(overscanRows, 0)
         // Select the local viewport, but keep row coordinates relative to the committed anchor.
@@ -65,11 +58,12 @@ public enum ResidentRenderPreparation {
         let clipStart = max(scrollLeft, 0)
         let clipWidth = max(viewportCols, 0)
         let commands = result.rows.enumerated().map { index, row in
-            let slice = clipped(row: row, scrollLeft: clipStart, viewportCols: clipWidth)
+            let slice = clipped(row: row, scrollLeft: clipStart, viewportCols: clipWidth, alignToGlyphStart: true)
             return ResidentPreparedRowCommand(
                 rowIndex: UInt32(lower + index),
                 composedUTF16Start: slice.startUTF16,
                 composedUTF16End: slice.startUTF16 + slice.row.text.utf16.count,
+                composedStartColumn: slice.startColumn,
                 displayRow: UInt16(clamping: index),
                 presentationRow: index - (visibleStart - lower),
                 gutterBufferLine: row.bufLine,
@@ -93,18 +87,21 @@ public enum ResidentRenderPreparation {
         clipped(row: row, scrollLeft: scrollLeft, viewportCols: viewportCols).row
     }
 
-    private static func clipped(row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> (row: GUIVisualRow, startUTF16: Int) {
+    private static func clipped(
+        row: GUIVisualRow, scrollLeft: Int, viewportCols: Int, alignToGlyphStart: Bool = false
+    ) -> (row: GUIVisualRow, startUTF16: Int, startColumn: Int) {
         let text = row.text
-        guard !text.isEmpty else { return (row, 0) }
+        guard !text.isEmpty else { return (row, 0, 0) }
         let clipStart = max(scrollLeft, 0)
         let clipWidth = max(viewportCols, 0)
         // UTF-8 byte count bounds display width for an unstyled row.
         // Retain a fitting unscrolled row without walking its graphemes.
-        if clipStart == 0, row.spans.isEmpty, text.utf8.count <= clipWidth { return (row, 0) }
+        if clipStart == 0, row.spans.isEmpty, text.utf8.count <= clipWidth { return (row, 0, 0) }
         let clipLimit = clipStart + clipWidth
         var column = 0
         var index = text.startIndex
         var start = text.endIndex
+        var firstGlyphColumn = clipStart
         var end = text.endIndex
         // Walk only as far as the viewport edge; retain the existing wide-character clipping semantics.
         while index < text.endIndex {
@@ -113,7 +110,10 @@ public enum ResidentRenderPreparation {
                 break
             }
             let nextColumn = column + displayColumnWidth(text[index])
-            if column <= clipStart && clipStart < nextColumn { start = index }
+            if column <= clipStart && clipStart < nextColumn {
+                start = index
+                firstGlyphColumn = column
+            }
             if clipLimit < nextColumn {
                 end = index
                 column = clipLimit
@@ -124,25 +124,27 @@ public enum ResidentRenderPreparation {
         }
         let clipEnd = min(clipLimit, column)
         guard clipStart < clipEnd else {
-            return (rebuilt(row, text: "", spans: [], scrollLeft: scrollLeft), text.utf16.count)
+            return (rebuilt(row, text: "", spans: [], scrollLeft: scrollLeft), text.utf16.count, clipStart)
         }
         // Reuse a whole unscrolled row only when every span survives normalization.
         if clipStart == 0, start == text.startIndex, end == text.endIndex,
            row.spans.allSatisfy({ $0.startCol < $0.endCol && Int($0.endCol) <= clipEnd }) {
-            return (row, 0)
+            return (row, 0, 0)
         }
         let clippedText = String(text[start..<end])
+        let startColumn = alignToGlyphStart ? firstGlyphColumn : clipStart
         let clippedSpans = row.spans.compactMap { span -> GUIHighlightSpan? in
             let start = Int(span.startCol)
             let end = Int(span.endCol)
-            guard end > clipStart, start < clipEnd else { return nil }
-            let newStart = UInt16(clamping: max(start - clipStart, 0))
-            let newEnd = UInt16(clamping: min(end - clipStart, clipEnd - clipStart))
+            guard end > startColumn, start < clipEnd else { return nil }
+            let newStart = UInt16(clamping: max(start - startColumn, 0))
+            let newEnd = UInt16(clamping: min(end - startColumn, clipEnd - startColumn))
             guard newStart < newEnd else { return nil }
             return GUIHighlightSpan(startCol: newStart, endCol: newEnd, fg: span.fg, bg: span.bg,
                                     attrs: span.attrs, fontWeight: span.fontWeight, fontId: span.fontId)
         }
-        return (rebuilt(row, text: clippedText, spans: clippedSpans, scrollLeft: scrollLeft), start.utf16Offset(in: text))
+        return (rebuilt(row, text: clippedText, spans: clippedSpans, scrollLeft: scrollLeft),
+                start.utf16Offset(in: text), startColumn)
     }
 
     private static func rebuilt(_ row: GUIVisualRow, text: String,

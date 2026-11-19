@@ -62,6 +62,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_application_quit_request Opcodes.application_quit_request()
   @op_application_quit_decision Opcodes.application_quit_decision()
   @op_scroll_batch Opcodes.scroll_batch()
+  @op_horizontal_pan Opcodes.horizontal_pan()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_link_cursor Opcodes.set_link_cursor()
@@ -239,8 +240,10 @@ defmodule MingaEditor.Frontend.Protocol do
              frame_rejection_disposition()}
           | {:window_ref_miss, generation :: non_neg_integer(), frame_seq :: non_neg_integer(),
              last_applied_frame_seq :: non_neg_integer(), window_id :: non_neg_integer()}
-          | {:scroll_batch, window_id :: non_neg_integer(), delta_lines :: integer(),
+          | {:scroll_batch, window_id :: non_neg_integer(), delta :: integer(),
              direction :: :down | :up}
+          | {:horizontal_pan, window_id :: non_neg_integer(), delta :: integer(),
+             input_seq :: pos_integer()}
           | {:application_quit_request, request_id :: non_neg_integer()}
           | {:application_quit_decision, request_id :: non_neg_integer(),
              application_quit_decision()}
@@ -774,9 +777,14 @@ defmodule MingaEditor.Frontend.Protocol do
     end
   end
 
-  def decode_event(<<@op_scroll_batch, window_id::16, delta_lines::16-signed, direction::8>>) do
-    dir = if direction == 0, do: :down, else: :up
-    {:ok, {:scroll_batch, window_id, delta_lines, dir}}
+  def decode_event(<<@op_scroll_batch, window_id::16, delta::16-signed, direction::8>>)
+      when direction in 0..1 do
+    {:ok, {:scroll_batch, window_id, delta, elem({:down, :up}, direction)}}
+  end
+
+  def decode_event(<<@op_horizontal_pan, window_id::16, delta::16-signed, input_seq::32>>)
+      when window_id > 0 and delta != 0 and input_seq > 0 do
+    {:ok, {:horizontal_pan, window_id, delta, input_seq}}
   end
 
   # GUI action: opcode(1) + action_type(1) + payload
@@ -814,6 +822,7 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_application_quit_request,
              @op_application_quit_decision,
              @op_scroll_batch,
+             @op_horizontal_pan,
              @op_operation_native_result,
              @op_native_presentation_observation
            ] do

@@ -28,6 +28,8 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
   ]
   defstruct window_id: 0,
             reset_required: false,
+            wrapped: false,
+            can_pan_horizontally: false,
             anchor_top: 0,
             anchor_left: 0,
             anchor_visual_row_offset: 0,
@@ -37,11 +39,15 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
             overscan_end_line: 0,
             content_epoch: 0,
             layout_generation: 0,
-            scroll_seq: 0
+            scroll_seq: 0,
+            horizontal_pan_ack: 0,
+            horizontal_pan_limit: 0
 
   @type t :: %__MODULE__{
           window_id: non_neg_integer(),
           reset_required: boolean(),
+          wrapped: boolean(),
+          can_pan_horizontally: boolean(),
           anchor_top: non_neg_integer(),
           anchor_left: non_neg_integer(),
           anchor_visual_row_offset: non_neg_integer(),
@@ -51,7 +57,9 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
           overscan_end_line: non_neg_integer(),
           content_epoch: non_neg_integer(),
           layout_generation: non_neg_integer(),
-          scroll_seq: non_neg_integer()
+          scroll_seq: non_neg_integer(),
+          horizontal_pan_ack: non_neg_integer(),
+          horizontal_pan_limit: non_neg_integer()
         }
 
   @doc "Builds scroll presentation metadata from a render window when geometry is available."
@@ -68,33 +76,43 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
     %__MODULE__{
       window_id: window.window_id,
       reset_required: window.full_refresh,
+      wrapped: window.wrapped,
+      can_pan_horizontally: window.content_kind == :buffer and not window.wrapped,
       anchor_top: geometry.viewport.top,
       anchor_left: geometry.viewport.left,
-      anchor_visual_row_offset: retained_anchor_offset(window.rows, geometry),
+      anchor_visual_row_offset: retained_anchor_offset(window, geometry),
       visible_start_line: visible_start_line,
       visible_end_line: visible_end_line,
       overscan_start_line: overscan_start_line,
       overscan_end_line: overscan_end_line,
       content_epoch: window.content_epoch,
       layout_generation: layout_generation(geometry),
-      scroll_seq: window.scroll_seq
+      scroll_seq: window.scroll_seq,
+      horizontal_pan_ack: window.horizontal_pan_ack,
+      horizontal_pan_limit: window.horizontal_pan_limit
     }
   end
 
   # The row store can begin partway through the anchor's wrapped source line.
   # Frontends skip only the continuation rows still present in that store.
-  @spec retained_anchor_offset([Row.t()], PaneGeometry.t()) :: non_neg_integer()
+  @spec retained_anchor_offset(Window.t(), PaneGeometry.t()) :: non_neg_integer()
+  defp retained_anchor_offset(%Window{row_store_mode: {:resident, _}}, geometry),
+    do: geometry.viewport.visual_row_offset
+
   defp retained_anchor_offset(
-         [%Row{buf_line: line, visual_index: first_visual_index} | _],
+         %Window{rows: [%Row{buf_line: line, visual_index: first_visual_index} | _]},
          %PaneGeometry{viewport: %{top: line, visual_row_offset: offset}}
        ),
        do: max(offset - first_visual_index, 0)
 
-  defp retained_anchor_offset(_rows, %PaneGeometry{viewport: viewport}),
+  defp retained_anchor_offset(_window, %PaneGeometry{viewport: viewport}),
     do: viewport.visual_row_offset
 
   @spec resident_line_range(Window.t(), PaneGeometry.t()) ::
           {non_neg_integer(), non_neg_integer()}
+  defp resident_line_range(%Window{wrapped: true, row_store_mode: {:resident, _}}, geometry),
+    do: {0, geometry.viewport.total_lines}
+
   defp resident_line_range(%Window{row_store_mode: {:resident, count}}, _geometry),
     do: {0, count}
 
@@ -143,7 +161,6 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
       geometry.clip_rect,
       geometry.viewport.rows,
       geometry.viewport.cols,
-      geometry.viewport.left,
       geometry.gutter_metrics
     })
   end

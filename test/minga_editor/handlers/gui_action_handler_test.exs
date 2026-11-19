@@ -77,7 +77,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     window = Map.fetch!(handled.workspace.windows.map, handled.workspace.windows.active)
     assert window.viewport.top == 1
-    assert window.scroll_echo_top == 1
+    assert window.scroll_echo_anchor == {1, 0, 0}
     assert window.scroll_detach_cursor == {0, 0}
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
 

@@ -497,7 +497,14 @@ func applyConformanceFrame(t *testing.T, model *Model, i int, step conformanceSt
 	windowID := command.Window.ID
 	_, offsetBefore := model.localPresentation.scrolls[windowID]
 
-	model.applyMutation(command)
+	switch command.Kind {
+	case protocol.CommandWindowContent:
+		model.putWindow(command.Window)
+	case protocol.CommandWindowDelta:
+		model.applyWindowDelta(command.Window)
+	default:
+		model.applyMutation(command)
+	}
 
 	if step.Expect == nil {
 		return
@@ -565,18 +572,11 @@ func injectConformanceOffset(model *Model, step conformanceStep) {
 	// mid-transcript with anchor keys matching the currently-stored frame, so the
 	// reconciler compares it against the next committed frame's keys.
 	window := model.windows[step.WindowID]
-	model.localPresentation.scrolls[step.WindowID] = presentationScroll{
-		anchorTop:        window.Scroll.AnchorTop,
-		anchorLeft:       window.Scroll.AnchorLeft,
-		contentEpoch:     window.Scroll.ContentEpoch,
-		layoutGeneration: window.Scroll.LayoutGeneration,
-		// Capture the scroll_seq the currently-stored frame carries so a
-		// later strictly-newer scroll_seq forces a discard, exactly as a real
-		// wheel offset captures the committed seq at creation time (#2671).
-		scrollSeq: window.Scroll.ScrollSeq,
-		rowOffset: step.RowOffset,
-		colOffset: step.ColOffset,
-	}
+	anchor, wrapped := model.residentRows[step.WindowID].wrappedAnchor(window.Scroll)
+	scroll := capturePresentationScroll(window, anchor)
+	scroll.predictingWrapped = wrapped
+	scroll.rowOffset, scroll.colOffset = step.RowOffset, step.ColOffset
+	model.localPresentation.scrolls[step.WindowID] = scroll
 }
 
 func assertConformancePointer(t *testing.T, model *Model, i int, step conformanceStep) {

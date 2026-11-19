@@ -1354,10 +1354,8 @@ defmodule MingaEditor.Commands.Agent do
     NoticeWorkflow.publish(state, "Thinking: #{level}")
   end
 
-  @spec apply_model_and_provider(state(), String.t(), String.t() | nil) :: state()
-  defp apply_model_and_provider(state, model, provider \\ nil) do
-    provider = provider || AgentConfig.extract_provider_prefix(model)
-
+  @spec apply_model_and_provider(state(), String.t(), String.t()) :: state()
+  defp apply_model_and_provider(state, model, provider) do
     state
     |> update_agent_ui(&UIState.set_model_name(&1, model))
     |> update_agent_ui(&UIState.set_provider_name(&1, provider))
@@ -1366,26 +1364,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Sets an exact agent model route without resetting conversation context."
   @spec set_model(state(), String.t() | ModelSelection.t()) :: state()
   def set_model(state, model_or_selection) do
-    display = model_display(model_or_selection)
-
-    case Runtime.active_session(state.shell_runtime) do
-      nil ->
-        NoticeWorkflow.publish(state, "No agent session; model selection was not changed")
-
-      session ->
-        case Session.set_model(session, model_or_selection) do
-          :ok ->
-            state = apply_model_selection_to_ui(state, model_or_selection)
-            Session.add_system_message(session, "Model: #{display}")
-            NoticeWorkflow.publish(state, "Model: #{display}")
-
-          {:error, reason} when is_binary(reason) ->
-            NoticeWorkflow.publish(state, reason)
-
-          {:error, reason} ->
-            NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
-        end
-    end
+    MingaEditor.Agent.ConnectionAction.schedule_current(state, {:model, model_or_selection})
   end
 
   @spec sync_restored_model_selection(state(), pid()) :: state()
@@ -1407,20 +1386,12 @@ defmodule MingaEditor.Commands.Agent do
       state
   end
 
-  @spec apply_model_selection_to_ui(state(), String.t() | ModelSelection.t()) :: state()
+  @spec apply_model_selection_to_ui(state(), ModelSelection.t()) :: state()
   defp apply_model_selection_to_ui(state, %ModelSelection{} = selection) do
     state
     |> apply_model_and_provider(selection.route.display_name, selection.route.model_provider)
     |> update_agent_ui(&UIState.set_thinking_level(&1, selection.policy.reasoning.effort))
   end
-
-  defp apply_model_selection_to_ui(state, model), do: apply_model_and_provider(state, model)
-
-  @spec model_display(String.t() | ModelSelection.t()) :: String.t()
-  defp model_display(%ModelSelection{} = selection),
-    do: "#{selection.route.display_name} via #{selection.route.execution.wire_protocol}"
-
-  defp model_display(model), do: model
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
   #
@@ -2383,7 +2354,7 @@ defmodule MingaEditor.Commands.Agent do
         name: :agent_pick_model,
         description: "Pick AI agent model",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.AgentModelSource) end
+        execute: &MingaEditor.UI.Picker.AgentModelSource.open/1
       },
       %Minga.Command{
         name: :agent_pick_thinking,

@@ -194,6 +194,25 @@ defmodule Minga.Credo.ExplicitTargetCheckTest do
     end
   end
 
+  test "absolute visual scroll accepts only the exact pane and presentation identity" do
+    for {payload, triggers} <- [
+          {"<<window_id::16, presentation_id::64, rank::32>>", []},
+          {"<<window_id::16, rank::32>>", ["window_id"]},
+          {"<<window_id::16, presentation_id::signed-64, rank::32>>", ["window_id"]},
+          {"<<window_id::16, presentation_id::64, rank::16>>", ["rank", "window_id"]}
+        ] do
+      issues =
+        """
+        defmodule MingaEditor.Frontend.Protocol.GUI do
+          def decode_gui_action(@gui_action_scroll_to_visual_rank, #{payload}), do: :ok
+        end
+        """
+        |> check()
+
+      assert Enum.sort(Enum.map(issues, & &1.trigger)) == triggers
+    end
+  end
+
   test "existing narrow identities need a reasoned capped exemption" do
     code = """
     defmodule MingaEditor.Frontend.Protocol.GUI do

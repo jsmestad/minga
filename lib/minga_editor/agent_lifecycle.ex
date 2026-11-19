@@ -17,6 +17,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
+  alias MingaAgent.Session.ConnectionSnapshot
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
@@ -79,6 +80,15 @@ defmodule MingaEditor.AgentLifecycle do
       ui
       |> UIState.replace_panel(panel)
       |> UIState.project_model_selection(Map.get(snapshot, :model_selection))
+
+    ui =
+      case Map.get(snapshot, :connection) do
+        %ConnectionSnapshot{target: %{session: ^session_pid}} = connection ->
+          UIState.project_connection(ui, connection)
+
+        _unavailable ->
+          UIState.clear_connection(ui)
+      end
 
     state
     |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(agent)

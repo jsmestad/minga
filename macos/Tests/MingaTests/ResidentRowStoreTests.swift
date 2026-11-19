@@ -89,6 +89,79 @@ struct ResidentRowStoreTests {
         #expect(store.lowerBound(bufferLine: 9) == fixture.count)
     }
 
+    @Test("wrapped source rank and select survive group growth, insertion, and cross-chunk deletion")
+    func wrappedSourceRankAndSelect() throws {
+        func group(_ ids: Range<UInt64>) -> [GUIVisualRow] {
+            ids.map { row($0, bufferLine: UInt32(10_000 - $0), type: $0 == ids.lowerBound ? .normal : .wrapContinuation) }
+        }
+        let original = group(1..<4) + group(4..<5) + group(5..<138) + group(138..<142)
+        var store = try ResidentRowStore(rows: original, mode: .sequentialWrapped)
+        let snapshot = store
+        var oracle = original
+
+        func expectProjection() {
+            var line: UInt32 = 0
+            var expected: [UInt32] = []
+            for (rank, row) in oracle.enumerated() {
+                if row.rowType == .normal {
+                    line = expected.last.map { $0 + 1 } ?? 0
+                    #expect(store.lowerBound(bufferLine: line) == rank)
+                }
+                expected.append(line)
+                #expect(store.row(at: rank)?.bufLine == line)
+                #expect(store.row(at: rank)?.rowId == row.rowId)
+            }
+            #expect(store.rows(in: 1..<store.count).rows.map(\.bufLine) == Array(expected.dropFirst()))
+            #expect(store.lowerBound(bufferLine: line + 1) == store.count)
+            #expect(store.normalStartCount == Int(line) + 1)
+        }
+        expectProjection()
+
+        let edits: [(start: Int, removed: Int, inserted: [GUIVisualRow])] = [
+            (3, 0, group(200..<203)),
+            (0, 3, group(1..<4) + [row(300, type: .wrapContinuation)]),
+            (1, 2, []),
+            (6, 133, [])
+        ]
+        for edit in edits {
+            oracle.replaceSubrange(edit.start..<(edit.start + edit.removed), with: edit.inserted)
+            try store.applyBatch(
+                [ResidentRowSplice(startIndex: edit.start, deleteCount: edit.removed, insertedRows: edit.inserted)],
+                baseRowCount: store.count, resultRowCount: oracle.count
+            )
+            expectProjection()
+        }
+
+        #expect(snapshot.row(at: original.count - 1)?.bufLine == 3)
+        let retained = try #require(store.row(at: store.count - 1))
+        #expect(retained.bufLine == 3)
+        #expect(retained.rowId == 141)
+        #expect(try store.resolve(rowID: retained.rowId, contentHash: retained.contentHash) == original.last)
+        #expect(snapshot.counters.splices == 0)
+        #expect(snapshot.counters.resourceWeightRowsVisited == 0)
+    }
+
+    @Test("wrapped group edits touch bounded visual chunks", arguments: [5_000, 65_536])
+    func boundedWrappedEdit(visualRows: Int) throws {
+        let rows = (0..<visualRows).map {
+            row(UInt64($0 + 1), bufferLine: 0, type: $0.isMultiple(of: 2) ? .normal : .wrapContinuation)
+        }
+        var store = try ResidentRowStore(rows: rows, mode: .sequentialWrapped)
+        let counters = store.counters
+        try store.applyBatch(
+            [ResidentRowSplice(startIndex: 1_001, deleteCount: 1, insertedRows: [])],
+            baseRowCount: visualRows, resultRowCount: visualRows - 1
+        )
+        let work = store.counters - counters
+        #expect(work.fullResets == 0)
+        #expect(work.chunksTouched <= 7)
+        #expect(work.rowsVisited <= 6 * ResidentRowStore.chunkCapacity + 1)
+        #expect(store.normalStartCount == visualRows / 2)
+        #expect(store.lowerBound(bufferLine: 501) == 1_001)
+        #expect(store.row(at: 1_000)?.bufLine == 500)
+        #expect(store.row(at: visualRows - 2)?.rowId == UInt64(visualRows))
+    }
+
     @Test("copy-on-write mutation leaves the committed value unchanged")
     func copyOnWrite() throws {
         let committed = try ResidentRowStore(rows: rows(0..<260))

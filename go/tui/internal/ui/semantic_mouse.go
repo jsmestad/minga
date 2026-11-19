@@ -123,84 +123,96 @@ func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
 	return m, true
 }
 
-func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
-	mouse := msg.Mouse()
-	if !isWheelButton(mouse.Button) {
-		return m
-	}
+func (m *Model) scrollWindowByWheel(mouse tea.Mouse, delta int, horizontal bool) bool {
 	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
 	if !ok {
-		return m
+		return false
 	}
 	window := m.windows[windowID]
-	if !window.ScrollSet {
-		return m
+	delta = clampInt(delta, -0x8000, 0x7FFF)
+	if horizontal {
+		m.sendHorizontalPan(window, delta)
+		return true
 	}
-	// reset_required is a one-shot instruction consumed by
-	// reconcilePresentationScroll when the frame commits. The committed window
-	// retains the wire metadata, so gating input on that field would permanently
-	// disable local scrolling after a reset frame.
-	scroll := m.localPresentation.scrolls[windowID]
+	m.previewVerticalScroll(window, delta)
+	direction := byte(0)
+	if delta != 0 {
+		if delta < 0 {
+			direction++
+		}
+		m.send(protocol.EncodeScrollBatch(windowID, int16(delta), direction))
+	}
+	return true
+}
+
+func (m *Model) previewVerticalScroll(window protocol.WindowContent, delta int) {
+	if !window.ScrollSet {
+		return
+	}
+	// ResetRequired was consumed when this frame committed. It is not an
+	// input gate for later wheel events.
+	scroll := m.localPresentation.scrolls[window.ID]
+	if window.Scroll.Wrapped {
+		// A windowed payload has no complete visual-rank basis. It follows the
+		// BEAM's committed vertical motion instead of predicting into overscan.
+		if !window.WrappedResidentRows {
+			return
+		}
+		gutter, hasGutter := m.windowGutter(window.ID)
+		_, height := m.windowRenderDimensions(window, hasGutter, gutter)
+		anchor := m.presentationPayloadStart(window)
+		if !scroll.keysMatch(window.Scroll) {
+			scroll = capturePresentationScroll(window, anchor)
+		}
+		maxTop := m.wrappedResidentMaxTop(window, height)
+		start := clampInt(anchor+scroll.rowOffset, 0, maxTop)
+		top := clampInt(start+delta, 0, maxTop)
+		if top != start {
+			scroll.rowOffset = top - anchor
+			scroll.predictingWrapped = true
+			m.localPresentation.scrolls[window.ID] = scroll
+		}
+		return
+	}
 	if !scroll.keysMatch(window.Scroll) {
-		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration, scrollSeq: window.Scroll.ScrollSeq}
+		scroll = capturePresentationScroll(window, 0)
 	}
 	visibleRows := presentationVisibleRows(window)
 	if body := m.bodyHeight(); visibleRows > body && body > 0 {
 		visibleRows = body
 	}
 	before, after := m.presentationScrollRowBounds(window, visibleRows)
-	switch mouse.Button {
-	case tea.MouseWheelDown, tea.MouseWheelUp:
-		if mouse.Mod.Contains(tea.ModShift) {
-			// Horizontal scroll is 1-column-at-a-time regardless of coalesced magnitude.
-			colDelta := 1
-			if delta < 0 {
-				colDelta = -1
-			}
-			scroll.colOffset = max(min(scroll.colOffset+colDelta, m.maxPresentationColOffset(window)), minPresentationColOffset(window))
-		} else {
-			scroll.rowOffset = max(min(scroll.rowOffset+delta, after), -before)
-		}
-	case tea.MouseWheelRight:
-		scroll.colOffset = min(scroll.colOffset+1, m.maxPresentationColOffset(window))
-	case tea.MouseWheelLeft:
-		scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
-	}
-	if scroll.rowOffset == 0 && scroll.colOffset == 0 {
-		delete(m.localPresentation.scrolls, windowID)
-	} else {
-		m.localPresentation.scrolls[windowID] = scroll
-	}
-	return m
+	scroll.rowOffset = clampInt(scroll.rowOffset+delta, -before, after)
+	m.localPresentation.storeUnwrappedScroll(window.ID, scroll)
 }
 
-func (m Model) maxPresentationColOffset(window protocol.WindowContent) int {
-	return m.maxPresentationLeft(window) - int(window.ScrollLeft)
-}
-
-func minPresentationColOffset(window protocol.WindowContent) int {
-	return -int(window.ScrollLeft)
-}
-
-func (m Model) maxPresentationLeft(window protocol.WindowContent) int {
-	textWidth := int(window.Geometry.TextRect.Width)
-	if textWidth <= 0 {
-		textWidth = int(window.Geometry.ContentRect.Width)
+func (m *Model) sendHorizontalPan(window protocol.WindowContent, delta int) {
+	if !window.ScrollSet || !window.Scroll.CanPanHorizontally || window.Scroll.Wrapped {
+		return
 	}
-	textWidth = max(textWidth, 1)
-	maxRowWidth := 0
-	visible := max(presentationVisibleRows(window), 1)
-	start := m.presentationSourceStart(window, visible)
-	rows := window.Rows
-	if store, ok := m.residentRows[window.ID]; ok {
-		rows = store.rangeRows(start, visible+4)
-	} else if start < len(rows) {
-		rows = rows[start:min(start+visible+4, len(rows))]
+	scroll, ok := m.localPresentation.scrolls[window.ID]
+	if !ok || !scroll.keysMatch(window.Scroll) {
+		scroll = capturePresentationScroll(window, 0)
 	}
-	for _, row := range rows {
-		maxRowWidth = max(maxRowWidth, displayWidth(row.Text))
+	committed := int(window.ScrollLeft)
+	// Use the pending left edge for bounds even when a text drag hides it.
+	left := max(committed+scroll.colOffset, 0)
+	if delta > 0 {
+		// A smaller committed extent stops rightward motion without snapping left.
+		delta = min(delta, max(int(window.Scroll.HorizontalPanLimit)-left, 0))
 	}
-	return max(maxRowWidth-textWidth, 0)
+	next := max(left+delta, 0)
+	if next == left {
+		return
+	}
+	seq := m.localPresentation.horizontalPanSeq + 1
+	if seq == 0 || !m.send(protocol.EncodeHorizontalPan(window.ID, int16(next-left), seq)) {
+		return
+	}
+	m.localPresentation.horizontalPanSeq = seq
+	scroll.pendingPanSeq = seq
+	scroll.colOffset = next - committed
+	m.localPresentation.storeUnwrappedScroll(window.ID, scroll)
 }
 
 func (m Model) presentationScrollWindowAt(x int, y int) (uint16, bool) {
@@ -391,10 +403,14 @@ func (m Model) gutterFoldMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		return nil, false
 	}
 	localY := bodyY - placement.row
-	height := placement.height
+	_, height := m.windowRenderDimensions(window, true, gutter)
+	if localY < 0 || localY >= height {
+		return nil, false
+	}
 	sourceStart := m.presentationSourceStart(window, height)
 	sourceRowIndex := localY + sourceStart
-	entry, ok := gutter.EntryAt(sourceRowIndex)
+	row, hasRow := m.windowRow(window, sourceRowIndex)
+	entry, ok := presentedGutterEntry(window.WrappedResidentRows, gutter, sourceRowIndex, row, hasRow)
 	if !ok {
 		return nil, false
 	}

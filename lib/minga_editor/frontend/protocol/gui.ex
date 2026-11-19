@@ -162,6 +162,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_edit_confirm Opcodes.gui_action_file_tree_edit_confirm()
   @gui_action_file_tree_edit_cancel Opcodes.gui_action_file_tree_edit_cancel()
   @gui_action_scroll_to_line Opcodes.gui_action_scroll_to_line()
+  @gui_action_scroll_to_visual_rank Opcodes.gui_action_scroll_to_visual_rank()
   @gui_action_system_will_sleep Opcodes.gui_action_system_will_sleep()
   @gui_action_system_did_wake Opcodes.gui_action_system_did_wake()
   @gui_action_system_will_unmount Opcodes.gui_action_system_will_unmount()
@@ -288,6 +289,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:focus_window, window_id :: non_neg_integer(), generation :: non_neg_integer()}
           | {:scroll_to_line, window_id :: non_neg_integer(), generation :: non_neg_integer(),
              line :: non_neg_integer()}
+          | {:scroll_to_visual_rank, window_id :: non_neg_integer(),
+             presentation_id :: non_neg_integer(), rank :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
           | {:tab_reorder, id :: pos_integer(), new_index :: non_neg_integer()}
           | {:tab_pin, id :: pos_integer()}
@@ -859,6 +862,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ),
       do: {:ok, {:scroll_to_line, window_id, generation, line}}
 
+  def decode_gui_action(
+        @gui_action_scroll_to_visual_rank,
+        <<window_id::16, presentation_id::64, rank::32>>
+      ),
+      do: {:ok, {:scroll_to_visual_rank, window_id, presentation_id, rank}}
+
   def decode_gui_action(@gui_action_file_tree_drop, payload), do: decode_file_tree_drop(payload)
 
   def decode_gui_action(
@@ -1075,6 +1084,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_intent(:completion, 1), do: {:ok, :accept}
   defp decode_semantic_intent(:picker, 1), do: {:ok, :activate_item}
   defp decode_semantic_intent(:picker, 2), do: {:ok, :activate_action}
+  defp decode_semantic_intent(:picker, 3), do: {:ok, :dismiss}
   defp decode_semantic_intent(:file_tree, 1), do: {:ok, :primary}
   defp decode_semantic_intent(:file_tree, 2), do: {:ok, :toggle}
   defp decode_semantic_intent(:file_tree, 3), do: {:ok, :open_in_split}

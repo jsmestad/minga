@@ -296,6 +296,8 @@ Each extension declaration gets one ordered root beneath `Minga.Extension.RootSu
 
 The runtime tier handles rendering and user interaction. `rest_for_one` keeps the render path ordered: if Frontend.Manager fails, Renderer.Server and the Editor generation restart because both depend on the frontend port. If Renderer.Server fails, the Editor generation restarts because Editor holds the renderer pid. The generation is a `one_for_all` boundary around Editor, its effect scheduler, and supervised effect workers. An Editor crash therefore stops every old formatting or git mutation worker before replacement authority starts. Buffers remain outside this boundary, so undo history, cursor positions, and unsaved changes are preserved.
 
+Credential input uses a private `ConnectionInput` task under the Editor generation's `EffectTaskSupervisor`. The Editor sends sealed input directly to this task, not through the effect scheduler or the renderer. The task can write only after the scheduled effect joins it and Session confirms that the original Editor registered it as the writer. The authorized task loads the model catalog before submitting the key, so first-time catalog parsing does not hold Session or block rendering. Canceling the join stops the task; detaching the original Session driver or canceling setup revokes its write authority. Session orders credential writes against those changes and sends a successful save notice after the connection snapshot for the resulting conversation.
+
 ```mermaid
 graph TD
     RT["Runtime.Supervisor<br/><i>one_for_one</i>"]
@@ -454,7 +456,7 @@ Agent Help is an independent `Minga.RenderModel.UI.AgentHelp` value encoded thro
 
 #### Resident-store history
 
-Historical note (recorded 2026-10-29): epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 completed that work and deleted velocity-aware overscan prefetch. The windowed emit path remains for wrapped/folded buffers and the brief pre-promotion arming frame, with fixed overscan rather than velocity tiers. New scrollable surfaces reuse that lifecycle instead of defining per-surface reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).
+Epic #2652 established resident navigable models plus discardable frontend-local presentation offsets. #2680 removed velocity-aware overscan. Normal-size soft-wrapped buffers also retain their BEAM-composed visual rows in Swift and Go. The fixed-overscan windowed path serves folded buffers, panes over the residence budget, and panes waiting for promotion. New scrollable surfaces reuse this lifecycle instead of defining their own reconciliation. See [Resident scrolling](workstreams/resident-scroll.md).
 
 [ADR-0005](adr/0005-frontend-owns-immediate-ui-feedback.md) sets the responsiveness target: present feedback from committed data on the next available frontend frame without waiting for a new BEAM decision. Soft-wrapped scrolling is its first application.
 
@@ -516,6 +518,8 @@ An explicit `recovery_reserver` supplies the complete `{generation, next_frame_s
 The `framed` transcript kind carries an actual begin/commit batch, required transaction-result and last-committed expectations, resident rows, and cell-space pane rectangles. Swift uses the production decoded-frame dispatcher and Go the production transaction fixture. The BEAM re-decodes the recorded bytes and checks lineage, rows and geometry. Resize inputs first pass through the real Editor mailbox and then through real Layout; frontend-reported row fit remains authoritative under ADR-0001. Wheel-during-commit and click-after-settle steps exercise the input corpus's local-presentation and pointer seams.
 
 Targeted recovery is recorded against a warmed, acknowledged two-pane base. The missed pane receives full content without changing generation or dropping the nonzero base; the sibling's rows and content epoch stay unchanged. Captured lifecycle side channels remain attached to their original delivery, including rejected frames, but are not repeated when an old frame is replayed as stale input. Both frontend runners check those background/title effects and every pane's row identities and epochs.
+
+When the frontend rejects a transaction, it discards updates for every pane. The renderer keeps the acknowledged row and semantic bases plus any pending edits until the frame is acknowledged. A targeted retry can therefore replay changes for siblings from their acknowledged bases without refreshing unchanged panes.
 
 Recovery responses are never hand-typed. `mix conformance.gen --check` generates twice, rejects nondeterministic output, and compares against committed bytes without rewriting them. The corpus format and exact status expectations are documented in `test/conformance/corpus/README.md`.
 

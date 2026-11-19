@@ -38,8 +38,9 @@ defmodule MingaEditor.Window do
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
-          scroll_echo_top: integer() | nil,
-          authoritative_scroll_seq: non_neg_integer()
+          scroll_echo_anchor: Viewport.scroll_anchor() | nil,
+          authoritative_scroll_seq: non_neg_integer(),
+          horizontal_pan_ack: non_neg_integer()
         }
 
   @enforce_keys [:id, :content, :viewport]
@@ -64,8 +65,9 @@ defmodule MingaEditor.Window do
     },
     scroll_velocity: %ScrollVelocity{},
     scroll_detach_cursor: nil,
-    scroll_echo_top: nil,
-    authoritative_scroll_seq: 0
+    scroll_echo_anchor: nil,
+    authoritative_scroll_seq: 0,
+    horizontal_pan_ack: 0
   ]
 
   @doc "Creates a new window with the given id, buffer, and viewport dimensions."
@@ -280,11 +282,19 @@ defmodule MingaEditor.Window do
     %{window | viewport: Viewport.put_top(vp, new_top), pinned: pinned}
   end
 
-  @doc "Scrolls the window horizontally by display columns."
-  @spec scroll_horizontal(t(), integer()) :: t()
-  def scroll_horizontal(%__MODULE__{viewport: viewport} = window, delta) do
-    new_left = max(viewport.left + delta, 0)
-    %{window | viewport: %{viewport | left: new_left}}
+  @doc "Pans without moving the caret or changing the vertical gesture's velocity."
+  @spec pan_horizontally(t(), integer(), Buffer.position(), non_neg_integer()) :: t()
+  def pan_horizontally(%__MODULE__{viewport: viewport} = window, delta, cursor, input_seq) do
+    # A clamped or coalesced pan still acknowledges intent, even if left did not change.
+    window = if input_seq == 0, do: window, else: %{window | horizontal_pan_ack: input_seq}
+    panned = Viewport.pan(viewport, delta)
+
+    if panned.left == viewport.left do
+      window
+    else
+      %{window | viewport: panned, scroll_detach_cursor: cursor}
+      |> mark_scroll_echo()
+    end
   end
 
   @doc "Sets whether the window should stay pinned to the bottom while content streams."
@@ -311,20 +321,10 @@ defmodule MingaEditor.Window do
     }
   end
 
-  @doc """
-  Records the committed viewport top of a frontend-reported free-scroll (#2661).
-
-  Set by the mouse-wheel/trackpad input path to the top it just committed. It is
-  an editor-owned, top-level `Window` field (never in the render cache) so the
-  async render writeback cannot clobber a newer value: only the input path ever
-  writes it, on the live window. It is deliberately sticky — never cleared. A
-  later wheel overwrites it; `settle_scroll_seq/1` treats a viewport top equal to
-  this value as an echo of the frontend's own report, so it does not advance
-  `scroll_seq` (the "echo-loop guard": no re-anchor storm during a wheel/trackpad scroll gesture).
-  """
-  @spec mark_scroll_echo(t(), integer()) :: t()
-  def mark_scroll_echo(%__MODULE__{} = window, echo_top) when is_integer(echo_top) do
-    %{window | scroll_echo_top: echo_top}
+  @doc "Records the full committed pane position as an echo of frontend scroll input."
+  @spec mark_scroll_echo(t()) :: t()
+  def mark_scroll_echo(%__MODULE__{viewport: viewport} = window) do
+    %{window | scroll_echo_anchor: Viewport.scroll_anchor(viewport)}
   end
 
   @doc """
@@ -338,7 +338,7 @@ defmodule MingaEditor.Window do
   policy and is the source of truth for the command set.
   It is an editor-owned, top-level `Window` field (never in the render cache), a
   monotonic request counter incremented once per authoritative jump. Like
-  `scroll_echo_top`, only the editor writes it, on the live window, so the async
+  `scroll_echo_anchor`, only the editor writes it, on the live window, so the async
   render writeback (which copies back only the render cache) cannot clobber it.
 
   `settle_scroll_seq/1` consumes it: the render cache remembers the last request

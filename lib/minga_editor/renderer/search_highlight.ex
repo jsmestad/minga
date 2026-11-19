@@ -43,6 +43,21 @@ defmodule MingaEditor.Renderer.SearchHighlight do
 
   def maybe_substitute_preview(_state, lines, _first_line), do: {lines, []}
 
+  @doc "Returns whether temporary text replacements can change source layout."
+  @spec substitute_preview?(state()) :: boolean()
+  def substitute_preview?(state) do
+    case substitute_input(state) do
+      nil ->
+        false
+
+      input ->
+        match?(
+          {_pattern, replacement} when is_binary(replacement),
+          extract_substitute_parts(input)
+        )
+    end
+  end
+
   @doc "Computes search matches for the visible line range."
   @spec search_matches_for_lines(state(), [String.t()], non_neg_integer()) :: [search_match()]
   def search_matches_for_lines(state, lines, first_line) do

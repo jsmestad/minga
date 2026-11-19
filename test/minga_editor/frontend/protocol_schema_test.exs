@@ -61,6 +61,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       application_quit_request: 0x0D,
       application_quit_decision: 0x0E,
       operation_native_result: 0x0F,
+      horizontal_pan: 0x12,
       native_presentation_observation: 0x1D,
       editor_text_event: 0x1E,
       text_presentation_state: 0x1F,
@@ -274,7 +275,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       semantic_item_activate: 0x65,
       agent_prompt_fit: 0x66,
       agent_prompt_scroll: 0x67,
-      agent_tool_approval: 0x68
+      agent_tool_approval: 0x68,
+      scroll_to_visual_rank: 0x69
     )
   end
 

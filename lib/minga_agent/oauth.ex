@@ -3,9 +3,10 @@ defmodule MingaAgent.OAuth do
   OpenAI OAuth acquisition helpers: PKCE generation, authorize URL
   construction, code exchange, and oauth.json persistence.
 
-  Pure calculations with no processes. The flow orchestration lives in
-  `MingaAgent.OAuth.Flow`.
+  The flow orchestration lives in `MingaAgent.OAuth.Flow`; `MingaAgent.OAuth.Store` serializes credential-file operations.
   """
+
+  alias MingaAgent.OAuth.Store
 
   @client_id "app_EMoamEEZ73f0CkXaXp7hrann"
   @authorize_url "https://auth.openai.com/oauth/authorize"
@@ -172,29 +173,32 @@ defmodule MingaAgent.OAuth do
   end
 
   @doc """
-  Writes tokens to the oauth.json file with 0600 permissions.
+  Atomically installs tokens with mode 0600, preserving other providers and following final symlinks.
 
-  Merges into any existing file content so other provider entries are preserved.
+  A failed write leaves the previous credential file intact. A competing refresh rejects the write without waiting on provider I/O.
   """
-  @spec write_oauth_file(token_response(), String.t()) :: :ok | {:error, String.t()}
-  def write_oauth_file(tokens, path \\ oauth_path()) do
-    dir = Path.dirname(path)
+  @spec write_oauth_file(token_response(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def write_oauth_file(tokens, path \\ oauth_path(), opts \\ []) do
+    case Store.install(path, oauth_file_payload(tokens), opts) do
+      :ok ->
+        :ok
 
-    with :ok <- ensure_dir(dir),
-         {:ok, existing} <- read_existing(path) do
-      merged = Map.merge(existing, oauth_file_payload(tokens))
-      json = :json.format(merged)
+      {:error, :oauth_file_busy} ->
+        {:error, "OAuth credentials are busy. Try again after the current request finishes."}
 
-      case File.write(path, json) do
-        :ok ->
-          File.chmod(path, 0o600)
-          :ok
-
-        {:error, reason} ->
-          {:error, "Failed to write #{path}: #{inspect(reason)}"}
-      end
+      {:error, _reason} ->
+        {:error, "OAuth credential storage failed."}
     end
   end
+
+  @doc "Removes the Codex OAuth entry without touching other providers."
+  @spec revoke_oauth_file(String.t()) :: :ok | {:error, term()}
+  def revoke_oauth_file(path), do: Store.remove(path, @provider_key)
+
+  @doc "Resolves the Codex OAuth credential in coordination with install and revoke."
+  @spec resolve_oauth_file(String.t()) ::
+          {:ok, ReqLLM.OAuth.resolved_credential()} | {:error, term()}
+  def resolve_oauth_file(path), do: Store.resolve(path)
 
   @doc """
   Returns the path to `~/.config/minga/oauth.json` (XDG-aware).
@@ -296,33 +300,6 @@ defmodule MingaAgent.OAuth do
     case Base.url_decode64(payload, padding: false) do
       {:ok, decoded} -> {:ok, decoded}
       :error -> Base.url_decode64(payload, padding: true)
-    end
-  end
-
-  defp read_existing(path) do
-    case File.read(path) do
-      {:ok, ""} ->
-        {:ok, %{}}
-
-      {:ok, content} ->
-        case JSON.decode(content) do
-          {:ok, map} when is_map(map) -> {:ok, map}
-          {:ok, _non_map} -> {:ok, %{}}
-          {:error, err} -> {:error, "Failed to parse #{path}: #{inspect(err)}"}
-        end
-
-      {:error, :enoent} ->
-        {:ok, %{}}
-
-      {:error, reason} ->
-        {:error, "Failed to read #{path}: #{inspect(reason)}"}
-    end
-  end
-
-  defp ensure_dir(dir) do
-    case File.mkdir_p(dir) do
-      :ok -> :ok
-      {:error, reason} -> {:error, "Failed to create #{dir}: #{inspect(reason)}"}
     end
   end
 end

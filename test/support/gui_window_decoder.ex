@@ -20,6 +20,7 @@ defmodule Minga.Test.GUIWindowDecoder do
       full_refresh: true,
       cursor_visible: true,
       sequential_rows: false,
+      wrapped_rows: false,
       cursor_row: 0,
       cursor_col: 0,
       cursor_shape: :block,
@@ -61,6 +62,7 @@ defmodule Minga.Test.GUIWindowDecoder do
         full_refresh: (flags &&& 1) == 1,
         cursor_visible: (flags &&& 2) == 2,
         sequential_rows: (flags &&& 4) == 4,
+        wrapped_rows: (flags &&& 8) == 8,
         cursor_row: cursor_row,
         cursor_col: cursor_col,
         cursor_shape: decode_cursor_shape(cursor_shape),
@@ -122,11 +124,13 @@ defmodule Minga.Test.GUIWindowDecoder do
          <<window_id::16, flags::8, anchor_top::32, anchor_left::16, anchor_visual_row_offset::16,
            visible_start_line::32, visible_end_line::32, overscan_start_line::32,
            overscan_end_line::32, content_epoch::32, layout_generation::32, scroll_seq::32,
-           rest::binary>>
+           horizontal_pan_ack::32, horizontal_pan_limit::16, rest::binary>>
        ) do
     scroll_presentation = %{
       window_id: window_id,
       reset_required: (flags &&& 0x01) == 0x01,
+      wrapped: (flags &&& 0x02) == 0x02,
+      can_pan_horizontally: (flags &&& 0x04) == 0x04,
       anchor_top: anchor_top,
       anchor_left: anchor_left,
       anchor_visual_row_offset: anchor_visual_row_offset,
@@ -136,7 +140,9 @@ defmodule Minga.Test.GUIWindowDecoder do
       overscan_end_line: overscan_end_line,
       content_epoch: content_epoch,
       layout_generation: layout_generation,
-      scroll_seq: scroll_seq
+      scroll_seq: scroll_seq,
+      horizontal_pan_ack: horizontal_pan_ack,
+      horizontal_pan_limit: horizontal_pan_limit
     }
 
     {scroll_presentation, rest}
@@ -145,7 +151,7 @@ defmodule Minga.Test.GUIWindowDecoder do
   defp decode_geometry(
          <<window_id::16, total::binary-size(8), content::binary-size(8), text::binary-size(8),
            gutter::binary-size(8), clip::binary-size(8), viewport_top::32, viewport_left::16,
-           viewport_rows::16, viewport_cols::16, total_lines::32, visual_row_offset::16,
+           viewport_rows::16, viewport_cols::16, total_lines::32, visual_row_offset::32,
            total_visual_rows::32, line_number_width::16, sign_col_width::16, hit_count::8,
            rest::binary>>
        ) do

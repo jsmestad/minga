@@ -75,6 +75,13 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, _session_pid, {:error, message}),
     do: SessionEventWorkflow.error(state, message)
 
+  def dispatch(
+        %EditorState{} = state,
+        session_pid,
+        {:connection_changed, %MingaAgent.Session.ConnectionSnapshot{} = connection}
+      ),
+      do: SessionEventWorkflow.connection_changed(state, session_pid, connection)
+
   def dispatch(%EditorState{} = state, _session_pid, {:credentials_status, configured?}),
     do: SessionEventWorkflow.credentials_status(state, configured?)
 
@@ -122,20 +129,23 @@ defmodule MingaEditor.Agent.Events do
 
   @spec apply_model_selection(EditorState.t(), ModelSelection.t()) :: EditorState.t()
   defp apply_model_selection(%EditorState{} = state, %ModelSelection{} = selection) do
-    route = selection.route
+    current_ui = state.workspace.agent_ui
 
-    message =
-      "Model activated: #{route.display_name} via " <>
-        "#{route.model_provider}/#{route.execution.wire_protocol}"
+    case UIState.project_model_selection(current_ui, selection) do
+      ^current_ui ->
+        state
 
-    agent_ui =
-      state.workspace.agent_ui
-      |> UIState.project_model_selection(selection)
-      |> UIState.push_toast(message, :info)
+      agent_ui ->
+        route = selection.route
 
-    state
-    |> TraditionalWorkflow.install_agent_ui(agent_ui)
-    |> MingaEditor.schedule_render(16)
+        message =
+          "Model activated: #{route.display_name} via " <>
+            "#{route.model_provider}/#{route.execution.wire_protocol}"
+
+        state
+        |> TraditionalWorkflow.install_agent_ui(UIState.push_toast(agent_ui, message, :info))
+        |> MingaEditor.schedule_render(16)
+    end
   end
 
   @doc "Applies one coalesced agent stream batch without changing mailbox ownership."

@@ -17,6 +17,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Core.Face
   alias Minga.Core.Unicode
   alias Minga.Diagnostics
+  alias MingaEditor.DisplayMap
   alias MingaEditor.InlineAsk.Render, as: InlineAskRender
   alias MingaEditor.InlineEdit.Render, as: InlineEditRender
   alias MingaEditor.State.Mouse
@@ -87,10 +88,13 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     composition_key = composition_key(state, decorations, is_active)
 
     search_matches =
-      case preview_matches do
-        [] -> SearchHighlight.search_matches_for_lines(state, lines, first_line)
-        _ -> preview_matches
-      end
+      visible_search_matches(
+        state,
+        preview_matches,
+        Map.get(params, :visible_line_map),
+        lines,
+        first_line
+      )
 
     confirm_match = if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil)
 
@@ -190,6 +194,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     {ctx, state}
   end
+
+  defp visible_search_matches(_state, [_ | _] = matches, _map, _lines, _first), do: matches
+
+  defp visible_search_matches(state, [], %DisplayMap{} = page, _lines, _first) do
+    Enum.flat_map(DisplayMap.source_runs(page), fn {first, lines} ->
+      SearchHighlight.search_matches_for_lines(state, lines, first)
+    end)
+  end
+
+  defp visible_search_matches(state, [], _map, lines, first),
+    do: SearchHighlight.search_matches_for_lines(state, lines, first)
 
   @spec diagnostics_snapshot(String.t() | nil) ::
           {non_neg_integer(), [Minga.Diagnostics.Diagnostic.t()]}
@@ -617,7 +632,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       highlight_fingerprint(ctx.highlight),
       ctx.diagnostic_signs,
       ctx.git_signs,
-      ctx.viewport.left,
       ctx.viewport.cols,
       ctx.content_w,
       is_active,

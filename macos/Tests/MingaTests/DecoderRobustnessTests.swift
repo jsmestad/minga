@@ -261,10 +261,13 @@ struct DecoderTruncatedGUIChromeTests {
     }
 }
 
-private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> Data {
+private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil,
+                               headerFlags: UInt8 = 0x03, scrollFlags: UInt8 = 0,
+                               horizontalPanAck: UInt32 = 0, horizontalPanLimit: UInt16 = 0,
+                               scrollPresentationByteCount: Int = 45) -> Data {
     var headerPayload = Data()
     appendU16(&headerPayload, 1) // window_id
-    headerPayload.append(0x03) // flags
+    headerPayload.append(headerFlags)
     appendU16(&headerPayload, 0) // cursor_row
     appendU16(&headerPayload, 0) // cursor_col
     headerPayload.append(0x00) // cursor_shape
@@ -281,7 +284,7 @@ private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> D
     if let scrollSeq {
         var scrollPresentationPayload = Data()
         appendU16(&scrollPresentationPayload, 1) // window_id
-        scrollPresentationPayload.append(0x00) // flags
+        scrollPresentationPayload.append(scrollFlags)
         appendU32(&scrollPresentationPayload, 5) // anchor_top
         appendU16(&scrollPresentationPayload, 0) // anchor_left
         appendU16(&scrollPresentationPayload, 0) // anchor_visual_row_offset
@@ -292,6 +295,13 @@ private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> D
         appendU32(&scrollPresentationPayload, 42) // content_epoch (matches header above)
         appendU32(&scrollPresentationPayload, 7) // layout_generation
         appendU32(&scrollPresentationPayload, scrollSeq) // scroll_seq
+        appendU32(&scrollPresentationPayload, horizontalPanAck)
+        appendU16(&scrollPresentationPayload, horizontalPanLimit)
+        if scrollPresentationPayload.count > scrollPresentationByteCount {
+            scrollPresentationPayload.removeLast(scrollPresentationPayload.count - scrollPresentationByteCount)
+        } else if scrollPresentationPayload.count < scrollPresentationByteCount {
+            scrollPresentationPayload.append(Data(count: scrollPresentationByteCount - scrollPresentationPayload.count))
+        }
 
         payload.append(windowContentSection(id: 0x0A, payload: scrollPresentationPayload))
     }
@@ -379,9 +389,12 @@ struct DecoderScrollPresentationScrollSeqTests {
         return payload
     }
 
-    @Test("decodes the scroll_seq field appended to the scroll_presentation section")
-    func decodesScrollSeq() throws {
-        let data = windowContentData(rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99)
+    @Test("decodes horizontal pan eligibility, acknowledgment, and limit after scroll authority")
+    func decodesHorizontalPanFields() throws {
+        let data = windowContentData(
+            rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99, scrollFlags: 0x04,
+            horizontalPanAck: 0x12345678, horizontalPanLimit: 0x012C
+        )
 
         let (command, _) = try decodeCommand(data: data, offset: 0)
         guard case .guiWindowContent(let content) = command else {
@@ -389,19 +402,40 @@ struct DecoderScrollPresentationScrollSeqTests {
             return
         }
         #expect(content.scrollPresentation?.scrollSeq == 99)
+        #expect(content.scrollPresentation?.canPanHorizontally == true)
+        #expect(content.scrollPresentation?.horizontalPanAck == 0x12345678)
+        #expect(content.scrollPresentation?.horizontalPanLimit == 0x012C)
     }
 
-    @Test("truncated scroll_presentation section (missing scroll_seq bytes) throws malformed")
-    func truncatedScrollSeq() {
-        var data = windowContentData(rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99)
-        // Chop off the last 2 of the 4 scroll_seq bytes; the section's declared
-        // length still claims the full 39 bytes so the decoder must reject it
-        // rather than reading past the truncated buffer.
-        data.removeLast(2)
-
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
+    @Test("wrapped wheel intent is independent of row-store residence", arguments: [UInt8(0x03), UInt8(0x0B)])
+    func decodesWrappedScrollFlags(headerFlags: UInt8) throws {
+        let data = windowContentData(
+            rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99, headerFlags: headerFlags, scrollFlags: 0x02
+        )
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        guard case .guiWindowContent(let content) = command else {
+            Issue.record("Expected guiWindowContent")
+            return
         }
+        #expect(size == data.count)
+        #expect(content.scrollPresentation?.isWrapped == true)
+        #expect(content.scrollPresentation?.canPanHorizontally == false)
+        #expect(content.scrollPresentation?.resetRequired == false)
+        #expect(content.scrollPresentation?.scrollSeq == 99)
+        #expect(content.rowStore.mode.isResident == (headerFlags == 0x0B))
+    }
+
+    @Test("gui_window_content rejects mutually exclusive residency bits")
+    func rejectsContradictoryResidence() {
+        expectMalformedWindowContent(windowContentData(rowsPayload: Self.emptyRowsPayload(), headerFlags: 0x0F))
+    }
+
+    @Test("scroll_presentation rejects missing or extra bytes", arguments: [39, 43, 44, 46])
+    func requiresExactScrollPresentationSize(byteCount: Int) {
+        let data = windowContentData(
+            rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99, scrollPresentationByteCount: byteCount
+        )
+        expectMalformedWindowContent(data)
     }
 }
 

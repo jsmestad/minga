@@ -1978,11 +1978,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard wcPayloadEnd >= wcSStart + wcSLen else { throw ProtocolDecodeError.malformed }
 
             switch wcSId {
-            case 0x01: // Header: window_id(2) + flags(1: full_refresh, cursor_visible, sequential_residence) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
+            case 0x01: // Header: window_id(2) + flags(1: full_refresh, cursor_visible, sequential_residence, wrapped_residence) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
                 guard !wcSawHeader, wcSLen >= 10 else { throw ProtocolDecodeError.malformed }
                 wcSawHeader = true
                 wcWindowId = try readU16(data, wcSStart)
                 wcFlags = data[wcSStart + 2]
+                guard wcFlags & 0x0C != 0x0C else { throw ProtocolDecodeError.malformed }
                 wcCursorRow = try readU16(data, wcSStart + 3)
                 wcCursorCol = try readU16(data, wcSStart + 5)
                 wcCursorShape = CursorShape(rawValue: data[wcSStart + 7]) ?? .block
@@ -2017,7 +2018,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             cursorCol: wcCursorCol,
             cursorShape: wcCursorShape,
             scrollLeft: wcScrollLeft,
-            rowStoreMode: (wcFlags & 0x04) != 0 ? .sequential : .windowed,
+            rowStoreMode: (wcFlags & 0x08) != 0 ? .sequentialWrapped : ((wcFlags & 0x04) != 0 ? .sequential : .windowed),
             rows: wcRows,
             selection: wcOverlays.selection,
             searchMatches: wcOverlays.searchMatches,
@@ -3813,7 +3814,7 @@ private func decodeWindowContentRows(data: Data, start: Int, end: Int) throws ->
 
 private func decodeWindowContentRow(data: Data, pos: inout Int, end: Int) throws -> GUIVisualRow {
     guard pos + 21 <= end else { throw ProtocolDecodeError.malformed }
-    let rowType = GUIVisualRowType(rawValue: data[pos]) ?? .normal
+    guard let rowType = GUIVisualRowType(rawValue: data[pos]) else { throw ProtocolDecodeError.malformed }
     let rowId = try readU64(data, pos + 1)
     let bufLine = try readU32(data, pos + 9)
     let contentHash = try readU32(data, pos + 13)
@@ -4316,7 +4317,7 @@ private func decodeGutterEntries(data: Data, start: Int, end: Int, strict: Bool)
 }
 
 private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -> GUIScrollPresentation {
-    guard start + 39 <= end else { throw ProtocolDecodeError.malformed }
+    guard start + 45 == end else { throw ProtocolDecodeError.malformed }
 
     return GUIScrollPresentation(
         windowId: try readU16(data, start),
@@ -4330,7 +4331,11 @@ private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -
         overscanEndLine: try readU32(data, start + 23),
         contentEpoch: try readU32(data, start + 27),
         layoutGeneration: try readU32(data, start + 31),
-        scrollSeq: try readU32(data, start + 35)
+        scrollSeq: try readU32(data, start + 35),
+        isWrapped: data[start + 2] & 0x02 != 0,
+        canPanHorizontally: data[start + 2] & 0x04 != 0,
+        horizontalPanAck: try readU32(data, start + 39),
+        horizontalPanLimit: try readU16(data, start + 43)
     )
 }
 
@@ -4351,17 +4356,17 @@ private func decodePaneGeometry(data: Data, start: Int, end: Int) throws -> GUIP
     let clipRect = try readCellRect(data, pos, end)
     pos += 8
 
-    guard pos + 20 <= end else { throw ProtocolDecodeError.malformed }
+    guard pos + 22 <= end else { throw ProtocolDecodeError.malformed }
     let viewport = GUIViewportSummary(
         top: try readU32(data, pos),
         left: try readU16(data, pos + 4),
         rows: try readU16(data, pos + 6),
         cols: try readU16(data, pos + 8),
         totalLines: try readU32(data, pos + 10),
-        visualRowOffset: try readU16(data, pos + 14),
-        totalVisualRows: try readU32(data, pos + 16)
+        visualRowOffset: try readU32(data, pos + 14),
+        totalVisualRows: try readU32(data, pos + 18)
     )
-    pos += 20
+    pos += 22
 
     guard pos + 5 <= end else { throw ProtocolDecodeError.malformed }
     let metrics = GUIGutterMetrics(lineNumberWidth: try readU16(data, pos), signColWidth: try readU16(data, pos + 2))

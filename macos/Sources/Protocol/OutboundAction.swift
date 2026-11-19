@@ -65,6 +65,8 @@ public enum OutboundAction: Equatable, Sendable {
     /// Wrapped viewport movement; positive rows scroll down.
     case agentPromptScroll(windowID: UInt16, generation: UInt64, deltaRows: Int32)
     case scrollBatch(windowID: UInt16, deltaLines: Int16, direction: UInt8)
+    /// Signed viewport movement; the BEAM echoes the positive input sequence for this pane.
+    case horizontalPan(windowID: UInt16, deltaColumns: Int16, inputSeq: UInt32)
     case paste(String)
     case log(level: UInt8, message: String)
     case selectTab(id: UInt32)
@@ -128,6 +130,7 @@ public enum OutboundAction: Equatable, Sendable {
     case chatScrolledAwayFromBottom
     case chatReturnedToBottom
     case scrollToLine(windowID: UInt16, generation: UInt64, line: UInt32)
+    case scrollToVisualRank(windowID: UInt16, presentationID: UInt64, rank: UInt32)
     case foldToggleAtLine(windowID: UInt16, generation: UInt64, bufferLine: UInt32)
     case focusWindow(windowID: UInt16, generation: UInt64)
     case configQuery

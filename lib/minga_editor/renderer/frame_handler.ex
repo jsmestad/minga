@@ -75,21 +75,15 @@ defmodule MingaEditor.Renderer.FrameHandler do
   defp do_render_sync(state, intent, seq, pushed_at, retry_count) do
     {prepared, input} = BufferChanges.prepare(state, intent)
 
-    case execute_pipeline(prepared, input, intent, seq, pushed_at) do
-      {:ok, committed, output} ->
-        finish_sync(committed, output, FrameAttempt.new(intent, seq, pushed_at))
+    case execute_pipeline(prepared.pipeline, input, seq, pushed_at) do
+      {:ok, output} ->
+        finish_sync(prepared, output, FrameAttempt.new(intent, seq, pushed_at))
 
-      {:stale, _error, retained} when retry_count < @max_stale_retries ->
-        do_render_sync(retained, intent, seq, pushed_at, retry_count + 1)
+      {:stale, _error} when retry_count < @max_stale_retries ->
+        do_render_sync(prepared, intent, seq, pushed_at, retry_count + 1)
 
-      {:stale, error, retained} ->
-        {:reply, {:error, error}, retained}
-
-      {:stale_search, error, retained} ->
-        {:reply, {:error, error}, retained}
-
-      {:error, error, retained} ->
-        {:reply, {:error, error}, retained}
+      {failure, error} when failure in [:stale, :stale_search, :error] ->
+        {:reply, {:error, error}, prepared}
     end
   end
 
@@ -110,11 +104,11 @@ defmodule MingaEditor.Renderer.FrameHandler do
   def run(%State{} = state, %FrameAttempt{} = attempt, retry_count) do
     {prepared, input} = BufferChanges.prepare(state, attempt.intent)
 
-    case execute_pipeline(prepared, input, attempt.intent, attempt.seq, attempt.pushed_at) do
-      {:ok, committed, output} -> await_or_commit(committed, output, attempt)
-      {:stale, error, retained} -> retry_stale(retained, attempt, retry_count, error)
-      {:stale_search, _error, retained} -> advance(retained)
-      {:error, error, retained} -> drop_failed(retained, error, attempt.seq)
+    case execute_pipeline(prepared.pipeline, input, attempt.seq, attempt.pushed_at) do
+      {:ok, output} -> await_or_commit(prepared, output, attempt)
+      {:stale, error} -> retry_stale(prepared, attempt, retry_count, error)
+      {:stale_search, _error} -> advance(prepared)
+      {:error, error} -> drop_failed(prepared, error, attempt.seq)
     end
   end
 
@@ -131,9 +125,14 @@ defmodule MingaEditor.Renderer.FrameHandler do
     end
   end
 
-  @doc "Commits pipeline-global renderer state after composition or acknowledgement."
+  @doc "Commits a locally completed or frontend-acknowledged frame."
   @spec commit_output(State.t(), Input.t()) :: State.t()
   def commit_output(state, output) do
+    state =
+      state
+      |> State.commit_local_scroll_geometry(output)
+      |> BufferChanges.commit(output, output.intent)
+
     %{
       state
       | font_registry: output.font_registry,
@@ -170,30 +169,31 @@ defmodule MingaEditor.Renderer.FrameHandler do
     end
   end
 
-  @spec execute_pipeline(State.t(), Input.t(), Intent.t(), non_neg_integer(), integer()) ::
-          {:ok, State.t(), Input.t()}
-          | {:stale, StaleBufferError.t(), State.t()}
-          | {:stale_search, StaleSearchError.t(), State.t()}
-          | {:error, Exception.t(), State.t()}
-  defp execute_pipeline(state, input, intent, seq, pushed_at) do
+  @spec execute_pipeline(State.pipeline(), Input.t(), non_neg_integer(), integer()) ::
+          {:ok, Input.t()}
+          | {:stale, StaleBufferError.t()}
+          | {:stale_search, StaleSearchError.t()}
+          | {:error, Exception.t()}
+  defp execute_pipeline(pipeline, input, seq, pushed_at) do
     output =
       Telemetry.span([:minga, :render, :pipeline], %{frame_seq: seq}, fn ->
-        input |> Input.with_frame_seq(seq) |> state.pipeline.()
+        input |> Input.with_frame_seq(seq) |> pipeline.()
       end)
 
-    committed = BufferChanges.commit(state, output, intent)
     emit_frame_telemetry(output, seq, pushed_at)
-    {:ok, committed, output}
+    {:ok, output}
   rescue
-    error in [StaleBufferError] -> {:stale, error, state}
-    error in [StaleSearchError] -> {:stale_search, error, state}
-    error -> {:error, error, state}
+    error in [StaleBufferError] -> {:stale, error}
+    error in [StaleSearchError] -> {:stale_search, error}
+    error -> {:error, error}
   end
 
   @spec await_or_commit(State.t(), Input.t(), FrameAttempt.t()) :: result()
   defp await_or_commit(%State{require_ack?: true} = state, output, %FrameAttempt{} = attempt) do
     lease = AckLease.start(attempt, output, state.ack_timeout_ms)
 
+    # The lease owns speculative window caches. Keep the acknowledged bases
+    # and consumed edits in state so a rejection can recompose from them.
     state = %{state | font_registry: output.font_registry}
     {:noreply, State.await_ack(state, lease)}
   end

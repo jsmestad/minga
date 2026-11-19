@@ -56,6 +56,11 @@ defmodule MingaEditor.Shell.Runtime do
   @spec state(t()) :: shell_state()
   def state(%__MODULE__{state: state}), do: state
 
+  @doc "Captures the shell-owned privacy-filtered state for rendering, never for input."
+  @spec render_snapshot(t()) :: shell_state()
+  def render_snapshot(%__MODULE__{entry: %Entry{module: module}, state: state}),
+    do: module.render_snapshot(state)
+
   @doc "Returns the active Traditional tab bar, or nil for another shell."
   @spec traditional_tab_bar(t()) :: TabBar.t() | nil
   def traditional_tab_bar(%__MODULE__{state: %TraditionalState{} = shell_state}) do

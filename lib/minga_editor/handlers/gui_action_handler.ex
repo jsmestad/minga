@@ -42,6 +42,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
   alias MingaEditor.Input.Observatory
+  alias MingaEditor.Mouse.BufferScroll
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
   alias MingaEditor.PickerUI
   alias MingaEditor.Session.State
@@ -629,6 +630,18 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
         %{state | workspace: State.set_windows(state.workspace, windows)}
     end)
+  end
+
+  defp dispatch_action(state, {:scroll_to_visual_rank, window_id, presentation_id, rank}) do
+    current = state.workspace.windows
+
+    with %Window{} = window <- Map.get(current.map, window_id),
+         {:ok, updated} <- BufferScroll.seek_resident(state, window, presentation_id, rank) do
+      windows = Windows.set_map(current, Map.put(current.map, window_id, updated))
+      %{state | workspace: State.set_windows(state.workspace, windows)}
+    else
+      _ -> state
+    end
   end
 
   defp dispatch_action(state, {:fold_toggle_at_line, window_id, generation, line}) do
@@ -1244,6 +1257,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        ),
        do: PickerUI.activate_action(state, generation, id)
 
+  defp apply_semantic_target(state, %Target{}, :dismiss, :picker_dismissal),
+    do: PickerUI.close(state)
+
   defp apply_semantic_target(state, %Target{}, :accept, {:prompt, generation, id}),
     do: MingaEditor.PromptUI.activate(state, generation, id)
 
@@ -1625,14 +1641,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     window
     |> Window.set_viewport(new_vp)
-    |> Window.mark_scroll_echo(new_vp.top)
+    |> Window.mark_scroll_echo()
     |> Window.record_scroll_event(now, cursor_pos)
   end
 
   defp scroll_to_line_commit(%Window{} = window, new_vp) do
     window
     |> Window.set_viewport(new_vp)
-    |> Window.mark_scroll_echo(new_vp.top)
+    |> Window.mark_scroll_echo()
   end
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()

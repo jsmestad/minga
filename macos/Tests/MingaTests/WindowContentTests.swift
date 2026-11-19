@@ -180,7 +180,7 @@ struct WindowContentBuilder {
     static func sampleScrollPresentationPayload(windowId: UInt16 = 7) -> Data {
         var data = Data()
         appendU16(&data, windowId)
-        data.append(0x01)
+        data.append(0x05)
         appendU32(&data, 5)
         appendU16(&data, 2)
         appendU16(&data, 1)
@@ -191,6 +191,8 @@ struct WindowContentBuilder {
         appendU32(&data, 42)
         appendU32(&data, 99)
         appendU32(&data, 3) // scroll_seq (#2661)
+        appendU32(&data, 0x12345678) // horizontal_pan_ack
+        appendU16(&data, 0x012C) // horizontal_pan_limit
         return data
     }
 
@@ -207,8 +209,8 @@ struct WindowContentBuilder {
         appendU16(&data, 10)
         appendU16(&data, 33)
         appendU32(&data, 200)
-        appendU16(&data, 0)
-        appendU32(&data, 20)
+        appendU32(&data, 70_000) // full continuation ordinal
+        appendU32(&data, 80_000)
         appendU16(&data, 2)
         appendU16(&data, 3)
         data.append(2)
@@ -639,6 +641,8 @@ struct WindowContentDecoderTests {
         #expect(geometry.textRect == GUICellRect(row: 2, col: 8, width: 33, height: 10))
         #expect(geometry.viewport.top == 5)
         #expect(geometry.viewport.totalLines == 200)
+        #expect(geometry.viewport.visualRowOffset == 70_000)
+        #expect(geometry.viewport.totalVisualRows == 80_000)
         #expect(geometry.gutterMetrics.lineNumberWidth == 2)
         #expect(geometry.gutterMetrics.signColWidth == 3)
         #expect(geometry.hitRegions.map(\.kind) == [.text, .foldControl])
@@ -765,6 +769,9 @@ struct WindowContentDecoderTests {
         #expect(presentation.contentEpoch == 42)
         #expect(presentation.layoutGeneration == 99)
         #expect(presentation.scrollSeq == 3)
+        #expect(presentation.canPanHorizontally)
+        #expect(presentation.horizontalPanAck == 0x12345678)
+        #expect(presentation.horizontalPanLimit == 0x012C)
     }
 
     @Test("Reject scroll presentation identity mismatch")
@@ -1129,6 +1136,9 @@ struct WindowContentDecoderTests {
         #expect(presentation.contentEpoch == 42)
         #expect(presentation.layoutGeneration == 99)
         #expect(presentation.scrollSeq == 3)
+        #expect(presentation.canPanHorizontally)
+        #expect(presentation.horizontalPanAck == 0x12345678)
+        #expect(presentation.horizontalPanLimit == 0x012C)
     }
 
     @Test("Rows delta rejects mismatched scroll presentation identity")
