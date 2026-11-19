@@ -505,15 +505,31 @@ public struct AgentChatView: View {
 
     @ViewBuilder
     private func usageRow(input: UInt32, output: UInt32, costMicros: UInt32) -> some View {
-        let cost = Double(costMicros) / 1_000_000.0
         HStack(spacing: Spacing.lg) {
             Spacer()
             Label("\(input)", systemImage: "arrow.up")
+                .accessibilityLabel("\(input) input tokens")
             Label("\(output)", systemImage: "arrow.down")
-            Text(String(format: "$%.4f", cost))
+                .accessibilityLabel("\(output) output tokens")
+            if costMicros > 0 {
+                let amount = reportedCost(costMicros)
+                Text(amount)
+                    .accessibilityLabel("Reported cost \(amount)")
+            }
         }
         .font(Typography.font(.caption))
         .foregroundStyle(theme.agentTextFg.opacity(0.3))
+    }
+
+    private func reportedCost(_ micros: UInt32) -> String {
+        let dollars = micros / 1_000_000
+        var fraction = micros % 1_000_000
+        var places: Int32 = 6
+        while places > 2 && fraction.isMultiple(of: 10) {
+            fraction /= 10
+            places -= 1
+        }
+        return String(format: "$%u.%0*u", dollars, places, fraction)
     }
 
     // MARK: - Follow output pill
