@@ -231,6 +231,88 @@ defmodule MingaAgent.Tool.ExecutorTest do
     end
   end
 
+  describe "argument admission" do
+    test "invalid SDK and generic arguments never construct or execute context-bound callbacks",
+         %{
+           table: table
+         } do
+      schema = %{
+        "type" => "object",
+        "properties" => %{"limit" => %{"type" => "integer", "minimum" => 1, "maximum" => 4}},
+        "required" => ["limit"],
+        "additionalProperties" => false
+      }
+
+      context =
+        Context.new(
+          project_root: "/tmp/admission-root",
+          router_context: MingaAgent.ToolRouter.context(nil, nil)
+        )
+
+      for sdk? <- [false, true] do
+        name = if sdk?, do: "bounded_sdk", else: "bounded_generic"
+        calls = :atomics.new(2, [])
+
+        metadata =
+          if sdk? do
+            tool =
+              ReqLLM.Tool.new!(
+                name: name,
+                description: "Inspect a bounded number of entries",
+                parameter_schema: schema,
+                callback: fn _args -> raise "SDK validation must not execute its callback" end
+              )
+
+            %{sdk_input: tool}
+          else
+            %{}
+          end
+
+        spec =
+          Spec.new!(
+            name: name,
+            description: "Inspect a bounded number of entries",
+            parameter_schema: schema,
+            metadata: metadata,
+            context_requirements: [:tool_context],
+            build: fn %Context{project_root: "/tmp/admission-root"} ->
+              :atomics.add(calls, 1, 1)
+
+              fn _args ->
+                :atomics.add(calls, 2, 1)
+                {:ok, :inspected}
+              end
+            end
+          )
+
+        assert :ok = Registry.register(table, spec)
+
+        for args <- [%{}, %{"limit" => "2"}, %{"limit" => 0}, %{"limit" => 5}] do
+          assert {:error, %JSV.ValidationError{}} =
+                   Executor.execute(name, args, table, :exec, tool_context: context)
+        end
+
+        for {args, reason} <- [
+              {%{"limit" => 2, limit: 5}, {:ambiguous_key, "limit"}},
+              {%{1 => 2}, :non_json_key},
+              {%{"limit" => self()}, :non_json_value}
+            ] do
+          assert {:error, {:invalid_tool_arguments, ^reason}} =
+                   Executor.execute(name, args, table, :exec, tool_context: context)
+        end
+
+        assert :atomics.get(calls, 1) == 0
+        assert :atomics.get(calls, 2) == 0
+
+        assert {:ok, :inspected} =
+                 Executor.execute(name, %{"limit" => 2}, table, :exec, tool_context: context)
+
+        assert :atomics.get(calls, 1) == 1
+        assert :atomics.get(calls, 2) == 1
+      end
+    end
+  end
+
   describe "plan mode" do
     test "refuses destructive tools before the callback runs", %{table: table} do
       parent = self()

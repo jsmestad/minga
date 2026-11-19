@@ -8,6 +8,7 @@ Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool th
 2. **Do not reintroduce context artifact writing without a reader.** The old writer saved `.minga/context/session-summary-*` files that no code loaded. Add an explicit picker or loader before adding any new writer.
 3. **Batch edits into a single call** rather than making N separate calls. One call means one undo entry and one version bump.
 4. **Test the tool function** in its test under `test/minga_agent/tools/`. Assert observable content, isolation, and error behavior rather than mock forwarding.
+5. **Declare the complete argument schema in `MingaAgent.Tool.Spec.parameter_schema`.** Canonical execution checks required fields, types, and constraints before constructing a context-bound callback, including tools adapted from ReqLLM. Schemas compile when declared; unresolved external references fail instead of fetching remote schemas. Valid SDK normalization and defaults remain available. Local atom-keyed arguments use a JSON validation view without changing generic callback values; ambiguous keys and non-JSON terms return argument errors.
 
 For example, a change to the edit tool uses:
 
