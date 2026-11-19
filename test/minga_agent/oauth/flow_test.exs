@@ -171,9 +171,10 @@ defmodule MingaAgent.OAuth.FlowTest do
     # The launcher can exit before it processes the monitor signal from this test process.
     assert_receive {:DOWN, ^monitor, :process, ^helper, reason}
     assert reason in [:killed, :noproc]
-    assert {:error, :econnrefused} = :gen_tcp.connect({127, 0, 0, 1}, port, [], 100)
+    refute Process.whereis(:minga_oauth_flow)
 
     replacement = make_ref()
+    # A new flow must bind the same callback port, not silently fall back to the other port.
     second = Task.async(fn -> Flow.run(operation_ref: replacement, launch_fun: launch) end)
     assert_receive {:launching, _helper, ^port}, 1_000
     send(second.pid, {:connection_cancelled, replacement})
