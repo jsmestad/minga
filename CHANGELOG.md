@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
 - Agent workspaces have a **Tasks** inspector. The checklist, blockers, and retained results survive restart and follow the selected conversation branch.
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
+- `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 
 ### Changed
 
