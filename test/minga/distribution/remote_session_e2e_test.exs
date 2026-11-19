@@ -26,6 +26,13 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionMetadata
+  alias MingaEditor.Agent.SlashCommand
+  alias MingaEditor.Remote.SessionClient
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
 
   @moduletag :distributed
 
@@ -56,7 +63,9 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
     :ok =
       :erpc.call(peer.node, Application, :put_all_env, [[minga: Application.get_all_env(:minga)]])
 
-    :erpc.call(peer.node, System, :put_env, [[{"XDG_CONFIG_HOME", config_home}]])
+    :erpc.call(peer.node, System, :put_env, [
+      [{"XDG_CONFIG_HOME", config_home}, {"XDG_DATA_HOME", Path.join(config_home, "data")}]
+    ])
 
     # The peer never ran test_helper.exs, so seed the ETS stub tables the boot
     # path touches and silence noisy background work.
@@ -166,7 +175,8 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
         end
 
         receive do
-          {:agent_event, ^remote_pid, event} -> send(test_pid, {:viewer_event, event})
+          {:agent_event, ^remote_pid, :messages_changed} ->
+            send(test_pid, {:viewer_event, :messages_changed})
         end
       end)
 
@@ -212,5 +222,35 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
              Session.messages(remote_pid),
              &match?({:system, "message after reconnect", _}, &1)
            )
+  end
+
+  test "remote OAuth callback failure does not expose the pasted description", %{server: server} do
+    {:ok, %{session_id: id, token: token, pid: session}} =
+      SessionClient.start_session(server, provider: @stub)
+
+    {:ok, %{role: :driver}} = SessionClient.attach_driver(server, id, token, 0, self())
+    {:ok, _url, ref} = SessionClient.begin_oauth(session)
+
+    tab = Tab.new_agent(1, "Agent")
+    {tab_bar, workspace} = tab |> TabBar.new() |> TabBar.add_workspace("Agent", session)
+    tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace.id)
+    shell = TraditionalState.install_tab_bar(%TraditionalState{}, tab_bar)
+
+    state = %EditorState{
+      workspace: %MingaEditor.Session.State{},
+      shell_runtime: Runtime.new(Runtime.default_entry(), shell)
+    }
+
+    callback =
+      "http://localhost:1455/auth/callback?error=access_denied&error_description=callback-sentinel"
+
+    assert {:ok, _state} = SlashCommand.execute(state, "/login --complete #{ref} #{callback}")
+    assert_receive {:agent_event, ^session, :messages_changed}, 2_000
+
+    failures = for {:system, text, :error} <- Session.messages(session), do: text
+
+    assert "Login failed. Start a new login and paste the callback URL from that attempt." in failures
+
+    refute Enum.any?(failures, &String.contains?(&1, "callback-sentinel"))
   end
 end

@@ -344,6 +344,49 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
     end
 
+    test "a rejected provider argument does not leak into history or the transcript" do
+      {:ok, session} = StubServer.start_link(notify: self())
+
+      state =
+        base_state(session: session) |> AgentCommands.input_paste("/auth\trevoke secret-value")
+
+      new_state = AgentCommands.submit_prompt(state)
+
+      assert new_state.workspace.agent_ui.panel.prompt_history == []
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
+      assert_receive {:stub_system_message, message, _level}
+      assert message =~ "Choose a supported provider to revoke:"
+      refute message =~ "secret-value"
+    end
+
+    test "indented credential commands are cleared without entering history or reaching the session" do
+      session = start_supervised!({StubServer, notify: self()})
+      state = base_state(session: session)
+
+      for {submit, status, text} <- [
+            {&AgentCommands.submit_prompt/1, :idle, "  /auth openai credential-sentinel"},
+            {&AgentCommands.scope_queue_follow_up/1, :thinking,
+             "  /LOGIN --complete ref callback-sentinel"}
+          ] do
+        agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+        result =
+          state
+          |> Workflow.install_agent_state(AgentState.set_status(agent, status))
+          |> AgentCommands.input_paste(text)
+          |> submit.()
+
+        assert result.workspace.agent_ui.panel.prompt_history == []
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(result.workspace.agent_ui.panel) == ""
+
+        assert result.shell_runtime.state.notice.message ==
+                 "Credential commands must start at the beginning of the prompt."
+
+        :sys.get_state(session)
+        refute_received {:stub_system_message, _, _}
+      end
+    end
+
     test "unknown slash command preserves draft and reports the error in chat" do
       {:ok, session} = StubServer.start_link(notify: self())
 
