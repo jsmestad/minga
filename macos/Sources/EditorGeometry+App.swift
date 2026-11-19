@@ -41,8 +41,7 @@ extension WindowChrome {
             isFullScreen: appState.isFullScreen,
             trafficLightMidY: appState.trafficLightMidY,
             title: appState.windowTitle,
-            backgroundIsDark: appState.windowBgIsDark,
-            hasReceivedFirstFrame: appState.hasReceivedFirstFrame
+            backgroundIsDark: appState.windowBgIsDark
         )
     }
 }
