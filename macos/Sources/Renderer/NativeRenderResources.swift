@@ -335,9 +335,22 @@ struct NativeRenderFactories {
                 return library
             }
             let executableURL = Bundle.main.executableURL!
-            return try? device.makeLibrary(
-                URL: executableURL.deletingLastPathComponent().appendingPathComponent("default.metallib")
-            )
+            let executableDirectory = executableURL.deletingLastPathComponent()
+            if let library = try? device.makeLibrary(URL: executableDirectory.appendingPathComponent("default.metallib")) {
+                return library
+            }
+
+            // Foundation locates Bundle.main from the launch path, which can be a symlink outside the app bundle.
+            let resolvedExecutable = executableURL.resolvingSymlinksInPath()
+            guard resolvedExecutable != executableURL else { return nil }
+            let resolvedDirectory = resolvedExecutable.deletingLastPathComponent()
+            let contents = resolvedDirectory.deletingLastPathComponent()
+            if resolvedDirectory.lastPathComponent == "MacOS", contents.lastPathComponent == "Contents",
+               let bundle = Bundle(url: contents.deletingLastPathComponent()),
+               let library = try? device.makeDefaultLibrary(bundle: bundle) {
+                return library
+            }
+            return try? device.makeLibrary(URL: resolvedDirectory.appendingPathComponent("default.metallib"))
         },
         makeTexture: { device, descriptor in device.makeTexture(descriptor: descriptor) },
         makeBuffer: { device, length, options in device.makeBuffer(length: length, options: options) },
