@@ -69,7 +69,7 @@ func TestAgentHelpRendersWhileChatHiddenOnlyWithinCommittedContainment(t *testin
 		t.Fatalf("independent Help requires Chat visibility: %q", view)
 	}
 	layer := model.overlayLayer()
-	if layer == nil || layer.GetX() != 4 || layer.GetY() != 3 || layer.Width() != 30 || layer.Height() != 7 {
+	if layer == nil || layer.GetX() != 4 || layer.GetY() != 4 || layer.Width() != 30 || layer.Height() != 7 {
 		t.Fatalf("Help escaped the authored content rect: %+v", layer)
 	}
 	if layers := model.floatingOverlayLayers(); len(layers) != 1 {
@@ -166,7 +166,7 @@ func TestAgentHelpCloseStaysReachableAtNarrowWidthsAndAfterScrolling(t *testing.
 			model.scrollAgentHelp(1000)
 			_ = model.View()
 			close := waitForZone(t, model, zoneIDAgentHelpClose)
-			if *close != first || close.StartY != 3 || close.EndY != 3 || close.StartX < 4 || close.EndX >= 4+int(width) {
+			if *close != first || close.StartY != 4 || close.EndY != 4 || close.StartX < 4 || close.EndX >= 4+int(width) {
 				t.Fatalf("Close moved/clipped at width %d: %+v -> %+v", width, first, close)
 			}
 			click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: close.StartX, Y: close.StartY})
@@ -176,7 +176,7 @@ func TestAgentHelpCloseStaysReachableAtNarrowWidthsAndAfterScrolling(t *testing.
 			}
 			// Every non-control cell in containment is modal, not an underlying
 			// timeline Review, composer, or editor text action.
-			click.X, click.Y = 4, 4
+			click.X, click.Y = 4, close.EndY+1
 			if packet, handled := model.semanticMousePacket(click); !handled || packet != nil {
 				t.Fatalf("Help body activated underlying content: %x handled=%v", packet, handled)
 			}

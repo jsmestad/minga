@@ -29,4 +29,4 @@ Do **not** reintroduce spacing arithmetic on the BEAM, an `effective_rows`-style
 
 ## Consequences
 
-The wire `rows` field means "content rows available at current presentation metrics." The TUI reports its cell rows unchanged (spacing is 1.0 by construction). Runtime spacing changes re-fit on the frontend and arrive as an ordinary resize. Net code deletion on the BEAM; the only remaining floor lives next to the pixels it measures.
+The wire `rows` field means "content rows available at current presentation metrics." The TUI measures in cells (spacing is 1.0) and reports rows below its local header. The grid still includes the status, minibuffer, and timeline reservations authored by the BEAM for terminal layout. A runtime change to the fitted grid, whether from spacing or the TUI header, arrives as an ordinary resize.

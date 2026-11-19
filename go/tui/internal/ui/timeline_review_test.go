@@ -24,7 +24,7 @@ func timelineReviewModel(files []protocol.TimelineFile) Model {
 	}
 	model.surfacePlacements = []generated.SurfacePlacement{{
 		SurfaceID: surfaceIDEditTimeline,
-		Rect:      generated.Rect{Row: 16, Col: 4, Width: 60, Height: 6},
+		Rect:      generated.Rect{Row: 15, Col: 4, Width: 60, Height: 6},
 		Z:         170, HitKind: 8,
 	}}
 	model.layout = model.computeLayout()
@@ -279,7 +279,7 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 				if state.mini {
 					footerRows++
 				}
-				rect := generated.Rect{Row: height - footerRows - 3, Width: width, Height: 3}
+				rect := generated.Rect{Row: uint16(model.layout.grid.Height) - footerRows - 3, Width: width, Height: 3}
 				mini := timelineMinibufferCommand(t, state.mini)
 				files := make([]protocol.TimelineFile, 100)
 				for index := range files {
@@ -302,8 +302,8 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 							protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
 								ID: 7, Rows: []protocol.WindowRow{{ID: 700, Text: "Review body retained"}},
 								GeometrySet: true, Geometry: protocol.PaneGeometry{
-									ContentRect: protocol.Rect{Row: 1, Width: width, Height: rect.Row - 1},
-									TextRect:    protocol.Rect{Row: 1, Width: width, Height: rect.Row - 1},
+									ContentRect: protocol.Rect{Width: width, Height: rect.Row},
+									TextRect:    protocol.Rect{Width: width, Height: rect.Row},
 								},
 							}},
 							protocol.Command{Kind: protocol.CommandTextPresentation, TextPresentation: protocol.TextPresentation{WindowID: 7, PresentationID: 700}},
@@ -371,7 +371,7 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 						t.Fatalf("file count moved chrome: %+v -> %+v", baseline, model.layout)
 					}
 					band := model.layout.timeline
-					if band != (uiRect{X: 0, Y: int(rect.Row), Width: int(width), Height: 3}) ||
+					if band != (uiRect{X: 0, Y: int(height - footerRows - 3), Width: int(width), Height: 3}) ||
 						model.layout.body.Y+model.layout.body.Height != band.Y ||
 						band.Y+band.Height != model.layout.footer.Y ||
 						model.layout.footer.Y+model.layout.footer.Height != int(height) || model.layout.footer.Height != int(footerRows) {
@@ -453,9 +453,10 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 					commit(files[:count])
 					assertFrame(step == 0, count)
 					if count == 0 {
-						click(0, int(rect.Row)+2, nil)
+						y := model.layout.timeline.Y + 2
+						click(0, y, nil)
 						drainOutboundPackets(out)
-						updated, _ := model.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 0, Y: int(rect.Row) + 2}))
+						updated, _ := model.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 0, Y: y}))
 						model = updated.(Model)
 						if packets := drainOutboundPackets(out); len(packets) != 0 {
 							t.Fatalf("empty chrome wheel leaked into the prompt/editor: %x", packets)
@@ -517,7 +518,7 @@ func TestTimelineChromeRespectsHigherOverlayPointerContainment(t *testing.T) {
 	}}
 	model.surfacePlacements = append(model.surfacePlacements, generated.SurfacePlacement{
 		SurfaceID: surfaceIDFloatPopup,
-		Rect:      generated.Rect{Row: uint16(button.StartY), Col: 4, Width: 60, Height: 2},
+		Rect:      generated.Rect{Row: uint16(button.StartY - model.layout.grid.Y), Col: 4, Width: 60, Height: 2},
 		Z:         270, HitKind: 8,
 	})
 	_ = model.View()
