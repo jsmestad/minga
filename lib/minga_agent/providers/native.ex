@@ -3871,19 +3871,19 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp auth_hint_for_provider("openai") do
-    "Run /auth openai <key>, sign in with /login for Codex models, or pick another configured model with /model."
+    "Run /auth openai to enter a key, sign in with /login for Codex models, or pick another configured model with /model."
   end
 
   defp auth_hint_for_provider("anthropic") do
-    "Run /auth anthropic <key> or pick another configured model with /model."
+    "Run /auth anthropic to enter a key, or pick another configured model with /model."
   end
 
   defp auth_hint_for_provider("google") do
-    "Run /auth google <key> or pick another configured model with /model."
+    "Run /auth google to enter a key, or pick another configured model with /model."
   end
 
   defp auth_hint_for_provider(_provider) do
-    "Run /auth to add an API key, sign in with /login, or pick another configured model with /model."
+    "Choose a provider with /model, check credential status with /auth, or sign in with /login."
   end
 
   @spec notify_lifecycle(pid(), Event.Error.t()) :: Event.Error.t()

@@ -8,11 +8,15 @@ defmodule MingaEditor.Agent.UIState do
   each under 16 fields while providing a single access point on
   `EditorState.agent_ui`.
 
+  `connection` caches the Session's authoritative connection projection; nil means it has not been attached or hydrated, not that credentials are absent.
+
   Most callers use the functions on this module. Input handlers and
   renderers read the focused UI value from the editor workspace.
   """
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaEditor.Agent.ConnectionPrompt
   alias MingaEditor.Agent.UIState.Compaction
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
@@ -29,11 +33,15 @@ defmodule MingaEditor.Agent.UIState do
   @typedoc "Agent UI state wrapping Panel and View sub-structs."
   @type t :: %__MODULE__{
           panel: Panel.t(),
-          view: View.t()
+          view: View.t(),
+          connection: ConnectionSnapshot.t() | nil,
+          connection_prompt: ConnectionPrompt.t() | nil
         }
 
   defstruct panel: %Panel{},
-            view: %View{}
+            view: %View{},
+            connection: nil,
+            connection_prompt: nil
 
   # Placeholder prefix used in input lines to represent a collapsed paste block.
   @paste_placeholder_prefix "\0PASTE:"
@@ -41,6 +49,57 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Creates a new UIState with credential-aware panel defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{panel: Panel.new()}
+
+  @doc "Caches canonical connection facts without changing draft, focus, history or scroll."
+  @spec project_connection(t(), ConnectionSnapshot.t()) :: t()
+  def project_connection(%__MODULE__{panel: panel} = state, %ConnectionSnapshot{} = connection) do
+    panel =
+      panel
+      |> Panel.set_credential_readiness(connection.credential_readiness)
+      |> Panel.project_model_selection(connection.model_selection)
+
+    prompt = current_connection_prompt(state.connection_prompt, connection)
+    %{state | connection: connection, panel: panel, connection_prompt: prompt}
+  end
+
+  @doc "Remembers the exact outstanding input operation without retaining the input."
+  @spec offer_connection_prompt(t(), ConnectionPrompt.t()) :: t()
+  def offer_connection_prompt(%__MODULE__{} = state, %ConnectionPrompt{} = prompt) do
+    if ConnectionPrompt.current?(prompt, state.connection),
+      do: %{state | connection_prompt: prompt},
+      else: state
+  end
+
+  @doc "Removes only the specified outstanding input request."
+  @spec retire_connection_prompt(t(), ConnectionPrompt.t()) :: t()
+  def retire_connection_prompt(%__MODULE__{connection_prompt: prompt} = state, prompt),
+    do: %{state | connection_prompt: nil}
+
+  def retire_connection_prompt(%__MODULE__{} = state, _prompt), do: state
+
+  @spec current_connection_prompt(ConnectionPrompt.t() | nil, ConnectionSnapshot.t()) ::
+          ConnectionPrompt.t() | nil
+  defp current_connection_prompt(nil, _connection), do: nil
+
+  defp current_connection_prompt(prompt, connection) do
+    if ConnectionPrompt.current?(prompt, connection), do: prompt, else: nil
+  end
+
+  @doc "Projects credential facts only until an authoritative connection snapshot is attached."
+  @spec project_credential_readiness(t(), MingaAgent.Credentials.readiness()) :: t()
+  def project_credential_readiness(
+        %__MODULE__{connection: %ConnectionSnapshot{}} = state,
+        _readiness
+      ),
+      do: state
+
+  def project_credential_readiness(%__MODULE__{connection: nil, panel: panel} = state, readiness),
+    do: %{state | panel: Panel.set_credential_readiness(panel, readiness)}
+
+  @doc "Drops a retired Session's cached connection without discarding its draft."
+  @spec clear_connection(t()) :: t()
+  def clear_connection(%__MODULE__{} = state),
+    do: %{state | connection: nil, connection_prompt: nil}
 
   @doc "Attaches the process-backed prompt buffer to this UI value."
   @spec attach_prompt_buffer(t(), pid()) :: t()
@@ -268,8 +327,11 @@ defmodule MingaEditor.Agent.UIState do
 
   # ── Model/provider config ──────────────────────────────────────────────────
 
-  @doc "Projects a resolved model policy without an activation notice."
+  @doc "Projects model facts only until an authoritative connection snapshot is attached."
   @spec project_model_selection(t(), MingaAgent.ModelSelection.t() | nil) :: t()
+  def project_model_selection(%__MODULE__{connection: %ConnectionSnapshot{}} = state, _selection),
+    do: state
+
   def project_model_selection(%__MODULE__{} = state, nil), do: state
 
   def project_model_selection(

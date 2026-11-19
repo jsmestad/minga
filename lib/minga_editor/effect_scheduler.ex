@@ -153,6 +153,10 @@ defmodule MingaEditor.EffectScheduler do
         }
   def stats(server), do: GenServer.call(server, :stats)
 
+  @doc "Returns the supervisor owned by this scheduler generation."
+  @spec task_supervisor(server()) :: GenServer.server()
+  def task_supervisor(server), do: GenServer.call(server, :task_supervisor)
+
   @impl true
   @spec init(keyword()) :: {:ok, State.t()}
   def init(opts) do
@@ -204,6 +208,8 @@ defmodule MingaEditor.EffectScheduler do
     do: {:reply, Engine.active?(state, handler), state}
 
   def handle_call(:stats, _from, state), do: {:reply, Engine.stats(state), state}
+
+  def handle_call(:task_supervisor, _from, state), do: {:reply, state.task_supervisor, state}
 
   @impl true
   def handle_cast({:finalize, outcome}, state), do: {:noreply, Engine.finalize(state, outcome)}

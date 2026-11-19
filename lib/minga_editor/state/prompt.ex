@@ -12,20 +12,46 @@ defmodule MingaEditor.State.Prompt do
           text: String.t(),
           cursor: non_neg_integer(),
           label: String.t(),
-          context: map() | nil
+          context: map() | nil,
+          sensitive: boolean()
         }
 
+  @derive {Inspect, except: [:text, :context]}
   defstruct handler: nil,
             generation: 0,
             text: "",
             cursor: 0,
             label: "",
-            context: nil
+            context: nil,
+            sensitive: false
 
   @doc "Returns true if a prompt is currently open."
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{handler: nil}), do: false
   def open?(%__MODULE__{}), do: true
+
+  @doc "Returns whether input must be excluded from presentation and key history."
+  @spec sensitive?(t()) :: boolean()
+  def sensitive?(%__MODULE__{sensitive: sensitive}), do: sensitive
+
+  @doc "Returns display text and its grapheme cursor without exposing sensitive input."
+  @spec render_data(t()) :: {String.t(), String.t(), non_neg_integer()}
+  def render_data(%__MODULE__{sensitive: true, label: label, text: text, cursor: cursor}) do
+    {label, String.duplicate("•", String.length(text)), cursor}
+  end
+
+  def render_data(%__MODULE__{sensitive: false, label: label, text: text, cursor: cursor}) do
+    {label, text, cursor}
+  end
+
+  @doc "Returns already-masked render text without the live input callback context."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{sensitive: true} = prompt) do
+    {_label, masked, _cursor} = render_data(prompt)
+    %{prompt | text: masked, context: nil, sensitive: false}
+  end
+
+  def render_snapshot(%__MODULE__{} = prompt), do: prompt
 
   @doc "Resolves an action only for the exact opening that offered it."
   @spec resolve_activation(t(), non_neg_integer(), binary()) ::

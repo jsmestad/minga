@@ -174,10 +174,11 @@ defmodule MingaEditor.Input.Router do
   defp route_key_normal(state, codepoint, modifiers) do
     old_mode = Editing.mode(state)
     was_inserting = Editing.inserting?(state)
+    record? = not MingaEditor.PromptUI.sensitive_input?(state)
 
     state
     |> dispatch_split(codepoint, modifiers)
-    |> record_keystroke(codepoint, modifiers, old_mode)
+    |> record_keystroke(codepoint, modifiers, old_mode, record?)
     |> maybe_handle_completion(was_inserting, codepoint, modifiers)
   end
 
@@ -594,9 +595,11 @@ defmodule MingaEditor.Input.Router do
     end
   end
 
-  @spec record_keystroke(EditorState.t(), non_neg_integer(), non_neg_integer(), atom()) ::
+  @spec record_keystroke(EditorState.t(), non_neg_integer(), non_neg_integer(), atom(), boolean()) ::
           EditorState.t()
-  defp record_keystroke(state, codepoint, modifiers, mode_before) do
+  defp record_keystroke(state, _codepoint, _modifiers, _mode_before, false), do: state
+
+  defp record_keystroke(state, codepoint, modifiers, mode_before, true) do
     entry = %KeystrokeHistory.Entry{
       key: {codepoint, modifiers},
       mode_before: mode_before,

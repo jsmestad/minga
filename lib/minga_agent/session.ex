@@ -24,6 +24,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
+  alias MingaAgent.Credentials.Secret
   alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.EventLog.Failure
@@ -47,6 +48,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
+  alias MingaAgent.Session.Connection
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Prefix
@@ -114,6 +118,7 @@ defmodule MingaAgent.Session do
           credentials_configured_fn: credentials_configured_fn() | nil,
           credentials_snapshot_fn: credentials_snapshot_fn(),
           credential_readiness: Credentials.readiness(),
+          connection: Connection.t(),
           turn_execution: TurnExecution.t(),
           transcript: Transcript.t(),
           continuation: Continuation.t(),
@@ -308,13 +313,101 @@ defmodule MingaAgent.Session do
           active_tool_name: String.t() | nil,
           credentials_configured: boolean(),
           credential_readiness: Credentials.readiness(),
-          model_selection: ModelSelection.t() | nil
+          model_selection: ModelSelection.t() | nil,
+          connection: ConnectionSnapshot.t()
         }
 
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
   @spec editor_snapshot(GenServer.server()) :: editor_snapshot()
   def editor_snapshot(session) do
     GenServer.call(session, :editor_snapshot)
+  end
+
+  @doc """
+  Admits explicitly requested setup against an exact live target.
+  A subscriber can receive an optional secret-free input request after its canonical change event.
+  """
+  @spec begin_connection(
+          GenServer.server(),
+          ConnectionTarget.t(),
+          Connection.method(),
+          pid(),
+          {pid(), term()} | nil
+        ) ::
+          {:ok, reference()} | {:error, atom()}
+  def begin_connection(session, target, method, owner_pid, notify \\ nil)
+      when is_pid(owner_pid) do
+    GenServer.call(session, {:begin_connection, target, method, owner_pid, notify})
+  end
+
+  @doc "Binds the exact acquisition worker for operation-specific cancellation."
+  @spec register_connection_worker(GenServer.server(), ConnectionTarget.t(), reference(), pid()) ::
+          :ok | {:error, atom()}
+  def register_connection_worker(session, target, operation_ref, worker_pid)
+      when is_pid(worker_pid) do
+    GenServer.call(session, {:register_connection_worker, target, operation_ref, worker_pid})
+  end
+
+  @doc "Binds an acquisition worker from the original owner without waiting on Session."
+  @spec request_connection_worker(GenServer.server(), ConnectionTarget.t(), reference(), pid()) ::
+          :ok
+  def request_connection_worker(session, target, operation_ref, worker_pid)
+      when is_pid(worker_pid) do
+    GenServer.cast(
+      session,
+      {:request_connection_worker, target, operation_ref, worker_pid, self()}
+    )
+  end
+
+  @doc "Cancels only the captured setup operation; committed storage is never rolled back."
+  @spec cancel_connection(GenServer.server(), ConnectionTarget.t(), reference()) ::
+          :ok | {:error, atom()}
+  def cancel_connection(session, target, operation_ref) do
+    GenServer.call(session, {:cancel_connection, target, operation_ref})
+  end
+
+  @doc """
+  Requests exact-operation cancellation without waiting for Session.
+
+  This acknowledges delivery only, not cancellation or rollback of a commit
+  that already won Session's serialized persistence boundary.
+  """
+  @spec request_connection_cancel(GenServer.server(), ConnectionTarget.t(), reference()) :: :ok
+  def request_connection_cancel(session, target, operation_ref)
+      when is_reference(operation_ref) do
+    GenServer.cast(session, {:request_connection_cancel, target, operation_ref, self()})
+  end
+
+  @doc "Serializes exact-target API-key installation against cancellation and supersession."
+  @spec commit_api_key(
+          GenServer.server(),
+          ConnectionTarget.t(),
+          reference(),
+          String.t(),
+          Secret.t()
+        ) ::
+          {:ok, ConnectionSnapshot.t()} | {:error, atom()}
+  def commit_api_key(session, target, operation_ref, provider, secret) do
+    GenServer.call(session, {:commit_api_key, target, operation_ref, provider, secret})
+  end
+
+  @doc "Commits acquired OAuth credentials for the original target and authorized worker."
+  @spec commit_oauth(GenServer.server(), ConnectionTarget.t(), reference(), Secret.t()) ::
+          {:ok, ConnectionSnapshot.t()} | {:error, atom()}
+  def commit_oauth(session, target, operation_ref, secret) do
+    GenServer.call(session, {:commit_oauth, target, operation_ref, secret})
+  end
+
+  @doc "Reports failure only for the current OAuth operation and its authorized actor."
+  @spec report_oauth_failure(GenServer.server(), ConnectionTarget.t(), reference(), atom()) :: :ok
+  def report_oauth_failure(session, target, ref, reason) do
+    GenServer.cast(session, {:report_oauth_failure, target, ref, reason, self()})
+  end
+
+  @doc "Retries the captured connection without submitting or replaying any draft."
+  @spec retry_connection(GenServer.server(), ConnectionTarget.t()) :: :ok | {:error, term()}
+  def retry_connection(session, target) do
+    GenServer.call(session, {:retry_connection, target})
   end
 
   @doc """
@@ -541,6 +634,18 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:set_model, model}, timeout)
   end
 
+  @doc "Changes a model only while its captured conversation and selection epoch remain current."
+  @spec set_model_for_target(
+          GenServer.server(),
+          ConnectionTarget.t(),
+          ModelResolver.intent(),
+          timeout()
+        ) ::
+          :ok | {:error, term()}
+  def set_model_for_target(session, target, intent, timeout \\ 5_000) do
+    GenServer.call(session, {:set_model_for_target, target, intent}, timeout)
+  end
+
   @doc "Toggles the collapsed state of a tool or thinking message by stable transcript ID."
   @spec toggle_tool_collapse(GenServer.server(), non_neg_integer()) :: :ok
   def toggle_tool_collapse(session, message_id) do
@@ -750,7 +855,10 @@ defmodule MingaAgent.Session do
       )
 
     credentials_configured_fn = Keyword.get(opts, :credentials_configured_fn)
-    credentials_snapshot_fn = Keyword.get(opts, :credentials_snapshot_fn, &Credentials.snapshot/0)
+    credential_opts = Keyword.get(provider_opts, :credential_opts, [])
+
+    credentials_snapshot_fn =
+      Keyword.get(opts, :credentials_snapshot_fn, fn -> Credentials.snapshot(credential_opts) end)
 
     initial_thinking_level =
       Keyword.get(opts, :thinking_level, Keyword.get(provider_opts, :thinking_level))
@@ -762,7 +870,7 @@ defmodule MingaAgent.Session do
     resolved_provider_resolution = resolve_provider(opts)
     credential_snapshot = credentials_snapshot_fn.()
 
-    {model_selection, selection_error} =
+    {model_selection, selection_error, resolution_problem} =
       initial_model_selection(
         resolved_provider_resolution,
         raw_model_name,
@@ -834,6 +942,7 @@ defmodule MingaAgent.Session do
       credentials_configured_fn: credentials_configured_fn,
       credentials_snapshot_fn: credentials_snapshot_fn,
       credential_readiness: credential_readiness,
+      connection: Connection.new(resolution_problem),
       turn_execution: TurnExecution.new(),
       transcript:
         Transcript.new(
@@ -1109,10 +1218,35 @@ defmodule MingaAgent.Session do
       active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
       credentials_configured: state.credentials_configured,
       credential_readiness: state.credential_readiness,
-      model_selection: state.model_selection
+      model_selection: state.model_selection,
+      connection: connection_snapshot(state)
     }
 
     {:reply, snapshot, state}
+  end
+
+  def handle_call({:begin_connection, target, method, owner, notify}, _from, state) do
+    begin_connection_workflow(state, target, method, owner, notify)
+  end
+
+  def handle_call({:register_connection_worker, target, ref, worker}, {caller, _}, state) do
+    register_connection_worker_workflow(state, target, ref, worker, caller)
+  end
+
+  def handle_call({:cancel_connection, target, ref}, {caller, _}, state) do
+    cancel_connection_workflow(state, target, ref, caller)
+  end
+
+  def handle_call({:commit_api_key, target, ref, provider, secret}, {caller, _}, state) do
+    commit_api_key_workflow(state, target, ref, provider, secret, caller)
+  end
+
+  def handle_call({:commit_oauth, target, ref, secret}, {caller, _}, state) do
+    commit_oauth_workflow(state, target, ref, secret, caller)
+  end
+
+  def handle_call({:retry_connection, target}, _from, state) do
+    retry_connection_workflow(state, target)
   end
 
   def handle_call(:artifact_store, _from, state) do
@@ -1162,25 +1296,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:restart_provider, _from, state) do
-    {:reset, lifecycle, retry_timer} = ProviderLifecycle.reset_retry(state.provider)
-    cancel_provider_retry_timer(retry_timer)
-    state = %{state | provider: lifecycle}
-
-    {state, result} = refresh_credentials_state_result(state)
-
-    case {ProviderLifecycle.pid(state.provider), result} do
-      {provider, :ok} when is_pid(provider) ->
-        {:reply, :ok, state}
-
-      {_provider, :ok} when state.credentials_configured == false ->
-        {:reply, {:error, :credentials_not_configured}, state}
-
-      {_provider, :ok} ->
-        {:reply, {:error, :provider_not_ready}, state}
-
-      {_provider, {:error, reason}} ->
-        {:reply, {:error, reason}, state}
-    end
+    restart_provider_workflow(state)
   end
 
   def handle_call({:revoke_tool_trust, :all}, _from, state) do
@@ -1465,37 +1581,12 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
-  def handle_call(
-        {:set_model, intent},
-        _from,
-        %{provider: %{module: MingaAgent.Providers.Native}} = state
-      ) do
-    opts = model_resolution_opts(state)
-
-    case ModelResolver.resolve(intent, opts) do
-      {:ok, selection} ->
-        case apply_resolved_model_selection(
-               state,
-               selection,
-               Keyword.fetch!(opts, :credential_snapshot)
-             ) do
-          {:ok, state} -> {:reply, :ok, state}
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
-
-      {:error, reason} ->
-        {:reply, {:error, ModelResolver.message(reason)}, state}
-    end
+  def handle_call({:set_model, intent}, _from, state) do
+    set_model_workflow(state, intent)
   end
 
-  def handle_call({:set_model, model}, _from, state) when is_binary(model) do
-    {state, refresh_result} =
-      state
-      |> update_model_configuration(model)
-      |> remember_pending_model_change(model)
-      |> refresh_credentials_state_result()
-
-    {:reply, refresh_result, state}
+  def handle_call({:set_model_for_target, target, intent}, _from, state) do
+    set_model_for_target_workflow(state, target, intent)
   end
 
   def handle_call({:toggle_tool_collapse, message_id}, _from, state) do
@@ -2222,7 +2313,7 @@ defmodule MingaAgent.Session do
 
   @spec commit_seed_messages(state(), state(), Continuation.t()) :: {:reply, term(), state()}
   defp commit_seed_messages(state, candidate, continuation) do
-    case commit_session_transition(state, %{candidate | continuation: continuation}) do
+    case commit_conversation_transition(state, %{candidate | continuation: continuation}) do
       {:ok, committed} ->
         {:reply, :ok, committed}
 
@@ -2296,7 +2387,7 @@ defmodule MingaAgent.Session do
           {:reply, term(), state()}
   defp commit_branch_at(state, candidate, turn_index, branch_name) do
     with :ok <- validate_branch_model(candidate),
-         {:ok, committed} <- commit_session_transition(state, candidate) do
+         {:ok, committed} <- commit_conversation_transition(state, candidate) do
       {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
        committed}
     else
@@ -2337,7 +2428,7 @@ defmodule MingaAgent.Session do
   @spec commit_branch_switch(state(), state()) :: {:reply, term(), state()}
   defp commit_branch_switch(state, candidate) do
     with :ok <- validate_branch_model(candidate),
-         {:ok, committed} <- commit_session_transition(state, candidate) do
+         {:ok, committed} <- commit_conversation_transition(state, candidate) do
       {:reply, :ok, committed}
     else
       {:error, reason, failed} ->
@@ -2385,6 +2476,7 @@ defmodule MingaAgent.Session do
     state = cancel_save_timer(state)
     execution = TurnExecution.reset(source_execution)
     state = %{state | session_id: session_id, created_at: now}
+    state = invalidate_connection(state, :conversation)
 
     transcript =
       state.transcript
@@ -2413,6 +2505,23 @@ defmodule MingaAgent.Session do
 
   @impl GenServer
   @spec handle_cast(term(), state()) :: {:noreply, state()}
+  def handle_cast({:report_oauth_failure, target, ref, reason, caller}, state) do
+    {:noreply, fail_oauth_workflow(state, target, ref, reason, caller)}
+  end
+
+  def handle_cast({:request_connection_cancel, target, operation_ref, caller}, state) do
+    {:reply, _result, state} = cancel_connection_workflow(state, target, operation_ref, caller)
+    {:noreply, state}
+  end
+
+  def handle_cast({:request_connection_worker, target, ref, worker, caller}, state) do
+    {:reply, result, state} =
+      register_connection_worker_workflow(state, target, ref, worker, caller)
+
+    send(worker, {:connection_worker_binding, ref, result})
+    {:noreply, state}
+  end
+
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
     state = notify_messages_changed(state)
@@ -2463,6 +2572,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info({:agent_provider_lifecycle_event, %Event.Error{} = event}, state) do
+    state = retain_connection_error(state, event)
     {:noreply, report_turn_error(state, humanize_error(event, state))}
   end
 
@@ -2538,7 +2648,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    {:noreply, handle_subscriber_down(state, pid, ref, reason)}
+    {:noreply, connection_dependency_down(state, pid, ref, reason)}
   end
 
   def handle_info({:timeout, timer_ref, :idle_gc}, state) do
@@ -3081,6 +3191,18 @@ defmodule MingaAgent.Session do
     do: broadcast(state, {:resumable_boundary, continuation.revision})
 
   defp announce_resumable_boundary(state, %Continuation{}), do: state
+
+  @spec commit_conversation_transition(state(), state()) ::
+          {:ok, state()} | {:error, term(), state()}
+  defp commit_conversation_transition(previous, candidate) do
+    case commit_session_transition(previous, candidate) do
+      {:ok, committed} ->
+        {:ok, committed |> invalidate_connection(:conversation) |> publish_connection()}
+
+      {:error, reason, failed} ->
+        {:error, reason, failed}
+    end
+  end
 
   @spec commit_session_transition(state(), state()) ::
           {:ok, state()} | {:error, term(), state()}
@@ -3856,6 +3978,7 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.Error{} = event, state) do
+    state = retain_connection_error(state, event)
     report_turn_error(state, humanize_error(event, state))
   end
 
@@ -4156,6 +4279,7 @@ defmodule MingaAgent.Session do
   @spec notify_subscriber_connected(pid(), state()) :: :ok
   defp notify_subscriber_connected(pid, state) do
     send(pid, {:agent_event, self(), {:credentials_status, state.credential_readiness}})
+    send(pid, {:agent_event, self(), {:connection_changed, connection_snapshot(state)}})
     notify_retained_event_log_failure(pid, state.event_log_failure)
   end
 
@@ -4180,12 +4304,12 @@ defmodule MingaAgent.Session do
     case SubscriberLifecycle.detach(state.subscriber_lifecycle, pid) do
       {:removed, lifecycle, %SubscriberAttachment{} = attachment} ->
         Process.demonitor(attachment.monitor_ref, [:flush])
-        state = %{state | subscriber_lifecycle: lifecycle}
+        state = cancel_connection_for_owner(%{state | subscriber_lifecycle: lifecycle}, pid)
         record_user_disconnected(state, pid, attachment.role, reason)
         maybe_schedule_idle_gc(state)
 
       :unchanged ->
-        state
+        cancel_connection_for_owner(state, pid)
     end
   end
 
@@ -4197,7 +4321,7 @@ defmodule MingaAgent.Session do
            monitor_ref
          ) do
       {:removed, lifecycle, %SubscriberAttachment{} = attachment} ->
-        state = %{state | subscriber_lifecycle: lifecycle}
+        state = cancel_connection_for_owner(%{state | subscriber_lifecycle: lifecycle}, pid)
         record_user_disconnected(state, pid, attachment.role, reason)
         maybe_schedule_idle_gc(state)
 
@@ -4324,8 +4448,544 @@ defmodule MingaAgent.Session do
 
   # ── Broadcasting ────────────────────────────────────────────────────────────
 
+  # Connection setup is serialized here, immediately around the existing
+  # credential writers. Network acquisition never runs in this process.
+  @spec connection_target(state()) :: ConnectionTarget.t()
+  defp connection_target(state) do
+    ConnectionTarget.new(self(), state.session_id, state.model_selection, state.connection.epoch)
+  end
+
+  @spec connection_snapshot(state()) :: ConnectionSnapshot.t()
+  defp connection_snapshot(state) do
+    ConnectionSnapshot.new(
+      connection_target(state),
+      state.credential_readiness,
+      state.model_selection,
+      state.provider,
+      Connection.activity(state.connection),
+      Connection.problem(state.connection)
+    )
+  end
+
+  @spec validate_connection_target(state(), ConnectionTarget.t()) :: :ok | {:error, :stale_target}
+  defp validate_connection_target(state, target) do
+    case connection_target(state) do
+      ^target -> :ok
+      _current -> {:error, :stale_target}
+    end
+  end
+
+  @spec validate_connection_method(term()) :: :ok | {:error, :unsupported_method}
+  defp validate_connection_method({:api_key, provider}) when is_binary(provider) do
+    case Credentials.env_var_for(provider) do
+      env_var when is_binary(env_var) -> :ok
+      nil -> {:error, :unsupported_method}
+    end
+  end
+
+  defp validate_connection_method(method) when method in [:oauth_browser, :oauth_manual], do: :ok
+
+  defp validate_connection_method(_method), do: {:error, :unsupported_method}
+
+  @spec begin_connection_workflow(
+          state(),
+          ConnectionTarget.t(),
+          Connection.method(),
+          pid(),
+          {pid(), term()} | nil
+        ) ::
+          {:reply, term(), state()}
+  defp begin_connection_workflow(state, target, method, owner, notify) do
+    with :ok <- validate_connection_target(state, target),
+         :ok <- validate_connection_owner(state, owner),
+         :ok <- validate_connection_notice(state, owner, notify),
+         :ok <- validate_connection_method(method) do
+      retire_connection_dependencies(state.connection, :cancel)
+      owner_ref = Process.monitor(owner)
+
+      {:ok, connection, ref} =
+        Connection.begin(state.connection, target, method, {owner, owner_ref}, notify)
+
+      state = publish_connection(%{state | connection: connection})
+      notify_connection_input(notify, target, ref, method)
+      {:reply, {:ok, ref}, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec validate_connection_notice(state(), pid(), Connection.notification()) ::
+          :ok | {:error, :not_driver}
+  defp validate_connection_notice(state, owner, nil) do
+    case SubscriberLifecycle.driver(state.subscriber_lifecycle) do
+      driver when driver in [nil, owner] -> :ok
+      _not_owner -> {:error, :not_driver}
+    end
+  end
+
+  defp validate_connection_notice(state, _owner, {subscriber, _correlation}) do
+    case SubscriberLifecycle.role(state.subscriber_lifecycle, subscriber) do
+      :driver when node(subscriber) == node() -> :ok
+      _not_driver -> {:error, :not_driver}
+    end
+  end
+
+  @spec notify_connection_input(
+          {pid(), term()} | nil,
+          ConnectionTarget.t(),
+          reference(),
+          Connection.method()
+        ) :: :ok
+  defp notify_connection_input(nil, _target, _ref, _method), do: :ok
+
+  defp notify_connection_input({subscriber, correlation}, target, ref, method) do
+    send(
+      subscriber,
+      {:agent_event, self(), {:connection_input_requested, correlation, target, ref, method}}
+    )
+
+    :ok
+  end
+
+  @spec validate_connection_owner(state(), pid()) :: :ok | {:error, :not_driver}
+  defp validate_connection_owner(state, owner) when node(owner) == node() do
+    case SubscriberLifecycle.role(state.subscriber_lifecycle, owner) do
+      :viewer -> {:error, :not_driver}
+      _local_or_driver -> :ok
+    end
+  end
+
+  defp validate_connection_owner(_state, _owner), do: {:error, :not_driver}
+
+  @spec authorize_connection_actor(state(), pid(), :owner | :writer) :: :ok | {:error, atom()}
+  defp authorize_connection_actor(state, caller, role) do
+    {_ref, _target, _method, {{owner, _}, notify}, worker} = Connection.pending(state.connection)
+
+    with :ok <- validate_connection_owner(state, owner),
+         :ok <- validate_connection_notice(state, owner, notify) do
+      case {role, worker} do
+        {:owner, _worker} when caller == owner -> :ok
+        {:writer, {^caller, _monitor}} -> :ok
+        _unassigned -> {:error, :not_connection_actor}
+      end
+    end
+  end
+
+  @spec register_connection_worker_workflow(
+          state(),
+          ConnectionTarget.t(),
+          reference(),
+          pid(),
+          pid()
+        ) ::
+          {:reply, term(), state()}
+  defp register_connection_worker_workflow(state, target, ref, worker, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- authorize_connection_actor(state, caller, :owner),
+         :ok <- validate_local_connection_worker(worker) do
+      register_connection_worker_monitor(state, worker)
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec validate_local_connection_worker(pid()) :: :ok | {:error, :not_connection_actor}
+  defp validate_local_connection_worker(worker) when node(worker) == node(), do: :ok
+  defp validate_local_connection_worker(_worker), do: {:error, :not_connection_actor}
+
+  @spec register_connection_worker_monitor(state(), pid()) :: {:reply, term(), state()}
+  defp register_connection_worker_monitor(state, worker) do
+    monitor = Process.monitor(worker)
+
+    case Connection.register_worker(state.connection, {worker, monitor}) do
+      {:ok, connection} ->
+        {:reply, :ok, %{state | connection: connection}}
+
+      {:error, reason} ->
+        Process.demonitor(monitor, [:flush])
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec cancel_connection_workflow(state(), ConnectionTarget.t(), reference(), pid()) ::
+          {:reply, term(), state()}
+  defp cancel_connection_workflow(state, target, ref, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- authorize_connection_actor(state, caller, :owner),
+         {:cancelled, connection} <- Connection.cancel(state.connection) do
+      retire_connection_dependencies(state.connection, :cancel)
+      {:reply, :ok, publish_connection(%{state | connection: connection})}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec commit_api_key_workflow(
+          state(),
+          ConnectionTarget.t(),
+          reference(),
+          String.t(),
+          Secret.t(),
+          pid()
+        ) ::
+          {:reply, term(), state()}
+  defp commit_api_key_workflow(state, target, ref, provider, secret, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- authorize_connection_actor(state, caller, :writer),
+         :ok <- Connection.match_method(state.connection, {:api_key, provider}) do
+      {state, Secret.write_api_key(secret, provider, connection_credential_opts(state))}
+      |> finish_connection_writer()
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec commit_oauth_workflow(state(), ConnectionTarget.t(), reference(), Secret.t(), pid()) ::
+          {:reply, term(), state()}
+  defp commit_oauth_workflow(state, target, ref, secret, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- authorize_connection_actor(state, caller, :writer),
+         :ok <- Connection.match_method(state.connection, :oauth) do
+      result =
+        Secret.write_oauth(secret, connection_oauth_path(state), connection_oauth_account(state))
+
+      {state, result}
+      |> finish_connection_writer()
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec connection_oauth_account(state()) :: String.t() | nil
+  defp connection_oauth_account(%{
+         model_selection: %ModelSelection{
+           credential: %MingaAgent.ModelSelection.Credential.OAuth{account_id: account}
+         }
+       }),
+       do: account
+
+  defp connection_oauth_account(_state), do: nil
+
+  @spec connection_oauth_path(state()) :: String.t()
+  defp connection_oauth_path(%{
+         model_selection: %ModelSelection{
+           credential: %MingaAgent.ModelSelection.Credential.OAuth{oauth_path: path}
+         }
+       })
+       when is_binary(path),
+       do: path
+
+  defp connection_oauth_path(state) do
+    state
+    |> connection_credential_opts()
+    |> Keyword.get_lazy(:oauth_path, &Credentials.oauth_path/0)
+  end
+
+  @spec connection_credential_opts(state()) :: keyword()
+  defp connection_credential_opts(state),
+    do: Keyword.get(state.provider.opts, :credential_opts, [])
+
+  @spec finish_connection_writer({state(), :ok | {:error, atom()}}) :: {:reply, term(), state()}
+  defp finish_connection_writer({state, :ok}) do
+    {ref, _target, method, {_owner, notify}, _worker} = Connection.pending(state.connection)
+    retire_connection_dependencies(state.connection, :committed)
+    {:committed, connection} = Connection.committed(state.connection)
+
+    {state, _readiness_result} =
+      refresh_credentials_state_result(%{state | connection: connection})
+
+    state = publish_connection(state)
+    snapshot = connection_snapshot(state)
+    notify_connection_saved(method, notify, snapshot.target, ref)
+    {:reply, {:ok, snapshot}, state}
+  end
+
+  defp finish_connection_writer({state, {:error, reason}}) do
+    {ref, target, method, {_owner, notify}, _worker} = Connection.pending(state.connection)
+
+    if method in [:oauth_browser, :oauth_manual],
+      do: notify_oauth_failure(notify, target, ref, reason)
+
+    retire_connection_dependencies(state.connection, :cancel)
+    {:failed, connection} = Connection.failed(state.connection)
+    {:reply, {:error, reason}, publish_connection(%{state | connection: connection})}
+  end
+
+  @spec fail_oauth_workflow(state(), ConnectionTarget.t(), reference(), atom(), pid()) :: state()
+  defp fail_oauth_workflow(state, target, ref, reason, caller) do
+    with :ok <- Connection.authorize(state.connection, target, ref, connection_target(state)),
+         :ok <- Connection.match_method(state.connection, :oauth),
+         true <-
+           authorize_connection_actor(state, caller, :writer) == :ok or
+             authorize_connection_actor(state, caller, :owner) == :ok do
+      {:reply, {:error, ^reason}, state} = finish_connection_writer({state, {:error, reason}})
+      state
+    else
+      _refused -> state
+    end
+  end
+
+  @spec notify_oauth_failure(Connection.notification(), ConnectionTarget.t(), reference(), atom()) ::
+          :ok
+  defp notify_oauth_failure(nil, _target, _ref, _reason), do: :ok
+
+  defp notify_oauth_failure({subscriber, correlation}, target, ref, reason) do
+    send(
+      subscriber,
+      {:agent_event, self(), {:oauth_acquisition_failed, correlation, target, ref, reason}}
+    )
+
+    :ok
+  end
+
+  @spec notify_connection_saved(
+          Connection.method(),
+          Connection.notification(),
+          ConnectionTarget.t(),
+          reference()
+        ) :: :ok
+  defp notify_connection_saved(_method, nil, _target, _ref), do: :ok
+
+  defp notify_connection_saved(method, {subscriber, correlation}, target, ref) do
+    event =
+      if match?({:api_key, _}, method),
+        do: :connection_api_key_saved,
+        else: :connection_oauth_saved
+
+    send(
+      subscriber,
+      {:agent_event, self(), {event, correlation, target, ref}}
+    )
+
+    :ok
+  end
+
+  @spec retry_connection_workflow(state(), ConnectionTarget.t()) :: {:reply, term(), state()}
+  defp retry_connection_workflow(state, target) do
+    case validate_connection_target(state, target) do
+      :ok -> restart_provider_workflow(state)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec restart_provider_workflow(state()) :: {:reply, term(), state()}
+  defp restart_provider_workflow(state) do
+    {:reset, lifecycle, retry_timer} = ProviderLifecycle.reset_retry(state.provider)
+    cancel_provider_retry_timer(retry_timer)
+    connection = Connection.provider_recovered(state.connection)
+
+    {state, result} =
+      refresh_credentials_state_result(%{state | provider: lifecycle, connection: connection})
+
+    state = publish_connection(state)
+
+    case {ProviderLifecycle.pid(state.provider), result} do
+      {provider, :ok} when is_pid(provider) ->
+        {:reply, :ok, state}
+
+      {_provider, :ok} when state.credentials_configured == false ->
+        {:reply, {:error, :credentials_not_configured}, state}
+
+      {_provider, :ok} ->
+        {:reply, {:error, :provider_not_ready}, state}
+
+      {_provider, {:error, reason}} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec retire_connection_dependencies(Connection.t(), :cancel | :committed) :: :ok
+  defp retire_connection_dependencies(connection, disposition) do
+    case Connection.pending(connection) do
+      {ref, target, method, {{owner, owner_monitor}, _notify}, worker} ->
+        if disposition == :cancel and method in [:oauth_browser, :oauth_manual] do
+          MingaAgent.OAuth.PendingFlow.cancel_operation(ref, {target.session_id, owner})
+        end
+
+        Process.demonitor(owner_monitor, [:flush])
+        retire_connection_worker(worker, ref, disposition)
+
+      nil ->
+        :ok
+    end
+  end
+
+  @spec cancel_connection_for_owner(state(), pid()) :: state()
+  defp cancel_connection_for_owner(state, owner) do
+    case Connection.pending(state.connection) do
+      {_ref, _target, _method, {{pid, _monitor}, notify}, _worker}
+      when pid == owner or elem(notify, 0) == owner ->
+        {:cancelled, connection} = Connection.cancel(state.connection)
+        retire_connection_dependencies(state.connection, :cancel)
+        publish_connection(%{state | connection: connection})
+
+      _unrelated_or_retired ->
+        state
+    end
+  end
+
+  @spec retire_connection_worker(Connection.dependency() | nil, reference(), :cancel | :committed) ::
+          :ok
+  defp retire_connection_worker({worker, monitor}, ref, :cancel) do
+    send(worker, {:connection_cancelled, ref})
+    Process.demonitor(monitor, [:flush])
+    :ok
+  end
+
+  defp retire_connection_worker({_worker, monitor}, _ref, :committed) do
+    Process.demonitor(monitor, [:flush])
+    :ok
+  end
+
+  defp retire_connection_worker(nil, _ref, _disposition), do: :ok
+
+  @spec connection_dependency_down(state(), pid(), reference(), term()) :: state()
+  defp connection_dependency_down(state, pid, monitor, reason) do
+    case Connection.dependency_down(state.connection, {pid, monitor}) do
+      {:cancelled, connection} ->
+        retire_connection_dependencies(state.connection, :cancel)
+        publish_connection(%{state | connection: connection})
+
+      :unrelated ->
+        handle_subscriber_down(state, pid, monitor, reason)
+    end
+  end
+
+  @spec set_model_for_target_workflow(state(), ConnectionTarget.t(), ModelResolver.intent()) ::
+          {:reply, term(), state()}
+  defp set_model_for_target_workflow(state, target, intent) do
+    case validate_connection_target(state, target) do
+      :ok -> set_model_workflow(state, intent)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec set_model_workflow(state(), ModelResolver.intent()) :: {:reply, term(), state()}
+  defp set_model_workflow(%{provider: %{module: MingaAgent.Providers.Native}} = state, intent) do
+    opts = model_resolution_opts(state)
+
+    case ModelResolver.resolve(intent, opts) do
+      {:ok, selection} ->
+        case apply_resolved_model_selection(
+               state,
+               selection,
+               Keyword.fetch!(opts, :credential_snapshot)
+             ) do
+          {:ok, state} -> {:reply, :ok, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, ModelResolver.message(reason)}, state}
+    end
+  end
+
+  defp set_model_workflow(state, model) when is_binary(model) do
+    {candidate, result} =
+      state
+      |> update_model_configuration(model)
+      |> remember_pending_model_change(model)
+      |> refresh_credentials_state_result()
+
+    case result do
+      :ok ->
+        {:reply, :ok, candidate |> commit_connection_selection(state) |> publish_connection()}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec invalidate_connection(state(), :conversation | :selection) :: state()
+  defp invalidate_connection(state, reason) do
+    retire_connection_dependencies(state.connection, :cancel)
+
+    connection =
+      case reason do
+        :conversation -> Connection.invalidate(state.connection)
+        :selection -> Connection.selection_changed(state.connection)
+      end
+
+    %{state | connection: connection}
+  end
+
+  @spec commit_connection_selection(state(), state()) :: state()
+  defp commit_connection_selection(state, previous) do
+    state = retain_resolution_problem(state, nil)
+
+    case {state.model_selection, state.provider.model_name} do
+      {selection, model}
+      when selection == previous.model_selection and
+             model == previous.provider.model_name ->
+        state
+
+      _changed ->
+        invalidate_connection(state, :selection)
+    end
+  end
+
+  @spec retain_resolution_problem(state(), ModelResolver.resolution_error() | nil) :: state()
+  defp retain_resolution_problem(state, reason),
+    do: %{state | connection: Connection.resolved(state.connection, reason)}
+
+  @spec retain_connection_error(state(), Event.Error.t()) :: state()
+  defp retain_connection_error(state, event),
+    do: %{state | connection: Connection.provider_failed(state.connection, event.kind)}
+
+  @spec mark_connection_provider_failed(state()) :: state()
+  defp mark_connection_provider_failed(state),
+    do: %{state | connection: Connection.provider_failed(state.connection, :provider_error)}
+
+  @spec publish_connection(state()) :: state()
+  defp publish_connection(
+         %{
+           connection: %Connection{
+             epoch: epoch,
+             published: %ConnectionSnapshot{
+               target: %ConnectionTarget{epoch: epoch},
+               model_selection: previous_selection
+             }
+           }
+         } = state
+       )
+       when previous_selection != state.model_selection do
+    # Provider preview/start work can emit existing turn events while a model
+    # candidate is staged. Publish its connection only after the model commits
+    # and advances the target epoch; rejected candidates never escape.
+    state
+  end
+
+  defp publish_connection(state) do
+    if connection_projection_current?(state, state.connection.published) do
+      state
+    else
+      snapshot = connection_snapshot(state)
+
+      Enum.each(SubscriberLifecycle.subscribers(state.subscriber_lifecycle), fn subscriber ->
+        send(subscriber, {:agent_event, self(), {:connection_changed, snapshot}})
+      end)
+
+      %{state | connection: Connection.published(state.connection, snapshot)}
+    end
+  end
+
+  @spec connection_projection_current?(state(), ConnectionSnapshot.t() | nil) :: boolean()
+  defp connection_projection_current?(state, %ConnectionSnapshot{} = snapshot) do
+    snapshot.target.session == self() and
+      snapshot.target.session_id == state.session_id and
+      snapshot.target.epoch == state.connection.epoch and
+      snapshot.model_selection == state.model_selection and
+      snapshot.credential_readiness == state.credential_readiness and
+      snapshot.provider_phase == ProviderLifecycle.phase(state.provider) and
+      snapshot.operation == Connection.activity(state.connection) and
+      snapshot.problem == Connection.problem(state.connection)
+  end
+
+  defp connection_projection_current?(_state, nil), do: false
+
   @spec broadcast(state(), term()) :: state()
   defp broadcast(state, event) do
+    state = publish_connection(state)
     record_broadcast_event(state, event)
     session_pid = self()
 
@@ -5108,12 +5768,17 @@ defmodule MingaAgent.Session do
 
     case result do
       {:ok, selection} ->
-        state = install_model_selection(state, selection)
+        state =
+          state
+          |> install_model_selection(selection)
+          |> commit_connection_selection(state)
+
         refresh_credentials_from_snapshot(state, snapshot, true)
 
       {:error, :no_available_model} ->
         state =
           state
+          |> retain_resolution_problem(:no_available_model)
           |> install_credential_readiness(:unconfigured)
           |> broadcast_credential_readiness()
 
@@ -5122,6 +5787,7 @@ defmodule MingaAgent.Session do
       {:error, reason} ->
         state =
           %{state | selection_error: ModelResolver.message(reason)}
+          |> retain_resolution_problem(reason)
           |> install_credential_readiness(:unconfigured)
           |> broadcast_credential_readiness()
 
@@ -5210,7 +5876,7 @@ defmodule MingaAgent.Session do
           keyword(),
           CredentialSnapshot.t(),
           String.t() | nil
-        ) :: {ModelSelection.t() | nil, String.t() | nil}
+        ) :: {ModelSelection.t() | nil, String.t() | nil, ModelResolver.resolution_error() | nil}
   defp initial_model_selection(
          %{module: MingaAgent.Providers.Native} = resolution,
          model,
@@ -5231,17 +5897,17 @@ defmodule MingaAgent.Session do
     case ModelResolver.resolve(model, resolver_opts) do
       {:ok, selection} ->
         case maybe_apply_initial_reasoning(selection, thinking_level) do
-          {:ok, selection} -> {selection, nil}
-          {:error, message} -> {nil, message}
+          {:ok, selection} -> {selection, nil, nil}
+          {:error, message} -> {nil, message, {:incompatible_selection, message}}
         end
 
       {:error, reason} ->
-        {nil, ModelResolver.message(reason)}
+        {nil, ModelResolver.message(reason), reason}
     end
   end
 
   defp initial_model_selection(_resolution, _model, _provider_opts, _snapshot, _thinking),
-    do: {nil, nil}
+    do: {nil, nil, nil}
 
   @spec maybe_apply_initial_reasoning(ModelSelection.t(), String.t() | nil) ::
           {:ok, ModelSelection.t()} | {:error, String.t()}
@@ -5308,7 +5974,7 @@ defmodule MingaAgent.Session do
 
     case start_loaded_provider(prepared) do
       {:ok, staged} ->
-        case commit_model_selection(staged, state.model_selection, selection) do
+        case commit_model_selection(staged, state, selection) do
           {:ok, committed} ->
             {:ok, finish_loaded_provider_attachment(committed, state.provider)}
 
@@ -5323,17 +5989,21 @@ defmodule MingaAgent.Session do
   end
 
   defp do_apply_resolved_model_selection(state, selection) do
-    commit_model_selection(state, state.model_selection, selection)
+    commit_model_selection(state, state, selection)
   end
 
-  @spec commit_model_selection(state(), ModelSelection.t() | nil, ModelSelection.t()) ::
+  @spec commit_model_selection(state(), state(), ModelSelection.t()) ::
           {:ok, state()} | {:error, term()}
   defp commit_model_selection(state, previous, selection) do
-    operation = {:model, selection, model_transition(previous, selection)}
+    operation = {:model, selection, model_transition(previous.model_selection, selection)}
 
     with {:ok, committed, :ok} <- refresh_continuation_prefix(state, operation) do
       {:ok,
-       committed |> install_credential_readiness(:configured) |> broadcast_credential_readiness()}
+       committed
+       |> commit_connection_selection(previous)
+       |> install_credential_readiness(:configured)
+       |> broadcast_credential_readiness()
+       |> publish_connection()}
     end
   end
 
@@ -5551,11 +6221,12 @@ defmodule MingaAgent.Session do
     end
 
     state = clear_provider_start_error(state)
+    state = %{state | connection: Connection.provider_recovered(state.connection)}
 
     state = apply_pending_thinking_level(state)
     state = maybe_show_auth_onboarding(state)
     dispatch_session_start(state)
-    state
+    publish_connection(state)
   end
 
   @spec clear_provider_start_error(state()) :: state()
@@ -5575,7 +6246,12 @@ defmodule MingaAgent.Session do
     Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
     {:failed, lifecycle, lease} = ProviderLifecycle.failure(state.provider, reason)
     release_provider_lease(lease)
-    state = %{state | provider: lifecycle}
+
+    state = %{
+      state
+      | provider: lifecycle,
+        connection: Connection.provider_failed(state.connection, :startup_failed)
+    }
 
     mark_provider_failed(state, format_error(reason))
   end
@@ -5589,6 +6265,7 @@ defmodule MingaAgent.Session do
     state =
       state
       |> Map.put(:provider, lifecycle)
+      |> mark_connection_provider_failed()
       |> mark_provider_failed("Agent provider crashed")
       |> recover_interrupted_request()
 
@@ -5733,14 +6410,14 @@ defmodule MingaAgent.Session do
     """
     Welcome to Minga. Set up a provider to get started.
 
-    Add an API key (works with any supported provider):
+    Open a masked API key prompt for your provider:
 
-      /auth anthropic <key>     Anthropic Claude
-      /auth openai <key>        OpenAI GPT
-      /auth google <key>        Google Gemini
-      /auth openrouter <key>    OpenRouter (many models)
-      /auth groq <key>          Groq
-      /auth deepseek <key>      DeepSeek
+      /auth anthropic           Anthropic Claude
+      /auth openai              OpenAI GPT
+      /auth google              Google Gemini
+      /auth openrouter          OpenRouter (many models)
+      /auth groq                Groq
+      /auth deepseek            DeepSeek
 
     Or sign in with a ChatGPT subscription (OpenAI accounts only):
 
@@ -5797,9 +6474,6 @@ defmodule MingaAgent.Session do
   defp humanize_legacy_error(message, provider) when is_binary(message) do
     humanize_legacy_error_kind(classify_legacy_error(message), message, provider)
   end
-
-  defp humanize_legacy_error(message, provider),
-    do: humanize_legacy_error(inspect(message), provider)
 
   @spec classify_legacy_error(String.t()) :: legacy_error_kind()
   defp classify_legacy_error(message) do
@@ -5867,8 +6541,6 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp provider_slug(_state), do: "provider"
-
   @spec provider_label(String.t()) :: String.t()
   defp provider_label("provider"), do: "the model provider"
   defp provider_label("openai_codex"), do: "OpenAI Codex"
@@ -5889,7 +6561,7 @@ defmodule MingaAgent.Session do
     do: "Run /auth to check credentials, or pick another configured model with /model."
 
   defp auth_hint(provider),
-    do: "Run /auth #{provider} <key> or pick another configured model with /model."
+    do: "Run /auth #{provider} to enter a key, or pick another configured model with /model."
 
   # Detects an inspected Elixir struct/exception leaking into the message, so
   # we never show a raw `%ReqLLM.Error{...}`-style dump in the transcript.
@@ -6667,6 +7339,8 @@ defmodule MingaAgent.Session do
         created_at: loaded_at
     }
 
+    loaded = invalidate_connection(loaded, :conversation)
+    loaded = retain_resolution_problem(loaded, nil)
     loaded = finish_loaded_provider_attachment(loaded, state.provider)
     finish_loaded_session_restore(loaded)
   end
@@ -7067,6 +7741,7 @@ defmodule MingaAgent.Session do
     })
 
     dispatch_session_end(state, reason)
+    retire_connection_dependencies(state.connection, :cancel)
     state = release_subscriber_lifecycle(state)
     _stopped_state = stop_provider_lifecycle(state)
 

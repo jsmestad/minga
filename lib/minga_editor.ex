@@ -1602,6 +1602,54 @@ defmodule MingaEditor do
   # ── Agent event dispatch ──────────────────────────────────────────────────
 
   @spec route_agent_event(EditorState.t(), pid(), term()) :: {:noreply, EditorState.t()}
+  defp route_agent_event(
+         state,
+         session,
+         {:connection_input_requested, workspace_id, %{session: session} = target, ref, method}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.offer(state, workspace_id, target, ref, method)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:connection_api_key_saved, workspace_id, %{session: session} = target, ref}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.saved(state, workspace_id, target, ref)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:oauth_manual_requested, id,
+          %MingaAgent.OAuth.ManualReady{target: %{session: session}} = ready}
+       ) do
+    state =
+      MingaEditor.Agent.ConnectionSetup.offer_oauth(state, id, ready)
+
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:oauth_acquisition_failed, id, %{session: session} = target, _operation_ref, reason}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.oauth_failed(state, id, target, reason)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(
+         state,
+         session,
+         {:connection_oauth_saved, id, %{session: session} = target, _ref}
+       ) do
+    state = MingaEditor.Agent.ConnectionSetup.oauth_saved(state, id, target)
+    {:noreply, schedule_render(state, 16)}
+  end
+
   defp route_agent_event(state, session_pid, event) do
     route_agent_event(state, session_pid, event, agent_event_owner(state, session_pid))
   end
