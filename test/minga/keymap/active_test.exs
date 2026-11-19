@@ -1,6 +1,8 @@
 defmodule Minga.Keymap.ActiveTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog, only: [capture_log: 1]
+
   alias Minga.Keymap.Active
   alias Minga.Keymap.Bindings
 
@@ -64,6 +66,36 @@ defmodule Minga.Keymap.ActiveTest do
       trie = Active.leader_trie(s)
       {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
       assert {:command, :find_file} = Bindings.lookup(f_node, {?f, 0})
+    end
+
+    test "reports either order of a prefix overlap and retains both bindings", %{store: s} do
+      for {short, short_command, long_command, order, warning} <- [
+            {"U", :reach_short_second, :reach_long_first, [:long, :short], "shadows"},
+            {"V", :reach_short_first, :reach_long_second, [:short, :long], "is shadowed by"}
+          ] do
+        bindings = %{short: {short, short_command}, long: {short <> " h", long_command}}
+        [first, second] = Enum.map(order, &Map.fetch!(bindings, &1))
+        {first_keys, first_command} = first
+        {second_keys, second_command} = second
+
+        initial_log =
+          capture_log(fn ->
+            assert :ok = Active.bind(s, :normal, "SPC " <> first_keys, first_command, "First")
+          end)
+
+        refute initial_log =~ "binding #{inspect(first_command)}"
+
+        overlap_log =
+          capture_log(fn ->
+            assert :ok = Active.bind(s, :normal, "SPC " <> second_keys, second_command, "Second")
+          end)
+
+        assert overlap_log =~ "binding #{inspect(second_command)} to #{second_keys} #{warning}"
+        trie = Active.leader_trie(s)
+        <<key>> = short
+        assert {:command, ^short_command} = Bindings.lookup(trie, {key, 0})
+        assert {:command, ^long_command, _} = Bindings.lookup_sequence(trie, [{key, 0}, {?h, 0}])
+      end
     end
   end
 

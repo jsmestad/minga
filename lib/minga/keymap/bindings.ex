@@ -14,10 +14,7 @@ defmodule Minga.Keymap.Bindings do
   fires the command as soon as the prefix key is pressed, so the longer
   sequences underneath it become unreachable. There is no ambiguity timeout.
 
-  Because this is an easy config foot-gun (binding `g` silently kills `gg`,
-  `gd`, …), `bind/4` emits a `Logger.warning/1` whenever a new binding
-  shadows, or is shadowed by, existing sequences. The trie still stores both
-  bindings; the warning just makes the dead sequences visible at bind time.
+  The trie stores both bindings. Configuration callers can use `overlap_warning/3` to report unreachable sequences when they install a new binding.
 
   ## Key representation
 
@@ -105,7 +102,6 @@ defmodule Minga.Keymap.Bindings do
   @spec bind(node_t(), [key()], atom() | tuple(), String.t()) :: node_t()
   def bind(%Node{} = root, [_ | _] = keys, command, description)
       when (is_atom(command) or is_tuple(command)) and is_binary(description) do
-    warn_on_overlap(root, keys, command)
     do_bind(root, keys, command, description)
   end
 
@@ -125,34 +121,22 @@ defmodule Minga.Keymap.Bindings do
     %{root | children: Map.put(children, key, updated_child)}
   end
 
-  # Detects the prefix/command overlap foot-gun and warns once at bind time.
-  # Two shapes matter:
-  #   * short-then-long: the new binding lands on a node that already has
-  #     children, so its longer sequences become unreachable.
-  #   * long-then-short: the new (longer) sequence passes through an existing
-  #     command-bearing node, which already shadows it.
-  # The trie still records both bindings; "short binding wins" at dispatch.
-  @spec warn_on_overlap(node_t(), [key()], atom() | tuple()) :: :ok
-  defp warn_on_overlap(root, keys, command) do
+  @doc "Returns a warning for an unreachable key sequence, or `nil` when the new binding does not overlap."
+  @spec overlap_warning(node_t(), [key(), ...], atom() | tuple()) :: String.t() | nil
+  def overlap_warning(%Node{} = root, [_ | _] = keys, command) do
     case overlap(root, keys) do
       {:shadows_longer, existing} ->
-        Minga.Log.warning(
-          :config,
-          "Keymap: binding #{inspect(command)} to #{format_keys(keys)} shadows " <>
-            "longer sequence(s) under that prefix (e.g. #{format_keys(existing)}); " <>
-            "the longer sequence(s) will be unreachable because the short binding wins."
-        )
+        "Keymap: binding #{inspect(command)} to #{format_keys(keys)} shadows " <>
+          "longer sequence(s) under that prefix (e.g. #{format_keys(existing)}); " <>
+          "the longer sequence(s) will be unreachable because the short binding wins."
 
       {:shadowed_by_shorter, existing_keys, existing_command} ->
-        Minga.Log.warning(
-          :config,
-          "Keymap: binding #{inspect(command)} to #{format_keys(keys)} is shadowed by " <>
-            "existing command #{inspect(existing_command)} on prefix #{format_keys(existing_keys)}; " <>
-            "the longer sequence will be unreachable because the short binding wins."
-        )
+        "Keymap: binding #{inspect(command)} to #{format_keys(keys)} is shadowed by " <>
+          "existing command #{inspect(existing_command)} on prefix #{format_keys(existing_keys)}; " <>
+          "the longer sequence will be unreachable because the short binding wins."
 
       :none ->
-        :ok
+        nil
     end
   end
 

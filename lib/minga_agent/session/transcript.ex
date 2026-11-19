@@ -256,7 +256,7 @@ defmodule MingaAgent.Session.Transcript do
   @spec append_stream_tail(t(), stream_kind(), iodata()) :: t()
   def append_stream_tail(%__MODULE__{} = transcript, kind, chunks)
       when kind in [:assistant, :thinking] do
-    stream_tail(transcript, kind, IO.iodata_to_binary(chunks), last_message(transcript))
+    stream_tail(transcript, kind, :erlang.iolist_to_binary(chunks), last_message(transcript))
   end
 
   defp stream_tail(transcript, :assistant, fragment, {:assistant, text}) do

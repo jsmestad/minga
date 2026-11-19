@@ -14,7 +14,7 @@ defmodule Minga.Credo.ReachPolicyTest do
 
   setup_all do
     {policy, _bindings} = Code.eval_file(@policy_path)
-    %{allowed: get_in(policy, [:effects, :allowed]) || []}
+    %{policy: policy, allowed: get_in(policy, [:effects, :allowed]) || []}
   end
 
   test "the effects policy names exactly global foundations and explicit pure Agent values, each with a child twin",
@@ -48,7 +48,46 @@ defmodule Minga.Credo.ReachPolicyTest do
     allowances =
       allowed |> Enum.map(fn {_pattern, effects} -> Enum.sort(effects) end) |> Enum.uniq()
 
-    assert allowances == [[:exception, :io, :pure, :unknown]],
+    assert allowances == [[:exception, :pure, :unknown]],
            "Layer 0 purity is one rule, not a per-module negotiation: #{inspect(allowances)}"
+  end
+
+  @tag :tmp_dir
+  test "rejects logging and real I/O but accepts pure iodata operations", %{
+    policy: policy,
+    tmp_dir: dir
+  } do
+    path = Path.join(dir, "probe.ex")
+
+    File.write!(path, """
+    defmodule Minga.Core.ReachProbe do
+      alias Minga.Log, as: Log
+      require Logger
+
+      def convert(parts), do: :binary.list_to_bin(parts)
+      def convert_iodata(parts), do: :erlang.iolist_to_binary(parts)
+      def size(parts), do: :erlang.iolist_size(parts)
+      def write(text), do: IO.puts(text)
+      def direct_log(text), do: Logger.warning(text)
+      def wrapped_log(text), do: Log.warning(:config, text)
+      def shell(), do: System.cmd("echo", ["example"])
+    end
+    """)
+
+    project = Reach.Project.from_sources([path], source_only: true)
+
+    assert %{status: "failed", violations: violations} =
+             Reach.Check.Architecture.run(project, policy)
+
+    assert Enum.sort(
+             for violation <- violations,
+                 do: {violation.type, violation.function || violation.call}
+           ) ==
+             [
+               {:effect_policy, "direct_log/1"},
+               {:effect_policy, "shell/0"},
+               {:effect_policy, "write/1"},
+               {:forbidden_call, "Minga.Log.warning/2"}
+             ]
   end
 end
