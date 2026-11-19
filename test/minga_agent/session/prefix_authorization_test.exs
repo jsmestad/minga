@@ -1325,7 +1325,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     Enum.map_join(message.content, "", & &1.text)
   end
 
-  test "attached send rejects stale revisions and preserves distinct file, buffer and selection snapshots",
+  test "attached send rejects stale revisions and preserves each distinct snapshot kind",
        context do
     session = start_session(context, tool_call?: false)
     id = Session.session_id(session)
@@ -1373,24 +1373,38 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
              )
 
     file_identity = DraftAttachment.identity(saved_file)
+    diagnostic_text = "warning line 2, column 1 (utf8) [fixture linter]: Check this expression\n"
+    diagnostics = {:diagnostics, "/project/example.ex", "example.ex", diagnostic_text}
+
+    assert {:ok, 4, retained_diagnostics} =
+             SessionStore.attach_text(
+               id,
+               3,
+               %{draft | attachments: [saved_file, whole_buffer, attachment]},
+               diagnostics,
+               context.store_dir,
+               opts
+             )
+
+    diagnostic_identity = DraftAttachment.identity(retained_diagnostics)
     messages_before = Session.messages(session)
 
     assert {:error, :draft_attachments_changed} =
              Session.send_attached_prompt(
                session,
                id,
-               [file_identity, buffer_identity, {token, "wrong revision"}],
+               [diagnostic_identity, file_identity, buffer_identity, {token, "wrong revision"}],
                draft.text
              )
 
     refute_received {:transport_request, _, _, _}
     assert Session.messages(session) == messages_before
 
-    assert {:ok, 4} =
+    assert {:ok, 5} =
              Session.send_attached_prompt(
                session,
                id,
-               [file_identity, buffer_identity, identity],
+               [diagnostic_identity, file_identity, buffer_identity, identity],
                draft.text
              )
 
@@ -1398,18 +1412,20 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     assert [
              %{type: :text, text: "Explain this"},
+             %{type: :text, text: diagnostic_snapshot},
              %{type: :text, text: file_snapshot},
              %{type: :text, text: buffer_snapshot},
              %{type: :text, text: selection_snapshot}
            ] =
              List.last(messages).content
 
+    assert diagnostic_snapshot == "\n\nDiagnostics snapshot: example.ex\n" <> diagnostic_text
     assert file_snapshot == "\n\nFile snapshot: example.ex\n" <> saved_text
     assert buffer_snapshot == "\n\nBuffer snapshot: example.ex\n" <> unsaved_text
     assert selection_snapshot == "\n\nSelection snapshot: example.ex\n" <> text
     await_idle(session)
     assert {:ok, _conversation} = SessionStore.load(id, context.store_dir, opts)
-    assert {:ok, 4, nil} = SessionStore.read_presentation(id, context.store_dir, opts)
+    assert {:ok, 5, nil} = SessionStore.read_presentation(id, context.store_dir, opts)
   end
 
   test "equal source reloads and OAuth provider restart preserve opaque history and selected skills",

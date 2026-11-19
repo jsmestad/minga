@@ -77,6 +77,8 @@ To capture the whole current buffer, including changes you have not saved, press
 
 To attach a saved project file without opening it, press `SPC a F` or choose **Attach project file** under **Draft attachments**. Select the file, then choose the destination Agent workspace. The **File snapshot** contains the saved text from disk, not any unsaved edits in an open buffer. Inspect or remove it from **Draft attachments** before sending. Only nonempty UTF-8 text up to 32 KiB can be attached this way.
 
+To attach the diagnostics already published for the current file, press `SPC a D` or choose **Attach File Diagnostics to Agent Draft** in the macOS editor context menu, then choose the destination Agent workspace. A **Diagnostics snapshot** records the messages, severities, producers, and locations at capture time. It does not run a compiler or refresh diagnostics. A file with no published diagnostics has nothing to attach. If the complete snapshot exceeds 32 KiB, the editor rejects it rather than sending a partial list.
+
 In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a j` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
 
 An unsent snapshot stays with its original local conversation after restart. Sending an attached prompt saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale, the route cannot accept it, or an active turn prevents sending, Minga keeps the draft and explains what to do before retrying.
