@@ -60,10 +60,11 @@ func TestCommittedToolOutcomesOverrideCompatibilityError(t *testing.T) {
 						if (tc.status == 3 || tc.status == 5) && strings.Contains(view, "233900ms") {
 							t.Fatalf("approval wait shown as execution duration: %q", view)
 						}
-						if got := agentMessageRowCount(message); got != len(rows) {
-							t.Fatalf("row count = %d, rendered %d", got, len(rows))
+						height, layout := measureAgentMessage(message, 120)
+						if height != len(rows) {
+							t.Fatalf("row count = %d, rendered %d", height, len(rows))
 						}
-						ranged := model.renderAgentMessageRows(message, 120, 0, len(rows))
+						ranged := model.renderAgentMessageRows(message, layout, 120, 0, len(rows))
 						if strings.Join(ranged, "\n") != strings.Join(rows, "\n") {
 							t.Fatal("resident ranged rendering differs from full tool renderer")
 						}
