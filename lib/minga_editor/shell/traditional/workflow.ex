@@ -26,8 +26,10 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
 
   @doc "Installs the active Traditional agent presentation."
   @spec install_agent_ui(EditorState.t(), UIState.t()) :: EditorState.t()
-  def install_agent_ui(%EditorState{} = state, %UIState{} = agent_ui),
-    do: %{state | workspace: SessionState.set_agent_ui(state.workspace, agent_ui)}
+  def install_agent_ui(%EditorState{} = state, %UIState{} = agent_ui) do
+    state = %{state | workspace: SessionState.set_agent_ui(state.workspace, agent_ui)}
+    MingaEditor.Agent.DraftWorkflow.bind(state)
+  end
 
   @doc "Sets the active agent status through its owning shell state."
   @spec install_agent_status(EditorState.t(), AgentState.status()) :: EditorState.t()

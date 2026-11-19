@@ -4,6 +4,7 @@ defmodule MingaAgent.SessionPersistenceTest do
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStore.CaptureSpec
   alias MingaAgent.ArtifactStores
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.Session.Continuation
   alias MingaAgent.ToolCall
@@ -11,6 +12,13 @@ defmodule MingaAgent.SessionPersistenceTest do
   alias MingaAgent.Tool.Output.Range
   alias MingaAgent.ToolApproval.Public
   alias MingaAgent.ToolApproval.Target
+
+  defp request_draft(session, record_id, operation) do
+    ref = make_ref()
+    :ok = Session.request_composer_draft(session, record_id, ref, operation)
+    assert_receive {:composer_draft_result, ^session, ^record_id, ^ref, result}
+    result
+  end
 
   describe "session persistence" do
     test "session has a unique ID" do
@@ -26,6 +34,56 @@ defmodule MingaAgent.SessionPersistenceTest do
       :ok = Session.new_session(session)
       id2 = Session.session_id(session)
       assert id1 != id2
+    end
+
+    @tag :tmp_dir
+    test "a delayed composer write cannot follow the live session into a different record", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      original = Session.session_id(session)
+
+      draft = %DraftSnapshot{
+        text: "unfinished",
+        cursor: {0, 10},
+        paste_blocks: [],
+        attachments: []
+      }
+
+      assert {:ok, 0, nil} = request_draft(session, original, :read)
+      assert {:ok, 1} = request_draft(session, original, {:save, 0, draft})
+      assert :ok = Session.new_session(session)
+      replacement = Session.session_id(session)
+
+      assert {:error, :stale_target} = request_draft(session, original, {:save, 1, nil})
+      assert {:error, :stale_target} = request_draft(session, original, :read)
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(original, dir)
+      assert {:ok, 0, nil} = request_draft(session, replacement, :read)
+    end
+
+    @tag :tmp_dir
+    test "a saved draft can reopen before it has a conversation", %{tmp_dir: dir} do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      record_id = "unsent-record"
+      draft = %DraftSnapshot{text: "not sent", cursor: {0, 8}, paste_blocks: [], attachments: []}
+      assert {:ok, 1} = SessionStore.save_presentation(record_id, 0, draft, dir)
+      assert :ok = Session.load_session(session, record_id)
+      assert Session.session_id(session) == record_id
+      assert [] = Session.messages(session)
+      assert {:ok, 1, ^draft} = request_draft(session, record_id, :read)
+      assert {:error, :enoent} = SessionStore.load(record_id, dir)
     end
 
     @tag :tmp_dir

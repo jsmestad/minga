@@ -32,7 +32,8 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
           model_selection: ModelSelection.t() | nil,
           provider_phase: :stopped | :starting | :running | :retrying | :terminal_failure,
           operation: operation(),
-          problem: problem() | nil
+          problem: problem() | nil,
+          persistent_drafts?: boolean()
         }
 
   @enforce_keys [
@@ -49,7 +50,8 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
     :model_selection,
     :provider_phase,
     :operation,
-    :problem
+    :problem,
+    persistent_drafts?: false
   ]
 
   @doc "Projects already-owned facts without discovery or credential acquisition."
@@ -71,6 +73,11 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
       problem: problem
     }
   end
+
+  @doc "Projects whether this Session can durably save composer presentation."
+  @spec project_draft_persistence(t(), boolean()) :: t()
+  def project_draft_persistence(%__MODULE__{} = snapshot, enabled?) when is_boolean(enabled?),
+    do: %{snapshot | persistent_drafts?: enabled?}
 
   @doc "Returns canonical presentation; idle turn status is never connection evidence."
   @spec status(t()) :: presentation()

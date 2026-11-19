@@ -16,6 +16,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
+  alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab.File, as: TabFile
@@ -135,6 +136,14 @@ defmodule MingaEditor.Commands.Workspace do
   @doc "Discards drafts and then closes the active workspace."
   @spec workspace_discard_and_close(state()) :: state()
   def workspace_discard_and_close(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
+    case DraftWorkflow.before_close(state, :active) do
+      {:ok, state} -> discard_and_close(state, tb)
+      {:error, state} -> state
+    end
+  end
+
+  @spec discard_and_close(state(), TabBar.t()) :: state()
+  defp discard_and_close(state, tb) do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
@@ -304,6 +313,14 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec close_active_workspace(state()) :: state()
   defp close_active_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
+    case DraftWorkflow.before_close(state, :active) do
+      {:ok, state} -> close_workspace(state, tb)
+      {:error, state} -> state
+    end
+  end
+
+  @spec close_workspace(state(), TabBar.t()) :: state()
+  defp close_workspace(state, tb) do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do

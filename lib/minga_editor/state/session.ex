@@ -143,6 +143,14 @@ defmodule MingaEditor.State.Session do
       do: {:ok, %{session | application_quit: {:responding, request_id, :inventory, :proceeding}}}
 
   def prepare_application_quit_response(
+        %__MODULE__{application_quit: {:requesting, request_id}} = session,
+        request_id,
+        :inventory,
+        :cancelled
+      ),
+      do: {:ok, %{session | application_quit: {:responding, request_id, :inventory, :cancelled}}}
+
+  def prepare_application_quit_response(
         %__MODULE__{application_quit: {:saving, request_id}} = session,
         request_id,
         :save,

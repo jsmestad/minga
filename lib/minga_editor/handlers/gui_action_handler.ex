@@ -23,6 +23,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias Minga.LSP.Supervisor, as: LspSupervisor
   alias Minga.LSP.SyncServer, as: LspSyncServer
 
+  alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
   alias MingaEditor.CompletionHandling
@@ -574,12 +575,18 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     commit_from_gui(state, message, true)
   end
 
-  defp dispatch_action(state, {:workspace_close, _ws_id} = action) do
-    transitioned = handle_shell_gui_action(state, action)
+  defp dispatch_action(state, {:workspace_close, owner} = action) do
+    case DraftWorkflow.before_close(state, owner) do
+      {:ok, state} ->
+        transitioned = handle_shell_gui_action(state, action)
 
-    state
-    |> WorkspaceWorkflow.persist_changes(transitioned)
-    |> MingaEditor.TabWorkflow.sync_active_workspace_agent_ui()
+        state
+        |> WorkspaceWorkflow.persist_changes(transitioned)
+        |> MingaEditor.TabWorkflow.sync_active_workspace_agent_ui()
+
+      {:error, state} ->
+        state
+    end
   end
 
   defp dispatch_action(state, {:workspace_rename, _ws_id, _name} = action) do

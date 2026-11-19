@@ -105,4 +105,12 @@ A completed session snapshot is durable across a full application restart. The m
 
 An application restart does not make an admitted effect safe to replay. If the snapshot contains an unfinished admitted effect, recovery records its unknown outcome and requires reconciliation. Use the visible tool result and the external system's state to decide what to do next.
 
+### Recover unsent input
+
+In a locally saved Agent session, Minga autosaves your composer text, caret, and pasted blocks after edits. The draft is private presentation data, not part of the transcript or the next provider request until you send it.
+
+After restart, open the **Sessions** picker from the Agent workspace. Choose the original conversation, or choose **Unsent Agent draft** if you never sent a prompt in that session. The picker does not display the unsent text. Credential commands that may carry secrets are not autosaved; enter credentials through the masked setup controls instead.
+
+If you close the workspace or quit before autosave finishes, Minga cancels the close and keeps your text. After a temporary storage failure, the next edit or close attempt can retry the save. If the record changed elsewhere, Minga does not overwrite it. Copy any changes you need to keep before a force quit. Restart restores the last confirmed draft.
+
 For architecture ownership, see [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery). For the provider request contract, see [For AI Coders](FOR-AI-CODERS.md#provider-turns-keep-their-durable-continuation).

@@ -34,12 +34,14 @@ defmodule MingaEditor.Agent.UIState do
   @type t :: %__MODULE__{
           panel: Panel.t(),
           view: View.t(),
+          draft_save: MingaEditor.Agent.DraftSave.t() | nil,
           connection: ConnectionSnapshot.t() | nil,
           connection_prompt: ConnectionPrompt.t() | nil
         }
 
   defstruct panel: %Panel{},
             view: %View{},
+            draft_save: nil,
             connection: nil,
             connection_prompt: nil
 
@@ -61,6 +63,10 @@ defmodule MingaEditor.Agent.UIState do
     prompt = current_connection_prompt(state.connection_prompt, connection)
     %{state | connection: connection, panel: panel, connection_prompt: prompt}
   end
+
+  @doc "Installs acknowledgement metadata without changing the live prompt buffer."
+  @spec project_draft_save(t(), MingaEditor.Agent.DraftSave.t() | nil) :: t()
+  def project_draft_save(%__MODULE__{} = state, save), do: %{state | draft_save: save}
 
   @doc "Remembers the exact outstanding input operation without retaining the input."
   @spec offer_connection_prompt(t(), ConnectionPrompt.t()) :: t()
@@ -143,6 +149,17 @@ defmodule MingaEditor.Agent.UIState do
   @spec reset_paste_metadata(t()) :: t()
   def reset_paste_metadata(%__MODULE__{panel: panel} = state) do
     %{state | panel: %{panel | pasted_blocks: []}}
+  end
+
+  @doc "Installs paste metadata for the restored prompt's placeholder positions."
+  @spec restore_prompt_pastes(t(), [MingaAgent.DraftSnapshot.paste_block()]) :: t()
+  def restore_prompt_pastes(%__MODULE__{panel: panel} = state, saved) do
+    blocks = Enum.map(saved, fn {text, expanded?} -> %{text: text, expanded: expanded?} end)
+
+    %{
+      state
+      | panel: Panel.follow_prompt_cursor(%{panel | history_index: -1, pasted_blocks: blocks})
+    }
   end
 
   @doc "Records a submitted prompt in newest-first history order."

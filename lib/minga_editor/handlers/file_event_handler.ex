@@ -187,6 +187,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           {EditorState.t(), [file_effect()]}
   defp handle_buffer_changed(state, %Minga.Events.BufferChangedEvent{buffer: buffer} = event) do
     state = GuiSearchWorkflow.buffer_changed(state, event)
+    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
     state = %{state | lsp: LSPState.clear_semantic_tokens(state.lsp, buffer)}
 
     if FileTreeFreshness.buffer_under_tree?(state, buffer) do

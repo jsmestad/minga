@@ -78,12 +78,17 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
       assert {:error, :enoent} = SessionStore.load(data.id, dir)
       assert SessionStore.list(dir) == []
+      assert {:ok, :draft_only} = SessionStore.load_recoverable(data.id, dir)
+      record_id = data.id
+      assert [{:draft_only, ^record_id, timestamp}] = SessionStore.list_recoverable(dir)
+      assert {:ok, _time, 0} = DateTime.from_iso8601(timestamp)
 
       assert :ok = SessionStore.save(data, dir)
       assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
       assert {:ok, saved} = SessionStore.load(data.id, dir)
       assert saved.messages == data.messages
       assert saved.message_ids == data.message_ids
+      assert [{:conversation, %{id: ^record_id}}] = SessionStore.list_recoverable(dir)
     end
 
     test "conversation and draft writes preserve each other and reject conflicting retries", %{
