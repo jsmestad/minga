@@ -176,9 +176,11 @@ final class RecoveryManager {
     /// The failure stays latched until AppDelegate installs a replacement connection.
     func presentTransportFailure(
         message: String,
-        restartAction: (@MainActor () -> Void)?
+        restartAction: (@MainActor () -> Void)?,
+        quitAction: (@MainActor () -> Void)? = nil
     ) {
         guard !isShowingTransportFailure else { return }
+        let quit = quitAction ?? self.quitAction
         transportFailureMessage = message
         isShowingAlert = true
         isShowingTransportFailure = true
@@ -196,10 +198,10 @@ final class RecoveryManager {
                 if let restartAction {
                     restartAction()
                 } else {
-                    self.quitAction()
+                    quit()
                 }
             case .quit:
-                self.quitAction()
+                quit()
             }
         }
     }
@@ -283,6 +285,6 @@ final class RecoveryManager {
     ) -> String {
         let unsavedWarning = "Unsaved changes may be lost. Only the latest autosave or swap can recover them."
         guard !canRestart else { return message + " " + unsavedWarning }
-        return message + " " + unsavedWarning + " Quit Minga, then relaunch it from your terminal."
+        return message + " " + unsavedWarning + " Quit Minga, then relaunch it."
     }
 }

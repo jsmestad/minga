@@ -72,6 +72,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- macOS loads bundled Metal shaders when the frontend executable is launched through a symlink. If startup fails or the first editor frame never arrives, Minga offers a Quit action instead of leaving the loading screen up indefinitely.
 - Returning to a local Agent tab reuses its conversation when no messages or pins changed. Status and approvals still refresh from the arriving session.
 - Agent tools reject arguments that violate their declared JSON Schema before constructing or invoking an executable callback, including non-SDK tools. Valid SDK input normalization and defaults remain available, and the schema validator now fails closed when a regular expression exceeds its match budget.
 - Invalid `/auth` and `/login` arguments no longer enter prompt history. Minga rejects indented credential commands before sending them and keeps invalid provider names and remote sign-in callback errors out of the transcript.

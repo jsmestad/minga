@@ -3,11 +3,20 @@ import Foundation
 /// Resolves process death, ordered protocol closure, and the application quit handshake for one connection.
 @MainActor
 final class EditorCoreLifecycle {
-    private enum State {
+    private enum State: Equatable {
         case connected
+        case awaitingFirstFrame
+        case startupTimedOut
         case awaitingProcessExit
+        case awaitingProcessExitDuringStartup(timedOut: Bool)
         case awaitingQuitConfirmation
         case terminated
+    }
+
+    enum FirstFrameDisposition {
+        case committed
+        case recovered
+        case ignored
     }
 
     private let quitCoordinator: ApplicationQuitCoordinator
@@ -17,6 +26,7 @@ final class EditorCoreLifecycle {
     private let presentCoreStopped: () -> Void
     private let terminateApplication: () -> Void
     private let closureTimeout: TimeInterval
+    private let startupTimeout: TimeInterval
     private var state = State.connected
     private var deadlineToken: UInt64?
     private var nextDeadlineToken: UInt64 = 0
@@ -25,6 +35,7 @@ final class EditorCoreLifecycle {
         quitCoordinator: ApplicationQuitCoordinator,
         processManager: BEAMProcessManager?,
         closureTimeout: TimeInterval = 2,
+        startupTimeout: TimeInterval = 20,
         retireConnection: @escaping () -> Void,
         presentTransportFailure: @escaping (String) -> Void,
         presentCoreStopped: @escaping () -> Void,
@@ -33,10 +44,58 @@ final class EditorCoreLifecycle {
         self.quitCoordinator = quitCoordinator
         self.processManager = processManager
         self.closureTimeout = closureTimeout
+        self.startupTimeout = startupTimeout
         self.retireConnection = retireConnection
         self.presentTransportFailure = presentTransportFailure
         self.presentCoreStopped = presentCoreStopped
         self.terminateApplication = terminateApplication
+    }
+
+    var isAwaitingFirstFrame: Bool { state == .awaitingFirstFrame }
+    var startupHasTimedOut: Bool {
+        state == .startupTimedOut || state == .awaitingProcessExitDuringStartup(timedOut: true)
+    }
+
+    private var isStarting: Bool {
+        switch state {
+        case .awaitingFirstFrame, .startupTimedOut, .awaitingProcessExitDuringStartup:
+            return true
+        case .connected, .awaitingProcessExit, .awaitingQuitConfirmation, .terminated:
+            return false
+        }
+    }
+
+    /// Keeps the startup wait bounded even if the peer leaves both pipes open.
+    func waitForFirstFrame(onTimeout: @escaping @MainActor @Sendable () -> Void) {
+        guard state == .connected else { return }
+        state = .awaitingFirstFrame
+        scheduleDeadline(after: startupTimeout) { lifecycle in
+            lifecycle.state = .startupTimedOut
+            lifecycle.quitCoordinator.startupDidFail()
+            onTimeout()
+        }
+    }
+
+    /// Does not complete startup when a transport failure has already won the race.
+    func firstFrameDidCommit() -> FirstFrameDisposition {
+        switch state {
+        case .awaitingFirstFrame, .startupTimedOut:
+            let recovered = startupHasTimedOut
+            deadlineToken = nil
+            state = .connected
+            quitCoordinator.startupDidFinish()
+            return recovered ? .recovered : .committed
+        case .connected, .awaitingProcessExit, .awaitingProcessExitDuringStartup, .awaitingQuitConfirmation, .terminated:
+            return .ignored
+        }
+    }
+
+    /// Retires the connection only after the user chooses to quit.
+    func abandonTimedOutStartup() -> Bool {
+        guard startupHasTimedOut else { return false }
+        stop()
+        retireConnection()
+        return true
     }
 
     /// Drains a final response even when the independent process callback arrived first.
@@ -49,9 +108,8 @@ final class EditorCoreLifecycle {
 
     /// Stops neither final reader delivery nor a pending quit when a writer fails before EOF.
     func transportDidFail(message: String) {
-        guard state == .connected || state == .awaitingProcessExit else { return }
-        state = .awaitingProcessExit
-        awaitCoreTermination(message: message)
+        guard state != .terminated, state != .awaitingQuitConfirmation else { return }
+        waitForProcessExit(message: message)
     }
 
     /// EOF follows final response delivery. Bundle mode also waits for owned process death; dev mode has no separate process observer.
@@ -60,8 +118,9 @@ final class EditorCoreLifecycle {
         if let disposition = quitCoordinator.transportDidDisconnect() {
             finishCoreTermination(disposition)
         } else if processManager != nil {
-            state = .awaitingProcessExit
-            awaitCoreTermination(message: "The editor core connection closed unexpectedly.")
+            waitForProcessExit(message: "The editor core connection closed unexpectedly.")
+        } else if isStarting {
+            failStartup(message: "The editor core connection closed before the first frame.")
         } else {
             let disposition = quitCoordinator.coreDidExit()
             finishCoreTermination(disposition)
@@ -69,9 +128,13 @@ final class EditorCoreLifecycle {
         }
     }
 
-    /// Claims pending application quits before the process manager applies its automatic restart policy.
+    /// Claims startup failures and pending quits before the process manager applies its restart policy.
     func coreDidExit() -> Bool {
         guard state != .terminated else { return false }
+        if isStarting {
+            failStartup(message: "The editor core exited before the first frame.")
+            return true
+        }
         deadlineToken = nil
         let disposition = quitCoordinator.coreDidExit()
         if disposition == .awaitingConfirmation {
@@ -114,25 +177,50 @@ final class EditorCoreLifecycle {
         }
     }
 
+    private func waitForProcessExit(message: String) {
+        if state == .awaitingFirstFrame { deadlineToken = nil }
+        state = isStarting ? .awaitingProcessExitDuringStartup(timedOut: startupHasTimedOut) : .awaitingProcessExit
+        awaitCoreTermination(message: message)
+    }
+
+    private func failStartup(message: String) {
+        quitCoordinator.startupDidFail()
+        processManager?.beginAppShutdown()
+        stop()
+        retireConnection()
+        presentTransportFailure(message)
+    }
+
     private func awaitCoreTermination(message: String) {
+        scheduleDeadline(after: closureTimeout) { lifecycle in
+            if lifecycle.state == .awaitingQuitConfirmation,
+               let disposition = lifecycle.quitCoordinator.transportDidDisconnect() {
+                lifecycle.finishCoreTermination(disposition)
+            } else if lifecycle.isStarting {
+                lifecycle.failStartup(message: message)
+            } else {
+                lifecycle.quitCoordinator.transportRecoveryDidExpire()
+                lifecycle.stop()
+                lifecycle.retireConnection()
+                lifecycle.presentTransportFailure(message)
+            }
+        }
+    }
+
+    private func scheduleDeadline(
+        after timeout: TimeInterval,
+        action: @escaping @MainActor @Sendable (EditorCoreLifecycle) -> Void
+    ) {
         guard deadlineToken == nil else { return }
         nextDeadlineToken &+= 1
         let token = nextDeadlineToken
         deadlineToken = token
         // Main-actor Tasks are not guaranteed to run in terminateLater's modal loop. Use the same native delivery path as protocol and process callbacks.
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + closureTimeout) { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) { [weak self] in
             MainRunLoopAction {
                 guard let self, self.deadlineToken == token else { return }
                 self.deadlineToken = nil
-                if self.state == .awaitingQuitConfirmation,
-                   let disposition = self.quitCoordinator.transportDidDisconnect() {
-                    self.finishCoreTermination(disposition)
-                } else {
-                    self.quitCoordinator.transportRecoveryDidExpire()
-                    self.stop()
-                    self.retireConnection()
-                    self.presentTransportFailure(message)
-                }
+                action(self)
             }.enqueue()
         }
     }

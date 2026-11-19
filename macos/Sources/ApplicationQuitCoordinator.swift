@@ -12,11 +12,12 @@ enum ApplicationQuitDecision: UInt8, Sendable {
 enum ApplicationTerminationPolicy {
     static func reply(
         coreIsLive: Bool,
+        waitingForFirstFrame: Bool = false,
         coordinator: ApplicationQuitCoordinator?
     ) -> NSApplication.TerminateReply {
         guard coreIsLive else { return .terminateNow }
         guard let coordinator else { return .terminateCancel }
-        return coordinator.begin() == .pending ? .terminateLater : .terminateCancel
+        return coordinator.begin(waitingForFirstFrame: waitingForFirstFrame) == .pending ? .terminateLater : .terminateCancel
     }
 }
 
@@ -30,6 +31,7 @@ final class ApplicationQuitCoordinator {
 
     enum State: Equatable {
         case idle
+        case awaitingStartup
         case awaitingResponse(requestID: UInt32, connectionID: UInt64)
         case awaitingDecision(requestID: UInt32, connectionID: UInt64)
         case proceeding(requestID: UInt32, connectionID: UInt64)
@@ -79,15 +81,29 @@ final class ApplicationQuitCoordinator {
     }
 
     /// Begins one request or reuses the request already pending with AppKit.
-    func begin() -> BeginDisposition {
+    func begin(waitingForFirstFrame: Bool = false) -> BeginDisposition {
         guard state == .idle else { return .pending }
+        if waitingForFirstFrame {
+            state = .awaitingStartup
+            return .pending
+        }
+        return sendQuitRequest(appKitIsWaiting: false)
+    }
 
+    /// The BEAM must not retain a quit request that startup recovery can cancel locally.
+    func startupDidFinish() {
+        guard state == .awaitingStartup else { return }
+        _ = sendQuitRequest(appKitIsWaiting: true)
+    }
+
+    private func sendQuitRequest(appKitIsWaiting: Bool) -> BeginDisposition {
         let requestID = allocateRequestID()
         let requestConnectionID = connectionID
         state = .awaitingResponse(requestID: requestID, connectionID: requestConnectionID)
 
         guard sendRequest(requestID) else {
             state = .idle
+            if appKitIsWaiting { replyToAppKit(false) }
             presentFailure("Minga could not contact the editor core. Quit was cancelled.")
             restoreFocus()
             return .rejected
@@ -149,6 +165,10 @@ final class ApplicationQuitCoordinator {
     func coreDidExit() -> CoreExitDisposition {
         coreExited = true
         switch state {
+        case .awaitingStartup:
+            cancelDeferredQuit()
+            return .cancelledTermination
+
         case .proceeding(_, let expectedConnectionID) where expectedConnectionID == connectionID:
             state = .idle
             replyToAppKit(true)
@@ -177,6 +197,9 @@ final class ApplicationQuitCoordinator {
         let previousState = state
 
         switch previousState {
+        case .awaitingStartup:
+            cancelDeferredQuit()
+
         case .awaitingResponse(let requestID, let oldConnectionID),
              .awaitingDecision(let requestID, let oldConnectionID):
             cancel(
@@ -210,6 +233,8 @@ final class ApplicationQuitCoordinator {
     /// Ends a bounded wait when a broken transport does not produce a confirmed quit.
     func transportRecoveryDidExpire() {
         switch state {
+        case .awaitingStartup:
+            cancelDeferredQuit()
         case .awaitingResponse(let requestID, let expectedConnectionID),
              .awaitingDecision(let requestID, let expectedConnectionID),
              .proceeding(let requestID, let expectedConnectionID):
@@ -221,6 +246,18 @@ final class ApplicationQuitCoordinator {
         case .idle:
             break
         }
+    }
+
+    /// Releases AppKit without leaving a pending request on the BEAM.
+    func startupDidFail() {
+        guard state == .awaitingStartup else { return }
+        cancelDeferredQuit()
+    }
+
+    private func cancelDeferredQuit() {
+        state = .idle
+        replyToAppKit(false)
+        restoreFocus()
     }
 
     private func resolveDecision(
@@ -252,7 +289,7 @@ final class ApplicationQuitCoordinator {
             return activeRequestID == requestID
                 && activeConnectionID == expectedConnectionID
                 && connectionID == expectedConnectionID
-        case .idle:
+        case .idle, .awaitingStartup:
             return false
         }
     }

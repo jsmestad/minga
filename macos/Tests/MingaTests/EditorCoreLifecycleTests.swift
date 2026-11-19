@@ -6,6 +6,83 @@ import Testing
 @Suite("Editor core lifecycle", .serialized)
 @MainActor
 struct EditorCoreLifecycleTests {
+    @Test("a silent startup releases pending AppKit quit without closing the connection until the user acts")
+    func silentStartupWithPendingQuit() {
+        let fixture = Fixture(managed: false)
+        fixture.lifecycle.waitForFirstFrame { fixture.events.startupTimeouts += 1 }
+        #expect(ApplicationTerminationPolicy.reply(coreIsLive: true, waitingForFirstFrame: true, coordinator: fixture.quit) == .terminateLater)
+        runLifecycleModalLoop(until: { fixture.events.startupTimeouts == 1 })
+
+        #expect(fixture.events.startupTimeouts == 1)
+        #expect(fixture.events.quitRequests.isEmpty)
+        #expect(fixture.events.replies == [false])
+        #expect(fixture.events.retirements == 0)
+        #expect(fixture.events.failures.isEmpty)
+        #expect(fixture.lifecycle.abandonTimedOutStartup())
+        #expect(!fixture.lifecycle.abandonTimedOutStartup())
+        #expect(fixture.events.retirements == 1)
+    }
+
+    @Test("a first frame leaves the normal quit handshake in charge, even if the startup alert was shown", arguments: [false, true])
+    func startupFrameBeforeOrAfterDeadline(late: Bool) {
+        let fixture = Fixture(managed: false)
+        fixture.lifecycle.waitForFirstFrame { fixture.events.startupTimeouts += 1 }
+        #expect(ApplicationTerminationPolicy.reply(coreIsLive: true, waitingForFirstFrame: true, coordinator: fixture.quit) == .terminateLater)
+        #expect(fixture.events.quitRequests.isEmpty)
+        if late { runLifecycleModalLoop(until: { fixture.events.startupTimeouts == 1 }) }
+
+        #expect(fixture.lifecycle.firstFrameDidCommit() == (late ? .recovered : .committed))
+        waitPastDeadline()
+        #expect(fixture.events.startupTimeouts == (late ? 1 : 0))
+        #expect(!fixture.lifecycle.abandonTimedOutStartup())
+        if late {
+            #expect(fixture.events.replies == [false])
+            #expect(fixture.events.quitRequests.isEmpty)
+            #expect(fixture.quit.begin() == .pending)
+        }
+        #expect(fixture.events.quitRequests == [1])
+        fixture.lifecycle.receive(ApplicationQuitResponse(requestID: 1, outcome: .needsDecision, dirtyCount: 1, bufferName: "", detail: ""))
+        #expect(fixture.events.dirtyCounts == [1])
+        fixture.events.resolveQuitDecision?(.save)
+        #expect(fixture.events.quitDecisions == [.save])
+        fixture.lifecycle.receive(approval)
+        fixture.lifecycle.readerDidClose()
+        #expect(fixture.events.replies == (late ? [false, true] : [true]))
+    }
+
+    @Test("a broken startup transport reports its cause instead of the first-frame timeout")
+    func startupTransportFailure() {
+        let fixture = Fixture(managed: true)
+        fixture.lifecycle.waitForFirstFrame { fixture.events.startupTimeouts += 1 }
+        fixture.lifecycle.transportDidFail(message: "startup pipe broke")
+        #expect(fixture.lifecycle.firstFrameDidCommit() == .ignored)
+        runLifecycleModalLoop(until: { !fixture.events.failures.isEmpty })
+        waitPastDeadline()
+
+        #expect(fixture.events.failures == ["startup pipe broke"])
+        #expect(fixture.events.startupTimeouts == 0)
+        #expect(fixture.events.retirements == 1)
+        #expect(fixture.manager?.isShuttingDown == true)
+    }
+
+    @Test("a pipe failure does not invalidate the visible startup Quit action", arguments: [false, true])
+    func quitWhileTimedOutTransportIsClosing(readerClosed: Bool) {
+        let fixture = Fixture(managed: true)
+        fixture.lifecycle.waitForFirstFrame { fixture.events.startupTimeouts += 1 }
+        runLifecycleModalLoop(until: { fixture.events.startupTimeouts == 1 })
+
+        if readerClosed {
+            fixture.lifecycle.readerDidClose()
+        } else {
+            fixture.lifecycle.transportDidFail(message: "startup pipe broke")
+        }
+        #expect(fixture.lifecycle.abandonTimedOutStartup())
+        waitPastDeadline()
+
+        #expect(fixture.events.retirements == 1)
+        #expect(fixture.events.failures.isEmpty)
+    }
+
     @Test("dev writer failure waits for ordered approval and EOF without recovery")
     func devWriterFailureBeforeEOF() {
         let fixture = Fixture(managed: false)
@@ -32,6 +109,34 @@ struct EditorCoreLifecycleTests {
         #expect(fixture.events.terminations == 1)
         #expect(fixture.events.replies.isEmpty)
         #expect(fixture.events.failures.isEmpty)
+    }
+
+    @Test("a dev pipe that closes before the first frame offers native recovery")
+    func devEOFBeforeFirstFrame() {
+        let fixture = Fixture(managed: false)
+        fixture.lifecycle.waitForFirstFrame { fixture.events.startupTimeouts += 1 }
+        #expect(fixture.quit.begin(waitingForFirstFrame: true) == .pending)
+        fixture.lifecycle.readerDidClose()
+        waitPastDeadline()
+
+        #expect(fixture.events.replies == [false])
+        #expect(fixture.events.failures == ["The editor core connection closed before the first frame."])
+        #expect(fixture.events.startupTimeouts == 0)
+        #expect(fixture.events.terminations == 0)
+    }
+
+    @Test("bundle startup exit is reported rather than entering the automatic crash restart loop")
+    func managedExitBeforeFirstFrame() throws {
+        let fixture = Fixture(managed: true)
+        let manager = try #require(fixture.manager)
+        manager.onTermination = { _ in fixture.lifecycle.coreDidExit() }
+        fixture.lifecycle.waitForFirstFrame { fixture.events.startupTimeouts += 1 }
+        manager.handleTermination(status: 1, reason: .exit)
+        waitPastDeadline()
+
+        #expect(fixture.events.failures == ["The editor core exited before the first frame."])
+        #expect(fixture.events.startupTimeouts == 0)
+        #expect(manager.exitIntent != .restartScheduled)
     }
 
     @Test("managed core-initiated clean quit uses normal exit without a native handshake")
@@ -181,6 +286,11 @@ struct EditorCoreLifecycleTests {
         var retirements = 0
         var terminations = 0
         var coreStops = 0
+        var startupTimeouts = 0
+        var quitRequests: [UInt32] = []
+        var dirtyCounts: [UInt16] = []
+        var quitDecisions: [ApplicationQuitDecision] = []
+        var resolveQuitDecision: ((ApplicationQuitDecision) -> Void)?
     }
 
     @MainActor
@@ -193,9 +303,19 @@ struct EditorCoreLifecycleTests {
         init(managed: Bool) {
             let events = Observations()
             let quit = ApplicationQuitCoordinator(
-                sendRequest: { _ in true },
-                sendDecision: { _, _ in true },
-                presentDecision: { _, _ in Issue.record("Unexpected quit chooser") },
+                sendRequest: { requestID in
+                    events.quitRequests.append(requestID)
+                    return true
+                },
+                sendDecision: { requestID, decision in
+                    #expect(requestID == events.quitRequests.last)
+                    events.quitDecisions.append(decision)
+                    return true
+                },
+                presentDecision: { dirtyCount, resolve in
+                    events.dirtyCounts.append(dirtyCount)
+                    events.resolveQuitDecision = resolve
+                },
                 replyToAppKit: { events.replies.append($0) },
                 presentFailure: { _ in },
                 restoreFocus: {}
@@ -208,6 +328,7 @@ struct EditorCoreLifecycleTests {
                 quitCoordinator: quit,
                 processManager: manager,
                 closureTimeout: 0.01,
+                startupTimeout: 0.01,
                 retireConnection: { events.retirements += 1 },
                 presentTransportFailure: { events.failures.append($0) },
                 presentCoreStopped: { events.coreStops += 1 },

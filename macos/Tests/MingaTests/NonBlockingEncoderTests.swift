@@ -597,6 +597,24 @@ struct NonBlockingEncoderTests {
 
 @Suite("ProtocolReader")
 struct ProtocolReaderTests {
+    @Test("a closed read descriptor disconnects without throwing an Objective-C exception")
+    func closedDescriptorDisconnects() throws {
+        let pipe = Pipe()
+        let handle = pipe.fileHandleForReading
+        try handle.close()
+        defer { pipe.fileHandleForWriting.closeFile() }
+        let disconnected = DispatchSemaphore(value: 0)
+        let reader = ProtocolReader(
+            input: handle,
+            handler: { _ in Issue.record("A closed descriptor delivered a frame") },
+            onDecodeFailure: { _ in Issue.record("A closed descriptor delivered a decode failure") },
+            onDisconnect: { disconnected.signal() }
+        )
+
+        reader.start()
+        #expect(disconnected.wait(timeout: .now() + 2) == .success)
+    }
+
     @Test("rejects an oversized packet before reading or decoding its payload")
     func rejectsOversizedPacketBeforeDecode() throws {
         let stream = Data([0, 0, 0, 9])
