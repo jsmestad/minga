@@ -869,6 +869,24 @@ func DecodeGuiAgentChatHeader(data []byte, offset int, windowEnd int) (GuiAgentC
 	}, pos, nil
 }
 
+func DecodeGuiAgentChatDraftAttachments(data []byte, offset int, windowEnd int) (GuiAgentChatDraftAttachments, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "count"); err != nil {
+		return GuiAgentChatDraftAttachments{}, offset, err
+	}
+	countVal := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+8, "offer"); err != nil {
+		return GuiAgentChatDraftAttachments{}, offset, err
+	}
+	offer := decodeU64(data, pos)
+	pos += 8
+	return GuiAgentChatDraftAttachments{
+		Count: countVal,
+		Offer: offer,
+	}, pos, nil
+}
+
 // Section decoders for gui_gutter
 
 func DecodeGuiGutterWindow(data []byte, offset int, windowEnd int) (GuiGutterWindow, int, error) {

@@ -607,6 +607,11 @@ type GuiAgentChatHeader struct {
 	Status  uint8
 }
 
+type GuiAgentChatDraftAttachments struct {
+	Count uint8
+	Offer uint64
+}
+
 type GuiPickerPreviewHeader struct {
 	Visible uint8
 	Kind    uint8

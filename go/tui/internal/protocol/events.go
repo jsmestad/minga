@@ -1,6 +1,10 @@
 package protocol
 
-import "github.com/jsmestad/minga/go/tui/internal/generated"
+import (
+	"encoding/binary"
+
+	"github.com/jsmestad/minga/go/tui/internal/generated"
+)
 
 const (
 	ModShift byte = 0x01
@@ -161,6 +165,17 @@ func EncodeKeyPress(codepoint rune, modifiers byte, seq uint32) []byte {
 	}
 }
 
+// EncodeComposerKeyPress keeps the physical key and echoes its displayed composer offer.
+func EncodeComposerKeyPress(codepoint rune, modifiers byte, seq uint32, offer uint64) []byte {
+	var packet [18]byte
+	packet[0] = generated.OPKeyPress
+	binary.BigEndian.PutUint32(packet[1:], uint32(codepoint))
+	packet[5] = modifiers
+	binary.BigEndian.PutUint32(packet[6:], seq)
+	binary.BigEndian.PutUint64(packet[10:], offer)
+	return packet[:]
+}
+
 func EncodeMouseEvent(row, col int16, button, mods, eventType, clickCount byte) []byte {
 	return []byte{
 		generated.OPMouseEvent,
@@ -254,6 +269,12 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	}
 	out := []byte{generated.OPGuiAction, generated.GUIActionExecuteCommand, byte(len(payload) >> 8), byte(len(payload))}
 	return append(out, payload...)
+}
+
+func EncodeGUIAgentComposerSubmit(offer uint64) []byte {
+	packet := [10]byte{generated.OPGuiAction, generated.GUIActionAgentComposerSubmit}
+	binary.BigEndian.PutUint64(packet[2:], offer)
+	return packet[:]
 }
 
 func EncodeGUIAgentToolToggle(messageID uint32) []byte {

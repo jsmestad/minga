@@ -1235,7 +1235,7 @@ final class SpyEncoder: OutboundActionEncoding, Sendable {
                 $0.logCalls.append(Log(level: level, message: message))
             case .paste(let text):
                 $0.pasteCalls.append(Paste(text: text))
-            case .keyPress(let codepoint, let modifiers, _):
+            case .keyPress(let codepoint, let modifiers, _, _):
                 $0.keyPressCalls.append(KeyPress(codepoint: codepoint, modifiers: modifiers))
             case .pickerQueryChanged(let generation, let editSequence, let text):
                 $0.pickerQueryCalls.append(PickerQuery(generation: generation, editSeq: editSequence, text: text))

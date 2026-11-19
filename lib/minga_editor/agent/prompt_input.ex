@@ -10,9 +10,17 @@ defmodule MingaEditor.Agent.PromptInput do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State
+  alias MingaEditor.State.Frontend
   alias MingaEditor.WindowFocus
 
   @type state :: State.t()
+
+  @doc "Supplies one input's displayed composer offer to the existing command path."
+  @spec with_offer(state(), pos_integer(), (state() -> state())) :: state()
+  def with_offer(state, offer, dispatch) do
+    next = dispatch.(%{state | frontend: Frontend.composer_input(state.frontend, offer)})
+    %{next | frontend: Frontend.composer_input(next.frontend, nil)}
+  end
 
   @spec fit(state(), pos_integer(), pos_integer(), pos_integer(), pos_integer()) :: state()
   def fit(state, window_id, generation, columns, rows)

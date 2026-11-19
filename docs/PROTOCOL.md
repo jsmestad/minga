@@ -100,7 +100,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
-| `0x01` | key_press | 10 | A key was pressed with an input correlation sequence |
+| `0x01` | key_press | 10 or 18 | A key was pressed with an input correlation sequence and optional composer offer |
 | `0x02` | resize | 5 | Frontend content grid changed size |
 | `0x03` | ready | 29 | Frontend is initialized and ready (capability format 2 plus exact protocol version) |
 | `0x04` | mouse_event | 9 | Legacy non-text pointer events and wheel input |
@@ -334,9 +334,10 @@ opcode:    u8  = 0x01
 codepoint: u32           Unicode codepoint of the key
 modifiers: u8            modifier flags (see below)
 seq:       u32           input correlation sequence echoed on commit_frame
+offer:     u64 optional  nonzero offer from the committed Agent composer
 ```
 
-Total size: 10 bytes.
+Total size: 10 bytes, or 18 bytes with the optional offer. A key routed to Agent submission uses the offer to verify the displayed attachment set without changing keyboard routing.
 
 **Codepoint values:** Standard Unicode codepoints for printable characters. For special keys, use the codepoint values defined by the frontend's input library (e.g., libvaxis uses values above the Unicode range for function keys, arrows, etc.). The BEAM's key handling maps these to editor actions.
 

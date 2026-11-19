@@ -495,6 +495,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x07 | Completion | prompt completion popup state |
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 | 0x09 | InputFocused | `input_focused(1)` |
+| 0x0A | DraftAttachments | `count(1) + offer(8)`. The offer is opaque and binds the exact composer and attachment set, including an empty set. Absence means no offer and zero attachments. |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
 
@@ -1282,6 +1283,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x68 | agent_tool_approval | session_id(string16) + request_id(string16) + tool_call_id(string16) + decision(1) | Resolve only the displayed session's admitted request and pending tool call |
 | 0x69 | scroll_to_visual_rank | window_id(2) + presentation_id(8) + rank(4) | Scroll the named wrapped resident pane to a visual row without moving its cursor or focus. The BEAM ignores stale presentations. |
 | 0x6A | agent_read_retained_output | message_id(4) + retained_output_offer(16) | Read the capture offered by this tool occurrence. Echo the opaque offer from its committed message. Unrelated transcript updates leave the offer valid. A changed result, workspace, or conversation makes it stale. |
+| 0x6B | agent_composer_submit | offer(8) | Submit using the exact composer offer displayed with the Send button. A changed offer leaves the draft untouched. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

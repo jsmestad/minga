@@ -2016,6 +2016,7 @@ final class EditorNSView: MTKView {
         addEditorMenuItem("Copy", action: "copy", connectionGeneration: connectionGeneration, to: menu)
         addEditorMenuItem("Paste", action: "paste", connectionGeneration: connectionGeneration, to: menu)
         addEditorMenuItem("Select All", action: "select_all", connectionGeneration: connectionGeneration, to: menu)
+        addEditorMenuItem("Attach Selection to Agent Draft", action: "agent_attach_selection", connectionGeneration: connectionGeneration, to: menu)
         menu.addItem(.separator())
 
         let hasLsp = statusBarState?.hasLsp ?? false
@@ -3331,7 +3332,8 @@ final class EditorNSView: MTKView {
         dispatcher.previewFileTreeNavigation(codepoint: codepoint, modifiers: modifiers)
         recoveryManager?.onKeySent()
         let seq = dispatcher.latency.stamp()
-        encoder.send(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: seq))
+        let composerOffer = codepoint == 13 || codepoint == 102 ? dispatcher.guiState.agentChatState.draftAttachmentOffer : 0
+        encoder.send(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: seq, composerOffer: composerOffer))
     }
 
     /// Clears stale local text-input prediction when the authoritative BEAM mode changes.

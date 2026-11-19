@@ -46,7 +46,7 @@ public enum AgentApprovalDecision: Equatable, Sendable {
 /// exhaustively chooses the wire encoding for every case.
 public enum OutboundAction: Equatable, Sendable {
     case ready(cols: UInt16, rows: UInt16)
-    case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
+    case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32, composerOffer: UInt64 = 0)
     case resize(cols: UInt16, rows: UInt16)
     case requestKeyframe(lastGoodFrameSequence: UInt32, generation: UInt32)
     case frameApplied(generation: UInt32, frameSequence: UInt32)
@@ -104,6 +104,7 @@ public enum OutboundAction: Equatable, Sendable {
     case agentToolApproval(sessionId: String, requestId: String, toolCallId: String, decision: AgentApprovalDecision)
     case agentToolToggle(messageID: UInt32)
     case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
+    case agentComposerSubmit(offer: UInt64)
     case executeCommand(name: String)
     case openFile(path: String)
     case gitStageFile(path: String)

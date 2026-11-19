@@ -24,6 +24,7 @@ public enum FrontendActionComposition {
         case .executeCommand(let name): .executeCommand(name: name)
         case .agentToolToggle(let messageID): .agentToolToggle(messageID: messageID)
         case .agentReadRetainedOutput(let messageID, let offer): .agentReadRetainedOutput(messageID: messageID, offer: offer)
+        case .composerSubmit(let offer): .agentComposerSubmit(offer: offer)
         case .chatScrolledAwayFromBottom: .chatScrolledAwayFromBottom
         case .chatReturnedToBottom: .chatReturnedToBottom
         }

@@ -69,6 +69,14 @@ A failed checkpoint or result save blocks further model execution. Minga preserv
 
 Managed Session restart also waits for the prior provider and every registered effect worker to exit. A new generation cannot overlap an effect from the previous generation. Stopping or exhausting restart attempts keeps the session ID reserved until the Session, provider, and workers are down. The ownership and generation contract is described in [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery).
 
+## Keep a selected excerpt with an unsent draft
+
+Open a local Agent workspace, then select text in a file. In Vim Visual mode, press `A` and choose the destination Agent workspace. On macOS, you can also choose **Attach Selection to Agent Draft** from the editor context menu.
+
+In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a j` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
+
+An unsent selection stays with its original local conversation after restart. Sending an attached prompt saves the exact displayed selection with the accepted request and clears the unsent draft. If the selection changed, the route cannot accept it, or an active turn prevents sending, Minga keeps the draft and explains what to do before retrying.
+
 ## Retained tool output
 
 Tool results keep two separate facts: a bounded model-visible `view` and, when admitted, a record-scoped reference to the exact captured bytes. A complete capture, a requested range, presentation truncation, and an incomplete capture are distinct states. A visible truncation does not mean retained bytes were discarded, while an incomplete capture never claims that omitted bytes exist.

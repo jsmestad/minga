@@ -197,6 +197,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @typedoc "An input event decoded from a frontend."
   @type input_event ::
           {:key_press, codepoint :: non_neg_integer(), modifiers(), input_seq()}
+          | {:key_press, codepoint :: non_neg_integer(), modifiers(), input_seq(), pos_integer()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t(),
              protocol_version :: non_neg_integer()}
@@ -582,6 +583,11 @@ defmodule MingaEditor.Frontend.Protocol do
   @spec decode_event(binary()) :: {:ok, input_event()} | {:error, :unknown_opcode | :malformed}
   def decode_event(<<@op_key_press, codepoint::32, modifiers::8, seq::32>>) do
     {:ok, {:key_press, codepoint, modifiers, seq}}
+  end
+
+  def decode_event(<<@op_key_press, codepoint::32, modifiers::8, seq::32, offer::64>>)
+      when offer > 0 do
+    {:ok, {:key_press, codepoint, modifiers, seq, offer}}
   end
 
   def decode_event(<<@op_resize, width::16, height::16>>) do

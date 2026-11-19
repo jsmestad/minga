@@ -29,6 +29,7 @@ defmodule MingaEditor.State.Frontend do
           resource_pressure: ResourcePressure.t(),
           native_presentation: NativePresentationObservation.t() | nil,
           last_input_seq: non_neg_integer(),
+          composer_input_offer: pos_integer() | nil,
           file_dialog: file_dialog_request(),
           next_file_dialog_request_id: file_dialog_request_id()
         }
@@ -41,6 +42,7 @@ defmodule MingaEditor.State.Frontend do
             resource_pressure: ResourcePressure.new(),
             native_presentation: nil,
             last_input_seq: 0,
+            composer_input_offer: nil,
             file_dialog: :idle,
             next_file_dialog_request_id: 1
 
@@ -75,6 +77,11 @@ defmodule MingaEditor.State.Frontend do
   @spec resize_terminal(t(), Viewport.t()) :: t()
   def resize_terminal(%__MODULE__{} = frontend, %Viewport{} = viewport),
     do: %{frontend | terminal_viewport: viewport}
+
+  @doc "Scopes a committed composer offer to one dispatched input."
+  @spec composer_input(t(), pos_integer() | nil) :: t()
+  def composer_input(%__MODULE__{} = frontend, offer),
+    do: %{frontend | composer_input_offer: offer}
 
   @doc "Records the frontend's current resource-pressure report."
   @spec report_resource_pressure(t(), boolean(), ResourcePressure.thermal_state()) :: t()
