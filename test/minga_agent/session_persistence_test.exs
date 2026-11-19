@@ -112,6 +112,30 @@ defmodule MingaAgent.SessionPersistenceTest do
     end
 
     @tag :tmp_dir
+    test "targeted restore rejects the old conversation after an in-process reset", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      old = Session.session_id(session)
+      assert :ok = Session.new_session(session)
+      current = Session.session_id(session)
+      refute current == old
+
+      assert {:error, :stale_session} = Session.load_session(session, "saved-record", old)
+
+      assert {:error, :stale_session} =
+               Session.import_legacy_session(session, "saved-record", old)
+
+      assert Session.session_id(session) == current
+    end
+
+    @tag :tmp_dir
     test "load_session replaces messages", %{tmp_dir: dir} do
       session =
         start_test_session(

@@ -87,7 +87,7 @@ defmodule Minga.Test.StubServer do
     {:reply, snapshot, state}
   end
 
-  def handle_call({:load_session, session_id}, _from, state) do
+  def handle_call({:load_session, session_id, nil}, _from, state) do
     case Map.get(state, :load_result, :ok) do
       :ok ->
         case Map.get(state, :notify) do
