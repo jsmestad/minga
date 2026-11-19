@@ -130,7 +130,8 @@ unless Version.new(older) < Version.new(newer) && Version.new(newer) < Version.n
 end
 if RUBY_PLATFORM.include?("darwin")
   require "cask/cask_loader"
-  cask = Cask::CaskLoader.load(Pathname(ARGV.fetch(0)))
+  # This local fixture checks the DSL, not Homebrew's public cask lookup policy.
+  cask = Cask::CaskLoader::FromPathLoader.new(Pathname(ARGV.fetch(0))).load(config: nil)
   abort "wrong Homebrew cask version" unless cask.version.to_s == newer
   macos = cask.depends_on.macos
   abort "wrong cask macOS floor" unless macos.comparator == ">=" && macos.version.to_s == "15"
