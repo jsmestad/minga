@@ -1241,6 +1241,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert MingaEditor.Agent.PromptBuffer.prompt_text(state_a.workspace.agent_ui) ==
                "keyboard draft"
 
+      {:links, links_before} = Process.info(self(), :links)
       state_b = MingaEditor.Commands.execute(state_a, :agent_new_session)
       tab_b = Runtime.active_tab(state_b.shell_runtime)
       session_b = Runtime.active_session(state_b.shell_runtime)
@@ -1250,6 +1251,16 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         stop_owned_prompt(prompt_b)
         MingaAgent.SessionManager.stop_session_by_pid(session_b)
       end)
+
+      {:links, links_after} = Process.info(self(), :links)
+
+      new_buffers =
+        Enum.filter(links_after -- links_before, fn pid ->
+          match?({BufferProcess, :init, _}, :proc_lib.translate_initial_call(pid))
+        end)
+
+      assert new_buffers == [prompt_b]
+      assert Minga.Buffer.content(prompt_a) == "keyboard draft"
 
       refute session_a == session_b
       assert owning_workspaces.(state_b, session_a) == [tab_a.group_id]
