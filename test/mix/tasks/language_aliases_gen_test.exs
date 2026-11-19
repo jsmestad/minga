@@ -1,10 +1,13 @@
+Code.require_file("mix/language_alias_generator.ex")
+Code.require_file("mix/tasks/language_aliases.gen.ex")
+
 # This module changes the working directory to exercise a Mix task that resolves repo-local paths.
 defmodule Mix.Tasks.LanguageAliases.GenTest do
   # Changes the process working directory while exercising the repo-local Mix task.
   use ExUnit.Case, async: false
 
   @source_path "config/language_aliases.json"
-  @generated_elixir_path ".generated/language_aliases/elixir/lib/minga/language/generated_aliases.ex"
+  @generated_elixir_path "generated/elixir/generated_aliases.ex"
   @generated_zig_path "zig/src/generated/language_aliases.zig"
 
   test "generates Elixir and Zig language alias artifacts from the source file" do

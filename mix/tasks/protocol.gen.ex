@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Protocol.Gen do
   @moduledoc """
   Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/`, which is ignored by Git and consumed by local build steps.
+  The schema is the source of truth. Commit refreshed Elixir and Go outputs; Swift and Zig outputs are local build inputs.
   """
 
   use Mix.Task
