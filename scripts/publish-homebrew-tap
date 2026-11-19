@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Prepare or push a single Homebrew tap commit from an already verified bundle."""
+
+import argparse
+import base64
+import os
+import re
+import subprocess
+from pathlib import Path
+
+TAP_URL = "https://github.com/jsmestad/homebrew-minga.git"
+MAIN = "refs/heads/main"
+ORIGIN_MAIN = "refs/remotes/origin/main"
+PREPARED = "refs/minga/prepared-tap"
+RECIPES = ("Formula/minga.rb", "Casks/minga-mac.rb")
+NUMBER = r"(?:0|[1-9][0-9]*)"
+BASE = rf"{NUMBER}\.{NUMBER}\.{NUMBER}"
+RUN = r"[1-9][0-9]*"
+RELEASE_VERSION = re.compile(rf"({BASE})-dev\.({RUN})")
+TAP_VERSION = re.compile(rf"({BASE})(?:beta({RUN}))?")
+VERSION_LINE = re.compile(rb'''version[ \t]+(["'])([0-9a-z.]+)\1[ \t]*(?:#.*)?''')
+PLACEHOLDER_SHA = re.compile(rb'''sha256[ \t]+(["'])PLACEHOLDER\1''')
+
+
+def require_push_permission(token):
+    # Public clones can succeed without authorization; check before publishing the release.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GH_") and key != "HOMEBREW_TAP_TOKEN"}
+    env.update(GH_TOKEN=token, GH_PROMPT_DISABLED="1")
+    result = subprocess.run(
+        ["gh", "api", "--hostname", "github.com", "repos/jsmestad/homebrew-minga",
+         "--jq", ".permissions.push"],
+        env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if result.returncode or result.stdout.strip() != b"true":
+        raise ValueError("could not confirm push permission on jsmestad/homebrew-minga with HOMEBREW_TAP_TOKEN")
+
+
+def git(cwd, *args, token=None):
+    # Ignore inherited Git configuration/tracing. The token never goes in an argument or a file.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_") and key != "HOMEBREW_TAP_TOKEN"}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0")
+    if token is not None:
+        encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
+        env.update(GIT_CONFIG_COUNT="2",
+                   GIT_CONFIG_KEY_0=f"http.{TAP_URL}.extraHeader",
+                   GIT_CONFIG_VALUE_0=f"Authorization: Basic {encoded}",
+                   GIT_CONFIG_KEY_1="http.followRedirects", GIT_CONFIG_VALUE_1="false")
+    command = ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "core.autocrlf=false",
+               "-c", "user.name=github-actions[bot]",
+               "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"]
+    result = subprocess.run(command + list(args), cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        diagnostic = result.stderr.decode(errors="replace").strip()
+        if token is not None:
+            diagnostic = diagnostic.replace(token, "[redacted]").replace(encoded, "[redacted]")
+        raise ValueError(f"git {args[0]} failed: {diagnostic}")
+    return result.stdout
+
+
+def pair_version(recipes):
+    versions = []
+    for path, data in recipes.items():
+        lines = re.findall(rb"(?m)^[ \t]*version\b[^\r\n]*", data)
+        match = VERSION_LINE.fullmatch(lines[0].lstrip()) if len(lines) == 1 else None
+        version = match[2].decode("ascii") if match else None
+        if version is None or TAP_VERSION.fullmatch(version) is None:
+            raise ValueError(f"expected one explicit base or betaN version in {path}")
+        versions.append(version)
+    if versions[0] != versions[1]:
+        raise ValueError("formula and cask versions disagree")
+    return versions[0]
+
+
+def read_commit_pair(worktree, commit):
+    records = git(worktree, "ls-tree", "-r", commit, "--", *RECIPES).decode("ascii").splitlines()
+    entries = dict(record.split("\t", 1)[::-1] for record in records)
+    recipes = {}
+    for path in RECIPES:
+        mode, kind, oid = entries.get(path, "- - -").split()
+        if kind != "blob" or mode not in ("100644", "100755"):
+            raise ValueError(f"tap commit must contain a regular recipe at {path}")
+        recipes[path] = git(worktree, "cat-file", "blob", oid)
+    return recipes
+
+
+def decide(previous, candidate, base, run):
+    version = pair_version(previous)
+    old_base, old_run = TAP_VERSION.fullmatch(version).groups()
+    candidate_base = tuple(map(int, base.split(".")))
+    current_base = tuple(map(int, old_base.split(".")))
+
+    if any(b"PLACEHOLDER" in data for data in previous.values()):
+        for data in previous.values():
+            checksums = re.findall(rb"(?m)^[ \t]*sha256\b[^\r\n]*", data)
+            if (version != "0.1.0" or not checksums
+                    or not all(PLACEHOLDER_SHA.fullmatch(line.strip()) for line in checksums)):
+                raise ValueError("tap does not contain the paired 0.1.0 bootstrap placeholders")
+        return "stale" if candidate_base < current_base else "publish"
+
+    # A real stable release supersedes betas for its base (and any older base).
+    if old_run is None:
+        return "stale" if candidate_base <= current_base else "publish"
+
+    # Run numbers are workflow-wide. Neither the run nor the release base may go backwards.
+    old_run, run = int(old_run), int(run)
+    if run == old_run:
+        if candidate_base != current_base or previous != candidate:
+            raise ValueError("the tap already has different recipes for this run number")
+        return "current"
+    return "stale" if run < old_run or candidate_base < current_base else "publish"
+
+
+def commit_message(version, source_sha):
+    return f"chore: publish Minga {version}\n\nMinga-Source-SHA: {source_sha}\n"
+
+
+def resolve(worktree, ref):
+    return git(worktree, "rev-parse", "--verify", f"{ref}^{{commit}}").decode("ascii").strip()
+
+
+def verify_commit(worktree, commit, parent, candidate, message):
+    parents = git(worktree, "rev-list", "--parents", "-n", "1", commit).decode("ascii").split()
+    if parents != [commit, parent]:
+        raise ValueError("prepared commit is not a single child of the cloned tap main")
+    if git(worktree, "show", "-s", "--format=%B", commit).rstrip(b"\n") != message.rstrip("\n").encode():
+        raise ValueError("prepared commit identity does not match VERSION and SOURCE_SHA")
+    paths = git(worktree, "diff-tree", "--name-only", "-r", parent, commit).decode("ascii").splitlines()
+    if set(paths) != set(RECIPES) or read_commit_pair(worktree, commit) != candidate:
+        raise ValueError("prepared commit must change only the exact verified formula and cask")
+
+
+def prepare(worktree, remote, token, candidate, base, run, message):
+    git(worktree.parent, "clone", "--depth=1", "--single-branch", "--branch", "main", "--no-tags",
+        "--", remote, str(worktree), token=token)
+    parent = resolve(worktree, ORIGIN_MAIN)
+    outcome = decide(read_commit_pair(worktree, parent), candidate, base, run)
+    if outcome == "publish":
+        for path, data in candidate.items():
+            (worktree / path).write_bytes(data)
+        git(worktree, "add", "--", *RECIPES)
+        git(worktree, "commit", "--no-gpg-sign", "-m", message)
+        commit = resolve(worktree, "HEAD")
+        verify_commit(worktree, commit, parent, candidate, message)
+        git(worktree, "update-ref", PREPARED, commit)
+    return outcome
+
+
+def push(worktree, remote, token, candidate, base, run, message):
+    commit = resolve(worktree, PREPARED)
+    if commit != resolve(worktree, "HEAD"):
+        raise ValueError("tap HEAD changed since prepare; prepare again in a fresh worktree")
+    parent = resolve(worktree, ORIGIN_MAIN)
+    verify_commit(worktree, commit, parent, candidate, message)
+    if decide(read_commit_pair(worktree, parent), candidate, base, run) != "publish":
+        raise ValueError("prepared recipes do not advance the cloned tap")
+    for flags in (("--all",), ("--push", "--all")):
+        urls = git(worktree, "remote", "get-url", *flags, "origin").decode().splitlines()
+        if urls != [remote]:
+            raise ValueError("prepared tap origin does not match the publication destination")
+    if git(worktree, "ls-remote", "--exit-code", "--refs", "origin", MAIN, token=token) != f"{parent}\t{MAIN}\n".encode():
+        raise ValueError("tap main advanced since prepare; prepare again in a fresh worktree")
+    # Push this exact commit without force. If main advances after ls-remote, Git rejects the race.
+    git(worktree, "push", "--no-follow-tags", "--recurse-submodules=no", "origin", f"{commit}:{MAIN}", token=token)
+
+
+def promote(action, bundle, version, source_sha, worktree, *, remote, token=None):
+    match = RELEASE_VERSION.fullmatch(version)
+    if match is None:
+        raise ValueError("VERSION must be canonical BASE-dev.N with a positive run number")
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
+        raise ValueError("SOURCE_SHA must be a full lowercase Git SHA")
+    base, run = match.groups()
+    candidate = {path: (bundle / Path(path).name).read_bytes() for path in RECIPES}
+    if pair_version(candidate) != f"{base}beta{run}" or any(b"PLACEHOLDER" in data for data in candidate.values()):
+        raise ValueError("bundle recipes do not match VERSION or still contain placeholders")
+    if action == "prepare" and token is not None:
+        require_push_permission(token)
+    operation = {"prepare": prepare, "push": push}[action]
+    return operation(worktree.resolve(), remote, token, candidate, base, run, commit_message(version, source_sha))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("action", choices=("prepare", "push"))
+    parser.add_argument("bundle", type=Path, metavar="BUNDLE")
+    parser.add_argument("version", metavar="VERSION")
+    parser.add_argument("source_sha", metavar="SOURCE_SHA")
+    parser.add_argument("worktree", type=Path, metavar="WORKTREE")
+    args = parser.parse_args()
+    token = os.environ.get("HOMEBREW_TAP_TOKEN")
+    if not token:
+        parser.exit(1, "publish-homebrew-tap: HOMEBREW_TAP_TOKEN is required\n")
+    try:
+        outcome = promote(args.action, args.bundle, args.version, args.source_sha, args.worktree,
+                          remote=TAP_URL, token=token)
+    except (OSError, ValueError) as error:
+        parser.exit(1, f"publish-homebrew-tap: {error}\n")
+    if outcome is not None:
+        print(outcome)
+
+
+if __name__ == "__main__":
+    main()

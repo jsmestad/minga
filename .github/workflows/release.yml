@@ -405,6 +405,10 @@ jobs:
     needs: [validate, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      recipe_artifact_id: ${{ steps.homebrew-recipes.outputs.artifact-id }}
+      manifest_id: ${{ steps.manifest.outputs.artifact-id }}
+      manifest_sha: ${{ steps.verify.outputs.manifest_sha }}
     env:
       CANDIDATE_CONTEXT: ${{ needs.validate.outputs.context }}
       GH_TOKEN: ${{ github.token }}
@@ -456,6 +460,7 @@ jobs:
           retention-days: ${{ env.RETENTION_DAYS }}
           overwrite: false
       - name: Re-download manifest and verify the complete generation
+        id: verify
         env:
           MANIFEST_ID: ${{ steps.manifest.outputs.artifact-id }}
         shell: bash
@@ -467,6 +472,7 @@ jobs:
           mv artifacts.next.json artifacts.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MANIFEST_ID/zip" > "downloads/$MANIFEST_ID.zip"
           python3 scripts/release_candidate.py verify --context context.json --artifacts artifacts.json --downloads downloads --source-tool-versions source.tool-versions --manifest-artifact-id "$MANIFEST_ID" --manifest-sha256 "$manifest_sha" --receipt preparation-receipt.json
+          printf 'manifest_sha=%s\n' "$manifest_sha" >> "$GITHUB_OUTPUT"
           {
             echo '### Complete immutable preparation (not installed/UI/X0 qualification)'
             printf 'Manifest artifact ID: %s\n\nManifest-file SHA256: %s\n\n' "$MANIFEST_ID" "$manifest_sha"
@@ -475,7 +481,7 @@ jobs:
             echo '```'
             cat SHA256SUMS.txt
             echo '```'
-            echo 'Run the independent read-only verification workflow with this exact handle before any later approval.'
+            echo 'Use this exact handle for independent read-only verification.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Retain bounded successful preparation receipt
         uses: actions/upload-artifact@v4
@@ -499,9 +505,10 @@ jobs:
           scripts/render-tui-formula --version "$(jq -er .version context.json)" \
             --arm64 homebrew-input/minga_macos_aarch64.tar.gz \
             --dmg homebrew-input/Minga.dmg --output homebrew-recipes
-          cp preparation-receipt.json homebrew-recipes/
+          cp preparation-receipt.json manifest.json homebrew-recipes/
       - name: Retain unpublished Homebrew recipes and candidate receipt
         if: github.event_name == 'push'
+        id: homebrew-recipes
         uses: actions/upload-artifact@v4
         with:
           name: homebrew-recipes-${{ github.run_id }}-${{ github.run_attempt }}
@@ -509,3 +516,59 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ env.RETENTION_DAYS }}
           overwrite: false
+
+  publish-homebrew:
+    name: Publish rolling Homebrew packages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga'
+    needs: [validate, finalize]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: rolling-homebrew-publication
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      actions: read
+      contents: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      CANDIDATE_CONTEXT: ${{ needs.validate.outputs.context }}
+      MANIFEST_ID: ${{ needs.finalize.outputs.manifest_id }}
+      MANIFEST_SHA: ${{ needs.finalize.outputs.manifest_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.finalize.outputs.recipe_artifact_id }}
+          path: recipes
+          merge-multiple: true
+      - name: Stage the exact verified payloads and recipes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/stage-homebrew-publication.py recipes bundle payload-downloads
+      - name: Preflight tap access and check its current generation
+        id: tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          state=$(scripts/publish-homebrew-tap prepare bundle "$VERSION" "$SOURCE_SHA" "$RUNNER_TEMP/homebrew-tap")
+          case "$state" in publish|current|stale) ;; *) exit 1 ;; esac
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+          if [[ $state == stale ]]; then
+            echo 'Skipped: the Homebrew tap already has a newer release.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Make the verified immutable prerelease available
+        if: steps.tap.outputs.state != 'stale'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_RELEASE_TOKEN || github.token }}
+        run: scripts/publish-homebrew-release bundle "$VERSION" "$SOURCE_SHA"
+      - name: Advance the formula and cask in one tap commit
+        if: steps.tap.outputs.state == 'publish'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: scripts/publish-homebrew-tap push bundle "$VERSION" "$SOURCE_SHA" "$RUNNER_TEMP/homebrew-tap"
