@@ -98,7 +98,7 @@ func (r *agentTranscriptRenderer) messageHeight(m Model, entry *transcriptEntry,
 	if entry.heightRevision == entry.revision && entry.heightWidth == width && entry.height > 0 {
 		return entry.height
 	}
-	entry.height = agentMessageRowCount(entry.message)
+	entry.height, entry.proseLayout = measureAgentMessage(entry.message, width)
 	entry.heightWidth = width
 	entry.heightRevision = entry.revision
 	r.work.MessagesMeasured++
@@ -298,7 +298,7 @@ func (r *agentTranscriptRenderer) renderForward(m Model, transcript *residentTra
 		height := r.messageHeight(m, entry, width)
 		if position.row < height {
 			count := min(limit-len(lines), height-position.row)
-			lines = append(lines, r.messageRows(m, *entry, position.row, count, width)...)
+			lines = append(lines, r.messageRows(m, entry, position.row, count, width)...)
 			position.row += count
 			continue
 		}
@@ -313,12 +313,12 @@ func (r *agentTranscriptRenderer) renderForward(m Model, transcript *residentTra
 	return lines
 }
 
-func (r *agentTranscriptRenderer) messageRows(m Model, entry transcriptEntry, start int, count int, width int) []string {
+func (r *agentTranscriptRenderer) messageRows(m Model, entry *transcriptEntry, start int, count int, width int) []string {
 	if count <= 0 {
 		return nil
 	}
 	if agentMessageAnimated(entry.message) {
-		rows := m.renderAgentMessageRows(entry.message, width, start, count)
+		rows := m.renderAgentMessageRows(entry.message, entry.proseLayout, width, start, count)
 		r.work.RowsStyled += len(rows)
 		return rows
 	}
@@ -330,9 +330,8 @@ func (r *agentTranscriptRenderer) messageRows(m Model, entry transcriptEntry, st
 		key := transcriptCacheKey{slot: entry.slot, revision: entry.revision, chunk: chunk}
 		rows, found := r.cached(key)
 		if !found {
-			height := agentMessageRowCount(entry.message)
-			chunkCount := min(transcriptChunkRows, height-chunkStart)
-			rows = m.renderAgentMessageRows(entry.message, width, chunkStart, chunkCount)
+			chunkCount := min(transcriptChunkRows, entry.height-chunkStart)
+			rows = m.renderAgentMessageRows(entry.message, entry.proseLayout, width, chunkStart, chunkCount)
 			r.work.RowsStyled += len(rows)
 			r.work.CacheMisses++
 			r.admit(key, rows, m.zones)
@@ -410,6 +409,48 @@ func (r *agentTranscriptRenderer) retainApprovalMarkers(zones *zoneManager) {
 
 func agentMessageAnimated(message protocol.AgentChatMessage) bool {
 	return (message.Kind == agentKindThinking && !message.Collapsed) || ((message.Kind == agentKindTool || message.Kind == agentKindStyledTool) && message.Status == 0)
+}
+
+func measureAgentMessage(message protocol.AgentChatMessage, width int) (int, agentProseLayout) {
+	count := agentMessageRowCount(message)
+	if !agentMessageHasStyledProse(message) {
+		return count, nil
+	}
+	var layout agentProseLayout
+	bodyWidth := agentProseBodyWidth(width)
+	if len(message.MarkdownBlocks) == 0 {
+		if wrapped := layoutAgentProse(message.StyledLines, bodyWidth); wrapped != nil {
+			layout = agentProseLayout{0: wrapped}
+			count += len(wrapped) - min(len(message.StyledLines), agentAssistantStyledLines)
+		}
+		return count, layout
+	}
+	for index, block := range message.MarkdownBlocks {
+		if !agentMarkdownBlockIsProse(block) {
+			continue
+		}
+		if wrapped := layoutAgentProse(block.Lines, bodyWidth); wrapped != nil {
+			if layout == nil {
+				layout = make(agentProseLayout)
+			}
+			layout[index] = wrapped
+			count += len(wrapped) - min(len(block.Lines), agentAssistantStyledLines)
+		}
+	}
+	return count, layout
+}
+
+func agentMessageHasStyledProse(message protocol.AgentChatMessage) bool {
+	switch message.Kind {
+	case agentKindAssistant, agentKindStyled, agentKindAssistantMarkdown:
+		return len(message.MarkdownBlocks) > 0 || len(message.StyledLines) > 0
+	default:
+		return false
+	}
+}
+
+func agentMarkdownBlockIsProse(block protocol.AgentMarkdownBlock) bool {
+	return block.Kind >= 0x01 && block.Kind <= 0x04
 }
 
 func agentMessageRowCount(message protocol.AgentChatMessage) int {
@@ -512,26 +553,37 @@ func boolInt(value bool) int {
 	return 0
 }
 
-func (m Model) renderAgentMessageRows(message protocol.AgentChatMessage, width int, start int, count int) []string {
+func (m Model) renderAgentMessageRows(message protocol.AgentChatMessage, layout agentProseLayout, width int, start int, count int) []string {
 	if count <= 0 {
 		return nil
 	}
-	if message.Kind != agentKindAssistantMarkdown || len(message.MarkdownBlocks) == 0 {
+	if !agentMessageHasStyledProse(message) {
 		rows := m.renderAgentMessage(message, width)
 		return sliceRows(rows, start, count)
 	}
-	return m.renderAgentAssistantMarkdownRows(message, width, start, count)
+	return m.renderAgentRichAssistantRows(message, layout, width, start, count)
 }
 
-func (m Model) renderAgentAssistantMarkdownRows(message protocol.AgentChatMessage, width int, start int, count int) []string {
+func (m Model) renderAgentRichAssistantRows(message protocol.AgentChatMessage, layout agentProseLayout, width int, start int, count int) []string {
 	end := start + count
 	rows := make([]string, 0, count)
 	if start == 0 {
 		rows = append(rows, m.renderAgentAssistantHeader(width))
 	}
+	if len(message.MarkdownBlocks) == 0 {
+		bodyStart := max(start-1, 0)
+		if bodyCount := end - 1 - bodyStart; bodyCount > 0 {
+			rows = append(rows, m.renderAgentProseRows(message.StyledLines, layout[0], width, bodyStart, bodyCount)...)
+		}
+		return rows
+	}
 	offset := 1
-	for _, block := range message.MarkdownBlocks {
+	for index, block := range message.MarkdownBlocks {
+		wrapped := layout[index]
 		blockHeight := agentMarkdownBlockRowCount(block)
+		if wrapped != nil {
+			blockHeight += len(wrapped) - min(len(block.Lines), agentAssistantStyledLines)
+		}
 		if blockHeight == 0 || offset+blockHeight <= start {
 			offset += blockHeight
 			continue
@@ -541,15 +593,18 @@ func (m Model) renderAgentAssistantMarkdownRows(message protocol.AgentChatMessag
 		}
 		blockStart := max(start-offset, 0)
 		blockCount := min(end-offset, blockHeight) - blockStart
-		rows = append(rows, m.renderAgentMarkdownBlockRows(block, width, blockStart, blockCount)...)
+		rows = append(rows, m.renderAgentMarkdownBlockRows(block, wrapped, width, blockStart, blockCount)...)
 		offset += blockHeight
 	}
 	return rows
 }
 
-func (m Model) renderAgentMarkdownBlockRows(block protocol.AgentMarkdownBlock, width int, start int, count int) []string {
+func (m Model) renderAgentMarkdownBlockRows(block protocol.AgentMarkdownBlock, wrapped []agentProseRow, width int, start int, count int) []string {
 	if count <= 0 {
 		return nil
+	}
+	if agentMarkdownBlockIsProse(block) {
+		return m.renderAgentProseRows(block.Lines, wrapped, width, start, count)
 	}
 	if block.Kind != 0x07 {
 		return sliceRows(m.renderAgentMarkdownBlock(block, width), start, count)

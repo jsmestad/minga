@@ -667,7 +667,7 @@ func applyConformanceTranscriptScroll(t *testing.T, model *Model, i int, step co
 
 	model.transcriptRenderer.render(*model, store, conformanceTranscriptBudget(*model, step), max(model.width-2, 1))
 	transition := store.takePinTransition()
-	assertConformanceGoSelector(t, i, step, store, transition)
+	assertConformanceGoSelector(t, i, step, store, max(model.width-2, 1), transition)
 }
 
 // assertConformanceTranscriptPosition resolves the production viewport once
@@ -680,7 +680,7 @@ func assertConformanceTranscriptPosition(t *testing.T, model *Model, i int, step
 	store := model.transcript
 	model.transcriptRenderer.render(*model, store, conformanceTranscriptBudget(*model, step), max(model.width-2, 1))
 	transition := store.takePinTransition()
-	assertConformanceGoSelector(t, i, step, store, transition)
+	assertConformanceGoSelector(t, i, step, store, max(model.width-2, 1), transition)
 }
 
 func conformanceTranscriptBudget(model Model, step conformanceStep) int {
@@ -693,7 +693,7 @@ func conformanceTranscriptBudget(model Model, step conformanceStep) int {
 	return max(total-maxTop, 1)
 }
 
-func conformanceTranscriptTopOffset(store *residentTranscript) int {
+func conformanceTranscriptTopOffset(store *residentTranscript, width int) int {
 	if store.pinned || store.anchor.slot == 0 {
 		return 0
 	}
@@ -703,19 +703,20 @@ func conformanceTranscriptTopOffset(store *residentTranscript) int {
 	}
 	offset := store.anchor.row
 	for entry := 0; entry < index; entry++ {
-		offset += agentMessageRowCount(store.entry(entry).message) + 1
+		height, _ := measureAgentMessage(store.entry(entry).message, width)
+		offset += height + 1
 	}
 	return offset
 }
 
-func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, store *residentTranscript, transition pinEdge) {
+func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, store *residentTranscript, width int, transition pinEdge) {
 	t.Helper()
 	sel := step.Go
 	if sel == nil {
 		return
 	}
 	if sel.ExpectTopOffset != nil && !store.pinned {
-		if got := conformanceTranscriptTopOffset(store); got != *sel.ExpectTopOffset {
+		if got := conformanceTranscriptTopOffset(store, width); got != *sel.ExpectTopOffset {
 			t.Fatalf("step %d (%s): anchor-derived top offset = %d, want %d", i, step.Note, got, *sel.ExpectTopOffset)
 		}
 	}
