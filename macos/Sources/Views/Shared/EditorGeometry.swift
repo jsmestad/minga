@@ -69,29 +69,24 @@ public struct WindowChrome: Equatable, Sendable {
     public var title: String
     /// Whether the BEAM-selected background is dark (drives `.preferredColorScheme`).
     public var backgroundIsDark: Bool
-    /// Whether the first commit_frame has arrived (dismisses the startup overlay).
-    public var hasReceivedFirstFrame: Bool
 
     public init(
         isFullScreen: Bool,
         trafficLightMidY: CGFloat,
         title: String,
-        backgroundIsDark: Bool,
-        hasReceivedFirstFrame: Bool
+        backgroundIsDark: Bool
     ) {
         self.isFullScreen = isFullScreen
         self.trafficLightMidY = trafficLightMidY
         self.title = title
         self.backgroundIsDark = backgroundIsDark
-        self.hasReceivedFirstFrame = hasReceivedFirstFrame
     }
 
-    /// Canvas-preview chrome: windowed, dark, first frame already received.
+    /// Canvas-preview chrome: windowed and dark.
     public static let preview = WindowChrome(
         isFullScreen: false,
         trafficLightMidY: 20,
         title: "Minga",
-        backgroundIsDark: true,
-        hasReceivedFirstFrame: true
+        backgroundIsDark: true
     )
 }

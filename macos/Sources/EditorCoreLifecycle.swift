@@ -90,12 +90,12 @@ final class EditorCoreLifecycle {
         }
     }
 
-    /// Retires the connection only after the user chooses to quit.
-    func abandonTimedOutStartup() -> Bool {
-        guard startupHasTimedOut else { return false }
+    /// Retires a startup connection before an explicit Quit or Retry.
+    func abandonStartup() {
+        guard isStarting else { return }
+        quitCoordinator.startupDidFail()
         stop()
         retireConnection()
-        return true
     }
 
     /// Drains a final response even when the independent process callback arrived first.
@@ -185,7 +185,7 @@ final class EditorCoreLifecycle {
 
     private func failStartup(message: String) {
         quitCoordinator.startupDidFail()
-        processManager?.beginAppShutdown()
+        processManager?.suppressStartupRestart()
         stop()
         retireConnection()
         presentTransportFailure(message)

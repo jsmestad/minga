@@ -59,11 +59,24 @@ struct MingaApp: App {
                 .environment(\.editorFocusPolicy, appDelegate.appState.editorNSView?.focusPolicy)
                 .environment(\.agentPromptSurface, appDelegate.appState.editorNSView.map { AgentPromptSurface(editor: $0) })
                 .frame(minWidth: 160, minHeight: 80)
+                .allowsHitTesting(appDelegate.appState.hasReceivedFirstFrame)
+                .accessibilityHidden(!appDelegate.appState.hasReceivedFirstFrame)
                 // Disable SwiftUI's focus system so it doesn't steal
                 // first responder from the EditorNSView.
                 .focusable(false)
                 .focusEffectDisabled()
                 .background(EditorWindowIdentifierSetter())
+                .overlay {
+                    if let startup = appDelegate.appState.startup {
+                        StartupOverlay(
+                            startup: startup,
+                            onKeepWaiting: { appDelegate.keepWaitingForStartup() },
+                            onRetry: { appDelegate.retryStartup() },
+                            onQuit: { appDelegate.quitDuringStartup() }
+                        )
+                        .transition(.opacity)
+                    }
+                }
                 // Scene-owned URL delivery preserves the window and its Metal view's redraw lifecycle.
                 .onOpenURL { url in
                     appDelegate.openFileURL(url)
@@ -86,6 +99,86 @@ struct MingaApp: App {
                 sendAction: FrontendActionComposition.settingsHandler(encoder: appDelegate.appState.encoder)
             )
         }
+    }
+}
+
+private struct StartupOverlay: View {
+    let startup: StartupPresentation
+    let onKeepWaiting: () -> Void
+    let onRetry: () -> Void
+    let onQuit: () -> Void
+
+    private var title: String {
+        switch startup {
+        case .starting: "Starting Minga…"
+        case .waiting, .waitingLonger: "Waiting for the editor…"
+        case .slow: "Minga is taking longer than expected"
+        case .retrying: "Restarting the editor core…"
+        case .failed: "Minga Could Not Start"
+        }
+    }
+
+    private var showsProgress: Bool {
+        switch startup {
+        case .starting, .waiting, .waitingLonger, .retrying: true
+        case .slow, .failed: false
+        }
+    }
+
+    private var canRetry: Bool {
+        switch startup {
+        case .slow(let canRetry), .waitingLonger(let canRetry), .failed(_, let canRetry): canRetry
+        case .starting, .waiting, .retrying: false
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: Spacing.lg) {
+                    if showsProgress {
+                        ProgressView().controlSize(.small).accessibilityHidden(true)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                    if case .failed(let message, _) = startup {
+                        Text(message).foregroundStyle(.secondary)
+                    }
+                    if canRetry {
+                        Text("Retry replaces the editor core. Changes not saved or recovered may be lost.")
+                            .foregroundStyle(.secondary)
+                    } else if case .slow = startup {
+                        Text("You can keep waiting or quit and relaunch Minga from your terminal.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Spacing.md) { actions }
+                        VStack(spacing: Spacing.md) { actions }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 440)
+                .padding(Spacing.panel)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(.background)
+    }
+
+    @ViewBuilder private var actions: some View {
+        if case .slow = startup {
+            Button("Keep Waiting", action: onKeepWaiting)
+        }
+        if canRetry {
+            Button("Retry Startup", action: onRetry)
+        }
+        Button("Quit Minga", action: onQuit)
     }
 }
 
@@ -423,6 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if SingletonEditorWindowProbe.isRequested {
+            appState.startup = nil
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
             return
@@ -439,8 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Protocol encoder and reader: in bundle mode, we spawn the BEAM
         // and use pipe file handles. In dev mode, we use stdin/stdout.
-        let protocolInput: FileHandle
-        let protocolOutput: FileHandle
+        let handles: (input: FileHandle, output: FileHandle)?
 
         if BEAMProcessManager.isBundleMode {
             let manager = BEAMProcessManager()
@@ -457,23 +550,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self, self.beamManager?.isShuttingDown != true else { return }
                 NSApp.terminate(nil)
             }
-            manager.onBEAMReady = { [weak self] newReadHandle, newWriteHandle in
-                self?.reconnectProtocol(readHandle: newReadHandle, writeHandle: newWriteHandle)
+            manager.start(onStartupFailure: { [weak self] in self?.presentStartupProcessFailure($0) })
+            if let input = manager.readHandle, let output = manager.writeHandle {
+                recordStartupPhase("beam_spawned")
+                handles = (input, output)
+            } else {
+                handles = nil
             }
-
-            manager.start()
-            recordStartupPhase("beam_spawned")
-
-            guard let readH = manager.readHandle, let writeH = manager.writeHandle else {
-                presentNativeStartupFailure("Minga could not start the bundled editor core.")
-                return
-            }
-            protocolInput = readH
-            protocolOutput = writeH
         } else {
             // Dev mode: BEAM is our parent, use stdin/stdout
-            protocolInput = .standardInput
-            protocolOutput = .standardOutput
+            handles = (.standardInput, .standardOutput)
         }
 
         // Register the bundled Nerd Font for devicon rendering.
@@ -500,7 +586,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let ctRenderer = CoreTextMetalRenderer(
             resourcePolicy: frameResourcePolicy.nativeRenderer
         ) else {
-            presentNativeStartupFailure("Minga could not initialize its Metal renderer. Check that the app has a working Metal device and its shader resources are installed.")
+            beamManager?.abortStartup()
+            presentStartupFailure("Minga could not initialize Metal. Check that this Mac supports Metal and reinstall Minga if its shader resources are missing.", canRetry: false)
             return
         }
         ctRenderer.setupRenderers(fontManager: fm)
@@ -516,20 +603,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.recoveryManager = recovery
 
-        let connectionID = outboundConnectionState.issueID()
-        guard let connection = replaceProtocolConnection(
-            connectionID: connectionID,
-            readHandle: protocolInput,
-            writeHandle: protocolOutput,
-            canRestart: false
-        ) else { return }
-        let enc = connection.encoder
-
-        // Enable port-based logging so messages appear in *Messages*.
-        PortLogger.info("macOS GUI frontend starting (\(beamManager != nil ? "bundle" : "dev") mode)")
-        PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(fm.cellWidth)x\(fm.cellHeight), scale: \(scale)x")
-        PortLogger.info("Initial grid: \(cols)x\(rows) cells")
-
         // Command dispatcher.
         let disp = CommandDispatcher(
             cols: cols, rows: rows, guiState: appState.gui,
@@ -539,7 +612,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         disp.fontManager = fm
-        disp.replaceConnection(with: connectionID)
         disp.onOperationNativeResult = { [weak self] result in
             self?.encoder?.send(.operationNativeResult(result))
         }
@@ -602,12 +674,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Create the editor view.
-        let nsView = EditorNSView(encoder: enc, dispatcher: disp,
+        let nsView = EditorNSView(encoder: ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         nsView.editorInput = appState.gui.editorInput
         ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
-        appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: enc)
         appState.gui.settingsState.onCursorBlinkChanged = { [weak nsView] enabled in
             nsView?.setCursorBlinkEnabled(enabled)
         }
@@ -636,8 +707,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // #2739 status is emitted at semantic publication/rejection, never from
         // the old replay loop and never delayed until Metal presentation.
         disp.onTransactionResult = { [weak self] result in
-            guard let encoder = self?.encoder else { return }
+            guard let self, let encoder = self.encoder else { return }
             encoder.send(result.outboundAction)
+            if !self.appState.hasReceivedFirstFrame,
+               case .rejected(_, _, _, .resourcePolicy) = result {
+                self.presentStartupFailure("The editor’s first frame exceeds the macOS frontend’s resource limits.", canRetry: false)
+            }
         }
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
@@ -646,15 +721,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.
 
-        // First frame callback: dismiss the startup overlay and flush Finder,
-        // `open -a`, and CLI wait requests buffered until the BEAM can accept
-        // semantic GUI actions.
-        disp.onFirstRender = { [weak self] in
+        beamManager?.onBEAMReady = { [weak self] input, output in
+            self?.connectProtocol(readHandle: input, writeHandle: output)
+        }
+        if let handles {
+            connectProtocol(readHandle: handles.input, writeHandle: handles.output)
+        }
+    }
+
+    private func installStartupFrameCallback() {
+        // The callback is one-shot, so every new startup connection installs its own.
+        dispatcher?.onFirstRender = { [weak self] in
             guard let self, let disposition = self.coreLifecycle?.firstFrameDidCommit(),
                   disposition != .ignored else { return }
-            if disposition == .recovered {
-                self.recoveryManager?.transportDidReconnect()
-            }
 
             os_signpost(.end, log: startupLog, name: "AppStartup")
             recordStartupPhase("first_frame_committed")
@@ -662,7 +741,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
             withAnimation(.easeOut(duration: duration), completionCriteria: .removed) {
-                self.appState.hasReceivedFirstFrame = true
+                self.appState.startup = nil
             } completion: { [weak self] in
                 guard let editorNSView = self?.editorNSView else { return }
                 _ = editorNSView.focusPolicy.requestPresentationFocus()
@@ -671,13 +750,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.acceptsOpenRequests = true
             self.flushPendingOpenRequests()
         }
-
-        startProtocolConnection(connection)
     }
 
     private func startProtocolConnection(_ connection: ProtocolConnection) {
         coreConnectionIsLive = true
         if !appState.hasReceivedFirstFrame {
+            appState.startup = .waiting
+            installStartupFrameCallback()
             coreLifecycle?.waitForFirstFrame { [weak self] in self?.presentStartupTimeout() }
         }
         // Start only after every consumer, including the first-frame callback, is installed.
@@ -763,8 +842,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // The timeout alert owns the explicit Quit action; do not start another unanswered handshake.
-        if coreLifecycle?.startupHasTimedOut == true { return .terminateCancel }
+        if coreLifecycle?.startupHasTimedOut == true { return .terminateNow }
         let coreIsLive = coreConnectionIsLive
             && (beamManager.map { !$0.isShuttingDown && $0.hasLiveProcess } ?? true)
         return ApplicationTerminationPolicy.reply(
@@ -1067,32 +1145,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workspaceNotificationTasks = []
     }
 
-    // MARK: - Protocol reconnection (after BEAM restart)
+    // MARK: - Protocol connection
 
-    /// Replaces the protocol reader and encoder with fresh ones backed by new pipe handles.
-    /// Called by BEAMProcessManager.onBEAMReady after a crash restart.
-    private func reconnectProtocol(readHandle: FileHandle, writeHandle: FileHandle) {
+    private func connectProtocol(readHandle: FileHandle, writeHandle: FileHandle) {
         let connectionID = outboundConnectionState.issueID()
         guard let replacement = replaceProtocolConnection(
             connectionID: connectionID,
             readHandle: readHandle,
-            writeHandle: writeHandle,
-            canRestart: true
+            writeHandle: writeHandle
         ) else { return }
         recoveryManager?.transportDidReconnect()
         startProtocolConnection(replacement)
+        PortLogger.info("macOS GUI frontend connected (\(beamManager != nil ? "bundle" : "dev") mode)")
 
-        // Re-send ready event so the new BEAM knows our dimensions.
-        if let nsView = editorNSView {
-            let gutterPad: CGFloat = (nsView.dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-            let cols = UInt16(max((nsView.bounds.width - gutterPad) / CGFloat(nsView.cellWidth), 1))
-            let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
-            replacement.encoder.send(.ready(cols: cols, rows: rows))
-        }
+        editorNSView?.announceReadyIfLaidOut()
 
-        sendCurrentPowerThermalState(reason: "Power state after BEAM reconnect")
-
-        PortLogger.info("Protocol reconnected after BEAM restart")
+        sendCurrentPowerThermalState(reason: "Power state after BEAM connection")
     }
 
     // MARK: - Font change
@@ -1186,8 +1254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func replaceProtocolConnection(
         connectionID: UInt64,
         readHandle: FileHandle,
-        writeHandle: FileHandle,
-        canRestart: Bool
+        writeHandle: FileHandle
     ) -> ProtocolConnection? {
         let connection = ProtocolConnection.replacing(
             protocolConnection,
@@ -1232,7 +1299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             },
             onInitializationFailure: { [weak self] error in
-                self?.presentOutboundTransportInitializationFailure(error, canRestart: canRestart)
+                self?.presentOutboundTransportInitializationFailure(error)
             }
         )
         guard let connection else { return nil }
@@ -1256,6 +1323,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         guard let dispatcher else { return }
         dispatcher.dispatch(frame, connectionID: connectionID)
+        if !appState.hasReceivedFirstFrame, let message = appState.gui.protocolErrorState.message {
+            coreLifecycle?.abandonStartup()
+            beamManager?.abortStartup()
+            presentStartupFailure(message, canRetry: false)
+        }
     }
 
     private func handleProtocolDecodeFailure(_ failure: DecodedFrameFailure, connectionID: UInt64) {
@@ -1317,38 +1389,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editorNSView?.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
     }
 
-    private func presentNativeStartupFailure(_ message: String) {
+    func keepWaitingForStartup() {
+        guard case .slow(let canRetry) = appState.startup else { return }
+        appState.startup = .waitingLonger(canRetry: canRetry)
+    }
+
+    func retryStartup() {
+        guard let manager = beamManager else { return }
+        switch appState.startup {
+        case .slow(true), .waitingLonger(true), .failed(_, true):
+            appState.startup = .retrying
+            coreLifecycle?.abandonStartup()
+            manager.retryStartup { [weak self] in self?.presentStartupProcessFailure($0) }
+        default:
+            break
+        }
+    }
+
+    func quitDuringStartup() {
+        guard !appState.hasReceivedFirstFrame else { return }
+        coreLifecycle?.abandonStartup()
+        NSApp.terminate(nil)
+    }
+
+    private func presentStartupProcessFailure(_ failure: BEAMProcessManager.StartupFailure) {
+        switch failure {
+        case .missingRelease:
+            presentStartupFailure("The bundled editor core is missing. Reinstall Minga and launch it again.", canRetry: false)
+        case .launch(let reason):
+            presentStartupFailure("Minga could not launch the editor core. \(reason)", canRetry: true)
+        case .previousCoreStopTimedOut:
+            presentStartupFailure("Minga could not confirm that the previous editor core stopped in time. No replacement was started.", canRetry: false)
+        }
+    }
+
+    private func presentStartupFailure(_ message: String, canRetry: Bool) {
         NSLog("Minga startup failed: %@", message)
-        beamManager?.abortStartup()
-        MainRunLoopAction {
-            let alert = NSAlert()
-            alert.alertStyle = .critical
-            alert.messageText = "Minga Could Not Start"
-            alert.informativeText = message
-            alert.addButton(withTitle: "Quit Minga")
-            alert.runModal()
-            NSApp.terminate(nil)
-        }.enqueue()
+        appState.startup = .failed(message: message, canRetry: canRetry)
     }
 
     private func presentStartupTimeout() {
-        let message = "Minga did not receive a usable editor frame before the startup deadline."
-        NSLog("Minga startup failed: %@", message)
-        recoveryManager?.presentTransportFailure(message: message, restartAction: nil) { [weak self] in
-            guard self?.coreLifecycle?.abandonTimedOutStartup() == true else { return }
-            NSApp.terminate(nil)
-        }
+        guard case .waiting = appState.startup else { return }
+        NSLog("Minga startup is waiting for its first frame")
+        appState.startup = .slow(canRetry: beamManager != nil)
     }
 
     private func presentTerminalTransportFailure(message: String) {
-        if appState.hasReceivedFirstFrame, let manager = beamManager {
-            recoveryManager?.presentTransportFailure(
-                message: message,
-                restartAction: { manager.restartTransportAfterFailure() }
-            )
-        } else {
-            recoveryManager?.presentTransportFailure(message: message, restartAction: nil)
+        guard appState.hasReceivedFirstFrame else {
+            if case .failed(_, false) = appState.startup { return }
+            let detail = beamManager == nil ? message + " Quit, then relaunch Minga from your terminal." : message
+            presentStartupFailure(detail, canRetry: beamManager != nil)
+            return
         }
+        let restart: (@MainActor () -> Void)?
+        if let manager = beamManager {
+            restart = { manager.restartTransportAfterFailure() }
+        } else {
+            restart = nil
+        }
+        recoveryManager?.presentTransportFailure(message: message, restartAction: restart)
     }
 
     private func dismissInputRejection() {
@@ -1362,16 +1461,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func presentOutboundTransportInitializationFailure(
-        _ error: OutboundTransportInitializationError,
-        canRestart: Bool
-    ) {
+    private func presentOutboundTransportInitializationFailure(_ error: OutboundTransportInitializationError) {
         coreConnectionIsLive = false
         applicationQuitCoordinator?.transportRecoveryDidExpire()
-        if canRestart, appState.hasReceivedFirstFrame {
-            presentTerminalTransportFailure(message: error.userFacingMessage)
-        } else {
-            presentNativeStartupFailure(error.userFacingMessage)
+        if !appState.hasReceivedFirstFrame {
+            coreLifecycle?.stop()
+            beamManager?.stopUnconnectedStartup()
         }
+        presentTerminalTransportFailure(message: error.userFacingMessage)
     }
 }
