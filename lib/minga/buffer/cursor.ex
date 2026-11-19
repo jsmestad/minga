@@ -179,7 +179,7 @@ defmodule Minga.Buffer.Cursor do
   @spec joined(String.t(), String.t()) :: String.t()
   defp joined(before, ""), do: before
   defp joined("", after_), do: after_
-  defp joined(before, after_), do: IO.iodata_to_binary([before, after_])
+  defp joined(before, after_), do: :binary.list_to_bin([before, after_])
 
   # A gap-crossing caret read materializes the content once and reuses it for both halves.
   # Otherwise the read is a view and the halves use one exact copy of the content.
@@ -258,7 +258,7 @@ defmodule Minga.Buffer.Cursor do
   defp exact_copy(%Document{before: before, after: after_}, start, count) do
     in_before = byte_size(before) - start
 
-    IO.iodata_to_binary([
+    :binary.list_to_bin([
       binary_part(before, start, in_before),
       binary_part(after_, 0, count - in_before)
     ])

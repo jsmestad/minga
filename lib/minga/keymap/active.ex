@@ -782,7 +782,7 @@ defmodule Minga.Keymap.Active do
   # Normal mode: leader sequences (SPC + more keys)
   defp do_bind(server, :normal, [{32, 0} | rest], command, description) when rest != [] do
     ets_update(server, @leader_trie_key, Defaults.leader_trie(), fn trie ->
-      Bindings.bind(trie, rest, command, description)
+      bind_configured(trie, rest, command, description)
     end)
   end
 
@@ -804,7 +804,7 @@ defmodule Minga.Keymap.Active do
        when mode in [:insert, :visual, :operator_pending, :command] do
     ets_update(server, @mode_tries_key, %{}, fn tries ->
       trie = Map.get(tries, mode, Bindings.new())
-      updated = Bindings.bind(trie, keys, command, description)
+      updated = bind_configured(trie, keys, command, description)
       Map.put(tries, mode, updated)
     end)
   end
@@ -815,7 +815,7 @@ defmodule Minga.Keymap.Active do
     ets_update(server, @scope_overrides_key, %{}, fn overrides ->
       scope_map = Map.get(overrides, scope, %{})
       trie = Map.get(scope_map, vim_state, Bindings.new())
-      updated = Bindings.bind(trie, keys, command, description)
+      updated = bind_configured(trie, keys, command, description)
       new_scope_map = Map.put(scope_map, vim_state, updated)
       Map.put(overrides, scope, new_scope_map)
     end)
@@ -824,6 +824,17 @@ defmodule Minga.Keymap.Active do
   defp do_bind(_server, mode, _keys, _command, _description) do
     Minga.Log.warning(:config, "Keybinding for mode #{inspect(mode)} not yet supported")
     {:error, "keybinding for mode #{inspect(mode)} not yet supported"}
+  end
+
+  @spec bind_configured(Bindings.node_t(), [Bindings.key(), ...], atom(), String.t()) ::
+          Bindings.node_t()
+  defp bind_configured(trie, keys, command, description) do
+    case Bindings.overlap_warning(trie, keys, command) do
+      nil -> :ok
+      warning -> Minga.Log.warning(:config, warning)
+    end
+
+    Bindings.bind(trie, keys, command, description)
   end
 
   # ── Private: filetype bind ─────────────────────────────────────────────────
@@ -839,7 +850,7 @@ defmodule Minga.Keymap.Active do
 
         ets_update(server, @filetype_tries_key, %{}, fn tries ->
           trie = Map.get(tries, filetype, Bindings.new())
-          updated = Bindings.bind(trie, sub_keys, command, description)
+          updated = bind_configured(trie, sub_keys, command, description)
           Map.put(tries, filetype, updated)
         end)
 
@@ -856,7 +867,7 @@ defmodule Minga.Keymap.Active do
       {:ok, keys} ->
         ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
           trie = Map.get(tries, {filetype, mode}, Bindings.new())
-          updated = Bindings.bind(trie, keys, command, description)
+          updated = bind_configured(trie, keys, command, description)
           Map.put(tries, {filetype, mode}, updated)
         end)
 

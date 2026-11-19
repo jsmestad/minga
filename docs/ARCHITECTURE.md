@@ -904,6 +904,8 @@ Layer 2: MingaEditor.*    (editor presentation + orchestration)
 
 This isn't just organization for readability. A credo check (`Minga.Credo.DependencyDirectionCheck`) enforces these boundaries at compile time. Every `mix credo` run catches violations.
 
+Reach checks runtime effects separately from dependency direction. Its `.reach.exs` policy rejects classified side effects in the pure foundations and in explicitly listed Agent contracts. Use Erlang iodata primitives for byte conversion and sizing in these modules; Reach classifies the entire Elixir `IO` module as I/O. Unknown calls are not proof of purity. The policy explicitly rejects calls to `Minga.Log` from these modules, even when Reach cannot infer the effect.
+
 **Layer 0 (`lib/minga/`)** contains everything the editor needs to function as a runtime: buffer management, language detection, config system, events, LSP client, git operations, project management, and the parser protocol. These modules have zero knowledge of how information is presented to users.
 
 **Layer 1 (`lib/minga_agent/`)** contains the AI agent runtime: session management, tool registry and execution, the API gateway, and changeset/overlay support. Agent code depends on Layer 0 (it reads buffers, uses events, calls into the config system) but never imports from MingaEditor.
