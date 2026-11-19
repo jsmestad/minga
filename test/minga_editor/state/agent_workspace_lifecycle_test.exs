@@ -606,7 +606,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       on_exit(fn -> stop_session(session) end)
       {state, workspace_id, _file_ref} = state_with_active_agent_workspace(session)
       %{connection: connection} = Session.editor_snapshot(session)
-      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+      ui = state.workspace.agent_ui |> put_prompt("") |> UIState.project_connection(connection)
       state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
       context = %{origin: {workspace_id, connection.target}}
       {state, revision} = PickerUI.open_loading(state, AgentRetainedOutputSource, context)
@@ -632,6 +632,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
       assert {:picker, _payload} = state.shell_runtime.state.modal
       closed = GuiActionHandler.dispatch(state, {:workspace_close, workspace_id})
+      assert TabBar.get_workspace(closed.shell_runtime.state.tab_bar, workspace_id) == nil
       assert closed.shell_runtime.state.modal == :none
 
       assert :stale ==
