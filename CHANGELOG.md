@@ -65,6 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Returning to a local Agent tab reuses its conversation when no messages or pins changed. Status and approvals still refresh from the arriving session.
 - Agent tools reject arguments that violate their declared JSON Schema before constructing or invoking an executable callback, including non-SDK tools. Valid SDK input normalization and defaults remain available, and the schema validator now fails closed when a regular expression exceeds its match budget.
 - Invalid `/auth` and `/login` arguments no longer enter prompt history. Minga rejects indented credential commands before sending them and keeps invalid provider names and remote sign-in callback errors out of the transcript.
 - Agent workspaces show Awaiting approval without an execution animation while a tool waits for consent. Denied, Cancelled, Expired, and Error outcomes stay distinct in native and terminal conversations, including restored sessions. Approval waits do not inflate execution durations. Stopping an admitted effect preserves retained output and disclosure state without claiming that its effects were rolled back.

@@ -11,6 +11,9 @@ defmodule Minga.Test.StubServer do
 
   use GenServer
 
+  alias MingaAgent.Session.Transcript
+  alias MingaAgent.TurnUsage
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -30,6 +33,31 @@ defmodule Minga.Test.StubServer do
 
   def handle_call(:pinned_ids, _from, state),
     do: {:reply, Map.get(state, :pinned_ids, MapSet.new()), state}
+
+  def handle_call({:transcript_since, cursor}, _from, state) do
+    messages = Map.get(state, :messages, [])
+    pairs = Map.get_lazy(state, :message_ids, fn -> default_message_ids(messages) end)
+    pins = Map.get(state, :pinned_ids, MapSet.new())
+    source = {messages, pairs, pins}
+
+    transcript =
+      case Map.get(state, :transcript_fixture) do
+        {^source, transcript} ->
+          transcript
+
+        previous ->
+          now = DateTime.utc_now()
+
+          transcript =
+            if previous, do: elem(previous, 1), else: Transcript.new([], now, make_ref())
+
+          ids = Enum.map(pairs, &elem(&1, 0))
+          Transcript.restore(transcript, messages, ids, [], TurnUsage.new(), pins, now)
+      end
+
+    {:reply, Transcript.since(transcript, cursor),
+     Map.put(state, :transcript_fixture, {source, transcript})}
+  end
 
   def handle_call({:toggle_pin, id}, _from, state) do
     pinned_ids = Map.get(state, :pinned_ids, MapSet.new())
