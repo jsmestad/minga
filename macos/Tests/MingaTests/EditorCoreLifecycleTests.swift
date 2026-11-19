@@ -18,8 +18,8 @@ struct EditorCoreLifecycleTests {
         #expect(fixture.events.replies == [false])
         #expect(fixture.events.retirements == 0)
         #expect(fixture.events.failures.isEmpty)
-        #expect(fixture.lifecycle.abandonTimedOutStartup())
-        #expect(!fixture.lifecycle.abandonTimedOutStartup())
+        fixture.lifecycle.abandonStartup()
+        fixture.lifecycle.abandonStartup()
         #expect(fixture.events.retirements == 1)
     }
 
@@ -34,7 +34,8 @@ struct EditorCoreLifecycleTests {
         #expect(fixture.lifecycle.firstFrameDidCommit() == (late ? .recovered : .committed))
         waitPastDeadline()
         #expect(fixture.events.startupTimeouts == (late ? 1 : 0))
-        #expect(!fixture.lifecycle.abandonTimedOutStartup())
+        fixture.lifecycle.abandonStartup()
+        #expect(fixture.events.retirements == 0)
         if late {
             #expect(fixture.events.replies == [false])
             #expect(fixture.events.quitRequests.isEmpty)
@@ -62,7 +63,7 @@ struct EditorCoreLifecycleTests {
         #expect(fixture.events.failures == ["startup pipe broke"])
         #expect(fixture.events.startupTimeouts == 0)
         #expect(fixture.events.retirements == 1)
-        #expect(fixture.manager?.isShuttingDown == true)
+        #expect(fixture.manager?.exitIntent == .startupFailed)
     }
 
     @Test("a pipe failure does not invalidate the visible startup Quit action", arguments: [false, true])
@@ -76,7 +77,7 @@ struct EditorCoreLifecycleTests {
         } else {
             fixture.lifecycle.transportDidFail(message: "startup pipe broke")
         }
-        #expect(fixture.lifecycle.abandonTimedOutStartup())
+        fixture.lifecycle.abandonStartup()
         waitPastDeadline()
 
         #expect(fixture.events.retirements == 1)

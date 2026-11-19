@@ -176,11 +176,9 @@ final class RecoveryManager {
     /// The failure stays latched until AppDelegate installs a replacement connection.
     func presentTransportFailure(
         message: String,
-        restartAction: (@MainActor () -> Void)?,
-        quitAction: (@MainActor () -> Void)? = nil
+        restartAction: (@MainActor () -> Void)?
     ) {
         guard !isShowingTransportFailure else { return }
-        let quit = quitAction ?? self.quitAction
         transportFailureMessage = message
         isShowingAlert = true
         isShowingTransportFailure = true
@@ -198,10 +196,10 @@ final class RecoveryManager {
                 if let restartAction {
                     restartAction()
                 } else {
-                    quit()
+                    self.quitAction()
                 }
             case .quit:
-                quit()
+                self.quitAction()
             }
         }
     }

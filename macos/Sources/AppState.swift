@@ -13,10 +13,20 @@ final class AppState {
     var isFullScreen: Bool = false
     /// Vertical center of the traffic light buttons, measured from the window top.
     var trafficLightMidY: CGFloat = 14
-    /// Flipped once when the first complete frame (commit_frame) arrives from the BEAM. The startup overlay fades out when this becomes true.
-    var hasReceivedFirstFrame: Bool = false
+    /// Native startup presentation. A committed editor replaces it.
+    var startup: StartupPresentation? = .starting
+    var hasReceivedFirstFrame: Bool { startup == nil }
     /// All GUI chrome sub-states in a single container.
     let gui = GUIState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
     var encoder: OutboundActionEncoding?
+}
+
+enum StartupPresentation {
+    case starting
+    case waiting
+    case slow(canRetry: Bool)
+    case waitingLonger(canRetry: Bool)
+    case retrying
+    case failed(message: String, canRetry: Bool)
 }

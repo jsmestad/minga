@@ -133,6 +133,15 @@ def shared_capture_support(before_registry, after_registry, before_fixtures, aft
             if signature in current:
                 old_start, old_end = swift_fixture_member(current, signature)
                 original = current[old_start:old_end]
+                if signature == "static func productionPreviewAppState(":
+                    # Older ContentView owns the startup overlay and must be told this fixture already rendered.
+                    readiness = "        appState.hasReceivedFirstFrame = true\n"
+                    replacement = replacement.replace(readiness, "")
+                    if readiness in original:
+                        initializer = "        let appState = AppState()\n"
+                        if replacement.count(initializer) != 1:
+                            raise ValueError("expected one AppState initializer in the production preview fixture")
+                        replacement = replacement.replace(initializer, initializer + readiness, 1)
                 current = current[:old_start] + replacement + current[old_end:]
             elif signature == "static var themeSlots:":
                 insertion = current.index("public enum PreviewFixtures {") + len("public enum PreviewFixtures {")
@@ -144,7 +153,7 @@ def shared_capture_support(before_registry, after_registry, before_fixtures, aft
                 "path": f"macos/Sources/{filename}", "member": signature,
                 "originalSha256": hashlib.sha256(original.encode()).hexdigest(),
                 "sha256": hashlib.sha256(replacement.encode()).hexdigest(),
-                "scope": "identical preview-only capture ownership, complete Doom One palette, frozen fixture state and explicit failure",
+                "scope": "shared fixture contents and frozen motion with revision-local startup readiness",
             })
         if filename == "PreviewRegistry.swift":
             before_registry = current
