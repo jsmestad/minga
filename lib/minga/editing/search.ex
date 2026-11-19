@@ -358,7 +358,7 @@ defmodule Minga.Editing.Search do
         ) :: {String.t(), non_neg_integer()}
   defp do_substitute_all(line, [], _rep, prev_end, count, acc) do
     final = [binary_part(line, prev_end, byte_size(line) - prev_end) | acc]
-    {final |> Enum.reverse() |> IO.iodata_to_binary(), count}
+    {final |> Enum.reverse() |> :binary.list_to_bin(), count}
   end
 
   defp do_substitute_all(line, [{pos, len} | rest], rep, prev_end, count, acc) do
@@ -425,7 +425,7 @@ defmodule Minga.Editing.Search do
           {String.t(), non_neg_integer(), [replacement_span()]}
   defp do_sub_spans_all(line, [], acc) do
     final = [binary_part(line, acc.prev_end, byte_size(line) - acc.prev_end) | acc.output]
-    {final |> Enum.reverse() |> IO.iodata_to_binary(), acc.count, Enum.reverse(acc.spans)}
+    {final |> Enum.reverse() |> :binary.list_to_bin(), acc.count, Enum.reverse(acc.spans)}
   end
 
   defp do_sub_spans_all(line, [{pos, len} | rest], acc) do
@@ -445,7 +445,7 @@ defmodule Minga.Editing.Search do
   end
 
   @spec output_byte_size(iolist()) :: non_neg_integer()
-  defp output_byte_size(acc), do: IO.iodata_length(Enum.reverse(acc))
+  defp output_byte_size(acc), do: :erlang.iolist_size(Enum.reverse(acc))
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
