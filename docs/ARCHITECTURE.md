@@ -966,9 +966,9 @@ compaction, restore/load and clear/reset transitions advance an exact generation
 and revision, including load into the same PID. Foreign, reset and future cursors
 return named reset outcomes with a replacement snapshot; malformed cursors are
 rejected. GenServer exits and timeouts propagate normally. Runtime cursors and
-indexes never enter durable serialization. Markdown, incremental editor projection,
-compact render submission and frontend encoding remain separate downstream owners;
-this source contract alone does not complete the producer-performance repair.
+indexes never enter durable serialization.
+
+The Editor's conversation projection records the source cursor it was built from. Local Agent tabs reuse that projection when the Session reports unchanged entries and pins. A change to either rebuilds the display from one atomic snapshot. Applying only the changed entries is still outstanding. Remote sessions keep the existing reads until their protocol can advertise cursor support.
 
 Each branch snapshot retains both model messages and display-boundary identities. Switching branches restores both values, so later branches cannot inherit boundaries from another branch. Legacy display-only records remain unchanged until an explicit import; the importer reconstructs only portable user and assistant text, records `:legacy_reconstructed` provenance, and omits unavailable attachment data rather than fabricating it. Tool calls and system entries remain readable in the preserved display record but do not become model history.
 

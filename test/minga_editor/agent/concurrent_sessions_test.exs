@@ -14,6 +14,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.Session
+  alias MingaAgent.Session.Transcript, as: SourceTranscript
+  alias MingaAgent.Session.Transcript.Cursor
+  alias MingaAgent.ToolApproval
+  alias MingaAgent.ToolApproval.Target
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
@@ -32,6 +37,33 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias Minga.Test.StubServer
+
+  @transcript_sync [:minga, :agent, :transcript_sync]
+
+  defp observe_sync do
+    id = make_ref()
+    test_pid = self()
+
+    :ok =
+      :telemetry.attach(
+        id,
+        @transcript_sync,
+        fn _event, measurements, metadata, observer ->
+          if self() == observer,
+            do: send(observer, {:transcript_sync, metadata.outcome, measurements.entries_read})
+        end,
+        test_pid
+      )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  defp start_session(id) do
+    start_supervised!(
+      {Session, provider: Minga.Test.StubProvider, persist?: false, hooks_enabled?: false},
+      id: id
+    )
+  end
 
   defp base_state(tabs, active_id) do
     tb = build_tab_bar(tabs, active_id)
@@ -250,30 +282,126 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert cache.pending_approval == nil
     end
 
-    test "failed session snapshot clears stale active tool name" do
-      dead_session = spawn(fn -> :ok end)
-      ref = Process.monitor(dead_session)
-      assert_receive {:DOWN, ^ref, :process, ^dead_session, _reason}
+    for count <- [100, 10_000] do
+      test "local switch reads zero of #{count} unchanged entries and one consistent snapshot on change" do
+        count = unquote(count)
+        session_a = start_session(:session_a)
+        session_b = start_session(:session_b)
+        messages = for index <- 1..count, do: {:user, "B entry #{index}"}
 
-      tab = agent_tab(1, "A", dead_session)
-
-      state =
-        [tab]
-        |> base_state(1)
-        |> then(fn state ->
-          agent =
-            state.shell_runtime.state
-            |> MingaEditor.Shell.Traditional.State.agent()
-            |> AgentState.set_status(:tool_executing)
-            |> AgentState.set_active_tool_name("stale_tool")
-
-          MingaEditor.Shell.Traditional.Workflow.install_agent_state(state, agent)
+        :sys.replace_state(session_b, fn source ->
+          %{source | transcript: SourceTranscript.new(messages, DateTime.utc_now(), make_ref())}
         end)
 
-      rebuilt = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
+        tabs = [agent_tab(1, "A", session_a), agent_tab(2, "B", session_b)]
+        observe_sync()
+        state = base_state(tabs, 1) |> MingaEditor.TabWorkflow.switch(2)
+        assert_receive {:transcript_sync, :changed, ^count}
+        retained = state.workspace.agent_ui.panel.transcript
+        valid_cursor = retained.source_cursor
+        assert valid_cursor != nil
 
-      assert MingaEditor.Shell.Traditional.State.agent(rebuilt.shell_runtime.state).runtime.active_tool_name ==
-               nil
+        away = MingaEditor.TabWorkflow.switch(state, 1)
+        assert_receive {:transcript_sync, :changed, _}
+
+        back = MingaEditor.TabWorkflow.switch(away, 2)
+        assert_receive {:transcript_sync, :unchanged, 0}
+        assert back.workspace.agent_ui.panel.transcript === retained
+
+        away = MingaEditor.TabWorkflow.switch(back, 1)
+        assert_receive {:transcript_sync, :unchanged, 0}
+        Session.add_system_message(session_b, "B received this while hidden")
+        updated = MingaEditor.TabWorkflow.switch(away, 2)
+        entries_read = count + 2
+        assert_receive {:transcript_sync, :changed, ^entries_read}
+        assert updated.workspace.agent_ui.panel.transcript.source_cursor != valid_cursor
+
+        assert {:system, "B received this while hidden", :info} in updated.workspace.agent_ui.panel.transcript.messages
+      end
+    end
+
+    test "metadata-only changes restyle from retained entries and strong source changes rebuild" do
+      session = start_session(:primary)
+      :ok = Session.send_prompt(session, "Only in the original conversation")
+      observe_sync()
+
+      state = base_state([agent_tab(1, "Agent", session)], 1)
+      state = AgentLifecycle.sync_transcript(state)
+      assert_receive {:transcript_sync, :changed, count}
+      original = state.workspace.agent_ui.panel.transcript
+
+      :sys.replace_state(session, fn source ->
+        Map.update!(source, :transcript, &SourceTranscript.touch(&1, DateTime.utc_now()))
+      end)
+
+      theme = state.appearance.theme
+      theme = %{theme | syntax: Map.put(theme.syntax, :test_theme_marker, true)}
+      state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.sync_transcript()
+      assert_receive {:transcript_sync, :unchanged, 0}
+      after_touch = state.workspace.agent_ui.panel.transcript
+      assert after_touch.source_cursor != original.source_cursor
+      assert after_touch.styled_fingerprint != original.styled_fingerprint
+      assert after_touch.messages == original.messages
+
+      invalid = %Cursor{incarnation: nil, generation: 0, revision: 0}
+
+      panel =
+        Panel.cache_transcript_display(
+          state.workspace.agent_ui.panel,
+          Transcript.display([]),
+          [],
+          source_cursor: invalid
+        )
+
+      state =
+        state
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_panel(panel)
+        |> AgentLifecycle.sync_transcript()
+
+      assert_receive {:transcript_sync, :reset, ^count}
+      assert state.workspace.agent_ui.panel.transcript.messages == original.messages
+
+      :ok = Session.new_session(session)
+      :ok = Session.send_prompt(session, "Only in the replacement conversation")
+      replaced = AgentLifecycle.sync_transcript(state)
+      assert_receive {:transcript_sync, :reset, _}
+      messages = replaced.workspace.agent_ui.panel.transcript.messages
+      assert {:user, "Only in the replacement conversation"} in messages
+      refute {:user, "Only in the original conversation"} in messages
+
+      :ok = stop_supervised(:primary)
+      assert AgentLifecycle.sync_transcript(replaced) === replaced
+      refute_received {:transcript_sync, _, _}
+    end
+
+    test "failed arriving snapshot never displays the outgoing Session's live state" do
+      session_a = start_supervised!({StubServer, []})
+      dead_session = spawn(fn -> :ok end)
+      ref = Process.monitor(dead_session)
+      assert_receive {:DOWN, ^ref, :process, ^dead_session, _}
+
+      state = base_state([agent_tab(1, "A", session_a), agent_tab(2, "B", dead_session)], 1)
+      target = Target.new("session-a", "request-a", "call-a")
+
+      approval =
+        ToolApproval.new(name: "read_file", tool_call_id: "call-a") |> ToolApproval.public(target)
+
+      state =
+        AgentLifecycle.apply_session_snapshot(state, session_a, %{
+          status: :tool_executing,
+          pending_approval: approval,
+          error: "Only session A's error",
+          active_tool_name: "read_file"
+        })
+
+      assert TraditionalState.agent(state.shell_runtime.state).pending_approval != nil
+      arrived = MingaEditor.TabWorkflow.switch(state, 2)
+      displayed = TraditionalState.agent(arrived.shell_runtime.state)
+
+      assert AgentState.status(displayed) == :idle
+      assert is_nil(displayed.pending_approval)
+      assert is_nil(displayed.error)
+      assert is_nil(displayed.runtime.active_tool_name)
     end
 
     test "sync_transcript preserves cached transcript when the session dies before cleanup" do
