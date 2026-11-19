@@ -17,6 +17,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
   alias Minga.RenderModel.UI.AgentChat.Usage
 
   @command :gui_agent_chat_message
+  @max_run_text_bytes 65_535
 
   @doc "Stable uint32 id for a message, or 0 for a bare (unwrapped) body."
   @spec message_id(AgentChat.message()) :: non_neg_integer()
@@ -222,10 +223,79 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
 
   @spec encode_styled_line(AgentChat.styled_line()) :: binary()
   defp encode_styled_line(runs) do
+    {encoded, count} = Enum.map_reduce(runs, 0, &encode_run_parts/2)
+
     Writer.new(@command)
-    |> Writer.uint16(:run_count, Enum.count(runs))
-    |> Writer.append(Enum.map(runs, &encode_styled_run/1))
+    |> Writer.uint16(:run_count, count)
+    |> Writer.append(encoded)
     |> Writer.finish()
+  end
+
+  @spec encode_run_parts(AgentChat.styled_run(), non_neg_integer()) :: {iodata(), pos_integer()}
+  defp encode_run_parts(run, count) when byte_size(elem(run, 0)) <= @max_run_text_bytes,
+    do: {encode_styled_run(run), count + 1}
+
+  defp encode_run_parts(run, count) do
+    text = elem(run, 0)
+
+    case preceding_grapheme_end(text, 0) do
+      {:oversized_grapheme, size} ->
+        <<grapheme::binary-size(^size), tail::binary>> = text
+        {encoded_grapheme, count} = encode_oversized_grapheme(grapheme, run, count)
+        encode_run_tail(encoded_grapheme, run, tail, count)
+
+      size ->
+        <<prefix::binary-size(^size), tail::binary>> = text
+        encode_run_tail(encode_styled_run(put_elem(run, 0, prefix)), run, tail, count + 1)
+    end
+  end
+
+  @spec encode_run_tail(iodata(), AgentChat.styled_run(), String.t(), pos_integer()) ::
+          {iodata(), pos_integer()}
+  defp encode_run_tail(encoded, _run, "", count), do: {encoded, count}
+
+  defp encode_run_tail(encoded, run, tail, count) do
+    {encoded_tail, count} = encode_run_parts(put_elem(run, 0, tail), count)
+    {[encoded, encoded_tail], count}
+  end
+
+  @spec preceding_grapheme_end(String.t(), non_neg_integer()) ::
+          pos_integer() | {:oversized_grapheme, pos_integer()}
+  defp preceding_grapheme_end(_text, @max_run_text_bytes), do: @max_run_text_bytes
+
+  defp preceding_grapheme_end(text, position) do
+    case String.next_grapheme_size(text) do
+      {size, tail} when position + size <= @max_run_text_bytes ->
+        preceding_grapheme_end(tail, position + size)
+
+      {size, _tail} when position == 0 ->
+        {:oversized_grapheme, size}
+
+      _past_limit ->
+        position
+    end
+  end
+
+  # The grapheme extent is already known. Only inspect the bytes at each wire cut.
+  @spec encode_oversized_grapheme(String.t(), AgentChat.styled_run(), non_neg_integer()) ::
+          {iodata(), pos_integer()}
+  defp encode_oversized_grapheme(text, run, count)
+       when byte_size(text) <= @max_run_text_bytes,
+       do: {encode_styled_run(put_elem(run, 0, text)), count + 1}
+
+  defp encode_oversized_grapheme(text, run, count) do
+    size = preceding_utf8_boundary(text, @max_run_text_bytes)
+    <<prefix::binary-size(^size), tail::binary>> = text
+    encoded = encode_styled_run(put_elem(run, 0, prefix))
+    {encoded_tail, count} = encode_oversized_grapheme(tail, run, count + 1)
+    {[encoded, encoded_tail], count}
+  end
+
+  @spec preceding_utf8_boundary(String.t(), pos_integer()) :: pos_integer()
+  defp preceding_utf8_boundary(text, position) do
+    if :binary.at(text, position) in 0x80..0xBF,
+      do: preceding_utf8_boundary(text, position - 1),
+      else: position
   end
 
   @spec encode_styled_run(AgentChat.styled_run()) :: binary()
