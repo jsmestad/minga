@@ -185,6 +185,27 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert window.render_cache.last_buf_version >= 0
     end
 
+    test "a missing composer skips the Agent window and warns with its identity" do
+      state = gui_state(content: "regular buffer")
+      win_id = state.workspace.windows.active
+      window = Window.new_agent_chat(win_id, 24, 80)
+      windows = %{state.workspace.windows | map: %{win_id => window}}
+      state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: UIState.new()}}
+      intent = Intent.from_editor_state(state)
+      renderer = RendererState.new(editor_pid: nil, pipeline: &RenderPipeline.run/1)
+      {_renderer, input} = BufferChanges.prepare(renderer, intent)
+      layout = Layout.put(input) |> Layout.get()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {[], nil, next} = Content.build_agent_chat_content(input, layout)
+          assert {[], nil, _state} = Content.build_agent_chat_content(next, layout)
+        end)
+
+      warning = "skipped agent window #{win_id}: composer buffer missing"
+      assert length(:binary.matches(log, warning)) == 1
+    end
+
     test "agent prompt publishes its source lease and canonical text geometry without forcing refresh" do
       state = gui_state(content: "regular buffer")
       win_id = state.workspace.windows.active

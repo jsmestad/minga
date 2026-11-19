@@ -355,6 +355,17 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp maybe_render_agent_window(
          %Window{content: {:agent_chat, _}} = window,
          win_id,
+         _win_layout,
+         frames,
+         cursor,
+         %{workspace: %{agent_ui: %{panel: %{prompt_buffer: nil}}}} = st
+       ) do
+    {frames, cursor, warn_unavailable_prompt(st, window, win_id, :missing)}
+  end
+
+  defp maybe_render_agent_window(
+         %Window{content: {:agent_chat, _}} = window,
+         win_id,
          win_layout,
          frames,
          cursor,
@@ -367,12 +378,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     # Prompt or session process died between state sync and this render.
     # Skip this window; the next lifecycle event will clean up state.
     :exit, _ ->
-      Minga.Log.debug(
-        :render,
-        "[content] skipped agent window #{win_id}: agent process unavailable"
-      )
-
-      {frames, cursor, st}
+      {frames, cursor, warn_unavailable_prompt(st, window, win_id, :unavailable)}
   end
 
   defp maybe_render_agent_window(
@@ -420,6 +426,24 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   defp maybe_render_agent_window(_window, _win_id, _win_layout, frames, cursor, st) do
     {frames, cursor, st}
+  end
+
+  @spec warn_unavailable_prompt(state(), Window.t(), Window.id(), :missing | :unavailable) ::
+          state()
+  defp warn_unavailable_prompt(state, window, id, reason) do
+    fault = {id, window.accessibility_generation, reason}
+
+    if state.caches.prompt_unavailable == fault do
+      state
+    else
+      # Publishing to Messages requests another render. Warn once per fault.
+      Minga.Log.warning(
+        :render,
+        "[content] skipped agent window #{id}: composer buffer #{reason}"
+      )
+
+      Input.record_prompt_unavailable(state, fault)
+    end
   end
 
   # Renders an agent chat window through semantic transcript and prompt models.
