@@ -29,6 +29,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.DirectorySource
   alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.UI.Picker.FileSource
@@ -223,10 +224,11 @@ defmodule MingaEditor.PickerUI do
         source_module,
         revision,
         fetch_identity,
-        {:ok, items, candidates, meta}
+        {:ok, _items, _candidates, meta} = result
       ) do
     case live_fetch(state, source_module, revision, fetch_identity, meta) do
       {:ok, payload} ->
+        {:ok, items, candidates, meta} = project_fetch_result(source_module, state, result)
         picker_state = payload.picker_ui
         picker = Picker.put_candidates(picker_state.picker, items, candidates)
         new_picker_state = PickerState.complete_fetch(picker_state, picker)
@@ -261,6 +263,16 @@ defmodule MingaEditor.PickerUI do
         :stale
     end
   end
+
+  @spec project_fetch_result(module(), state(), fetch_result()) :: fetch_result()
+  defp project_fetch_result(AgentModelSource, state, result) do
+    AgentModelSource.for_publication(
+      result,
+      MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+    )
+  end
+
+  defp project_fetch_result(_source, _state, result), do: result
 
   @spec live_fetch(state(), module(), reference(), term() | nil, Source.fetch_meta() | nil) ::
           {:ok, PickerPayload.t()} | :stale

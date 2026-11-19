@@ -1,8 +1,13 @@
 defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Credentials.Secret
+  alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.OAuth
+  alias MingaAgent.Providers.Native
+  alias MingaAgent.Session
   alias MingaAgent.Test.ModelPickerSession
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.RuntimeState
@@ -12,6 +17,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.Effect.{Policy, Request}
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
@@ -19,6 +25,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Picker.AgentModelSource
+  alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Theme
   alias MingaEditor.Viewport
@@ -34,6 +41,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     def init(message), do: {:ok, message}
 
     @impl GenServer
+    def handle_call(:begin_model_discovery, _from, fixture), do: {:reply, :local, fixture}
+
     def handle_call(:get_available_models, _from, {candidates, _message} = fixture),
       do: {:reply, {:ok, candidates}, fixture}
 
@@ -71,6 +80,191 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert item.description =~ "openai:env"
     assert item.description =~ "thinking low (off/low/high)"
     assert item.description =~ "tools yes, images yes, streaming yes"
+  end
+
+  defp start_codex_session(plug, path \\ "/tmp/model-picker-oauth.json") do
+    credential = OAuth.new("picker-account", path)
+    snapshot = Snapshot.new(%{"openai" => :env}, credential)
+
+    oauth = fn :openai_codex, oauth_file: path ->
+      {:ok,
+       %{
+         provider_key: "openai-codex",
+         account_id: credential.account_id,
+         oauth_file: path,
+         token: "picker-token"
+       }}
+    end
+
+    start_supervised!(
+      {Session,
+       provider: Native,
+       credentials_snapshot_fn: fn -> snapshot end,
+       model: "openai:no-such-model",
+       persist?: false,
+       provider_opts: [
+         model_resolver_opts: ModelSelectionFixture.resolver_opts(),
+         credential_opts: [
+           oauth_path: path,
+           oauth_resolver: oauth,
+           plug: plug
+         ]
+       ]}
+    )
+  end
+
+  test "Codex discovery failure keeps API-key choices and shows a login notice" do
+    session = start_codex_session(fn conn -> Plug.Conn.send_resp(conn, 401, "") end)
+
+    connection = connection(session)
+    {state, workspace_id} = editor_state(connection, "Prior Model", nil)
+    ctx = context(connection, workspace_id)
+
+    assert {:ok, items, %{status: status} = meta} = AgentModelSource.async_fetch(ctx)
+    assert [item] = Enum.filter(items, &model_choice?/1)
+
+    assert request_provider(item) == :openai
+    assert Enum.any?(items, &match?({:connect, _}, &1.meta.intent))
+    assert status =~ "/login"
+    assert {:ok, [candidate]} = Session.get_available_models(session)
+    assert candidate.selection.route.request_provider == :openai
+
+    Session.refresh_credentials(session)
+    assert {:ok, _} = Session.get_available_models(session)
+
+    {opened, revision} =
+      PickerUI.open_loading(state, AgentModelSource, ctx.picker_ui.context)
+
+    assert {:ok, published} =
+             PickerUI.apply_fetch_result(
+               opened,
+               AgentModelSource,
+               revision,
+               {:ok, items, Candidate.from_items(items), meta}
+             )
+
+    assert {:picker, %{picker_ui: %{picker: %{items: ^items}}}} =
+             published.shell_runtime.state.modal
+
+    assert published.shell_runtime.state.notice == opened.shell_runtime.state.notice
+  end
+
+  test "canceling a refresh preserves the completed inventory until a new result replaces it" do
+    owner = self()
+    calls = :atomics.new(1, [])
+
+    session =
+      start_codex_session(fn conn ->
+        case :atomics.add_get(calls, 1, 1) do
+          1 ->
+            Req.Test.json(conn, %{"models" => [%{"slug" => "test-model", "visibility" => "list"}]})
+
+          2 ->
+            send(owner, {:refresh_started, self()})
+
+            receive do
+              :finish -> Plug.Conn.send_resp(conn, 401, "")
+            end
+
+          3 ->
+            Plug.Conn.send_resp(conn, 401, "")
+        end
+      end)
+
+    ctx = context(connection(session), 1)
+    assert {:ok, ready, meta} = AgentModelSource.async_fetch(ctx)
+
+    providers = for item <- ready, model_choice?(item), do: request_provider(item)
+    assert Enum.sort(providers) == [:openai, :openai_codex]
+
+    worker = spawn(fn -> AgentModelSource.async_fetch(ctx) end)
+    monitor = Process.monitor(worker)
+    assert_receive {:refresh_started, ^worker}, 1_000
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}
+
+    assert {:ok, candidates} = Session.get_available_models(session)
+    assert Enum.any?(candidates, &(&1.selection.route.request_provider == :openai_codex))
+
+    assert {:ok, _items, %{status: _}} = AgentModelSource.async_fetch(ctx)
+    assert {:ok, [candidate]} = Session.get_available_models(session)
+    assert candidate.selection.route.request_provider == :openai
+
+    assert {:ok, projected, _, empty_meta} =
+             AgentModelSource.for_publication(
+               {:ok, ready, Candidate.from_items(ready), meta},
+               session
+             )
+
+    assert [item] = Enum.filter(projected, &model_choice?/1)
+    assert Enum.reject(projected, &model_choice?/1) == Enum.reject(ready, &model_choice?/1)
+    assert request_provider(item) == :openai
+    assert empty_meta == %{}
+  end
+
+  @tag :tmp_dir
+  test "a same-account sign-in supersedes a pending model lookup", %{tmp_dir: dir} do
+    owner = self()
+
+    session =
+      start_codex_session(
+        fn conn ->
+          send(owner, {:discovery_started, self()})
+
+          receive do
+            :reply -> Plug.Conn.send_resp(conn, 401, "")
+          end
+        end,
+        Path.join(dir, "oauth.json")
+      )
+
+    worker = Task.async(fn -> AgentModelSource.async_fetch(context(connection(session), 1)) end)
+    assert_receive {:discovery_started, pid}, 1_000
+    %{target: target} = Session.editor_snapshot(session).connection
+    assert {:ok, ref} = Session.begin_connection(session, target, :oauth_manual, self())
+    assert :ok = Session.register_connection_worker(session, target, ref, self())
+
+    replacement =
+      Secret.new(%{
+        access: "replacement-access",
+        refresh: "replacement-refresh",
+        account_id: "picker-account",
+        expires: System.system_time(:millisecond) + 3_600_000
+      })
+
+    assert {:ok, _snapshot} = Session.commit_oauth(session, target, ref, replacement)
+    assert {:ok, [_]} = Session.get_available_models(session)
+    send(pid, :reply)
+
+    assert {:ok, items, meta} = Task.await(worker)
+    assert [item] = Enum.filter(items, &model_choice?/1)
+    assert request_provider(item) == :openai
+    assert meta == %{}
+  end
+
+  test "retrying the connection supersedes a pending model lookup" do
+    owner = self()
+
+    session =
+      start_codex_session(fn conn ->
+        send(owner, {:discovery_started, self()})
+
+        receive do
+          :reply ->
+            Req.Test.json(conn, %{"models" => [%{"slug" => "test-model", "visibility" => "list"}]})
+        end
+      end)
+
+    worker = Task.async(fn -> AgentModelSource.async_fetch(context(connection(session), 1)) end)
+    assert_receive {:discovery_started, pid}, 1_000
+    %{target: target} = Session.editor_snapshot(session).connection
+    assert :ok = Session.retry_connection(session, target)
+    send(pid, :reply)
+
+    assert {:ok, items, meta} = Task.await(worker)
+    assert meta == %{}
+    assert [item] = Enum.filter(items, &model_choice?/1)
+    assert request_provider(item) == :openai
   end
 
   test "keeps duplicate display names distinct by exact route identity" do
@@ -243,11 +437,13 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   end
 
   defp model_items(context) do
-    Enum.filter(
-      AgentModelSource.candidates(context),
-      &match?({:model, %ModelSelection{}}, &1.meta.intent)
-    )
+    Enum.filter(AgentModelSource.candidates(context), &model_choice?/1)
   end
+
+  defp model_choice?(item), do: match?({:model, %ModelSelection{}}, item.meta.intent)
+
+  defp request_provider(%{meta: %{intent: {:model, selection}}}),
+    do: selection.route.request_provider
 
   defp connection(session) do
     %ConnectionSnapshot{
