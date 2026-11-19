@@ -27,6 +27,7 @@ defmodule Minga.Telemetry.DevHandler do
   | `[:minga, :port, :write, :stop]` | `:port` | `[port:write] 12µs (5360 bytes)` |
   | `[:minga, :input, :dispatch, :stop]` | `:editor` | `[input:dispatch] 85µs` |
   | `[:minga, :command, :execute, :stop]` | `:editor` | `[command:move_down] 12µs` |
+  | `[:minga, :agent, :transcript_sync]` | `:agent` | `[agent:transcript_sync] unchanged (0 entries read)` |
   """
 
   @handler_id "minga-dev-handler"
@@ -52,7 +53,8 @@ defmodule Minga.Telemetry.DevHandler do
         [:minga, :render, :hop_latency],
         [:minga, :port, :write, :stop],
         [:minga, :input, :dispatch, :stop],
-        [:minga, :command, :execute, :stop]
+        [:minga, :command, :execute, :stop],
+        [:minga, :agent, :transcript_sync]
       ],
       &__MODULE__.handle_event/4,
       nil
@@ -137,6 +139,15 @@ defmodule Minga.Telemetry.DevHandler do
     duration = measurements.duration
     command = Map.get(metadata, :command, :unknown)
     Minga.Log.debug(:editor, fn -> "[command:#{command}] #{to_microseconds(duration)}µs" end)
+  end
+
+  def handle_event(
+        [:minga, :agent, :transcript_sync],
+        %{entries_read: count},
+        %{outcome: outcome},
+        _config
+      ) do
+    Minga.Log.debug(:agent, fn -> "[agent:transcript_sync] #{outcome} (#{count} entries read)" end)
   end
 
   # Catch-all for any future events that aren't handled yet.
