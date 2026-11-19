@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.
-- Protected `main` builds prepare rolling Homebrew candidates for the macOS TUI and GUI. Preparation does not publish the packages or update the tap.
+- Successful rolling builds from `main` publish Apple Silicon packages to the Minga Homebrew tap. Use `brew upgrade minga` for the TUI or `brew upgrade --cask minga-mac` for the GUI.
 
 ### Changed
 
