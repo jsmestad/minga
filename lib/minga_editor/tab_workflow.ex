@@ -143,6 +143,7 @@ defmodule MingaEditor.TabWorkflow do
     |> TraditionalWorkflow.install_agent_spinner_stop()
     |> rebuild_switched_agent(target)
     |> ensure_agent_composer(target)
+    |> AgentHistorySource.dismiss_if_stale()
     |> maybe_restart_incoming_spinner()
   end
 
