@@ -22,7 +22,7 @@ func agentHelpRoutingModel(t *testing.T, width, height int) (Model, chan []byte)
 			Opcode: generated.OPGuiSurfaceLayout,
 			Placements: []generated.SurfacePlacement{{
 				SurfaceID: surfaceIDAgentHelp,
-				Rect: generated.Rect{Row: uint16(model.layout.body.Y), Col: uint16(model.layout.body.X),
+				Rect: generated.Rect{Col: uint16(model.layout.body.X),
 					Width: uint16(model.layout.body.Width), Height: uint16(model.layout.body.Height - 8)},
 				Z: 300, HitKind: 8,
 			}},

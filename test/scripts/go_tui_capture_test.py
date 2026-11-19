@@ -238,7 +238,7 @@ if mode in ("ignore-shutdown", "valid-ignore-shutdown"):
 if mode == "valid-term-zero":
     signal.signal(signal.SIGTERM, lambda *_args: sys.exit(0))
 if mode not in ("no-ready", "ignore-shutdown"):
-    ready = bytes([3]) + struct.pack(">HH", columns + (mode == "wrong-size"), rows)
+    ready = bytes([3]) + struct.pack(">HH", columns + (mode == "wrong-size"), max(rows - 1, 1))
     os.write(1, struct.pack(">I", len(ready)) + ready)
 if mode == "flood":
     os.write(2, b"stderr flood\\n" * 20000)
@@ -301,9 +301,9 @@ while True:
                 self.assertIn("TimeoutError", metadata["error"])
                 self.assertIn(b"failure boundary drained", stderr)
 
-    def test_kernel_winsize_is_required_in_ready(self):
+    def test_fitted_kernel_grid_is_required_in_ready(self):
         metadata, _, _ = self.run_failure("wrong-size")
-        self.assertIn("ready size 61x24, expected 60x24", metadata["error"])
+        self.assertIn("ready size 61x23, expected 60x23", metadata["error"])
 
     def test_protocol_and_stderr_are_drained_concurrently_with_terminal(self):
         metadata, stderr, _ = self.run_failure("flood")

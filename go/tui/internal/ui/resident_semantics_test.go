@@ -72,7 +72,7 @@ func TestResidentSemanticsDriveLocallyScrolledPresentation(t *testing.T) {
 		t.Fatalf("resident cursorline missing after local scroll: visible=%v bg=%06x", visible, bg)
 	}
 	cursor := model.View().Cursor
-	if cursor == nil || cursor.X != 3 || cursor.Y != 1 {
+	if cursor == nil || cursor.X != 3 || cursor.Y != model.layout.grid.Y+1 {
 		t.Fatalf("resident cursor was not rebased into the local slice: %+v", cursor)
 	}
 }

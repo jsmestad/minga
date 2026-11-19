@@ -151,8 +151,8 @@ func TestEditorTextHitIgnoresStructuralSurfaceRegistryPlacements(t *testing.T) {
 	// SurfaceRegistry places editor_area and buffer_content. Its :window node is
 	// the structural container represented here by the semantic WindowContent.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: 1, Rect: generated.Rect{Row: uint16(model.layout.body.Y), Col: uint16(model.layout.body.X), Width: 20, Height: 5}, Z: 100, HitKind: 7},
-		{SurfaceID: 3, Rect: generated.Rect{Row: uint16(model.layout.body.Y), Col: uint16(model.layout.body.X), Width: 8, Height: 2}, Z: 101, HitKind: 1},
+		{SurfaceID: 1, Rect: generated.Rect{Width: 20, Height: 4}, Z: 100, HitKind: 7},
+		{SurfaceID: 3, Rect: generated.Rect{Width: 8, Height: 2}, Z: 101, HitKind: 1},
 	}
 	_, packet, handled := model.handleEditorTextMouse(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: model.layout.body.X + 1, Y: model.layout.body.Y}))
 	if !handled || packet == nil || packet[0] != generated.OPEditorTextEvent {
@@ -173,7 +173,7 @@ func TestEditorTextInitialHitDefersToVisiblePlacedOverlay(t *testing.T) {
 	}
 	model.surfacePlacements = []generated.SurfacePlacement{{
 		SurfaceID: surfaceIDCompletionMenu,
-		Rect:      generated.Rect{Row: uint16(model.layout.body.Y), Col: uint16(model.layout.body.X), Width: 8, Height: 2},
+		Rect:      generated.Rect{Width: 8, Height: 2},
 		Z:         301,
 		HitKind:   8,
 	}}
