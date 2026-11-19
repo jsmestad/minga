@@ -167,7 +167,10 @@ defmodule MingaAgent.OAuth.FlowTest do
     monitor = Process.monitor(helper)
     send(first.pid, {:connection_cancelled, operation})
     assert {:error, :cancelled} = Task.await(first, 1_000)
-    assert_receive {:DOWN, ^monitor, :process, ^helper, :killed}
+
+    # The launcher can exit before it processes the monitor signal from this test process.
+    assert_receive {:DOWN, ^monitor, :process, ^helper, reason}
+    assert reason in [:killed, :noproc]
     assert {:error, :econnrefused} = :gen_tcp.connect({127, 0, 0, 1}, port, [], 100)
 
     replacement = make_ref()

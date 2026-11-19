@@ -38,11 +38,21 @@ class ReleaseCandidateTest(unittest.TestCase):
         }
         self.created = now.isoformat()
         self.expires = (now + timedelta(days=7)).isoformat()
+        self.source_tool_versions = self.root / "source.tool-versions"
+        self.prepare_candidate("1.26.11")
+
+    def write_source_pins(self, go_version):
+        self.source_tool_versions.write_text(
+            f"erlang 29.1.2\nelixir 1.20.5-otp-29\nzig 0.16.0\ngolang {go_version}\n"
+        )
+
+    def prepare_candidate(self, go_version):
+        self.write_source_pins(go_version)
         self.metadata = []
         self.entries = {}
         self.builds = {}
         for filename, target in candidate.PAYLOADS.items():
-            tools = dict(candidate.PINS)
+            tools = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": go_version, "native_zig": "0.16.0"}
             ids = ["package-contents", "native-architecture", "package-boot"]
             if filename == "Minga.dmg":
                 ids += ["signature", "notarization", "stapling"]
@@ -51,7 +61,7 @@ class ReleaseCandidateTest(unittest.TestCase):
                 ids.append("package-runtime-abi")
                 tools.update(python="3.14.10", erts="17.1.1", host_erts_arch=target["arch"] + "-fixture",
                              erts_source={"version": 2, "kind": "local-source-build", **target,
-                                          "otp_version": candidate.PINS["otp"], "erts_version": "17.1.1"})
+                                          "otp_version": tools["otp"], "erts_version": "17.1.1"})
             build = {
                 "schema_version": 1, "context": dict(self.context),
                 "filename": filename, "target": target, "toolchains": tools,
@@ -101,6 +111,7 @@ class ReleaseCandidateTest(unittest.TestCase):
             sys.executable, str(SCRIPT), command,
             "--context", str(self.root / "context.json"),
             "--artifacts", str(self.root / "artifacts.json"),
+            "--source-tool-versions", str(self.source_tool_versions),
             "--downloads", str(self.downloads), *arguments,
         ], capture_output=True, text=True)
         if success:
@@ -163,6 +174,24 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.assertEqual([item["filename"] for item in self.manifest["payloads"]], list(names))
         del self.context["channel"]
         self.reject("missing, duplicate or unexpected artifacts")
+
+    def test_unexpired_candidates_use_their_source_generation_pins(self):
+        self.verify(success=True)
+        self.write_source_pins("1.26.4")
+        self.reject("wrong pinned toolchain")
+
+        self.context["source_sha"] = "c" * 40
+        self.prepare_candidate("1.26.4")
+        self.verify(success=True)
+        self.write_source_pins("1.26.11")
+        self.reject("wrong pinned toolchain")
+
+    def test_partial_or_ambiguous_source_pins_cannot_verify(self):
+        original = self.source_tool_versions.read_text()
+        self.source_tool_versions.write_text(original.replace("golang 1.26.11\n", ""))
+        self.reject("missing source toolchain pins")
+        self.source_tool_versions.write_text(original + "golang 1.26.4\n")
+        self.reject("invalid or duplicate source toolchain pin")
 
     def test_verifies_historical_wrapper_manifest_without_creating_one(self):
         # Reproduce the previous on-wire manifest and checksum order independently
@@ -346,7 +375,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.builds[label]["toolchains"]["go"] = "1.25.0"
         self.replace_build(label)
         self.reject("wrong pinned toolchain")
-        self.builds[label]["toolchains"]["go"] = candidate.PINS["go"]
+        self.builds[label]["toolchains"]["go"] = "1.26.11"
         self.builds[label]["target"] = {"os": "linux", "arch": "aarch64"}
         self.replace_build(label)
         self.reject("wrong build target")
