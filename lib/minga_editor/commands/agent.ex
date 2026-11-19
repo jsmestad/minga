@@ -622,7 +622,12 @@ defmodule MingaEditor.Commands.Agent do
 
   defp submit_prompt(state, panel, false, _session) do
     text = PromptBuffer.prompt_text(panel)
-    submit_prompt_text(state, text, SlashCommand.slash_command?(text))
+
+    if SlashCommand.indented_credential_command?(text) do
+      reject_indented_credential_command(state)
+    else
+      submit_prompt_text(state, text, SlashCommand.slash_command?(text))
+    end
   end
 
   @spec submit_prompt_text(state(), String.t(), boolean()) :: state()
@@ -637,6 +642,13 @@ defmodule MingaEditor.Commands.Agent do
 
   defp submit_prompt_text(state, text, false) do
     send_prompt_to_llm(state, text)
+  end
+
+  @spec reject_indented_credential_command(state()) :: state()
+  defp reject_indented_credential_command(state) do
+    state
+    |> clear_submitted_slash_input_for_sensitivity(true)
+    |> NoticeWorkflow.publish("Credential commands must start at the beginning of the prompt.")
   end
 
   @spec clear_submitted_slash_input(state(), String.t()) :: state()
@@ -1107,11 +1119,16 @@ defmodule MingaEditor.Commands.Agent do
       ] ->
         text = PromptBuffer.prompt_text(panel)
 
-        if SlashCommand.slash_command?(text) do
-          state = clear_submitted_slash_input(state, text)
-          execute_slash_command(state, text)
-        else
-          send_follow_up_to_llm(state, text)
+        case {SlashCommand.indented_credential_command?(text), SlashCommand.slash_command?(text)} do
+          {true, _} ->
+            reject_indented_credential_command(state)
+
+          {false, true} ->
+            state = clear_submitted_slash_input(state, text)
+            execute_slash_command(state, text)
+
+          {false, false} ->
+            send_follow_up_to_llm(state, text)
         end
 
       true ->
