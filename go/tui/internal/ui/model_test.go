@@ -1482,14 +1482,19 @@ func TestAgentChatPanelRendersStructuredTranscript(t *testing.T) {
 		{Kind: 0x02, Text: "I will make the agent surface semantic."},
 		{Kind: 0x04, Name: "read_file", Summary: "go/tui/internal/ui/render_surfaces.go", Status: 1, DurationMS: 25, Collapsed: true},
 		{Kind: 0x09, Name: "edit_file", Summary: "Update agent renderer", PreviewLines: []string{"+ semantic panel"}},
-		{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 12500}},
+		{Kind: 0x06, Usage: protocol.AgentUsage{Input: 1200, Output: 300, CostMicros: 500}},
+		{Kind: 0x01, Text: "now explain the renderer"},
+		{Kind: 0x02, Text: "This turn reported no usage."},
 	}})
 
 	view := ansi.Strip(strings.Join(model.renderAgentChatPanelWithLimit(chat, 120, 28), "\n"))
-	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "Read", "read_file", "path:", "Approval edit_file", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Context", "Hints", "╰"} {
+	for _, want := range []string{"󰚩 Agent", "anthropic / claude-sonnet-4", "◌ medium", "Read", "read_file", "path:", "Approval edit_file", "This turn reported no usage.", "Usage", "NORMAL", "fix the renderer", "◇ Session", "Provider", "Model", "Latest usage", "Input    1.2K", "Output   300", "Hints", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("agent chat panel missing %q in %q", want, view)
 		}
+	}
+	if strings.Count(view, "$0.0005") != 2 || strings.Contains(view, "Context") || strings.Contains(view, "Last turn") {
+		t.Fatalf("usage should retain the latest reported sub-cent cost without attributing it to the turn that reported no usage: %q", view)
 	}
 }
 
