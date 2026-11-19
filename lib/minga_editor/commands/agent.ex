@@ -2374,6 +2374,12 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.AgentModelSource.open/1
       },
       %Minga.Command{
+        name: :agent_retained_history,
+        description: "Read retained Agent messages",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentHistorySource.open/1
+      },
+      %Minga.Command{
         name: :agent_pick_thinking,
         description: "Pick AI thinking level",
         requires_buffer: false,

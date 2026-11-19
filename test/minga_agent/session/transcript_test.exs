@@ -11,6 +11,34 @@ defmodule MingaAgent.Session.TranscriptTest do
   @now ~U[2026-07-17 12:00:00Z]
   @later ~U[2026-07-17 12:01:00Z]
 
+  test "history returns an ordered bounded page before a stable anchor after a streaming append" do
+    transcript = Transcript.new(Enum.map(1..100, &{:user, "message #{&1}"}), @now, make_ref())
+    previous = Transcript.cursor(transcript)
+    current = Transcript.append_stream_tail(transcript, :assistant, ["partial"])
+    cursor = Transcript.cursor(current)
+
+    assert {:ok, ^cursor, entries, true} = Transcript.history_before(current, previous, 96, 3)
+
+    assert Enum.map(entries, &{&1.id, &1.message}) ==
+             [
+               {93, {:user, "message 93"}},
+               {94, {:user, "message 94"}},
+               {95, {:user, "message 95"}}
+             ]
+
+    assert {:ok, ^cursor, [], false} = Transcript.history_before(current, previous, 1, 64)
+    assert {:error, :anchor_unavailable} = Transcript.history_before(current, previous, 999, 4)
+    assert {:error, :invalid_range} = Transcript.history_before(current, previous, 96, 65)
+  end
+
+  test "history rejects another transcript even when its message uses the same ID" do
+    first = Transcript.new([{:user, "first"}], @now, make_ref())
+    other = Transcript.new([{:user, "other"}], @now, make_ref())
+
+    assert {:reset, :foreign_incarnation} =
+             Transcript.history_before(other, Transcript.cursor(first), 1, 64)
+  end
+
   test "reused tool IDs update only the latest indexed occurrence and keep stable IDs" do
     first = ToolCall.new("reused", "shell") |> ToolCall.complete("old result")
     current = ToolCall.new("reused", "shell")

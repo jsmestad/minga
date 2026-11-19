@@ -25,6 +25,7 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.UI.Picker.AgentHistorySource
   alias MingaEditor.WorkspaceWorkflow
 
   @opaque staged_switch ::
@@ -131,6 +132,7 @@ defmodule MingaEditor.TabWorkflow do
     |> ModalWorkflow.dismiss_if_stale()
     |> TraditionalWorkflow.install_agent_spinner_stop()
     |> rebuild_switched_agent(target)
+    |> AgentHistorySource.dismiss_if_stale()
     |> maybe_restart_incoming_spinner()
   end
 

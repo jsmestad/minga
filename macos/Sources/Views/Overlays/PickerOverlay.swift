@@ -48,6 +48,10 @@ public struct PickerOverlay: View {
                         let maxHeight = geo.size.height * 0.4
                         let listHeight = min(totalItemsHeight, max(maxHeight, 120))
                         resultsList(maxListHeight: listHeight)
+                        if state.hasPreview && !state.previewLines.isEmpty {
+                            Divider().overlay(theme.popupBorder.opacity(0.3))
+                            previewPanel(maxHeight: geo.size.height * 0.18)
+                        }
                     }
                     .frame(width: min(panelWidth, geo.size.width - 40))
                     .background(
@@ -87,6 +91,41 @@ public struct PickerOverlay: View {
                 updateAccessibilityFocus()
             }
         }
+    }
+
+    private func previewPanel(maxHeight: CGFloat) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(state.previewLines) { line in
+                    Text(attributedPreviewLine(line))
+                        .font(Typography.font(.small, design: .monospaced))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Spacing.md)
+            .textSelection(.enabled)
+        }
+        .frame(maxHeight: maxHeight)
+        .accessibilityLabel("Selected result preview")
+    }
+
+    private func attributedPreviewLine(_ line: PreviewLine) -> AttributedString {
+        var text = AttributedString()
+        for segment in line.segments {
+            let color = segment.fgColor
+            var span = AttributedString(segment.text)
+            span.foregroundColor = Color(
+                red: Double((color >> 16) & 255) / 255,
+                green: Double((color >> 8) & 255) / 255,
+                blue: Double(color & 255) / 255
+            )
+            if segment.bold {
+                span.inlinePresentationIntent = .stronglyEmphasized
+            }
+            text.append(span)
+        }
+        return text
     }
 
     // MARK: - Search field

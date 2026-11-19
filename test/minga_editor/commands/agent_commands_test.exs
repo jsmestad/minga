@@ -27,6 +27,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
@@ -41,6 +42,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Session.State, as: WorkspaceState
+  alias MingaEditor.UI.Picker.AgentHistorySource
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -1347,8 +1349,25 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert MingaEditor.Agent.PromptBuffer.prompt_text(active_a.workspace.agent_ui) ==
                before_cursor <> "!" <> after_cursor
 
+      %{connection: %{target: history_target}} = Session.editor_snapshot(session_a)
+
+      {active_a, revision} =
+        PickerUI.open_loading(active_a, AgentHistorySource, %{
+          origin: {tab_a.group_id, history_target},
+          source: history_target,
+          anchor: :tail
+        })
+
       active_b = MingaEditor.TabWorkflow.switch(active_a, tab_b.id)
       assert Runtime.active_session(active_b.shell_runtime) == session_b
+
+      assert :stale =
+               PickerUI.apply_fetch_result(
+                 active_b,
+                 AgentHistorySource,
+                 revision,
+                 {:error, "Late history result for the previous workspace"}
+               )
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(active_b.workspace.agent_ui) ==
                "preserved beta draft"

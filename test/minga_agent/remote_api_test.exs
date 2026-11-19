@@ -4,6 +4,8 @@ defmodule MingaAgent.RemoteAPITest do
 
   alias MingaAgent.RemoteAPI
   alias MingaAgent.RemoteAPI.SessionInfo
+  alias MingaAgent.Session
+  alias MingaAgent.Session.Transcript.Entry
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionMetadata
@@ -21,6 +23,23 @@ defmodule MingaAgent.RemoteAPITest do
     assert {:ok, token} = SessionManager.session_token(session_id)
     assert :ok = RemoteAPI.authorize(session_id, token)
     assert {:error, :unauthorized} = RemoteAPI.authorize(session_id, "invalid-token")
+  end
+
+  test "retained history requires the live session token and returns bounded original text", %{
+    tmp_dir: dir
+  } do
+    assert {:ok, %SessionInfo{session_id: id, pid: pid, token: token}} =
+             RemoteAPI.start_session(provider: Minga.Test.StubProvider, session_store_dir: dir)
+
+    on_exit(fn -> SessionManager.stop_session(id) end)
+    assert %{connection: %{target: target}} = Session.editor_snapshot(pid)
+    :ok = Session.add_system_message(pid, "retained\noriginal 界")
+
+    assert {:error, :unauthorized} =
+             RemoteAPI.transcript_history_before(target, "invalid-token", target, :tail, 1)
+
+    assert {:ok, _cursor, [%Entry{message: {:system, "retained\noriginal 界", :info}}], true} =
+             RemoteAPI.transcript_history_before(target, token, target, :tail, 1)
   end
 
   test "start_session preserves the healthy metadata contract", %{tmp_dir: dir} do
