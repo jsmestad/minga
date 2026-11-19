@@ -2482,6 +2482,11 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.FileAttachmentSource.open/1
       },
       %Minga.Command{
+        name: :agent_attach_diagnostics,
+        description: "Attach current file diagnostics to an Agent draft",
+        execute: &MingaEditor.UI.Picker.DiagnosticAttachmentSource.open/1
+      },
+      %Minga.Command{
         name: :agent_draft_attachments,
         description: "Inspect Agent draft attachments",
         requires_buffer: false,

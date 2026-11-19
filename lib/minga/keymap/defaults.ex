@@ -152,6 +152,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a j), :agent_draft_attachments, "Inspect draft attachments"},
     {~k(a b), :agent_attach_buffer, "Attach current buffer to Agent"},
     {~k(a F), :agent_attach_file, "Attach project file to Agent"},
+    {~k(a D), :agent_attach_diagnostics, "Attach file diagnostics to Agent"},
     {~k(a r), :workspace_pending_reviews, "Pending reviews"},
     {~k(a o), :remote_find_file, "Open remote file"},
     {~k(a T), :agent_pick_thinking, "Pick thinking level"},

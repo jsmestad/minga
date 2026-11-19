@@ -519,6 +519,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:execute_command, "agent_toggle_help"}),
     do: AgentCommands.scope_toggle_help(state)
 
+  defp dispatch_action(state, {:execute_command, "agent_attach_diagnostics_at:" <> target}),
+    do: MingaEditor.UI.Picker.DiagnosticAttachmentSource.open_presented(state, target)
+
   defp dispatch_action(state, {:execute_command, name_str}) do
     command = String.to_existing_atom(name_str)
 

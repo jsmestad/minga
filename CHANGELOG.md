@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
 - Agent workspaces have a **Tasks** inspector. The checklist, blockers, and retained results survive restart and follow the selected conversation branch.
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
+- `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 
 ### Changed
 
@@ -74,6 +75,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- macOS loads bundled Metal shaders when the frontend executable is launched through a symlink. If startup fails or the first editor frame never arrives, Minga offers a Quit action instead of leaving the loading screen up indefinitely.
 - Returning to a local Agent tab reuses its conversation when no messages or pins changed. Status and approvals still refresh from the arriving session.
 - Agent tools reject arguments that violate their declared JSON Schema before constructing or invoking an executable callback, including non-SDK tools. Valid SDK input normalization and defaults remain available, and the schema validator now fails closed when a regular expression exceeds its match budget.
 - Invalid `/auth` and `/login` arguments no longer enter prompt history. Minga rejects indented credential commands before sending them and keeps invalid provider names and remote sign-in callback errors out of the transcript.
