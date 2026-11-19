@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentConnection
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -25,7 +26,14 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld")
-    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
+
+    prompt_buf =
+      if Keyword.get(opts, :cold_composer, false) do
+        nil
+      else
+        {:ok, pid} = BufferProcess.start_link(content: "")
+        pid
+      end
 
     session_pid = Keyword.get(opts, :session, fake_session())
 
@@ -170,6 +178,107 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
         }
       end)
     end
+  end
+
+  test "cold toggle renders an empty composer in Normal mode without focusing it" do
+    state = AgentCommands.toggle_agent_split(base_state(cold_composer: true))
+    assert_cold_composer(state)
+  end
+
+  test "a failed first Agent startup keeps the same composer and draft when returning to the file" do
+    {ingest, monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^monitor, :process, ^ingest, :normal}
+
+    state =
+      base_state(cold_composer: true)
+      |> MingaEditor.WorkspaceWorkflow.install_tab_bar(TabBar.new(Tab.new_file(1, "test.ex")))
+
+    state = %{
+      state
+      | agent_connection: AgentConnection.connect_ingest(state.agent_connection, ingest)
+    }
+
+    opened = AgentCommands.toggle_agent_split(state)
+    composer = opened.workspace.agent_ui.panel.prompt_buffer
+
+    assert is_pid(composer)
+    assert Runtime.active_session(opened.shell_runtime) == nil
+    assert TraditionalState.agent(opened.shell_runtime.state).error != nil
+    :ok = BufferProcess.insert_text(composer, "draft after failed start")
+
+    returned = AgentCommands.toggle_agent_split(opened)
+    assert Runtime.active_tab_kind(returned.shell_runtime) == :file
+
+    reopened = AgentCommands.toggle_agent_split(returned)
+    assert reopened.workspace.agent_ui.panel.prompt_buffer == composer
+    assert BufferProcess.content(composer) == "draft after failed start"
+  end
+
+  test "arriving at a background Agent tab renders its composer before further input" do
+    state = base_state(cold_composer: true)
+    %Tab{id: id} = TabBar.find_by_kind(state.shell_runtime.state.tab_bar, :agent)
+    assert_cold_composer(MingaEditor.TabWorkflow.switch(state, id))
+  end
+
+  test "reactivating the current Agent tab replaces a stopped composer without focusing it" do
+    state = base_state(active: true)
+    %Tab{id: id} = Runtime.active_tab(state.shell_runtime)
+    previous = state.workspace.agent_ui.panel.prompt_buffer
+    GenServer.stop(previous)
+
+    restored = MingaEditor.TabWorkflow.switch(state, id)
+
+    refute restored.workspace.agent_ui.panel.prompt_buffer == previous
+    assert_cold_composer(restored)
+  end
+
+  @tag :tmp_dir
+  test "a brokered Agent tab renders its own composer without borrowing the previous draft",
+       %{tmp_dir: dir} do
+    state = base_state(active: true)
+    original_tab = Runtime.active_tab(state.shell_runtime)
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        MingaEditor.Agent.PromptBuffer.set_prompt_text(state.workspace.agent_ui, "previous draft")
+      )
+
+    assert {:ok, %{session_id: record, pid: session, token: token}} =
+             MingaAgent.RemoteAPI.start_session(
+               provider: Minga.Test.StubProvider,
+               session_store_dir: dir
+             )
+
+    on_exit(fn -> MingaAgent.SessionManager.stop_session(record) end)
+
+    connected = AgentCommands.connect_remote_session(state, "test host", record, session, token)
+    assert Runtime.active_session(connected.shell_runtime) == session
+    assert_cold_composer(connected)
+
+    returned = MingaEditor.TabWorkflow.switch(connected, original_tab.id)
+
+    assert MingaEditor.Agent.PromptBuffer.prompt_text(returned.workspace.agent_ui) ==
+             "previous draft"
+  end
+
+  defp assert_cold_composer(state) do
+    panel = state.workspace.agent_ui.panel
+    assert is_pid(panel.prompt_buffer)
+    assert Minga.Buffer.content(panel.prompt_buffer) == ""
+    refute panel.input_focused
+    assert state.workspace.editing.mode == :normal
+
+    intent = MingaEditor.RenderPipeline.Intent.from_editor_state(state)
+
+    renderer =
+      MingaEditor.Renderer.State.new(editor_pid: nil, pipeline: &MingaEditor.RenderPipeline.run/1)
+
+    {_renderer, input} = MingaEditor.Renderer.BufferChanges.prepare(renderer, intent)
+    layout = MingaEditor.Layout.put(input) |> MingaEditor.Layout.get()
+
+    assert {[%{models: [_prompt]}], _cursor, _state} =
+             MingaEditor.RenderPipeline.Content.build_agent_chat_content(input, layout)
   end
 
   describe "toggle_agent_split/1 — activating (tab switch)" do

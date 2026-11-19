@@ -171,6 +171,11 @@ defmodule MingaEditor.RenderPipeline.Input do
   def record_prompt(%__MODULE__{} = input, %MingaEditor.Agent.View.PromptFrame{} = prompt),
     do: %{input | prompt: prompt, caches: Caches.retain_prompt(input.caches, prompt.presentation)}
 
+  @spec record_prompt_unavailable(t(), {pos_integer(), pos_integer(), :missing | :unavailable}) ::
+          t()
+  def record_prompt_unavailable(%__MODULE__{caches: caches} = input, fault),
+    do: %{input | caches: Caches.record_prompt_unavailable(caches, fault)}
+
   @spec reset_frame_rows_rasterized(t()) :: t()
   def reset_frame_rows_rasterized(%__MODULE__{caches: caches} = input),
     do: %{input | caches: Caches.reset_frame_rows_rasterized(caches)}
