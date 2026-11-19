@@ -1981,11 +1981,13 @@ final class EditorNSView: MTKView {
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
+        let point = convert(event.locationInWindow, from: nil)
+        let target = dispatcher.visibleEditorPresentation?.textLayout?.hit(at: point, capturedWindowID: nil)?.target
         if !(sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_PRESS, clickCount: cc)) {
             encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
         }
         contextMenuShownForRightClick = true
-        let menu = buildEditorContextMenu(connectionGeneration: inputConnectionGeneration)
+        let menu = buildEditorContextMenu(connectionGeneration: inputConnectionGeneration, target: target)
         activeContextMenu = menu
         NSMenu.popUpContextMenu(menu, with: event, for: self)
         if activeContextMenu === menu {
@@ -2017,7 +2019,7 @@ final class EditorNSView: MTKView {
         let connectionGeneration: UInt64
     }
 
-    private func buildEditorContextMenu(connectionGeneration: UInt64) -> NSMenu {
+    private func buildEditorContextMenu(connectionGeneration: UInt64, target: EditorTextTarget?) -> NSMenu {
         let menu = NSMenu(title: "Editor")
         menu.autoenablesItems = false
         addEditorMenuItem("Cut", action: "cut", connectionGeneration: connectionGeneration, to: menu)
@@ -2026,6 +2028,10 @@ final class EditorNSView: MTKView {
         addEditorMenuItem("Select All", action: "select_all", connectionGeneration: connectionGeneration, to: menu)
         addEditorMenuItem("Attach Selection to Agent Draft", action: "agent_attach_selection", connectionGeneration: connectionGeneration, to: menu)
         addEditorMenuItem("Attach Current Buffer to Agent Draft", action: "agent_attach_buffer", connectionGeneration: connectionGeneration, to: menu)
+        if let target {
+            let action = "agent_attach_diagnostics_at:\(target.windowID):\(target.presentationID)"
+            addEditorMenuItem("Attach File Diagnostics to Agent Draft", action: action, connectionGeneration: connectionGeneration, to: menu)
+        }
         menu.addItem(.separator())
 
         let hasLsp = statusBarState?.hasLsp ?? false
