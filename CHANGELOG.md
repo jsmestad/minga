@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Added
+
+- `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
+
 ### Changed
 
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.
