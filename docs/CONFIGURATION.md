@@ -777,6 +777,8 @@ The buffer content is never modified; only the display changes. Cursor movement 
 
 ## Keybindings
 
+Press `SPC h a` and type part of a command name or description to find it. Select a match to open its `*Help*` page without running the command. Use the command name from that page when you write a binding. For example, search for `format buffer`, then bind `:format_buffer`.
+
 `bind/4` adds or overrides keybindings in any vim mode:
 
 ```elixir
