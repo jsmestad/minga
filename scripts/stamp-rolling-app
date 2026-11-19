@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Stamp an assembled rolling Minga.app before release signing."""
+
+import argparse
+from pathlib import Path
+import plistlib
+import re
+from xml.parsers.expat import ExpatError
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("app", type=Path, metavar="APP_PATH")
+    parser.add_argument("version", metavar="VERSION")
+    args = parser.parse_args()
+
+    match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)-dev\.([1-9][0-9]*)", args.version)
+    if match is None:
+        parser.error("VERSION must be BASE-dev.N with a positive decimal N")
+    base, sequence = match.groups()
+
+    plist = args.app / "Contents/Info.plist"
+    try:
+        content = plist.read_bytes()
+        info = plistlib.loads(content)
+        if not isinstance(info, dict) or info.get("CFBundleShortVersionString") != base:
+            raise ValueError(f"CFBundleShortVersionString must match the base version {base}")
+
+        info["CFBundleVersion"] = sequence
+        fmt = plistlib.FMT_BINARY if content.startswith(b"bplist00") else plistlib.FMT_XML
+        plist.write_bytes(plistlib.dumps(info, fmt=fmt, sort_keys=False))
+    except (OSError, ValueError, ExpatError) as error:
+        parser.error(f"{plist}: {error}")
+
+
+if __name__ == "__main__":
+    main()

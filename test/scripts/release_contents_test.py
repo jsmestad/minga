@@ -312,6 +312,22 @@ class ReleaseContentsTest(unittest.TestCase):
         self.put(app / "Contents/Info.plist", plistlib.dumps({"CFBundleShortVersionString": "0.0.9", "CFBundleExecutable": "Minga", "LSMinimumSystemVersion": "15.0"}))
         self.run_checker("--app", app, success=False)
 
+    def test_rolling_gui_requires_both_matching_bundle_versions(self):
+        app = self.app_fixture()
+        version = "0.1.0-dev.123"
+        self.priv.parent.rename(self.priv.parent.with_name(f"minga-{version}"))
+        (self.release / "releases/0.1.0").rename(self.release / "releases" / version)
+        self.put(self.release / "releases/start_erl.data", f"17.1.2 {version}".encode())
+        info_path = app / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        info["CFBundleVersion"] = "123"
+        self.put(info_path, plistlib.dumps(info))
+        self.run_checker("--app", app, "--rolling-version", version)
+        self.run_checker("--app", app, "--rolling-version", "0.1.0-dev.124", success=False)
+        info["CFBundleVersion"] = "124"
+        self.put(info_path, plistlib.dumps(info))
+        self.run_checker("--app", app, "--rolling-version", version, success=False)
+
     def test_gui_minimum_os_cannot_drop_supported_macos_15_0(self):
         app = self.app_fixture()
         info_path = app / "Contents/Info.plist"
