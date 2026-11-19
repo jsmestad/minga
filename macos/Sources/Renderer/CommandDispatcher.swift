@@ -1232,10 +1232,10 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, let draftAttachmentCount, let draftAttachmentOffer):
             let wasVisible = guiState.agentChatState.visible
             if visible {
-                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: promptMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer)
             } else {
                 guiState.agentChatState.hide()
             }

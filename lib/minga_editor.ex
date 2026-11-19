@@ -880,6 +880,18 @@ defmodule MingaEditor do
   # Key presses dispatch through the active shell's overlay handlers, then
   # surface handlers, via Input.Router. The router runs centralized post-key
   # housekeeping (highlight sync, reparse, completion, render) exactly once.
+  def handle_info({:minga_input, {:key_press, codepoint, modifiers, seq, offer}}, state) do
+    next =
+      MingaEditor.Agent.PromptInput.with_offer(state, offer, fn scoped ->
+        {:noreply, updated} =
+          handle_info({:minga_input, {:key_press, codepoint, modifiers, seq}}, scoped)
+
+        updated
+      end)
+
+    {:noreply, next}
+  end
+
   def handle_info({:minga_input, {:key_press, codepoint, modifiers, seq}}, state) do
     state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_nav(state)
     state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_yank(state)

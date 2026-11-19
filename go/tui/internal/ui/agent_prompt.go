@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -110,8 +111,19 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 	}
 	control := agentComposerControlLabel(chat, placement.innerWidth)
 	label := control
+	if attachments := agentComposerAttachmentLabel(placement.innerWidth, lipgloss.Width(control), chat.DraftAttachmentCount); attachments != "" {
+		label += " · " + attachments
+	}
 	if placement.innerWidth >= 48 {
-		label += " · Enter send · Shift+Enter newline · Esc normal"
+		const fullHint = " · Enter send · Shift+Enter newline"
+		if lipgloss.Width(label)+len(fullHint) <= placement.innerWidth {
+			label += fullHint
+		} else {
+			label += " · Shift+Enter newline"
+		}
+		if lipgloss.Width(label)+len(" · Esc normal") <= placement.innerWidth {
+			label += " · Esc normal"
+		}
 	}
 	inner := lipgloss.NewStyle().Foreground(p.Accent()).Background(bg).Width(placement.innerWidth).Render(fitStyled(label, placement.innerWidth))
 	if placement.border != 0 {
@@ -122,6 +134,24 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		lines = append(lines, base.Render(border.Render("╰"+strings.Repeat("─", max(width-2, 0))+"╯")))
 	}
 	return lines
+}
+
+func agentComposerAttachmentLabel(width, actionWidth int, count byte) string {
+	full := "Attachments"
+	if count > 0 {
+		full += " (" + strconv.Itoa(int(count)) + ")"
+	}
+	available := width - actionWidth - 3
+	if available >= len(full) {
+		return full
+	}
+	if count > 0 {
+		short := "+" + strconv.Itoa(int(count))
+		if available >= len(short) {
+			return short
+		}
+	}
+	return ""
 }
 
 func agentComposerControlLabel(chat protocol.AgentChat, width int) string {
@@ -200,12 +230,22 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 	}
 	chat, _ := m.agentChat()
 	controlWidth := lipgloss.Width(agentComposerControlLabel(chat, p.innerWidth))
-	if y != p.controlsRow || x < p.col-p.prefix || x >= p.col-p.prefix+controlWidth {
+	start := p.col - p.prefix
+	if y != p.controlsRow || x < start {
+		return nil, false
+	}
+	attachmentStart := start + controlWidth + 3
+	if label := agentComposerAttachmentLabel(p.innerWidth, controlWidth, chat.DraftAttachmentCount); label != "" && x >= attachmentStart && x < attachmentStart+len(label) {
+		return protocol.EncodeGUIExecuteCommand("agent_draft_attachments"), true
+	}
+	if x >= start+controlWidth {
 		return nil, false
 	}
 	command := "agent_submit_or_newline"
 	if agentHasActiveTurn(chat.Status) {
 		command = "agent_abort"
+	} else if chat.DraftAttachmentOffer != 0 {
+		return protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer), true
 	}
 	return protocol.EncodeGUIExecuteCommand(command), true
 }

@@ -481,12 +481,12 @@ func TestChatDoesNotRouteTranscriptWheelThroughHiddenSemanticCanvas(t *testing.T
 }
 
 func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
-	for _, width := range []uint16{1, 3, 4, 6, 12, 40, 80, 120} {
+	for _, width := range []uint16{1, 3, 4, 6, 12, 40, 60, 80, 120} {
 		for _, status := range []byte{0, 1, 2, 3, 4, 5} {
 			t.Run(fmt.Sprintf("width%d/status%d", width, status), func(t *testing.T) {
 				out := make(chan []byte, 64)
 				model := New(width, 16, out)
-				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1, InputFocused: true}
+				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1, InputFocused: true, DraftAttachmentCount: 2, DraftAttachmentOffer: 0x1122334455667788}
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 818)
 				p, _ := model.agentPromptPlacement()
 				label := "Send"
@@ -512,12 +512,34 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 				if p.innerWidth >= 48 && !strings.Contains(body[p.controlsRow], "Shift+Enter newline") {
 					t.Fatalf("missing newline help: %q", body[p.controlsRow])
 				}
-				want := protocol.EncodeGUIExecuteCommand(command)
+				attachmentLabel := "Attachments (2)"
+				if p.innerWidth < labelWidth+3+len(attachmentLabel) {
+					attachmentLabel = "+2"
+				}
+				attachmentStart := strings.Index(body[p.controlsRow], attachmentLabel)
+				if p.innerWidth >= labelWidth+3+len(attachmentLabel) && attachmentStart < 0 {
+					t.Fatalf("attached draft count not visible: %q", body[p.controlsRow])
+				}
+				if attachmentStart >= 0 {
+					attachmentStart = displayWidth(body[p.controlsRow][:attachmentStart]) - controlStart
+				}
+				wantAction := protocol.EncodeGUIExecuteCommand(command)
+				if command == "agent_submit_or_newline" {
+					wantAction = protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer)
+				}
+				wantAttachments := protocol.EncodeGUIExecuteCommand("agent_draft_attachments")
 				drainOutboundPackets(out)
 				for cell := range p.innerWidth {
+					var want []byte
+					switch {
+					case cell < labelWidth:
+						want = wantAction
+					case attachmentStart >= 0 && cell >= attachmentStart && cell < attachmentStart+len(attachmentLabel):
+						want = wantAttachments
+					}
 					click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: controlStart + cell, Y: controlY})
 					packet, handled := model.semanticMousePacket(click)
-					if cell < labelWidth {
+					if want != nil {
 						if !handled || !bytes.Equal(packet, want) {
 							t.Fatalf("visible label cell %d did not activate: %x handled=%v", cell, packet, handled)
 						}
@@ -531,14 +553,14 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 						if len(outbound) != 0 && outbound[0] == generated.OPKeyPress {
 							t.Fatalf("control/help cell %d entered mode-dependent key dispatch: %x", cell, outbound)
 						}
-						if len(outbound) > 1 && outbound[0] == generated.OPGuiAction && outbound[1] == generated.GUIActionExecuteCommand {
+						if len(outbound) > 1 && outbound[0] == generated.OPGuiAction && (outbound[1] == generated.GUIActionExecuteCommand || outbound[1] == generated.GUIActionAgentComposerSubmit) {
 							actionPackets++
-							if cell >= labelWidth || !bytes.Equal(outbound, want) {
+							if want == nil || !bytes.Equal(outbound, want) {
 								t.Fatalf("help/padding cell %d submitted/stopped draft: %x", cell, outbound)
 							}
 						}
 					}
-					if cell < labelWidth && actionPackets != 1 {
+					if want != nil && actionPackets != 1 {
 						t.Fatalf("visible label cell %d emitted %d command packets", cell, actionPackets)
 					}
 				}

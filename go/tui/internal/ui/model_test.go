@@ -860,6 +860,22 @@ func TestPickerPreviewDefaultsToPopupTextAndSurface(t *testing.T) {
 	}
 }
 
+func TestShortFloatingPickerShowsTheWholeSinglePreviewRow(t *testing.T) {
+	rows := []string{"界界界界界界界界", strings.Repeat("✈️", 8)}
+	for _, size := range [][2]uint16{{80, 20}, {24, 8}} {
+		model := New(size[0], size[1], nil)
+		picker := protocol.Picker{Visible: true, Title: "Draft attachments", SelectedID: 2, Items: []protocol.PickerItem{{ActivationID: 1, Label: "note.txt"}, {ActivationID: 2, Label: "Next page"}, {ActivationID: 3, Label: "Remove snapshot"}}}
+		preview := protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{}}}}}
+		for _, row := range rows {
+			preview.Lines[0].Segments[0].Text = row
+			screen := ansi.Strip(model.renderFloatingPicker(picker, preview))
+			if !strings.Contains(screen, row) || !strings.Contains(screen, "Next page") {
+				t.Fatalf("%dx%d must render the complete page and reachable next action: %q", size[0], size[1], screen)
+			}
+		}
+	}
+}
+
 func TestPickerOverlayIsBounded(t *testing.T) {
 	model := New(100, 24, nil)
 	items := make([]protocol.PickerItem, 20)

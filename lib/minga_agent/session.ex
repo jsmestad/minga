@@ -27,6 +27,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Credentials.Secret
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.Event
   alias MingaAgent.EventLog
@@ -226,6 +227,17 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:send_prompt_for_id, expected_session_id, content}, timeout)
   end
 
+  @doc "Submits the displayed set of retained draft attachments to the still-matching local record."
+  @spec send_attached_prompt(
+          GenServer.server(),
+          String.t(),
+          [DraftAttachment.identity()],
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: {:ok, non_neg_integer()} | {:accepted, non_neg_integer(), term()} | {:error, term()}
+  def send_attached_prompt(session, record_id, [_ | _] = shown, content) do
+    GenServer.call(session, {:send_attached_prompt, record_id, shown, content})
+  end
+
   @doc "Aborts only when the Session still has the expected identity."
   @spec abort_for_id(GenServer.server(), String.t()) :: :ok | {:error, :session_id_changed}
   def abort_for_id(session, expected_session_id) when is_binary(expected_session_id) do
@@ -334,7 +346,11 @@ defmodule MingaAgent.Session do
   end
 
   @type composer_draft_operation ::
-          :read | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          :read
+          | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:remove_attachment, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:attach_selection, SessionStore.draft_revision(), DraftSnapshot.t(),
+             {String.t(), String.t(), String.t()}}
 
   @type composer_draft_correlation :: reference() | {non_neg_integer(), reference()}
 
@@ -349,6 +365,12 @@ defmodule MingaAgent.Session do
       when is_binary(record_id) do
     GenServer.cast(session, {:composer_draft, self(), record_id, correlation, operation})
   end
+
+  @doc "Reads an exact unsent attachment only from the specified local record."
+  @spec read_draft_attachment(GenServer.server(), String.t(), DraftAttachment.identity()) ::
+          {:ok, DraftSnapshot.attachment(), String.t()} | {:error, term()}
+  def read_draft_attachment(session, record_id, identity),
+    do: GenServer.call(session, {:read_draft_attachment, record_id, identity})
 
   @doc """
   Admits explicitly requested setup against an exact live target.
@@ -1122,6 +1144,32 @@ defmodule MingaAgent.Session do
       ) do
     handle_prompt(content, :steering, state)
   end
+
+  def handle_call({:send_attached_prompt, record_id, shown, content}, {caller, _tag}, state)
+      when node(caller) == node() do
+    handle_attached_prompt(state, record_id, shown, content)
+  end
+
+  def handle_call({:send_attached_prompt, _record_id, _shown, _content}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call({:read_draft_attachment, record_id, identity}, {caller, _tag}, state)
+      when node(caller) == node() do
+    result =
+      with :ok <- validate_composer_record(state, record_id) do
+        SessionStore.read_draft_attachment(
+          record_id,
+          identity,
+          state.session_store_dir,
+          artifact_store_opts(state)
+        )
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:read_draft_attachment, _record_id, _identity}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
 
   def handle_call(
         {:abort_for_id, expected_session_id},
@@ -2831,7 +2879,8 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state) do
+  def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state)
+      when is_pid(caller) and node(caller) == node() do
     result =
       with :ok <- validate_composer_record(state, record_id) do
         composer_draft(state, record_id, operation)
@@ -2840,6 +2889,9 @@ defmodule MingaAgent.Session do
     send(caller, {:composer_draft_result, self(), record_id, correlation, result})
     {:noreply, state}
   end
+
+  def handle_cast({:composer_draft, _caller, _record_id, _correlation, _operation}, state),
+    do: {:noreply, state}
 
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
@@ -3487,15 +3539,19 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec persist_boundary_candidate(state(), state()) :: {state(), :ok | {:error, term()}}
-  defp persist_boundary_candidate(state, candidate) do
-    case save_to_disk(candidate) do
+  @spec persist_boundary_candidate(state(), state(), :preserve | non_neg_integer()) ::
+          {state(), :ok | {:error, term()}}
+  defp persist_boundary_candidate(state, candidate, draft_revision \\ :preserve) do
+    case save_to_disk(candidate, draft_revision) do
       :ok ->
         {persistence, timer_to_cancel} = Persistence.cancel(candidate.persistence)
         cancel_runtime_timer(timer_to_cancel)
 
         persisted = %{candidate | persistence: Persistence.saved(persistence)}
         {announce_resumable_boundary(persisted, candidate.continuation), :ok}
+
+      {:error, {:draft_commit_uncertain, :admit_draft, _, _}} = error ->
+        {state, error}
 
       {:error, reason} ->
         Minga.Log.error(
@@ -4036,24 +4092,62 @@ defmodule MingaAgent.Session do
   defp validate_approval_liveness(_state, _tool_call_id),
     do: {:error, :approval_not_found}
 
+  @spec handle_attached_prompt(
+          state(),
+          String.t(),
+          [DraftAttachment.identity()],
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: {:reply, term(), state()} | {:stop, term(), term(), state()}
+  defp handle_attached_prompt(state, record_id, shown, content) do
+    with :ok <- validate_composer_record(state, record_id),
+         false <- TurnExecution.active?(state.turn_execution),
+         {:ok, revision, retained} <-
+           SessionStore.resolve_draft_attachments(
+             record_id,
+             shown,
+             state.session_store_dir,
+             artifact_store_opts(state)
+           ),
+         {:ok, prompt} <-
+           DraftAttachment.append_to_prompt(content, retained, state.model_selection) do
+      case handle_prompt(prompt, :steering, state, revision) do
+        {:reply,
+         {:error,
+          {:conversation_persistence_failed, {:draft_commit_uncertain, :admit_draft, _, _}} =
+              reason}, failed} ->
+          {:stop, reason, {:error, reason}, failed}
+
+        reply ->
+          reply
+      end
+    else
+      true -> {:reply, {:error, :attachment_send_busy}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
   @spec handle_prompt(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           TurnExecution.prompt_kind(),
-          state()
-        ) :: {:reply, :ok | {:queued, TurnExecution.prompt_kind()} | {:error, term()}, state()}
+          state(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp handle_prompt(content, kind, state, draft_revision \\ :preserve)
+
   defp handle_prompt(
          _content,
          _kind,
-         %{continuation: %Continuation{tool_checkpoint: %{}}} = state
+         %{continuation: %Continuation{tool_checkpoint: %{}}} = state,
+         _draft_revision
        ) do
     {:reply, {:error, :effect_reconciliation_required}, state}
   end
 
-  defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state) do
+  defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state, _draft_revision) do
     {:reply, {:error, :credentials_pending}, state}
   end
 
-  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state) do
+  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state, _draft_revision) do
     # No usable provider yet. Refuse locally so callers can preserve the draft instead of clearing it.
     {:reply, {:error, :credentials_not_configured}, state}
   end
@@ -4061,7 +4155,8 @@ defmodule MingaAgent.Session do
   defp handle_prompt(
          content,
          kind,
-         %{provider: provider} = state
+         %{provider: provider} = state,
+         draft_revision
        )
        when ProviderLifecycle.is_detached(provider) do
     {state, refresh_result} = refresh_credentials_state_result(state)
@@ -4074,29 +4169,33 @@ defmodule MingaAgent.Session do
         {:reply, {:error, :provider_not_ready}, state}
 
       {_provider, :ok} ->
-        handle_prompt(content, kind, state)
+        handle_prompt(content, kind, state, draft_revision)
     end
   end
 
-  defp handle_prompt(content, kind, state) do
+  defp handle_prompt(content, kind, state, draft_revision) do
     case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
+      {:queued, _execution} when is_integer(draft_revision) ->
+        {:reply, {:error, :attachment_send_busy}, state}
+
       {:queued, execution} ->
         state = broadcast(state, {:prompt_queued, content, kind})
         {:reply, {:queued, kind}, %{state | turn_execution: execution}}
 
       {:send_now, execution} ->
-        send_new_turn(content, state, execution)
+        send_new_turn(content, state, execution, draft_revision)
     end
   end
 
   @spec send_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
-          TurnExecution.t()
-        ) :: {:reply, :ok | {:error, term()}, state()}
-  defp send_new_turn(content, state, execution) do
+          TurnExecution.t(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp send_new_turn(content, state, execution, draft_revision) do
     case dispatch_user_prompt_submit(state, content) do
-      :ok -> begin_new_turn(content, state, execution)
+      :ok -> begin_new_turn(content, state, execution, draft_revision)
       {:error, %HookResult{} = result} -> reply_to_prompt_veto(state, result)
     end
   end
@@ -4104,12 +4203,13 @@ defmodule MingaAgent.Session do
   @spec begin_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
-          TurnExecution.t()
-        ) :: {:reply, :ok | {:error, term()}, state()}
-  defp begin_new_turn(content, state, execution) do
+          TurnExecution.t(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp begin_new_turn(content, state, execution, draft_revision) do
     case prepare_provider_request(state) do
       {:ok, prepared} ->
-        admit_new_turn(content, prepared, execution)
+        admit_new_turn(content, prepared, execution, draft_revision)
 
       {:error, reason} ->
         reply_to_prompt_admission_failure(state, reason)
@@ -4119,13 +4219,14 @@ defmodule MingaAgent.Session do
   @spec admit_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
-          TurnExecution.t()
-        ) :: {:reply, :ok | {:error, term()}, state()}
-  defp admit_new_turn(content, state, execution) do
+          TurnExecution.t(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp admit_new_turn(content, state, execution, draft_revision) do
     {user_message, send_content} = build_user_message(content)
     candidate = append_msg(state, user_message)
 
-    case admit_provider_request(state, candidate, send_content) do
+    case admit_provider_request(state, candidate, send_content, draft_revision) do
       {:ok, request, admitted} ->
         admitted =
           admitted
@@ -4133,11 +4234,22 @@ defmodule MingaAgent.Session do
           |> notify_messages_changed()
 
         dispatch_new_turn_request(admitted, request, execution)
+        |> acknowledge_consumed_draft(draft_revision)
 
       {:error, reason, failed_state} ->
         reply_to_prompt_admission_failure(failed_state, reason)
     end
   end
+
+  @spec acknowledge_consumed_draft({:reply, term(), state()}, :preserve | non_neg_integer()) ::
+          {:reply, term(), state()}
+  defp acknowledge_consumed_draft(reply, :preserve), do: reply
+
+  defp acknowledge_consumed_draft({:reply, :ok, state}, revision),
+    do: {:reply, {:ok, revision + 1}, state}
+
+  defp acknowledge_consumed_draft({:reply, {:error, reason}, state}, revision),
+    do: {:reply, {:accepted, revision + 1, reason}, state}
 
   @spec dispatch_new_turn_request(state(), Request.t(), TurnExecution.t()) ::
           {:reply, :ok | {:error, term()}, state()}
@@ -5699,9 +5811,10 @@ defmodule MingaAgent.Session do
   @spec admit_provider_request(
           state(),
           state(),
-          String.t() | [ReqLLM.Message.ContentPart.t()]
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :preserve | non_neg_integer()
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
-  defp admit_provider_request(previous, candidate, content) do
+  defp admit_provider_request(previous, candidate, content, draft_revision \\ :preserve) do
     with {:ok, turn_id} <- request_turn_id(candidate),
          request_id = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
          {:ok, request, continuation} <-
@@ -5711,7 +5824,7 @@ defmodule MingaAgent.Session do
       {persisted, save_result} =
         if Persistence.enabled?(candidate.persistence) do
           durable = %{candidate | continuation: Continuation.mark_durable(continuation)}
-          persist_boundary_candidate(previous, durable)
+          persist_boundary_candidate(previous, durable, draft_revision)
         else
           {candidate, :ok}
         end
@@ -7329,8 +7442,8 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec save_to_disk(state()) :: :ok | {:error, term()}
-  defp save_to_disk(state) do
+  @spec save_to_disk(state(), :preserve | non_neg_integer()) :: :ok | {:error, term()}
+  defp save_to_disk(state, draft_revision \\ :preserve) do
     if Persistence.enabled?(state.persistence) do
       now = DateTime.to_iso8601(DateTime.utc_now())
       last_message_at = DateTime.to_iso8601(Transcript.last_changed_at(state.transcript))
@@ -7360,7 +7473,18 @@ defmodule MingaAgent.Session do
         continuation: state.continuation
       }
 
-      SessionStore.save(data, state.session_store_dir, artifact_store_opts(state))
+      case draft_revision do
+        :preserve ->
+          SessionStore.save(data, state.session_store_dir, artifact_store_opts(state))
+
+        revision ->
+          SessionStore.save_submitted_draft(
+            data,
+            revision,
+            state.session_store_dir,
+            artifact_store_opts(state)
+          )
+      end
     else
       :ok
     end
@@ -7390,6 +7514,7 @@ defmodule MingaAgent.Session do
 
   @spec composer_draft(state(), String.t(), composer_draft_operation()) ::
           {:ok, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:ok, SessionStore.draft_revision(), DraftSnapshot.attachment()}
           | {:ok, SessionStore.draft_revision()}
           | {:error, term()}
   defp composer_draft(state, record_id, :read) do
@@ -7401,6 +7526,27 @@ defmodule MingaAgent.Session do
       record_id,
       expected,
       draft,
+      state.session_store_dir,
+      artifact_store_opts(state)
+    )
+  end
+
+  defp composer_draft(state, record_id, {:remove_attachment, expected, draft}) do
+    SessionStore.save_attachment_removal(
+      record_id,
+      expected,
+      draft,
+      state.session_store_dir,
+      artifact_store_opts(state)
+    )
+  end
+
+  defp composer_draft(state, record_id, {:attach_selection, expected, draft, selection}) do
+    SessionStore.attach_selection(
+      record_id,
+      expected,
+      draft,
+      selection,
       state.session_store_dir,
       artifact_store_opts(state)
     )

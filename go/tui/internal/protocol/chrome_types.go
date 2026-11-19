@@ -497,9 +497,11 @@ type AgentChat struct {
 	// InputFocused reports whether the composer captures keys (0x78 section 0x09).
 	// The resident transcript scroll (#2654) gates j/k on this so a scroll key is
 	// not mistaken for composer cursor motion. Absent section leaves it false.
-	InputFocused bool
-	Pending      string
-	Completion   []string
+	InputFocused         bool
+	DraftAttachmentCount byte
+	DraftAttachmentOffer uint64
+	Pending              string
+	Completion           []string
 }
 
 type AgentChatMessage struct {

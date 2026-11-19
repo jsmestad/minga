@@ -13,7 +13,7 @@ var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
 // keyPacket encodes a key press, stamping the latency correlation sequence
 // (ticket #2215) into every actual key_press packet so the resulting frame's
 // commit_frame can resolve a keystroke-to-write sample. Paste packets carry no sequence.
-func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
+func keyPacket(msg tea.KeyPressMsg, seq uint32, composer ...uint64) ([]byte, bool) {
 	key := msg.Key()
 	if key.Mod.Contains(tea.ModCtrl) && key.Code >= 'a' && key.Code <= 'z' {
 		return protocol.EncodeKeyPress(key.Code, keyModifiers(key), seq), true
@@ -21,6 +21,9 @@ func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
 
 	switch key.Code {
 	case tea.KeyEnter, tea.KeyKpEnter:
+		if len(composer) > 0 && composer[0] != 0 {
+			return protocol.EncodeComposerKeyPress(13, keyModifiers(key), seq, composer[0]), true
+		}
 		return protocol.EncodeKeyPress(13, keyModifiers(key), seq), true
 	case tea.KeyBackspace:
 		return protocol.EncodeKeyPress(127, keyModifiers(key), seq), true
@@ -51,6 +54,9 @@ func keyPacket(msg tea.KeyPressMsg, seq uint32) ([]byte, bool) {
 	if key.Text != "" {
 		runes := []rune(key.Text)
 		if len(runes) == 1 {
+			if len(composer) > 0 && composer[0] != 0 && runes[0] == 'f' {
+				return protocol.EncodeComposerKeyPress(runes[0], printableTextModifiers(key), seq, composer[0]), true
+			}
 			return protocol.EncodeKeyPress(runes[0], printableTextModifiers(key), seq), true
 		}
 		return protocol.EncodePaste(key.Text), true

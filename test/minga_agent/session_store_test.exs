@@ -7,6 +7,7 @@ defmodule MingaAgent.SessionStoreTest do
   alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Branch
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
@@ -99,6 +100,94 @@ defmodule MingaAgent.SessionStoreTest do
   end
 
   describe "draft snapshots" do
+    test "selection capture rejects stale writes and keeps exact bytes after interrupted publication",
+         %{tmp_dir: dir} do
+      id = "selection-draft"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      draft = draft_snapshot("Already typed")
+      text = "selected 日本語\n"
+      selection = {"note.ex", "note.ex selection", text}
+
+      assert {:ok, 1} = SessionStore.save_presentation(id, 0, draft, dir, opts)
+
+      assert {:error, {:stale_draft_revision, 1}} =
+               SessionStore.attach_selection(id, 0, draft, selection, dir, opts)
+
+      refused = [fault_injector: %{before_session_snapshot_rename: {:error, :refused}}] ++ opts
+
+      assert {:error, :refused} =
+               SessionStore.attach_selection(id, 1, draft, selection, dir, refused)
+
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(id, dir, opts)
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+
+      uncertain = [fault_injector: %{after_session_snapshot_rename: {:error, :uncertain}}] ++ opts
+
+      assert {:ok, 2, attachment} =
+               SessionStore.attach_selection(id, 1, draft, selection, dir, uncertain)
+
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, 2, %DraftSnapshot{text: "Already typed", attachments: [^attachment]}} =
+               SessionStore.read_presentation(id, dir, opts)
+
+      identity = DraftAttachment.identity(attachment)
+
+      assert {:ok, ^attachment, ^text} =
+               SessionStore.read_draft_attachment(id, identity, dir, opts)
+
+      assert {:error, :attachment_not_in_draft} =
+               SessionStore.read_draft_attachment("other-record", identity, dir, opts)
+
+      assert {:ok, 3} = SessionStore.save_attachment_removal(id, 2, draft, dir, uncertain)
+      assert {:ok, 3, ^draft} = SessionStore.read_presentation(id, dir, opts)
+
+      assert {:error, {:stale_draft_revision, 3}} =
+               SessionStore.attach_selection(id, 2, draft, selection, dir, opts)
+
+      assert {:error, :attachment_not_in_draft} =
+               SessionStore.read_draft_attachment(id, identity, dir, opts)
+
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+      assert {:error, :enoent} = SessionStore.load(id, dir, opts)
+    end
+
+    test "attached admission consumes the draft only once when directory sync is interrupted", %{
+      tmp_dir: dir
+    } do
+      id = "selection-admission"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      draft = draft_snapshot("Explain this")
+      selection = {"note.ex", "note.ex", "selected text"}
+
+      assert {:ok, 1, attachment} =
+               SessionStore.attach_selection(id, 0, draft, selection, dir, opts)
+
+      admission = sample_data(id)
+      refused = [fault_injector: %{before_session_snapshot_rename: {:error, :disk_full}}] ++ opts
+      assert {:error, :disk_full} = SessionStore.save_submitted_draft(admission, 1, dir, refused)
+
+      assert {:ok, 1, %DraftSnapshot{attachments: [^attachment]}} =
+               SessionStore.read_presentation(id, dir, opts)
+
+      assert {:error, :enoent} = SessionStore.load(id, dir, opts)
+
+      interrupted =
+        [fault_injector: %{after_session_snapshot_rename: {:error, :interrupted}}] ++ opts
+
+      assert :ok = SessionStore.save_submitted_draft(admission, 1, dir, interrupted)
+      assert {:ok, 2, nil} = SessionStore.read_presentation(id, dir, opts)
+
+      assert {:ok, %{messages: [_, {:user, "Hello, how are you?"} | _]}} =
+               SessionStore.load(id, dir, opts)
+
+      assert {:error, {:stale_draft_revision, 2}} =
+               SessionStore.save_submitted_draft(admission, 1, dir, opts)
+    end
+
     test "draft-only records do not impersonate a conversation and survive its first save", %{
       tmp_dir: dir
     } do

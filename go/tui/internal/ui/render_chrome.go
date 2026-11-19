@@ -783,9 +783,17 @@ func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
 func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {
 	theme := m.palette()
 	style := m.popupLineStyle(width)
-	limit := min(len(preview.Lines), max(height-1, 0))
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, " Preview", width)}
+	first := 1
+	if height == 1 && len(preview.Lines) == 1 {
+		// A short overlay can still show a complete one-row preview.
+		first = 0
+	}
+	limit := min(len(preview.Lines), max(height-first, 0))
+	lines := make([]string, 0, height)
+	if first != 0 {
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
+		lines = append(lines, renderPadded(titleStyle, " Preview", width))
+	}
 	for _, line := range preview.Lines[:limit] {
 		var builder strings.Builder
 		builder.WriteString(lipgloss.NewStyle().Background(theme.PopupSurface()).ColorWhitespace(true).Render(" "))

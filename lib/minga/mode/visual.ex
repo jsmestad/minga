@@ -261,6 +261,11 @@ defmodule Minga.Mode.Visual do
     {:execute_then_transition, [{:wrap_visual_selection, "`", "`"}], :normal, state}
   end
 
+  def handle_key({?A, modifiers}, %VisualState{text_object_modifier: nil} = state)
+      when modifiers in [0, 1] do
+    {:execute, :agent_attach_selection, state}
+  end
+
   # ── Text object selection ──────────────────────────────────────────────────────
 
   # `i` enters "inner" text object mode.

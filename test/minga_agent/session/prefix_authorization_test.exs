@@ -12,6 +12,8 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Checklist
   alias MingaAgent.Credentials
+  alias MingaAgent.DraftAttachment
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.OAuth
@@ -1321,6 +1323,45 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   defp tool_text(messages, id) do
     message = Enum.find(messages, &(&1.role == :tool and &1.tool_call_id == id))
     Enum.map_join(message.content, "", & &1.text)
+  end
+
+  test "attached send refuses a changed selection set and sends the exact retained snapshot",
+       context do
+    session = start_session(context, tool_call?: false)
+    id = Session.session_id(session)
+    opts = [artifact_runtime: context.runtime]
+
+    draft = %DraftSnapshot{
+      text: "Explain this",
+      cursor: {0, 12},
+      paste_blocks: [],
+      attachments: []
+    }
+
+    text = "αβ\ntrailing spaces  \n"
+    selection = {"example.ex", "example.ex", text}
+
+    assert {:ok, 1, attachment} =
+             SessionStore.attach_selection(id, 0, draft, selection, context.store_dir, opts)
+
+    {token, _digest} = identity = DraftAttachment.identity(attachment)
+    messages_before = Session.messages(session)
+
+    assert {:error, :draft_attachments_changed} =
+             Session.send_attached_prompt(session, id, [{token, "wrong revision"}], draft.text)
+
+    refute_received {:transport_request, _, _, _}
+    assert Session.messages(session) == messages_before
+    assert {:ok, 2} = Session.send_attached_prompt(session, id, [identity], draft.text)
+    assert_receive {:transport_request, 1, messages, _options}, @timeout
+
+    assert [%{type: :text, text: "Explain this"}, %{type: :text, text: snapshot}] =
+             List.last(messages).content
+
+    assert snapshot == "\n\nSelection snapshot: example.ex\n" <> text
+    await_idle(session)
+    assert {:ok, _conversation} = SessionStore.load(id, context.store_dir, opts)
+    assert {:ok, 2, nil} = SessionStore.read_presentation(id, context.store_dir, opts)
   end
 
   test "equal source reloads and OAuth provider restart preserve opaque history and selected skills",

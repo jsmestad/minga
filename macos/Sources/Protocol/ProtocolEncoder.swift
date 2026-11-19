@@ -208,6 +208,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(name, limit: Int(UInt16.max))
         case .agentReadRetainedOutput(let messageID, let offer):
             return messageID == 0 || (offer.high == 0 && offer.low == 0) ? .invalidPayload("Retained output requires a tool message identity and displayed offer") : nil
+        case .agentComposerSubmit(let offer):
+            return offer == 0 ? .invalidPayload("Agent submit requires a displayed composer offer") : nil
         case .agentToolApproval(let sessionId, let requestId, let toolCallId, _):
             guard !sessionId.isEmpty, !requestId.isEmpty, !toolCallId.isEmpty else {
                 return .invalidPayload("Tool approval requires session, request, and tool call identity")
@@ -292,7 +294,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     private func encode(_ action: OutboundAction) {
         switch action {
         case .ready(let cols, let rows): encodeReady(cols: cols, rows: rows)
-        case .keyPress(let codepoint, let modifiers, let sequence): encodeKeyPress(codepoint: codepoint, modifiers: modifiers, seq: sequence)
+        case .keyPress(let codepoint, let modifiers, let sequence, let composerOffer): encodeKeyPress(codepoint: codepoint, modifiers: modifiers, seq: sequence, composerOffer: composerOffer)
         case .resize(let cols, let rows): encodeResize(cols: cols, rows: rows)
         case .requestKeyframe(let lastGoodFrameSequence, let generation): encodeRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSequence, generation: generation)
         case .frameApplied(let generation, let frameSequence): encodeFrameApplied(generation: generation, frameSeq: frameSequence)
@@ -375,6 +377,12 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             writeU32(&buf, 2, messageID)
             writeU64(&buf, 6, offer.high)
             writeU64(&buf, 14, offer.low)
+            writeFrame(buf)
+        case .agentComposerSubmit(let offer):
+            var buf = Data(count: 10)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_AGENT_COMPOSER_SUBMIT
+            writeU64(&buf, 2, offer)
             writeFrame(buf)
         case .executeCommand(let name): encodeExecuteCommand(name: name)
         case .openFile(let path): encodeOpenFile(path: path)
@@ -544,12 +552,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     /// Send a key press event carrying a u32 latency correlation sequence
     /// (ticket #2215) appended after the modifiers byte.
-    private func encodeKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
-        var buf = Data(count: 10)
+    private func encodeKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32, composerOffer: UInt64) {
+        var buf = Data(count: composerOffer == 0 ? 10 : 18)
         buf[0] = OP_KEY_PRESS
         writeU32(&buf, 1, codepoint)
         buf[5] = modifiers
         writeU32(&buf, 6, seq)
+        if composerOffer != 0 { writeU64(&buf, 10, composerOffer) }
         os_signpost(.event, log: inputLog, name: "InputSent", "seq=%{public}u codepoint=%{public}u modifiers=%{public}u", seq, codepoint, modifiers)
         writeFrame(buf)
     }
