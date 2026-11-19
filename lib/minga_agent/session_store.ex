@@ -328,39 +328,39 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @doc "Captures explicit selection text and commits it with the exact composer revision."
-  @spec attach_selection(
+  @doc "Captures an explicit text snapshot and commits it with the exact composer revision."
+  @spec attach_text(
           String.t(),
           draft_revision(),
           DraftSnapshot.t(),
-          {String.t(), String.t(), String.t()},
+          DraftAttachment.text_snapshot(),
           String.t() | nil,
           keyword()
         ) :: {:ok, draft_revision(), DraftSnapshot.attachment()} | {:error, term()}
-  def attach_selection(id, expected, %DraftSnapshot{} = draft, selection, config_dir, opts) do
+  def attach_text(id, expected, %DraftSnapshot{} = draft, snapshot, config_dir, opts) do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
          true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
       with_record_workflow(path, fn ->
-        attach_selection_at_revision(path, id, expected, draft, selection, opts)
+        attach_text_at_revision(path, id, expected, draft, snapshot, opts)
       end)
     end
   end
 
-  @spec attach_selection_at_revision(
+  @spec attach_text_at_revision(
           String.t(),
           String.t(),
           draft_revision(),
           DraftSnapshot.t(),
-          {String.t(), String.t(), String.t()},
+          DraftAttachment.text_snapshot(),
           keyword()
         ) :: {:ok, draft_revision(), DraftSnapshot.attachment()} | {:error, term()}
-  defp attach_selection_at_revision(path, id, expected, draft, {source, label, text}, opts) do
+  defp attach_text_at_revision(path, id, expected, draft, snapshot, opts) do
     with {:ok, record, generation} <- read_record_for_write(path, id, opts),
          {:ok, {^expected, _draft}} <- decode_presentation(record),
          {:ok, store} <- ensure_artifact_store(id, opts),
-         {:ok, attachment, pin} <- DraftAttachment.capture_selection(store, source, label, text) do
+         {:ok, attachment, pin} <- DraftAttachment.capture_text(store, snapshot) do
       updated = %{draft | attachments: [attachment | draft.attachments]}
 
       result =

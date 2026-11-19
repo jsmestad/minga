@@ -121,6 +121,12 @@ defmodule Minga.Buffer do
   @doc "Content and mutation version captured atomically in one call."
   @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
   defdelegate content_with_version(server), to: BufferProcess
+
+  @doc "Returns the complete text and file path from one buffer state only if the text fits."
+  @spec bounded_content_with_path(t(), non_neg_integer()) ::
+          {:ok, String.t(), String.t() | nil} | {:error, :too_large}
+  defdelegate bounded_content_with_path(server, max_bytes), to: BufferProcess
+
   @doc "A byte-bounded content prefix and mutation version captured atomically."
   @spec content_prefix_with_version(t(), non_neg_integer()) ::
           {binary(), non_neg_integer(), boolean()}

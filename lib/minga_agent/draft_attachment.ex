@@ -22,6 +22,14 @@ defmodule MingaAgent.DraftAttachment do
   def max_bytes, do: @max_bytes
 
   @type identity :: {String.t(), String.t()}
+  @type text_snapshot :: {:selection | :buffer, String.t(), String.t(), String.t()}
+
+  @doc "Labels how a retained text snapshot was captured."
+  @spec snapshot_label(DraftSnapshot.source_kind()) :: String.t()
+  def snapshot_label(:selection), do: "Selection snapshot"
+  def snapshot_label(:buffer), do: "Buffer snapshot"
+  def snapshot_label(:file), do: "File snapshot"
+  def snapshot_label(:diagnostics), do: "Diagnostics snapshot"
 
   @doc "Returns the stable retained identity and captured revision of a snapshot."
   @spec identity(DraftSnapshot.attachment()) :: identity() | nil
@@ -68,8 +76,10 @@ defmodule MingaAgent.DraftAttachment do
 
     parts =
       parts ++
-        Enum.map(snapshots, fn {{_kind, _source, label, _revision, _capture}, text} ->
-          ContentPart.text(IO.iodata_to_binary(["\n\nSelection snapshot: ", label, "\n", text]))
+        Enum.map(snapshots, fn {{kind, _source, label, _revision, _capture}, text} ->
+          ContentPart.text(
+            IO.iodata_to_binary(["\n\n", snapshot_label(kind), ": ", label, "\n", text])
+          )
         end)
 
     estimated = Enum.reduce(parts, 0, &estimate_text_part/2)
@@ -86,15 +96,15 @@ defmodule MingaAgent.DraftAttachment do
 
   defp estimate_text_part(_other, total), do: total
 
-  @doc "Stages a selection with a delivery pin. The record writer transfers or releases this pin."
-  @spec capture_selection(GenServer.server(), String.t(), String.t(), binary()) ::
+  @doc "Stages exact text with a delivery pin. The record writer transfers or releases this pin."
+  @spec capture_text(GenServer.server(), text_snapshot()) ::
           {:ok, DraftSnapshot.attachment(), {:delivery, String.t(), String.t()}}
           | {:error, term()}
-  def capture_selection(store, source, label, text)
-      when is_binary(source) and is_binary(label) and is_binary(text) and
-             byte_size(text) in 1..@max_bytes do
+  def capture_text(store, {kind, source, label, text})
+      when kind in [:selection, :buffer] and is_binary(source) and is_binary(label) and
+             is_binary(text) and byte_size(text) in 1..@max_bytes do
     key =
-      {:delivery, "composer-selection",
+      {:delivery, "composer-attachment",
        Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)}
 
     with true <- String.valid?(text) || {:error, :invalid_attachment_text},
@@ -108,11 +118,11 @@ defmodule MingaAgent.DraftAttachment do
            ),
          {:ok, capture} <- ArtifactStore.begin(store, spec),
          {:ok, reference} <- write_capture(store, capture, text, key) do
-      {:ok, {:selection, source, label, reference.sha256, {:snapshot, reference}}, key}
+      {:ok, {kind, source, label, reference.sha256, {:snapshot, reference}}, key}
     end
   end
 
-  def capture_selection(_store, _source, _label, _text), do: {:error, :invalid_attachment_text}
+  def capture_text(_store, _snapshot), do: {:error, :invalid_attachment_text}
 
   @doc "Reads only complete, matching bytes from this record. It never reopens the source."
   @spec read_text(GenServer.server(), DraftSnapshot.attachment()) ::

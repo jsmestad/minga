@@ -108,17 +108,17 @@ defmodule MingaAgent.SessionStoreTest do
       {:ok, store} = ArtifactStores.ensure_record(id, runtime)
       draft = draft_snapshot("Already typed")
       text = "selected 日本語\n"
-      selection = {"note.ex", "note.ex selection", text}
+      selection = {:selection, "note.ex", "note.ex selection", text}
 
       assert {:ok, 1} = SessionStore.save_presentation(id, 0, draft, dir, opts)
 
       assert {:error, {:stale_draft_revision, 1}} =
-               SessionStore.attach_selection(id, 0, draft, selection, dir, opts)
+               SessionStore.attach_text(id, 0, draft, selection, dir, opts)
 
       refused = [fault_injector: %{before_session_snapshot_rename: {:error, :refused}}] ++ opts
 
       assert {:error, :refused} =
-               SessionStore.attach_selection(id, 1, draft, selection, dir, refused)
+               SessionStore.attach_text(id, 1, draft, selection, dir, refused)
 
       assert {:ok, 1, ^draft} = SessionStore.read_presentation(id, dir, opts)
       assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
@@ -126,7 +126,7 @@ defmodule MingaAgent.SessionStoreTest do
       uncertain = [fault_injector: %{after_session_snapshot_rename: {:error, :uncertain}}] ++ opts
 
       assert {:ok, 2, attachment} =
-               SessionStore.attach_selection(id, 1, draft, selection, dir, uncertain)
+               SessionStore.attach_text(id, 1, draft, selection, dir, uncertain)
 
       assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
 
@@ -145,7 +145,7 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:ok, 3, ^draft} = SessionStore.read_presentation(id, dir, opts)
 
       assert {:error, {:stale_draft_revision, 3}} =
-               SessionStore.attach_selection(id, 2, draft, selection, dir, opts)
+               SessionStore.attach_text(id, 2, draft, selection, dir, opts)
 
       assert {:error, :attachment_not_in_draft} =
                SessionStore.read_draft_attachment(id, identity, dir, opts)
@@ -161,10 +161,10 @@ defmodule MingaAgent.SessionStoreTest do
       runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
       opts = [artifact_runtime: runtime]
       draft = draft_snapshot("Explain this")
-      selection = {"note.ex", "note.ex", "selected text"}
+      selection = {:selection, "note.ex", "note.ex", "selected text"}
 
       assert {:ok, 1, attachment} =
-               SessionStore.attach_selection(id, 0, draft, selection, dir, opts)
+               SessionStore.attach_text(id, 0, draft, selection, dir, opts)
 
       admission = sample_data(id)
       refused = [fault_injector: %{before_session_snapshot_rename: {:error, :disk_full}}] ++ opts

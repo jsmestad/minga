@@ -150,6 +150,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a H), :agent_retained_history, "Read retained Agent messages"},
     {~k(a k), :agent_checklist, "Inspect Agent checklist"},
     {~k(a j), :agent_draft_attachments, "Inspect draft attachments"},
+    {~k(a b), :agent_attach_buffer, "Attach current buffer to Agent"},
     {~k(a r), :workspace_pending_reviews, "Pending reviews"},
     {~k(a o), :remote_find_file, "Open remote file"},
     {~k(a T), :agent_pick_thinking, "Pick thinking level"},

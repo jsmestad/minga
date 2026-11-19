@@ -15,6 +15,20 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
+  test "whole content read never returns a truncated buffer", %{tmp_dir: dir} do
+    path = Path.join(dir, "source.txt")
+    File.write!(path, "")
+    buffer = start_supervised!({BufferProcess, file_path: path})
+    limit = 32 * 1024
+    text = String.duplicate("é\n", div(limit - 2, 3)) <> "é"
+
+    assert {:ok, "", ^path} = Buffer.bounded_content_with_path(buffer, limit)
+    :ok = Buffer.insert_text(buffer, text)
+    assert {:ok, ^text, ^path} = Buffer.bounded_content_with_path(buffer, limit)
+    :ok = Buffer.insert_text(buffer, "!")
+    assert {:error, :too_large} = Buffer.bounded_content_with_path(buffer, limit)
+  end
+
   describe "request_sync_snapshot/4" do
     test "atomically returns full, edits, unchanged, and reset-required full snapshots" do
       {:ok, buffer} = BufferProcess.start_link(content: "one")

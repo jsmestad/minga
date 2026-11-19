@@ -2017,6 +2017,7 @@ final class EditorNSView: MTKView {
         addEditorMenuItem("Paste", action: "paste", connectionGeneration: connectionGeneration, to: menu)
         addEditorMenuItem("Select All", action: "select_all", connectionGeneration: connectionGeneration, to: menu)
         addEditorMenuItem("Attach Selection to Agent Draft", action: "agent_attach_selection", connectionGeneration: connectionGeneration, to: menu)
+        addEditorMenuItem("Attach Current Buffer to Agent Draft", action: "agent_attach_buffer", connectionGeneration: connectionGeneration, to: menu)
         menu.addItem(.separator())
 
         let hasLsp = statusBarState?.hasLsp ?? false

@@ -75,14 +75,14 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
   @spec async_fetch(Context.t()) :: {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
   def async_fetch(%Context{picker_ui: %{context: %{origin: origin, attachments: attachments}}}) do
     items =
-      for {_kind, _source, label, revision, {:snapshot, %Reference{bytes: bytes, token: token}}} <-
+      for {kind, _source, label, revision, {:snapshot, %Reference{bytes: bytes, token: token}}} <-
             attachments do
         identity = {token, revision}
 
         %Item{
           id: {:page, origin, {identity, 0, []}},
           label: literal(label),
-          description: "Selection snapshot · #{bytes} bytes",
+          description: "#{DraftAttachment.snapshot_label(kind)} · #{bytes} bytes",
           two_line: true
         }
       end
@@ -99,10 +99,11 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
         }
       }) do
     case Session.read_draft_attachment(session, record, identity) do
-      {:ok, {_kind, _source, label, _revision, _capture}, text} when offset <= byte_size(text) ->
+      {:ok, {kind, _source, label, _revision, _capture}, text} when offset <= byte_size(text) ->
         tail = binary_part(text, offset, byte_size(text) - offset)
         {row, remaining} = take_row(tail, @row_cells, [])
         next = byte_size(text) - byte_size(remaining)
+        description = DraftAttachment.snapshot_label(kind)
 
         items =
           page_items(
@@ -111,15 +112,14 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
             {offset, previous},
             next,
             byte_size(text),
-            literal(label),
+            {literal(label), description},
             [IO.iodata_to_binary(Enum.reverse(row))]
           )
 
-        {:ok, items,
-         %{status: "Selection snapshot · bytes #{offset}–#{next} of #{byte_size(text)}"}}
+        {:ok, items, %{status: "#{description} · bytes #{offset}–#{next} of #{byte_size(text)}"}}
 
       _unavailable ->
-        {:error, "Selection snapshot is no longer available in this draft."}
+        {:error, "The snapshot is no longer available in this draft."}
     end
   catch
     :exit, _reason -> {:error, "The original Agent conversation disconnected."}
@@ -211,10 +211,10 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
           {non_neg_integer(), [non_neg_integer()]},
           non_neg_integer(),
           non_neg_integer(),
-          String.t(),
+          {String.t(), String.t()},
           [String.t()]
         ) :: [Item.t()]
-  defp page_items(origin, identity, {offset, previous}, next, total, label, rows) do
+  defp page_items(origin, identity, {offset, previous}, next, total, {label, description}, rows) do
     meta = %{rows: rows}
 
     trailing = [
@@ -238,7 +238,7 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
         ],
         else: trailing
 
-    [%Item{id: :display, label: label, description: "Selection snapshot", meta: meta} | trailing]
+    [%Item{id: :display, label: label, description: description, meta: meta} | trailing]
   end
 
   @spec page_item(origin(), page(), String.t(), map()) :: Item.t()
