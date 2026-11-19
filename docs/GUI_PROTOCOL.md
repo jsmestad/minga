@@ -1057,6 +1057,8 @@ Typed body payloads:
 0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1) + optional tool_preview_payload. The summary uses a UTF-8-safe preview budget so the styled payload and appended auto-approval/preview bytes still fit. Link URLs are limited to http, https, and mailto.
 0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + session_id_len(2) + session_id + request_id_len(2) + request_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
+0x0B (tool_call_with_retained_output): type(1) + retained_output_offer(16) + fields from `0x04` after its type byte.
+0x0C (styled_tool_call_with_retained_output): type(1) + retained_output_offer(16) + fields from `0x08` after its type byte.
 ```
 
 For `tool_call` (`0x04`) and `styled_tool_call` (`0x08`), `status` is authoritative: 0 = running, 1 = complete, 2 = error, 3 = denied, 4 = cancelled, 5 = approval_expired. The retained `error` flag does not override this outcome. Denial, known cancellation, and approval expiry carry no execution duration (`duration_ms = 0`); a human approval wait must not appear as tool execution time. An error known to have occurred without execution also carries no execution duration. An admitted effect with an unknown result is an error with its retained explanation and output, not a fabricated cancellation or completion.
@@ -1279,6 +1281,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x67 | agent_prompt_scroll | window_id(2) + generation(8) + delta_rows(4, signed) | Scroll the committed prompt by wrapped visual rows; positive is down |
 | 0x68 | agent_tool_approval | session_id(string16) + request_id(string16) + tool_call_id(string16) + decision(1) | Resolve only the displayed session's admitted request and pending tool call |
 | 0x69 | scroll_to_visual_rank | window_id(2) + presentation_id(8) + rank(4) | Scroll the named wrapped resident pane to a visual row without moving its cursor or focus. The BEAM ignores stale presentations. |
+| 0x6A | agent_read_retained_output | message_id(4) + retained_output_offer(16) | Read the capture offered by this tool occurrence. Echo the opaque offer from its committed message. Unrelated transcript updates leave the offer valid. A changed result, workspace, or conversation makes it stale. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

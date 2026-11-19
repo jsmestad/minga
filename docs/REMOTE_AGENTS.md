@@ -74,6 +74,8 @@ That preview limit is not a capture limit.
 Trailing whitespace belongs to the capture, while an exit-status annotation belongs only to the preview.
 Capture reads on demand, so slow storage blocks the producer instead of accumulating an unbounded output queue in the BEAM.
 
+In the Agent workspace, expand the native tool card and choose **Read retained output**, or select the same action on a Go terminal tool card. `Ctrl+Alt+O` opens the latest tool result in the terminal. For example, reopen a session after changing a log file, then copy a range or read the complete original capture before copying it. Minga reads the stored bytes, not the changed file. Copy actions identify partial captures and label binary data as Base64. For captures above 16 MiB, copy ranges rather than the whole capture at once.
+
 Use `fetch_output` with the reference from the shell result, then advance the requested byte range until every retained byte has been read.
 For example, after reading the first 51,200 bytes, build the next request from the decoded result without reconstructing its reference:
 

@@ -5,6 +5,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.{Range, Reference}
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
@@ -462,6 +465,71 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     end
   end
 
+  test "a retained output offer survives unrelated streaming but not a conversation change" do
+    session = fake_session_pid()
+
+    connection = fn epoch ->
+      %ConnectionSnapshot{
+        target: ConnectionTarget.new(session, "retained-offer", nil, epoch),
+        credential_readiness: :checking,
+        model_selection: nil,
+        provider_phase: :stopped,
+        operation: :idle,
+        problem: nil
+      }
+    end
+
+    {:ok, token} = Reference.token("retained-offer", String.duplicate("a", 32))
+
+    {:ok, reference} =
+      Reference.new(
+        token: token,
+        media_type: "text/plain",
+        bytes: 7,
+        sha256: Reference.digest("content")
+      )
+
+    {:ok, range} = Range.new(:full, :bytes, 0, 7, 7)
+    {:ok, output} = Output.new("", :complete, range, reference: reference)
+    tool = ToolCall.new("retained", "shell", %{}) |> ToolCall.complete("", output)
+    preview_only = ToolCall.new("preview", "shell", %{}) |> ToolCall.complete("preview")
+    messages = [{:tool_call, tool}, {:tool_call, preview_only}]
+    original = connection.(make_ref())
+
+    assert [
+             {1, {:tool_call, %ToolCallView{retained_output_offer: <<_::128>> = offer} = card}},
+             {2, {:tool_call, %ToolCallView{retained_output_offer: nil}}}
+             | _
+           ] =
+             context(session, synced_panel(messages), connection: original)
+             |> AgentChatBuilder.build()
+             |> Map.fetch!(:resident_messages)
+
+    assert <<0x0B, ^offer::binary-size(16), _::binary>> =
+             AgentChatMessageCodec.encode_message_body({:tool_call, card})
+
+    streaming =
+      context(session, synced_panel(messages ++ [{:assistant, "Streaming"}]),
+        connection: original
+      )
+      |> AgentChatBuilder.build()
+
+    assert [{1, {:tool_call, %ToolCallView{retained_output_offer: ^offer}}} | _] =
+             streaming.resident_messages
+
+    changed =
+      context(session, synced_panel(messages), connection: connection.(make_ref()))
+      |> AgentChatBuilder.build()
+
+    assert [
+             {1, {:tool_call, %ToolCallView{retained_output_offer: <<_::128>> = changed_offer}}}
+             | _
+           ] =
+             changed.resident_messages
+
+    refute changed_offer == offer
+  end
+
   test "build/1 removes resolved controls without changing the tool card's stable message ID" do
     session = fake_session_pid()
     target = ApprovalTarget.new("session-A", "admitted-request", "tc-shell")
@@ -529,6 +597,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     state = TestHelpers.base_state(port_manager: nil)
     agent_ui = PromptBuffer.ensure(%UIState{panel: panel})
+
+    agent_ui =
+      case Keyword.fetch(opts, :connection) do
+        {:ok, connection} -> UIState.project_connection(agent_ui, connection)
+        :error -> agent_ui
+      end
+
     windows = Windows.set_map(state.workspace.windows, %{1 => window})
 
     workspace =

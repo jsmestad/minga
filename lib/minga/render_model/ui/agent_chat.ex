@@ -250,7 +250,8 @@ defmodule Minga.RenderModel.UI.AgentChat do
             duration_ms: non_neg_integer() | nil,
             auto_approved_scope: auto_approved_scope(),
             preview_kind: preview_kind(),
-            preview_lines: [String.t()]
+            preview_lines: [String.t()],
+            retained_output_offer: <<_::128>> | nil
           }
 
     defstruct name: "",
@@ -262,7 +263,8 @@ defmodule Minga.RenderModel.UI.AgentChat do
               duration_ms: nil,
               auto_approved_scope: nil,
               preview_kind: :args,
-              preview_lines: []
+              preview_lines: [],
+              retained_output_offer: nil
   end
 
   defmodule ApprovalView do

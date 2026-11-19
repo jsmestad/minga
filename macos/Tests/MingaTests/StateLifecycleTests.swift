@@ -604,9 +604,9 @@ struct AgentChatTranscriptTests {
         guard case .assistantMarkdown(4, let blocks) = state.messages[3] else { Issue.record("expected markdown"); return }
         #expect(blocks[0].isComplete)
         guard case .thinking(5, "t", true) = state.messages[4] else { Issue.record("expected thinking"); return }
-        guard case .toolCall(6, "read", "s", 1, false, true, 1, 2, "r", 3, let toolPreview) = state.messages[5] else { Issue.record("expected tool"); return }
+        guard case .toolCall(6, "read", "s", 1, false, true, 1, 2, "r", 3, let toolPreview, nil) = state.messages[5] else { Issue.record("expected tool"); return }
         #expect(toolPreview == ["lib.ex"])
-        guard case .styledToolCall(7, "run", "s2", 2, true, false, 2, 3, let resultLines, 1, let styledPreview) = state.messages[6] else { Issue.record("expected styled tool"); return }
+        guard case .styledToolCall(7, "run", "s2", 2, true, false, 2, 3, let resultLines, 1, let styledPreview, nil) = state.messages[6] else { Issue.record("expected styled tool"); return }
         #expect(resultLines[0][0].underline)
         #expect(styledPreview == ["-old", "+new"])
         guard case .approvalToolCall(8, "edit", "needs ok", "tc", "session-a", "request-a", 2, let approvalPreview) = state.messages[7] else { Issue.record("expected approval"); return }

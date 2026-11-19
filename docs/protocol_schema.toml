@@ -1439,6 +1439,11 @@ value = 0x68
 name = "scroll_to_visual_rank"
 value = 0x69
 
+# Stable tool message ID (u32) + opaque 16-byte offer from the displayed tool card.
+[[gui_actions]]
+name = "agent_read_retained_output"
+value = 0x6A
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven

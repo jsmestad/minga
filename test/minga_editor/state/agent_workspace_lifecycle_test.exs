@@ -10,9 +10,15 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaEditor.Agent.SessionEventWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.Effect.{Outcome, Policy, Request}
+  alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.PickerUI
+  alias MingaEditor.UI.Picker.{AgentRetainedOutputCopy, AgentRetainedOutputSource}
+  alias MingaEditor.UI.Picker.{Candidate, Item}
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.State, as: EditorState
@@ -592,6 +598,120 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.active_workspace_id(shell_state.tab_bar) == 0
     assert prompt_text(workspace.agent_ui) == ""
     assert SessionManager.session_id_for_pid(session) == {:error, :not_found}
+  end
+
+  test "closing the original Agent workspace dismisses a loaded or pending retained output picker" do
+    for phase <- [:loading, :ready] do
+      {:ok, _session_id, session} = SessionManager.start_session([])
+      on_exit(fn -> stop_session(session) end)
+      {state, workspace_id, _file_ref} = state_with_active_agent_workspace(session)
+      %{connection: connection} = Session.editor_snapshot(session)
+      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+      context = %{origin: {workspace_id, connection.target}}
+      {state, revision} = PickerUI.open_loading(state, AgentRetainedOutputSource, context)
+
+      state =
+        case phase do
+          :loading ->
+            state
+
+          :ready ->
+            items = [%Item{id: :copy, label: "Copy retained output"}]
+
+            {:ok, ready} =
+              PickerUI.apply_fetch_result(
+                state,
+                AgentRetainedOutputSource,
+                revision,
+                {:ok, items, Candidate.from_items(items), %{}}
+              )
+
+            ready
+        end
+
+      assert {:picker, _payload} = state.shell_runtime.state.modal
+      closed = GuiActionHandler.dispatch(state, {:workspace_close, workspace_id})
+      assert closed.shell_runtime.state.modal == :none
+
+      assert :stale ==
+               PickerUI.apply_fetch_result(
+                 closed,
+                 AgentRetainedOutputSource,
+                 revision,
+                 {:error, "Delayed result from the closed workspace"}
+               )
+    end
+  end
+
+  test "retained output stays selectable after a read or clipboard failure" do
+    {:ok, _session_id, session} = SessionManager.start_session([])
+    on_exit(fn -> stop_session(session) end)
+    {state, workspace_id, _file_ref} = state_with_active_agent_workspace(session)
+    %{connection: connection} = Session.editor_snapshot(session)
+    state = SessionEventWorkflow.connection_changed(state, session, connection)
+    context = %{origin: {workspace_id, connection.target}}
+    {state, revision} = PickerUI.open_loading(state, AgentRetainedOutputSource, context)
+    items = [%Item{id: :copy, label: "Copy bytes 0–4096", meta: %{view: "last good page"}}]
+
+    assert {:ok, ready} =
+             PickerUI.apply_fetch_result(
+               state,
+               AgentRetainedOutputSource,
+               revision,
+               {:ok, items, Candidate.from_items(items), %{}}
+             )
+
+    assert {:ok, read_failed} =
+             PickerUI.apply_fetch_result(
+               ready,
+               AgentRetainedOutputSource,
+               revision,
+               {:error, "Retained range expired"}
+             )
+
+    assert {:picker,
+            %{picker_ui: %{load_status: {:error, "Retained range expired"}, picker: picker}}} =
+             read_failed.shell_runtime.state.modal
+
+    assert ^items = picker.filtered
+
+    effect = %AgentRetainedOutputCopy{bytes: "last good page", revision: revision}
+    request = Request.new(effect, :system_clipboard, Policy.fifo(0))
+    outcome = Outcome.failed(request, :clipboard_unavailable)
+
+    assert {copy_failed, ^outcome} = AgentRetainedOutputCopy.apply(ready, outcome)
+
+    assert {:picker,
+            %{picker_ui: %{load_status: {:error, "Copy not confirmed. Retry."}, picker: picker}}} =
+             copy_failed.shell_runtime.state.modal
+
+    assert ^items = picker.filtered
+  end
+
+  test "a new conversation generation closes retained output and rejects pending results in the same workspace" do
+    {:ok, _session_id, session} = SessionManager.start_session([])
+    on_exit(fn -> stop_session(session) end)
+    {state, workspace_id, _file_ref} = state_with_active_agent_workspace(session)
+    %{connection: connection} = Session.editor_snapshot(session)
+    state = SessionEventWorkflow.connection_changed(state, session, connection)
+    context = %{origin: {workspace_id, connection.target}}
+    {state, revision} = PickerUI.open_loading(state, AgentRetainedOutputSource, context)
+
+    refreshed = %{connection | target: %{connection.target | epoch: make_ref()}}
+    ui = UIState.project_connection(state.workspace.agent_ui, refreshed)
+    projected = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+    assert {:picker, _payload} = projected.shell_runtime.state.modal
+
+    items = [%Item{id: :copy, label: "Output from the previous conversation"}]
+    outcome = {:ok, items, Candidate.from_items(items), %{}}
+
+    assert :stale =
+             PickerUI.apply_fetch_result(projected, AgentRetainedOutputSource, revision, outcome)
+
+    closed = SessionEventWorkflow.connection_changed(state, session, refreshed)
+    assert closed.shell_runtime.state.modal == :none
+    assert prompt_text(closed.workspace.agent_ui) == "restart draft"
   end
 
   test "session-down cleanup clears session and status while preserving draft and file membership" do

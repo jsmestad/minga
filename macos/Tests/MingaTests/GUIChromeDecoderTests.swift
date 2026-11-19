@@ -3212,11 +3212,20 @@ struct AgentTranscriptDecoderTests {
         styled.append(styledLines([styledRun(explanation)]))
         styled.append(0)
 
-        let data = buildFullReplace(epoch: 9, entries: [(id: 1, body: plain), (id: 2, body: styled)])
+        let offer = Wire.RetainedOutputOffer(high: 0x0102030405060708, low: 0x090A0B0C0D0E0F10)
+        let offerBytes = Data(Array(UInt8(1)...UInt8(16)))
+        let plainWithOffer = Data([0x0B]) + offerBytes + Data(plain.dropFirst())
+        let styledWithOffer = Data([0x0C]) + offerBytes + Data(styled.dropFirst())
+
+        let data = buildFullReplace(epoch: 9, entries: [
+            (id: 1, body: plainWithOffer),
+            (id: 2, body: styledWithOffer),
+            (id: 3, body: plain)
+        ])
         let (command, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
         guard case .guiAgentTranscript(_, _, _, _, _, let messages) = command,
-              messages.count == 2,
+              messages.count == 3,
               case .toolCall(_, _, let plainStatus, let plainError, _, _, let duration, let result, _, _) = messages[0].content,
               case .styledToolCall(_, _, let styledStatus, let styledError, _, _, _, let lines, _, _) = messages[1].content else {
             Issue.record("Expected plain and styled committed tool results")
@@ -3226,6 +3235,9 @@ struct AgentTranscriptDecoderTests {
         #expect(plainError && styledError)
         #expect(duration == 0 && result == explanation)
         #expect(lines[0][0].text == explanation)
+        #expect(messages[0].retainedOutputOffer == offer)
+        #expect(messages[1].retainedOutputOffer == offer)
+        #expect(messages[2].retainedOutputOffer == nil)
     }
 
     @Test("approval rejects every truncated body instead of accepting an ID-less payload")

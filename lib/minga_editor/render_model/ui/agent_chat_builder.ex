@@ -8,11 +8,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Theme
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
@@ -61,6 +63,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     full_pairs = panel.transcript.message_pairs
     full_styled_cache = resolve_styled_cache(panel, ctx.intent.frame.theme)
     pending_approval = PendingApproval.public(shell_agent.pending_approval)
+    retained_scope = retained_scope(agent_ui.connection, ctx.intent.frame.shell_state, session)
 
     # Resident transcript (#2654): the projection display-start scoped conversation for
     # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
@@ -68,7 +71,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     # older complete messages were omitted.
     {resident_messages, resident_truncated?} =
       full_pairs
-      |> build_gui_messages(full_styled_cache, pending_approval)
+      |> build_gui_messages(full_styled_cache, pending_approval, retained_scope)
       |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
       |> select_resident_messages()
 
@@ -89,9 +92,19 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           ctx.intent.frame.focus_owner.surface == :agent,
       resident_messages: resident_messages,
       resident_truncated?: resident_truncated?,
-      transcript_epoch: transcript_epoch(session, panel)
+      transcript_epoch: TranscriptProjection.presentation_epoch(panel.transcript, session)
     }
   end
+
+  @spec retained_scope(term(), TraditionalState.t(), pid()) :: RetainedOutputTarget.scope() | nil
+  defp retained_scope(%{target: %{session: session, epoch: epoch}}, shell_state, session) do
+    case TraditionalState.tab_bar(shell_state) do
+      %TabBar{} = tabs -> {TabBar.active_workspace_id(tabs), epoch}
+      nil -> nil
+    end
+  end
+
+  defp retained_scope(_connection, _shell_state, _session), do: nil
 
   @doc false
   @spec select_resident_messages([AgentChat.message()], pos_integer()) ::
@@ -101,13 +114,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
         max_bytes \\ Minga.Config.get(:agent_transcript_resident_max_bytes)
       ) do
     AgentChat.resident_suffix(messages, max_bytes, &AgentChatMessageCodec.resident_entry_size/1)
-  end
-
-  # Opaque change token for the resident transcript stream. Flips on structural
-  # change (session switch, clear_display window start, or message content mutation).
-  @spec transcript_epoch(pid(), MingaEditor.Agent.UIState.Panel.t()) :: non_neg_integer()
-  defp transcript_epoch(session, panel) do
-    :erlang.phash2({session, panel.transcript.display_start, panel.transcript.version})
   end
 
   @spec build_prompt_completion(MingaEditor.Agent.UIState.Panel.t()) :: PromptCompletion.t() | nil
@@ -156,18 +162,21 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   # A tool ID can recur; a pending target decorates only its latest transcript occurrence.
-  @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil, approval() | nil) :: [
-          {pos_integer(), term()}
-        ]
-  defp build_gui_messages(messages_with_ids, nil, nil) do
-    Enum.map(messages_with_ids, &to_core_message/1)
+  @spec build_gui_messages(
+          [{pos_integer(), term()}],
+          [term()] | nil,
+          approval() | nil,
+          RetainedOutputTarget.scope() | nil
+        ) :: [{pos_integer(), term()}]
+  defp build_gui_messages(messages_with_ids, nil, nil, scope) do
+    Enum.map(messages_with_ids, &to_core_message(&1, scope))
   end
 
-  defp build_gui_messages(messages_with_ids, nil, %PublicApproval{} = pending_approval) do
+  defp build_gui_messages(messages_with_ids, nil, %PublicApproval{} = pending_approval, scope) do
     {messages, _remaining} =
       :lists.mapfoldr(
         fn message, approval ->
-          projected = message |> maybe_inline_approval(approval) |> to_core_message()
+          projected = message |> maybe_inline_approval(approval) |> to_core_message(scope)
           {projected, remaining_approval(message, approval)}
         end,
         pending_approval,
@@ -177,17 +186,23 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     messages
   end
 
-  defp build_gui_messages(messages_with_ids, styled_cache, nil) when is_list(styled_cache) do
+  defp build_gui_messages(messages_with_ids, styled_cache, nil, scope)
+       when is_list(styled_cache) do
     padded = pad_cache(styled_cache, length(messages_with_ids))
 
     messages_with_ids
     |> Enum.zip(padded)
     |> Enum.map(fn message ->
-      message |> maybe_style_message(nil) |> to_core_message()
+      message |> maybe_style_message(nil) |> to_core_message(scope)
     end)
   end
 
-  defp build_gui_messages(messages_with_ids, styled_cache, %PublicApproval{} = pending_approval)
+  defp build_gui_messages(
+         messages_with_ids,
+         styled_cache,
+         %PublicApproval{} = pending_approval,
+         scope
+       )
        when is_list(styled_cache) do
     padded = pad_cache(styled_cache, length(messages_with_ids))
     entries = Enum.zip(messages_with_ids, padded)
@@ -195,7 +210,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {messages, _remaining} =
       :lists.mapfoldr(
         fn {message, _cache_entry} = entry, approval ->
-          projected = entry |> maybe_style_message(approval) |> to_core_message()
+          projected = entry |> maybe_style_message(approval) |> to_core_message(scope)
           {projected, remaining_approval(message, approval)}
         end,
         pending_approval,
@@ -295,15 +310,17 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   # views the encoder serializes. After this pass the GUI encoder never sees a
   # MingaAgent struct.
 
-  @spec to_core_message({pos_integer(), term()}) :: {pos_integer(), term()}
-  defp to_core_message({id, body}), do: {id, to_core_body(body)}
+  @spec to_core_message({pos_integer(), term()}, RetainedOutputTarget.scope() | nil) ::
+          {pos_integer(), term()}
+  defp to_core_message({id, {:tool_call, %ToolCall{} = tc}}, scope),
+    do: {id, {:tool_call, tool_call_view(tc, scope, id)}}
+
+  defp to_core_message({id, {:styled_tool_call, %ToolCall{} = tc, styled_lines}}, scope),
+    do: {id, {:styled_tool_call, tool_call_view(tc, scope, id), styled_lines}}
+
+  defp to_core_message({id, body}, _scope), do: {id, to_core_body(body)}
 
   @spec to_core_body(term()) :: term()
-  defp to_core_body({:tool_call, %ToolCall{} = tc}), do: {:tool_call, tool_call_view(tc)}
-
-  defp to_core_body({:styled_tool_call, %ToolCall{} = tc, styled_lines}),
-    do: {:styled_tool_call, tool_call_view(tc), styled_lines}
-
   defp to_core_body({:assistant_markdown, blocks}), do: {:assistant_markdown, blocks}
 
   defp to_core_body({:approval_tool_call, %ToolCall{} = tc, approval}),
@@ -313,8 +330,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp to_core_body(body), do: body
 
-  @spec tool_call_view(ToolCall.t()) :: ToolCallView.t()
-  defp tool_call_view(%ToolCall{} = tc) do
+  @spec tool_call_view(ToolCall.t(), RetainedOutputTarget.scope() | nil, pos_integer()) ::
+          ToolCallView.t()
+  defp tool_call_view(%ToolCall{} = tc, scope, id) do
     preview = tc.preview || ToolApproval.build_transcript_preview(tc.name, tc.args)
 
     %ToolCallView{
@@ -327,7 +345,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       duration_ms: tc.duration_ms,
       auto_approved_scope: tc.auto_approved_scope,
       preview_kind: Map.get(preview, :kind, :args),
-      preview_lines: Map.get(preview, :lines, [])
+      preview_lines: Map.get(preview, :lines, []),
+      retained_output_offer: RetainedOutputTarget.offer(scope, id, tc)
     }
   end
 

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/hex"
 	"fmt"
 	"image/color"
 	"net/url"
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	zoneIDAgentModel        = "agent:pick-model"
-	zonePrefixAgentApproval = "agent:approval:"
+	zoneIDAgentModel              = "agent:pick-model"
+	zonePrefixAgentApproval       = "agent:approval:"
+	zonePrefixAgentRetainedOutput = "agent:retained-output:"
 )
 
 // Approval zones retain their complete displayed target, including in cached
@@ -46,6 +48,24 @@ func agentApprovalZonePacket(id string) []byte {
 	}, generated.AgentApprovalDecision(decision))
 }
 
+func agentRetainedOutputZonePacket(id string) []byte {
+	identity, ok := strings.CutPrefix(id, zonePrefixAgentRetainedOutput)
+	if !ok {
+		return nil
+	}
+	messageText, offerText, ok := strings.Cut(identity, ":")
+	var offer [16]byte
+	if !ok || len(offerText) != hex.EncodedLen(len(offer)) {
+		return nil
+	}
+	messageID, messageErr := strconv.ParseUint(messageText, 10, 32)
+	_, offerErr := hex.Decode(offer[:], []byte(offerText))
+	if messageErr != nil || offerErr != nil {
+		return nil
+	}
+	return protocol.EncodeGUIAgentReadRetainedOutput(uint32(messageID), offer)
+}
+
 func (m Model) agentDisplayedControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 	mouse := msg.Mouse()
 	if !m.agentChatVisible() || !m.layout.body.Contains(mouse.X, mouse.Y) ||
@@ -67,6 +87,10 @@ func (m Model) agentDisplayedControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 	for id, zone := range m.zones.zones {
 		if strings.HasPrefix(id, zonePrefixAgentApproval) && zone.InBounds(msg) {
 			packet := agentApprovalZonePacket(id)
+			return packet, packet != nil
+		}
+		if strings.HasPrefix(id, zonePrefixAgentRetainedOutput) && zone.InBounds(msg) {
+			packet := agentRetainedOutputZonePacket(id)
 			return packet, packet != nil
 		}
 	}
@@ -107,7 +131,7 @@ func (m Model) renderAgentApprovalActions(message protocol.AgentChatMessage, wid
 			rendered := muted.Render(label)
 			// Never leave an invisible or partially clipped action clickable.
 			if used+lipgloss.Width(label) <= width {
-				rendered = m.zones.MarkAgentApproval(zoneIDAgentApproval(message.ApprovalTarget, action.decision), rendered)
+				rendered = m.zones.markCachedTranscriptControl(zoneIDAgentApproval(message.ApprovalTarget, action.decision), rendered)
 			}
 			lines[rowIndex] += rendered
 			used += lipgloss.Width(label)

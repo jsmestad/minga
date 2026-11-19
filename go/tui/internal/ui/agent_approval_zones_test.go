@@ -24,7 +24,7 @@ func TestApprovalMarkersRetainCachedControlsWithoutRetainingTurnHistory(t *testi
 	var lastID, lastRows string
 	for index := range 500 {
 		lastID = fmt.Sprintf("agent:approval:request-%d", index)
-		lastRows = zones.MarkAgentApproval(lastID, "Approve")
+		lastRows = zones.markCachedTranscriptControl(lastID, "Approve")
 		renderer.admit(transcriptCacheKey{slot: uint64(index + 1)}, []string{lastRows}, zones)
 		finishApprovalZoneFrame(zones, renderer, lastRows)
 		if len(zones.approvalMarkers) > renderer.rowCap+1 || zones.Get(lastID) == nil {
@@ -48,7 +48,7 @@ func TestApprovalMarkersRetainCachedControlsWithoutRetainingTurnHistory(t *testi
 	if len(zones.approvalMarkers) != 0 || len(zones.ids) != 1 || len(zones.rids) != 1 || zones.Get("header") == nil {
 		t.Fatal("unreachable approval registrations survived or unrelated zones were retired")
 	}
-	fresh := zones.MarkAgentApproval("agent:approval:fresh", "Approve")
+	fresh := zones.markCachedTranscriptControl("agent:approval:fresh", "Approve")
 	if fresh == lastRows {
 		t.Fatal("a retired numeric token was reused for another target")
 	}
@@ -60,7 +60,7 @@ func TestApprovalMarkersRetainPartialAndDetachedPresentationRoots(t *testing.T) 
 	renderer := newAgentTranscriptRenderer()
 	renderer.begin(80, 1, 8)
 	id := "agent:approval:detached"
-	marked := zones.MarkAgentApproval(id, "Approve")
+	marked := zones.markCachedTranscriptControl(id, "Approve")
 	marker, _, ok := readZoneMarker(marked, 0)
 	if !ok {
 		t.Fatal("approval marker missing")
@@ -90,7 +90,7 @@ func TestMaximumApprovalIdentityBytesCannotEscapeTheRendererCacheBudget(t *testi
 	for _, decision := range []generated.AgentApprovalDecision{generated.AgentApprovalDecisionApprove, generated.AgentApprovalDecisionReject, generated.AgentApprovalDecisionApproveSession, generated.AgentApprovalDecisionApproveTurn} {
 		id := zoneIDAgentApproval(target, decision)
 		ids = append(ids, id)
-		row.WriteString(zones.MarkAgentApproval(id, "Act"))
+		row.WriteString(zones.markCachedTranscriptControl(id, "Act"))
 	}
 	key := transcriptCacheKey{slot: 1}
 	renderer.admit(key, []string{row.String()}, zones)

@@ -38,9 +38,7 @@ func (a *agentPanel) spinner() string {
 	return frames[int(a.animationFrame)%len(frames)]
 }
 
-// handleKey handles the Ctrl+Alt+X/Z collapse toggles. The stable message ID is
-// resolved against `messages` (the resident transcript, #2654) because it echoes
-// the BEAM-owned transcript IDs and remains valid after resident front trimming.
+// handleKey resolves read and collapse shortcuts against stable resident message IDs.
 func (a *agentPanel) handleKey(chat protocol.AgentChat, messages *residentTranscript, msg tea.KeyPressMsg) ([]byte, bool) {
 	if !chat.Visible {
 		return nil, false
@@ -50,6 +48,12 @@ func (a *agentPanel) handleKey(chat protocol.AgentChat, messages *residentTransc
 		return nil, false
 	}
 	switch key.Code {
+	case 'o', 'O':
+		message, ok := messages.latest(transcriptSummaryRetainedOutput)
+		if !ok {
+			return nil, false
+		}
+		return protocol.EncodeGUIAgentReadRetainedOutput(message.ID, message.RetainedOutputOffer), true
 	case 'x', 'X':
 		messageID, ok := latestToolMessageID(messages)
 		if !ok {
@@ -838,6 +842,19 @@ func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) 
 		lines = append(lines, m.renderAgentToolPreviewLines(msg.PreviewKind, msg.PreviewLines, width, statusColor)...)
 	}
 
+	if agentToolOffersRetainedOutput(msg) {
+		labelText := "[Read retained output]"
+		if width < 5+len(labelText) {
+			labelText = "[Output]"
+		}
+		label := railStyle.Render(labelText)
+		if width >= 5+len(labelText) && m.zones != nil {
+			zone := fmt.Sprintf("%s%d:%x", zonePrefixAgentRetainedOutput, msg.ID, msg.RetainedOutputOffer)
+			label = m.zones.markCachedTranscriptControl(zone, label)
+		}
+		hint := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  Ctrl+Alt+O reads latest")
+		lines = append(lines, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled("     "+label+hint, width)))
+	}
 	if agentToolIsError(msg) && hasAgentToolResult(msg) {
 		lines = append(lines, m.renderAgentToolResultLines(agentToolStatusLabel(msg), msg, width, statusColor)...)
 	} else if hasAgentToolResult(msg) && msg.Collapsed {
@@ -952,6 +969,10 @@ func agentToolMeta(msg protocol.AgentChatMessage) string {
 
 func hasAgentToolResult(msg protocol.AgentChatMessage) bool {
 	return strings.TrimSpace(msg.Result) != "" || len(msg.StyledLines) > 0
+}
+
+func agentToolOffersRetainedOutput(msg protocol.AgentChatMessage) bool {
+	return msg.ID != 0 && msg.RetainedOutputOffer != [16]byte{}
 }
 
 func (m Model) renderAgentToolCollapsedHint(width int, railColor color.Color) string {

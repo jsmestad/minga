@@ -16,6 +16,8 @@ defmodule MingaAgent.RemoteAPI do
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
+  alias MingaAgent.ArtifactStore.Fetched
+  alias MingaAgent.Tool.Output.{Range, Reference}
 
   @typedoc "Remote attachment role."
   @type role :: :driver | :viewer
@@ -207,6 +209,31 @@ defmodule MingaAgent.RemoteAPI do
   def session_data(session_id, token) when is_binary(session_id) and is_binary(token) do
     with :ok <- authorize(session_id, token) do
       SessionStore.load(session_id)
+    end
+  end
+
+  @doc "Reads original retained tool output for the exact token-authorized live session."
+  @spec read_retained_output(
+          ConnectionTarget.t(),
+          String.t(),
+          pos_integer(),
+          Reference.t(),
+          Range.t()
+        ) ::
+          {:ok, Fetched.t()} | {:error, term()}
+  def read_retained_output(
+        %ConnectionTarget{session_id: session_id, session: expected_pid} = target,
+        token,
+        id,
+        reference,
+        range
+      ) do
+    with :ok <- authorize(session_id, token),
+         {:ok, ^expected_pid} <- SessionManager.get_session(session_id) do
+      Session.read_retained_output(target, id, reference, range)
+    else
+      {:ok, _replacement_pid} -> {:error, :not_found}
+      {:error, _reason} = error -> error
     end
   end
 

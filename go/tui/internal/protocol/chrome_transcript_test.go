@@ -164,6 +164,12 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	usage = append(usage, u32Bytes(4)...)
 	usage = append(usage, u32Bytes(500)...)
 
+	offer := [16]byte{0x01, 0x02, 0x03, 0x04, 0xD5, 0xE6, 0xF7, 0xA8, 0x99, 0x8A, 0x7B, 0x6C, 0x5D, 0x4E, 0x3F, 0x20}
+	offeredTool := append([]byte{0x0B}, offer[:]...)
+	offeredTool = append(offeredTool, tool[1:]...)
+	offeredStyledTool := append([]byte{0x0C}, offer[:]...)
+	offeredStyledTool = append(offeredStyledTool, styledTool[1:]...)
+
 	got, _, _ := decodeAgentTranscript(replaceFrameBytes(11, false, []transcriptEntry{
 		{id: 1, body: assistant},
 		{id: 2, body: thinking},
@@ -174,8 +180,10 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 		{id: 7, body: approval},
 		{id: 8, body: usage},
 		{id: 9, body: markdown},
+		{id: 10, body: offeredTool},
+		{id: 11, body: offeredStyledTool},
 	}))
-	if !got.Present || len(got.Messages) != 9 {
+	if !got.Present || len(got.Messages) != 11 {
 		t.Fatalf("retained bodies not decoded: %+v", got)
 	}
 	if got.Messages[0].Kind != 0x02 || got.Messages[0].Text != "hello" {
@@ -196,6 +204,11 @@ func TestDecodeAgentTranscriptRetainedBodyFields(t *testing.T) {
 	styledToolRun := got.Messages[5].StyledLines[0][0]
 	if got.Messages[5].Name != "shell" || got.Messages[5].Summary != "ran" || got.Messages[5].Status != 1 || !got.Messages[5].IsError || !got.Messages[5].Collapsed || got.Messages[5].DurationMS != 42 || got.Messages[5].Result != "done" || got.Messages[5].AutoApprovedScope != 2 || got.Messages[5].PreviewKind != 1 || got.Messages[5].PreviewLines[0] != "-old" || styledToolRun.Text != "done" || styledToolRun.FG != 0x98BE65 || styledToolRun.BG != 0x21242B || !styledToolRun.Code() {
 		t.Fatalf("styled tool fields not retained: %+v", got.Messages[5])
+	}
+	if plain, styled := got.Messages[9], got.Messages[10]; plain.Kind != 0x04 || styled.Kind != 0x08 ||
+		plain.RetainedOutputOffer != offer || styled.RetainedOutputOffer != offer ||
+		plain.Result != "ok" || styled.Result != "done" || got.Messages[4].RetainedOutputOffer != ([16]byte{}) {
+		t.Fatalf("offered and preview-only tools were not distinguished: plain=%+v styled=%+v", plain, styled)
 	}
 	if got.Messages[6].Status != 1 || got.Messages[6].Name != "edit_file" || got.Messages[6].Summary != "demo.ex" || got.Messages[6].ApprovalTarget != (AgentApprovalTarget{SessionID: "session_1", RequestID: "request_1", ToolCallID: "tc_1"}) || got.Messages[6].Result != "" || got.Messages[6].PreviewKind != 2 || got.Messages[6].PreviewLines[0] != "mix test" {
 		t.Fatalf("approval fields not retained: %+v", got.Messages[6])

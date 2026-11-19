@@ -541,6 +541,22 @@ func TestAgentToggleUsesStableMessageID(t *testing.T) {
 	}
 }
 
+func TestAgentRetainedOutputShortcutSkipsRunningTool(t *testing.T) {
+	var panel agentPanel
+	chat := protocol.AgentChat{Visible: true}
+	offer := [16]byte{1, 2, 3}
+	resident := testTranscriptWithMessages([]protocol.AgentChatMessage{
+		{ID: 404, Kind: agentKindStyledTool, Status: 1, RetainedOutputOffer: offer},
+		{ID: 405, Kind: agentKindTool, Text: "running"},
+	})
+	press := tea.KeyPressMsg(tea.Key{Code: 'o', Mod: tea.ModCtrl | tea.ModAlt})
+
+	packet, handled := panel.handleKey(chat, resident, press)
+	if want := protocol.EncodeGUIAgentReadRetainedOutput(404, offer); !handled || !bytes.Equal(packet, want) {
+		t.Fatalf("retained output shortcut = (%v, %v), want (%v, true)", packet, handled, want)
+	}
+}
+
 func TestAgentMessageRowCountAndRangeMatchCurrentRenderer(t *testing.T) {
 	model := residentModel(t, 0)
 	fixtures := []protocol.AgentChatMessage{
