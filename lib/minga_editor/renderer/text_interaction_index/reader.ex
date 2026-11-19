@@ -5,6 +5,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
   alias MingaEditor.Mouse.Target.Text, as: TextTarget
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.Renderer.TextPresentation
+  alias MingaEditor.Renderer.WrapLayout
 
   @opaque t :: %__MODULE__{table: :ets.table()}
   @enforce_keys [:table]
@@ -26,7 +27,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
   def resolve(%__MODULE__{table: table}, %TextEvent{} = event) do
     with {:ok, active_id} <- read(table, {:active, event.window_id}),
          true <- active_id == event.presentation_id,
-         {:ok, {buffer, source_version, rows}} <-
+         {:ok, {buffer, source_version, rows, _scroll_request, _settled_scroll_seq}} <-
            read(table, {:lease, event.window_id, event.presentation_id}),
          {:ok, row} <- row_at(table, rows, event.row_index),
          {:ok, target} <-
@@ -56,7 +57,8 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
           {:ok, {pid(), non_neg_integer()}} | {:error, :inactive | :unavailable}
   def source(%__MODULE__{table: table}, window_id, presentation_id) do
     with {:ok, ^presentation_id} <- read(table, {:active, window_id}),
-         {:ok, {buffer, version, _rows}} <- read(table, {:lease, window_id, presentation_id}),
+         {:ok, {buffer, version, _rows, _scroll_request, _settled_scroll_seq}} <-
+           read(table, {:lease, window_id, presentation_id}),
          :ok <- active_still_exact(table, window_id, presentation_id) do
       {:ok, {buffer, version}}
     else
@@ -70,11 +72,28 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
           {:ok, {pid(), non_neg_integer()}} | {:error, :unknown | :unavailable}
   def retained_source(%__MODULE__{table: table}, window_id, presentation_id) do
     case read(table, {:lease, window_id, presentation_id}) do
-      {:ok, {buffer, version, _rows}} -> {:ok, {buffer, version}}
-      :error -> {:error, :unknown}
-      {:error, :unavailable} -> {:error, :unavailable}
+      {:ok, {buffer, version, _rows, _scroll_request, _settled_scroll_seq}} ->
+        {:ok, {buffer, version}}
+
+      :error ->
+        {:error, :unknown}
+
+      {:error, :unavailable} ->
+        {:error, :unavailable}
     end
   end
+
+  @doc "Reads complete wrapped-line counts for the current compatible windowed source."
+  @spec windowed_wrap_counts(t() | nil, pos_integer(), pid(), non_neg_integer(), tuple()) ::
+          WrapLayout.counts()
+  def windowed_wrap_counts(%__MODULE__{table: table}, window_id, buffer, version, basis) do
+    case read(table, {:windowed_wrap_counts, window_id}) do
+      {:ok, {^buffer, ^version, ^basis, counts}} -> counts
+      _ -> %{}
+    end
+  end
+
+  def windowed_wrap_counts(nil, _window_id, _buffer, _version, _basis), do: %{}
 
   @doc "Moves the live editor anchor using a compatible immutable wrapped root."
   @spec scroll_anchor(
@@ -100,7 +119,8 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
     key = {:scroll_root, window_id}
     header = fn ref -> rank_header(table, ref) end
 
-    with {:ok, {^buffer, ^version, ^basis, root} = identity} <- read(table, key),
+    # Relative wheel input uses the live anchor, independent of settled scroll authority.
+    with {:ok, {^buffer, ^version, ^basis, root, _}} <- read(table, key),
          {:ok, {size, lines, _, _, _, _, _}} when lines > 0 <-
            read(table, {:node_header, root}),
          line = min(line, lines - 1),
@@ -110,7 +130,47 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
          current = min(first + min(offset, last - first - 1), bottom),
          target = current |> Kernel.+(delta) |> max(0) |> min(bottom),
          {_, _} = anchor <- ResidentStore.locate_anchor(root, target, header),
-         {:ok, ^identity} <- read(table, key) do
+         {:ok, {^buffer, ^version, ^basis, ^root, _}} <- read(table, key) do
+      {:ok, anchor, target == bottom}
+    else
+      _ -> :error
+    end
+  end
+
+  @doc """
+  Resolves an absolute visual rank from the active resident lease only if its
+  layout and settled scroll authority still match the acknowledged root.
+  """
+  @spec seek_scroll_rank(
+          t(),
+          pos_integer(),
+          pos_integer(),
+          {pid(), non_neg_integer(), term(), non_neg_integer()},
+          non_neg_integer(),
+          pos_integer()
+        ) :: {:ok, {non_neg_integer(), non_neg_integer()}, boolean()} | :error
+  def seek_scroll_rank(
+        %__MODULE__{table: table},
+        window_id,
+        presentation_id,
+        {buffer, version, basis, authoritative_seq},
+        rank,
+        fitted
+      ) do
+    key = {:scroll_root, window_id}
+
+    with {:ok, ^presentation_id} <- read(table, {:active, window_id}),
+         {:ok, {^buffer, ^version, {:resident, root}, ^authoritative_seq, settled_scroll_seq}}
+         when is_integer(settled_scroll_seq) <-
+           read(table, {:lease, window_id, presentation_id}),
+         identity = {buffer, version, basis, root, settled_scroll_seq},
+         {:ok, ^identity} <- read(table, key),
+         {:ok, {size, _, _, _, _, _, _}} <- read(table, {:node_header, root}),
+         bottom = max(size - fitted, 0),
+         target = min(rank, bottom),
+         {_, _} = anchor <- ResidentStore.locate_anchor(root, target, &rank_header(table, &1)),
+         {:ok, ^identity} <- read(table, key),
+         :ok <- active_still_exact(table, window_id, presentation_id) do
       {:ok, anchor, target == bottom}
     else
       _ -> :error

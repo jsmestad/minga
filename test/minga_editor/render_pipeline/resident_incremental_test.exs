@@ -8,6 +8,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias Minga.Editing.Search.Index
   alias Minga.Events.BufferChangedEvent
   alias Minga.Search.IndexOwner
+  alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
   alias Minga.RenderModel.Window.Row
@@ -27,9 +28,15 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Render, as: EditorRender
   alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Search
+  alias Minga.Mode.CommandState
+  alias Minga.Core.WrapMap
+  alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
+  alias MingaEditor.Renderer.WrapLayout
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -83,6 +90,87 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     state
   end
 
+  test "horizontal wheel keeps an empty caret row detached until the caret moves" do
+    editor =
+      gui_state(content: "\n" <> String.duplicate("x", 80), rows: 8, cols: 26, filetype: :text)
+
+    buffer = editor.workspace.buffers.active
+    id = editor.workspace.windows.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+
+    {initial, state} = build_frame(editor)
+    editor = Mouse.handle_horizontal_pan(state.editor, id, 10, 1)
+    {panned, state} = build_frame(%{state | editor: editor})
+
+    assert %{top: 0, left: 10} = panned.geometry.viewport
+    assert panned.scroll_seq == initial.scroll_seq
+
+    assert %{can_pan_horizontally: true, horizontal_pan_ack: 1} =
+             ScrollPresentation.from_window(panned)
+
+    assert ScrollPresentation.from_window(panned).layout_generation ==
+             ScrollPresentation.from_window(initial).layout_generation
+
+    refute panned.cursor_visible
+    assert BufferProcess.cursor(buffer) == {0, 0}
+
+    assert :ok = BufferProcess.move_to(buffer, {1, 1})
+    {following, state} = build_frame(state)
+    assert %{top: 0, left: 0} = following.geometry.viewport
+    assert following.scroll_seq > panned.scroll_seq
+    assert following.cursor_visible
+
+    editor = Mouse.handle_horizontal_pan(state.editor, id, -1, 2)
+    {clamped, _state} = build_frame(%{state | editor: editor})
+    assert %{anchor_left: 0, horizontal_pan_ack: 2} = ScrollPresentation.from_window(clamped)
+  end
+
+  test "a windowed caret keeps its source coordinate when the committed horizontal clip hides it" do
+    content = String.duplicate("x", 80) <> :binary.copy("\n", 65_536)
+    editor = gui_state(content: content, rows: 8, cols: 26, filetype: :text)
+    buffer = editor.workspace.buffers.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+    {initial, state} = build_frame(editor)
+    assert initial.row_store_mode == :windowed
+    editor = Mouse.handle_horizontal_pan(state.editor, editor.workspace.windows.active, 10, 1)
+
+    assert {%{row_store_mode: :windowed, cursor_visible: false, accessibility_cursor: {0, 0}},
+            _state} = build_frame(%{state | editor: editor})
+  end
+
+  test "horizontal pan ignores long overscan rows and caps at the visible right edge" do
+    long = String.duplicate("x", 80)
+    content = :binary.copy("abc\n", 7) <> long <> :binary.copy("\nabc", 20)
+
+    editor =
+      base_state(
+        content: content,
+        rows: 8,
+        cols: 26,
+        filetype: :text,
+        capabilities: %MingaEditor.Frontend.Capabilities{frontend_type: :tui, semantic_ui: true}
+      )
+
+    buffer = editor.workspace.buffers.active
+    id = editor.workspace.windows.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+    {first, state} = build_frame(editor)
+    assert Enum.any?(first.rows, &(&1.text == long))
+    assert %{anchor_left: 0, horizontal_pan_limit: 0} = ScrollPresentation.from_window(first)
+
+    editor = Mouse.handle_horizontal_pan(state.editor, id, 100, 1)
+    {clamped, state} = build_frame(%{state | editor: editor})
+    assert %{anchor_left: 0, horizontal_pan_ack: 1} = ScrollPresentation.from_window(clamped)
+
+    editor = Mouse.handle_scroll_batch(state.editor, id, 7, :down)
+    {wide, state} = build_frame(%{state | editor: editor})
+    limit = 80 - wide.geometry.viewport.cols + 1
+    assert %{horizontal_pan_limit: ^limit} = ScrollPresentation.from_window(wide)
+    editor = Mouse.handle_horizontal_pan(state.editor, id, 100, 2)
+    {panned, _state} = build_frame(%{state | editor: editor})
+    assert %{anchor_left: ^limit, horizontal_pan_ack: 2} = ScrollPresentation.from_window(panned)
+  end
+
   test "wrapped wheel reaches the final continuation without changing the cursor or resending rows" do
     editor =
       gui_state(content: String.duplicate("x", 256) <> "TAIL", rows: 8, cols: 26, filetype: :text)
@@ -116,6 +204,201 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     assert reversed.geometry.viewport.visual_row_offset == total_rows - fitted - 1
     assert BufferProcess.cursor(buffer) == {0, 0}
   end
+
+  test "thumb rank reaches a continuation and rejects an obsolete layout without moving the cursor" do
+    editor = gui_state(content: String.duplicate("x", 256), rows: 5, cols: 20, filetype: :text)
+    buffer = editor.workspace.buffers.active
+    id = editor.workspace.windows.active
+    assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+    {_first, state} = build_frame(editor)
+    {frame, state} = build_frame(state)
+    renderer = RendererState.acknowledge_text_presentations(state.renderer, state.output)
+    presentation = frame.text_presentation_id
+
+    assert {:ok, renderer} =
+             RendererState.text_presentation_state(renderer, id, presentation, :active)
+
+    reader = RendererState.text_interaction_reader(renderer)
+
+    editor = %{
+      state.editor
+      | render: EditorRender.connect_renderer(state.editor.render, self(), reader)
+    }
+
+    assert {:resident, rows} = frame.row_store_mode
+    bottom = rows - frame.geometry.viewport.rows
+    assert bottom > 0
+
+    assert {:ok, action} =
+             MingaEditor.Frontend.Protocol.GUI.decode_gui_action(
+               Minga.Protocol.Opcodes.gui_action_scroll_to_visual_rank(),
+               <<id::16, presentation::64, rows::32>>
+             )
+
+    editor = GuiActionHandler.dispatch(editor, action)
+    assert %{top: 0, visual_row_offset: ^bottom} = editor.workspace.windows.map[id].viewport
+    {after_drag, _state} = build_frame(%{state | editor: editor})
+    assert after_drag.scroll_seq == frame.scroll_seq
+    assert BufferProcess.cursor(buffer) == {0, 0}
+
+    # An authoritative request can leave the top unchanged but still supersedes
+    # a drag release from the frame on screen.
+    jumped = %{editor | workspace: SessionState.mark_authoritative_scroll(editor.workspace)}
+    old_release = {:scroll_to_visual_rank, id, presentation, 0}
+    assert GuiActionHandler.dispatch(jumped, old_release) == jumped
+
+    {jump_frame, jump_state} = build_frame(%{state | editor: jumped})
+    refute jump_frame.text_presentation_id == presentation
+    RendererState.acknowledge_text_presentations(jump_state.renderer, jump_state.output)
+    assert GuiActionHandler.dispatch(jumped, old_release) == jumped
+
+    assert {:ok, :absolute} = BufferProcess.set_option(buffer, :line_numbers, :absolute)
+
+    assert GuiActionHandler.dispatch(editor, {:scroll_to_visual_rank, id, presentation, 0}) ==
+             editor
+
+    assert BufferProcess.cursor(buffer) == {0, 0}
+  end
+
+  test "windowed wheel reuses complete wrap counts until the source or width changes" do
+    # Make the source ineligible for residence without storing a giant line.
+    last_line = 65_536
+    tail = String.duplicate("x", 1024) <> "TAIL"
+
+    editor =
+      gui_state(
+        content: :binary.copy("\n", last_line) <> tail,
+        rows: 8,
+        cols: 26,
+        filetype: :text
+      )
+
+    buffer = editor.workspace.buffers.active
+    id = editor.workspace.windows.active
+    assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+    assert {:ok, :absolute} = BufferProcess.set_option(buffer, :line_numbers, :absolute)
+    assert :ok = BufferProcess.move_to(buffer, {last_line, 0})
+
+    editor = editor |> simulate_scroll(last_line) |> RenderPipeline.compute_layout()
+    editor = Mouse.handle_scroll_batch(editor, id, 1, :down)
+    {initial, state} = publish_windowed_frame(editor)
+    assert initial.row_store_mode == :windowed
+
+    assert %{top: ^last_line, visual_row_offset: 1, rows: fitted, cols: narrow} =
+             initial.geometry.viewport
+
+    source = BufferProcess.render_snapshot(buffer, 0, 0)
+    oracle = MingaEditor.Frontend.Capabilities.width_oracle(editor.frontend.capabilities)
+    basis = WrapLayout.basis(source, narrow, oracle, last_line)
+    reader = state.editor.render.text_interaction_reader
+    total = ceil_div(byte_size(tail), narrow)
+
+    assert %{^last_line => ^total} =
+             Reader.windowed_wrap_counts(reader, id, buffer, source.version, basis)
+
+    session = :trace.session_create(:windowed_wheel_wraps, buffer, [])
+
+    try do
+      assert 1 = :trace.process(session, self(), true, [:call])
+
+      state =
+        Enum.reduce(2..3, state, fn expected, state ->
+          {editor, editor_wraps} =
+            count_wraps(session, fn -> Mouse.handle_scroll_batch(state.editor, id, 1, :down) end)
+
+          # Missing counts for the bounded slice before the cached final line
+          # are allowed; wrapping the final line again is not.
+          assert editor_wraps <= fitted - 1
+
+          {{frame, state}, renderer_wraps} =
+            count_wraps(session, fn -> publish_windowed_frame(%{state | editor: editor}) end)
+
+          assert renderer_wraps == 0
+          assert %{top: ^last_line, visual_row_offset: ^expected} = frame.geometry.viewport
+          refute frame.cursor_visible
+          state
+        end)
+
+      editor = Mouse.handle_scroll_batch(state.editor, id, total, :down)
+      {bottom, state} = publish_windowed_frame(%{state | editor: editor})
+      assert bottom.geometry.viewport.visual_row_offset == total - fitted
+      assert String.ends_with?(Enum.map_join(bottom.rows, & &1.text), "TAIL")
+      assert BufferProcess.cursor(buffer) == {last_line, 0}
+
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      wide =
+        narrow + Gutter.total_width(:absolute, last_line + 1) -
+          Gutter.total_width(:none, last_line + 1)
+
+      wide_bottom = ceil_div(byte_size(tail), wide) - fitted
+
+      {editor, cold_wraps} =
+        count_wraps(session, fn -> Mouse.handle_scroll_batch(state.editor, id, 1, :down) end)
+
+      assert cold_wraps > fitted - 1
+      assert editor.workspace.windows.map[id].viewport.visual_row_offset == wide_bottom
+
+      {{reflowed, state}, reflow_wraps} =
+        count_wraps(session, fn -> publish_windowed_frame(%{state | editor: editor}) end)
+
+      assert reflow_wraps >= 2
+      assert reflowed.geometry.viewport.visual_row_offset == wide_bottom
+      assert %{} == Reader.windowed_wrap_counts(reader, id, buffer, source.version, basis)
+
+      shorter = String.duplicate("s", wide * (fitted + 2)) <> "END"
+      assert :ok = BufferProcess.replace_lines(buffer, last_line, last_line, shorter)
+      editor = Mouse.handle_scroll_batch(state.editor, id, 1, :down)
+      assert editor.workspace.windows.map[id].viewport.visual_row_offset == 3
+
+      {{edited, state}, edited_wraps} =
+        count_wraps(session, fn -> publish_windowed_frame(%{state | editor: editor}) end)
+
+      assert edited_wraps >= 2
+      assert %{top: ^last_line, visual_row_offset: 3} = edited.geometry.viewport
+      assert String.ends_with?(Enum.map_join(edited.rows, & &1.text), "END")
+
+      source = BufferProcess.render_snapshot(buffer, 0, 0)
+      basis = WrapLayout.basis(source, wide, oracle, last_line)
+
+      assert %{^last_line => _} =
+               Reader.windowed_wrap_counts(reader, id, buffer, source.version, basis)
+
+      replacement = String.duplicate("p", wide * 3) <> "PREVIEW"
+      command = CommandState.new("%s/END/#{replacement}/")
+      workspace = SessionState.transition_mode(state.editor.workspace, :command, command)
+      editor = RenderPipeline.compute_layout(%{state.editor | workspace: workspace})
+      editor = Mouse.handle_scroll_batch(editor, id, total, :down)
+      assert editor.workspace.windows.map[id].viewport.visual_row_offset > 3
+      {preview, _state} = publish_windowed_frame(%{state | editor: editor})
+      assert String.ends_with?(Enum.map_join(preview.rows, & &1.text), "PREVIEW")
+      assert Reader.windowed_wrap_counts(reader, id, buffer, source.version, basis) == %{}
+    after
+      :trace.session_destroy(session)
+    end
+  end
+
+  defp publish_windowed_frame(input) do
+    {model, %{editor: editor, renderer: renderer, output: output} = state} = build_frame(input)
+    renderer = RendererState.acknowledge_text_presentations(renderer, output)
+    reader = RendererState.text_interaction_reader(renderer)
+    render = EditorRender.connect_renderer(editor.render, self(), reader)
+    {model, %{state | editor: %{editor | render: render}, renderer: renderer}}
+  end
+
+  defp count_wraps(session, fun) do
+    mfa = {WrapMap, :compute, 3}
+    assert 1 = :trace.function(session, mfa, true, [:call_time])
+    result = fun.()
+    pid = self()
+    {:call_time, calls} = :trace.info(session, mfa, :call_time)
+    {^pid, count, _, _} = List.keyfind(calls, pid, 0, {pid, 0, 0, 0})
+    {result, count}
+  end
+
+  defp ceil_div(size, width), do: div(size + width - 1, width)
 
   test "growing a wrapped line splices its visual group and preserves the unchanged suffix" do
     editor = gui_state(content: "alpha\nbeta\ntail", rows: 6, cols: 20, filetype: :text)

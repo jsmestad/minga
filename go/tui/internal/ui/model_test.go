@@ -397,6 +397,20 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	}
 }
 
+func TestFooterKeepsNarrowNoticeReadableBesideMode(t *testing.T) {
+	model := New(60, 24, nil)
+	model.chrome[generated.OPGuiStatusBar] = protocol.ChromePayload{Status: protocol.StatusBar{
+		Message: "API key saved.",
+		Left:    []protocol.StatusSegment{{Text: " [SAFE] NORMAL [no file] Idle "}},
+		Right:   []protocol.StatusSegment{{Text: "Spaces:2 Text 1:1 Top"}},
+	}}
+
+	footer := ansi.Strip(model.footerLines()[0])
+	if !strings.Contains(footer, "API key saved.") || !strings.Contains(footer, "NORMAL") {
+		t.Fatalf("narrow footer hides the save notice or editing mode: %q", footer)
+	}
+}
+
 func TestOperationOnlyStatusIsDiscoverableAfterCommittedFrame(t *testing.T) {
 	model := New(80, 24, nil)
 	model.now = func() time.Time { return feedbackTestStart }
@@ -880,6 +894,73 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 	}
 	if len(rendered) > model.maxOverlayHeight() {
 		t.Fatalf("wide picker overlay height = %d, want <= %d", len(rendered), model.maxOverlayHeight())
+	}
+}
+
+func TestFloatingPickerPointerUsesPaintedItems(t *testing.T) {
+	for _, tc := range []struct {
+		width   uint16
+		preview bool
+	}{
+		{width: 60},
+		{width: 100},
+		{width: 140, preview: true},
+	} {
+		t.Run(fmt.Sprint(tc.width), func(t *testing.T) {
+			out := make(chan []byte, 2)
+			model := New(tc.width, 24, out)
+			items := make([]protocol.PickerItem, 20)
+			for i := range items {
+				items[i] = protocol.PickerItem{
+					Label:        fmt.Sprintf("界 item-%02d", i),
+					Description:  "Create a new empty buffer in the current editor workspace",
+					ActivationID: uint32(200 + i),
+				}
+			}
+			picker := protocol.Picker{Visible: true, Title: "Choose test item", Generation: 43, Selected: 13, Items: items}
+			model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: picker}
+			if tc.preview {
+				model.chrome[generated.OPGuiPickerPreview] = protocol.ChromePayload{Preview: protocol.PickerPreview{Visible: true, Lines: []protocol.PreviewLine{{Segments: []protocol.PreviewSegment{{Text: "preview details"}}}}}}
+			}
+			lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+			cell := func(label string) tea.MouseClickMsg {
+				t.Helper()
+				for y, line := range lines {
+					if i := strings.Index(line, label); i >= 0 {
+						return tea.MouseClickMsg(tea.Mouse{X: ansi.StringWidth(line[:i]), Y: y, Button: tea.MouseLeft})
+					}
+				}
+				t.Fatalf("picker did not draw %q", label)
+				return tea.MouseClickMsg{}
+			}
+			click := func(msg tea.MouseClickMsg, want []byte) {
+				t.Helper()
+				updated, _ := model.Update(msg)
+				model = updated.(Model)
+				select {
+				case got := <-out:
+					if !bytes.Equal(got, want) {
+						t.Fatalf("click (%d,%d): packet %x, want %x", msg.X, msg.Y, got, want)
+					}
+				default:
+					if want != nil {
+						t.Fatalf("click (%d,%d): no packet, want %x", msg.X, msg.Y, want)
+					}
+				}
+			}
+			target := cell("item-13")
+			click(target, protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 1, 43, []byte{0, 0, 0, 213}))
+			click(cell("Choose test item"), nil)
+			if tc.preview {
+				click(cell("preview details"), nil)
+			}
+			click(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft}), protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 3, 43, nil))
+
+			picker.Generation++
+			picker.Items[13].ActivationID++
+			model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: picker}
+			click(target, nil)
+		})
 	}
 }
 
@@ -1741,7 +1822,7 @@ func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 
 func TestSplitSeparatorsRenderOnContent(t *testing.T) {
 	model := New(24, 6, nil)
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Verticals: []protocol.VerticalSeparator{{Col: 2, StartRow: 1, EndRow: 1}}}}}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Verticals: []protocol.VerticalSeparator{{Col: 2, StartRow: 0, EndRow: 0}}}}}
 	lines := model.withSplitSeparators([]string{"\x1b[1mabcd\x1b[0m", "efgh"})
 	if !strings.Contains(lines[0], "│") {
 		t.Fatalf("vertical replacement should render on visible content: %q", lines[0])
@@ -1753,21 +1834,21 @@ func TestSplitSeparatorsRenderOnContent(t *testing.T) {
 
 func TestSplitSeparatorsRenderOnBlankRow(t *testing.T) {
 	model := New(24, 6, nil)
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Horizontals: []protocol.HorizontalSeparator{{Row: 1, Col: 0, Width: 16, Filename: "main.ex"}}}}}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{Horizontals: []protocol.HorizontalSeparator{{Row: 0, Col: 0, Width: 16, Filename: "main.ex"}}}}}
 	lines := model.withSplitSeparators([]string{"", ""})
 	if !strings.Contains(ansi.Strip(lines[0]), "main.ex") || !strings.Contains(ansi.Strip(lines[0]), "─") {
 		t.Fatalf("horizontal separator should render on blank row: %q", lines[0])
 	}
 }
 
-func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
+func TestSplitSeparatorsUseGridRowsBesideFileTree(t *testing.T) {
 	model := New(80, 6, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}},
 		generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{
-			Verticals:   []protocol.VerticalSeparator{{Col: 25, StartRow: 1, EndRow: 2}},
-			Horizontals: []protocol.HorizontalSeparator{{Row: 2, Col: 25, Width: 2}},
+			Verticals:   []protocol.VerticalSeparator{{Col: 25, StartRow: 0, EndRow: 1}},
+			Horizontals: []protocol.HorizontalSeparator{{Row: 1, Col: 25, Width: 2}},
 		}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "body-0"}, {Text: "body-1"}, {Text: "body-2"}}})
@@ -1922,7 +2003,7 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 	}
 }
 
-func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
+func TestSemanticWindowsNormalizeTreeColumnButKeepPrimaryGridRow(t *testing.T) {
 	model := New(90, 8, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
@@ -1931,14 +2012,14 @@ func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("semantic window should render with normalized geometry: %+v", lines)
+	if len(lines) < 3 {
+		t.Fatalf("semantic window should render with primary-grid placement: %+v", lines)
 	}
-	if got := visibleIndex(lines[1], "pane"); got != 36 {
-		t.Fatalf("absolute TUI geometry should not double-count file-tree width, got pane at %d in %q", got, lines[1])
+	if got := visibleIndex(lines[2], "pane"); got != 36 {
+		t.Fatalf("grid row 1 should appear on screen row 2 at the file-tree edge, got pane at %d in %q", got, lines[2])
 	}
-	if len(lines) > 2 && strings.Contains(lines[2], "pane") {
-		t.Fatalf("absolute TUI geometry should not double-count header rows: %+v", lines[:3])
+	if strings.Contains(lines[1], "pane") {
+		t.Fatalf("pane must not shift up into grid row 0: %+v", lines[:3])
 	}
 }
 
@@ -1992,7 +2073,7 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 		t.Fatalf("initial render should use committed visible rows, got %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	model.previewVerticalScroll(model.windows[7], 1)
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "bottom") || !strings.Contains(scrolled, "below") || strings.Contains(scrolled, "top") {
 		t.Fatalf("local presentation scroll should shift into overscan rows immediately, got %q", scrolled)
@@ -2000,7 +2081,7 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 }
 
 func TestPresentationScrollConsumesProducerResetAtCommit(t *testing.T) {
-	const encodedWindow = "gAAAA/sKAQAAAA4AAQEAWAAAAAAAAAAAAgIAAALzAAAADQAQAAAAAAAAAAAAAAAGe7ZOAAAAEnJvdyAwMDEgdmFsdWVfMCDOuwABAAAAEQAAAAAAAAACAAAQAAAAEAAAAAAAAAECLvILAAAAFCAgcm93IDAwMiB2YWx1ZV8xIM67AAEAAAATAAAAAAAAAAIAABAAAAAgAAAAAAAAAgPaHdcAAAAWICAgIHJvdyAwMDMgdmFsdWVfMiDOuwABAAAAFQAAAAAAAAACAAAQAAAAMAAAAAAAAAMCtGT4AAAAGCAgICAgIHJvdyAwMDQgdmFsdWVfMyDOuwABAAAAFwAAAAAAAAACAAAQAAAAQAAAAAAAAAQEn7M6AAAAGiAgICAgICAgcm93IDAwNSB2YWx1ZV80IM67AAEAAAAZAAAAAAAAAAIAABAAAABQAAAAAAAABQLzlZAAAAAScm93IDAwNiB2YWx1ZV81IM67AAEAAAARAAAAAAAAAAIAABAAAABgAAAAAAAABgcR/TkAAAAUICByb3cgMDA3IHZhbHVlXzYgzrsAAQAAABMAAAAAAAAAAgAAEAAAAHAAAAAAAAAHAZ6zIQAAABYgICAgcm93IDAwOCB2YWx1ZV83IM67AAEAAAAVAAAAAAAAAAIAABAAAACAAAAAAAAACAe4FDMAAAAYICAgICAgcm93IDAwOSB2YWx1ZV84IM67AAEAAAAXAAAAAAAAAAIAABAAAACQAAAAAAAACQHbNpYAAAAaICAgICAgICByb3cgMDEwIHZhbHVlXzkgzrsAAQAAABkAAAAAAAAAAgAAEAAAAKAAAAAAAAAKAptyggAAABNyb3cgMDExIHZhbHVlXzEwIM67AAEAAAASAAAAAAAAAAIAABAAAACwAAAAAAAACwG2l2sAAAAVICByb3cgMDEyIHZhbHVlXzExIM67AAEAAAAUAAAAAAAAAAIAABAAAADAAAAAAAAADAW13t0AAAAXICAgIHJvdyAwMTMgdmFsdWVfMTIgzrsAAQAAABYAAAAAAAAAAgADAAAAAQAEAAAAAgAABQAAAAIAAAYAAAACAAAHAAAAAgAACAAAAGYAAQAAAAAASAAMAAAAAABIAAwAAAAHAEEADAAAAAAABwAMAAAABwBBAAwAAAAAAAAADABBAAAAeAAAAAAAAAB4AAQAAwMBAAAABwBBAAwAAQIAAAAAAAcADAABAwAAAAIAAQAMAAEKAAAAJwABAQAAAAAAAAAAAAAAAAAAAAwAAAAAAAAADQAAAAIGgQnYAAAAAAwAAAAxAAAAAAAAAAP///////8AAAAfbWluZ2EtMzQyNC1yZXNpZGVudC1maXh0dXJlLnR4dA=="
+	const encodedWindow = "gAAABAEKAQAAAA4AAQEAWAAAAAAAAAAAAgIAAALzAAAADQAQAAAAAAAAAAAAAAAGe7ZOAAAAEnJvdyAwMDEgdmFsdWVfMCDOuwABAAAAEQAAAAAAAAACAAAQAAAAEAAAAAAAAAECLvILAAAAFCAgcm93IDAwMiB2YWx1ZV8xIM67AAEAAAATAAAAAAAAAAIAABAAAAAgAAAAAAAAAgPaHdcAAAAWICAgIHJvdyAwMDMgdmFsdWVfMiDOuwABAAAAFQAAAAAAAAACAAAQAAAAMAAAAAAAAAMCtGT4AAAAGCAgICAgIHJvdyAwMDQgdmFsdWVfMyDOuwABAAAAFwAAAAAAAAACAAAQAAAAQAAAAAAAAAQEn7M6AAAAGiAgICAgICAgcm93IDAwNSB2YWx1ZV80IM67AAEAAAAZAAAAAAAAAAIAABAAAABQAAAAAAAABQLzlZAAAAAScm93IDAwNiB2YWx1ZV81IM67AAEAAAARAAAAAAAAAAIAABAAAABgAAAAAAAABgcR/TkAAAAUICByb3cgMDA3IHZhbHVlXzYgzrsAAQAAABMAAAAAAAAAAgAAEAAAAHAAAAAAAAAHAZ6zIQAAABYgICAgcm93IDAwOCB2YWx1ZV83IM67AAEAAAAVAAAAAAAAAAIAABAAAACAAAAAAAAACAe4FDMAAAAYICAgICAgcm93IDAwOSB2YWx1ZV84IM67AAEAAAAXAAAAAAAAAAIAABAAAACQAAAAAAAACQHbNpYAAAAaICAgICAgICByb3cgMDEwIHZhbHVlXzkgzrsAAQAAABkAAAAAAAAAAgAAEAAAAKAAAAAAAAAKAptyggAAABNyb3cgMDExIHZhbHVlXzEwIM67AAEAAAASAAAAAAAAAAIAABAAAACwAAAAAAAACwG2l2sAAAAVICByb3cgMDEyIHZhbHVlXzExIM67AAEAAAAUAAAAAAAAAAIAABAAAADAAAAAAAAADAW13t0AAAAXICAgIHJvdyAwMTMgdmFsdWVfMTIgzrsAAQAAABYAAAAAAAAAAgADAAAAAQAEAAAAAgAABQAAAAIAAAYAAAACAAAHAAAAAgAACAAAAGYAAQAAAAAASAAMAAAAAABIAAwAAAAHAEEADAAAAAAABwAMAAAABwBBAAwAAAAAAAAADABBAAAAeAAAAAAAAAB4AAQAAwMBAAAABwBBAAwAAQIAAAAAAAcADAABAwAAAAIAAQAMAAEKAAAALQABAQAAAAAAAAAAAAAAAAAAAAwAAAAAAAAADQAAAAIGgQnYAAAAAAAAAAAAAAwAAAAxAAAAAAAAAAP///////8AAAAfbWluZ2EtMzQyNC1yZXNpZGVudC1maXh0dXJlLnR4dA=="
 
 	raw, err := base64.StdEncoding.DecodeString(encodedWindow)
 	if err != nil {
@@ -2017,11 +2098,7 @@ func TestPresentationScrollConsumesProducerResetAtCommit(t *testing.T) {
 
 	model := New(80, 24, nil)
 	model.putWindow(window)
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{
-		Button: tea.MouseWheelDown,
-		X:      int(window.Geometry.ContentRect.Col) + 1,
-		Y:      model.layout.header.Height + int(window.Geometry.ContentRect.Row) + 1,
-	}), 1)
+	model.previewVerticalScroll(model.windows[window.ID], 1)
 
 	scroll, ok := model.localPresentation.scrolls[window.ID]
 	if !ok || scroll.rowOffset != 1 {
@@ -2073,7 +2150,7 @@ func TestPresentationScrollResidentReachesDocumentBottom(t *testing.T) {
 	// A fling far larger than the payload window: it must accumulate to the
 	// document bottom, not clamp at a small overscan runway.
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+		model.previewVerticalScroll(model.windows[7], 1)
 	}
 
 	scroll := model.localPresentation.scrolls[7]
@@ -2122,7 +2199,7 @@ func TestPresentationScrollWindowedClampsAtOverscanEdge(t *testing.T) {
 	}
 
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+		model.previewVerticalScroll(model.windows[7], 1)
 	}
 
 	// Overscan payload bound: len(rows)=4, visible=2, before=(10-9)=1 -> after=1.
@@ -2166,7 +2243,7 @@ func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
 	})
 
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 1, Y: model.layout.header.Height}), -1)
+		model.previewVerticalScroll(model.windows[7], -1)
 	}
 	scroll := model.localPresentation.scrolls[7]
 	if want := -anchorTop; scroll.rowOffset != want {
@@ -2174,7 +2251,7 @@ func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
 	}
 
 	for i := 0; i < 500; i++ {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+		model.previewVerticalScroll(model.windows[7], 1)
 	}
 	scroll = model.localPresentation.scrolls[7]
 	// Scroll-past-end: max forward offset is docRows - 1 - anchorTop.
@@ -2270,7 +2347,7 @@ func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
 		t.Fatalf("visible content should use the matching presentation gutter row, got %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	model.previewVerticalScroll(model.windows[7], 1)
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "C  bottom") || !strings.Contains(scrolled, "D  below") {
 		t.Fatalf("locally shifted content should keep matching gutter rows, got %q", scrolled)
@@ -2307,9 +2384,9 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 		t.Fatalf("wrapped payload should not skip its first row just because document visual offset is non-zero, got %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	for range 3 {
+		model.previewVerticalScroll(model.windows[7], 1)
+	}
 
 	scroll := model.localPresentation.scrolls[7]
 	if scroll.rowOffset != 3 {
@@ -2319,30 +2396,6 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(rendered, "bottom") || !strings.Contains(rendered, "below") || strings.Contains(rendered, "top") {
 		t.Fatalf("wrapped presentation scroll should render the actual payload rows, got %q", rendered)
-	}
-}
-
-func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
-	model := New(20, 6, nil)
-	model.putWindow(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
-		GeometrySet:  true,
-		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 4, Height: 1}},
-		ScrollSet:    true,
-		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
-	})
-
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}), 1)
-	scroll := model.localPresentation.scrolls[7]
-	if scroll.rowOffset != 0 || scroll.colOffset != 1 {
-		t.Fatalf("shift wheel-down should move presentation horizontally, got row=%d col=%d", scroll.rowOffset, scroll.colOffset)
-	}
-
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}), -1)
-	if _, ok := model.localPresentation.scrolls[7]; ok {
-		t.Fatalf("shift wheel-up should cancel the horizontal offset and clear presentation scroll")
 	}
 }
 
@@ -2367,53 +2420,6 @@ func TestPresentationScrollHorizontalOffsetInvalidatesCachedRows(t *testing.T) {
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "cdef") || strings.Contains(scrolled, "abcdef") {
 		t.Fatalf("horizontal presentation scroll should invalidate cached rows and shift content, got %q", scrolled)
-	}
-}
-
-func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T) {
-	model := New(20, 6, nil)
-	model.putWindow(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
-		GeometrySet:  true,
-		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 4, Height: 1}},
-		ScrollSet:    true,
-		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
-	})
-
-	for range 10 {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 1, Y: model.layout.header.Height}), 1)
-	}
-
-	scroll := model.localPresentation.scrolls[7]
-	if scroll.colOffset != 2 {
-		t.Fatalf("horizontal presentation scroll should clamp at right edge, got col offset %d", scroll.colOffset)
-	}
-	rendered := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
-	if !strings.Contains(rendered, "cdef") || strings.TrimSpace(rendered) == "" {
-		t.Fatalf("repeated wheel-right should not blank content past the edge, got %q", rendered)
-	}
-}
-
-func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
-	model := New(20, 6, nil)
-	model.putWindow(protocol.WindowContent{
-		ID:           7,
-		ContentEpoch: 9,
-		Rows:         []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "abcdef"}},
-		GeometrySet:  true,
-		Geometry:     protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 7, Height: 1}, TextRect: protocol.Rect{Row: 0, Col: 3, Width: 4, Height: 1}},
-		ScrollSet:    true,
-		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
-	})
-
-	for range 10 {
-		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 3, Y: model.layout.header.Height}), 1)
-	}
-
-	if got := model.localPresentation.scrolls[7].colOffset; got != 2 {
-		t.Fatalf("horizontal presentation scroll should clamp against text rect width, got col offset %d", got)
 	}
 }
 
@@ -2786,10 +2792,13 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 	// BEAM placement rect, and its zones are scanned from there. Place it at the
 	// bottom band where it historically rendered.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDCompletionMenu, Rect: generated.Rect{Row: 12, Col: 0, Width: 60, Height: 4}, Z: 301, HitKind: 8},
+		{SurfaceID: surfaceIDCompletionMenu, Rect: generated.Rect{Row: 10, Col: 0, Width: 60, Height: 5}, Z: 301, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
-	_ = model.View()
+	view := renderedBody(model)
+	if !strings.Contains(view, "Completion") || !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
+		t.Fatalf("roomy completion menu lost its title or rounded frame: %q", view)
+	}
 
 	zone := waitForZone(t, model, zoneIDCompletionItem(1))
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
@@ -2798,6 +2807,107 @@ func TestSemanticMouseRoutesCompletionItemZones(t *testing.T) {
 	}
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX + 50, Y: zone.EndY + 50})); ok {
 		t.Fatalf("out-of-bounds completion clicks should fall back")
+	}
+}
+
+func TestCompletionKeepsAvailableRowsClickableInShortTerminals(t *testing.T) {
+	completion := protocol.Completion{
+		Visible: true, Generation: 11, SelectedID: "alpha", Documentation: "alpha docs",
+		Items: []protocol.CompletionItem{
+			{ID: "alpha", Label: "alpha"},
+			{ID: "beta", Label: "beta"},
+			{ID: "gamma", Label: "gamma"},
+			{ID: "delta", Label: "delta"},
+		},
+	}
+	for _, itemRows := range []int{2, 3, 4} {
+		t.Run(fmt.Sprintf("%d item rows", itemRows), func(t *testing.T) {
+			out := make(chan []byte, 16)
+			model := applyTo(t, New(60, uint16(itemRows+3), out), beginFrame(1, 0), testThemeCommand(),
+				protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+					Opcode: generated.OPGuiCompletion, Complete: completion,
+				}},
+				protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+					Opcode: generated.OPGuiSurfaceLayout, Placements: []generated.SurfacePlacement{{
+						SurfaceID: surfaceIDCompletionMenu, Rect: generated.Rect{Row: 1, Col: 1, Width: 20, Height: uint16(itemRows)}, Z: 301, HitKind: 8,
+					}},
+				}}, commitFrame(1))
+			drainOutboundPackets(out)
+
+			model.localPresentation.setIdentityPreview(presentationCompletion, completion.Generation, "delta")
+			lines := strings.Split(renderedBody(model), "\n")
+			const itemTop = 2 // Grid row 1 plus the title header.
+			for index, item := range completion.Items[len(completion.Items)-itemRows:] {
+				if !strings.Contains(lines[itemTop+index], item.Label) {
+					t.Fatalf("completion item %q was displaced from its available row: %q", item.Label, lines)
+				}
+			}
+			if !strings.Contains(lines[itemTop+itemRows-1], "▌ delta") {
+				t.Fatalf("completion lost its selected item: %q", lines)
+			}
+			itemY := itemTop + itemRows - 2
+			itemX := visibleIndex(lines[itemY], "gamma")
+			updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: itemX, Y: itemY}))
+			model = updated.(Model)
+			packets := drainOutboundPackets(out)
+			want := protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, completion.Generation, []byte("gamma"))
+			if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+				t.Fatalf("rendered non-selected item click emitted %x, want %x", packets, want)
+			}
+			if committed, _ := model.completion(); committed.SelectedID != "alpha" || committed.Documentation != "alpha docs" {
+				t.Fatalf("click changed committed completion instead of emitting an intent: %+v", committed)
+			}
+		})
+	}
+}
+
+func TestCompletionDocumentationClickIsContainedByAuthoredPlacement(t *testing.T) {
+	out := make(chan []byte, 16)
+	completion := protocol.Completion{
+		Visible: true, Generation: 11, SelectedID: "alpha", Documentation: "alpha docs\nsecond line",
+		Items: []protocol.CompletionItem{
+			{ID: "alpha", Label: "alpha"},
+			{ID: "beta", Label: "beta"},
+			{ID: "gamma", Label: "gamma"},
+		},
+	}
+	// CompletionUI.menu_rect/2, cursor {0,0}, primary grid 60×13:
+	// three items, six documentation rows, and two outside box rows.
+	model := applyTo(t, New(60, 14, out), beginFrame(1, 0), testThemeCommand(),
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+			Opcode: generated.OPGuiCompletion, Complete: completion,
+		}},
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+			Opcode: generated.OPGuiSurfaceLayout, Placements: []generated.SurfacePlacement{{
+				SurfaceID: surfaceIDCompletionMenu, Rect: generated.Rect{Row: 2, Col: 1, Width: 20, Height: 9}, Z: 301, HitKind: 8,
+			}},
+		}}, commitFrame(1))
+	drainOutboundPackets(out)
+
+	clickLabel := func(label string) [][]byte {
+		t.Helper()
+		lines := strings.Split(renderedBody(model), "\n")
+		for y, line := range lines {
+			if x := visibleIndex(line, label); x >= 0 {
+				if x < 1 || x >= 21 || y < 3 || y >= 12 {
+					t.Fatalf("%q rendered outside the authored completion rect at (%d,%d)", label, x, y)
+				}
+				updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
+				model = updated.(Model)
+				return drainOutboundPackets(out)
+			}
+		}
+		t.Fatalf("completion did not render %q: %q", label, lines)
+		return nil
+	}
+	for _, label := range []string{"Completion", "alpha docs", "second line"} {
+		if packets := clickLabel(label); len(packets) != 0 {
+			t.Fatalf("clicking %q emitted input: %x", label, packets)
+		}
+	}
+	want := protocol.EncodeGUISemanticItemActivate(byte(presentationCompletion), 1, completion.Generation, []byte("gamma"))
+	if packets := clickLabel("gamma"); len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("item click emitted %x, want %x", packets, want)
 	}
 }
 
@@ -2826,7 +2936,7 @@ func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
 	// more rows than that formula counts, takeLines clips the extra rows and
 	// their zones never register, so keep the two in lockstep.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 20, Col: 0, Width: 60, Height: 6}, Z: 160, HitKind: 8},
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 17, Col: 0, Width: 60, Height: 6}, Z: 160, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2835,8 +2945,8 @@ func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
 	// absolute coords come from the bottom-aligned placement, proving the overlay
 	// zones merge at the placement offset (ScanInto).
 	dismiss := waitForZone(t, model, zoneIDNotificationDismiss("build:test"))
-	if dismiss.StartY < 20 || dismiss.StartY >= 26 {
-		t.Fatalf("dismiss zone Y %d outside the notifications band rows 20..25", dismiss.StartY)
+	if dismiss.StartY < 18 || dismiss.StartY >= 24 {
+		t.Fatalf("dismiss zone Y %d outside the notifications band screen rows 18..23", dismiss.StartY)
 	}
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: dismiss.StartX, Y: dismiss.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUINotificationDismiss("build:test")) {
@@ -2872,7 +2982,7 @@ func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
 		}},
 	}
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 21, Col: 0, Width: 60, Height: 5}, Z: 160, HitKind: 8},
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 18, Col: 0, Width: 60, Height: 5}, Z: 160, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2905,7 +3015,7 @@ func TestSemanticMouseRoutesObservatoryNodeZones(t *testing.T) {
 	// and their zones never register, so keep the two in lockstep (the #2333 height
 	// lesson).
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDObservatory, Rect: generated.Rect{Row: 20, Col: 0, Width: 80, Height: 4}, Z: 180, HitKind: 8},
+		{SurfaceID: surfaceIDObservatory, Rect: generated.Rect{Row: 19, Col: 0, Width: 80, Height: 4}, Z: 180, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2946,7 +3056,7 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 	// Historical offers still use the committed chrome rectangle; this fixture
 	// authors two entry rows, while the mounted Agent workspace authors one.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 19, Col: 0, Width: 80, Height: 4}, Z: 170, HitKind: 8},
+		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 18, Col: 0, Width: 80, Height: 4}, Z: 170, HitKind: 8},
 	}
 	model.layout = model.computeLayout()
 	model.viewport.SetHeight(model.layout.body.Height)
@@ -2976,7 +3086,7 @@ func TestTimelineChromeRendersEditTimelineFiles(t *testing.T) {
 		ViewingIndex: 0xFFFF,
 		Files:        []protocol.TimelineFile{{Path: "lib/a.ex", EntryCount: 2, LinesAdded: 10, LinesRemoved: 3, ReviewStatus: 1}},
 	}}}
-	model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 8, Width: 60, Height: 3}, Z: 170, HitKind: 8}}
+	model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 7, Width: 60, Height: 3}, Z: 170, HitKind: 8}}
 	model.layout = model.computeLayout()
 
 	timeline, _ := model.editTimeline()
@@ -3001,7 +3111,7 @@ func TestSemanticMouseRoutesFloatPopupDismissOutsideBox(t *testing.T) {
 	// renderFloat draws 1 (title) + min(2 lines, ceiling-1) = 3 rows, bottom-
 	// aligned: content occupies rows 21..23, the phantom band is rows 18..20.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: 18, Col: 0, Width: 80, Height: 6}, Z: 270, HitKind: 8},
+		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: 17, Col: 0, Width: 80, Height: 6}, Z: 270, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -3046,7 +3156,7 @@ func TestFloatPopupDismissAbsentWhenContentFillsBand(t *testing.T) {
 	// Band height 3, content 1 (title) + min(8, ceiling-1) clamped to 3 = 3 rows:
 	// content fills the band (rows 21..23), no phantom rows.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: 21, Col: 0, Width: 80, Height: 3}, Z: 270, HitKind: 8},
+		{SurfaceID: surfaceIDFloatPopup, Rect: generated.Rect{Row: 20, Col: 0, Width: 80, Height: 3}, Z: 270, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -3067,7 +3177,7 @@ func TestCompletionRendersDocumentationPreviewWhenPresent(t *testing.T) {
 		Documentation: "Applies fun to each element of the enumerable.",
 	}
 
-	view := ansi.Strip(strings.Join(model.renderCompletion(completion), "\n"))
+	view := ansi.Strip(strings.Join(model.renderCompletion(completion, 60, 8), "\n"))
 	if !strings.Contains(view, "Documentation") {
 		t.Fatalf("expected a Documentation pane title, got: %q", view)
 	}
@@ -3082,11 +3192,11 @@ func TestCompletionWithoutDocumentationRendersNoPreviewPane(t *testing.T) {
 		Visible:       true,
 		Items:         []protocol.CompletionItem{{Label: "map", Detail: "Enum.map/2"}},
 		Documentation: "Applies fun.",
-	})
+	}, 60, 8)
 	withoutDoc := model.renderCompletion(protocol.Completion{
 		Visible: true,
 		Items:   []protocol.CompletionItem{{Label: "map", Detail: "Enum.map/2"}},
-	})
+	}, 60, 8)
 
 	noDocView := ansi.Strip(strings.Join(withoutDoc, "\n"))
 	if strings.Contains(noDocView, "Documentation") {
@@ -3144,7 +3254,7 @@ func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 	// The hover popup is registry-placed now (#2281): it renders at its BEAM
 	// placement rect and its hover-action zone is scanned from there.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 12, Col: 0, Width: 60, Height: 4}, Z: 290, HitKind: 8},
+		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 11, Col: 0, Width: 60, Height: 4}, Z: 290, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -3207,8 +3317,8 @@ func TestBottomPanelHeightUsesSemanticPercent(t *testing.T) {
 	model := New(80, 20, nil)
 	panel := protocol.BottomPanel{Visible: true, HeightPercent: 50}
 
-	if got := model.bottomPanelHeight(panel); got != 10 {
-		t.Fatalf("bottom panel height = %d, want semantic 50%% of terminal height", got)
+	if got := model.bottomPanelHeight(panel); got != 9 {
+		t.Fatalf("bottom panel height = %d, want 50%% of the 19-row primary grid", got)
 	}
 }
 
@@ -3336,7 +3446,7 @@ func bottomPanelTestModel(messageCount int, out chan<- []byte) (Model, protocol.
 	// bottomPanelHeight computes its band so local scroll routing matches.
 	height := model.bottomPanelHeight(panel)
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDBottomPanel, Rect: generated.Rect{Row: uint16(model.height - height), Col: 0, Width: uint16(model.width), Height: uint16(height)}, Z: 200, HitKind: 7},
+		{SurfaceID: surfaceIDBottomPanel, Rect: generated.Rect{Row: uint16(model.layout.grid.Height - height), Col: 0, Width: uint16(model.width), Height: uint16(height)}, Z: 200, HitKind: 7},
 	}
 	return model, panel
 }
@@ -3510,7 +3620,7 @@ func TestCompletionTwoIndexRenderingSplit(t *testing.T) {
 	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Generation: 7, Selected: 0, SelectedID: "foo", Items: items, Documentation: "foo docs"}}
 	model.localPresentation.setIdentityPreview(presentationCompletion, 7, "baz")
 
-	lines := model.renderCompletion(model.chrome[generated.OPGuiCompletion].Complete)
+	lines := model.renderCompletion(model.chrome[generated.OPGuiCompletion].Complete, 80, 6)
 
 	joined := ansi.Strip(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "foo docs") {

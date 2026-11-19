@@ -109,7 +109,8 @@ type Model struct {
 	// of truth for region positions, replacing the old renderedHeaderHeight
 	// cache. Recomputed whenever inputs change: applied commands (chrome) and
 	// resize (width/height).
-	layout uiLayout
+	layout       uiLayout
+	reportedGrid gridSize
 	// staging holds the open frame transaction (#2219). It is non-nil only
 	// between a begin_frame and its commit_frame: semantic/chrome commands
 	// accumulate here instead of mutating the live model, so View() never paints
@@ -132,12 +133,9 @@ type Model struct {
 	// tests observe it after submission; they never infer or pre-populate status.
 	lastFrameOutcome      frameOutcome
 	lastTerminalRejection *terminalRejection
-	// surfacePlacements is the BEAM's authoritative per-frame surface layout from
-	// gui_surface_layout (0xA4, #2268): one rect+z list. Compositing reads the z
-	// of a placed surface to order it instead of the old hand-coded
-	// overlayLines() precedence chain; the rects equal what BEAM mouse
-	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
-	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
+	// surfacePlacements is the BEAM's per-frame rect+z list from gui_surface_layout.
+	// The BEAM hit-tests these rects in primary-grid coordinates. The frontend
+	// translates them to screen coordinates for compositing and pointer input.
 	surfacePlacements []generated.SurfacePlacement
 	localPresentation localPresentation
 	// transcript is the resident agent-chat transcript store (#2654). It folds
@@ -212,8 +210,22 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
 	m.layout = m.computeLayout()
+	m.reportedGrid = m.layout.gridSize()
 	m.viewport.SetHeight(m.layout.body.Height)
 	return m
+}
+
+// ReadyPacket reports the initial primary grid, before any BEAM chrome arrives.
+func (m Model) ReadyPacket() []byte {
+	size := m.layout.gridSize()
+	return protocol.EncodeReady(size.cols, size.rows)
+}
+
+func (m *Model) reportGridResize() {
+	size := m.layout.gridSize()
+	if size != m.reportedGrid && m.send(protocol.EncodeResize(size.cols, size.rows)) {
+		m.reportedGrid = size
+	}
 }
 
 func (m Model) currentTime() time.Time {
@@ -262,9 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// for the old geometry.
 		m.lineCache.reset()
 		m.layout = m.computeLayout()
-		m.viewport.SetWidth(msg.Width)
-		m.viewport.SetHeight(m.layout.body.Height)
-		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
+		m.reportGridResize()
 	case tea.KeyPressMsg:
 		if m.toggleHUD(msg) {
 			break
@@ -333,16 +343,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		if updated, ok := m.localMouse(msg); ok {
-			m = updated
-		} else if isWheelButton(msg.Mouse().Button) {
-			delta := wheelDeltaSign(msg.Mouse().Button)
+		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft {
+			if packet, handled := m.pickerPointerPacket(click); handled {
+				if packet != nil {
+					m.send(packet)
+				}
+				break
+			}
+		}
+		mouse := msg.Mouse()
+		if delta, horizontal := wheelScroll(mouse); delta != 0 {
+			if horizontal {
+				// There is no raw mouse fallback for a horizontal wheel: only
+				// an unobscured editor pane can accept a column displacement.
+				if m.layout.body.Contains(mouse.X, mouse.Y) && !m.editorTextOccluded(mouse.X, mouse.Y) {
+					m.scrollWindowByWheel(mouse, delta, true)
+				}
+				break
+			}
+			if updated, ok := m.localMouse(msg); ok {
+				m = updated
+				break
+			}
 			if m.sendAgentPromptScroll(msg, delta) {
 				break
 			}
 			m.queueAgentWheelScroll(msg, delta)
-			m = m.applyPresentationScrollDelta(msg, delta)
-			if !m.sendScrollBatchDelta(msg, delta) {
+			if !m.scrollWindowByWheel(mouse, delta, false) {
 				if packet, ok := m.mousePacket(msg); ok {
 					m.send(packet)
 				}
@@ -387,6 +414,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
 		m.publishTextPresentationInputModel()
+		m.reportGridResize()
 	case port.LogMsg:
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	}
@@ -487,7 +515,6 @@ func (m *Model) queueAgentWheelScroll(msg tea.MouseMsg, delta int) {
 	if !m.layout.body.Contains(mouse.X, mouse.Y) {
 		return
 	}
-	// wheelDeltaSign: +down / -up, matching the resident store's row convention.
 	m.transcript.scrollBy(delta)
 }
 
@@ -558,8 +585,10 @@ func (m Model) View() tea.View {
 		// leaving a blank screen (ticket #2237).
 		content = m.protocolErrorView()
 	} else {
-		body := m.viewport.View()
-		parts := append(m.headerLines()[:m.layout.header.Height], body)
+		parts := m.headerLines()[:m.layout.header.Height]
+		if m.layout.body.Height > 0 {
+			parts = append(parts, m.viewport.View())
+		}
 		if gap := m.layout.footer.Y - m.layout.body.Y - m.layout.body.Height; gap > 0 {
 			blank := strings.Repeat(" ", max(m.width, 1))
 			for range gap {
@@ -603,7 +632,8 @@ func (m Model) residentCursor() *tea.Cursor {
 		if !semantics.cursor.Eligible {
 			continue
 		}
-		_, height := m.windowRenderDimensions(window, false, protocol.Gutter{})
+		gutter, hasGutter := m.windowGutter(id)
+		width, height := m.windowRenderDimensions(window, hasGutter, gutter)
 		start := m.presentationSourceStart(window, height)
 		row := int(semantics.cursor.Row)
 		if row < start || row >= start+height {
@@ -614,12 +644,19 @@ func (m Model) residentCursor() *tea.Cursor {
 		if col < 0 {
 			continue
 		}
-		textWidth := int(window.Geometry.TextRect.Width)
-		if textWidth > 0 && col >= textWidth {
+		width, _, _ = windowRowComposition(window, width, height, start)
+		textWidth := windowTextWidth(width, gutter)
+		if authoredWidth := int(window.Geometry.TextRect.Width); authoredWidth > 0 {
+			textWidth = min(textWidth, authoredWidth)
+		}
+		if col >= textWidth {
 			continue
 		}
 		x := int(window.Geometry.TextRect.Col) + col
-		y := int(window.Geometry.TextRect.Row) + (row - start)
+		y := m.layout.grid.Y + int(window.Geometry.TextRect.Row) + (row - start)
+		if y < m.layout.body.Y || y >= m.layout.body.Y+m.layout.body.Height {
+			continue
+		}
 		cursor := tea.NewCursor(x, y)
 		switch window.CursorShape {
 		case 1:
@@ -1390,9 +1427,7 @@ func (m *Model) publishWindow(window protocol.WindowContent, store residentRows)
 		sort.Slice(m.windowOrder, func(i, j int) bool { return m.windowOrder[i] < m.windowOrder[j] })
 	}
 	m.reconcilePresentationScroll(window)
-	if window.Scroll.Wrapped {
-		window.Scroll.ResetRequired = false
-	}
+	window.Scroll.ResetRequired = false
 	m.windows[window.ID] = window
 }
 
@@ -1502,38 +1537,7 @@ func (m Model) bodyHeight() int {
 }
 
 func (m Model) maxOverlayHeight() int {
-	return min(max(m.height/3, 4), 12)
-}
-
-func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
-	mouse := msg.Mouse()
-	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
-	if !ok {
-		return false
-	}
-	window, ok := m.windows[windowID]
-	if !ok {
-		return false
-	}
-	if window.Scroll.Wrapped && (mouse.Button == tea.MouseWheelLeft || mouse.Button == tea.MouseWheelRight) {
-		return false
-	}
-
-	if delta == 0 {
-		return true
-	}
-	var deltaLines int16
-	var direction byte
-	if delta > 0 {
-		deltaLines = int16(min(delta, 0x7FFF))
-		direction = 0
-	} else {
-		deltaLines = int16(max(delta, -0x7FFF))
-		direction = 1
-	}
-
-	m.send(protocol.EncodeScrollBatch(windowID, deltaLines, direction))
-	return true
+	return min(max(m.layout.grid.Height/3, 4), maxPopupRows)
 }
 
 func (m Model) send(payload []byte) bool {

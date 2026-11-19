@@ -103,8 +103,12 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
     index = TextInteractionIndex.new()
     reader = TextInteractionIndex.reader(index)
     buffer = self()
-    identity = {:wrapped_resident, :width_basis, :identity}
-    presentation = TextPresentation.new(5, buffer, 11, identity, {:resident, next}, 7)
+    identity = {:wrapped_resident, :width_basis, 1, :identity}
+
+    presentation =
+      TextPresentation.new(5, buffer, 11, identity, {:resident, next}, 7)
+      |> TextPresentation.settle_scroll(4)
+
     index = TextInteractionIndex.publish(index, presentation)
     assert :ok = TextInteractionIndex.activate(index, 5, 7)
 
@@ -116,6 +120,15 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
 
     assert :error = Reader.scroll_anchor(reader, 5, buffer, 10, :width_basis, {1, 128}, 1, 4)
     assert :error = Reader.scroll_anchor(reader, 5, buffer, 11, :stale_width, {1, 128}, 1, 4)
+
+    next_identity = {:wrapped_resident, :width_basis, 2, :identity}
+
+    next_presentation =
+      TextPresentation.new(5, buffer, 11, next_identity, {:resident, next}, 8)
+      |> TextPresentation.settle_scroll(4)
+
+    index = TextInteractionIndex.publish(index, next_presentation)
+    assert :error = Reader.seek_scroll_rank(reader, 5, 7, {buffer, 11, :width_basis, 2}, 0, 4)
 
     event =
       TextEvent.new(%{
@@ -135,6 +148,51 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
     assert {:ok, %{line: 1, byte: 128, source_version: 11}} = Reader.resolve(reader, event)
     _index = TextInteractionIndex.drop_buffer(index, buffer)
     assert :error = Reader.scroll_anchor(reader, 5, buffer, 11, :width_basis, {1, 128}, 1, 4)
+  end
+
+  test "thumb seeks keep the displayed lease across echoes but reject it after a settled re-anchor" do
+    index = TextInteractionIndex.new()
+    reader = TextInteractionIndex.reader(index)
+    buffer = self()
+    rows = {:resident, ResidentStore.from_entries(Enum.map(0..2, &visual_entry/1))}
+    scroll_context = {buffer, 11, :width_basis, 1}
+
+    displayed_identity = {:wrapped_resident, :width_basis, 1, :identity}
+
+    displayed =
+      TextPresentation.new(5, buffer, 11, displayed_identity, rows, 7)
+      |> TextPresentation.settle_scroll(4)
+
+    index = TextInteractionIndex.publish(index, displayed)
+    assert :ok = TextInteractionIndex.activate(index, 5, 7)
+
+    echo_identity = {:wrapped_resident, :width_basis, 1, :echo}
+
+    echo =
+      TextPresentation.new(5, buffer, 11, echo_identity, rows, 8)
+      |> TextPresentation.settle_scroll(4)
+
+    index = TextInteractionIndex.publish(index, echo)
+
+    assert {:ok, {1, 0}, false} = Reader.seek_scroll_rank(reader, 5, 7, scroll_context, 1, 1)
+
+    reanchored_identity = {:wrapped_resident, :width_basis, 1, :reanchored}
+
+    reanchored =
+      TextPresentation.new(5, buffer, 11, reanchored_identity, rows, 9)
+      |> TextPresentation.settle_scroll(5)
+
+    index = TextInteractionIndex.publish(index, reanchored)
+
+    assert TextInteractionIndex.last_publication_nodes(index) == 0
+    assert {:ok, {^buffer, 11}} = Reader.source(reader, 5, 7)
+    assert :error = Reader.seek_scroll_rank(reader, 5, 7, scroll_context, 1, 1)
+
+    assert {:ok, {1, 0}, false} =
+             Reader.scroll_anchor(reader, 5, buffer, 11, :width_basis, {0, 0}, 1, 1)
+
+    assert :ok = TextInteractionIndex.activate(index, 5, 9)
+    assert {:ok, {1, 0}, false} = Reader.seek_scroll_rank(reader, 5, 9, scroll_context, 1, 1)
   end
 
   defp continuation_entry(offset) do

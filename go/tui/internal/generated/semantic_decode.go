@@ -2046,6 +2046,16 @@ func DecodeGuiWindowContentScrollPresentation(data []byte, offset int, windowEnd
 	}
 	scrollSeq := decodeU32(data, pos)
 	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "horizontal_pan_ack"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	horizontalPanAck := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+2, "horizontal_pan_limit"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	horizontalPanLimit := decodeU16(data, pos)
+	pos += 2
 	return GuiWindowContentScrollPresentation{
 		WindowID:              windowID,
 		Flags:                 flags,
@@ -2059,6 +2069,8 @@ func DecodeGuiWindowContentScrollPresentation(data []byte, offset int, windowEnd
 		ContentEpoch:          contentEpoch,
 		LayoutGeneration:      layoutGeneration,
 		ScrollSeq:             scrollSeq,
+		HorizontalPanAck:      horizontalPanAck,
+		HorizontalPanLimit:    horizontalPanLimit,
 	}, pos, nil
 }
 

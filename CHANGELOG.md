@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Added
+
+- `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
+
 ### Changed
 
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.
+- Models and connections opens a separate masked API key prompt from the Agent workspace. Saving or canceling does not send or replace the draft. `/auth <provider>` opens the same prompt and no longer accepts a key on the command line.
+- Local ChatGPT sign-in is available from Models and connections and `/login`. Cancel stops the current authorization attempt without changing credentials or the draft. The manual fallback uses masked input.
+- On macOS, pickers open below the window toolbar so the search field and results do not overlap the window controls. The selected row uses readable text on the selection background.
+- On narrow terminals, status notices stay readable when optional file and cursor information does not fit.
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
@@ -58,8 +66,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Entering plan mode, losing a provider, resetting a conversation, and restoring another conversation retire the original approval target before its identity changes. Known non-execution carries no execution duration, and plan mode does not increase the workspace's running-work count.
 - Saving or removing an agent API key replaces the credential file atomically. A failed write leaves existing keys intact, and malformed files report an error without including credential contents.
 - Text prompts show clickable Submit and Cancel controls in both frontends. Enter and Escape keep their existing behavior.
+- Clicking a terminal picker result chooses the item shown on that row, even when the popup is narrow or scrolled. Clicking outside the picker dismisses it without choosing a result.
 - A rejected manual OAuth completion no longer consumes the original session's pending login. The original client can still finish it once.
 - Wheel and trackpad scrolling now reach the last screen row of a soft-wrapped file without moving the cursor there first. Both frontends scroll locally when they have the wrapped rows in memory.
+- The macOS scrollbar follows screen rows in soft-wrapped panes with retained rows. It stays visible for a long single line, and dragging can land within that line without moving the cursor.
+- Repeated wheel ticks on an oversized wrapped line reuse the renderer's measured row count instead of laying out the unchanged line again on the input path.
+- Soft wrap stays on when a buffer contains closed folds, virtual lines, or Inline Ask blocks. Wheel scrolling follows the rendered rows without moving the cursor.
+- Horizontal trackpad and wheel input pans the targeted pane without moving the caret. Wrapped panes ignore sideways gestures, and the terminal can show the last column even when its scrollbar is visible.
 - Retained shell capture reads complete output and EOF on macOS without waiting for another chunk. Closing either parent channel stops idle, pending-read and backpressured output helpers, including when unread control bytes remain. The original producer is never replayed.
 - Codex login and revoke safely replace the OAuth credential file without dropping other providers. If the running instance is refreshing its credentials, login and disconnect ask the user to retry instead of racing the refresh.
 - Agent edits keep private overlay ownership instead of attempting to adopt a project file's group, which could reject valid macOS edits with `:eperm`. Owner-only staging directories prevent access widening, staged scripts retain their access permissions, and final atomic publication still preserves the original file's metadata.
@@ -75,6 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - macOS agent-workspace previews now capture readable, frozen production views at narrow and default widths, with full-window images, bounded failures and build-input receipts. A separate procedure covers real native keyboard and mouse evidence.
 - Native release preparation selects a Python build published for every host, fetches Linux prerequisites from the authenticated version-locked package index, reports bounded command failures and retains isolated build logs. CI checks changed release prerequisites on all four native hosts before the aggregate gate can pass.
 - Go terminal updates no longer erase the workspace header or retain trailing status text after a shorter replacement. Cursor presentation uses Bubble Tea's typed cursor metadata instead of embedding cursor-position controls in rendered cells.
+- The terminal reports the editor grid below its header, so wheel scrolling can show the final row of a windowed buffer instead of leaving it under the status bar.
 - The Go protocol reader skips valid length-framed unknown UI opcodes without losing later commands in the same committed frame, while still rejecting truncated payloads and unsupported required commands.
 - Standalone candidate builds now qualify a pinned native OTP/ERTS source input instead of requesting unavailable Burrito runtime archives. Build receipts, source hashes and final ERTS/NIF ABI checks fail closed without a host-runtime or download fallback.
 - The native streaming contract fixture supplies explicit synthetic SDK cost and checks completed usage and continuation, so its terminal-event deadline does not depend on cold pricing-catalog initialization.

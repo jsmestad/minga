@@ -277,7 +277,7 @@ defmodule MingaEditor.UI.Theme.Builder do
       fg: p.base.fg,
       bg: p.base.surface,
       border_fg: p.semantic.border,
-      sel_fg: p.semantic.contrast_fg,
+      sel_fg: p.base.fg,
       sel_bg: p.semantic.selection_bg,
       title_fg: p.semantic.highlight,
       key_fg: p.semantic.info,

@@ -296,6 +296,8 @@ Each extension declaration gets one ordered root beneath `Minga.Extension.RootSu
 
 The runtime tier handles rendering and user interaction. `rest_for_one` keeps the render path ordered: if Frontend.Manager fails, Renderer.Server and the Editor generation restart because both depend on the frontend port. If Renderer.Server fails, the Editor generation restarts because Editor holds the renderer pid. The generation is a `one_for_all` boundary around Editor, its effect scheduler, and supervised effect workers. An Editor crash therefore stops every old formatting or git mutation worker before replacement authority starts. Buffers remain outside this boundary, so undo history, cursor positions, and unsaved changes are preserved.
 
+Credential input uses a private `ConnectionInput` task under the Editor generation's `EffectTaskSupervisor`. The Editor sends sealed input directly to this task, not through the effect scheduler or the renderer. The task can write only after the scheduled effect joins it and Session confirms that the original Editor registered it as the writer. The authorized task loads the model catalog before submitting the key, so first-time catalog parsing does not hold Session or block rendering. Canceling the join stops the task; detaching the original Session driver or canceling setup revokes its write authority. Session orders credential writes against those changes and sends a successful save notice after the connection snapshot for the resulting conversation.
+
 ```mermaid
 graph TD
     RT["Runtime.Supervisor<br/><i>one_for_one</i>"]
@@ -901,6 +903,8 @@ Layer 2: MingaEditor.*    (editor presentation + orchestration)
 ```
 
 This isn't just organization for readability. A credo check (`Minga.Credo.DependencyDirectionCheck`) enforces these boundaries at compile time. Every `mix credo` run catches violations.
+
+Reach checks runtime effects separately from dependency direction. Its `.reach.exs` policy rejects classified side effects in the pure foundations and in explicitly listed Agent contracts. Use Erlang iodata primitives for byte conversion and sizing in these modules; Reach classifies the entire Elixir `IO` module as I/O. Unknown calls are not proof of purity. The policy explicitly rejects calls to `Minga.Log` from these modules, even when Reach cannot infer the effect.
 
 **Layer 0 (`lib/minga/`)** contains everything the editor needs to function as a runtime: buffer management, language detection, config system, events, LSP client, git operations, project management, and the parser protocol. These modules have zero knowledge of how information is presented to users.
 

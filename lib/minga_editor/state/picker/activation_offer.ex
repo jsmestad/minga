@@ -95,13 +95,14 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
           {[item_entry()], activation_id()}
   defp build_item_entries(nil, _previous, next_id), do: {[], next_id}
 
-  defp build_item_entries(%Picker{filtered: filtered}, previous, next_id) do
+  defp build_item_entries(%Picker{} = picker, previous, next_id) do
     prior_ids =
       Map.new(previous, fn {activation_id, _index, item} -> {item.id, activation_id} end)
 
-    filtered
-    |> Enum.take(@max_items)
-    |> Enum.with_index()
+    {items, start_index} = offered_window(picker)
+
+    items
+    |> Enum.with_index(start_index)
     |> Enum.map_reduce(next_id, fn {item, index}, candidate_id ->
       case Map.fetch(prior_ids, item.id) do
         {:ok, activation_id} -> {{activation_id, index, item}, candidate_id}
@@ -109,6 +110,14 @@ defmodule MingaEditor.State.Picker.ActivationOffer do
       end
     end)
   end
+
+  @spec offered_window(Picker.t()) :: {[Item.t()], non_neg_integer()}
+  defp offered_window(%Picker{results: :all, filtered: filtered, selected: selected}) do
+    start_index = selected - rem(selected, @max_items)
+    {Enum.slice(filtered, start_index, @max_items), start_index}
+  end
+
+  defp offered_window(%Picker{filtered: filtered}), do: {Enum.take(filtered, @max_items), 0}
 
   @spec action_entries(
           MingaEditor.State.Picker.action_menu(),

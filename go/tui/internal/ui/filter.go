@@ -36,14 +36,3 @@ func (f *InputFilter) allow(last *time.Time) bool {
 	*last = at
 	return true
 }
-
-func wheelDeltaSign(button tea.MouseButton) int {
-	switch button {
-	case tea.MouseWheelDown:
-		return 1
-	case tea.MouseWheelUp:
-		return -1
-	default:
-		return 0
-	}
-}

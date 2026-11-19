@@ -120,35 +120,21 @@ func (m Model) semanticWindowPlacement(window protocol.WindowContent) (semanticW
 	if rect == (protocol.Rect{}) {
 		return semanticWindowPlacement{}, false
 	}
-	row, col := m.normalizeSemanticGeometry(int(rect.Row), int(rect.Col))
 	return semanticWindowPlacement{
-		row:    row,
-		col:    col,
+		row:    int(rect.Row),
+		col:    m.semanticBodyCol(int(rect.Col)),
 		width:  int(rect.Width),
 		height: int(rect.Height),
 	}, true
 }
 
-// Protocol window geometry may arrive as absolute TUI geometry from the BEAM layout. Bubble Tea composes header rows and left chrome around the body after semantic content is rendered, so subtract any visible chrome offsets when the protocol coordinates include them. Body-relative geometry stays unchanged.
-func (m Model) normalizeSemanticGeometry(row int, col int) (int, int) {
-	rowOffset, colOffset := m.semanticContentOffsets()
-	if rowOffset > 0 {
-		row -= min(row, rowOffset)
+// The body canvas is composed beside local left chrome. Keep the existing
+// horizontal normalization separate from the primary grid's row origin.
+func (m Model) semanticBodyCol(col int) int {
+	if left := m.layout.leftPane.Width; col >= left {
+		return col - left
 	}
-	if colOffset > 0 && col >= colOffset {
-		col -= colOffset
-	}
-	return max(row, 0), max(col, 0)
-}
-
-// Protocol chrome geometry is absolute terminal geometry, so split separators are normalized into Bubble Tea's body canvas.
-func (m Model) normalizeChromeGeometry(row int, col int) (int, int) {
-	rowOffset, colOffset := m.semanticContentOffsets()
-	return row - rowOffset, col - colOffset
-}
-
-func (m Model) semanticContentOffsets() (int, int) {
-	return m.layout.header.Height, m.layout.leftPane.Width
+	return col
 }
 
 func (m Model) leftChromeWidth() int {
@@ -240,8 +226,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 			m.renderWork.decorationVisits++
 		}
 	}
-	gutterWidth := gutterRenderWidth(gutter)
-	contentWidth := max(width-gutterWidth, 1)
+	contentWidth := windowTextWidth(width, gutter)
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
 		m.renderWork.editorRowVisits++
 		trailing := blankMargin
@@ -418,12 +403,14 @@ func (m Model) presentationPayloadStart(window protocol.WindowContent) int {
 
 func (m Model) windowRenderDimensions(window protocol.WindowContent, hasGutter bool, gutter protocol.Gutter) (width int, height int) {
 	height = m.windowRowCount(window)
+	availableRows := m.bodyHeight()
 	width = m.width
 	if placement, ok := m.semanticWindowPlacement(window); ok {
 		if placement.width > 0 {
 			width = placement.width
 		}
 		if placement.height > 0 {
+			availableRows = max(availableRows-placement.row, 0)
 			height = placement.height
 		}
 	} else if window.GeometrySet && window.Geometry.ViewportRows > 0 {
@@ -431,12 +418,9 @@ func (m Model) windowRenderDimensions(window protocol.WindowContent, hasGutter b
 	} else if hasGutter && gutter.ContentHeight > 0 {
 		height = int(gutter.ContentHeight)
 	} else if len(m.windowOrder) <= 1 {
-		height = max(height, m.bodyHeight())
+		height = max(height, availableRows)
 	}
-	if body := m.bodyHeight(); height > body && body > 0 {
-		height = body
-	}
-	return width, height
+	return width, min(height, availableRows)
 }
 
 // windowRowComposition honors an authored trailing margin without reserving a second scrollbar cell.
@@ -455,6 +439,10 @@ func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeig
 		margin = 1
 	}
 	return paneWidth - margin, margin, sb
+}
+
+func windowTextWidth(rowWidth int, gutter protocol.Gutter) int {
+	return max(rowWidth-gutterRenderWidth(gutter), 1)
 }
 
 func presentationVisibleRows(window protocol.WindowContent) int {
@@ -532,7 +520,16 @@ func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) in
 	if !ok || !scroll.keysMatch(window.Scroll) {
 		return scrollLeft
 	}
-	return max(scrollLeft+scroll.colOffset, 0)
+	return max(scrollLeft+m.presentationColumnOffset(scroll.colOffset), 0)
+}
+
+func (m Model) presentationColumnOffset(offset int) int {
+	// While selection owns the pointer, paint and hit-testing use the same
+	// committed column. Pending wheel intents still reconcile behind it.
+	if m.textDrag != nil {
+		return 0
+	}
+	return offset
 }
 
 func (m Model) lineCacheKeyFor(window protocol.WindowContent, row protocol.WindowRow, rowIndex int) (lineCacheKey, bool) {
@@ -570,17 +567,18 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 	}
 
 	var builder strings.Builder
-	scrollLeft := int(window.ScrollLeft)
-	scrollLeft = m.presentationScrollEffectiveLeft(window)
+	scrollLeft := m.presentationScrollEffectiveLeft(window)
+	scrollRight := scrollLeft + width
 	col := 0
-	for graphemes := uniseg.NewGraphemes(row.Text); graphemes.Next(); {
+	for graphemes := uniseg.NewGraphemes(row.Text); col < scrollRight && graphemes.Next(); {
 		text := graphemes.Str()
-		span := spanAt(row.Spans, uint16(col))
 		spanWidth := max(displayWidth(text), 1)
-		if col+spanWidth <= scrollLeft {
-			col += spanWidth
+		end := col + spanWidth
+		if end <= scrollLeft {
+			col = end
 			continue
 		}
+		span := spanAt(row.Spans, uint16(col))
 		style := m.styleForEditorSpan(span)
 		if window.ID == protocol.AgentPromptWindowID && span.BG == 0 {
 			style = style.Background(m.palette().AgentInputSurface())
@@ -590,11 +588,18 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 		}
 		style = m.applyWindowOverlaysAt(style, window, sourceRowIndex, contentRowIndex, col)
 		style, text = m.applyIndentGuide(window, style, sourceRowIndex, contentRowIndex, col, text)
+		if col < scrollLeft || end > scrollRight {
+			// The terminal cannot draw part of a wide grapheme. Keep its
+			// visible cells blank, rather than shifting the following text.
+			text = strings.Repeat(" ", min(end, scrollRight)-max(col, scrollLeft))
+		}
 		builder.WriteString(style.Render(text))
-		col += spanWidth
+		col = end
 	}
-	if annotation := m.renderRowAnnotationsAt(window, sourceRowIndex, contentRowIndex); annotation != "" {
-		builder.WriteString(annotation)
+	if col < scrollRight {
+		if annotation := m.renderRowAnnotationsAt(window, sourceRowIndex, contentRowIndex); annotation != "" {
+			builder.WriteString(annotation)
+		}
 	}
 	return base.Render(fitStyled(builder.String(), width))
 }
@@ -771,9 +776,9 @@ func (m Model) withSplitSeparators(lines []string) []string {
 		style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", splits.Color)))
 	}
 	for _, vertical := range splits.Verticals {
-		startRow, col := m.normalizeChromeGeometry(int(vertical.StartRow), int(vertical.Col))
-		endRow, _ := m.normalizeChromeGeometry(int(vertical.EndRow), int(vertical.Col))
-		if col < 0 || endRow < 0 {
+		startRow, endRow := int(vertical.StartRow), int(vertical.EndRow)
+		col := int(vertical.Col) - m.layout.leftPane.Width
+		if col < 0 {
 			continue
 		}
 		for row := max(startRow, 0); row <= endRow && row < len(out); row++ {
@@ -782,8 +787,8 @@ func (m Model) withSplitSeparators(lines []string) []string {
 		}
 	}
 	for _, horizontal := range splits.Horizontals {
-		row, col := m.normalizeChromeGeometry(int(horizontal.Row), int(horizontal.Col))
-		if row < 0 || row >= len(out) {
+		row, col := int(horizontal.Row), int(horizontal.Col)-m.layout.leftPane.Width
+		if row >= len(out) {
 			continue
 		}
 		text := horizontalSeparatorText(int(horizontal.Width), horizontal.Filename)

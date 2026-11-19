@@ -9,12 +9,10 @@ import QuartzCore
 /// its per-frame `Outcome` into encoder sends, the presentation offset, and redraw scheduling; the
 /// session is free of AppKit / Metal / protocol IO so the whole state machine is unit-testable.
 ///
-/// **Gate policy.** `windowId` and the resident-vs-windowed decision are fixed when the drag starts
-/// (see `EditorNSView.beginThumbDragPresentation`) and are never re-evaluated. Residence is a
-/// document-size property that does not flip mid-drag, and re-checking it would let a same-frame
-/// residency change silently switch the gesture to the round-trip path. A residency change that
-/// arrives mid-drag therefore leaves the gate intact; only an authoritative anchor move (interrupt)
-/// or the reconcile completing tears the session down.
+/// **Gate policy.** `windowId` and the coordinate space are fixed when the drag starts
+/// (see `EditorNSView.beginScrollIndicatorDrag`). The view supplies either logical lines or
+/// absolute visual ranks throughout the session. An invalidated visual-rank basis ends the
+/// session rather than letting it reinterpret an existing target.
 ///
 /// **No release animator.** The reconcile drains the offset by tracking the committed anchor, not by
 /// easing on a timer. The BEAM echo-marks the drag's own commits, so the committed anchor lands
@@ -34,13 +32,19 @@ struct ThumbDragSession {
             self.contentEpoch = contentEpoch
             self.layoutGeneration = layoutGeneration
         }
+
+        /// A rank stays meaningful across scroll echoes, not across edits, reflow, or jumps.
+        func hasSameAuthority(as other: Self) -> Bool {
+            scrollSeq == other.scrollSeq && contentEpoch == other.contentEpoch &&
+                layoutGeneration == other.layoutGeneration
+        }
     }
 
     /// The per-frame decision the owner applies.
     struct Outcome: Equatable {
-        /// A target line to send on the ordered channel this frame (throttled), or nil.
+        /// An absolute line or rank to send this frame (throttled), or nil.
         var intent: UInt32?
-        /// Signed line offset to present (multiplied by cell height by the owner).
+        /// Signed row offset to present (multiplied by row pitch by the owner).
         var offsetLines: Int64
         /// The session is done: the owner drops it and zeroes the offset.
         var finished: Bool

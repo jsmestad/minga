@@ -10,7 +10,11 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaAgent.Test.ModelPickerSession
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.RuntimeState
-  alias MingaEditor.PickerUI
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaEditor.Agent.ConnectionSetup
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.{Policy, Request}
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -28,15 +32,22 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   defmodule RejectingSession do
     use GenServer
 
-    @spec start_link(String.t()) :: GenServer.on_start()
-    def start_link(message), do: GenServer.start_link(__MODULE__, message)
+    @spec start_link({[ModelCandidate.t()], String.t()}) :: GenServer.on_start()
+    def start_link(fixture), do: GenServer.start_link(__MODULE__, fixture)
 
     @impl GenServer
     def init(message), do: {:ok, message}
 
     @impl GenServer
-    def handle_call({:set_model, _selection}, _from, message),
-      do: {:reply, {:error, message}, message}
+    def handle_call(:get_available_models, _from, {candidates, _message} = fixture),
+      do: {:reply, {:ok, candidates}, fixture}
+
+    def handle_call(
+          {:set_model_for_target, %ConnectionTarget{session: session}, _selection},
+          _from,
+          {_candidates, message} = fixture
+        )
+        when session == self(), do: {:reply, {:error, message}, fixture}
   end
 
   test "shows exact route, unverified status, favorite, and thinking controls" do
@@ -55,7 +66,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     candidate = %ModelCandidate{selection: selection, favorite: true, current: true}
     session = start_supervised!({ModelPickerSession, [candidate]})
 
-    assert [item] = AgentModelSource.candidates(context(session))
+    assert [item] = model_items(context(connection(session), 1))
     assert item.id == ModelSelection.id(selection)
     assert item.active
     assert item.annotation == "★ favorite"
@@ -224,7 +235,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     ]
 
     session = start_supervised!({ModelPickerSession, candidates})
-    items = AgentModelSource.candidates(context(session))
+    items = model_items(context(connection(session), 1))
 
     assert Enum.map(items, & &1.label) == ["Shared Model", "Shared Model"]
     assert items |> Enum.map(& &1.id) |> Enum.uniq() |> length() == 2
@@ -234,20 +245,79 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   test "rejected picker selection preserves the prior visible model" do
     selection = ModelSelectionFixture.selection(display_name: "Rejected Model")
     candidate = %ModelCandidate{selection: selection, favorite: false, current: false}
-    picker_session = start_supervised!({ModelPickerSession, [candidate]})
-    [item] = AgentModelSource.candidates(context(picker_session))
-
     message = "The exact credential profile is unavailable. Pick another route."
-    rejecting_session = start_supervised!({RejectingSession, message})
-    state = editor_state(rejecting_session, "Prior Model")
+    session = start_supervised!({RejectingSession, {[candidate], message}})
+    task_supervisor = start_supervised!({Task.Supervisor, []})
+    scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+    :ok = EffectScheduler.attach(scheduler, self())
+    connection = connection(session)
+    {state, workspace_id} = editor_state(connection, "Prior Model", scheduler)
+    [item] = model_items(context(connection, workspace_id))
 
     state = AgentModelSource.on_select(item, state)
+    assert_receive {:effect_result, ^scheduler, %Outcome{} = outcome}, 1_000
+
+    assert {:noreply, state} =
+             MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
 
     assert state.workspace.agent_ui.panel.model_name == "Prior Model"
     assert state.shell_runtime.state.notice.message == message
   end
 
-  defp editor_state(session, model_name) do
+  test "a delayed save for the same durable ID cannot notify a replacement conversation" do
+    session = start_supervised!({ModelPickerSession, []})
+    committed = connection(session)
+    {state, id} = editor_state(committed, "Active Model", nil)
+    saved = {:agent_event, session, {:connection_api_key_saved, id, committed.target, make_ref()}}
+
+    assert {:noreply, notified} = MingaEditor.handle_info(saved, state)
+    assert notified.shell_runtime.state.notice.message == "API key saved."
+
+    replacement = connection(session)
+    assert replacement.target.session_id == committed.target.session_id
+    {replaced, ^id} = editor_state(replacement, "Restored Model", nil)
+
+    assert {:noreply, ignored} = MingaEditor.handle_info(saved, replaced)
+    refute ignored.shell_runtime.state.notice.message
+  end
+
+  test "a delayed authorization link failure cannot notify a replacement sign-in" do
+    session = start_supervised!({ModelPickerSession, []})
+    original = connection(session)
+    first = make_ref()
+    next = make_ref()
+    {state, id} = editor_state(%{original | operation: {:connecting, first}}, "Active Model", nil)
+    url = "https://auth.openai.com/oauth/authorize?fixture=1"
+    ready = MingaAgent.OAuth.ManualReady.new(original.target, first, self(), "first", url)
+    state = ConnectionSetup.offer_oauth(state, id, ready)
+    prompt = state.workspace.agent_ui.connection_prompt
+
+    effect = %ConnectionSetup{
+      workspace_id: id,
+      target: original.target,
+      intent: {:authorization_url, :open, prompt}
+    }
+
+    request = Request.new(effect, {:connection_authorization, session}, Policy.fifo(0))
+    failed = Outcome.failed(request, :authorization_link_unavailable)
+    {notified, _} = ConnectionSetup.apply(state, failed)
+    assert notified.shell_runtime.state.notice.message =~ "Could not open or copy"
+
+    {replacement, ^id} =
+      editor_state(%{original | operation: {:connecting, next}}, "Active Model", nil)
+
+    ready = MingaAgent.OAuth.ManualReady.new(original.target, next, self(), "next", url)
+    replacement = ConnectionSetup.offer_oauth(replacement, id, ready)
+    {ignored, _} = ConnectionSetup.apply(replacement, failed)
+    assert ignored.shell_runtime.state.notice == replacement.shell_runtime.state.notice
+    assert ignored.workspace.agent_ui.connection_prompt.operation_ref == next
+  end
+
+  defp editor_state(
+         %ConnectionSnapshot{target: %{session: session}} = connection,
+         model_name,
+         scheduler
+       ) do
     {tab_bar, workspace} =
       1
       |> Tab.new_agent("Agent")
@@ -259,33 +329,40 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       |> TabBar.move_tab_to_workspace(1, workspace.id)
       |> Map.put(:active_id, 1)
 
-    agent_ui = UIState.new() |> UIState.set_model_name(model_name)
+    agent_ui =
+      UIState.new()
+      |> UIState.project_connection(connection)
+      |> UIState.set_model_name(model_name)
 
-    %EditorState{
-      frontend: %MingaEditor.State.Frontend{port_manager: nil},
-      workspace: %MingaEditor.Session.State{editing: VimState.new(), agent_ui: agent_ui}
-    }
-    |> then(fn root ->
-      shell_state =
-        MingaEditor.Shell.Traditional.State.install_tab_bar(
-          MingaEditor.Shell.Runtime.state(root.shell_runtime),
-          tab_bar
-        )
-
-      %{
-        root
-        | shell_runtime:
-            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+    state =
+      %EditorState{
+        frontend: %MingaEditor.State.Frontend{port_manager: nil, rendering: :disabled},
+        workspace: %MingaEditor.Session.State{editing: VimState.new(), agent_ui: agent_ui},
+        effect_scheduler: scheduler
       }
-    end)
-    |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(%AgentState{
-      runtime: %RuntimeState{status: :idle},
-      error: nil,
-      spinner_timer: nil
-    })
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(%AgentState{
+        runtime: %RuntimeState{status: :idle},
+        error: nil,
+        spinner_timer: nil
+      })
+
+    {state, workspace.id}
   end
 
-  defp context(session) do
+  defp context(%ConnectionSnapshot{target: %{session: session} = target} = snapshot, workspace_id) do
     %Context{
       buffers: %Buffers{},
       editing: VimState.new(),
@@ -293,9 +370,34 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       viewport: Viewport.new(80, 24),
       tab_bar: %{},
       agent_session: session,
-      picker_ui: %{},
+      picker_ui: %{
+        context: %{
+          target: target,
+          connection: snapshot,
+          workspace_id: workspace_id,
+          connection_prompt: nil
+        }
+      },
       capabilities: %{},
       theme: Theme.get!(:doom_one)
+    }
+  end
+
+  defp model_items(context) do
+    Enum.filter(
+      AgentModelSource.candidates(context),
+      &match?({:model, %ModelSelection{}}, &1.meta.intent)
+    )
+  end
+
+  defp connection(session) do
+    %ConnectionSnapshot{
+      target: ConnectionTarget.new(session, "fixture-conversation", nil, make_ref()),
+      credential_readiness: :configured,
+      provider_phase: :running,
+      model_selection: nil,
+      operation: :idle,
+      problem: nil
     }
   end
 end

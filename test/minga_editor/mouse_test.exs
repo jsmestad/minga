@@ -50,6 +50,45 @@ defmodule MingaEditor.MouseTest do
     assert BufferProcess.cursor(buffer) == {0, 0}
   end
 
+  test "horizontal wheel and pan intent leave the caret in place and ignore wrap" do
+    {state, buffer} = start_mouse_state(String.duplicate("x", 80), width: 24, height: 8)
+    state = native_gui_state(state)
+    win_id = state.workspace.windows.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+    state = with_pan_limit(state, win_id, 5)
+
+    state = mouse(state, 0, 0, :wheel_right, :press)
+    assert %{left: 1, top: 0} = window_viewport(state, win_id)
+    state = Mouse.handle_horizontal_pan(state, win_id, 4, 1)
+    assert %{left: 5, top: 0} = window_viewport(state, win_id)
+
+    assert %{left: 5, top: 0} =
+             state |> Mouse.handle_horizontal_pan(win_id, 1, 2) |> window_viewport(win_id)
+
+    state = Mouse.handle_horizontal_pan(state, win_id, -10, 3)
+    assert %{left: 0, top: 0} = window_viewport(state, win_id)
+    assert BufferProcess.cursor(buffer) == {0, 0}
+
+    assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    assert Mouse.handle_horizontal_pan(state, win_id, 12, 4) == state
+    assert mouse(state, 0, 0, :wheel_right, :press) == state
+  end
+
+  test "horizontal pan targets the named split without changing focus" do
+    {state, buffer} = start_mouse_state(String.duplicate("x", 160), width: 80, height: 12)
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+    state = Movement.execute(state, :split_vertical)
+    active = state.workspace.windows.active
+    [target] = Map.keys(state.workspace.windows.map) -- [active]
+    state = with_pan_limit(state, target, 8)
+
+    state = Mouse.handle_horizontal_pan(state, target, 7, 1)
+    assert state.workspace.windows.active == active
+    assert %{left: 0, top: 0} = window_viewport(state, active)
+    assert %{left: 7, top: 0} = window_viewport(state, target)
+    assert BufferProcess.cursor(buffer) == {0, 0}
+  end
+
   describe "resident window scroll intent (#2661)" do
     test "handle_scroll_batch records the committed top as the free-scroll echo top" do
       {state, _buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
@@ -60,7 +99,7 @@ defmodule MingaEditor.MouseTest do
       state = Mouse.handle_scroll_batch(state, win_id, 3, :down)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
+      assert window.scroll_echo_anchor == Viewport.scroll_anchor(window.viewport)
     end
 
     test "H resolves against the reported top after a scroll report (ordered channel, AC2)" do
@@ -109,7 +148,7 @@ defmodule MingaEditor.MouseTest do
       window = Map.fetch!(state.workspace.windows.map, win_id)
       # apply_scroll_intent marks the committed top as a free-scroll echo; the
       # viewport-only path never touches the scroll echo.
-      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
+      assert window.scroll_echo_anchor == Viewport.scroll_anchor(window.viewport)
       assert BufferProcess.cursor(buffer) == {50, 0}
     end
 
@@ -129,7 +168,7 @@ defmodule MingaEditor.MouseTest do
       # and every committed top stayed a free-scroll echo.
       assert new_top > 50
       assert BufferProcess.cursor(buffer) == {50, 0}
-      assert window.scroll_echo_anchor == {new_top, 0}
+      assert window.scroll_echo_anchor == {new_top, 0, 0}
     end
 
     test "a resident GUI window scrolls up through apply_scroll_intent as well" do
@@ -143,7 +182,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 0, :wheel_up, :press)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
+      assert window.scroll_echo_anchor == Viewport.scroll_anchor(window.viewport)
       assert window.viewport.top == 39
       assert BufferProcess.cursor(buffer) == {50, 0}
     end
@@ -177,7 +216,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 0, :wheel_down, :press)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
+      assert window.scroll_echo_anchor == Viewport.scroll_anchor(window.viewport)
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.viewport.top > before_top
     end
@@ -197,7 +236,7 @@ defmodule MingaEditor.MouseTest do
       # The committed top is recorded as a free-scroll echo, exactly like the wheel
       # path, so settle_scroll_seq/1 treats it as an echo and never bumps scroll_seq.
       assert window.viewport.top == 30
-      assert window.scroll_echo_anchor == {30, 0}
+      assert window.scroll_echo_anchor == {30, 0, 0}
     end
 
     test "never moves the cursor even when the target scrolls it off-screen (#2691)" do
@@ -217,7 +256,7 @@ defmodule MingaEditor.MouseTest do
       assert window.viewport.top == 0
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.scroll_detach_cursor == {50, 0}
-      assert window.scroll_echo_anchor == Viewport.vertical_anchor(window.viewport)
+      assert window.scroll_echo_anchor == Viewport.scroll_anchor(window.viewport)
     end
 
     test "commits the exact dragged top so the frontend offset reconciles to zero" do
@@ -234,7 +273,7 @@ defmodule MingaEditor.MouseTest do
       # The committed anchor lands exactly on the requested line so the frontend's
       # local presentation offset (target - anchorTop) drains to zero on grid.
       assert window.viewport.top == 72
-      assert window.scroll_echo_anchor == {72, 0}
+      assert window.scroll_echo_anchor == {72, 0, 0}
     end
   end
 
@@ -649,6 +688,46 @@ defmodule MingaEditor.MouseTest do
              )
     end
 
+    test "wrapped fold gutter hits first segments and summaries, not continuation rows" do
+      {state, buffer} =
+        start_mouse_state("#{String.duplicate("a", 40)}\nfold start\nfold end\nafter\nlast",
+          width: 20
+        )
+
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      assert {:ok, :none} = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      state = set_active_fold_ranges(state, [FoldRange.new!(0, 4), FoldRange.new!(1, 2)])
+      state = fold_active_window_at(state, 1)
+      {row, col} = active_content_origin(state)
+      fold_col = col + MingaEditor.Renderer.Gutter.fold_column_offset()
+
+      assert %{fold_map: closed} = SessionState.active_window_struct(state.workspace)
+      assert FoldMap.fold_start?(closed, 1)
+
+      # The first source line occupies three rows; only its first row has a fold control.
+      for offset <- 1..2 do
+        clicked = mouse(state, row + offset, fold_col, :left, :press)
+        assert %{fold_map: ^closed} = SessionState.active_window_struct(clicked.workspace)
+        assert {0, _byte} = BufferProcess.cursor(buffer)
+      end
+
+      head_clicked = mouse(state, row, fold_col, :left, :press)
+      assert %{fold_map: head_fold} = SessionState.active_window_struct(head_clicked.workspace)
+      assert FoldMap.fold_start?(head_fold, 0)
+
+      summary_clicked = mouse(state, row + 3, fold_col, :left, :press)
+      assert %{fold_map: opened} = SessionState.active_window_struct(summary_clicked.workspace)
+      assert FoldMap.empty?(opened)
+
+      # With no closed folds, the same wrapped geometry still puts the control on row three.
+      opened_state = install_mouse(summary_clicked, state.workspace.mouse)
+      source_clicked = mouse(opened_state, row + 3, fold_col, :left, :press)
+      assert %{fold_map: reclosed} = SessionState.active_window_struct(source_clicked.workspace)
+      assert FoldMap.fold_start?(reclosed, 1)
+    end
+
     test "clicking a decoration fold indicator opens the folded region" do
       {state, buffer} = start_mouse_state("agent output\nline two\nline three")
 
@@ -872,6 +951,12 @@ defmodule MingaEditor.MouseTest do
 
   defp window_viewport(state, window_id),
     do: Map.fetch!(state.workspace.windows.map, window_id).viewport
+
+  defp with_pan_limit(state, id, limit) do
+    viewport = state |> window_viewport(id) |> Viewport.put_horizontal_pan_limit(limit)
+    windows = Windows.set_viewport(state.workspace.windows, id, viewport)
+    %{state | workspace: SessionState.set_windows(state.workspace, windows)}
+  end
 
   defp native_gui_state(state) do
     frontend =

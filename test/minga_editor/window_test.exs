@@ -65,7 +65,7 @@ defmodule MingaEditor.WindowTest do
       marked = Window.mark_authoritative_scroll(window)
 
       assert window.viewport.top == 5
-      assert window.scroll_echo_anchor == {5, 0}
+      assert window.scroll_echo_anchor == {5, 0, 0}
       assert Window.authoritative_scroll_seq(marked) == 1
       assert %RenderCache{} = marked.render_cache
     end

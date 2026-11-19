@@ -280,7 +280,7 @@ defmodule Minga.Frontend.Adapter.GUITest do
       assert %{metal_commands: [<<0xA2, _count, sections::binary>>]} =
                GUI.encode(render_model(jumped), caches)
 
-      assert <<_::binary-size(35), 1::32>> = section_payload(sections, 0x0A)
+      assert <<_::binary-size(35), 1::32, 0::32, 0::16>> = section_payload(sections, 0x0A)
     end
 
     test "emits the splice for a render-equivalent resident replacement" do

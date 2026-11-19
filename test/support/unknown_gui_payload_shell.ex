@@ -1,6 +1,10 @@
 defmodule MingaEditor.Test.UnknownGuiPayloadShell do
   @moduledoc "Test shell that returns an unsupported GUI payload tag."
 
+  @spec render_snapshot(MingaEditor.Shell.Traditional.State.t()) ::
+          MingaEditor.Shell.Traditional.State.t()
+  defdelegate render_snapshot(state), to: MingaEditor.Shell.Traditional.State
+
   @spec compute_layout(map()) :: MingaEditor.Layout.t()
   def compute_layout(%MingaEditor.RenderPipeline.Input{} = input),
     do: compute_layout(%{terminal_viewport: input.intent.frame.terminal_viewport})

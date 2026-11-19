@@ -104,7 +104,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           resident: boolean(),
           residence_armed: boolean(),
           scroll_seq: non_neg_integer(),
-          scroll_seq_last_anchor: {non_neg_integer(), non_neg_integer()} | nil,
+          scroll_seq_last_anchor: MingaEditor.Viewport.scroll_anchor() | nil,
           scroll_seq_last_authoritative: non_neg_integer()
         }
 
@@ -332,7 +332,7 @@ defmodule MingaEditor.Renderer.WindowCache do
 
   If the fingerprint changed, marks all lines dirty. Catches changes to
   visual selection, search matches, syntax highlights, diagnostic signs,
-  git signs, horizontal scroll, active/inactive status, and theme colors.
+  git signs, active/inactive status, and theme colors.
   """
   @spec detect_context_change(t(), context_fingerprint()) :: t()
   def detect_context_change(%__MODULE__{} = cache, fingerprint) do
@@ -852,8 +852,8 @@ defmodule MingaEditor.Renderer.WindowCache do
   """
   @spec settle_scroll_seq(
           t(),
-          {non_neg_integer(), non_neg_integer()},
-          {non_neg_integer(), non_neg_integer()} | nil,
+          MingaEditor.Viewport.scroll_anchor(),
+          MingaEditor.Viewport.scroll_anchor() | nil,
           non_neg_integer()
         ) :: t()
   def settle_scroll_seq(%__MODULE__{} = cache, anchor, echo_anchor, authoritative_seq) do

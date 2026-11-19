@@ -3,8 +3,10 @@ defmodule MingaEditor.DisplayMapTest do
 
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.FoldRegion
+  alias Minga.Core.WrapMap
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
+  alias MingaEditor.Viewport
   alias Minga.Editing.Fold.Range, as: FoldRange
 
   # ── No folds or decorations ──────────────────────────────────────────────
@@ -301,6 +303,90 @@ defmodule MingaEditor.DisplayMapTest do
       assert Enum.at(entries, 3) == {3, {:fold_start, 3}}
       assert Enum.at(entries, 4) == {7, :normal}
     end
+  end
+
+  test "each mixed row round-trips through the viewport anchor, including special rows" do
+    folds = FoldMap.new()
+    decorations = Decorations.new()
+    face = Minga.Core.Face.new()
+
+    {_, decorations} =
+      Decorations.add_block_decoration(decorations, 0,
+        placement: :above,
+        render: fn _width -> [{"above block", face}] end
+      )
+
+    {_, decorations} =
+      Decorations.add_virtual_text(decorations, {0, 0},
+        placement: :above,
+        segments: [{"above virtual", face}]
+      )
+
+    {_, decorations} =
+      Decorations.add_virtual_text(decorations, {0, 0},
+        placement: :below,
+        segments: [{"below virtual", face}]
+      )
+
+    {_, decorations} =
+      Decorations.add_block_decoration(decorations, 0,
+        placement: :below,
+        render: fn _width -> [{"below block", face}] end
+      )
+
+    [wraps] = WrapMap.compute(["abcdef"], 2)
+    sources = %{0 => {"abcdef", 0, "abcdef", wraps, 3}}
+    groups = folds |> DisplayMap.project(decorations, 1, 2) |> DisplayMap.source_window(0, 0, 0)
+    viewport = Viewport.new(1, 2, 0)
+    expected = [:block, :virtual_line, :wrapped, :wrapped, :wrapped, :virtual_line, :block]
+
+    Enum.reduce(Enum.with_index(expected), viewport, fn {type, rank}, previous ->
+      delta = if rank == 0, do: 0, else: 1
+      {page, next, bottom?} = DisplayMap.visual_page(groups, folds, previous, sources, delta)
+      assert [{0, entry}] = DisplayMap.to_visible_line_map(page)
+      assert elem(entry, 0) == type
+      assert bottom? == (rank == 6)
+      assert {^page, ^next, ^bottom?} = DisplayMap.visual_page(groups, folds, next, sources, 0)
+      next
+    end)
+  end
+
+  test "keeps the source head at the top when wrap width changes or its last above row is removed" do
+    folds = FoldMap.new()
+    text = String.duplicate("a", 30)
+
+    {id, decorations} =
+      Decorations.add_virtual_text(Decorations.new(), {0, 0},
+        placement: :above,
+        segments: [{"header", Minga.Core.Face.new()}]
+      )
+
+    page = fn decorations, viewport, delta ->
+      width = viewport.cols
+      [wraps] = WrapMap.compute([text], width)
+      sources = %{0 => {text, 0, text, wraps, length(wraps)}}
+
+      groups =
+        folds |> DisplayMap.project(decorations, 1, width) |> DisplayMap.source_window(0, 0, 0)
+
+      DisplayMap.visual_page(groups, folds, viewport, sources, delta)
+    end
+
+    assert {%DisplayMap{entries: [{0, {:wrapped, 0}}]}, head, false} =
+             page.(decorations, Viewport.new(1, 15, 0), 1)
+
+    narrow = Viewport.fit_content(head, 10, 1)
+
+    assert {%DisplayMap{entries: [{0, {:wrapped, 0}}]}, narrow_head, false} =
+             page.(decorations, narrow, 0)
+
+    assert {%DisplayMap{entries: [{0, {:wrapped, 1}}]}, _, false} =
+             page.(decorations, narrow_head, 1)
+
+    removed = Decorations.remove_virtual_text(decorations, id)
+
+    assert {%DisplayMap{entries: [{0, {:wrapped, 0}}]}, _, false} = page.(removed, head, 0)
+    assert {0, 0} = head |> Viewport.source_rows() |> Viewport.vertical_anchor()
   end
 
   # ── Fold region CRUD ────────────────────────────────────────────────────

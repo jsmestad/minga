@@ -15,6 +15,36 @@ import (
 
 const maxTabLabelWidth = 24
 
+type headerChrome struct {
+	workspaces protocol.WorkspaceBar
+	tabs       protocol.TabBar
+	breadcrumb protocol.Breadcrumb
+}
+
+func (m Model) headerChrome() headerChrome {
+	spaces, _ := m.workspaceBar()
+	tabs, _ := m.tabBar()
+	var crumb protocol.Breadcrumb
+	if m.width >= 100 {
+		crumb, _ = m.breadcrumb()
+	}
+	return headerChrome{workspaces: spaces, tabs: tabs, breadcrumb: crumb}
+}
+
+func (h headerChrome) height() int {
+	rows := 0
+	if len(h.workspaces.Spaces) > 1 {
+		rows++
+	}
+	if len(h.tabs.Tabs) > 0 {
+		rows++
+	}
+	if len(h.breadcrumb.Segments) > 0 {
+		rows++
+	}
+	return max(rows, 1) // the title occupies one row when semantic chrome is absent
+}
+
 func (m Model) headerLines() []string {
 	tree, hasTree := m.fileTree()
 	sidebarWidth := 0
@@ -26,15 +56,16 @@ func (m Model) headerLines() []string {
 		mainWidth = max(m.width-sidebarWidth, 1)
 	}
 
-	lines := []string{}
-	if spaces, ok := m.workspaceBar(); ok && len(spaces.Spaces) > 1 {
-		lines = append(lines, m.renderWorkspaces(spaces, mainWidth))
+	header := m.headerChrome()
+	lines := make([]string, 0, header.height())
+	if len(header.workspaces.Spaces) > 1 {
+		lines = append(lines, m.renderWorkspaces(header.workspaces, mainWidth))
 	}
-	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
-		lines = append(lines, m.renderTabs(tabBar, mainWidth))
+	if len(header.tabs.Tabs) > 0 {
+		lines = append(lines, m.renderTabs(header.tabs, mainWidth))
 	}
-	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
-		lines = append(lines, m.renderBreadcrumb(crumb, mainWidth))
+	if len(header.breadcrumb.Segments) > 0 {
+		lines = append(lines, m.renderBreadcrumb(header.breadcrumb, mainWidth))
 	}
 	if len(lines) == 0 {
 		title := m.title
@@ -216,6 +247,13 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
 	return lipgloss.NewStyle().Background(bg).Width(width).Render(fitStyled(text, width))
 }
 
+func (m Model) footerRows() int {
+	if mini, ok := m.minibuffer(); ok && mini.Visible {
+		return 2
+	}
+	return 1
+}
+
 func (m Model) footerLines() []string {
 	status := fmt.Sprintf("row %d col %d", m.cursorRow+1, m.cursorCol+1)
 	if chromeStatus, ok := m.statusBar(); ok {
@@ -264,9 +302,14 @@ func (m Model) footerLines() []string {
 }
 
 func (m Model) renderStatusSegments(status protocol.StatusBar) string {
-	left := m.renderSegmentList(status.Left)
-	right := m.renderSegmentList(status.Right)
 	message := m.renderStatusMessage(status.Message)
+	messageWidth := lipgloss.Width(message)
+	left := m.renderSegmentList(status.Left)
+	leftWidth := lipgloss.Width(left)
+	if messageWidth > 0 && messageWidth > m.width-leftWidth {
+		return fitStyled(message, m.width)
+	}
+	right := m.renderSegmentList(status.Right)
 	// Prepend a devicon for the current file type before the right segments.
 	if status.Filename != "" {
 		icon := devIconForPath(status.Filename, false)
@@ -286,16 +329,13 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 		pending := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys + "  ")
 		right = pending + right
 	}
-	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
-	messageWidth := lipgloss.Width(message)
-	available := max(m.width-leftWidth-rightWidth, 1)
-	if messageWidth > available {
-		// Feedback decoration and metadata are already styled. Truncate that one
-		// finalized value so narrow widths cannot fall back to the raw notice.
-		message = fitStyled(message, available)
-		messageWidth = lipgloss.Width(message)
+	if messageWidth > 0 && messageWidth > m.width-leftWidth-rightWidth {
+		// Keep the notice readable before optional file and cursor statistics.
+		right = ""
+		rightWidth = 0
 	}
+	available := max(m.width-leftWidth-rightWidth, 1)
 	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
 	rightSpacer := strings.Repeat(" ", max(available-messageWidth-lipgloss.Width(leftSpacer), 0))
 	spacerStyle := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
@@ -472,40 +512,37 @@ func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
 	return m.charmInput(prompt, value, mini.CursorPos)
 }
 
-// renderCompletion draws the completion popup as directly-styled rows rather
-// than a charm list so each row can carry a lipgloss zone marker. Mouse routing
-// (semantic_mouse.go) maps a row click to completion_select, matching the GUI
-// (CompletionOverlay.swift:93); the visual stays a titled, selectable list.
-// The content is wrapped in a rounded border matching the picker/which-key
-// treatment (#2534): PopupBorder foreground, PopupSurface background,
-// BorderBackground, and ColorWhitespace so the border band stays solid.
-func (m Model) renderCompletion(completion protocol.Completion) []string {
-	height := m.maxOverlayHeight()
-	width := max(m.width, 1)
+// Completion rows carry semantic hit zones. Give items the available rows
+// first, then committed documentation, then the frame and title.
+func (m Model) renderCompletion(completion protocol.Completion, width, height int) []string {
 	theme := m.palette()
-
-	// Reserve space for the rounded border: 2 columns (left+right) and 2 rows
-	// (top+bottom). Inner content renders inside the border box.
-	innerWidth := max(width-2, 1)
-	innerHeight := max(height-2, 0)
-
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(innerWidth).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, " Completion", innerWidth)}
+	innerWidth, innerHeight := width, height
+	itemRows := min(len(completion.Items), height)
+	spareRows := height - itemRows
+	doc := strings.TrimSpace(completion.Documentation)
+	frameRows := 3
+	if doc != "" && spareRows >= 2 {
+		frameRows += 2 // Keep room for the documentation title and its first line.
+	}
+	framed := spareRows >= frameRows && width >= 3
+	titleRows := 0
+	var lines []string
+	if framed {
+		innerWidth -= 2
+		innerHeight -= 2
+		titleRows = 1
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(innerWidth).ColorWhitespace(true)
+		lines = append(lines, renderPadded(titleStyle, " Completion", innerWidth))
+	}
 
 	// The doc pane renders for the BEAM-committed selection (two-index split:
 	// highlight follows local preview, docs follow committed).
-	doc := strings.TrimSpace(completion.Documentation)
 	docLines := []string(nil)
 	if doc != "" {
-		docLines = m.renderCompletionDocPane(doc, innerWidth, innerHeight-1)
-		// The pane must never starve the item list: at extreme overlay
-		// heights, showing the item being selected beats showing its docs.
-		if innerHeight-1-len(docLines) < 1 {
-			docLines = nil
-		}
+		docLines = m.renderCompletionDocPane(doc, innerWidth, innerHeight-titleRows-itemRows)
 	}
 
-	rowBudget := max(innerHeight-1-len(docLines), 0)
+	rowBudget := innerHeight - titleRows - len(docLines)
 	selected := m.effectiveCompletionIndex(completion)
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
@@ -517,9 +554,10 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 		lines = append(lines, m.zones.Mark(zoneIDCompletionItem(index), row))
 	}
 	lines = append(lines, docLines...)
-	lines = takeLines(lines, innerHeight)
+	if !framed {
+		return lines
+	}
 
-	// Wrap inner content in a rounded border matching the picker/which-key style.
 	content := strings.Join(lines, "\n")
 	bordered := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -533,15 +571,14 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 }
 
 // renderCompletionDocPane renders the selected item's documentation as a titled,
-// word-wrapped block below the completion list. It caps itself at roughly half
-// the remaining overlay budget so the item list stays usable; markdown is shown
-// as plain styled text for v1 (matching the GUI preview's plain rendering).
+// word-wrapped block below the completion list. The caller already reserves
+// item rows before passing the available documentation budget.
 func (m Model) renderCompletionDocPane(doc string, width int, budget int) []string {
 	if budget < 2 {
 		return nil
 	}
 	theme := m.palette()
-	paneBudget := max(min(budget/2, 6), 2)
+	paneBudget := min(budget, 6)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupMutedText()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	bodyStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
 
@@ -647,7 +684,13 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	}
 	end := min(start+rowBudget, len(picker.Items))
 	for index := start; index < end; index++ {
-		lines = append(lines, m.renderPickerItemRow(title, picker.Items[index], index == selected, width))
+		item := picker.Items[index]
+		row := m.renderPickerItemRow(title, item, index == selected, width)
+		if slot := index - start; slot < len(m.zones.picker.items) && item.ActivationID != 0 {
+			m.zones.picker.items[slot] = item.ActivationID
+			row = m.zones.Mark(pickerPointerZone(slot), row)
+		}
+		lines = append(lines, row)
 	}
 	for len(lines) < height {
 		lines = append(lines, panelStyle.Render(strings.Repeat(" ", max(width, 1))))

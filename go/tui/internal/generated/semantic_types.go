@@ -400,6 +400,8 @@ type GuiWindowContentScrollPresentation struct {
 	ContentEpoch          uint32
 	LayoutGeneration      uint32
 	ScrollSeq             uint32
+	HorizontalPanAck      uint32
+	HorizontalPanLimit    uint16
 }
 
 type GuiWindowContentAccessibility struct {

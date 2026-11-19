@@ -35,6 +35,22 @@ defmodule MingaEditor.State.ModalOverlay do
   @spec none() :: t()
   def none, do: :none
 
+  @doc "Returns a render-only modal value without sensitive prompt input."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(:none), do: :none
+
+  def render_snapshot({:prompt, %PromptPayload{} = payload} = modal) do
+    case PromptPayload.render_snapshot(payload) do
+      ^payload -> modal
+      snapshot -> {:prompt, snapshot}
+    end
+  end
+
+  def render_snapshot({:picker, %PickerPayload{}} = modal), do: modal
+  def render_snapshot({:completion, %CompletionPayload{}} = modal), do: modal
+  def render_snapshot({:command_completion, %CommandCompletionPayload{}} = modal), do: modal
+  def render_snapshot({:conflict, %ConflictPayload{}} = modal), do: modal
+
   @doc "Returns the active tag, or `:none`."
   @spec tag(t()) :: :none | variant()
   def tag(:none), do: :none

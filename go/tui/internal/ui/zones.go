@@ -39,6 +39,7 @@ type zoneManager struct {
 	zones           map[string]*zoneInfo
 	approvalMarkers map[string]struct{}
 	approvalRoots   map[string]struct{}
+	picker          pickerPointerZones
 }
 
 func newZoneManager() *zoneManager {
@@ -133,6 +134,7 @@ func (m *zoneManager) Get(id string) *zoneInfo {
 
 func (m *zoneManager) Scan(value string) string {
 	clear(m.approvalRoots)
+	m.picker = pickerPointerZones{}
 	out := make([]byte, 0, len(value))
 	line := make([]byte, 0, 128)
 	tracked := map[string]*zoneInfo{}

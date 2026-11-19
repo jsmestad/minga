@@ -4317,7 +4317,7 @@ private func decodeGutterEntries(data: Data, start: Int, end: Int, strict: Bool)
 }
 
 private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -> GUIScrollPresentation {
-    guard start + 39 <= end else { throw ProtocolDecodeError.malformed }
+    guard start + 45 == end else { throw ProtocolDecodeError.malformed }
 
     return GUIScrollPresentation(
         windowId: try readU16(data, start),
@@ -4332,7 +4332,10 @@ private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -
         contentEpoch: try readU32(data, start + 27),
         layoutGeneration: try readU32(data, start + 31),
         scrollSeq: try readU32(data, start + 35),
-        isWrapped: data[start + 2] & 0x02 != 0
+        isWrapped: data[start + 2] & 0x02 != 0,
+        canPanHorizontally: data[start + 2] & 0x04 != 0,
+        horizontalPanAck: try readU32(data, start + 39),
+        horizontalPanLimit: try readU16(data, start + 43)
     )
 }
 

@@ -422,6 +422,8 @@ defmodule Minga.Frontend.Adapter.GUI do
       window.full_refresh,
       window.scroll_left,
       window.scroll_seq,
+      window.horizontal_pan_ack,
+      window.horizontal_pan_limit,
       row_content_key(window),
       window.geometry
     })
@@ -438,6 +440,8 @@ defmodule Minga.Frontend.Adapter.GUI do
       window.content_epoch,
       window.full_refresh,
       window.scroll_left,
+      window.horizontal_pan_ack,
+      window.horizontal_pan_limit,
       # On the residence path the builder maintains an incremental digest of the
       # row set, so gate on it instead of re-hashing the (full-document) rows list
       # every frame. Off residence `content_digest` is nil and we hash `rows`

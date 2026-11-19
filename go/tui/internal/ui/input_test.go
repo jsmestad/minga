@@ -104,29 +104,6 @@ func TestTerminalInputParsesFragmentedSGRMouseTail(t *testing.T) {
 	}
 }
 
-func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		msg  tea.MouseMsg
-		want byte
-	}{
-		{name: "wheel right", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight}), want: 0x42},
-		{name: "wheel left", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelLeft}), want: 0x43},
-		{name: "shift wheel down", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift}), want: 0x42},
-		{name: "shift wheel up", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift}), want: 0x43},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := New(80, 24, nil).mousePacket(tc.msg)
-			if !ok {
-				t.Fatal("wheel should encode a mouse packet")
-			}
-			if packet[0] != generated.OPMouseEvent || packet[5] != tc.want {
-				t.Fatalf("mouse packet opcode/button = %#x/%#x, want mouse/%#x", packet[0], packet[5], tc.want)
-			}
-		})
-	}
-}
-
 // A held-button motion is a drag (event_type 0x03) and a free-pointer motion is
 // a hover (event_type 0x02). The BEAM only extends a selection on a drag, so the
 // distinction is load-bearing for drag selection (ticket #2229, AC2).
@@ -191,17 +168,6 @@ func TestSGRMouseTailDistinguishesDragFromMotion(t *testing.T) {
 	}
 }
 
-func TestTerminalInputPreservesShiftWheelSGRMouseTail(t *testing.T) {
-	mouse := normalizeTerminalInput(tea.KeyPressMsg(tea.Key{Code: tea.KeyExtended, Text: "<69;57;23M"})).(tea.MouseMsg)
-	packet, ok := New(80, 24, nil).mousePacket(mouse)
-	if !ok {
-		t.Fatal("SGR shift wheel tail should encode a mouse packet")
-	}
-	if packet[5] != 0x42 {
-		t.Fatalf("shift wheel-down should encode wheel-right button, got %#x", packet[5])
-	}
-}
-
 func TestPastePacketEncodesBracketedPasteAsPasteEvent(t *testing.T) {
 	packet := pastePacket(tea.PasteMsg{Content: "hello\nworld"})
 	if packet[0] != generated.OPPasteEvent {
@@ -240,13 +206,7 @@ func mouseCol(packet []byte) int16 {
 	return int16(uint16(packet[3])<<8 | uint16(packet[4]))
 }
 
-// tabBarModel builds a model whose header renders headerRows rows above the
-// editor body and refreshes the cached offset exactly as Update does after
-// applyCommands (ticket #2256). The header is always at least two rows (a tab
-// bar plus its separator connector), so headerRows must be >= 2; a wide
-// breadcrumb adds a third row. The chrome path is the realistic
-// source-of-truth check that the cached offset matches the rendered
-// headerLines.
+// tabBarModel mounts the same header chrome that a terminal grid can render.
 func tabBarModel(headerRows int) Model {
 	if headerRows < 1 {
 		panic("tabBarModel: tab bar is always at least one row")
@@ -262,6 +222,11 @@ func tabBarModel(headerRows int) Model {
 			Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}},
 		}
 	}
+	if headerRows == 3 {
+		chrome[generated.OPGuiWorkspaces] = protocol.ChromePayload{
+			Spaces: protocol.WorkspaceBar{Spaces: []protocol.Workspace{{ID: 1, Label: "one"}, {ID: 2, Label: "two"}}},
+		}
+	}
 	model.chrome = chrome
 	model.layout = model.computeLayout()
 	if model.layout.header.Height != headerRows {
@@ -272,8 +237,7 @@ func tabBarModel(headerRows int) Model {
 
 // TestMousePacketSubtractsHeaderOffset pins the outbound translation: a click on
 // the visually-Nth buffer line (terminal row N+headerHeight) must reach the BEAM
-// as editor row N, mirroring the inbound translation. Verified with the header
-// hidden (offset 0) and visible (one and two rows) (ticket #2256).
+// as grid row N, mirroring the inbound translation.
 func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -284,6 +248,7 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 		{name: "no header forwards row unchanged", offset: 0, terminalY: 5, wantRow: 5},
 		{name: "one header row subtracts one", offset: 1, terminalY: 5, wantRow: 4},
 		{name: "two header rows subtract two", offset: 2, terminalY: 5, wantRow: 3},
+		{name: "three header rows subtract three", offset: 3, terminalY: 5, wantRow: 2},
 		{name: "first body row maps to editor row zero", offset: 1, terminalY: 1, wantRow: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,7 +256,7 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 			// the rule is independent of whether headerLines can ever collapse to
 			// zero rows (it cannot today: there is always a title fallback).
 			model := New(120, 24, nil)
-			model.layout.header.Height = tc.offset
+			model.layout.grid.Y = tc.offset
 			msg := tea.MouseClickMsg(tea.Mouse{X: 7, Y: tc.terminalY, Button: tea.MouseLeft})
 			packet, ok := model.mousePacket(msg)
 			if !ok {
@@ -307,24 +272,21 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 	}
 }
 
-// TestMousePacketOffsetMirrorsRenderedHeader pins AC2: the offset subtracted
-// from outbound rows is the same headerLines height the renderer uses for the
-// frame on screen, sourced through the cache that Update refreshes after
-// applyCommands. With a tab bar and a wide breadcrumb the header is two rows,
-// so a click on visual line 4 (terminal row 5) reaches the BEAM as editor
-// row 3 (ticket #2256).
+// Mouse rows must use the physical origin of the rendered primary grid.
 func TestMousePacketOffsetMirrorsRenderedHeader(t *testing.T) {
-	model := tabBarModel(2)
-	if got, want := model.layout.header.Height, len(model.headerLines()); got != want {
-		t.Fatalf("cached offset = %d, rendered header height = %d; must match", got, want)
-	}
-	msg := tea.MouseClickMsg(tea.Mouse{X: 0, Y: 5, Button: tea.MouseLeft})
-	packet, ok := model.mousePacket(msg)
-	if !ok {
-		t.Fatal("body click should encode a mouse packet")
-	}
-	if got := mouseRow(packet); got != 3 {
-		t.Fatalf("encoded row = %d, want 3 (terminal row 5 minus two header rows)", got)
+	for _, rows := range []int{1, 2, 3} {
+		model := tabBarModel(rows)
+		if got, want := model.layout.grid.Y, len(model.headerLines()); got != want {
+			t.Fatalf("grid origin = %d, rendered header height = %d; must match", got, want)
+		}
+		msg := tea.MouseClickMsg(tea.Mouse{X: 0, Y: 5, Button: tea.MouseLeft})
+		packet, ok := model.mousePacket(msg)
+		if !ok {
+			t.Fatal("body click should encode a mouse packet")
+		}
+		if got, want := mouseRow(packet), int16(5-rows); got != want {
+			t.Fatalf("encoded row = %d with %d header rows, want %d", got, rows, want)
+		}
 	}
 }
 

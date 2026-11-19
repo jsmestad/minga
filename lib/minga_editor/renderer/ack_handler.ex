@@ -14,12 +14,10 @@ defmodule MingaEditor.Renderer.AckHandler do
       caches = Caches.acknowledge_frame(lease.output.caches, seq, generation)
       output = %{lease.output | caches: caches}
 
+      state = State.acknowledge_text_presentations(state, output)
       FrameHandler.send_receipt(state.editor_pid, output, seq, lease.attempt.intent)
 
-      state
-      |> State.acknowledge_text_presentations(output)
-      |> FrameHandler.commit_output(output)
-      |> FrameHandler.advance()
+      state |> FrameHandler.commit_output(output) |> FrameHandler.advance()
     else
       {:noreply, state}
     end

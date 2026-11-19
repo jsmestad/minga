@@ -1,17 +1,36 @@
 import CoreGraphics
+import MingaProtocol
 
 /// Pure geometry for the main editor's custom scroll track.
 ///
-/// Factored out of `EditorNSView` so the click/drag → target-line mapping can be
-/// unit-tested without AppKit (issue #2358). The live hit-testing and drag
-/// handling still live in `EditorNSView`; only this math is shared.
+/// Shared by the renderer and pointer handling so the thumb travels in the same
+/// coordinate space that a click or drag targets.
 enum EditorScrollTrack {
-    /// One authoritative scroll presentation shared by drawing and hit testing.
+    enum Coordinate: Equatable {
+        case logicalLine
+        case visualRank
+    }
+
+    /// The document extent, scrollable top range, and displayed position of one pane.
     struct Metrics: Equatable {
-        let totalLines: UInt32
+        let coordinate: Coordinate
+        let totalRows: UInt32
         let visibleRows: UInt32
-        let viewportTopLine: CGFloat
-        let resident: Bool
+        let displayedTop: CGFloat
+        let maxTop: UInt32
+        let presentsLocally: Bool
+
+        init(coordinate: Coordinate, totalRows: UInt32, visibleRows: UInt32, top: CGFloat,
+             maxTop: UInt32, presentsLocally: Bool) {
+            self.coordinate = coordinate
+            self.totalRows = totalRows
+            self.visibleRows = visibleRows
+            self.displayedTop = min(max(top, 0), CGFloat(maxTop))
+            self.maxTop = maxTop
+            self.presentsLocally = presentsLocally
+        }
+
+        var canScroll: Bool { maxTop > 0 && totalRows > visibleRows }
     }
 
     /// Geometry of the rendered scrollbar thumb within the editor track.
@@ -30,32 +49,45 @@ enum EditorScrollTrack {
     /// Wider than the drawn indicator so it is easy to grab.
     static let hitWidth: CGFloat = 20.0
 
-    /// Minimum thumb height, matching the renderer's 20px minimum translated into view coordinates.
+    /// Minimum thumb height in view points.
     static let minThumbHeight: CGFloat = 20.0
 
     /// Resolves scroll metrics from the active pane and the local transform used for this draw.
     static func metrics(
         surface: PresentedWindowSurface,
         localTransform: EditorLocalPresentationTransform?,
-        cellHeight: CGFloat
+        rowPitch: CGFloat
     ) -> Metrics? {
         let viewport = surface.paneGeometry.viewport
-        guard viewport.totalLines > 0, viewport.rows > 0, cellHeight > 0 else { return nil }
-        let scroll = surface.content.scrollPresentation
-        // Local wrapped-wheel transforms are visual ranks, not logical thumb positions.
-        let localOffset = scroll?.isWrapped != true && localTransform?.windowId == surface.windowId
-            ? localTransform?.offset.y ?? 0
-            : 0
-        let topLine = max(0, CGFloat(viewport.top) + localOffset / cellHeight)
-        let resident = scroll.map {
-            !$0.isWrapped && $0.overscanStartLine == 0 && $0.overscanEndLine >= viewport.totalLines
-        } ?? false
+        guard viewport.totalLines > 0, viewport.rows > 0, rowPitch > 0 else { return nil }
+        let visibleRows = UInt32(viewport.rows)
+        let localRows = localTransform.flatMap { transform in
+            transform.windowId == surface.windowId ? transform.offset.y / rowPitch : nil
+        } ?? 0
+        let content = surface.content
+        if let anchor = content.wrappedResidentAnchor, let maxTop = content.wrappedResidentMaxTop {
+            return Metrics(
+                coordinate: .visualRank, totalRows: viewport.totalVisualRows, visibleRows: visibleRows,
+                top: CGFloat(anchor) + localRows, maxTop: UInt32(maxTop), presentsLocally: true
+            )
+        }
+
+        // A wrapped windowed payload has no absolute rank. A logical thumb would
+        // claim a position and travel range that do not describe the displayed rows.
+        let scroll = content.scrollPresentation
+        guard scroll?.isWrapped != true, viewport.top != UInt32.max else { return nil }
+        let resident = isUnwrappedResident(scroll, totalLines: viewport.totalLines)
+        let maxTop = viewport.totalLines > visibleRows ? viewport.totalLines - (resident ? 1 : visibleRows) : 0
         return Metrics(
-            totalLines: viewport.totalLines,
-            visibleRows: UInt32(viewport.rows),
-            viewportTopLine: topLine,
-            resident: resident
+            coordinate: .logicalLine, totalRows: viewport.totalLines, visibleRows: visibleRows,
+            top: CGFloat(viewport.top) + localRows, maxTop: maxTop, presentsLocally: resident
         )
+    }
+
+    /// Unwrapped resident panes cover the whole document, including the last logical line.
+    static func isUnwrappedResident(_ scroll: GUIScrollPresentation?, totalLines: UInt32) -> Bool {
+        guard let scroll, !scroll.isWrapped, totalLines > 0 else { return false }
+        return scroll.overscanStartLine == 0 && scroll.overscanEndLine >= totalLines
     }
 
     /// Returns true when the editor should intercept a right-edge click for these metrics.
@@ -64,27 +96,20 @@ enum EditorScrollTrack {
         scrollIndicatorAlpha: Float,
         alwaysShowScrollbar: Bool
     ) -> Bool {
-        guard metrics.totalLines > metrics.visibleRows else { return false }
+        guard metrics.canScroll else { return false }
         return alwaysShowScrollbar || scrollIndicatorAlpha > 0
     }
 
     /// Computes thumb geometry from the same metrics used by renderer and pointer handling.
     static func thumb(
         viewHeight: CGFloat,
-        metrics: Metrics,
-        minThumbHeight: CGFloat = Self.minThumbHeight
+        metrics: Metrics
     ) -> Thumb? {
-        guard metrics.totalLines > metrics.visibleRows, viewHeight > 0 else { return nil }
-        let proportion = CGFloat(metrics.visibleRows) / CGFloat(metrics.totalLines)
+        guard metrics.canScroll, viewHeight > 0 else { return nil }
+        let proportion = CGFloat(metrics.visibleRows) / CGFloat(metrics.totalRows)
         let thumbHeight = min(viewHeight, max(proportion * viewHeight, minThumbHeight))
-        let travelHeight = max(viewHeight - thumbHeight, 0)
-        let maxTop = maxScrollableTop(
-            totalLines: metrics.totalLines,
-            visibleRows: metrics.visibleRows,
-            resident: metrics.resident
-        )
-        let clampedTopLine = min(metrics.viewportTopLine, CGFloat(maxTop))
-        let y = travelHeight > 0 ? (clampedTopLine / CGFloat(maxTop)) * travelHeight : 0
+        let travelHeight = viewHeight - thumbHeight
+        let y = metrics.displayedTop / CGFloat(metrics.maxTop) * travelHeight
         return Thumb(y: y, height: thumbHeight, travelHeight: travelHeight)
     }
 
@@ -95,99 +120,26 @@ enum EditorScrollTrack {
         return x >= trackX && x <= viewWidth
     }
 
-    /// Returns true when the editor should intercept a right-edge click for scroll-track interaction.
-    ///
-    /// The track only captures clicks when the document can actually scroll, the viewport top is valid,
-    /// and either the indicator is visible or the macOS scrollbar setting forces it to stay visible.
-    static func shouldCaptureTrackClick(
-        totalLines: UInt32,
-        visibleRows: UInt32,
-        viewportTopLine: UInt32,
-        scrollIndicatorAlpha: Float,
-        alwaysShowScrollbar: Bool
-    ) -> Bool {
-        guard totalLines > visibleRows else { return false }
-        guard viewportTopLine != 0xFFFF_FFFF else { return false }
-        return alwaysShowScrollbar || scrollIndicatorAlpha > 0
-    }
-
-    /// Computes the visible thumb geometry with the same sizing and travel range used by the renderer.
-    static func thumb(
-        viewHeight: CGFloat,
-        totalLines: UInt32,
-        visibleRows: UInt32,
-        viewportTopLine: UInt32,
-        resident: Bool = false,
-        minThumbHeight: CGFloat = Self.minThumbHeight
-    ) -> Thumb? {
-        guard totalLines > visibleRows, viewHeight > 0 else { return nil }
-        guard viewportTopLine != 0xFFFF_FFFF else { return nil }
-
-        return thumb(
-            viewHeight: viewHeight,
-            metrics: Metrics(
-                totalLines: totalLines,
-                visibleRows: visibleRows,
-                viewportTopLine: CGFloat(viewportTopLine),
-                resident: resident
-            ),
-            minThumbHeight: minThumbHeight
-        )
-    }
-
     /// Returns the pointer offset inside the current thumb when the pointer is grabbing the thumb.
     static func dragOffset(forY y: CGFloat, thumb: Thumb) -> CGFloat? {
         guard y >= thumb.y, y <= thumb.y + thumb.height else { return nil }
         return y - thumb.y
     }
 
-    /// Maps a drag pointer Y to a target top line while preserving the offset captured inside the thumb on mouse down.
-    static func line(
-        forDraggedY y: CGFloat,
-        dragOffset: CGFloat,
-        viewHeight: CGFloat,
-        totalLines: UInt32,
-        visibleRows: UInt32,
-        resident: Bool = false,
-        minThumbHeight: CGFloat = Self.minThumbHeight
-    ) -> UInt32 {
-        guard let thumb = thumb(
-            viewHeight: viewHeight,
-            totalLines: totalLines,
-            visibleRows: visibleRows,
-            viewportTopLine: 0,
-            resident: resident,
-            minThumbHeight: minThumbHeight
-        ) else { return 0 }
-        guard thumb.travelHeight > 0 else { return 0 }
-
-        let thumbY = max(0, min(thumb.travelHeight, y - dragOffset))
-        let proportion = thumbY / thumb.travelHeight
-        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows, resident: resident)
-        return UInt32(max(0, min(Int64(maxTop), Int64(Double(proportion) * Double(maxTop)))))
+    /// Maps a grabbed thumb's pointer position back to its absolute line or visual rank.
+    static func target(forDraggedY y: CGFloat, dragOffset: CGFloat, viewHeight: CGFloat, metrics: Metrics) -> UInt32 {
+        guard let thumb = thumb(viewHeight: viewHeight, metrics: metrics), thumb.travelHeight > 0 else { return 0 }
+        let fraction = min(max((y - dragOffset) / thumb.travelHeight, 0), 1)
+        let position = fraction * CGFloat(metrics.maxTop)
+        // Invert the displayed visual rank even if floating-point arithmetic leaves
+        // the result infinitesimally below an integer.
+        return UInt32(metrics.coordinate == .visualRank ? position.rounded() : position)
     }
 
-    /// Maps a track click Y within `viewHeight` to a target top line, clamped to the valid scroll range.
-    ///
-    /// `y` uses EditorNSView's flipped top-down coordinates, so 0 is the top of the view and
-    /// `viewHeight` is the bottom. Returns 0 when the document fits entirely on screen.
-    static func line(
-        forY y: CGFloat,
-        viewHeight: CGFloat,
-        totalLines: UInt32,
-        visibleRows: UInt32,
-        resident: Bool = false
-    ) -> UInt32 {
-        guard totalLines > visibleRows, viewHeight > 0 else { return 0 }
-
-        let clampedY = max(0, min(viewHeight, y))
-        let proportion = clampedY / viewHeight
-        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows, resident: resident)
-        return UInt32(max(0, min(Int64(maxTop), Int64(Double(proportion) * Double(maxTop)))))
-    }
-
-    static func maxScrollableTop(totalLines: UInt32, visibleRows: UInt32, resident: Bool) -> UInt32 {
-        let subtract: Int64 = resident ? 1 : Int64(visibleRows)
-        return UInt32(max(Int64(totalLines) - subtract, 1))
+    /// Maps a top-down track click to the absolute line or rank in the same scroll range.
+    static func target(forY y: CGFloat, viewHeight: CGFloat, metrics: Metrics) -> UInt32 {
+        guard metrics.canScroll, viewHeight > 0 else { return 0 }
+        let position = min(max(y / viewHeight, 0), 1) * CGFloat(metrics.maxTop)
+        return UInt32(metrics.coordinate == .visualRank ? position.rounded() : position)
     }
 }

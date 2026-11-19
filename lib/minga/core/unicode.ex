@@ -462,7 +462,7 @@ defmodule Minga.Core.Unicode do
   @spec do_truncate_display_width(String.t(), non_neg_integer(), non_neg_integer(), [String.t()]) ::
           String.t()
   defp do_truncate_display_width("", _max_width, _width, acc) do
-    acc |> Enum.reverse() |> IO.iodata_to_binary()
+    acc |> Enum.reverse() |> :binary.list_to_bin()
   end
 
   defp do_truncate_display_width(text, max_width, width, acc) do
@@ -471,13 +471,13 @@ defmodule Minga.Core.Unicode do
         next_width = width + grapheme_width(grapheme)
 
         if next_width > max_width do
-          acc |> Enum.reverse() |> IO.iodata_to_binary()
+          acc |> Enum.reverse() |> :binary.list_to_bin()
         else
           do_truncate_display_width(rest, max_width, next_width, [grapheme | acc])
         end
 
       nil ->
-        acc |> Enum.reverse() |> IO.iodata_to_binary()
+        acc |> Enum.reverse() |> :binary.list_to_bin()
     end
   end
 

@@ -418,6 +418,16 @@ func EncodeScrollBatch(windowID uint16, deltaLines int16, direction byte) []byte
 	}
 }
 
+// EncodeHorizontalPan sends a signed column displacement and its intent sequence.
+func EncodeHorizontalPan(windowID uint16, deltaCols int16, seq uint32) []byte {
+	return []byte{
+		generated.OPHorizontalPan,
+		byte(windowID >> 8), byte(windowID),
+		byte(uint16(deltaCols) >> 8), byte(deltaCols),
+		byte(seq >> 24), byte(seq >> 16), byte(seq >> 8), byte(seq),
+	}
+}
+
 func EncodePaste(text string) []byte {
 	payload := []byte(text)
 	if len(payload) > 65535 {

@@ -45,6 +45,20 @@ defmodule MingaEditor.UI.Picker.Scorer do
     |> Enum.map(fn {_score, candidate} -> candidate end)
   end
 
+  @doc "Returns all matching candidates in the same stable order as `top_k/3`."
+  @spec all_matches([Candidate.t()], [String.t()]) :: [Candidate.t()]
+  def all_matches(candidates, segments) do
+    candidates
+    |> Enum.reduce([], fn candidate, matches ->
+      case score_candidate(candidate, segments) do
+        0 -> matches
+        score -> [{score, candidate} | matches]
+      end
+    end)
+    |> Enum.sort(&better?/2)
+    |> Enum.map(&elem(&1, 1))
+  end
+
   @doc """
   Scores a single candidate against the query segments. Returns `0` when any
   segment fails to match. Mirrors the picker's historical scoring: a label

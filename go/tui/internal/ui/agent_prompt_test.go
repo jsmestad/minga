@@ -57,6 +57,8 @@ func decodedPromptCommand(t *testing.T, rows []protocol.WindowRow, cursorRow, cu
 	scroll = binary.BigEndian.AppendUint32(scroll, 17)
 	scroll = binary.BigEndian.AppendUint32(scroll, 3)
 	scroll = binary.BigEndian.AppendUint32(scroll, 4)
+	scroll = binary.BigEndian.AppendUint32(scroll, 0) // horizontal_pan_ack
+	scroll = binary.BigEndian.AppendUint16(scroll, 0) // horizontal_pan_limit
 	selected := []byte{selection.Type}
 	selected = binary.BigEndian.AppendUint16(selected, selection.StartRow)
 	selected = binary.BigEndian.AppendUint16(selected, selection.StartCol)
@@ -267,11 +269,17 @@ func TestPromptWheelUsesSourceGenerationWithoutLocalCaretOrTranscriptScroll(t *t
 	p, _ := model.agentPromptPlacement()
 	drainOutboundPackets(out)
 	beforeCursor, beforeBody := model.View().Cursor, model.content()
-	for _, button := range []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelUp} {
-		updated, _ := model.Update(tea.MouseWheelMsg(tea.Mouse{X: model.layout.body.X + p.col, Y: model.layout.body.Y + p.row, Button: button}))
+	for _, step := range []struct {
+		button tea.MouseButton
+		delta  int32
+	}{
+		{tea.MouseWheelDown, 1},
+		{tea.MouseWheelUp, -1},
+	} {
+		updated, _ := model.Update(tea.MouseWheelMsg(tea.Mouse{X: model.layout.body.X + p.col, Y: model.layout.body.Y + p.row, Button: step.button}))
 		model = updated.(Model)
 		packets := drainOutboundPackets(out)
-		assertPacketCount(t, packets, protocol.EncodeGUIAgentPromptScroll(protocol.AgentPromptScroll{WindowID: protocol.AgentPromptWindowID, Generation: 0x123456789, DeltaRows: int32(wheelDeltaSign(button))}), 1)
+		assertPacketCount(t, packets, protocol.EncodeGUIAgentPromptScroll(protocol.AgentPromptScroll{WindowID: protocol.AgentPromptWindowID, Generation: 0x123456789, DeltaRows: step.delta}), 1)
 		if len(packets) != 1 {
 			t.Fatalf("wheel leaked raw coordinate or editor scroll: %x", packets)
 		}

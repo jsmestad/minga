@@ -25,7 +25,11 @@ Set a hosted provider and catalog model:
 set :agent_model, "anthropic:claude-sonnet-4-20250514"
 ```
 
-Configure the matching credential with `/auth`, `/login` for OpenAI Codex, or the provider environment variable. Open `/model` to list the routes available for the credentials configured on the current machine.
+Open **Models and connections** from the Agent workspace to configure a credential without sending your draft. Choose **Sign in with ChatGPT** to open browser authorization, or use `/login` for the same local flow. Until authorization finishes, **Cancel connection setup** cancels that attempt without removing existing credentials.
+
+If your browser cannot open automatically, use **Open authorization link** or **Copy authorization link** in the picker. Approve the request, choose **Resume OpenAI sign-in**, then paste the redirect URL or code into the masked prompt. For an Agent workspace attached to another host, follow [the remote sign-in instructions](REMOTE_AGENTS.md#sign-in-on-a-headless-server).
+
+For other providers, choose the API-key action, run `/auth <provider>`, or use the provider environment variable. Open `/model` to list the routes available for the configured credentials.
 
 For a Codex subscription, `/model` checks the signed-in account's model list. A model in OpenAI's API catalog is not automatically available through Codex OAuth. If the check fails, the picker explains why it omitted Codex models and still shows routes for configured API keys. Reopen `/model` to refresh the account list used by slash completion.
 

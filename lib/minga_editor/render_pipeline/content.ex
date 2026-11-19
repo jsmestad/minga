@@ -14,8 +14,6 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias Minga.Core.Decorations
   alias Minga.Core.WidthOracle.Monospace
   alias Minga.Config
-  alias Minga.Core.Unicode
-  alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
   alias Minga.RenderModel.Window.RowSlotExhaustedError
   alias MingaEditor.FoldMap
@@ -23,6 +21,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias Minga.Telemetry
 
   alias MingaEditor.Renderer.Context
+  alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
@@ -194,6 +193,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       has_sign_column: scroll.has_sign_column,
       file_path: scroll.snapshot.file_path,
       options: scroll.snapshot.options,
+      visible_line_map: scroll.visible_line_map,
       decorations: scroll.snapshot.decorations,
       git_signs: scroll.git_signs,
       is_active: scroll.is_active,
@@ -218,14 +218,9 @@ defmodule MingaEditor.RenderPipeline.Content do
       is_active: is_active,
       viewport: viewport,
       cursor_line: cursor_line,
-      cursor_byte_col: cursor_byte_col,
       cursor_col: cursor_col,
-      first_line: first_line,
-      lines: lines,
       snapshot: snapshot,
       gutter_w: gutter_w,
-      content_w: content_w,
-      wrap_on: wrap_on,
       window: window
     } = scroll
 
@@ -233,15 +228,13 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     # Compute context fingerprint and check for context changes.
     # If any context input (visual selection, search, highlights, signs,
-    # horizontal scroll, active status) changed, all lines are dirty.
+    # or active status) changed, all lines are dirty.
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
-    # Resolve the active window's buffer cursor.
+    # Wrapped cursors are projected from the composed rows in the window model.
     buf_cursor =
-      if is_active and not (wrap_on and scroll.full_residence) do
-        # When folds are active, viewport.top is in visible-line coordinates.
-        # Convert cursor_line from buffer to visible for correct screen position.
+      if is_active and not scroll.wrap_on do
         visible_cursor =
           if FoldMap.empty?(window.fold_map) do
             cursor_line
@@ -249,36 +242,14 @@ defmodule MingaEditor.RenderPipeline.Content do
             FoldMap.buffer_to_visible(window.fold_map, cursor_line)
           end
 
-        {screen_row_delta, visual_row_byte_offset, visual_row_indent_width} =
-          cursor_visual_position(%{
-            wrap_on: wrap_on,
-            lines: lines,
-            first_line: first_line,
-            cursor_line: cursor_line,
-            cursor_byte_col: cursor_byte_col,
-            content_w: content_w,
-            viewport: viewport,
-            options: snapshot.options,
-            oracle: render_ctx.width_oracle,
-            visible_line_map: scroll.visible_line_map
-          })
-
-        cr = max(visible_cursor - viewport.top + screen_row_delta + row_off, 0)
-
-        # Adjust cursor column for inline virtual text that shifts content right
-        adjusted_cursor_col =
+        adjusted_col =
           Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
 
-        cursor_line_text = cursor_text_from_snapshot(lines, cursor_line, first_line)
-        visual_row_col = Unicode.display_col(cursor_line_text, visual_row_byte_offset)
-
-        cc =
-          gutter_w + visual_row_indent_width + adjusted_cursor_col - visual_row_col -
-            viewport.left + col_off
-
-        Cursor.new(cr, cc, Minga.Editing.cursor_shape(state))
-      else
-        nil
+        if Viewport.includes_column?(viewport, adjusted_col, scroll.content_w) do
+          row = max(visible_cursor - viewport.top + row_off, 0)
+          col = gutter_w + adjusted_col - viewport.left + col_off
+          Cursor.new(row, col, Minga.Editing.cursor_shape(state))
+        end
       end
 
     # Build the canonical window model; TUI adapts it to cells at the frontend boundary.
@@ -288,7 +259,10 @@ defmodule MingaEditor.RenderPipeline.Content do
       build_window_model_with_slot_reset(state, scroll, window, render_ctx, plan)
 
     {window_model, window, viewport, buf_cursor} =
-      finalize_wrapped_resident(window_model, window, scroll, buf_cursor)
+      finalize_buffer_presentation(window_model, window, scroll, buf_cursor)
+
+    presentation =
+      TextPresentation.settle_scroll(build_result.text_presentation, window_model.scroll_seq)
 
     window =
       window
@@ -296,7 +270,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       |> Window.put_retained_wrap_lines(build_result.retained_wrap_lines)
       |> Window.put_resident_build(build_result.resident_build)
       |> Window.put_resident_semantic_state(build_result.resident_semantic_state)
-      |> Window.put_text_presentation(build_result.text_presentation)
+      |> Window.put_text_presentation(presentation)
       |> Window.put_row_slot_allocator(build_result.row_slot_allocator)
 
     state =
@@ -326,13 +300,13 @@ defmodule MingaEditor.RenderPipeline.Content do
     {window_content, cursor_info, state}
   end
 
-  @spec finalize_wrapped_resident(
+  @spec finalize_buffer_presentation(
           Minga.RenderModel.Window.t(),
           Window.t(),
           WindowScroll.t(),
           Cursor.t() | nil
         ) :: {Minga.RenderModel.Window.t(), Window.t(), Viewport.t(), Cursor.t() | nil}
-  defp finalize_wrapped_resident(
+  defp finalize_buffer_presentation(
          model,
          window,
          %WindowScroll{wrap_on: true, full_residence: true} = scroll,
@@ -350,94 +324,32 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     window = window |> Window.set_viewport(viewport) |> Window.settle_scroll_seq()
     model = %{model | scroll_seq: Window.scroll_seq(window)}
-    {row, col, _width, _height} = scroll.win_layout.content
-
-    cursor =
-      if scroll.is_active and model.cursor_visible,
-        do:
-          Cursor.new(
-            row + model.cursor_row,
-            col + scroll.gutter_w + model.cursor_col,
-            model.cursor_shape
-          )
-
-    {model, window, viewport, cursor}
+    {model, window, viewport, wrapped_model_cursor(model, scroll)}
   end
 
-  defp finalize_wrapped_resident(model, window, scroll, cursor),
-    do: {model, window, scroll.viewport, cursor}
+  defp finalize_buffer_presentation(
+         model,
+         window,
+         %WindowScroll{wrap_on: true} = scroll,
+         _cursor
+       ),
+       do: {model, window, scroll.viewport, wrapped_model_cursor(model, scroll)}
 
-  @spec cursor_visual_position(map()) :: {integer(), non_neg_integer(), non_neg_integer()}
-  defp cursor_visual_position(%{wrap_on: false}), do: {0, 0, 0}
+  defp finalize_buffer_presentation(model, window, scroll, cursor) do
+    viewport = Viewport.put_horizontal_pan_limit(scroll.viewport, model.horizontal_pan_limit)
+    {model, Window.set_viewport(window, viewport), viewport, cursor}
+  end
 
-  defp cursor_visual_position(%{wrap_on: true, visible_line_map: visible_line_map})
-       when is_list(visible_line_map), do: {0, 0, 0}
+  defp wrapped_model_cursor(model, scroll) do
+    if scroll.is_active and model.cursor_visible do
+      {row, col, _width, _height} = scroll.win_layout.content
 
-  defp cursor_visual_position(%{
-         wrap_on: true,
-         lines: lines,
-         first_line: first_line,
-         cursor_line: cursor_line,
-         cursor_byte_col: cursor_byte_col,
-         content_w: content_w,
-         viewport: viewport,
-         options: options,
-         oracle: oracle
-       }) do
-    line_idx = cursor_line - first_line
-
-    if line_idx >= 0 and line_idx < Enum.count(lines) do
-      wrap_map = wrap_map_for_cursor(lines, line_idx, content_w, options, oracle)
-
-      cursor_entry =
-        Enum.at(wrap_map, line_idx, [
-          %{byte_offset: 0, text: "", source_text: "", indent_width: 0}
-        ])
-
-      visual_row_idx = visual_row_index(cursor_entry, cursor_byte_col)
-      rows_before = wrap_map |> Enum.take(line_idx) |> WrapMap.visual_row_count()
-      logical_delta = cursor_line - viewport.top
-      screen_delta = rows_before + visual_row_idx - viewport.visual_row_offset - logical_delta
-
-      cursor_row =
-        Enum.at(cursor_entry, visual_row_idx, %{
-          byte_offset: 0,
-          text: "",
-          source_text: "",
-          indent_width: 0
-        })
-
-      {screen_delta, cursor_row.byte_offset, Map.get(cursor_row, :indent_width, 0)}
-    else
-      {0, 0, 0}
+      Cursor.new(
+        row + model.cursor_row,
+        col + scroll.gutter_w + model.cursor_col,
+        model.cursor_shape
+      )
     end
-  end
-
-  @spec wrap_map_for_cursor(
-          [String.t()],
-          non_neg_integer(),
-          pos_integer(),
-          %{atom() => term()},
-          Minga.Core.WidthOracle.t()
-        ) :: WrapMap.t()
-  defp wrap_map_for_cursor(lines, line_idx, content_w, options, oracle) do
-    relevant_lines = Enum.take(lines, line_idx + 1)
-
-    WrapMap.compute(relevant_lines, content_w,
-      breakindent: Map.get(options, :breakindent, true),
-      linebreak: Map.get(options, :linebreak, true),
-      oracle: oracle,
-      tab_width: Map.get(options, :tab_width, 2)
-    )
-  end
-
-  @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
-  defp visual_row_index(wrap_entry, cursor_byte_col) do
-    wrap_entry
-    |> Enum.with_index()
-    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_byte_col end)
-    |> Enum.at(-1, {%{byte_offset: 0}, 0})
-    |> elem(1)
   end
 
   defp maybe_render_agent_window(
@@ -625,15 +537,5 @@ defmodule MingaEditor.RenderPipeline.Content do
   @spec update_agent_scroll_metrics(state(), non_neg_integer(), pos_integer()) :: state()
   defp update_agent_scroll_metrics(state, total_lines, visible_height) do
     Input.record_agent_scroll_metrics(state, total_lines, visible_height)
-  end
-
-  defp cursor_text_from_snapshot(lines, cursor_line, first_line) do
-    idx = cursor_line - first_line
-
-    if idx >= 0 and idx < Enum.count(lines) do
-      Enum.at(lines, idx, "")
-    else
-      ""
-    end
   end
 end

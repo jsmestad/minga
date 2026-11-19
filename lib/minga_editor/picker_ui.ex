@@ -323,7 +323,11 @@ defmodule MingaEditor.PickerUI do
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
 
     picker =
-      Picker.new(items, title: Source.title(source_module, callback_source), max_visible: max_vis)
+      Picker.new(items,
+        title: Source.title(source_module, callback_source),
+        max_visible: max_vis,
+        results: picker_results(source_module)
+      )
 
     new_state = clear_whichkey(state)
     layout = MingaEditor.UI.Picker.Source.layout(source_module, callback_source)
@@ -345,6 +349,10 @@ defmodule MingaEditor.PickerUI do
       {:picker, PickerPayload.new(picker_state)}
     )
   end
+
+  @spec picker_results(module()) :: :bounded | :all
+  defp picker_results(MingaEditor.UI.Picker.CommandHelpSource), do: :all
+  defp picker_results(_source), do: :bounded
 
   @spec clear_whichkey(state()) :: state()
   defp clear_whichkey(state),

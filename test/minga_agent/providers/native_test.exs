@@ -1617,7 +1617,7 @@ defmodule MingaAgent.Providers.NativeTest do
                   reasoning_details: [reasoning]
                 })
               ],
-              %{},
+              %{total_cost: 0.001},
               %{response_id: "resp_native_1"}
             )
 
