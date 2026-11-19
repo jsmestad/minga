@@ -236,6 +236,18 @@ defmodule Mix.Tasks.App.Assemble do
       {output, _} -> Mix.raise("Failed to copy release: #{output}")
     end
 
+    # Keep launch mode identifiable even if the installed release is missing.
+    info_plist = Path.join([app_bundle_path, "Contents", "Info.plist"])
+
+    case System.cmd(
+           "plutil",
+           ["-replace", "MingaEmbeddedCore", "-bool", "YES", info_plist],
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {output, _} -> Mix.raise("Failed to record the embedded release in Info.plist: #{output}")
+    end
+
     :ok
   end
 

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import struct
 import subprocess
@@ -66,6 +67,7 @@ class ReleaseContentsTest(unittest.TestCase):
         self.put(self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so", header(target))
         self.put(self.release / "erts-17.1.2/bin/beam.smp", header(target), True)
         self.put(self.release / "bin/minga", b"#!/bin/sh\n", True)
+        self.put(self.release / "launchers/minga", b"#!/bin/sh\n", True)
         self.put(self.release / "releases/start_erl.data", b"17.1.2 0.1.0\n")
         self.put(self.release / "releases/0.1.0/start.boot")
         for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"):
@@ -103,14 +105,13 @@ class ReleaseContentsTest(unittest.TestCase):
                         self.put(self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so", universal)
                         self.run_checker()
 
-    def test_universal_membership_applies_to_helpers_and_outer_binary(self):
+    def test_universal_membership_applies_to_standalone_native_helpers(self):
         self.target = "macos_aarch64"
         self.fixture(self.target)
         universal = fat_header(("macos_x86_64", "macos_aarch64"))
         for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"):
             self.put(self.priv / name, universal, True)
-        binary = self.put(self.root / "standalone", universal, True)
-        self.run_checker("--binary", binary)
+        self.run_checker()
 
     def test_big_endian_actual_macho_slice_headers_are_verified(self):
         self.target = "macos_aarch64"
@@ -260,11 +261,14 @@ class ReleaseContentsTest(unittest.TestCase):
         (self.release / "external").symlink_to(self.root / "outside")
         self.run_checker(success=False)
 
-    def test_wrapper_actual_header_is_required(self):
-        binary = self.put(self.root / "minga_linux_x86_64", header("linux_aarch64"), True)
-        self.run_checker("--binary", binary, success=False)
-        self.put(binary, header(self.target), True)
-        self.run_checker("--binary", binary)
+    def test_standalone_public_launcher_must_be_executable(self):
+        launcher = self.release / "launchers/minga"
+        launcher.chmod(0o644)
+        result = self.run_checker(success=False)
+        self.assertIn("launchers/minga", result.stderr)
+        launcher.unlink()
+        result = self.run_checker(success=False)
+        self.assertIn("launchers/minga", result.stderr)
 
     def app_fixture(self):
         self.target = "macos_aarch64"
@@ -276,6 +280,7 @@ class ReleaseContentsTest(unittest.TestCase):
         self.priv = destination / "lib/minga-0.1.0/priv"
         self.fixture(self.target)
         self.put(destination / "bin/minga_macos", b"#!/bin/sh\n", True)
+        (destination / "launchers/minga").unlink()
         self.put(app / "Contents/Info.plist", plistlib.dumps({"CFBundleShortVersionString": "0.1.0", "CFBundleExecutable": "Minga", "LSMinimumSystemVersion": "15.0"}))
         for name in ("Resources/default.metallib", "Resources/Assets.car", "Resources/Fonts/font.ttf"):
             self.put(app / "Contents" / name)
@@ -317,16 +322,22 @@ class ReleaseContentsTest(unittest.TestCase):
                 self.put(info_path, plistlib.dumps(info))
                 self.run_checker("--app", app, success=False)
 
-
     def runtime_receipt(self):
         os_name, arch = self.target.split("_", 1)
-        helper = {"x86_64": "71c35316aff45bbfd243d8eb9bfc4a58b6eb97cee09514cd2030e145b68107fb",
-                  "aarch64": "6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e"}[arch]
-        receipt = {"version": 1, "kind": "local-source-build", "os": os_name, "arch": arch,
-                   "otp_version": "29.1.2", "erts_version": "17.1.1",
-                   "minimum_macos": "15.0" if os_name == "macos" else None,
-                   "musl_version": "1.2.5" if os_name == "linux" else None,
-                   "abi": {"interpreter": f"/tmp/libc-musl-{helper}.so", "musl_sha256": helper}}
+        is_linux = os_name == "linux"
+        minimum = None if is_linux else "15.0"
+        interpreters = {"x86_64": "/lib64/ld-linux-x86-64.so.2", "aarch64": "/lib/ld-linux-aarch64.so.1"}
+        receipt = {"version": 2, "kind": "local-source-build", "os": os_name, "arch": arch,
+                   "otp_version": "29.1.2", "erts_version": "17.1.1", "minimum_macos": minimum,
+                   "abi": {"interpreter": interpreters[arch] if is_linux else None,
+                           "external_dependencies": [], "minimum_macos": minimum}}
+        if is_linux:
+            receipt["build_environment"] = {"kind": "native-ubuntu", "host_arch": arch, "os_id": "ubuntu",
+                                            "os_version": "24.04", "glibc_version": "2.39", "cc_version": "gcc fixture"}
+            receipt["abi"]["external_dependencies"] = [
+                {"file": f"erts-17.1.1/bin/{name}", "libraries": ["libc.so.6"]}
+                for name in ("beam.smp", "erlexec")
+            ]
         path = self.root / "runtime-receipt.json"
         path.write_text(json.dumps(receipt))
         return path
@@ -345,10 +356,16 @@ class ReleaseContentsTest(unittest.TestCase):
             command.append(f"-mmacosx-version-min={minimum}")
         compiled = subprocess.run(command, capture_output=True, text=True, timeout=20)
         self.assertEqual(compiled.returncode, 0, compiled.stderr)
-        for path in [self.release / "erts-17.1.1/bin/beam.smp",
-                     self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so",
+        sqlite = self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so"
+        for path in [self.release / "erts-17.1.1/bin/beam.smp", self.release / "erts-17.1.1/bin/erlexec",
                      *(self.priv / name for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"))]:
             shutil.copy2(binary, path)
+        if os_name == "linux":
+            built = subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(sqlite)],
+                                   capture_output=True, text=True, timeout=20)
+            self.assertEqual(built.returncode, 0, built.stderr)
+        else:
+            shutil.copy2(binary, sqlite)
 
     @unittest.skipUnless(platform.system() == "Darwin", "Native Mach-O dependency checks require macOS")
     def test_relative_native_dependency_is_relocatable(self):
@@ -390,9 +407,45 @@ class ReleaseContentsTest(unittest.TestCase):
         self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
 
     @unittest.skipUnless(platform.system() == "Linux", "Native ELF dependency checks require Linux")
-    def test_glibc_runtime_cannot_claim_musl_closure(self):
+    def test_ubuntu_glibc_package_requires_matching_receipt_baseline_and_elf_dependencies(self):
         self.native_fixture()
-        self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
+        path = self.runtime_receipt()
+        self.run_checker("--runtime-receipt", path)
+        receipt = json.loads(path.read_text())
+        receipt["abi"]["external_dependencies"][0]["libraries"].append("libm.so.6")
+        path.write_text(json.dumps(receipt))
+        result = self.run_checker("--runtime-receipt", path, success=False)
+        self.assertIn("inventory differs", result.stderr)
+        receipt["abi"]["external_dependencies"][0]["libraries"].pop()
+        receipt["build_environment"]["glibc_version"] = "2.40"
+        path.write_text(json.dumps(receipt))
+        result = self.run_checker("--runtime-receipt", path, success=False)
+        self.assertIn("Ubuntu glibc interpreter/baseline", result.stderr)
+
+    @unittest.skipUnless(platform.system() == "Linux", "Native ELF dependency checks require Linux")
+    def test_linux_final_bytes_reject_wrong_loader_and_build_root_search_path(self):
+        self.native_fixture()
+        receipt = self.runtime_receipt()
+        beam = self.release / "erts-17.1.1/bin/beam.smp"
+        for option, expected in (("--dynamic-linker=/tmp/private-loader.so", "unqualified glibc interpreter"),
+                                 ("-rpath,/opt/build-libs", "native library search path")):
+            with self.subTest(option=option):
+                built = subprocess.run(["cc", str(self.root / "native.c"), f"-Wl,{option}", "-o", str(beam)],
+                                       capture_output=True, text=True, timeout=20)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                self.assertIn(expected, self.run_checker("--runtime-receipt", receipt, success=False).stderr)
+
+    @unittest.skipUnless(platform.system() == "Linux", "Native ELF dependency checks require Linux")
+    def test_linux_sqlite_nif_cannot_require_glibc_newer_than_baseline(self):
+        self.native_fixture()
+        sqlite = self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so"
+        data = sqlite.read_bytes()
+        version = re.search(rb"GLIBC_2\.\d+(?:\.\d+)?\x00", data)
+        self.assertIsNotNone(version)
+        original = version.group()
+        sqlite.write_bytes(data.replace(original, b"GLIBC_9" + original[len(b"GLIBC_2"):]))
+        result = self.run_checker("--runtime-receipt", self.runtime_receipt(), success=False)
+        self.assertIn("exceeds the qualified glibc ABI", result.stderr)
 
     def test_malformed_source_receipt_is_an_explicit_failure(self):
         path = self.put(self.root / "invalid-receipt.json", b"[]\n")

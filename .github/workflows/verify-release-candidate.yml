@@ -117,7 +117,7 @@ jobs:
               page += 1
           check(any(item["id"] == manifest_id for item in artifacts), "Exact manifest artifact is missing/deleted; no substitution")
           release_candidate.validate_context(context)
-          release_candidate.validate_artifacts(artifacts, context, [*release_candidate.PAYLOADS, "checksums", "manifest"])
+          release_candidate.verification_artifacts(artifacts, context)
           # Fetch each immutable ID again. Deleted/expired inputs stop here; names are only inventory constraints, never download selectors.
           current = []
           downloads = Path("downloads")

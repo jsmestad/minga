@@ -2,20 +2,14 @@ defmodule Minga.Mix.ProtocolGenerator do
   @moduledoc """
   Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, `zig/src/generated/` for Zig, and `go/tui/internal/generated/` for the Go TUI. The generated Zig public export block in `zig/src/protocol.zig` is also refreshed from the schema.
+  The schema is the source of truth. Elixir and Go consume checked-in outputs; Swift and Zig generate their ignored build inputs on demand. The generator also refreshes the public export block in `zig/src/protocol.zig`.
   """
 
   @schema_path "docs/protocol_schema.toml"
-  @generated_root ".generated/protocol"
-  @generated_elixir_path Path.join([@generated_root, "elixir/lib/minga/protocol/opcodes.ex"])
-  @generated_golden_fields_path Path.join([
-                                  @generated_root,
-                                  "elixir/lib/minga/protocol/golden_fields.ex"
-                                ])
-  @generated_encode_path Path.join([
-                           @generated_root,
-                           "elixir/lib/minga/protocol/encode.ex"
-                         ])
+  @generated_root "generated/elixir"
+  @generated_elixir_path Path.join(@generated_root, "opcodes.ex")
+  @generated_golden_fields_path Path.join(@generated_root, "golden_fields.ex")
+  @generated_encode_path Path.join(@generated_root, "encode.ex")
   @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_swift_consumers_path "macos/.generated/protocol/ProtocolConsumers.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
@@ -72,17 +66,9 @@ defmodule Minga.Mix.ProtocolGenerator do
     end
   end
 
-  @doc "Files whose change requires regenerating protocol artifacts."
-  @spec source_paths() :: [Path.t()]
-  def source_paths, do: [@schema_path, @protocol_zig_path, Path.relative_to_cwd(__ENV__.file)]
-
   @doc "Every artifact written by `run/2`, excluding the in-place `protocol.zig` export block."
   @spec generated_paths() :: [Path.t()]
   def generated_paths, do: Enum.map(renderers(true), &elem(&1, 0))
-
-  @doc "Sources plus outputs: every file whose content decides whether generation must run again."
-  @spec tracked_paths() :: [Path.t()]
-  def tracked_paths, do: source_paths() ++ generated_paths()
 
   @spec ensure_generator_deps_loaded!() :: :ok
   defp ensure_generator_deps_loaded! do

@@ -23,10 +23,15 @@ git clone https://github.com/jsmestad/minga.git
 cd minga
 asdf install          # Installs pinned Erlang, Elixir, Zig from .tool-versions
 mix deps.get
-mix compile           # Builds both Elixir and Zig
+mix compile
+make native.support   # Build the native parser and helper binaries
 ```
 
 The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are incremental and fast.
+
+### Refresh generated sources
+
+Run `mix codegen` after changing `docs/protocol_schema.toml`, `config/language_aliases.json`, or either generator. Commit the refreshed Elixir and Go files and the Zig export block if they changed. Swift and Zig build inputs remain ignored. CI regenerates the sources on a clean checkout and rejects any tracked changes, missing generated files, or obsolete files in `generated/elixir/`. Ordinary `mix compile` reads the checked-in Elixir files without running either generator.
 
 ### Run it
 

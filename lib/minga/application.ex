@@ -71,8 +71,7 @@ defmodule Minga.Application do
       │   └── MingaAgent.ArtifactStores.StoreSupervisor
       └── Minga.SystemObserver               (always-on process observer)
 
-  In standalone Burrito mode, or when the macOS app's bundled TUI wrapper is
-  used, automatically processes CLI arguments after the supervision tree is up.
+  The standalone TUI launcher processes CLI arguments after the supervision tree is up.
   """
 
   use Application
@@ -286,9 +285,7 @@ defmodule Minga.Application do
 
   @spec start_editor?() :: boolean()
   defp start_editor? do
-    Application.get_env(:minga, :start_editor, false) or
-      (Burrito.Util.running_standalone?() and not standalone_headless?() and
-         not standalone_terminal_command?())
+    Application.get_env(:minga, :start_editor, false)
   end
 
   @spec maybe_prepare_cli_startup() :: :ok
@@ -307,7 +304,7 @@ defmodule Minga.Application do
 
   @spec standalone_cli?() :: boolean()
   defp standalone_cli? do
-    Burrito.Util.running_standalone?() or System.get_env("MINGA_STANDALONE_TUI") == "1"
+    System.get_env("MINGA_STANDALONE_TUI") == "1"
   end
 
   @spec minimal_mode?() :: boolean()
@@ -324,24 +321,6 @@ defmodule Minga.Application do
     :ok
   rescue
     _ -> :ok
-  end
-
-  @spec standalone_headless?() :: boolean()
-  defp standalone_headless? do
-    Minga.CLI.headless_args?(Minga.CLI.argv())
-  rescue
-    error ->
-      Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
-      false
-  end
-
-  @spec standalone_terminal_command?() :: boolean()
-  defp standalone_terminal_command? do
-    Minga.CLI.terminal_command?(Minga.CLI.argv())
-  rescue
-    error ->
-      Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
-      false
   end
 
   @spec standalone_minimal?() :: boolean()
