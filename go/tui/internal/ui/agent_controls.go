@@ -56,6 +56,7 @@ func (m Model) agentDisplayedControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 	for _, control := range [...]struct{ zone, command string }{
 		{zoneIDAgentModel, "agent_pick_model"},
 		{zoneIDAgentHeaderHelp, "agent_toggle_help"},
+		{zoneIDAgentHistory, "agent_retained_history"},
 	} {
 		if zone := m.zones.Get(control.zone); zone != nil && zone.InBounds(msg) {
 			return protocol.EncodeGUIExecuteCommand(control.command), true

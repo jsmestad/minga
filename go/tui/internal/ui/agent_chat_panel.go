@@ -246,7 +246,7 @@ func (m Model) renderAgentTranscriptHeader(width int) string {
 
 func (m Model) renderAgentEarlierMessagesHidden(width int) string {
 	p := m.palette()
-	label := " earlier messages hidden "
+	label := " earlier messages hidden · open History "
 	return lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width).Align(lipgloss.Center).Render(fit(label, width))
 }
 
@@ -326,6 +326,10 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 		helpLabel = "?"
 	}
 	help := m.zones.Mark(zoneIDAgentHeaderHelp, muted.Render(helpLabel))
+	if width >= 34 {
+		history := m.zones.Mark(zoneIDAgentHistory, muted.Render("[History]"))
+		help = history + " " + help
+	}
 	helpWidth := lipgloss.Width(help)
 	if width <= helpWidth {
 		return base.Render(help)

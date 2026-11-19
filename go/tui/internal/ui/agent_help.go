@@ -12,6 +12,7 @@ import (
 const (
 	zoneIDAgentHeaderHelp = "agent:header-help"
 	zoneIDAgentHelpClose  = "agent:help-close"
+	zoneIDAgentHistory    = "agent:history"
 )
 
 func (m Model) agentHelp() (protocol.AgentHelp, bool) {

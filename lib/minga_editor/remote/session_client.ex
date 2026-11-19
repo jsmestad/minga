@@ -5,6 +5,7 @@ defmodule MingaEditor.Remote.SessionClient do
   alias MingaAgent.RemoteAPI.AttachResult
   alias MingaAgent.RemoteAPI.SessionInfo
   alias MingaAgent.Session
+  alias MingaAgent.Session.{ConnectionTarget, Transcript}
   alias MingaAgent.SessionStore
 
   @type remote_node :: node()
@@ -114,6 +115,24 @@ defmodule MingaEditor.Remote.SessionClient do
   def stop_session(remote_node, session_id) when is_atom(remote_node) and is_binary(session_id) do
     with {:ok, token} <- session_token(remote_node, session_id) do
       erpc(remote_node, :stop_session, [session_id, token], 5_000)
+    end
+  end
+
+  @doc "Reads a bounded retained transcript page through the remote session broker."
+  @spec transcript_history_before(
+          ConnectionTarget.t(),
+          ConnectionTarget.t() | Transcript.Cursor.t(),
+          pos_integer() | :tail,
+          1..64
+        ) :: Transcript.history_result() | {:error, term()}
+  def transcript_history_before(
+        %ConnectionTarget{session: pid, session_id: id} = target,
+        source,
+        anchor,
+        limit
+      ) do
+    with {:ok, token} <- session_token(node(pid), id) do
+      erpc(node(pid), :transcript_history_before, [target, token, source, anchor, limit], 5_000)
     end
   end
 

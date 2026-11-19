@@ -1,15 +1,57 @@
 defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Project.Root
   alias Minga.RenderModel.UI.Picker
+  alias MingaAgent.Session
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.State.Picker, as: PickerUIState
+  alias MingaEditor.UI.Picker.AgentHistorySource
+  alias MingaEditor.UI.Picker.Context, as: PickerContext
   alias MingaEditor.UI.Picker, as: PickerState
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectFileCandidate
+
+  test "Unicode-heavy retained history and its selected preview fit the shared wire frame" do
+    session =
+      start_supervised!({Session, provider: Minga.Test.SessionMockProvider, persist?: false})
+
+    text = String.duplicate("👨‍👩‍👧‍👦", 3_000)
+
+    for _ <- 1..25, do: :ok = Session.add_system_message(session, text)
+    %{connection: %{target: target}} = Session.editor_snapshot(session)
+
+    context =
+      TestHelpers.base_state(port_manager: nil)
+      |> PickerContext.from_editor_state(%{origin: {1, target}, source: target, anchor: :tail})
+
+    assert {:ok, [earlier | retained] = items, _meta} = AgentHistorySource.async_fetch(context)
+    assert earlier.label == "Earlier retained messages"
+    assert length(retained) == 24
+
+    picker =
+      items
+      |> PickerState.new(title: AgentHistorySource.title(), max_visible: length(items))
+      |> PickerState.move_down()
+
+    model =
+      picker
+      |> picker_modal(AgentHistorySource, nil, "", :ready)
+      |> build_context()
+      |> PickerBuilder.build()
+
+    assert length(model.items) == 25
+    assert [[{preview, _, false}], [{notice, _, false}]] = model.preview_lines
+    assert String.valid?(preview)
+    assert String.starts_with?(text, preview)
+    assert notice =~ "copy the full text"
+    packet = PickerEncoder.encode_command(model)
+    assert :binary.match(packet, preview) != :nomatch
+    assert :binary.match(packet, notice) != :nomatch
+  end
 
   describe "build/1" do
     test "returns hidden picker when modal is not a picker" do

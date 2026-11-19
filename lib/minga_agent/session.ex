@@ -407,6 +407,17 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:transcript_since, cursor})
   end
 
+  @doc "Reads a bounded history page for an exact conversation target or transcript cursor."
+  @spec transcript_history_before(
+          GenServer.server(),
+          ConnectionTarget.t() | Transcript.Cursor.t(),
+          pos_integer() | :tail,
+          1..64
+        ) :: Transcript.history_result() | {:error, :stale_target}
+  def transcript_history_before(session, source, anchor, limit) do
+    GenServer.call(session, {:transcript_history_before, source, anchor, limit})
+  end
+
   @doc """
   Resolves the exact session, admitted request and tool approval shown by a control.
 
@@ -1163,6 +1174,25 @@ defmodule MingaAgent.Session do
 
   def handle_call({:transcript_since, cursor}, _from, state) do
     {:reply, Transcript.since(state.transcript, cursor), state}
+  end
+
+  def handle_call(
+        {:transcript_history_before, %ConnectionTarget{} = target, anchor, limit},
+        _from,
+        state
+      ) do
+    case validate_connection_target(state, target) do
+      :ok ->
+        cursor = Transcript.cursor(state.transcript)
+        {:reply, Transcript.history_before(state.transcript, cursor, anchor, limit), state}
+
+      {:error, :stale_target} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:transcript_history_before, cursor, anchor, limit}, _from, state) do
+    {:reply, Transcript.history_before(state.transcript, cursor, anchor, limit), state}
   end
 
   def handle_call(:usage, _from, state) do

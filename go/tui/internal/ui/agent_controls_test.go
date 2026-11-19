@@ -370,15 +370,18 @@ func TestAgentHeaderStatusAndThinkingAreNotNamedButtons(t *testing.T) {
 	model, out := newAgentControlModel(t, true)
 	_ = model.View()
 	identity := waitForZone(t, model, zoneIDAgentModel)
-	help := waitForZone(t, model, zoneIDAgentHeaderHelp)
-	if identity.EndX+1 >= help.StartX {
-		t.Fatal("fixture must present the static status and thinking area between model and Help")
+	history := waitForZone(t, model, zoneIDAgentHistory)
+	if identity.EndX+1 >= history.StartX {
+		t.Fatal("fixture must present the static status and thinking area between model and History")
 	}
-	for x := identity.EndX + 1; x < help.StartX; x++ {
+	for x := identity.EndX + 1; x < history.StartX; x++ {
 		drainOutboundPackets(out)
 		model = driveAgentControlSGR(t, model, x, identity.StartY, 'M', false)
 		assertNoAgentNamedOperation(t, drainOutboundPackets(out))
 	}
+	drainOutboundPackets(out)
+	driveAgentControlSGR(t, model, history.StartX, history.StartY, 'M', true)
+	assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIExecuteCommand("agent_retained_history"), 1)
 }
 
 func TestApprovalReplacementRetainsTargetOccurrencesAndResourceTotals(t *testing.T) {

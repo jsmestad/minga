@@ -22,6 +22,7 @@ defmodule MingaAgent.Session.Transcript do
   alias MingaAgent.Session.Transcript.Active
   alias MingaAgent.Session.Transcript.Changes
   alias MingaAgent.Session.Transcript.Cursor
+  alias MingaAgent.Session.Transcript.Entry
   alias MingaAgent.Session.Transcript.Snapshot
 
   @typedoc "The streaming message kind that may replace the active tail."
@@ -138,6 +139,44 @@ defmodule MingaAgent.Session.Transcript do
   @spec cursor(t()) :: Cursor.t()
   def cursor(%__MODULE__{} = transcript) do
     Cursor.new(transcript.incarnation, transcript.generation, transcript.revision)
+  end
+
+  @type history_result ::
+          {:ok, Cursor.t(), [Entry.t()], boolean()}
+          | {:error, :invalid_range | :invalid_cursor | :anchor_unavailable}
+          | {:reset, Cursor.reset_reason()}
+
+  @doc """
+  Reads an ordered page before an identified entry in the same transcript generation.
+
+  Appends may advance the requested revision. The returned cursor identifies the
+  actual read. A reset or missing anchor never falls back to another conversation.
+  """
+  @spec history_before(t(), Cursor.t(), pos_integer() | :tail, 1..64) :: history_result()
+  def history_before(%__MODULE__{} = transcript, previous, anchor, limit)
+      when (anchor == :tail or (is_integer(anchor) and anchor > 0)) and
+             is_integer(limit) and limit in 1..64 do
+    case Cursor.compare(
+           previous,
+           transcript.incarnation,
+           transcript.generation,
+           transcript.revision
+         ) do
+      {:unchanged, _cursor} -> read_history_before(transcript, anchor, limit)
+      {:changes_since, _revision} -> read_history_before(transcript, anchor, limit)
+      rejected -> rejected
+    end
+  end
+
+  def history_before(%__MODULE__{}, _previous, _anchor, _limit), do: {:error, :invalid_range}
+
+  @spec read_history_before(t(), pos_integer() | :tail, 1..64) ::
+          {:ok, Cursor.t(), [Entry.t()], boolean()} | {:error, :anchor_unavailable}
+  defp read_history_before(transcript, anchor, limit) do
+    case Active.before(transcript.active, anchor, limit) do
+      {:ok, entries, earlier?} -> {:ok, cursor(transcript), entries, earlier?}
+      unavailable -> unavailable
+    end
   end
 
   @doc """
