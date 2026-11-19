@@ -7,6 +7,7 @@ defmodule MingaAgent.SessionStoreTest do
   alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Branch
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
@@ -63,6 +64,260 @@ defmodule MingaAgent.SessionStoreTest do
         )
       ],
       memory: "- [2026-01-01 00:00 UTC] Use concise answers\n"
+    }
+  end
+
+  describe "draft snapshots" do
+    test "draft-only records do not impersonate a conversation and survive its first save", %{
+      tmp_dir: dir
+    } do
+      data = sample_data("draft-before-first-turn")
+      draft = draft_snapshot("Unsent")
+
+      assert {:ok, 0, nil} = SessionStore.read_presentation(data.id, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+      assert {:error, :enoent} = SessionStore.load(data.id, dir)
+      assert SessionStore.list(dir) == []
+
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+      assert {:ok, saved} = SessionStore.load(data.id, dir)
+      assert saved.messages == data.messages
+      assert saved.message_ids == data.message_ids
+    end
+
+    test "conversation and draft writes preserve each other and reject conflicting retries", %{
+      tmp_dir: dir
+    } do
+      data = sample_data("conversation-first")
+      draft = draft_snapshot("Recovered\n界")
+      replacement = draft_snapshot("Do not overwrite")
+
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+
+      assert {:error, {:stale_draft_revision, 1}} =
+               SessionStore.save_presentation(data.id, 0, replacement, dir)
+
+      assert {:ok, saved} = SessionStore.load(data.id, dir)
+      assert saved.messages == data.messages
+      assert saved.pinned_ids == data.pinned_ids
+
+      assert {:ok, 2} = SessionStore.save_presentation(data.id, 1, nil, dir)
+      assert {:ok, 2, nil} = SessionStore.read_presentation(data.id, dir)
+      assert {:ok, ^saved} = SessionStore.load(data.id, dir)
+    end
+
+    test "adding a draft to an older conversation preserves its on-disk payload", %{tmp_dir: dir} do
+      data = sample_data("existing-version-five")
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+      legacy =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.merge(%{"version" => 5, "remote_token" => "existing-token"})
+
+      File.write!(path, JSON.encode!(legacy))
+
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+      assert {:ok, 0, nil} = SessionStore.read_presentation(data.id, dir)
+
+      draft = %DraftSnapshot{
+        text: "Draft\n界",
+        cursor: {1, 3},
+        paste_blocks: [{"First\nSecond", true}],
+        attachments: [{:file, "src/a.ex", "A", "observed-revision", :live}]
+      }
+
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+      assert {:ok, ^loaded} = SessionStore.load(data.id, dir)
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+      assert %{"conversation" => ^legacy} = path |> File.read!() |> JSON.decode!()
+
+      assert {:ok, "existing-token"} =
+               SessionStore.establish_remote_token(data.id, "candidate", dir)
+    end
+
+    test "automatic pruning keeps old records with drafts until the draft is cleared", %{
+      tmp_dir: dir
+    } do
+      data = %{sample_data("old-unsent") | timestamp: "2025-01-01T00:00:00Z"}
+      draft = draft_snapshot("Keep this unsent draft")
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+      assert SessionStore.prune(30, dir) == 0
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+      assert {:ok, 2} = SessionStore.save_presentation(data.id, 1, nil, dir)
+      assert SessionStore.prune(30, dir) == 1
+      assert {:error, :enoent} = SessionStore.load(data.id, dir)
+    end
+
+    test "an unsupported draft version cannot be silently discarded by either writer", %{
+      tmp_dir: dir
+    } do
+      data = sample_data("future-draft")
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft_snapshot("First"), dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+      future =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> put_in(["presentation", "draft", "version"], 999)
+        |> JSON.encode!()
+
+      File.write!(path, future)
+
+      assert {:error, {:unknown_draft_version, 999}} =
+               SessionStore.read_presentation(data.id, dir)
+
+      assert {:error, {:unknown_draft_version, 999}} = SessionStore.save(data, dir)
+
+      assert {:error, {:unknown_draft_version, 999}} =
+               SessionStore.save_presentation(data.id, 1, draft_snapshot("Replacement"), dir)
+
+      assert File.read!(path) == future
+    end
+
+    test "a draft outside the envelope cannot become a read or pin authority", %{tmp_dir: dir} do
+      id = "misplaced-draft"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {sent, sent_delivery} = store_output(store, "sent", "committed", "text/plain")
+      {unsent, unsent_delivery} = store_output(store, "unsent", "not committed", "text/plain")
+      data = data_with_output(id, sent, Continuation.new())
+      assert :ok = SessionStore.save(data, dir, opts)
+      assert :ok = ArtifactStore.release(store, sent_delivery)
+
+      draft = captured_draft(unsent.reference)
+      {:ok, draft_payload} = DraftSnapshot.encode(draft)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{id}.json")
+      %{"version" => 6} = conversation = path |> File.read!() |> JSON.decode!()
+
+      corrupt =
+        JSON.encode!(
+          Map.put(conversation, "presentation", %{"revision" => 1, "draft" => draft_payload})
+        )
+
+      File.write!(path, corrupt)
+
+      assert {:error, :invalid_draft_snapshot} = SessionStore.read_presentation(id, dir, opts)
+      assert {:error, :invalid_draft_snapshot} = SessionStore.save(data, dir, opts)
+
+      assert {:error, :invalid_draft_snapshot} =
+               SessionStore.save_presentation(id, 0, draft, dir, opts)
+
+      assert File.read!(path) == corrupt
+
+      assert :ok = ArtifactStore.release(store, unsent_delivery)
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "committed"}} =
+               ArtifactStore.fetch(store, sent.reference, sent.selection)
+
+      assert {:error, :expired} = ArtifactStore.fetch(store, unsent.reference, unsent.selection)
+    end
+
+    test "invalid UTF-8 coordinates and oversized pasted drafts cannot replace durable text", %{
+      tmp_dir: dir
+    } do
+      id = "draft-boundaries"
+      original = draft_snapshot("Unsent")
+      assert {:ok, 1} = SessionStore.save_presentation(id, 0, original, dir)
+
+      bad_cursor = %DraftSnapshot{draft_snapshot("界") | cursor: {0, 1}}
+
+      assert {:error, :invalid_draft_snapshot} =
+               SessionStore.save_presentation(id, 1, bad_cursor, dir)
+
+      too_large = %DraftSnapshot{
+        original
+        | paste_blocks: [{String.duplicate("x", 1_048_576), false}]
+      }
+
+      assert {:error, :draft_too_large} = SessionStore.save_presentation(id, 1, too_large, dir)
+      assert {:ok, 1, ^original} = SessionStore.read_presentation(id, dir)
+    end
+
+    test "draft and conversation pins reconcile together after uncertain draft rename", %{
+      tmp_dir: dir
+    } do
+      id = "draft-pin-renamed"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+
+      {conversation, conversation_delivery} =
+        store_output(store, "conversation", "sent", "text/plain")
+
+      {original, original_delivery} = store_output(store, "original", "unsent A", "text/plain")
+      {candidate, candidate_delivery} = store_output(store, "candidate", "unsent B", "text/plain")
+      data = data_with_output(id, conversation, Continuation.new())
+
+      assert :ok = SessionStore.save(data, dir, opts)
+
+      assert {:ok, 1} =
+               SessionStore.save_presentation(
+                 id,
+                 0,
+                 captured_draft(original.reference),
+                 dir,
+                 opts
+               )
+
+      assert :ok = ArtifactStore.release(store, conversation_delivery)
+      assert :ok = ArtifactStore.release(store, original_delivery)
+
+      draft = captured_draft(candidate.reference)
+
+      pre_rename =
+        [fault_injector: %{before_session_snapshot_rename: {:error, :before_rename}}] ++ opts
+
+      assert {:error, :before_rename} =
+               SessionStore.save_presentation(id, 1, draft, dir, pre_rename)
+
+      assert {:ok, 1, _original} = SessionStore.read_presentation(id, dir, opts)
+
+      post_rename =
+        [fault_injector: %{after_session_snapshot_rename: {:error, :after_rename}}] ++ opts
+
+      assert {:error, :after_rename} =
+               SessionStore.save_presentation(id, 1, draft, dir, post_rename)
+
+      assert :ok = ArtifactStore.release(store, candidate_delivery)
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+      assert {:ok, 2} = SessionStore.save_presentation(id, 1, draft, dir, opts)
+      assert {:ok, 2, ^draft} = SessionStore.read_presentation(id, dir, opts)
+      assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "sent"}} =
+               ArtifactStore.fetch(store, conversation.reference, conversation.selection)
+
+      assert {:ok, %{bytes: "unsent B"}} =
+               ArtifactStore.fetch(store, candidate.reference, candidate.selection)
+
+      assert {:error, :expired} =
+               ArtifactStore.fetch(store, original.reference, original.selection)
+    end
+  end
+
+  defp draft_snapshot(text) do
+    %DraftSnapshot{text: text, cursor: {0, 0}, paste_blocks: [], attachments: []}
+  end
+
+  defp captured_draft(reference) do
+    %DraftSnapshot{
+      text: "Retain selected text",
+      cursor: {0, 0},
+      paste_blocks: [],
+      attachments: [
+        {:selection, "src/demo.ex", "Current selection", reference.sha256, {:snapshot, reference}}
+      ]
     }
   end
 
@@ -1932,6 +2187,33 @@ defmodule MingaAgent.SessionStoreTest do
 
       assert {:error, _} = SessionStore.load("s1", dir)
       assert {:error, _} = SessionStore.load("s2", dir)
+    end
+
+    test "history clearing keeps a draft-only record and explicit delete removes its namespace",
+         %{tmp_dir: dir} do
+      id = "unsent-only"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {output, delivery} = store_output(store, "attachment", "unsent", "text/plain")
+      draft = captured_draft(output.reference)
+
+      assert {:ok, 1} = SessionStore.save_presentation(id, 0, draft, dir, opts)
+      assert :ok = ArtifactStore.release(store, delivery)
+      assert :ok = SessionStore.save(sample_data("saved-history"), dir, opts)
+      assert :ok = SessionStore.clear_all(dir, opts)
+
+      assert {:error, :enoent} = SessionStore.load("saved-history", dir)
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(id, dir, opts)
+
+      assert {:ok, %{bytes: "unsent"}} =
+               ArtifactStore.fetch(store, output.reference, output.selection)
+
+      assert %{namespaces: 1, artifacts: 1} = ArtifactQuota.usage(runtime.quota)
+
+      assert :ok = SessionStore.delete(id, dir, opts)
+      assert {:ok, 0, nil} = SessionStore.read_presentation(id, dir, opts)
+      assert %{namespaces: 0, artifacts: 0} = ArtifactQuota.usage(runtime.quota)
     end
   end
 

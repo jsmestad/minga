@@ -15,6 +15,7 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.ModelSelection
   alias MingaAgent.ArtifactStorage.FaultInjector
   alias MingaAgent.Session.Continuation
@@ -27,6 +28,10 @@ defmodule MingaAgent.SessionStore do
 
   @version 6
   @legacy_version 2
+  @envelope_version 7
+
+  @type draft_revision :: non_neg_integer()
+  @typep presentation :: {draft_revision(), DraftSnapshot.t() | nil}
 
   @typep snapshot_schema :: 2 | 4 | 5 | 6 | :model_v3 | :retention_v3
 
@@ -108,11 +113,8 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     result =
-      with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
-           {:ok, json, references, generation} <- encode_snapshot(data) do
-        with_record_workflow(path, fn ->
-          save_record(path, id, {json, references, generation}, opts)
-        end)
+      with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+        with_record_workflow(path, fn -> commit_conversation(path, id, data, opts) end)
       end
 
     case result do
@@ -123,6 +125,180 @@ defmodule MingaAgent.SessionStore do
         Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{inspect(reason)}")
         {:error, reason}
     end
+  end
+
+  @spec commit_conversation(String.t(), String.t(), session_data(), keyword()) ::
+          :ok | {:error, term()}
+  defp commit_conversation(path, id, data, opts) do
+    with {:ok, previous, previous_generation} <- read_record_for_write(path, id, opts),
+         {:ok, encoded} <- encode_snapshot(data, Map.get(previous, "presentation")) do
+      save_record(path, id, encoded, previous_generation, opts)
+    end
+  end
+
+  @doc "Reads the committed draft revision and snapshot. An absent draft has revision zero."
+  @spec read_presentation(String.t(), String.t() | nil, keyword()) ::
+          {:ok, draft_revision(), DraftSnapshot.t() | nil} | {:error, term()}
+  def read_presentation(id, config_dir \\ nil, opts \\ []) when is_binary(id) and is_list(opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn -> read_committed_presentation(path, id, opts) end)
+    end
+  end
+
+  @spec read_committed_presentation(String.t(), String.t(), keyword()) ::
+          {:ok, draft_revision(), DraftSnapshot.t() | nil} | {:error, term()}
+  defp read_committed_presentation(path, id, opts) do
+    with {:ok, record, generation} <- read_record_for_write(path, id, opts),
+         {:ok, {revision, draft}} <- decode_presentation(record),
+         :ok <- reconcile_presentation_record(id, record, generation, opts) do
+      {:ok, revision, draft}
+    end
+  end
+
+  @doc """
+  Saves the next draft revision without changing the conversation. Exact retries are idempotent.
+
+  Pass `nil` to clear the draft at a new revision. A stale revision returns the current revision without writing.
+  """
+  @spec save_presentation(
+          String.t(),
+          draft_revision(),
+          DraftSnapshot.t() | nil,
+          String.t() | nil,
+          keyword()
+        ) ::
+          {:ok, draft_revision()} | {:error, term()}
+  def save_presentation(id, expected, draft, config_dir \\ nil, opts \\ [])
+      when is_binary(id) and is_integer(expected) and expected >= 0 and is_list(opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
+         {:ok, encoded_draft} <- encode_draft(draft) do
+      with_record_workflow(path, fn ->
+        commit_presentation(path, id, expected, encoded_draft, opts)
+      end)
+    end
+  end
+
+  @spec commit_presentation(String.t(), String.t(), draft_revision(), map() | nil, keyword()) ::
+          {:ok, draft_revision()} | {:error, term()}
+  defp commit_presentation(path, id, expected, draft, opts) do
+    with {:ok, previous, generation} <- read_record_for_write(path, id, opts),
+         {:ok, {revision, _draft}} <- decode_presentation(previous) do
+      save_presentation_revision(
+        path,
+        id,
+        {previous, generation, revision},
+        expected,
+        draft,
+        opts
+      )
+    end
+  end
+
+  @spec save_presentation_revision(
+          String.t(),
+          String.t(),
+          {map(), String.t() | nil, draft_revision()},
+          draft_revision(),
+          map() | nil,
+          keyword()
+        ) :: {:ok, draft_revision()} | {:error, term()}
+  defp save_presentation_revision(path, id, {record, generation, expected}, expected, draft, opts) do
+    revision = expected + 1
+
+    with {:ok, record} <- editable_presentation_record(record, id),
+         record = Map.put(record, "presentation", %{"revision" => revision, "draft" => draft}),
+         {:ok, encoded} <- encode_record(record, id),
+         :ok <- save_record(path, id, encoded, generation, opts) do
+      {:ok, revision}
+    end
+  end
+
+  defp save_presentation_revision(
+         _path,
+         id,
+         {%{"presentation" => %{"draft" => draft}} = record, generation, revision},
+         expected,
+         draft,
+         opts
+       )
+       when revision == expected + 1 do
+    with :ok <- reconcile_presentation_record(id, record, generation, opts), do: {:ok, revision}
+  end
+
+  defp save_presentation_revision(
+         _path,
+         _id,
+         {_record, _generation, revision},
+         _expected,
+         _draft,
+         _opts
+       ),
+       do: {:error, {:stale_draft_revision, revision}}
+
+  @spec editable_presentation_record(map(), String.t()) ::
+          {:ok, map()} | {:error, :legacy_import_required}
+  defp editable_presentation_record(record, id) when map_size(record) == 0,
+    do: {:ok, new_envelope(id, nil, nil)}
+
+  defp editable_presentation_record(%{"version" => @envelope_version} = record, _id),
+    do: {:ok, record}
+
+  defp editable_presentation_record(%{"version" => version} = record, id)
+       when version in [2, 3, 4, 5, @version],
+       do: {:ok, new_envelope(id, record, nil)}
+
+  defp editable_presentation_record(_record, _id), do: {:error, :legacy_import_required}
+
+  @spec encode_draft(DraftSnapshot.t() | nil) :: {:ok, map() | nil} | {:error, term()}
+  defp encode_draft(nil), do: {:ok, nil}
+  defp encode_draft(%DraftSnapshot{} = draft), do: DraftSnapshot.encode(draft)
+
+  @spec validate_presentation_id(String.t()) :: :ok | {:error, :invalid_session_id}
+  defp validate_presentation_id(id) do
+    if id not in ["", ".", ".."] and not String.contains?(id, ["/", "\\", <<0>>]) do
+      :ok
+    else
+      {:error, :invalid_session_id}
+    end
+  end
+
+  @spec decode_presentation(map()) :: {:ok, presentation()} | {:error, term()}
+  defp decode_presentation(%{
+         "version" => @envelope_version,
+         "presentation" => %{"revision" => revision, "draft" => draft}
+       })
+       when is_integer(revision) and revision > 0 do
+    case draft do
+      nil -> {:ok, {revision, nil}}
+      encoded -> with {:ok, draft} <- DraftSnapshot.decode(encoded), do: {:ok, {revision, draft}}
+    end
+  end
+
+  defp decode_presentation(%{"presentation" => _invalid}), do: {:error, :invalid_draft_snapshot}
+
+  defp decode_presentation(%{"version" => @envelope_version}),
+    do: {:error, :invalid_draft_snapshot}
+
+  defp decode_presentation(_record), do: {:ok, {0, nil}}
+
+  @spec reconcile_presentation_record(String.t(), map(), String.t() | nil, keyword()) ::
+          :ok | {:error, term()}
+  defp reconcile_presentation_record(_id, _record, nil, _opts), do: :ok
+
+  defp reconcile_presentation_record(id, record, generation, opts) do
+    references = snapshot_references(record)
+
+    with {:ok, store} <- artifact_store_for_reconciliation(id, references, opts) do
+      repair_snapshot_ownership(store, generation, references)
+    end
+  catch
+    :exit, reason -> {:error, {:artifact_store_unavailable, reason}}
   end
 
   @spec session_record_path(String.t(), String.t() | nil) :: String.t()
@@ -138,11 +314,16 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec save_record(String.t(), String.t(), {String.t(), [Reference.t()], String.t()}, keyword()) ::
+  @spec save_record(
+          String.t(),
+          String.t(),
+          {String.t(), [Reference.t()], String.t()},
+          String.t() | nil,
+          keyword()
+        ) ::
           :ok | {:error, term()}
-  defp save_record(path, id, {json, references, generation}, opts) do
+  defp save_record(path, id, {json, references, generation}, previous_generation, opts) do
     with :ok <- ensure_private_dir(Path.dirname(path)),
-         {:ok, previous_generation} <- previous_generation(path, id, opts),
          {:ok, store} <- pin_candidate(id, generation, references, opts) do
       case atomic_write_private_result(path, json, fault_injector(opts)) do
         {:ok, :durable} ->
@@ -158,21 +339,52 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec encode_snapshot(session_data()) ::
-          {:ok, String.t(), [Reference.t()], String.t()} | {:error, term()}
-  defp encode_snapshot(data) do
-    candidate = serialize(data)
+  @spec encode_snapshot(session_data(), map() | nil) ::
+          {:ok, {String.t(), [Reference.t()], String.t()}} | {:error, term()}
+  defp encode_snapshot(data, presentation) do
+    conversation = serialize(data)
+
+    record =
+      case presentation do
+        nil ->
+          conversation
+
+        presentation ->
+          generation = conversation |> conversation_references() |> snapshot_generation()
+          conversation = Map.put(conversation, "artifact_generation", generation)
+          new_envelope(data.id, conversation, presentation)
+      end
+
+    encode_record(record, data.id)
+  rescue
+    error -> {:error, {:snapshot_encode_failed, Exception.message(error)}}
+  end
+
+  @spec encode_record(map(), String.t()) ::
+          {:ok, {String.t(), [Reference.t()], String.t()}} | {:error, term()}
+  defp encode_record(candidate, id) do
     references = snapshot_references(candidate)
     generation = snapshot_generation(references)
     candidate = Map.put(candidate, "artifact_generation", generation)
     json = JSON.encode!(candidate)
 
     with {:ok, encoded_record} <- decode_json(json),
-         {:ok, _validated_session} <- load_versioned_record(encoded_record, data.id) do
-      {:ok, json, references, generation}
+         {:ok, _session, _generation, _references} <-
+           validated_record_authority(encoded_record, id) do
+      {:ok, {json, references, generation}}
     end
   rescue
     error -> {:error, {:snapshot_encode_failed, Exception.message(error)}}
+  end
+
+  @spec new_envelope(String.t(), map() | nil, map() | nil) :: map()
+  defp new_envelope(id, conversation, presentation) do
+    %{
+      "version" => @envelope_version,
+      "id" => id,
+      "conversation" => conversation,
+      "presentation" => presentation
+    }
   end
 
   @spec snapshot_generation([Reference.t()]) :: String.t()
@@ -188,10 +400,31 @@ defmodule MingaAgent.SessionStore do
   end
 
   @spec snapshot_references(map()) :: [Reference.t()]
-  defp snapshot_references(candidate) do
+  defp snapshot_references(
+         %{"version" => @envelope_version, "conversation" => conversation} = record
+       ) do
+    conversation_references =
+      if is_map(conversation), do: conversation_references(conversation), else: []
+
+    presentation_references =
+      case decode_presentation(record) do
+        {:ok, {_revision, %DraftSnapshot{} = draft}} -> DraftSnapshot.references(draft)
+        _ -> []
+      end
+
+    (conversation_references ++ presentation_references)
+    |> Enum.uniq()
+    |> Enum.sort_by(& &1.token)
+  end
+
+  defp snapshot_references(conversation),
+    do: conversation |> conversation_references() |> canonical_references()
+
+  @spec conversation_references(map()) :: [Reference.t()]
+  defp conversation_references(candidate) do
     transcript_messages =
-      candidate["messages"] ++
-        Enum.flat_map(candidate["branches"], fn branch -> branch["messages"] end)
+      Map.get(candidate, "messages", []) ++
+        Enum.flat_map(Map.get(candidate, "branches", []), fn branch -> branch["messages"] end)
 
     transcript_references =
       Enum.flat_map(transcript_messages, fn
@@ -205,9 +438,12 @@ defmodule MingaAgent.SessionStore do
           []
       end)
 
-    (transcript_references ++ ContinuationCodec.references(candidate["continuation"]))
-    |> Enum.uniq_by(& &1.token)
-    |> Enum.sort_by(& &1.token)
+    transcript_references ++ ContinuationCodec.references(candidate["continuation"])
+  end
+
+  @spec canonical_references([Reference.t()]) :: [Reference.t()]
+  defp canonical_references(references) do
+    references |> Enum.uniq_by(& &1.token) |> Enum.sort_by(& &1.token)
   end
 
   @spec pin_candidate(String.t(), String.t(), [Reference.t()], keyword()) ::
@@ -301,13 +537,18 @@ defmodule MingaAgent.SessionStore do
   @spec fault_injector(keyword()) :: FaultInjector.t()
   defp fault_injector(opts), do: Keyword.get(opts, :fault_injector)
 
-  @spec previous_generation(String.t(), String.t(), keyword()) ::
-          {:ok, String.t() | nil} | {:error, term()}
-  defp previous_generation(path, id, opts) do
+  @spec read_record_for_write(String.t(), String.t(), keyword()) ::
+          {:ok, map(), String.t() | nil} | {:error, term()}
+  defp read_record_for_write(path, id, opts) do
     case read_durable_record(path, opts) do
-      {:ok, data} -> previous_record_authority(data, id)
-      {:error, :enoent} -> {:ok, nil}
-      {:error, _reason} = error -> error
+      {:ok, data} ->
+        with {:ok, generation} <- previous_record_authority(data, id), do: {:ok, data, generation}
+
+      {:error, :enoent} ->
+        {:ok, %{}, nil}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -315,10 +556,12 @@ defmodule MingaAgent.SessionStore do
   defp previous_record_authority(data, id) do
     case Map.get(data, "version") do
       version when version in [nil, 1] ->
-        with true <- valid_legacy_authority?(data, id),
+        with {:ok, {0, nil}} <- decode_presentation(data),
+             true <- valid_legacy_authority?(data, id),
              %{} <- deserialize_legacy(data) do
           {:ok, nil}
         else
+          {:error, _reason} = error -> error
           _invalid -> {:error, :invalid_session_record}
         end
 
@@ -378,9 +621,11 @@ defmodule MingaAgent.SessionStore do
   end
 
   @spec validated_record_authority(map(), String.t()) ::
-          {:ok, session_data(), String.t() | nil, [Reference.t()]} | {:error, term()}
+          {:ok, session_data() | :no_conversation, String.t() | nil, [Reference.t()]}
+          | {:error, term()}
   defp validated_record_authority(data, id) do
-    with {:ok, session} <- load_versioned_record(data, id),
+    with {:ok, _presentation} <- decode_presentation(data),
+         {:ok, session} <- decode_record_conversation(data, id),
          {:ok, generation, references} <- artifact_authority(data) do
       {:ok, session, generation, references}
     end
@@ -388,10 +633,45 @@ defmodule MingaAgent.SessionStore do
     _error -> {:error, :invalid_session_record}
   end
 
+  @spec decode_record_conversation(map(), String.t()) ::
+          {:ok, session_data() | :no_conversation} | {:error, term()}
+  defp decode_record_conversation(
+         %{"version" => @envelope_version, "id" => id, "conversation" => conversation} = record,
+         id
+       )
+       when map_size(record) == 5 do
+    if non_empty_string?(id) and valid_generation?(record["artifact_generation"]) do
+      decode_envelope_conversation(conversation, id)
+    else
+      {:error, :invalid_session_record}
+    end
+  end
+
+  defp decode_record_conversation(%{"version" => @envelope_version}, _id),
+    do: {:error, :invalid_session_record}
+
+  defp decode_record_conversation(record, id), do: load_versioned_record(record, id)
+
+  @spec decode_envelope_conversation(term(), String.t()) ::
+          {:ok, session_data() | :no_conversation} | {:error, term()}
+  defp decode_envelope_conversation(nil, _id), do: {:ok, :no_conversation}
+
+  defp decode_envelope_conversation(%{"presentation" => _draft}, _id),
+    do: {:error, :invalid_draft_snapshot}
+
+  defp decode_envelope_conversation(conversation, id) when is_map(conversation) do
+    with {:ok, session} <- load_versioned_record(conversation, id),
+         {:ok, _generation, _references} <- artifact_authority(conversation) do
+      {:ok, session}
+    end
+  end
+
+  defp decode_envelope_conversation(_invalid, _id), do: {:error, :invalid_session_record}
+
   @spec artifact_authority(map()) ::
           {:ok, String.t() | nil, [Reference.t()]} | {:error, :invalid_session_record}
   defp artifact_authority(%{"version" => version, "artifact_generation" => generation} = data)
-       when version in [3, 5, @version] do
+       when version in [3, 5, @version, @envelope_version] do
     references = snapshot_references(data)
 
     if generation == snapshot_generation(references),
@@ -464,8 +744,8 @@ defmodule MingaAgent.SessionStore do
   defp read_remote_token(path, missing_record) do
     with {:ok, json} <- File.read(path),
          {:ok, data} when is_map(data) <- decode_json(json) do
-      case data["remote_token"] do
-        token when is_binary(token) -> {:ok, token}
+      case record_conversation(data) do
+        %{"remote_token" => token} when is_binary(token) -> {:ok, token}
         _ -> missing_record
       end
     else
@@ -505,7 +785,10 @@ defmodule MingaAgent.SessionStore do
          {:ok, session, generation, references} <- validated_record_authority(data, id),
          {:ok, store} <- artifact_store_for_reconciliation(id, references, opts),
          :ok <- repair_snapshot_ownership(store, generation, references) do
-      {:ok, session}
+      case session do
+        :no_conversation -> {:error, :enoent}
+        session -> {:ok, session}
+      end
     end
   catch
     :exit, reason -> {:error, {:artifact_store_unavailable, reason}}
@@ -950,7 +1233,7 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @doc "Deletes all saved transcripts before explicitly dropping each artifact record."
+  @doc "Deletes saved conversations and their artifacts, leaving draft-only records intact."
   @spec clear_all(String.t() | nil, keyword()) :: :ok
   def clear_all(config_dir \\ nil, opts \\ []) when is_list(opts) do
     dir = sessions_dir(config_dir)
@@ -959,13 +1242,33 @@ defmodule MingaAgent.SessionStore do
       {:ok, files} ->
         files
         |> Enum.filter(&String.ends_with?(&1, ".json"))
-        |> Enum.each(fn file ->
-          id = String.trim_trailing(file, ".json")
-          log_delete_failure(id, delete(id, config_dir, opts))
-        end)
+        |> Enum.each(&clear_history_entry(&1, dir, opts))
 
       {:error, _reason} ->
         :ok
+    end
+  end
+
+  @spec clear_history_entry(String.t(), String.t(), keyword()) :: :ok
+  defp clear_history_entry(file, dir, opts) do
+    path = Path.join(dir, file) |> Path.expand()
+    id = String.trim_trailing(file, ".json")
+
+    result =
+      with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+        with_record_workflow(path, fn -> clear_history_record(path, id, opts) end)
+      end
+
+    log_delete_failure(id, result)
+  end
+
+  @spec clear_history_record(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  defp clear_history_record(path, id, opts) do
+    case read_durable_record(path, opts) do
+      {:ok, %{"version" => @envelope_version, "conversation" => nil}} -> :ok
+      {:ok, _conversation_record} -> delete_record(path, id, opts)
+      {:error, :enoent} -> :ok
+      {:error, _reason} = error -> error
     end
   end
 
@@ -973,7 +1276,7 @@ defmodule MingaAgent.SessionStore do
   Prunes session transcripts older than `days` days.
 
   Returns the number durably removed before their artifact records were
-  explicitly dropped. Durable remote identities are retained.
+  explicitly dropped. Durable remote identities and records with an unsent draft are retained.
   """
   @spec prune(non_neg_integer(), String.t() | nil, keyword()) :: non_neg_integer()
   def prune(days, config_dir \\ nil, opts \\ [])
@@ -984,10 +1287,33 @@ defmodule MingaAgent.SessionStore do
     list(config_dir)
     |> Enum.filter(fn meta -> meta.timestamp < cutoff_str end)
     |> Enum.count(fn meta ->
-      result = delete(meta.id, config_dir, opts)
-      log_delete_failure(meta.id, result)
+      result = prune_one(meta.id, config_dir, cutoff_str, opts)
+      if result != :keep, do: log_delete_failure(meta.id, result)
       result == :ok
     end)
+  end
+
+  @spec prune_one(String.t(), String.t() | nil, String.t(), keyword()) ::
+          :ok | :keep | {:error, term()}
+  defp prune_one(id, config_dir, cutoff, opts) do
+    path = session_record_path(id, config_dir)
+
+    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn -> prune_record(path, id, cutoff, opts) end)
+    end
+  end
+
+  @spec prune_record(String.t(), String.t(), String.t(), keyword()) ::
+          :ok | :keep | {:error, term()}
+  defp prune_record(path, id, cutoff, opts) do
+    with {:ok, record, _generation} <- read_record_for_write(path, id, opts),
+         {:ok, {_revision, nil}} <- decode_presentation(record),
+         %{"timestamp" => timestamp} when timestamp < cutoff <- record_conversation(record) do
+      delete_record(path, id, opts)
+    else
+      {:error, _reason} = error -> error
+      _ -> :keep
+    end
   end
 
   @spec log_delete_failure(String.t(), :ok | {:error, term()}) :: :ok
@@ -1391,7 +1717,8 @@ defmodule MingaAgent.SessionStore do
   @spec load_meta(String.t()) :: session_meta() | nil
   defp load_meta(path) do
     with {:ok, json} <- File.read(path),
-         {:ok, data} when is_map(data) <- decode_json(json),
+         {:ok, record} when is_map(record) <- decode_json(json),
+         data when is_map(data) <- record_conversation(record),
          true <- data["version"] in [nil, 1, 2, 3, 4, 5, @version] do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
@@ -1416,6 +1743,10 @@ defmodule MingaAgent.SessionStore do
       _ -> nil
     end
   end
+
+  @spec record_conversation(map()) :: map() | nil
+  defp record_conversation(%{"version" => @envelope_version} = record), do: record["conversation"]
+  defp record_conversation(record), do: record
 
   @spec continuation_kind(map()) ::
           :lossless | :legacy_reconstructed | :legacy_import_required
