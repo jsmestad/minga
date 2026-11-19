@@ -404,9 +404,13 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 		lines = append(lines, m.renderAgentDetailRow("Auth", "run /auth or check API key", width))
 	}
 	if usage, ok := lastAgentUsage(messages); ok {
-		lines = append(lines, m.renderAgentDetailRow("Context", fmt.Sprintf("%s in · %s out", formatAgentTokens(usage.Input), formatAgentTokens(usage.Output)), width))
+		lines = append(lines,
+			m.renderAgentDetailsSection("Latest usage", width),
+			m.renderAgentDetailRow("Input", formatAgentTokens(usage.Input), width),
+			m.renderAgentDetailRow("Output", formatAgentTokens(usage.Output), width),
+		)
 		if usage.CostMicros > 0 {
-			lines = append(lines, m.renderAgentDetailRow("Cost", fmt.Sprintf("$%.2f", float64(usage.CostMicros)/1_000_000), width))
+			lines = append(lines, m.renderAgentDetailRow("Cost", formatAgentCost(usage.CostMicros), width))
 		}
 	}
 	lines = append(lines, m.renderAgentDetailsSection("Hints", width))
@@ -1156,9 +1160,17 @@ func (m Model) renderAgentUsageMessage(msg protocol.AgentChatMessage, width int)
 	usage := msg.Usage
 	text := fmt.Sprintf("  ◌ Usage · in %s · out %s", formatAgentTokens(usage.Input), formatAgentTokens(usage.Output))
 	if usage.CostMicros > 0 {
-		text += fmt.Sprintf(" · $%.2f", float64(usage.CostMicros)/1_000_000)
+		text += " · " + formatAgentCost(usage.CostMicros)
 	}
 	return lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width).Render(fitStyled(text, width))
+}
+
+func formatAgentCost(micros uint32) string {
+	amount := fmt.Sprintf("$%d.%06d", micros/1_000_000, micros%1_000_000)
+	end := len(amount)
+	for cents := end - 4; end > cents && amount[end-1] == '0'; end-- {
+	}
+	return amount[:end]
 }
 
 func agentPromptModeName(mode byte) string {
