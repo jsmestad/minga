@@ -10,6 +10,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.Agent.SessionEventWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
@@ -580,6 +581,69 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert prompt_text(rejected.workspace.agent_ui) == "restart draft"
   end
 
+  @tag :tmp_dir
+  test "saved Sessions choices cannot replace a changed workspace or conversation", %{
+    tmp_dir: dir
+  } do
+    first =
+      Minga.Test.SessionCase.start_test_session(
+        provider: Minga.Test.SessionMockProvider,
+        persist?: true,
+        session_store_dir: dir
+      )
+
+    second =
+      Minga.Test.SessionCase.start_test_session(
+        provider: Minga.Test.SessionMockProvider,
+        persist?: true,
+        session_store_dir: dir
+      )
+
+    second_id = Session.session_id(second)
+    saved_id = "saved-picker-choice"
+
+    snapshot = %MingaAgent.DraftSnapshot{
+      text: "original saved draft",
+      cursor: {0, 0},
+      paste_blocks: [],
+      attachments: []
+    }
+
+    assert {:ok, 1} = MingaAgent.SessionStore.save_presentation(saved_id, 0, snapshot, dir)
+    {state, _owner, _file} = state_with_active_agent_workspace(first)
+    {state, other_tab, _workspace} = add_inactive_picker_tab(state, second)
+    original_tab = TabBar.active(state.shell_runtime.state.tab_bar).id
+    original_id = Session.session_id(first)
+    original_choice = saved_picker_choice(state, dir, saved_id)
+
+    other = MingaEditor.TabWorkflow.switch(state, other_tab.id)
+    other = AgentSessionSource.on_select(original_choice, other)
+    assert Runtime.active_session(other.shell_runtime) == second
+    assert Session.session_id(second) == second_id
+    assert Session.session_id(first) == original_id
+
+    fresh_other_choice = saved_picker_choice(other, dir, saved_id)
+    other = AgentSessionSource.on_select(fresh_other_choice, other)
+    assert Session.session_id(second) == saved_id
+    assert :ok = Session.new_session(second)
+
+    original = MingaEditor.TabWorkflow.switch(other, original_tab)
+    assert :ok = Session.new_session(first)
+    reset_id = Session.session_id(first)
+    fresh_original_choice = saved_picker_choice(original, dir, saved_id)
+    blocked = AgentSessionSource.on_select(fresh_original_choice, original)
+    assert Session.session_id(first) == reset_id
+    assert prompt_text(blocked.workspace.agent_ui) == "restart draft"
+
+    BufferProcess.replace_content(blocked.workspace.agent_ui.panel.prompt_buffer, "")
+    rejected = AgentSessionSource.on_select(original_choice, blocked)
+    assert Session.session_id(first) == reset_id
+    assert prompt_text(rejected.workspace.agent_ui) == ""
+
+    AgentSessionSource.on_select(fresh_original_choice, rejected)
+    assert Session.session_id(first) == saved_id
+  end
+
   test "GUI workspace close stops the owned session and refreshes the active session UI" do
     {:ok, _session_id, session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(session) end)
@@ -863,14 +927,13 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     state = MingaEditor.TabWorkflow.switch(state, 2)
     refute TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == owner
-    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
+    state = DraftWorkflow.edited(state, buffer)
 
     assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    state = MingaEditor.Agent.DraftWorkflow.due(state, owner, token)
+    state = DraftWorkflow.due(state, owner, token)
     assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 2}}, 1_000
 
-    state =
-      MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 2})
+    state = DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 2})
 
     assert prompt_text(state.workspace.agent_ui) == ""
 
@@ -913,7 +976,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       save_composer_edit(state, session, owner, id, buffer)
 
     BufferProcess.replace_content(buffer, "still kept live")
-    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
+    state = DraftWorkflow.edited(state, buffer)
     assert prompt_text(state.workspace.agent_ui) == "still kept live"
     assert {:ok, 3, ^newer} = MingaAgent.SessionStore.read_presentation(id, dir)
     refute_receive {:composer_draft_due, ^owner, _token}, 450
@@ -933,23 +996,21 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, session)
     assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 0, nil}}, 1_000
 
-    state =
-      MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 0, nil})
+    state = DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 0, nil})
 
     {state, {:ok, 1}} = save_composer_edit(state, session, owner, id, buffer)
     assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    state = MingaEditor.Agent.DraftWorkflow.due(state, owner, token)
+    state = DraftWorkflow.due(state, owner, token)
     {state, session, owner, id, buffer}
   end
 
   defp save_composer_edit(state, session, owner, id, buffer) do
-    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
+    state = DraftWorkflow.edited(state, buffer)
     assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    state = MingaEditor.Agent.DraftWorkflow.due(state, owner, token)
+    state = DraftWorkflow.due(state, owner, token)
     assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, result}, 1_000
 
-    {MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, result),
-     result}
+    {DraftWorkflow.handle_result(state, session, id, owner, ref, result), result}
   end
 
   defp state_with_agent_workspace_tabs do
@@ -1114,6 +1175,13 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   defp live_picker_choice(state, id) do
     state
     |> Context.from_editor_state()
+    |> AgentSessionSource.candidates()
+    |> Enum.find(fn item -> elem(item.id, 0) == id end)
+  end
+
+  defp saved_picker_choice(state, dir, id) do
+    state
+    |> Context.from_editor_state(%{persisted_only: true, session_store_dir: dir})
     |> AgentSessionSource.candidates()
     |> Enum.find(fn item -> elem(item.id, 0) == id end)
   end

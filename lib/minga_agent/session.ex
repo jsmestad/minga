@@ -531,10 +531,12 @@ defmodule MingaAgent.Session do
   Loads a previously saved session, replacing the current conversation history.
 
   The current session is saved before replacement. The restored conversation history, branches, model, and metadata become the active session state.
+
+  Pass the currently displayed session ID to reject a delayed activation after this process has changed conversations.
   """
-  @spec load_session(GenServer.server(), String.t()) :: :ok | {:error, term()}
-  def load_session(session, session_id) when is_binary(session_id) do
-    GenServer.call(session, {:load_session, session_id})
+  @spec load_session(GenServer.server(), String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def load_session(session, session_id, origin_id \\ nil) when is_binary(session_id) do
+    GenServer.call(session, {:load_session, session_id, origin_id})
   end
 
   @doc """
@@ -542,10 +544,12 @@ defmodule MingaAgent.Session do
 
   The source file is never changed. The imported transcript is visibly marked
   as reconstructed and is not represented as lossless provider continuation.
+  Pass the currently displayed session ID to reject a delayed activation after this process has changed conversations.
   """
-  @spec import_legacy_session(GenServer.server(), String.t()) :: :ok | {:error, term()}
-  def import_legacy_session(session, session_id) when is_binary(session_id) do
-    GenServer.call(session, {:import_legacy_session, session_id})
+  @spec import_legacy_session(GenServer.server(), String.t(), String.t() | nil) ::
+          :ok | {:error, term()}
+  def import_legacy_session(session, session_id, origin_id \\ nil) when is_binary(session_id) do
+    GenServer.call(session, {:import_legacy_session, session_id, origin_id})
   end
 
   @doc "Returns lightweight metadata about this session (for the picker)."
@@ -1228,7 +1232,11 @@ defmodule MingaAgent.Session do
     end
   end
 
-  def handle_call({:load_session, session_id}, from, state) do
+  def handle_call({:load_session, _id, origin_id}, _from, state)
+      when is_binary(origin_id) and origin_id != state.session_id,
+      do: {:reply, {:error, :stale_session}, state}
+
+  def handle_call({:load_session, session_id, _origin_id}, from, state) do
     case SessionStore.load_recoverable(
            session_id,
            state.session_store_dir,
@@ -1240,7 +1248,11 @@ defmodule MingaAgent.Session do
     end
   end
 
-  def handle_call({:import_legacy_session, session_id}, from, state) do
+  def handle_call({:import_legacy_session, _id, origin_id}, _from, state)
+      when is_binary(origin_id) and origin_id != state.session_id,
+      do: {:reply, {:error, :stale_session}, state}
+
+  def handle_call({:import_legacy_session, session_id, _origin_id}, from, state) do
     case SessionStore.load_legacy(session_id, state.session_store_dir) do
       {:ok, legacy_data} -> persist_legacy_import(state, session_id, legacy_data, from)
       {:error, reason} -> {:reply, {:error, reason}, state}
