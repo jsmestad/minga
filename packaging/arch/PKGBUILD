@@ -1,0 +1,33 @@
+# Build next to the verified minga_linux_x86_64.tar.gz and its SHA256SUMS.txt.
+pkgname=minga
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='BEAM-powered modal text editor for the terminal'
+arch=('x86_64')
+url='https://github.com/jsmestad/minga'
+license=('MIT')
+depends=('glibc>=2.39' 'bash' 'coreutils')
+options=('!strip' '!debug')
+source=('minga_linux_x86_64.tar.gz' 'SHA256SUMS.txt' 'LICENSE')
+noextract=('minga_linux_x86_64.tar.gz')
+# SHA256SUMS.txt must come from the verified release candidate, not the archive.
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+prepare() {
+  local -a checksum
+  mapfile -t checksum < <(grep -E '^[a-f0-9]{64} [ *]minga_linux_x86_64\.tar\.gz$' SHA256SUMS.txt)
+  (( ${#checksum[@]} == 1 )) || return 1
+  printf '%s\n' "${checksum[0]}" | sha256sum --check --strict || return 1
+  tar -xzf minga_linux_x86_64.tar.gz || return 1
+  local erts='' version='' extra=''
+  # Mix writes this two-field record without a terminating newline.
+  read -r erts version extra < minga/releases/start_erl.data || [[ -n $version ]] || return 1
+  [[ -n $erts && $version == "$pkgver" && -z $extra && -x minga/launchers/minga ]]
+}
+
+package() {
+  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib"
+  cp -a minga "$pkgdir/usr/lib/"
+  ln -s ../lib/minga/launchers/minga "$pkgdir/usr/bin/minga"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

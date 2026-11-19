@@ -36,16 +36,16 @@ help:
 OS       := $(shell uname -s)
 ARCH     := $(shell uname -m)
 
-# Normalize macOS arm64 → aarch64 to match Burrito naming
+# Normalize the CPU name to match release artifact names.
 ifeq ($(ARCH),arm64)
   ARCH := aarch64
 endif
 
 ifeq ($(OS),Darwin)
-  BURRITO_TARGET := minga_macos_$(ARCH)
+  TUI_TARGET := minga_macos_$(ARCH)
   STANDALONE_INSTALL_NAME := minga-tui
 else
-  BURRITO_TARGET := minga_linux_$(ARCH)
+  TUI_TARGET := minga_linux_$(ARCH)
   STANDALONE_INSTALL_NAME := minga
 endif
 
@@ -54,17 +54,9 @@ PREFIX  ?= $(HOME)/.local
 BINDIR   = $(PREFIX)/bin
 APP_DIR ?= /Applications
 
-# Burrito unpacks the binary's payload into a versioned cache dir named
-# <app>_erts-<ertsver>_<appver> and only re-extracts when that dir is absent.
-# The app version rarely changes during local dev, so a fresh `make install`
-# would otherwise keep running the previously extracted code. We clear minga's
-# extraction on install to force a re-unpack of the new payload.
-ifeq ($(OS),Darwin)
-  BURRITO_INSTALL_DIR := $(HOME)/Library/Application Support/.burrito
-else
-  XDG_DATA_HOME ?= $(HOME)/.local/share
-  BURRITO_INSTALL_DIR := $(XDG_DATA_HOME)/.burrito
-endif
+TUI_RELEASE := _build/prod/rel/minga
+TUI_ARCHIVE := _build/prod/$(TUI_TARGET).tar.gz
+TUI_INSTALL_DIR := $(PREFIX)/libexec/minga-tui
 
 # ── Lint ────────────────────────────────────────────────────────────────
 
@@ -138,13 +130,19 @@ xcodegen-generate: xcodegen-install
 
 # ── Release (build without installing) ─────────────────────────────────
 
+ifeq ($(OS),Linux)
+release-tui: export EXQLITE_USE_SYSTEM :=
+endif
+
 release-tui:
-	@echo "Building TUI release for $(BURRITO_TARGET)..."
+	@echo "Building native TUI release for $(TUI_TARGET)..."
 	MIX_ENV=prod mix deps.get --only prod
+	@if [ "$(OS)" = Linux ]; then MIX_ENV=prod mix deps.clean exqlite --build; fi
 	MIX_ENV=prod mix native.build.tui
-	MIX_ENV=prod mix release minga --overwrite
-	@scripts/check-release-contents _build/prod/rel/minga
-	@echo "\033[32mTUI binary: burrito_out/$(BURRITO_TARGET)\033[0m"
+	MIX_ENV=prod mix release.tui --overwrite
+	@scripts/check-release-contents "$(TUI_RELEASE)" --runtime-receipt "$$MINGA_RELEASE_ERTS_RECEIPT"
+	COPYFILE_DISABLE=1 tar -czf "$(TUI_ARCHIVE)" -C "$(dir $(TUI_RELEASE))" "$(notdir $(TUI_RELEASE))"
+	@echo "TUI archive: $(TUI_ARCHIVE)"
 
 release-mac:
 ifeq ($(OS),Darwin)
@@ -165,13 +163,10 @@ endif
 # ── Install ─────────────────────────────────────────────────────────────
 
 install-tui: release-tui
-	@mkdir -p "$(BINDIR)"
-	cp "burrito_out/$(BURRITO_TARGET)" "$(BINDIR)/$(STANDALONE_INSTALL_NAME)"
-	chmod +x "$(BINDIR)/$(STANDALONE_INSTALL_NAME)"
-	@# Force Burrito to re-extract the new payload (see BURRITO_INSTALL_DIR above).
-	@rm -rf "$(BURRITO_INSTALL_DIR)"/minga_erts-*
-	@echo "\033[32mInstalled standalone TUI to $(BINDIR)/$(STANDALONE_INSTALL_NAME)\033[0m"
-	@"$(BINDIR)/$(STANDALONE_INSTALL_NAME)" --version || true
+	@mkdir -p "$(BINDIR)" "$(TUI_INSTALL_DIR)"
+	rsync -a --delete "$(TUI_RELEASE)/" "$(TUI_INSTALL_DIR)/"
+	ln -sfn "$$(cd "$(TUI_INSTALL_DIR)" && pwd -P)/launchers/minga" "$(BINDIR)/$(STANDALONE_INSTALL_NAME)"
+	@"$(BINDIR)/$(STANDALONE_INSTALL_NAME)" --version
 
 install-mac: release-mac
 ifeq ($(OS),Darwin)
@@ -210,6 +205,7 @@ endif
 uninstall:
 	@rm -f "$(BINDIR)/minga" && echo "Removed $(BINDIR)/minga" || true
 	@rm -f "$(BINDIR)/minga-tui" && echo "Removed $(BINDIR)/minga-tui" || true
+	@rm -rf "$(TUI_INSTALL_DIR)"
 ifeq ($(OS),Darwin)
 	@rm -rf "$(APP_DIR)/Minga.app" && echo "Removed $(APP_DIR)/Minga.app" || true
 endif

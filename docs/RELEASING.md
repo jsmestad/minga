@@ -22,10 +22,10 @@ Every preparation uses this complete inventory:
 | Final payload | Native target | Preparation runner |
 |---|---|---|
 | `Minga.dmg` | Apple Silicon macOS GUI, declared minimum macOS 15.0 | `macos-15` |
-| `minga_macos_aarch64` | Apple Silicon macOS TUI | `macos-15` |
-| `minga_macos_x86_64` | Intel macOS TUI | `macos-15-intel` |
-| `minga_linux_x86_64` | Linux x86_64 TUI | `ubuntu-24.04` |
-| `minga_linux_aarch64` | Linux ARM64 TUI | `ubuntu-24.04-arm` |
+| `minga_macos_aarch64.tar.gz` | Apple Silicon macOS TUI | `macos-15` |
+| `minga_macos_x86_64.tar.gz` | Intel macOS TUI | `macos-15-intel` |
+| `minga_linux_x86_64.tar.gz` | Linux x86_64 TUI, Ubuntu 24.04 glibc baseline | `ubuntu-24.04` |
+| `minga_linux_aarch64.tar.gz` | Linux ARM64 TUI, Ubuntu 24.04 glibc baseline | `ubuntu-24.04-arm` |
 
 Runner labels are configuration, not architecture evidence. Each job checks its actual host, ERTS, Go renderer, parser, hook runner and packaged native libraries. There is no Intel GUI, Linux GUI or Windows artifact in this matrix. A missing target or DMG fails preparation rather than producing a smaller candidate.
 
@@ -33,24 +33,20 @@ Runner labels are configuration, not architecture evidence. Each job checks its 
 
 `.tool-versions` is the source pin: Elixir `1.20.5-otp-29`, OTP `29.1.2`, Go `1.26.4` and native Zig `0.16.0`. Preparation selects Go explicitly; the `go/tui/go.mod` language directive is not a compiler-version pin. macOS jobs select Xcode 26.3 explicitly and verify the actual native host.
 
-The locked Burrito 1.6.0 declares wrapper Zig `0.16.0`. The workflow checks `Burrito.get_versions/0` before wrapping and records native-Zig and wrapper-Zig facts separately, even when their versions are equal. `BURRITO_TARGET` selects exactly one existing target per standalone job. The GUI embeds the plain `minga_macos` release instead of a Burrito wrapper.
+The TUI ships as a native Mix release tarball. The GUI still embeds the plain `minga_macos` release in `Minga.dmg`.
 
-Standalone preparation builds its own pinned OTP/ERTS input from the official sources in `scripts/release_erts_sources.json`; it does not depend on Burrito having published an archive for that OTP version. Actions selects Python 3.14.10, which has published builds for every native preparation host in the [upstream manifest](https://github.com/actions/python-versions/blob/main/versions-manifest.json). The Linux container retains its separately pinned interpreter. The producer requires the exact native CPU and committed build environment. macOS uses Xcode 26.3 build 17C529 with minimum macOS 15.0. Linux uses the digest-pinned Alpine recipe and verified musl helper bytes.
-
-The Linux build verifies the complete Alpine package index before fetching packages by name. That index pins direct and transitive versions. Installation then uses only the downloaded packages with networking disabled; no package or index fallback is allowed.
+Standalone preparation builds OTP and OpenSSL from checksum-pinned sources in `scripts/release_erts_sources.json`. macOS uses Xcode 26.3 build 17C529 with a minimum deployment target of macOS 15.0. Linux uses the Ubuntu 24.04 host's glibc and loader. Alpine and older glibc versions are not qualified by this build.
 
 The producer writes `erts.tar.gz` and a successful `receipt.json` only after source integrity, native architecture, runtime/header completeness, library closure, crypto execution and platform ABI checks pass. A failed rerun invalidates the old successful receipt. For a native standalone build, create the input before invoking Mix:
 
 ```bash
 python3 scripts/build-release-erts.py --os macos --arch aarch64 --output "$PWD/erts-input"
-MINGA_RELEASE_ERTS_RECEIPT="$PWD/erts-input/receipt.json" MIX_ENV=prod BURRITO_TARGET=macos_aarch64 mix release minga
+MINGA_RELEASE_ERTS_RECEIPT="$PWD/erts-input/receipt.json" MIX_ENV=prod make release-tui
 ```
 
-Use the matching native target on other hosts. `mix/release_erts.ex` validates the explicit receipt and archive against this checkout, then supplies a private copy through Burrito's public resolver. It preserves Burrito's musl fetch step and checks the fetched helper and interpreter binding before wrapping. There is no host-ERTS, alternate-download or ABI fallback.
+Use the matching native target on other hosts. `mix release.tui` checks the receipt and provides the verified runtime to Mix during assembly. It rejects an absent or mismatched receipt rather than substituting the host's ERTS.
 
-This input receipt is not final package qualification. Final standalone bytes must still extract their own helper into fresh state, boot the selected runtime, and execute crypto and SQLite checks. Source hashes and a patched Linux build sysroot do not establish that the frozen Burrito helper contains those patches; assess that helper separately rather than claiming blanket security qualification.
-
-Changed native release inputs also run a CI prerequisite gate on all four native hosts. It checks the actual selected Python and producer failure boundaries; Linux additionally builds the exact pinned prerequisite image with a clean client home. This checks prerequisite availability, not the later OTP build or final package qualification. The aggregate CI gate requires these jobs to succeed.
+The input receipt is not final package qualification. The final archive must still unpack in fresh state, boot the selected runtime, and execute crypto and SQLite checks on its native target.
 
 Failed commands report a bounded tail of their actual output, not only an ephemeral runner path. Failure artifacts retain only the isolated public-source command logs alongside existing sanitized context/toolchain facts. They do not upload the build home, source tree, credentials or signing material. These diagnostic artifacts are never candidate evidence.
 
@@ -115,15 +111,40 @@ Before any later promotion, qualify the exact unchanged candidate from clean use
 
 Any later release approval must name the exact source, candidate handle, run/attempt, asset hashes and immutable qualification evidence. Expired assets require a new prepared generation and new qualification/approval, not an implicit rebuild. This preparation path contains no publication-capable job; Homebrew channel selection and any external publication need separate explicit authorization. Tags do not start a replacement build/publication path.
 
-## Burrito's pre-VM boundary
+## Prepare package-manager installs
 
-Minga uses [Burrito](https://github.com/burrito-elixir/burrito) for standalone self-extracting releases. Distribution cookies must exist as `RELEASE_COOKIE` before the process starts; setting only `MINGA_COOKIE` inside application code is too late because the VM already exists. Direct execution of a downloaded raw Burrito artifact requires `RELEASE_COOKIE` whenever distribution will be enabled.
+Use the verified standalone tarballs as inputs, not a separately rebuilt release. Ubuntu packages install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
 
-Existing Homebrew and bundled GUI/TUI wrappers map `--cookie-file`, `MINGA_COOKIE` and `RELEASE_COOKIE` in that precedence order before VM startup. Non-distributed wrapper boots clear inherited `ERL_AFLAGS`, `ERL_FLAGS`, `ERL_ZFLAGS`, `ELIXIR_ERL_OPTIONS` and `RELEASE_VM_ARGS`, then install a fresh random fallback cookie. A local editor cannot accidentally inherit distribution or the baked-in release cookie.
-
-For a direct standalone version check, supply the cookie before launching the downloaded bytes:
+From the source checkout, use the release workflow's pinned Python and set `assets` to the directory containing the verified tarballs. Install `dpkg-deb` (provided by `dpkg` on Ubuntu) to build the Debian packages. Use the candidate's version in each command:
 
 ```bash
-chmod +x candidate-payload/minga_macos_aarch64
-RELEASE_COOKIE="$(openssl rand -hex 32)" RELEASE_DISTRIBUTION=none candidate-payload/minga_macos_aarch64 --version
+assets=/absolute/path/to/verified/assets
+scripts/build-tui-deb "$assets/minga_linux_x86_64.tar.gz" --version 0.1.0 --arch amd64 --output "$assets"
+scripts/build-tui-deb "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 --arch arm64 --output "$assets"
+scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" --x86-64 "$assets/minga_macos_x86_64.tar.gz" > "$assets/minga.rb"
 ```
+
+Install a local Ubuntu package with `sudo apt install "$assets/minga_0.1.0_amd64.deb"`. After publication, macOS users can install from the tap with `brew install jsmestad/minga/minga`.
+
+Before release approval, install and remove the `.deb` on clean Ubuntu 24.04 hosts of both supported architectures and run `minga --version` from `PATH`. Test the generated formula on both macOS architectures against the exact assets it names. Do not update the tap until those assets are available and their SHA-256 hashes match the formula.
+
+For Arch Linux and Omarchy on x86-64, build a local pacman package on an Arch host with `base-devel` installed. In an empty build directory, place `packaging/arch/PKGBUILD`, the checkout's `LICENSE`, and the verified `minga_linux_x86_64.tar.gz` and `SHA256SUMS.txt`. Set `pkgver` to the candidate version. Then run:
+
+```bash
+makepkg --cleanbuild
+sudo pacman -U ./minga-0.1.0-1-x86_64.pkg.tar.zst
+minga --version
+```
+
+Use `sudo pacman -R minga` to remove it. Qualify the installed package on Arch or Omarchy before offering it for download. This recipe does not publish to the AUR.
+
+## Running the standalone TUI
+
+Extract an archive into an empty directory and run its launcher. Keep the release directory intact when adding the launcher to `PATH`.
+
+```bash
+tar -xzf minga_macos_aarch64.tar.gz
+./minga/launchers/minga --version
+```
+
+Use the archive that matches your OS and CPU. The launcher maps `--cookie-file`, `MINGA_COOKIE` and `RELEASE_COOKIE` in that order. It clears inherited VM flags, supplies a random fallback cookie, and starts the VM with distribution off.

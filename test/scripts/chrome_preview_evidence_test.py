@@ -158,6 +158,40 @@ final class PreviewHostDelegate {{
                     with self.assertRaisesRegex(ValueError, "expected one preview fixture member"):
                         evidence.shared_capture_transport(before, after)
 
+    def test_shared_fixture_keeps_the_base_editor_startup_overlay_dismissed(self):
+        def registry(fixture, reports_ready):
+            readiness = "        appState.hasReceivedFirstFrame = true\n" if reports_ready else ""
+            return (
+                "enum PreviewRegistry {\n"
+                "    private(set) static var captureAppState: AppState?\n"
+                "    static func productionPreviewAppState() {\n"
+                "        let appState = AppState()\n"
+                f"{readiness}"
+                f"        {fixture}()\n"
+                "    }\n"
+                "    static func previewEditorNSView() {}\n"
+                "    static func previewThemeSlots() {}\n"
+                "    static func previewFailureView() {}\n"
+                "    static func commitPreviewEditorFrame() {}\n"
+                "}\n"
+            )
+
+        fixtures = (
+            "public enum PreviewFixtures {\n"
+            "    static var themeSlots: [Int] { [] }\n"
+            "    static func applyPreviewTheme() {}\n"
+            "    static func statusBarUpdate() {}\n"
+            "}\n"
+        )
+        for base_requires_ready, head_reports_ready in [(True, False), (False, True)]:
+            with self.subTest(base_requires_ready=base_requires_ready):
+                prepared, _, _ = evidence.shared_capture_support(
+                    registry("oldFixture", base_requires_ready),
+                    registry("newFixture", head_reports_ready),
+                    fixtures, fixtures,
+                )
+                self.assertEqual(prepared, registry("newFixture", base_requires_ready))
+
     def test_capture_support_missing_fixture_fails_before_mutating_base(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

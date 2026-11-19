@@ -460,6 +460,10 @@ defmodule Minga.CLITest do
       end)
 
       assert CLI.argv() == ["--editor", "/tmp/path with space"]
+
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      System.put_env("MINGA_CLI_ARGS_B64", "!")
+      assert CLI.argv() == System.argv()
     end
 
     test "stores GUI startup flags before application services start" do

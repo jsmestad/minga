@@ -35,6 +35,12 @@ final class BEAMProcessManager {
 
     /// The running BEAM child process.
     private var process: Process?
+    private var pendingStartupRetry: StartupRetry?
+
+    private struct StartupRetry {
+        let deadline: DispatchTime
+        let onFailure: (StartupFailure) -> Void
+    }
 
     /// Called when the BEAM exits unexpectedly and restart limits are exceeded.
     var onCrash: (@MainActor () -> Void)?
@@ -58,15 +64,12 @@ final class BEAMProcessManager {
         case running
         case transportRestart
         case restartScheduled
+        case startupFailed
         case appShutdown
     }
 
     private(set) var exitIntent: ExitIntent = .running
     var isShuttingDown: Bool { exitIntent == .appShutdown }
-
-    /// Whether start() has been called at least once. Used to gate
-    /// onBEAMReady so it only fires on restarts, not the initial start.
-    private var hasStartedOnce = false
 
     /// URLs for files passed via Finder "Open With" before the BEAM is ready.
     /// Flushed to the BEAM once the protocol signals ready.
@@ -88,27 +91,33 @@ final class BEAMProcessManager {
     /// Whether a BEAM child is currently running.
     var hasLiveProcess: Bool { process?.isRunning ?? false }
 
-    /// Whether the app is running as a bundle with an embedded BEAM release.
+    /// Whether the app is responsible for launching its editor core.
     static var isBundleMode: Bool {
-        BEAMLaunchInputAcquirer.embeddedExecutableURL() != nil
+        Bundle.main.object(forInfoDictionaryKey: "MingaEmbeddedCore") as? Bool == true
+            || BEAMLaunchInputAcquirer.embeddedExecutableURL() != nil
+    }
+
+    enum StartupFailure: Equatable {
+        case missingRelease
+        case launch(String)
+        case previousCoreStopTimedOut
     }
 
     /// Acquires current bundle inputs and spawns the owned BEAM child.
-    func start() {
+    func start(onStartupFailure: ((StartupFailure) -> Void)? = nil) {
         guard exitIntent != .appShutdown, process == nil else { return }
         guard let configuration = launchConfiguration() else {
             NSLog("BEAMProcessManager: no embedded BEAM release found")
+            onStartupFailure?(.missingRelease)
             return
         }
-        start(configuration: configuration)
+        start(configuration: configuration, onStartupFailure: onStartupFailure)
     }
 
     /// Spawns a child from complete launch inputs and observes its termination.
-    func start(configuration: BEAMLaunchConfiguration) {
+    func start(configuration: BEAMLaunchConfiguration, onStartupFailure: ((StartupFailure) -> Void)? = nil) {
         guard exitIntent != .appShutdown, process == nil else { return }
-        if exitIntent == .restartScheduled {
-            exitIntent = .running
-        }
+        exitIntent = .running
 
         // Prevent App Nap / automatic + sudden termination while the BEAM lives.
         beginBackgroundActivityIfNeeded()
@@ -132,7 +141,8 @@ final class BEAMProcessManager {
 
         proc.terminationHandler = { [weak self] process in
             MainRunLoopAction {
-                self?.handleTermination(
+                guard let self, self.process === process else { return }
+                self.handleTermination(
                     status: process.terminationStatus,
                     reason: process.terminationReason
                 )
@@ -148,7 +158,11 @@ final class BEAMProcessManager {
                 closeLaunchHandle(handle)
             }
             endBackgroundActivity()
-            onCrash?()
+            if let onStartupFailure {
+                onStartupFailure(.launch(error.localizedDescription))
+            } else {
+                onCrash?()
+            }
             return
         }
 
@@ -158,13 +172,7 @@ final class BEAMProcessManager {
 
         NSLog("BEAMProcessManager: BEAM started (pid \(proc.processIdentifier))")
 
-        // Only fire onBEAMReady on restarts, not the initial start.
-        // The initial start is handled by AppDelegate.applicationDidFinishLaunching
-        // which reads readHandle/writeHandle directly.
-        if hasStartedOnce {
-            onBEAMReady?(stdoutPipe.fileHandleForReading, stdinPipe.fileHandleForWriting)
-        }
-        hasStartedOnce = true
+        onBEAMReady?(stdoutPipe.fileHandleForReading, stdinPipe.fileHandleForWriting)
     }
 
     /// Buffers a file URL for opening once the BEAM is ready.
@@ -195,8 +203,44 @@ final class BEAMProcessManager {
         start()
     }
 
+    /// Keeps a failed startup's child owned without allowing its exit to launch another core automatically.
+    func suppressStartupRestart() {
+        guard exitIntent != .appShutdown else { return }
+        exitIntent = .startupFailed
+    }
+
+    /// Stops a child that never received a protocol connection, while preserving explicit Retry.
+    func stopUnconnectedStartup() {
+        suppressStartupRestart()
+        closeLaunchPipes()
+        if let process, process.isRunning { process.terminate() }
+    }
+
+    /// Replaces the startup core only after its termination callback. A slow stop never starts a second child.
+    func retryStartup(stopTimeout: TimeInterval = 3, onFailure: @escaping (StartupFailure) -> Void) {
+        guard exitIntent != .appShutdown, pendingStartupRetry == nil else { return }
+        restartTimestamps.removeAll()
+        guard let stopping = process else {
+            start(onStartupFailure: onFailure)
+            return
+        }
+
+        exitIntent = .startupFailed
+        let deadline = DispatchTime.now() + stopTimeout
+        pendingStartupRetry = StartupRetry(deadline: deadline, onFailure: onFailure)
+        if stopping.isRunning { stopping.terminate() }
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: deadline) { [weak self] in
+            MainRunLoopAction {
+                guard let self, self.process === stopping, let retry = self.pendingStartupRetry else { return }
+                self.pendingStartupRetry = nil
+                retry.onFailure(.previousCoreStopTimedOut)
+            }.enqueue()
+        }
+    }
+
     func beginAppShutdown() {
         exitIntent = .appShutdown
+        pendingStartupRetry = nil
     }
 
     /// Hands the launch pipes to a successfully constructed ProtocolConnection without closing them.
@@ -207,7 +251,7 @@ final class BEAMProcessManager {
 
     /// Aborts an owned launch without blocking the main actor or scheduling a restart.
     func abortStartup() {
-        exitIntent = .appShutdown
+        beginAppShutdown()
         if let process, process.isRunning {
             process.terminate()
         }
@@ -248,7 +292,7 @@ final class BEAMProcessManager {
         exitIntent: ExitIntent
     ) -> TransportRestartDisposition {
         switch exitIntent {
-        case .appShutdown:
+        case .appShutdown, .startupFailed:
             return .rejectDuringShutdown
         case .restartScheduled, .transportRestart:
             return .awaitScheduledRestart
@@ -307,7 +351,7 @@ final class BEAMProcessManager {
         recentRestartCount: Int,
         maxRestarts: Int
     ) -> TerminationOutcome {
-        if exitIntent == .appShutdown { return .normalExit }
+        if exitIntent == .appShutdown || exitIntent == .startupFailed { return .normalExit }
         if exitIntent == .transportRestart { return .restart(delay: 0) }
         if status == 0 { return .normalExit }
         if recentRestartCount >= maxRestarts { return .giveUp }
@@ -339,7 +383,18 @@ final class BEAMProcessManager {
         closeLaunchPipes()
         endBackgroundActivity()
 
+        if let retry = pendingStartupRetry {
+            pendingStartupRetry = nil
+            if DispatchTime.now() < retry.deadline {
+                start(onStartupFailure: retry.onFailure)
+            } else {
+                retry.onFailure(.previousCoreStopTimedOut)
+            }
+            return
+        }
+
         if onTermination?(status) == true { return }
+        if exitIntent == .startupFailed { return }
 
         // Prune old timestamps outside the restart window.
         let now = Date()

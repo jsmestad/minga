@@ -1,16 +1,6 @@
 Code.require_file("mix/compiler_manifest.ex", __DIR__)
 Code.require_file("mix/compilers/minga_bundled_extensions.ex", __DIR__)
 
-# Burrito hard-codes musl libc for Linux binaries. Tell cc_precompiler to
-# fetch the precompiled musl NIF for exqlite instead of source-compiling
-# against the host glibc (whose versioned symbols musl cannot resolve).
-if Mix.env() == :prod and :os.type() == {:unix, :linux} do
-  arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
-  System.put_env("TARGET_ARCH", arch)
-  System.put_env("TARGET_OS", "linux")
-  System.put_env("TARGET_ABI", "musl")
-end
-
 defmodule Minga.MixProject do
   use Mix.Project
 
@@ -18,6 +8,7 @@ defmodule Minga.MixProject do
   @generated_elixir_path "generated/elixir"
   @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
   @release_priv_entries @native_release_artifacts ++ ~w(extensions queries tree_sitter tutor.txt)
+  @tui_release_files ~w(mix/release_erts.ex mix/tasks/release.tui.ex)
 
   def project do
     [
@@ -241,7 +232,6 @@ defmodule Minga.MixProject do
 
   defp deps do
     [
-      {:burrito, "~> 1.6"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: :test},
       {:propcheck, "~> 1.5", only: :test},
@@ -267,13 +257,14 @@ defmodule Minga.MixProject do
 
   defp releases do
     [
-      # TUI release: Burrito-wrapped standalone binary (macOS + Linux)
       minga: [
-        steps: [&clean_release/1, :assemble, &prepare_release_artifacts/1, &wrap_tui_release/1],
-        burrito: [
-          targets: burrito_targets(),
-          debug: Mix.env() != :prod,
-          no_clean: true
+        include_erts: &tui_release_erts_path!/0,
+        steps: [
+          &Mix.Tasks.Release.Tui.verify_otp_apps!/1,
+          &clean_release/1,
+          :assemble,
+          &prepare_release_artifacts/1,
+          &install_tui_launcher/1
         ]
       ],
       # macOS GUI release: plain OTP release embedded inside Minga.app bundle.
@@ -289,10 +280,19 @@ defmodule Minga.MixProject do
     ]
   end
 
-  @spec wrap_tui_release(Mix.Release.t()) :: Mix.Release.t()
-  defp wrap_tui_release(release) do
-    Code.require_file("mix/release_erts.ex", __DIR__)
-    apply(Minga.ReleaseERTS, :wrap, [release])
+  @spec tui_release_erts_path!() :: Path.t()
+  defp tui_release_erts_path! do
+    Enum.each(@tui_release_files, &Code.require_file(&1, __DIR__))
+    apply(Mix.Tasks.Release.Tui, :erts_path!, [])
+  end
+
+  @spec install_tui_launcher(Mix.Release.t()) :: Mix.Release.t()
+  defp install_tui_launcher(release) do
+    destination = Path.join(release.path, "launchers/minga")
+    File.mkdir_p!(Path.dirname(destination))
+    File.cp!(Path.join(__DIR__, "macos/Resources/bin/minga-tui"), destination)
+    File.chmod!(destination, 0o755)
+    release
   end
 
   @spec clean_release(Mix.Release.t()) :: Mix.Release.t()
@@ -309,7 +309,7 @@ defmodule Minga.MixProject do
     File.mkdir_p!(release.path)
 
     for entry <- File.ls!(release.path),
-        entry in ~w(bin lib releases) or String.starts_with?(entry, "erts-") do
+        entry in ~w(bin launchers lib releases) or String.starts_with?(entry, "erts-") do
       File.rm_rf!(Path.join(release.path, entry))
     end
 
@@ -335,25 +335,6 @@ defmodule Minga.MixProject do
     end
 
     release
-  end
-
-  defp burrito_targets do
-    case :os.type() do
-      {:unix, :darwin} ->
-        [
-          macos_aarch64: [os: :darwin, cpu: :aarch64],
-          macos_x86_64: [os: :darwin, cpu: :x86_64]
-        ]
-
-      {:unix, :linux} ->
-        [
-          linux_x86_64: [os: :linux, cpu: :x86_64],
-          linux_aarch64: [os: :linux, cpu: :aarch64]
-        ]
-
-      _ ->
-        []
-    end
   end
 
   defp aliases do
@@ -443,6 +424,7 @@ defmodule Minga.MixProject do
           Mix.Tasks.Native.Build.Tui,
           native ++ zig ++ go ++ ~w(mix/tasks/native_build_tui.ex)
         ),
+      "release.tui": build_task(Mix.Tasks.Release.Tui, @tui_release_files),
       "dialyzer.incremental": [
         "deps.loadpaths",
         build_task(Mix.Tasks.Dialyzer.Incremental, dialyzer)

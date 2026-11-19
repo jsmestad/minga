@@ -56,7 +56,6 @@ enum PreviewRegistry {
         }
         chat.publishTranscript(state.transcriptSnapshot)
         appState.editorNSView = editor
-        appState.hasReceivedFirstFrame = true
         captureAppState = appState
         return AnyView(
             ZStack {
@@ -336,7 +335,6 @@ enum PreviewRegistry {
         let appState = AppState()
         appState.windowTitle = "Minga"
         appState.windowBgIsDark = true
-        appState.hasReceivedFirstFrame = true
         appState.trafficLightMidY = 14
 
         let encoder = PreviewFixtures.encoder()
@@ -633,7 +631,6 @@ enum PreviewRegistry {
         let appState = AppState()
         appState.windowTitle = "Minga"
         appState.windowBgIsDark = true
-        appState.hasReceivedFirstFrame = true
         appState.trafficLightMidY = 14
 
         let encoder = PreviewFixtures.encoder()
