@@ -12,7 +12,7 @@ defmodule Minga.ReleaseERTS do
   @repo Path.expand("..", __DIR__)
   @otp "29.1.2"
   @erts "17.1.1"
-  @openssl "3.5.1"
+  @openssl "3.5.9"
   @minimum_macos "15.0"
   @checks ~w(otp-version erts-version native-architecture crypto-result native-library-closure)
 

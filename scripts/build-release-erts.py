@@ -332,8 +332,8 @@ def boot_check(commands, root, manifest):
                   'ok = application:start(crypto), '
                   'static = maps:get(link_type, crypto:info()), '
                   '<<186,120,22,191,143,1,207,234,65,65,64,222,93,174,34,35,176,3,97,163,150,23,122,156,180,16,255,97,242,0,21,173>> = crypto:hash(sha256, <<"abc">>), '
-                  'true = lists:any(fun({<<"OpenSSL">>, _, V}) -> binary:match(V, <<"OpenSSL 3.5.1 ">>) =/= nomatch; (_) -> false end, crypto:info_lib()), '
-                  'io:format("MINGA_ERTS_OK~n"), halt(0).') % erts
+                  'true = lists:any(fun({<<"OpenSSL">>, _, V}) -> binary:match(V, <<"OpenSSL %s ">>) =/= nomatch; (_) -> false end, crypto:info_lib()), '
+                  'io:format("MINGA_ERTS_OK~n"), halt(0).') % (erts, manifest["openssl"]["version"])
     # Exercise OTP's relocated launcher without supplying ROOTDIR/BINDIR to conceal a stale install path.
     result = commands.run([bindir / "erl", "+S", "2:2", "+A", "2", "-boot", version.parent / "start_clean",
                            "-noshell", "-noinput", "-eval", expression],
