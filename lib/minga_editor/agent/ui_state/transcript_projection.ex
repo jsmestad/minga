@@ -75,6 +75,13 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   def bump_version(%__MODULE__{version: version} = projection),
     do: %{projection | version: version + 1}
 
+  @doc "Identifies the resident transcript presentation for a source-bound frontend action."
+  @spec presentation_epoch(t(), pid()) :: non_neg_integer()
+  def presentation_epoch(%__MODULE__{display_start: start, version: version}, session)
+      when is_pid(session) do
+    :erlang.phash2({session, start, version})
+  end
+
   @spec set_display_start(t(), non_neg_integer()) :: t()
   def set_display_start(%__MODULE__{} = projection, display_start)
       when is_integer(display_start) and display_start >= 0 do

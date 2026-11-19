@@ -34,6 +34,18 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
     end
   end
 
+  test "retained output read requires the exact displayed offer and a nonzero tool identity" do
+    offer = <<1::128>>
+
+    assert {:ok,
+            {:agent_read_retained_output,
+             %MingaEditor.Agent.RetainedOutputTarget{offer: ^offer, message_id: 42}}} =
+             ProtocolGUI.decode_gui_action(0x6A, <<42::32, offer::binary>>)
+
+    assert :error == ProtocolGUI.decode_gui_action(0x6A, <<0::32, offer::binary>>)
+    assert :error == ProtocolGUI.decode_gui_action(0x6A, <<42::32>>)
+  end
+
   describe "resident approval card to request-bound GUI action" do
     test "each approval decision preserves the exact displayed target" do
       target = Target.new("s", "r", "t")

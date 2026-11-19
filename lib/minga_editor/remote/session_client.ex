@@ -7,6 +7,8 @@ defmodule MingaEditor.Remote.SessionClient do
   alias MingaAgent.Session
   alias MingaAgent.Session.{ConnectionTarget, Transcript}
   alias MingaAgent.SessionStore
+  alias MingaAgent.ArtifactStore.Fetched
+  alias MingaAgent.Tool.Output.{Range, Reference}
 
   @type remote_node :: node()
   @type session_id :: String.t()
@@ -186,6 +188,30 @@ defmodule MingaEditor.Remote.SessionClient do
     end
   end
 
+  @doc "Reads retained output through the broker without changing the originating session."
+  @spec read_retained_output(
+          ConnectionTarget.t(),
+          token(),
+          pos_integer(),
+          Reference.t(),
+          Range.t()
+        ) ::
+          {:ok, Fetched.t()} | {:error, term()}
+  def read_retained_output(
+        %ConnectionTarget{session: remote_pid} = target,
+        token,
+        id,
+        reference,
+        range
+      ) do
+    erpc(
+      node(remote_pid),
+      :read_retained_output,
+      [target, token, id, reference, range],
+      5_000
+    )
+  end
+
   @doc "Returns the session id for a remote session pid."
   @spec session_id_for_pid(remote_node(), pid()) :: {:ok, session_id()} | {:error, term()}
   def session_id_for_pid(remote_node, remote_pid)
@@ -239,6 +265,10 @@ defmodule MingaEditor.Remote.SessionClient do
        when is_atom(remote_node) and is_atom(function) and is_list(args) and is_integer(timeout) do
     :erpc.call(remote_node, RemoteAPI, function, args, timeout)
   catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
+    :exit, reason ->
+      {:error, {:remote_unavailable, reason}}
+
+    :error, {:erpc, reason} when reason in [:timeout, :noconnection] ->
+      {:error, {:remote_unavailable, reason}}
   end
 end

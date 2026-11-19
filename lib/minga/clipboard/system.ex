@@ -5,7 +5,7 @@ defmodule Minga.Clipboard.System do
   Reads from and writes to the system clipboard using the best available
   tool for the current platform:
 
-  - **macOS**: `pbpaste` / `pbcopy`
+  - **macOS**: `pbpaste` and the native plain-text pasteboard via `osascript`
   - **Linux (Wayland)**: `wl-paste` / `wl-copy`
   - **Linux (X11)**: `xclip -selection clipboard`
   - **Linux (X11 alt)**: `xsel --clipboard`
@@ -22,11 +22,24 @@ defmodule Minga.Clipboard.System do
 
   @behaviour Minga.Clipboard.Behaviour
 
+  # pbcopy infers RTF and EPS from the first bytes. Declare the text type explicitly.
+  @write_macos_text """
+  ObjC.import("AppKit");
+  function run() {
+    const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+    const board = $.NSPasteboard.generalPasteboard;
+    board.clearContents;
+    if (!board.setDataForType(input, $.NSPasteboardTypeString)) {
+      throw new Error("The pasteboard rejected the text");
+    }
+  }
+  """
+
   # Cached tool info stores the resolved paths for both the read and write
   # executables. The clipboard tool doesn't change during a session, so we
   # detect once and cache in :persistent_term to avoid repeated PATH lookups.
   @typep tool_info ::
-           %{read: {String.t(), [String.t()]}, write: {String.t(), [String.t()]}}
+           %{read: {String.t(), [String.t()]}, write: {String.t(), String.t(), [String.t()]}}
            | :none
 
   @impl true
@@ -42,7 +55,7 @@ defmodule Minga.Clipboard.System do
   @spec write(String.t()) :: :ok | :unavailable | {:error, term()}
   def write(text) when is_binary(text) do
     case cached_tool_info() do
-      %{write: {path, args}} -> run_write(path, args, text)
+      %{write: {reader, path, args}} -> run_write(reader, path, args, text)
       :none -> :unavailable
     end
   end
@@ -75,7 +88,7 @@ defmodule Minga.Clipboard.System do
 
   @spec detect_tool() :: tool_info()
   defp detect_tool do
-    find_platform("pbcopy", "pbpaste", [], []) ||
+    find_platform("osascript", "pbpaste", ["-l", "JavaScript", "-e", @write_macos_text], []) ||
       find_platform("wl-copy", "wl-paste", [], ~w[--no-newline]) ||
       find_platform("xclip", "xclip", ~w[-selection clipboard], ~w[-selection clipboard -o]) ||
       find_platform("xsel", "xsel", ~w[--clipboard --input], ~w[--clipboard --output]) ||
@@ -85,8 +98,9 @@ defmodule Minga.Clipboard.System do
   @spec find_platform(String.t(), String.t(), [String.t()], [String.t()]) :: tool_info() | nil
   defp find_platform(write_cmd, read_cmd, write_args, read_args) do
     with write_path when write_path != nil <- System.find_executable(write_cmd),
-         read_path when read_path != nil <- System.find_executable(read_cmd) do
-      %{write: {write_path, write_args}, read: {read_path, read_args}}
+         read_path when read_path != nil <- System.find_executable(read_cmd),
+         reader when reader != nil <- System.find_executable("head") do
+      %{write: {reader, write_path, write_args}, read: {read_path, read_args}}
     else
       _ -> nil
     end
@@ -128,49 +142,44 @@ defmodule Minga.Clipboard.System do
     end
   end
 
-  @spec run_write(String.t(), [String.t()], String.t()) :: :ok | {:error, term()}
-  defp run_write(executable, args, text) do
+  @spec run_write(String.t(), String.t(), [String.t()], String.t()) :: :ok | {:error, term()}
+  defp run_write(reader, executable, args, text) do
+    # Erlang ports cannot half-close stdin. Feed the tool exactly the supplied bytes so
+    # it can see EOF while the port stays open to report the tool's exit status.
+    command = "\"$1\" -c \"$2\" | (shift 2; exec \"$@\")"
+
+    arguments = [
+      "-c",
+      command,
+      "minga-clipboard",
+      reader,
+      Integer.to_string(byte_size(text)),
+      executable
+    ]
+
     port =
-      Port.open({:spawn_executable, executable}, [
+      Port.open({:spawn_executable, "/bin/sh"}, [
         :binary,
         :exit_status,
         :use_stdio,
-        args: args
+        args: arguments ++ args
       ])
 
-    Port.command(port, text)
-    # Close the port's stdin so the clipboard tool sees EOF and processes
-    # the data. We then wait only for the {:closed} or {:exit_status}
-    # message, whichever arrives first. The old code waited 500ms for an
-    # exit_status that never arrived after :closed.
-    send(port, {self(), :close})
-    await_port_close(port)
+    if text != "", do: Port.command(port, text)
+    await_write_result(port)
   rescue
     e in [ErlangError, ArgumentError] -> {:error, Exception.message(e)}
   end
 
-  @spec await_port_close(port()) :: :ok | {:error, term()}
-  defp await_port_close(port) do
-    result =
-      receive do
-        {^port, :closed} -> :ok
-        {^port, {:exit_status, 0}} -> :ok
-        {^port, {:exit_status, code}} -> {:error, "exit #{code}"}
-      after
-        5_000 -> {:error, :timeout}
-      end
-
-    # Best-effort drain: catches the trailing :exit_status (if :closed arrived
-    # first) or trailing :closed (if :exit_status arrived first). The Task
-    # calling write/1 is short-lived, so any leaked message is cleaned up on
-    # task exit. Long-lived callers benefit from the drain but are not harmed
-    # if the trailing message hasn't been delivered yet.
+  @spec await_write_result(port()) :: :ok | {:error, term()}
+  defp await_write_result(port) do
     receive do
-      {^port, _} -> :ok
+      {^port, {:exit_status, 0}} -> :ok
+      {^port, {:exit_status, code}} -> {:error, "exit #{code}"}
     after
-      0 -> :ok
+      5_000 ->
+        send(port, {self(), :close})
+        {:error, :timeout}
     end
-
-    result
   end
 end

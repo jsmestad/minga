@@ -13,6 +13,7 @@ defmodule MingaEditor.Input.Picker do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.FocusTree.Node, as: FocusNode
+  alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
@@ -172,6 +173,9 @@ defmodule MingaEditor.Input.Picker do
           PickerData.item(),
           MingaEditor.State.Picker.callback_source()
         ) :: EditorState.t()
+  defp confirm_clicked_item(state, AgentRetainedOutputSource, item, _source),
+    do: AgentRetainedOutputSource.on_select(item, state)
+
   defp confirm_clicked_item(state, source, item, callback_source) do
     new_state = PickerUI.close(state)
     new_state = Source.on_select(source, item, new_state, callback_source)

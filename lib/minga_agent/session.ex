@@ -75,6 +75,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.Tool.Output.Reference
   alias MingaAgent.Tool.Invocation
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec, as: ToolSpec
@@ -443,6 +444,31 @@ defmodule MingaAgent.Session do
   def transcript_since(session, cursor) do
     GenServer.call(session, {:transcript_since, cursor})
   end
+
+  @doc "Reads up to 64 KiB of the original retained tool output, without rerunning it."
+  @spec read_retained_output(
+          ConnectionTarget.t(),
+          pos_integer(),
+          Reference.t(),
+          Range.t()
+        ) ::
+          {:ok, ArtifactStore.Fetched.t()} | {:error, term()}
+  def read_retained_output(
+        %ConnectionTarget{session: session} = target,
+        id,
+        %Reference{} = reference,
+        %Range{unit: :bytes, start: start, count: count} = range
+      )
+      when is_integer(id) and id > 0 and is_integer(start) and
+             start >= 0 and is_integer(count) and count in 0..65_536 do
+    with {:ok, store} <-
+           GenServer.call(session, {:retained_output_store, target, id, reference}) do
+      ArtifactStore.fetch(store, reference, range)
+    end
+  end
+
+  def read_retained_output(_target, _id, _reference, _range),
+    do: {:error, :invalid_range}
 
   @doc "Reads a bounded history page for an exact conversation target or transcript cursor."
   @spec transcript_history_before(
@@ -1239,6 +1265,15 @@ defmodule MingaAgent.Session do
 
   def handle_call({:transcript_since, cursor}, _from, state) do
     {:reply, Transcript.since(state.transcript, cursor), state}
+  end
+
+  def handle_call({:retained_output_store, target, id, reference}, _from, state) do
+    result =
+      with :ok <- validate_connection_target(state, target),
+           {:ok, ^reference} <- Transcript.retained_output(state.transcript, id, reference),
+           do: ensure_artifact_store(state)
+
+    {:reply, result, state}
   end
 
   def handle_call(

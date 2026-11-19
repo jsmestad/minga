@@ -12,8 +12,8 @@ public enum ChatMessageEntry: Identifiable {
     /// Assistant message with BEAM-authored semantic markdown blocks.
     case assistantMarkdown(id: Int, blocks: [Wire.AgentMarkdownBlock])
     case thinking(id: Int, text: String, collapsed: Bool)
-    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String])
-    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]], previewKind: UInt8, previewLines: [String])
+    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String, previewKind: UInt8, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil)
+    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]], previewKind: UInt8, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil)
     case approvalToolCall(id: Int, name: String, summary: String, toolCallId: String, sessionId: String, requestId: String, previewKind: UInt8, previewLines: [String])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
@@ -23,8 +23,8 @@ public enum ChatMessageEntry: Identifiable {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
              .assistantMarkdown(let id, _),
              .thinking(let id, _, _),
-             .toolCall(let id, _, _, _, _, _, _, _, _, _, _),
-             .styledToolCall(let id, _, _, _, _, _, _, _, _, _, _),
+             .toolCall(let id, _, _, _, _, _, _, _, _, _, _, _),
+             .styledToolCall(let id, _, _, _, _, _, _, _, _, _, _, _),
              .approvalToolCall(let id, _, _, _, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
@@ -716,9 +716,9 @@ public final class AgentChatState {
         case .thinking(let text, let collapsed):
             return .thinking(id: id, text: text, collapsed: collapsed)
         case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
-            return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines)
+            return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines, retainedOutputOffer: msg.retainedOutputOffer)
         case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines):
-            return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines)
+            return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines, retainedOutputOffer: msg.retainedOutputOffer)
         case .approvalToolCall(let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines):
             return .approvalToolCall(id: id, name: name, summary: summary, toolCallId: toolCallId, sessionId: sessionId, requestId: requestId, previewKind: previewKind, previewLines: previewLines)
         case .system(let text, let isError):

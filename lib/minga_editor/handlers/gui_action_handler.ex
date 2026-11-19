@@ -117,6 +117,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        ),
        do: AgentSubStates.respond_to_tool_approval(state, target, decision)
 
+  defp dispatch_action(
+         state,
+         {:agent_read_retained_output, %MingaEditor.Agent.RetainedOutputTarget{} = target}
+       ),
+       do: MingaEditor.Agent.RetainedOutputTarget.open(state, target)
+
   defp dispatch_action(state, {:agent_prompt_fit, window_id, generation, columns, rows}),
     do: MingaEditor.Agent.PromptInput.fit(state, window_id, generation, columns, rows)
 

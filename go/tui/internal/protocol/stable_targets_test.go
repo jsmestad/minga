@@ -21,6 +21,7 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionExecuteCommand":             false,
 		"GUIActionAgentToolToggle":            false,
 		"GUIActionAgentToolApproval":          false,
+		"GUIActionAgentReadRetainedOutput":    false,
 		"GUIActionSemanticItemActivate":       false,
 		"GUIActionHoverOpenAction":            false,
 		"GUIActionSidebarAction":              false,

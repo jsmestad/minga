@@ -27,6 +27,7 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.UI.Picker.AgentHistorySource
+  alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.WorkspaceWorkflow
 
   @opaque staged_switch ::
@@ -266,6 +267,7 @@ defmodule MingaEditor.TabWorkflow do
       _none ->
         state
     end
+    |> AgentRetainedOutputSource.dismiss_if_stale()
   end
 
   @spec clear_replayed_events(EditorState.t(), non_neg_integer()) :: EditorState.t()

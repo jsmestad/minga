@@ -1197,15 +1197,27 @@ public enum Wire {
         }
     }
 
+    public struct RetainedOutputOffer: Equatable, Sendable {
+        public let high: UInt64
+        public let low: UInt64
+
+        public init(high: UInt64, low: UInt64) {
+            self.high = high
+            self.low = low
+        }
+    }
+
     /// A chat message from gui_agent_transcript, with a stable BEAM-assigned ID.
     public struct ChatMessage: Sendable {
         /// Stable uint32 ID assigned by the BEAM. Persists across streaming updates.
         public let beamId: UInt32
         public let content: ChatMessageContent
+        public let retainedOutputOffer: RetainedOutputOffer?
 
-        public init(beamId: UInt32, content: ChatMessageContent) {
+        public init(beamId: UInt32, content: ChatMessageContent, retainedOutputOffer: RetainedOutputOffer? = nil) {
             self.beamId = beamId
             self.content = content
+            self.retainedOutputOffer = retainedOutputOffer
         }
     }
 

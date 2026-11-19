@@ -4,9 +4,10 @@ import MingaProtocol
 public struct AgentToolCallCard: View {
     public enum Action: Equatable, Sendable {
         case toggle(messageID: UInt32)
+        case readRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
     }
 
-    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], sendAction: ViewActionHandler<Action>?, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
+    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil, sendAction: ViewActionHandler<Action>?, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
         self.messageID = messageID
         self.name = name
         self.summary = summary
@@ -18,6 +19,7 @@ public struct AgentToolCallCard: View {
         self.result = result
         self.resultLines = resultLines
         self.previewLines = previewLines
+        self.retainedOutputOffer = retainedOutputOffer
         self.sendAction = sendAction
         self.styledLineView = styledLineView
     }
@@ -32,6 +34,7 @@ public struct AgentToolCallCard: View {
     public let result: String?
     public let resultLines: [[Wire.StyledTextRun]]?
     public let previewLines: [String]
+    public let retainedOutputOffer: Wire.RetainedOutputOffer?
     @Environment(\.themeColors) private var theme
     public let sendAction: ViewActionHandler<Action>?
     /// Closure to render a styled line, provided by the parent since it's shared
@@ -130,6 +133,14 @@ public struct AgentToolCallCard: View {
                 previewLinesView(visiblePreviewLines)
                     .padding(.horizontal, Spacing.md)
                     .padding(.bottom, Spacing.md)
+            }
+
+            if let offer = retainedOutputOffer, let sendAction, let id = UInt32(exactly: messageID), id != 0 {
+                Button("Read retained output") { sendAction(.readRetainedOutput(messageID: id, offer: offer)) }
+                    .buttonStyle(.borderless)
+                    .font(Typography.font(.small, weight: .medium))
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.sm)
             }
 
             // Result (collapsed by default, supports styled or plain text)

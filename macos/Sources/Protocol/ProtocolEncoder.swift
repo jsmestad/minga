@@ -206,6 +206,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(volumePath, limit: Int(UInt16.max))
         case .executeCommand(let name):
             return oversizedString(name, limit: Int(UInt16.max))
+        case .agentReadRetainedOutput(let messageID, let offer):
+            return messageID == 0 || (offer.high == 0 && offer.low == 0) ? .invalidPayload("Retained output requires a tool message identity and displayed offer") : nil
         case .agentToolApproval(let sessionId, let requestId, let toolCallId, _):
             guard !sessionId.isEmpty, !requestId.isEmpty, !toolCallId.isEmpty else {
                 return .invalidPayload("Tool approval requires session, request, and tool call identity")
@@ -366,6 +368,14 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             buf.append(wireDecision.rawValue)
             writeFrame(buf)
         case .agentToolToggle(let messageID): encodeAgentToolToggle(messageID: messageID)
+        case .agentReadRetainedOutput(let messageID, let offer):
+            var buf = Data(count: 22)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_AGENT_READ_RETAINED_OUTPUT
+            writeU32(&buf, 2, messageID)
+            writeU64(&buf, 6, offer.high)
+            writeU64(&buf, 14, offer.low)
+            writeFrame(buf)
         case .executeCommand(let name): encodeExecuteCommand(name: name)
         case .openFile(let path): encodeOpenFile(path: path)
         case .gitStageFile(let path): encodeGitStageFile(path: path)

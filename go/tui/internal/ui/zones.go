@@ -70,7 +70,7 @@ func (m *zoneManager) marker(id string) string {
 	return marker
 }
 
-func (m *zoneManager) MarkAgentApproval(id string, value string) string {
+func (m *zoneManager) markCachedTranscriptControl(id string, value string) string {
 	if id == "" || value == "" {
 		return value
 	}

@@ -62,7 +62,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
 
   def encode_message_body({:tool_call, %ToolCallView{} = tc}) do
     Writer.new(@command)
-    |> Writer.uint8(:message_kind, 0x04)
+    |> tool_message_header(0x04, 0x0B, tc.retained_output_offer)
     |> Writer.uint8(:status, tool_call_status_byte(tc.status))
     |> Writer.uint8(:is_error, bool_byte(tc.is_error))
     |> Writer.uint8(:collapsed, bool_byte(tc.collapsed))
@@ -92,7 +92,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
 
   def encode_message_body({:styled_tool_call, %ToolCallView{} = tc, styled_lines}) do
     Writer.new(@command)
-    |> Writer.uint8(:message_kind, 0x08)
+    |> tool_message_header(0x08, 0x0C, tc.retained_output_offer)
     |> Writer.uint8(:status, tool_call_status_byte(tc.status))
     |> Writer.uint8(:is_error, bool_byte(tc.is_error))
     |> Writer.uint8(:collapsed, bool_byte(tc.collapsed))
@@ -125,6 +125,16 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.uint32(:cache_write_tokens, usage.cache_write)
     |> Writer.uint32(:cost_micros, cost_int)
     |> Writer.finish()
+  end
+
+  @spec tool_message_header(Writer.t(), byte(), byte(), <<_::128>> | nil) :: Writer.t()
+  defp tool_message_header(writer, plain, _offered, nil),
+    do: Writer.uint8(writer, :message_kind, plain)
+
+  defp tool_message_header(writer, _plain, offered, <<_::128>> = offer) do
+    writer
+    |> Writer.uint8(:message_kind, offered)
+    |> Writer.append(offer)
   end
 
   @spec encode_text_message(non_neg_integer(), String.t()) :: binary()
