@@ -76,6 +76,16 @@ final class ProtocolReader: @unchecked Sendable {
 
     // MARK: - Private
 
+    /// Reads a complete header or payload even when the pipe splits it across writes.
+    private func readExactly(_ length: Int) throws -> Data? {
+        guard var data = try input.read(upToCount: length), !data.isEmpty else { return nil }
+        while data.count < length {
+            guard let chunk = try input.read(upToCount: length - data.count), !chunk.isEmpty else { return nil }
+            data.append(chunk)
+        }
+        return data
+    }
+
     private func readLoop() {
         while running.withLock({ $0 }) {
             // FileHandle returns autoreleased NSData; drain each packet so read buffers do not live until this thread exits.
@@ -86,13 +96,12 @@ final class ProtocolReader: @unchecked Sendable {
     private func readPacket() -> Bool {
         // Reserve the sole reader-to-main slot before reading any payload bytes.
         guard acquireAdmission() else { return false }
-        // Read 4-byte length header.
-        let lenData = input.readData(ofLength: 4)
-        guard lenData.count == 4 else {
-            // stdin closed or short read: BEAM has exited.
-            cancelAdmission()
-            onDisconnect()
-            return false
+        let lenData: Data
+        do {
+            guard let header = try readExactly(4) else { return disconnect() }
+            lenData = header
+        } catch {
+            return disconnect(readError: error)
         }
 
         let length = Int(lenData[0]) << 24 | Int(lenData[1]) << 16 |
@@ -100,23 +109,15 @@ final class ProtocolReader: @unchecked Sendable {
 
         guard length > 0, length <= maxPayloadLength else {
             os_log(.error, log: protocolLog, "Protocol payload length %{public}d outside valid range 1...%{public}d; disconnecting to avoid stream desync", length, maxPayloadLength)
-            cancelAdmission()
-            onDisconnect()
-            return false
+            return disconnect()
         }
 
-        // Read the payload.
-        var payload = Data()
-        var remaining = length
-        while remaining > 0 {
-            let chunk = input.readData(ofLength: remaining)
-            guard !chunk.isEmpty else {
-                cancelAdmission()
-                onDisconnect()
-                return false
-            }
-            payload.append(chunk)
-            remaining -= chunk.count
+        let payload: Data
+        do {
+            guard let body = try readExactly(length) else { return disconnect() }
+            payload = body
+        } catch {
+            return disconnect(readError: error)
         }
 
         os_signpost(.event, log: protocolLog, name: "ProtocolPayloadReceived", "bytes=%{public}d", payload.count)
@@ -143,5 +144,15 @@ final class ProtocolReader: @unchecked Sendable {
             onDecodeFailure(DecodedFrameFailure(error: .malformed, envelope: nil))
         }
         return true
+    }
+
+    private func disconnect(readError: (any Error)? = nil) -> Bool {
+        // Intentional retirement can close the descriptor while the blocking read unwinds.
+        if let readError, running.withLock({ $0 }) {
+            os_log(.error, log: protocolLog, "Protocol read failed: %{public}@", readError.localizedDescription)
+        }
+        cancelAdmission()
+        onDisconnect()
+        return false
     }
 }

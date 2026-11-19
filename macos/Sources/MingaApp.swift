@@ -395,7 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var applicationQuitAlert: NSAlert?
     private var activeFilePanel: NSSavePanel?
     private var inputRejectionAlert: NSAlert?
-    private var coreConnectionIsLive = true
+    private var coreConnectionIsLive = false
     private var recoveryManager: RecoveryManager?
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
@@ -423,7 +423,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if SingletonEditorWindowProbe.isRequested {
-            coreConnectionIsLive = false
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
             return
@@ -466,8 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recordStartupPhase("beam_spawned")
 
             guard let readH = manager.readHandle, let writeH = manager.writeHandle else {
-                NSLog("Failed to start BEAM process")
-                NSApp.terminate(nil)
+                presentNativeStartupFailure("Minga could not start the bundled editor core.")
                 return
             }
             protocolInput = readH
@@ -502,9 +500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let ctRenderer = CoreTextMetalRenderer(
             resourcePolicy: frameResourcePolicy.nativeRenderer
         ) else {
-            NSLog("Failed to initialize CoreText Metal renderer")
-            beamManager?.abortStartup()
-            NSApp.terminate(nil)
+            presentNativeStartupFailure("Minga could not initialize its Metal renderer. Check that the app has a working Metal device and its shader resources are installed.")
             return
         }
         ctRenderer.setupRenderers(fontManager: fm)
@@ -650,16 +646,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.
 
-        // Start the already-installed connection only after every application consumer is ready to receive its ordered events.
-        connection.start()
-        recordStartupPhase("protocol_started")
-        coreConnectionIsLive = true
-
         // First frame callback: dismiss the startup overlay and flush Finder,
         // `open -a`, and CLI wait requests buffered until the BEAM can accept
         // semantic GUI actions.
         disp.onFirstRender = { [weak self] in
-            guard let self else { return }
+            guard let self, let disposition = self.coreLifecycle?.firstFrameDidCommit(),
+                  disposition != .ignored else { return }
+            if disposition == .recovered {
+                self.recoveryManager?.transportDidReconnect()
+            }
 
             os_signpost(.end, log: startupLog, name: "AppStartup")
             recordStartupPhase("first_frame_committed")
@@ -676,6 +671,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.acceptsOpenRequests = true
             self.flushPendingOpenRequests()
         }
+
+        startProtocolConnection(connection)
+    }
+
+    private func startProtocolConnection(_ connection: ProtocolConnection) {
+        coreConnectionIsLive = true
+        if !appState.hasReceivedFirstFrame {
+            coreLifecycle?.waitForFirstFrame { [weak self] in self?.presentStartupTimeout() }
+        }
+        // Start only after every consumer, including the first-frame callback, is installed.
+        connection.start()
+        recordStartupPhase("protocol_started")
     }
 
     /// Delivers every application-owned prepared effect to its existing resource owner.
@@ -756,10 +763,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // The timeout alert owns the explicit Quit action; do not start another unanswered handshake.
+        if coreLifecycle?.startupHasTimedOut == true { return .terminateCancel }
         let coreIsLive = coreConnectionIsLive
             && (beamManager.map { !$0.isShuttingDown && $0.hasLiveProcess } ?? true)
         return ApplicationTerminationPolicy.reply(
             coreIsLive: coreIsLive,
+            waitingForFirstFrame: coreLifecycle?.isAwaitingFirstFrame == true,
             coordinator: applicationQuitCoordinator
         )
     }
@@ -1069,10 +1079,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeHandle: writeHandle,
             canRestart: true
         ) else { return }
-        replacement.start()
-
         recoveryManager?.transportDidReconnect()
-        coreConnectionIsLive = true
+        startProtocolConnection(replacement)
 
         // Re-send ready event so the new BEAM knows our dimensions.
         if let nsView = editorNSView {
@@ -1298,6 +1306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func retireProtocolConnection() {
+        coreConnectionIsLive = false
         outboundConnectionState.retire()
         recoveryManager?.transportDidReconnect()
         dismissInputRejection()
@@ -1308,8 +1317,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editorNSView?.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
     }
 
+    private func presentNativeStartupFailure(_ message: String) {
+        NSLog("Minga startup failed: %@", message)
+        beamManager?.abortStartup()
+        MainRunLoopAction {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Minga Could Not Start"
+            alert.informativeText = message
+            alert.addButton(withTitle: "Quit Minga")
+            alert.runModal()
+            NSApp.terminate(nil)
+        }.enqueue()
+    }
+
+    private func presentStartupTimeout() {
+        let message = "Minga did not receive a usable editor frame before the startup deadline."
+        NSLog("Minga startup failed: %@", message)
+        recoveryManager?.presentTransportFailure(message: message, restartAction: nil) { [weak self] in
+            guard self?.coreLifecycle?.abandonTimedOutStartup() == true else { return }
+            NSApp.terminate(nil)
+        }
+    }
+
     private func presentTerminalTransportFailure(message: String) {
-        if let manager = beamManager {
+        if appState.hasReceivedFirstFrame, let manager = beamManager {
             recoveryManager?.presentTransportFailure(
                 message: message,
                 restartAction: { manager.restartTransportAfterFailure() }
@@ -1336,16 +1368,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
         coreConnectionIsLive = false
         applicationQuitCoordinator?.transportRecoveryDidExpire()
-        if canRestart, let manager = beamManager {
-            recoveryManager?.presentTransportFailure(
-                message: error.userFacingMessage,
-                restartAction: { manager.restartTransportAfterFailure() }
-            )
+        if canRestart, appState.hasReceivedFirstFrame {
+            presentTerminalTransportFailure(message: error.userFacingMessage)
         } else {
-            recoveryManager?.presentTransportFailure(
-                message: error.userFacingMessage,
-                restartAction: nil
-            )
+            presentNativeStartupFailure(error.userFacingMessage)
         }
     }
 }
