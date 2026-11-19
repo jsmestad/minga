@@ -17,6 +17,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.Effect.{Outcome, Policy, Request}
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.PickerUI
+  alias MingaEditor.UI.Picker.{AgentRetainedOutputCopy, AgentRetainedOutputSource}
+  alias MingaEditor.UI.Picker.{Candidate, Item}
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.State, as: EditorState
@@ -28,8 +30,6 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
-  alias MingaEditor.UI.Picker.{AgentRetainedOutputCopy, AgentRetainedOutputSource}
-  alias MingaEditor.UI.Picker.{Candidate, Item}
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
