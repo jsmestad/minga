@@ -105,13 +105,37 @@ defmodule MingaAgent.OAuth.FlowTest do
       entry = PendingFlow.Entry.new("verifier", "state", 1455, "session-a", self())
 
       assert {:ok, ref} = PendingFlow.put(entry, 60_000)
-      assert {:ok, stored} = PendingFlow.take(ref, session_id: "session-a", client_pid: self())
+
+      assert {:ok, {stored, nil, nil}} =
+               PendingFlow.take(ref, session_id: "session-a", client_pid: self())
+
       assert %PendingFlow.Entry{} = stored
       assert stored.verifier == "verifier"
       assert stored.state == "state"
       assert stored.port == 1455
       assert stored.owner_session_id == "session-a"
       assert stored.owner_client_pid == self()
+    end
+
+    test "a mismatched operation cannot consume the bound fallback writer" do
+      entry = PendingFlow.Entry.new("verifier", "state", 1455, "session-a", self())
+      operation_ref = make_ref()
+      writer = fn _tokens -> :ok end
+      owner = [session_id: "session-a", client_pid: self()]
+
+      assert {:ok, ref} =
+               PendingFlow.put(entry, 60_000, operation_ref: operation_ref, write_fun: writer)
+
+      assert {:error, :wrong_operation} = PendingFlow.take(ref, owner)
+
+      assert {:error, :wrong_operation} =
+               PendingFlow.take(ref, Keyword.put(owner, :operation_ref, make_ref()))
+
+      assert {:ok, {^entry, ^writer, ^operation_ref}} =
+               PendingFlow.take(ref, Keyword.put(owner, :operation_ref, operation_ref))
+
+      assert {:error, :unknown_flow} =
+               PendingFlow.take(ref, Keyword.put(owner, :operation_ref, operation_ref))
     end
 
     test "complete_manual reports denied authorization" do
@@ -122,6 +146,35 @@ defmodule MingaAgent.OAuth.FlowTest do
       assert message =~ "Authorization failed"
       assert message =~ "Nope"
     end
+  end
+
+  test "cancelling while the browser launcher blocks releases the listener and registration" do
+    parent = self()
+    operation = make_ref()
+
+    launch = fn url ->
+      query = URI.decode_query(URI.parse(url).query)
+      port = URI.parse(query["redirect_uri"]).port
+      send(parent, {:launching, self(), port})
+
+      receive do
+        :release -> :ok
+      end
+    end
+
+    first = Task.async(fn -> Flow.run(operation_ref: operation, launch_fun: launch) end)
+    assert_receive {:launching, helper, port}, 1_000
+    monitor = Process.monitor(helper)
+    send(first.pid, {:connection_cancelled, operation})
+    assert {:error, :cancelled} = Task.await(first, 1_000)
+    assert_receive {:DOWN, ^monitor, :process, ^helper, :killed}
+    assert {:error, :econnrefused} = :gen_tcp.connect({127, 0, 0, 1}, port, [], 100)
+
+    replacement = make_ref()
+    second = Task.async(fn -> Flow.run(operation_ref: replacement, launch_fun: launch) end)
+    assert_receive {:launching, _helper, ^port}, 1_000
+    send(second.pid, {:connection_cancelled, replacement})
+    assert {:error, :cancelled} = Task.await(second, 1_000)
   end
 
   describe "registration" do

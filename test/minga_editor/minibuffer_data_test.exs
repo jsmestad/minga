@@ -102,6 +102,19 @@ defmodule MingaEditor.MinibufferDataTest do
 
       assert result.total_candidates == 2
     end
+
+    test "renders only masked graphemes from a live sensitive prompt" do
+      state =
+        TestHelpers.base_state()
+        |> PromptUI.open(MingaEditor.UI.Prompt.ProjectAdd, default: "á界secret", sensitive: true)
+
+      result = state |> Input.from_editor_state() |> MinibufferData.from_state()
+
+      assert result.visible
+      assert result.input == "••••••••"
+      assert result.cursor_pos == 8
+      assert Enum.map(result.candidates, & &1.label) == ["Submit", "Cancel"]
+    end
   end
 
   describe "from_state/1 command mode" do

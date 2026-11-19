@@ -349,13 +349,15 @@ defmodule MingaEditor.MinibufferData do
 
   @spec text_prompt(PromptState.t()) :: t()
   defp text_prompt(prompt_state) do
+    {label, input, cursor} = PromptState.render_data(prompt_state)
+
     %__MODULE__{
       visible: true,
       generation: prompt_state.generation,
       mode: @mode_text_prompt,
-      cursor_pos: prompt_state.cursor,
-      prompt: prompt_state.label,
-      input: prompt_state.text,
+      cursor_pos: cursor,
+      prompt: label,
+      input: input,
       context: "",
       selected_index: 0,
       candidates: [

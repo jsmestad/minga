@@ -82,7 +82,7 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
       shell_id: Runtime.id(state.shell_runtime),
       shell: Runtime.module(state.shell_runtime),
       shell_identity: Runtime.identity(state.shell_runtime),
-      shell_state: Runtime.state(state.shell_runtime),
+      shell_state: Runtime.render_snapshot(state.shell_runtime),
       message_store: state.render.message_store,
       notifications: state.feedback.notifications,
       sidebar_registry: state.extension_surfaces.sidebar_registry,

@@ -397,6 +397,20 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	}
 }
 
+func TestFooterKeepsNarrowNoticeReadableBesideMode(t *testing.T) {
+	model := New(60, 24, nil)
+	model.chrome[generated.OPGuiStatusBar] = protocol.ChromePayload{Status: protocol.StatusBar{
+		Message: "API key saved.",
+		Left:    []protocol.StatusSegment{{Text: " [SAFE] NORMAL [no file] Idle "}},
+		Right:   []protocol.StatusSegment{{Text: "Spaces:2 Text 1:1 Top"}},
+	}}
+
+	footer := ansi.Strip(model.footerLines()[0])
+	if !strings.Contains(footer, "API key saved.") || !strings.Contains(footer, "NORMAL") {
+		t.Fatalf("narrow footer hides the save notice or editing mode: %q", footer)
+	}
+}
+
 func TestOperationOnlyStatusIsDiscoverableAfterCommittedFrame(t *testing.T) {
 	model := New(80, 24, nil)
 	model.now = func() time.Time { return feedbackTestStart }
