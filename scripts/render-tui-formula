@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a Homebrew Formula from the exact archives for a versioned GitHub Release."""
+"""Render Homebrew recipes from the exact macOS assets for a versioned GitHub Release."""
 
 import argparse
 import hashlib
@@ -10,43 +10,58 @@ from pathlib import Path
 REPOSITORY = "https://github.com/jsmestad/minga"
 ARM64_ASSET = "minga_macos_aarch64.tar.gz"
 INTEL_ASSET = "minga_macos_x86_64.tar.gz"
+DMG_ASSET = "Minga.dmg"
 
 
-def archive_digest(path, asset):
-    if path.name != asset:
-        raise ValueError(f"expected {asset}, got {path}")
+def asset_digest(path, name):
+    if path.name != name:
+        raise ValueError(f"expected {name}, got {path}")
     info = path.stat()
     if not stat.S_ISREG(info.st_mode) or not info.st_size:
-        raise ValueError(f"not a nonempty archive file: {path}")
+        raise ValueError(f"not a nonempty {'archive' if name.endswith('.tar.gz') else 'DMG'} file: {path}")
 
     digest = hashlib.sha256()
-    with path.open("rb") as archive:
-        for block in iter(lambda: archive.read(1024 * 1024), b""):
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
 
 
-def render(version, arm64_sha, intel_sha):
-    release = f"{REPOSITORY}/releases/download/v{version}"
+def release_url(display_version, asset):
+    return f"{REPOSITORY}/releases/download/v{display_version}/{asset}"
+
+
+def render_formula(display_version, package_version, arm64_sha, intel_sha):
+    arm64_asset = ARM64_ASSET
+    architecture = f'''  on_arm do
+    url "{release_url(display_version, arm64_asset)}"
+    sha256 "{arm64_sha}"
+  end
+
+  on_intel do
+    url "{release_url(display_version, INTEL_ASSET)}"
+    sha256 "{intel_sha}"
+  end'''
+    expected_version = "#{version}"
+    if package_version != display_version:
+        arm64_asset = f"minga_{display_version}_macos_aarch64.tar.gz"
+    if intel_sha is None:
+        architecture = f'''  depends_on ArchRequirement => :arm64
+
+  url "{release_url(display_version, arm64_asset)}"
+  sha256 "{arm64_sha}"'''
+        expected_version = display_version
     return f'''# frozen_string_literal: true
 
 class Minga < Formula
   desc "BEAM-powered modal text editor for the terminal"
   homepage "{REPOSITORY}"
-  version "{version}"
+  version "{package_version}"
   license "MIT"
 
   depends_on macos: :sequoia
 
-  on_arm do
-    url "{release}/{ARM64_ASSET}"
-    sha256 "{arm64_sha}"
-  end
-
-  on_intel do
-    url "{release}/{INTEL_ASSET}"
-    sha256 "{intel_sha}"
-  end
+{architecture}
 
   def install
     # Homebrew stages inside the archive's single minga/ directory.
@@ -55,33 +70,98 @@ class Minga < Formula
   end
 
   test do
-    assert_equal "minga #{{version}}", shell_output("#{{bin}}/minga --version").strip
+    assert_equal "minga {expected_version}", shell_output("#{{bin}}/minga --version").strip
   end
 end
 '''
 
 
+def render_cask(display_version, package_version, dmg_sha):
+    dmg_asset = DMG_ASSET if package_version == display_version else f"Minga_{display_version}.dmg"
+    return f'''# frozen_string_literal: true
+
+cask "minga-mac" do
+  version "{package_version}"
+  sha256 "{dmg_sha}"
+
+  url "{release_url(display_version, dmg_asset)}"
+  name "Minga"
+  desc "BEAM-powered modal text editor with native macOS GUI"
+  homepage "{REPOSITORY}"
+
+  depends_on arch: :arm64
+  depends_on macos: :sequoia
+
+  app "Minga.app"
+
+  zap trash: [
+    "~/Library/Application Support/minga",
+    "~/Library/Preferences/com.minga.minga-mac.plist",
+    "~/Library/Caches/com.minga.minga-mac",
+  ]
+end
+'''
+
+
+def write_recipes(output, formula, cask):
+    output.mkdir(parents=True, exist_ok=True)
+    created = []
+    try:
+        for name, recipe in (("minga.rb", formula), ("minga-mac.rb", cask)):
+            path = output / name
+            with path.open("x", encoding="utf-8") as file:
+                created.append(path)
+                file.write(recipe)
+    except OSError:
+        for path in created:
+            path.unlink()
+        raise
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Supply the verified final archives for the same immutable release. "
-        "Writes Formula Ruby to stdout; does not contact GitHub or publish anything.",
+        epilog="Supply the verified final assets for the same immutable release. "
+        "Writes Formula Ruby to stdout unless --dmg and --output are supplied. "
+        "Does not contact GitHub or publish anything.",
         allow_abbrev=False,
     )
-    parser.add_argument("--version", required=True, help="release version without the v prefix (e.g. 0.1.0)")
+    parser.add_argument("--version", required=True, help="release version without the v prefix (e.g. 0.1.0 or 0.1.0-dev.42)")
     parser.add_argument("--arm64", required=True, type=Path, metavar="ARCHIVE", help=ARM64_ASSET)
-    parser.add_argument("--x86-64", required=True, type=Path, metavar="ARCHIVE", help=INTEL_ASSET)
+    parser.add_argument("--x86-64", type=Path, metavar="ARCHIVE", help="required for stable recipes only")
+    parser.add_argument("--dmg", type=Path, metavar="PATH", help=DMG_ASSET)
+    parser.add_argument("--output", metavar="DIRECTORY", help="write minga.rb and minga-mac.rb without overwriting files")
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", args.version):
-        parser.error("--version must be an explicit release version (e.g. 0.1.0)")
+    if (args.dmg is None) != (args.output is None):
+        parser.error("--dmg and --output must be supplied together")
+    if args.output == "":
+        parser.error("--output must name a directory")
+
+    display_version = args.version
+    match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)(?:-([0-9A-Za-z.-]+))?", display_version)
+    if not match:
+        parser.error("--version must be an explicit release version (e.g. 0.1.0 or 0.1.0-dev.42)")
+    base, prerelease = match.groups()
+    package_version = display_version
+    if prerelease and prerelease.split(".", 1)[0] == "dev":
+        rolling = re.fullmatch(r"dev\.([1-9][0-9]*)", prerelease)
+        if not rolling:
+            parser.error("--version must use base-dev.N with a positive run number for rolling releases")
+        # Homebrew's Version orders beta builds below the corresponding stable release.
+        package_version = f"{base}beta{rolling[1]}"
 
     try:
-        arm64_sha = archive_digest(args.arm64, ARM64_ASSET)
-        intel_sha = archive_digest(args.x86_64, INTEL_ASSET)
+        arm64_sha = asset_digest(args.arm64, ARM64_ASSET)
+        intel_sha = asset_digest(args.x86_64, INTEL_ASSET) if args.x86_64 and package_version == display_version else None
+        formula = render_formula(display_version, package_version, arm64_sha, intel_sha)
+        if args.dmg is None:
+            print(formula, end="")
+        else:
+            dmg_sha = asset_digest(args.dmg, DMG_ASSET)
+            cask = render_cask(display_version, package_version, dmg_sha)
+            write_recipes(Path(args.output), formula, cask)
     except (OSError, ValueError) as error:
         parser.error(str(error))
-
-    print(render(args.version, arm64_sha, intel_sha), end="")
 
 
 if __name__ == "__main__":

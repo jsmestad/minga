@@ -95,7 +95,7 @@ jobs:
           run = api(f"{root}/actions/runs/{run_id}/attempts/{attempt}")
           check(run["repository"]["full_name"] == repository, "Wrong producing repository")
           check(run["id"] == run_id and run["run_attempt"] == attempt, "Wrong producing generation")
-          check(run["event"] == "workflow_dispatch" and run["head_branch"] == "main", "Wrong preparation provenance")
+          check(run["event"] in ("workflow_dispatch", "push") and run["head_branch"] == "main", "Wrong preparation provenance")
           check(run["path"] == ".github/workflows/release.yml" and run["head_sha"] == workflow, "Wrong producing workflow revision")
           check(run["status"] == "completed" and run["conclusion"] == "success", "Preparation generation is incomplete/failed")
           context = {
@@ -105,6 +105,10 @@ jobs:
               "workflow_sha": workflow, "run_id": run_id,
               "run_attempt": attempt, "run_started_at": run["run_started_at"],
           }
+          if run["event"] == "push":
+              check(source == workflow, "Rolling candidate must build the exact main push")
+              check(context["version"].endswith(f'-dev.{run["run_number"]}'), "Wrong rolling build number")
+              context["channel"] = "homebrew"
           Path("context.json").write_text(json.dumps(context))
           prefix = f"candidate-{run_id}-{attempt}-"
           artifacts = []

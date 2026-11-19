@@ -1,3 +1,6 @@
+Code.require_file(Path.expand("../../mix/release_erts.ex", __DIR__))
+Code.require_file(Path.expand("../../mix/tasks/release.tui.ex", __DIR__))
+
 defmodule Minga.ReleaseTest do
   use ExUnit.Case, async: true
 

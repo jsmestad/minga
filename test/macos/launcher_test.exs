@@ -527,6 +527,14 @@ defmodule Minga.MacOSLauncherTest do
     assert File.read!(release_log) == "args=[#{encode_args(["README.md"])}]\n[start]\n"
   end
 
+  test "the desktop launcher reports the packaged rolling version", ctx do
+    releases = Path.join(ctx.app, "Contents/Resources/release/releases")
+    File.mkdir_p!(releases)
+    File.write!(Path.join(releases, "start_erl.data"), "17.1.1 0.1.0-dev.123")
+
+    assert {"minga 0.1.0-dev.123\n", 0} = System.cmd(@launcher, ["--version"], env: ctx.env)
+  end
+
   test "a symlinked archive launcher starts its own Mix release", ctx do
     root = Path.join(ctx.root, "unpacked path/minga")
     File.mkdir_p!(Path.join(root, "bin"))
