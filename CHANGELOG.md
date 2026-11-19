@@ -63,6 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Agent tools reject arguments that violate their declared JSON Schema before constructing or invoking an executable callback, including non-SDK tools. Valid SDK input normalization and defaults remain available, and the schema validator now fails closed when a regular expression exceeds its match budget.
 - Agent workspaces show Awaiting approval without an execution animation while a tool waits for consent. Denied, Cancelled, Expired, and Error outcomes stay distinct in native and terminal conversations, including restored sessions. Approval waits do not inflate execution durations. Stopping an admitted effect preserves retained output and disclosure state without claiming that its effects were rolled back.
 - Entering plan mode, losing a provider, resetting a conversation, and restoring another conversation retire the original approval target before its identity changes. Known non-execution carries no execution duration, and plan mode does not increase the workspace's running-work count.
 - Saving or removing an agent API key replaces the credential file atomically. A failed write leaves existing keys intact, and malformed files report an error without including credential contents.

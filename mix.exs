@@ -265,6 +265,7 @@ defmodule Minga.MixProject do
       {:propcheck, "~> 1.5", only: :test},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:req_llm, "~> 1.29"},
+      {:jsv, "~> 0.26.2"},
       {:req, "~> 0.7.5"},
       {:vibe_kit, "~> 0.1.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
