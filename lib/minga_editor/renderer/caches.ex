@@ -18,6 +18,7 @@ defmodule MingaEditor.Renderer.Caches do
             recovery_generation: 0,
             last_frame_keyframe?: false,
             prompt_presentation: nil,
+            prompt_unavailable: nil,
             adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new()
 
   @type t :: %__MODULE__{
@@ -36,6 +37,7 @@ defmodule MingaEditor.Renderer.Caches do
           recovery_generation: non_neg_integer(),
           last_frame_keyframe?: boolean(),
           prompt_presentation: MingaEditor.Renderer.TextPresentation.t() | nil,
+          prompt_unavailable: {pos_integer(), pos_integer(), :missing | :unavailable} | nil,
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
 
@@ -46,7 +48,12 @@ defmodule MingaEditor.Renderer.Caches do
 
   @spec retain_prompt(t(), MingaEditor.Renderer.TextPresentation.t()) :: t()
   def retain_prompt(%__MODULE__{} = caches, presentation),
-    do: %{caches | prompt_presentation: presentation}
+    do: %{caches | prompt_presentation: presentation, prompt_unavailable: nil}
+
+  @spec record_prompt_unavailable(t(), {pos_integer(), pos_integer(), :missing | :unavailable}) ::
+          t()
+  def record_prompt_unavailable(%__MODULE__{} = caches, fault),
+    do: %{caches | prompt_unavailable: fault}
 
   @spec reset_frame_rows_rasterized(t()) :: t()
   def reset_frame_rows_rasterized(%__MODULE__{} = caches),
