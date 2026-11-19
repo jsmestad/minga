@@ -207,6 +207,7 @@
 		6D00B9B59415F742DC1CF6CB /* ConformancePixelRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A76BCA983E350B800BA712 /* ConformancePixelRunner.swift */; };
 		6DC4EDE61F449DC8AFF50B20 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764F85CBFE17A90A0A61F2B6 /* StatusBarView.swift */; };
 		6DC89F81DBC022B3FCBA39BB /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
+		6E3FC5B5D64DB5096C6DAFF6 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B21BFD6A61768F0EDFCAB95B /* Fonts */; };
 		6EE7C16703E92B31CC9CE9C0 /* NonBlockingEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3DDF1EB804D4E31EDFA519 /* NonBlockingEncoderTests.swift */; };
 		6EE844B0AA477984A99FF81A /* MingaUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6F13186CB83B8FF2870F9D49 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
@@ -227,7 +228,6 @@
 		74AD4B2AD52CF461F0DC5D01 /* MinibufferStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B744449C852E13511FFE8D /* MinibufferStateTests.swift */; };
 		760DACD92959745AA9C61945 /* MingaUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; };
 		764CA69DC904E5F1288EE12A /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A84E92F596D0DDF8FF11049 /* MinibufferView.swift */; };
-		7680EFD077E0B916411123FA /* SymbolsNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */; };
 		770CB643A97CD034494278F9 /* MingaIPC in Resources */ = {isa = PBXBuildFile; fileRef = 3BE22623414F870C4F22F87C /* MingaIPC */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		775A6FF021A0BC43678D0C7F /* ModalTerminationDeliveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6290155186CF99E8CEADE8 /* ModalTerminationDeliveryTests.swift */; };
 		778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */; };
@@ -863,6 +863,7 @@
 		AFED73132C30A125845E8AB0 /* BEAMLaunchIsolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BEAMLaunchIsolationTests.swift; sourceTree = "<group>"; };
 		B0028682767B3EA94AB2CA62 /* GUIObservationGuardrailTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIObservationGuardrailTests.swift; sourceTree = "<group>"; };
 		B0D44A3A14F416969E64AA15 /* SidebarHeaderButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHeaderButton.swift; sourceTree = "<group>"; };
+		B21BFD6A61768F0EDFCAB95B /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Resources/Fonts; sourceTree = SOURCE_ROOT; };
 		B3A17BED6D3307942000B946 /* EditorFocusPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorFocusPolicyTests.swift; sourceTree = "<group>"; };
 		B4867C8EE01AF6ACFB27DB7C /* MessagesContentStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentStateTests.swift; sourceTree = "<group>"; };
 		B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerThermalPolicy.swift; sourceTree = "<group>"; };
@@ -956,7 +957,6 @@
 		FCA8938E70ED0123ACECD921 /* CompletionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionOverlay.swift; sourceTree = "<group>"; };
 		FCF88C789F51E0AB39AC03E1 /* RawAccessibilityAccessDispositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawAccessibilityAccessDispositionTests.swift; sourceTree = "<group>"; };
 		FCFB66F7BCD7E565FACECF70 /* ResyncOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResyncOverlay.swift; sourceTree = "<group>"; };
-		FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SymbolsNerdFontMono-Regular.ttf"; sourceTree = "<group>"; };
 		FD7FC26DB745A436D50E3AA6 /* WindowContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentTests.swift; sourceTree = "<group>"; };
 		FD9F43E781BA11616C52373E /* BreadcrumbBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreadcrumbBar.swift; sourceTree = "<group>"; };
 		FEA19E7E243EB130E1969551 /* CompletionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionStateTests.swift; sourceTree = "<group>"; };
@@ -1124,14 +1124,6 @@
 				CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */,
 			);
 			path = Renderer;
-			sourceTree = "<group>";
-		};
-		13651B343AC3A6E146620074 /* Fonts */ = {
-			isa = PBXGroup;
-			children = (
-				FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */,
-			);
-			path = Fonts;
 			sourceTree = "<group>";
 		};
 		1DD49BE6124F21E34B8482C1 /* .generated */ = {
@@ -1390,8 +1382,8 @@
 			isa = PBXGroup;
 			children = (
 				F5647A59C841B3C408994CC7 /* Assets.xcassets */,
+				B21BFD6A61768F0EDFCAB95B /* Fonts */,
 				206B34B6897C65A6D1C21BFE /* bin */,
-				13651B343AC3A6E146620074 /* Fonts */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -1866,7 +1858,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F6F56719C285CB9C3EA62A57 /* Assets.xcassets in Resources */,
-				7680EFD077E0B916411123FA /* SymbolsNerdFontMono-Regular.ttf in Resources */,
+				6E3FC5B5D64DB5096C6DAFF6 /* Fonts in Resources */,
 				770CB643A97CD034494278F9 /* MingaIPC in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

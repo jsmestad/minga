@@ -402,7 +402,9 @@ def native_build(output, manifest, os_name, arch, work):
         require(identity.startswith("Apple clang version "), "unqualified macOS compiler")
         cpu = "arm64" if arch == "aarch64" else arch
         flags = "-arch %s -mmacosx-version-min=15.0 -isysroot %s" % (cpu, sdk)
-        env.update(CC=compiler, CXX=cxx, CFLAGS=flags, CXXFLAGS=flags, LDFLAGS=flags,
+        # Setting CFLAGS overrides OTP's default optimization level; ERTS requires an explicit -O flag.
+        compiler_flags = "-O2 " + flags
+        env.update(CC=compiler, CXX=cxx, CFLAGS=compiler_flags, CXXFLAGS=compiler_flags, LDFLAGS=flags,
                    MACOSX_DEPLOYMENT_TARGET=manifest["minimum_macos"], SDKROOT=sdk)
         facts.update(kind="native-macos", developer_dir=pinned["developer_dir"],
                      xcode_version=pinned["xcode_version"], xcode_build=pinned["xcode_build"],

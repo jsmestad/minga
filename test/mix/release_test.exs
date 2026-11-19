@@ -58,6 +58,9 @@ defmodule Minga.ReleaseTest do
         ~w(minga-test-harness minga-renderer minga-renderer-gui scratch/output.dSYM/Contents/debug)
 
       Enum.each(leftovers, &write_file(priv, &1))
+      watcher_priv = Path.join(release.path, "lib/file_system-1.1.1/priv")
+      windows_watcher = write_file(watcher_priv, "inotifywait.exe")
+      macos_watcher = write_file(watcher_priv, "mac_listener")
 
       assert after_assemble(@release_name).(release) == release
 
@@ -66,6 +69,8 @@ defmodule Minga.ReleaseTest do
       end
 
       for path <- leftovers, do: refute(File.exists?(Path.join(priv, path)))
+      refute File.exists?(windows_watcher)
+      assert File.read!(macos_watcher) == "runtime asset"
     end
 
     test "#{name} rejects missing current native artifacts even when an old version has them", %{
@@ -89,7 +94,10 @@ defmodule Minga.ReleaseTest do
       path: Path.join([dir, "[release]", Atom.to_string(name)]),
       version: "1.0.0",
       erts_source: Path.join(dir, "qualified-otp/erts-17.1.1"),
-      applications: %{minga: [vsn: ~c"1.0.0", path: Path.join(dir, "source")]}
+      applications: %{
+        minga: [vsn: ~c"1.0.0", path: Path.join(dir, "source")],
+        file_system: [vsn: ~c"1.1.1", path: Path.join(dir, "file_system")]
+      }
     }
   end
 
