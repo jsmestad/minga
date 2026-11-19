@@ -45,6 +45,7 @@ type transcriptEntry struct {
 	height         int
 	heightWidth    int
 	heightRevision uint64
+	proseLayout    agentProseLayout
 }
 
 type transcriptAnchor struct {
@@ -186,6 +187,7 @@ func reviseTranscriptEntry(entry transcriptEntry, message protocol.AgentChatMess
 	entry.height = 0
 	entry.heightWidth = 0
 	entry.heightRevision = 0
+	entry.proseLayout = nil
 	return entry
 }
 

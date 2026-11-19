@@ -44,6 +44,63 @@ func TestAgentTranscriptRendersFromResidentStore(t *testing.T) {
 	}
 }
 
+func TestAgentTranscriptOffersBothEndsOfOneLongStyledParagraph(t *testing.T) {
+	for _, width := range []int{34, 50} {
+		model := residentModel(t, 0)
+		message := protocol.AgentChatMessage{
+			ID:   1,
+			Kind: agentKindAssistantMarkdown,
+			MarkdownBlocks: []protocol.AgentMarkdownBlock{{
+				Kind: 0x01,
+				Lines: []protocol.AgentStyledLine{{
+					{Text: "PROSE_HEAD "},
+					{Text: strings.Repeat("界👨‍👩‍👧‍👦", 120), Flags: 1},
+					{Text: " PROSE_TAIL"},
+				}},
+			}},
+		}
+		model.transcript.apply(replaceFrame(1, message, protocol.AgentChatMessage{
+			ID: 2, Kind: 0x01, Text: "NEXT_MESSAGE",
+		}))
+
+		render := func() string {
+			rows := model.transcriptRenderer.render(model, model.transcript, 8, width)
+			for _, row := range rows {
+				if size := displayWidth(strings.TrimRight(ansi.Strip(row), " ")); size > width {
+					t.Fatalf("%d columns: wrapped row occupies %d cells before padding", width, size)
+				}
+			}
+			return ansi.Strip(strings.Join(rows, "\n"))
+		}
+		bottom := render()
+		tail, next := strings.Index(bottom, "PROSE_TAIL"), strings.Index(bottom, "NEXT_MESSAGE")
+		if tail < 0 || next <= tail {
+			t.Fatalf("%d columns: transcript bottom lacks the end of the prose before the next message: %q", width, bottom)
+		}
+		model.transcript.scrollBy(-1000)
+		if top := render(); !strings.Contains(top, "PROSE_HEAD") || strings.Contains(top, "NEXT_MESSAGE") {
+			t.Fatalf("%d columns: scrolling up cannot reach the beginning of the wrapped prose: %q", width, top)
+		}
+	}
+}
+
+func TestAgentTranscriptWrapsStyledTextAfterATabAtTheRightEdge(t *testing.T) {
+	model := residentModel(t, 0)
+	model.transcript.apply(replaceFrame(1, protocol.AgentChatMessage{
+		ID:   1,
+		Kind: agentKindStyled,
+		StyledLines: []protocol.AgentStyledLine{{
+			{Text: strings.Repeat("x", 29)},
+			{Text: "\tZ", Flags: 1},
+		}},
+	}))
+	rows := model.transcriptRenderer.render(model, model.transcript, 8, 34)
+	if len(rows) != 3 || !strings.Contains(ansi.Strip(rows[1]), strings.Repeat("x", 29)) ||
+		!strings.HasPrefix(ansi.Strip(rows[2]), "  │     Z") {
+		t.Fatalf("tab expansion must move the styled suffix to a continuation row: %q", rows)
+	}
+}
+
 func TestAgentTranscriptLocalScrollRevealsOlderSameFrame(t *testing.T) {
 	model := residentModel(t, 40)
 
@@ -506,10 +563,11 @@ func TestAgentMessageRowCountAndRangeMatchCurrentRenderer(t *testing.T) {
 
 	for index, message := range fixtures {
 		want := model.renderAgentMessage(message, 50)
-		if got := agentMessageRowCount(message); got != len(want) {
-			t.Fatalf("fixture %d: row count = %d, want %d", index, got, len(want))
+		height, layout := measureAgentMessage(message, 50)
+		if height != len(want) {
+			t.Fatalf("fixture %d: row count = %d, want %d", index, height, len(want))
 		}
-		got := model.renderAgentMessageRows(message, 50, 0, len(want))
+		got := model.renderAgentMessageRows(message, layout, 50, 0, len(want))
 		if strings.Join(got, "\n") != strings.Join(want, "\n") {
 			t.Fatalf("fixture %d: ranged output differs from renderer", index)
 		}
