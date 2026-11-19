@@ -212,6 +212,11 @@ targets:
         type: file
       - path: Resources
         type: group
+        excludes:
+          - Fonts
+      - path: Resources/Fonts
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: Minga

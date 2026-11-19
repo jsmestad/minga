@@ -78,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- macOS TUI release builds pass the optimization flags required by Erlang/OTP. The macOS app preserves the bundled icon font directory, and macOS and Linux packages no longer ship the Windows-only file watcher.
 - macOS loads bundled Metal shaders when the frontend executable is launched through a symlink. Startup now shows what Minga is waiting for and offers Quit from the start. If the first editor frame is late, keep waiting or retry startup in the bundled app without opening a second editor core.
 - Returning to a local Agent tab reuses its conversation when no messages or pins changed. Status and approvals still refresh from the arriving session.
 - Agent tools reject arguments that violate their declared JSON Schema before constructing or invoking an executable callback, including non-SDK tools. Valid SDK input normalization and defaults remain available, and the schema validator now fails closed when a regular expression exceeds its match budget.

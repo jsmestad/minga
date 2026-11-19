@@ -352,6 +352,11 @@ defmodule Minga.MixProject do
       File.rm_rf!(Path.join(priv_dir, entry))
     end
 
+    # file_system ships its Windows watcher in every Hex package, but these releases target macOS and Linux.
+    watcher_version = release.applications |> Map.fetch!(:file_system) |> Keyword.fetch!(:vsn)
+    windows_watcher = "lib/file_system-#{watcher_version}/priv/inotifywait.exe"
+    File.rm_rf!(Path.join(release.path, windows_watcher))
+
     release
   end
 
