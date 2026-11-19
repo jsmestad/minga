@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Publish the two verified Apple Silicon Homebrew assets as a rolling prerelease."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+REPO = "jsmestad/minga"
+API = f"repos/{REPO}"
+RELEASES = f"{API}/releases"
+DRAFT_QUERY = """query($tag: String!) {
+  repository(owner: "jsmestad", name: "minga") {
+    release(tagName: $tag) { databaseId }
+  }
+}"""
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def gh(*args, missing_ok=False):
+    result = subprocess.run(
+        ["gh", *args], capture_output=True, text=True,
+        env={**os.environ, "GH_PROMPT_DISABLED": "1", "NO_COLOR": "1"},
+    )
+    if result.returncode:
+        if missing_ok and re.match(r"HTTP/\S+ 404\b", result.stdout):
+            return None
+        raise ValueError(f"gh {args[0]} {args[1]} failed: {result.stderr.strip() or result.returncode}")
+    return result.stdout
+
+
+def api(endpoint, *args, missing_ok=False):
+    command = ("api", endpoint, "--hostname", "github.com", *args)
+    if missing_ok:
+        output = gh(*command, "--include", missing_ok=True)
+        if output is None:
+            return None
+        _, separator, output = output.partition("\n\n")
+        require(separator, f"missing HTTP headers from {endpoint}")
+    else:
+        output = gh(*command)
+    return json.loads(output)
+
+
+def public_release(tag, *, missing_ok=False):
+    return api(f"{RELEASES}/tags/{tag}", missing_ok=missing_ok)
+
+
+def draft_release(tag):
+    # REST's tag lookup only covers published releases. Drafts use a pending tag.
+    result = api("graphql", "-f", f"query={DRAFT_QUERY}", "-f", f"tag={tag}")
+    release = result["data"]["repository"]["release"]
+    if release is None:
+        return None
+    release_id = release["databaseId"]
+    require(type(release_id) is int and release_id > 0, f"invalid GitHub release ID for {tag}")
+    return api(f"{RELEASES}/{release_id}")
+
+
+def check_release(release, tag, sha):
+    release_id = release["id"]
+    require(type(release_id) is int and release_id > 0, f"invalid GitHub release ID for {tag}")
+    require(release["tag_name"] == tag, f"release {release_id} has the wrong tag; expected {tag}")
+    require(release["target_commitish"] == sha, f"release {tag} has the wrong target; expected {sha}")
+    require(release["prerelease"] is True, f"release {tag} is not a prerelease")
+    require(type(release["draft"]) is bool, f"invalid draft status for {tag}")
+    return release_id
+
+
+def check_tag(tag, sha, *, missing_ok=False):
+    ref = api(f"{API}/git/ref/tags/{tag}", missing_ok=missing_ok)
+    if ref is None and missing_ok:
+        return
+    require(ref["ref"] == f"refs/tags/{tag}", f"GitHub returned the wrong ref for {tag}")
+    require(ref["object"]["type"] == "commit", f"tag {tag} is not a lightweight commit tag")
+    require(ref["object"]["sha"] == sha, f"tag {tag} does not point to {sha}")
+
+
+def local_assets(bundle, version):
+    assets = {}
+    for name in (f"minga_{version}_macos_aarch64.tar.gz", f"Minga_{version}.dmg"):
+        path = bundle / name
+        require(path.is_file(), f"missing bundle asset: {path}")
+        with path.open("rb") as file:
+            size = os.fstat(file.fileno()).st_size
+            require(size > 0, f"empty bundle asset: {path}")
+            assets[name] = (size, f"sha256:{hashlib.file_digest(file, 'sha256').hexdigest()}")
+    return assets
+
+
+def missing_assets(release_id, expected, *, draft_tag=None, sha=None):
+    # Three results are sufficient to detect extras; only two assets are allowed.
+    assets = api(f"{RELEASES}/{release_id}/assets?per_page=3")
+    require(isinstance(assets, list), f"invalid asset inventory for release {release_id}")
+    seen = set()
+    starters = []
+    names = set()
+    for asset in assets:
+        name = asset["name"]
+        require(name in expected and name not in names, f"unexpected or duplicate release asset: {name}")
+        names.add(name)
+        if draft_tag and asset["state"] == "starter" and asset["size"] == 0:
+            require(type(asset["id"]) is int and asset["id"] > 0, "invalid starter asset ID")
+            starters.append(asset["id"])
+            continue
+        size, digest = expected[name]
+        require(
+            asset["state"] == "uploaded" and asset["size"] == size and asset["digest"] == digest,
+            f"release asset {name} does not match the verified bundle (upload state, size or SHA256)",
+        )
+        seen.add(name)
+    if starters:
+        release = api(f"{RELEASES}/{release_id}")
+        require(check_release(release, draft_tag, sha) == release_id and release["draft"],
+                "cannot recover an upload after the release leaves draft")
+        for asset_id in starters:
+            gh("api", f"{RELEASES}/assets/{asset_id}", "--hostname", "github.com", "--method", "DELETE", "--silent")
+    return [name for name in expected if name not in seen]
+
+
+def publish(bundle, version, sha):
+    tag = f"v{version}"
+    expected = local_assets(bundle, version)
+    release = public_release(tag, missing_ok=True)
+    if release is not None:
+        require(release["draft"] is False, f"published lookup returned a draft for {tag}")
+    else:
+        release = draft_release(tag)
+
+    if release is None:
+        check_tag(tag, sha, missing_ok=True)
+        gh(
+            "release", "create", tag, "--repo", f"github.com/{REPO}", "--target", sha,
+            "--title", f"Minga {version}", "--notes", f"Rolling Homebrew build from `{sha}`.",
+            "--draft", "--prerelease", "--latest=false",
+        )
+        release = draft_release(tag)
+        require(release is not None and release["draft"] is True, f"draft creation not confirmed for {tag}")
+
+    release_id = check_release(release, tag, sha)
+    check_tag(tag, sha, missing_ok=release["draft"])
+    missing = missing_assets(release_id, expected, draft_tag=tag if release["draft"] else None, sha=sha)
+    if release["draft"]:
+        for name in missing:
+            # Upload by the checked numeric ID, without deleting or replacing any asset.
+            gh(
+                "api", f"https://uploads.github.com/{RELEASES}/{release_id}/assets?name={name}",
+                "--hostname", "github.com", "--method", "POST", "--input", str(bundle / name),
+                "--header", "Content-Type: application/octet-stream", "--silent",
+            )
+        if missing:
+            current = api(f"{RELEASES}/{release_id}")
+            require(check_release(current, tag, sha) == release_id and current["draft"],
+                    f"draft {tag} changed during upload")
+            require(not missing_assets(release_id, expected), f"draft {tag} is missing required assets")
+        # GitHub can defer creating the tag until publication. A preexisting tag must already match.
+        check_tag(tag, sha, missing_ok=True)
+        gh(
+            "api", f"{RELEASES}/{release_id}", "--hostname", "github.com", "--method", "PATCH",
+            "-F", "draft=false", "-f", "make_latest=false", "-f", f"target_commitish={sha}", "--silent",
+        )
+        public = public_release(tag)
+        require(check_release(public, tag, sha) == release_id and not public["draft"],
+                f"publication not confirmed for {tag}")
+        missing = missing_assets(release_id, expected)
+        check_tag(tag, sha)
+    require(not missing, f"public release {tag} is missing required assets")
+    print(f"Verified public prerelease: https://github.com/{REPO}/releases/tag/{tag}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("bundle", type=Path, metavar="BUNDLE")
+    parser.add_argument("version", metavar="VERSION")
+    parser.add_argument("source_sha", metavar="SOURCE_SHA")
+    args = parser.parse_args()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-dev\.[1-9][0-9]*", args.version):
+        parser.error("VERSION must be BASE-dev.N with a positive decimal N")
+    if not re.fullmatch(r"[a-f0-9]{40}", args.source_sha):
+        parser.error("SOURCE_SHA must be a full lowercase 40-character commit SHA")
+    if os.environ.get("GITHUB_REPOSITORY", REPO) != REPO:
+        parser.error(f"GITHUB_REPOSITORY must be {REPO}")
+    if not os.environ.get("GH_TOKEN"):
+        parser.error("GH_TOKEN is required")
+    try:
+        publish(args.bundle.resolve(), args.version, args.source_sha)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"{parser.prog}: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -2,9 +2,9 @@
 
 Prepare installable builds before deciding whether to release them. Candidate preparation uploads the complete build set to GitHub Actions, records its provenance and final-byte checksums, and gives it an immutable handle. A separate workflow downloads and verifies those exact bytes without rebuilding them.
 
-These are ordinary public build artifacts. They are not GitHub Releases. Neither workflow creates a tag, publishes a release, updates the Homebrew tap or edits the changelog. Version and release-note changes go through reviewed pull requests.
+Stable preparation and independent verification only upload GitHub Actions artifacts. They do not create tags, publish GitHub Releases, update the Homebrew tap, or edit the changelog.
 
-## Prepare and test rolling Homebrew builds
+## Rolling Homebrew publication
 
 Each push to protected `main` prepares the Apple Silicon macOS TUI archive and signed, notarized GUI DMG. The workflow builds the pushed commit, assigns version `0.1.0-dev.N` (where `N` is the workflow run number), and uploads an immutable candidate handle and a separate `homebrew-recipes` artifact. A rerun has a distinct attempt but retains the same version. It must never replace an already published set of bytes.
 
@@ -18,7 +18,9 @@ scripts/qualify-homebrew-upgrade /path/to/previous /path/to/next
 
 On Apple Silicon, the script verifies both payloads against the independent receipts, regenerates the recipes to confirm they match, and rehearses the formula and cask upgrades through a disposable local tap and isolated download cache. It checks the installed runtime version and cask signature without bypassing Gatekeeper. Record native GUI launch and interaction separately. Before the first stable cut, rehearse from the last rolling build to the first stable candidate, generating Apple Silicon-only stable recipes with `--arm64`, `--dmg`, and `--output`.
 
-Nothing here creates GitHub Release tags, uploads public release assets or mutates the real tap. Those actions still require separate authorization.
+After the macOS artifacts pass the release checks and byte verification, a protected `main` push publishes a versioned GitHub prerelease without making it the latest stable release. The publisher uses the built-in GitHub token to publish and the existing `HOMEBREW_TAP_TOKEN` to advance the formula and cask together. The tap token needs Contents write access to `jsmestad/homebrew-minga`. GitHub can reject tagging an older commit if workflow files have changed since that commit. If that happens, publish a newer qualified build or configure an optional `HOMEBREW_RELEASE_TOKEN` with Contents and Workflows write access scoped to `jsmestad/minga`. No Cloudflare account is needed.
+
+If a build or upload fails, the tap keeps its current version. If publication succeeds but the tap push fails, rerun only the failed publishing job so it reuses the original verified artifacts. Do not rerun the build to replace released bytes. A stale run cannot replace a newer formula and cask. Check the public release and `brew upgrade` on Apple Silicon to confirm delivery; package boot checks are not native upgrade evidence.
 
 ## Prepare a stable candidate
 
@@ -83,7 +85,7 @@ Only the controlled GUI signing/notarization steps receive the existing Apple se
 - `APPLE_CERTIFICATE_P12` and `APPLE_CERTIFICATE_PASSWORD`: Developer ID Application certificate and password.
 - `APPLE_ID`, `APPLE_APP_PASSWORD` and `APPLE_TEAM_ID`: notarization account, app-specific password and team.
 
-A configured secret name does not prove the credential works. The actual build must complete the signing and notarization checks. Temporary signing material is removed after the job. No Homebrew token is consumed. The workflow token has only contents/actions read permissions; artifact uploads use the Actions artifact service.
+A configured secret name does not prove the credential works. The actual build must complete the signing and notarization checks. Temporary signing material is removed after the job. Build and verification jobs have only Contents and Actions read access and never receive the Homebrew token.
 
 ## Keep the candidate identity
 
@@ -123,9 +125,9 @@ The local-only `scripts/release_candidate.py` also supports the workflow's `chec
 
 `scripts/check-release-contents` checks concrete resource presence, release/app metadata, native headers and package containment. Standalone preparation also supplies `--runtime-receipt` to inspect actual ERTS and NIF library dependencies, ELF interpreter binding or Mach-O minimum OS, and reject unbundled or build-root dependencies. The workflow additionally boots final standalone bytes or the final mounted signed DMG's terminal launcher, checks packaged ERTS, verifies a fixed-result OTP crypto hash and opens/closes the SQLite NIF. These checks identify what ran; they do not claim native GUI interaction, an installed authored-source workflow, sustained use or release approval.
 
-Before any later promotion, qualify the exact unchanged candidate from clean user state without a development checkout or build caches. Retain the full runtime/recovery, Swift GUI and Go TUI interaction, programmability/X0 and installed-distribution evidence required by [the v0.1.0 plan](https://github.com/jsmestad/minga/issues/3542). Verify the actual minimum supported OS and every architecture-specific package. Development-build evidence is not installed-package evidence.
+Before promoting a stable candidate, qualify the exact unchanged candidate from clean user state without a development checkout or build caches. Retain the full runtime/recovery, Swift GUI and Go TUI interaction, programmability/X0 and installed-distribution evidence required by [the v0.1.0 plan](https://github.com/jsmestad/minga/issues/3542). Verify the actual minimum supported OS and every architecture-specific package. Development-build evidence is not installed-package evidence.
 
-Any later release approval must name the exact source, candidate handle, run/attempt, asset hashes and immutable qualification evidence. Expired assets require a new prepared generation and new qualification/approval, not an implicit rebuild. This preparation path contains no publication-capable job; Homebrew channel selection and any external publication need separate explicit authorization. Tags do not start a replacement build/publication path.
+Stable release approval must name the exact source, candidate handle, run/attempt, asset hashes and immutable qualification evidence. Expired assets require a new prepared generation and new qualification/approval, not an implicit rebuild. Stable preparation does not publish. Tags do not start a replacement build or publication path.
 
 ## Prepare package-manager installs
 

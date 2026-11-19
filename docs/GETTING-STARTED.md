@@ -4,7 +4,16 @@ Five minutes from install to editing. Let's go.
 
 ## Install
 
-> **Pre-release notice:** Minga hasn't cut a release yet. For now, you need to build from source. Homebrew and pre-built binaries are coming soon.
+### macOS
+
+Install from Homebrew once the first [rolling prerelease](https://github.com/jsmestad/minga/releases) is published. Choose the GUI or terminal editor, or install both:
+
+```bash
+brew install --cask jsmestad/minga/minga-mac  # Installs Minga.app
+brew install jsmestad/minga/minga            # Installs the minga terminal command
+```
+
+Open the GUI from Applications or run `open -a Minga`. Run `minga` for the terminal editor. Get subsequent builds with `brew upgrade minga` or `brew upgrade --cask minga-mac`.
 
 ### From source
 
@@ -26,27 +35,11 @@ mix compile           # Builds both Elixir and Zig
 
 The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are fast.
 
-### After release (coming soon)
-
-Once releases ship, installation will be simpler:
-
-```bash
-# macOS GUI (installs Minga.app plus the GUI-aware `minga` launcher)
-brew install --cask jsmestad/minga/minga-mac
-minga .
-
-# Linux standalone TUI
-brew install jsmestad/minga/minga
-
-# Or download an artifact from GitHub Releases
-# https://github.com/jsmestad/minga/releases
-```
-
-On macOS, `minga FILE_OR_DIRECTORY` opens or reuses Minga.app. Use `minga --tui FILE_OR_DIRECTORY` (or the installed `minga-tui` command) for an explicit standalone terminal session. Terminal-only commands such as `--headless`, `attach`, `sessions`, `detach`, `kill-session`, and `login --manual` select the standalone runtime automatically. If Minga.app is missing or damaged, normal GUI opens fail with an installation error rather than silently falling back to a new TUI editor.
+Use the source build on Linux, on Intel Macs, or when developing Minga.
 
 ## Wait for a native editor result
 
-Use the bundled `minga-ipc open-ready` command when an automation needs to know that one file open reached the editor's native interaction boundary. The ordinary `minga` command, and the existing `minga-ipc open` and `minga-ipc wait` commands, keep their semantic-only completion behavior.
+Use the bundled `minga-ipc open-ready` command when an automation needs to know that one file open reached the editor's native interaction boundary. The GUI launcher bundled in `Minga.app`, and the existing `minga-ipc open` and `minga-ipc wait` commands, keep their semantic-only completion behavior.
 
 ```bash
 MINGA_IPC="/Applications/Minga.app/Contents/Resources/bin/minga-ipc"
