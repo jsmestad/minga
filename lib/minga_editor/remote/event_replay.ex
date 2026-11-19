@@ -23,7 +23,7 @@ defmodule MingaEditor.Remote.EventReplay do
     end)
   end
 
-  @doc "Converts replayable history into UI events. Live approvals come only from the Session snapshot."
+  @doc "Converts replayable history into UI events. Live approval and question controls come from the Session snapshot."
   @spec to_agent_event(EventRecord.t()) :: event() | nil
   def to_agent_event(%EventRecord{event_type: :assistant_delta, payload: payload}),
     do: {:text_delta, string_payload(payload, "delta")}

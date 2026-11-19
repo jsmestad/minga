@@ -220,4 +220,5 @@ const (
 	GUIActionScrollToVisualRank         byte = 0x69
 	GUIActionAgentReadRetainedOutput    byte = 0x6A
 	GUIActionAgentComposerSubmit        byte = 0x6B
+	GUIActionAgentOpenQuestion          byte = 0x6C
 )

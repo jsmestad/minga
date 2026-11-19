@@ -51,6 +51,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ModelSelection.Stored
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
+  alias MingaAgent.Question
+  alias MingaAgent.Question.Pending, as: PendingQuestion
+  alias MingaAgent.Question.Target, as: QuestionTarget
   alias MingaAgent.SessionMetadata
   alias MingaAgent.Session.ChecklistArchive
   alias MingaAgent.Session.Connection
@@ -331,6 +334,7 @@ defmodule MingaAgent.Session do
           status: status(),
           display_status: TurnExecution.display_status(),
           pending_approval: PublicApproval.t() | nil,
+          pending_question: {QuestionTarget.t(), Question.t()} | nil,
           error: String.t() | nil,
           active_tool_name: String.t() | nil,
           checklist: Checklist.t(),
@@ -643,6 +647,22 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:respond_to_approval_as, client_pid, target, decision})
   end
 
+  @doc "Reads the current question and its exact control target without exposing the tool worker."
+  @spec pending_question(GenServer.server()) :: {QuestionTarget.t(), Question.t()} | nil
+  def pending_question(session), do: GenServer.call(session, :pending_question)
+
+  @doc "Answers or cancels the displayed question as the attached driver."
+  @spec respond_to_question_as(
+          GenServer.server(),
+          pid() | {pid(), binary()},
+          QuestionTarget.t(),
+          Question.response()
+        ) ::
+          :ok | {:error, :not_driver | :question_not_found | :invalid_answer}
+  def respond_to_question_as(session, authority, %QuestionTarget{} = target, response) do
+    GenServer.call(session, {:respond_to_question_as, authority, target, response})
+  end
+
   @doc "Unsubscribes the calling process from session events."
   @spec unsubscribe(GenServer.server()) :: :ok
   def unsubscribe(session) do
@@ -654,6 +674,29 @@ defmodule MingaAgent.Session do
   def unsubscribe(session, pid) when is_pid(pid) do
     GenServer.call(session, {:unsubscribe, pid})
   end
+
+  @typedoc "Internal rollback handle for a broker attach that may have created a monitor."
+  @type broker_attachment :: :existing | {:created, pid(), reference()}
+
+  @doc "Subscribes through the broker and reports whether this operation created the attachment."
+  @spec broker_attach(GenServer.server(), pid(), attachment_role(), boolean()) ::
+          {:ok, broker_attachment()} | {:error, :invalid_role}
+  def broker_attach(session, pid, role, questions?) when is_pid(pid) and is_boolean(questions?) do
+    GenServer.call(session, {:broker_attach, pid, role, questions?})
+  end
+
+  @doc "Rolls back only the monitor installed by a failed broker attach."
+  @spec rollback_broker_attach(GenServer.server(), broker_attachment()) :: :ok
+  def rollback_broker_attach(_session, :existing), do: :ok
+
+  def rollback_broker_attach(session, {:created, pid, ref}) do
+    GenServer.call(session, {:rollback_broker_attach, pid, ref})
+  end
+
+  @doc "Atomically authorizes and detaches the current broker attachment."
+  @spec broker_detach(GenServer.server(), pid() | {pid(), binary()}) ::
+          :ok | {:error, :not_driver}
+  def broker_detach(session, authority), do: GenServer.call(session, {:broker_detach, authority})
 
   @doc "Manually triggers context compaction on the provider."
   @spec compact(GenServer.server()) :: {:ok, String.t()} | {:error, String.t()}
@@ -1407,6 +1450,7 @@ defmodule MingaAgent.Session do
       display_status: TurnExecution.display_status(state.turn_execution),
       pending_approval:
         public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
+      pending_question: public_question(state.turn_execution),
       error: TurnExecution.error(state.turn_execution),
       active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
       checklist: state.checklist,
@@ -1496,6 +1540,18 @@ defmodule MingaAgent.Session do
     handle_approval_response(target, decision, state)
   end
 
+  def handle_call(:pending_question, _from, state) do
+    {:reply, public_question(state.turn_execution), state}
+  end
+
+  def handle_call({:respond_to_question_as, authority, target, response}, _from, state) do
+    if SubscriberLifecycle.question_driver?(state.subscriber_lifecycle, authority) do
+      respond_to_question(state, target, response)
+    else
+      {:reply, {:error, :not_driver}, state}
+    end
+  end
+
   def handle_call({:set_tool_trust, name, scope}, _from, state) do
     execution = TurnExecution.put_trust(state.turn_execution, name, scope)
     {:reply, :ok, revise_tool_policy(state, execution)}
@@ -1521,7 +1577,11 @@ defmodule MingaAgent.Session do
 
   def handle_call({:subscribe, pid, opts}, _from, state) do
     role = Keyword.get(opts, :role, SubscriberLifecycle.default_role(state.subscriber_lifecycle))
-    reply_to_subscribe(state, pid, role)
+
+    case reply_to_subscribe(state, pid, role, Keyword.get(opts, :questions?, false) == true) do
+      {:reply, {:ok, _attachment}, subscribed} -> {:reply, :ok, subscribed}
+      {:reply, {:error, _reason}, _state} = error -> error
+    end
   end
 
   def handle_call({:subscriber_role, pid}, _from, state) do
@@ -1534,6 +1594,23 @@ defmodule MingaAgent.Session do
 
   def handle_call({:unsubscribe, pid}, _from, state) do
     {:reply, :ok, detach_subscriber(state, pid, :detached)}
+  end
+
+  def handle_call({:broker_attach, pid, role, questions?}, _from, state) do
+    mode = if questions?, do: :remote, else: false
+    reply_to_subscribe(state, pid, role, mode)
+  end
+
+  def handle_call({:rollback_broker_attach, pid, ref}, _from, state) do
+    Process.demonitor(ref, [:flush])
+    {:reply, :ok, handle_subscriber_down(state, pid, ref, :attach_failed)}
+  end
+
+  def handle_call({:broker_detach, authority}, _from, state) do
+    case SubscriberLifecycle.authorize_broker_detach(state.subscriber_lifecycle, authority) do
+      {:ok, pid} -> {:reply, :ok, detach_subscriber(state, pid, :detached)}
+      {:error, :not_driver} = error -> {:reply, error, state}
+    end
   end
 
   def handle_call(
@@ -1958,6 +2035,10 @@ defmodule MingaAgent.Session do
 
   def handle_call({:checklist_invocation, %Invocation{} = invocation}, {worker, _}, state) do
     reply_to_checklist_invocation(state, invocation, worker)
+  end
+
+  def handle_call({:question_invocation, %Invocation{} = invocation}, from, state) do
+    begin_question(state, invocation, from)
   end
 
   def handle_call({:tool_storage_failed, %Invocation{} = invocation, reason}, {worker, _}, state) do
@@ -2405,6 +2486,133 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec begin_question(state(), Invocation.t(), GenServer.from()) ::
+          {:noreply, state()} | {:reply, {:error, term()}, state()}
+  defp begin_question(state, %Invocation{name: "ask_user"} = invocation, {worker, _} = from) do
+    key = Invocation.key(invocation)
+
+    with %{invocation: ^invocation, worker: ^worker, started: true, failure: nil} <-
+           Map.get(state.tool_authority.invocations, key),
+         {:ok, _declaration} <- invocation_declaration(state, invocation, :admitted),
+         true <-
+           SubscriberLifecycle.driver_supports_questions?(state.subscriber_lifecycle) or
+             {:error, :no_question_driver},
+         {:ok, question} <-
+           Question.new(
+             invocation.arguments["prompt"],
+             Map.get(invocation.arguments, "choices", [])
+           ) do
+      target = %QuestionTarget{
+        session_id: state.session_id,
+        request_id: invocation.request_id,
+        checkpoint_id: invocation.checkpoint_id,
+        tool_call_id: invocation.call_id
+      }
+
+      install_pending_question(state, %PendingQuestion{
+        question: question,
+        target: target,
+        reply_to: from,
+        monitor: Process.monitor(worker)
+      })
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      _stale -> {:reply, {:error, :stale_invocation}, state}
+    end
+  end
+
+  defp begin_question(state, _invocation, _from), do: {:reply, {:error, :stale_invocation}, state}
+
+  @spec install_pending_question(state(), PendingQuestion.t()) ::
+          {:noreply, state()} | {:reply, {:error, term()}, state()}
+  defp install_pending_question(state, pending) do
+    case TurnExecution.request_question(state.turn_execution, pending) do
+      {:ok, execution} ->
+        state =
+          %{state | turn_execution: execution}
+          |> broadcast({:question_requested, pending.target, pending.question})
+
+        {:noreply, state}
+
+      {:error, reason} ->
+        Process.demonitor(pending.monitor, [:flush])
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec public_question(TurnExecution.t()) :: {QuestionTarget.t(), Question.t()} | nil
+  defp public_question(execution) do
+    case TurnExecution.pending_question(execution) do
+      %PendingQuestion{target: target, question: question} -> {target, question}
+      nil -> nil
+    end
+  end
+
+  @spec respond_to_question(state(), QuestionTarget.t(), Question.response()) ::
+          {:reply, :ok | {:error, :question_not_found | :invalid_answer}, state()}
+  defp respond_to_question(state, target, response) do
+    case TurnExecution.resolve_question(state.turn_execution, target, response) do
+      {:ok, pending, outcome, execution} ->
+        deliver_question_answer(state, pending, outcome, execution)
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec deliver_question_answer(
+          state(),
+          PendingQuestion.t(),
+          Question.outcome(),
+          TurnExecution.t()
+        ) ::
+          {:reply, :ok | {:error, :question_not_found}, state()}
+  defp deliver_question_answer(state, pending, outcome, execution) do
+    {worker, _} = pending.reply_to
+
+    if Process.alive?(worker) do
+      Process.demonitor(pending.monitor, [:flush])
+      GenServer.reply(pending.reply_to, {:ok, outcome})
+
+      state =
+        broadcast(
+          %{state | turn_execution: execution},
+          {question_resolution(outcome), pending.target}
+        )
+
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, :question_not_found}, interrupt_question(state)}
+    end
+  end
+
+  @spec question_resolution(Question.outcome()) :: :question_answered | :question_cancelled
+  defp question_resolution({:answered, _answer}), do: :question_answered
+  defp question_resolution(:cancelled), do: :question_cancelled
+
+  @spec interrupt_question(state()) :: state()
+  defp interrupt_question(state) do
+    case TurnExecution.interrupt_question(state.turn_execution) do
+      {:interrupted, pending, execution} ->
+        Process.demonitor(pending.monitor, [:flush])
+        GenServer.reply(pending.reply_to, {:error, :question_interrupted})
+
+        %{state | turn_execution: execution}
+        |> broadcast({:question_interrupted, pending.target})
+
+      :no_question ->
+        state
+    end
+  end
+
+  @spec handle_question_worker_down(state(), pid(), reference(), term()) :: state()
+  defp handle_question_worker_down(state, worker, ref, reason) do
+    case TurnExecution.pending_question(state.turn_execution) do
+      %PendingQuestion{reply_to: {^worker, _}, monitor: ^ref} -> interrupt_question(state)
+      _other -> connection_dependency_down(state, worker, ref, reason)
+    end
+  end
+
   @spec apply_checklist_invocation(state(), Invocation.t()) :: {:reply, term(), state()}
   defp apply_checklist_invocation(state, %Invocation{name: "todo_read", arguments: arguments})
        when map_size(arguments) == 0 do
@@ -2847,6 +3055,7 @@ defmodule MingaAgent.Session do
 
   @spec reset_new_session(state(), String.t()) :: state()
   defp reset_new_session(state, session_id) do
+    state = interrupt_question(state)
     source_execution = state.turn_execution
     state = interrupt_execution_approval(state, source_execution)
 
@@ -3055,7 +3264,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    {:noreply, connection_dependency_down(state, pid, ref, reason)}
+    {:noreply, handle_question_worker_down(state, pid, ref, reason)}
   end
 
   def handle_info({:timeout, timer_ref, :idle_gc}, state) do
@@ -3205,6 +3414,7 @@ defmodule MingaAgent.Session do
       state
       |> cancel_waiting_tool(source_execution)
       |> interrupt_execution_approval(source_execution)
+      |> interrupt_question()
       |> abort_provider()
       |> abort_active_tools(source_execution, false)
       |> cancel_provider_request()
@@ -3253,6 +3463,7 @@ defmodule MingaAgent.Session do
 
   @spec complete_provider_turn(state(), Event.token_usage() | nil, Outcome.t() | nil) :: state()
   defp complete_provider_turn(state, usage, outcome) do
+    state = interrupt_question(state)
     source_execution = state.turn_execution
 
     case TurnExecution.begin_completion(source_execution) do
@@ -3711,6 +3922,7 @@ defmodule MingaAgent.Session do
     state =
       state
       |> interrupt_execution_approval(source_execution)
+      |> interrupt_question()
       |> abort_active_tools(source_execution, true)
       |> announce_turn_status(execution)
 
@@ -3725,6 +3937,7 @@ defmodule MingaAgent.Session do
       if TurnExecution.active?(source_execution) do
         state
         |> interrupt_execution_approval(source_execution)
+        |> interrupt_question()
         |> abort_provider()
         |> abort_active_tools(source_execution, true)
       else
@@ -4695,25 +4908,32 @@ defmodule MingaAgent.Session do
 
   # ── Subscriber lifecycle ──────────────────────────────────────────────────
 
-  @spec reply_to_subscribe(state(), pid(), term()) ::
-          {:reply, :ok | {:error, :invalid_role}, state()}
-  defp reply_to_subscribe(state, pid, role) do
+  @spec reply_to_subscribe(state(), pid(), term(), boolean() | :remote) ::
+          {:reply, {:ok, broker_attachment()} | {:error, :invalid_role}, state()}
+  defp reply_to_subscribe(state, pid, role, questions?) do
     case SubscriberLifecycle.prepare_subscribe(state.subscriber_lifecycle, pid, role) do
       {:monitor, preparation} ->
-        monitor_subscriber(state, pid, preparation)
+        monitor_subscriber(state, pid, preparation, questions?)
 
       {:already_attached, lifecycle} ->
+        lifecycle = maybe_support_questions(lifecycle, pid, questions?)
+        state = %{state | subscriber_lifecycle: lifecycle}
         notify_subscriber_connected(pid, state)
-        {:reply, :ok, %{state | subscriber_lifecycle: lifecycle}}
+        {:reply, {:ok, :existing}, state}
 
       {:error, :invalid_role} ->
         {:reply, {:error, :invalid_role}, state}
     end
   end
 
-  @spec monitor_subscriber(state(), pid(), SubscriberLifecycle.subscription_preparation()) ::
-          {:reply, :ok, state()}
-  defp monitor_subscriber(state, pid, preparation) do
+  @spec monitor_subscriber(
+          state(),
+          pid(),
+          SubscriberLifecycle.subscription_preparation(),
+          boolean() | :remote
+        ) ::
+          {:reply, {:ok, broker_attachment()}, state()}
+  defp monitor_subscriber(state, pid, preparation, questions?) do
     monitor_ref = Process.monitor(pid)
 
     case SubscriberLifecycle.complete_subscribe(
@@ -4723,6 +4943,7 @@ defmodule MingaAgent.Session do
          ) do
       {:ok, lifecycle, subscription_change, timer_ref} ->
         cancel_reclaim_timer(timer_ref)
+        lifecycle = maybe_support_questions(lifecycle, pid, questions?)
 
         state =
           state
@@ -4730,13 +4951,28 @@ defmodule MingaAgent.Session do
           |> announce_subscription_change(pid, subscription_change)
 
         notify_subscriber_connected(pid, state)
-        {:reply, :ok, state}
+        {:reply, {:ok, {:created, pid, monitor_ref}}, state}
 
       {:error, reason} ->
         Process.demonitor(monitor_ref, [:flush])
         raise "subscriber monitor installation failed: #{inspect(reason)}"
     end
   end
+
+  @spec maybe_support_questions(SubscriberLifecycle.t(), pid(), term()) ::
+          SubscriberLifecycle.t()
+  defp maybe_support_questions(lifecycle, pid, true) when node(pid) == node(),
+    do: SubscriberLifecycle.support_questions(lifecycle, pid)
+
+  defp maybe_support_questions(lifecycle, pid, :remote) do
+    {receipt, lifecycle} =
+      SubscriberLifecycle.remote_question_access(lifecycle, pid, :crypto.strong_rand_bytes(32))
+
+    if is_binary(receipt), do: send(pid, {:agent_question_attachment, self(), receipt})
+    lifecycle
+  end
+
+  defp maybe_support_questions(lifecycle, _pid, _unsupported), do: lifecycle
 
   @spec announce_subscription_change(
           state(),
@@ -5701,6 +5937,13 @@ defmodule MingaAgent.Session do
        preview: approval.preview
      }}
   end
+
+  defp event_log_entry({:question_requested, %QuestionTarget{} = target, _question}),
+    do: {:question_requested, Map.from_struct(target)}
+
+  defp event_log_entry({event, %QuestionTarget{} = target})
+       when event in [:question_answered, :question_cancelled, :question_interrupted],
+       do: {event, Map.from_struct(target)}
 
   defp event_log_entry({:todo_plan_updated, todos}),
     do: {:todo_plan_updated, %{todos: todo_items_payload(todos)}}
@@ -7237,11 +7480,19 @@ defmodule MingaAgent.Session do
        ) do
     provider_pid = ProviderLifecycle.pid(state.provider)
 
+    selected =
+      PrefixStore.resolve(state.continuation.prefixes, state.continuation.prefixes.selected)
+
     preview_operation =
-      case PrefixStore.resolve(state.continuation.prefixes, state.continuation.prefixes.selected) do
+      case selected do
         %Prefix{skills: skills} -> {:selected, operation, skills}
         :unknown -> operation
       end
+
+    preview_operation =
+      if question_schema_enabled?(state, selected, operation),
+        do: {:with_questions, preview_operation},
+        else: preview_operation
 
     case preview_native_prefix(provider_pid, preview_operation) do
       {:ok, candidate, token, result} ->
@@ -7272,6 +7523,32 @@ defmodule MingaAgent.Session do
 
   defp refresh_continuation_prefix(_state, _operation),
     do: {:error, :provider_prefix_transition_unavailable}
+
+  @spec question_schema_enabled?(state(), Prefix.t() | :unknown, term()) :: boolean()
+  defp question_schema_enabled?(state, _selected, {:model, _selection, {:handoff, _policy}}),
+    do: SubscriberLifecycle.driver_supports_questions?(state.subscriber_lifecycle)
+
+  defp question_schema_enabled?(
+         %{continuation: %Continuation{boundaries: [], messages: []}} = state,
+         _selected,
+         _operation
+       ),
+       do: SubscriberLifecycle.driver_supports_questions?(state.subscriber_lifecycle)
+
+  defp question_schema_enabled?(
+         %{
+           continuation: %Continuation{boundaries: [], messages: [%ReqLLM.Message{role: :system}]}
+         } =
+           state,
+         _selected,
+         _operation
+       ),
+       do: SubscriberLifecycle.driver_supports_questions?(state.subscriber_lifecycle)
+
+  defp question_schema_enabled?(_state, %Prefix{schemas: schemas}, _operation),
+    do: Enum.any?(schemas, &(&1.name == "ask_user"))
+
+  defp question_schema_enabled?(_state, :unknown, _operation), do: false
 
   @spec preview_native_prefix(pid(), term()) :: term()
   defp preview_native_prefix(provider, operation) do

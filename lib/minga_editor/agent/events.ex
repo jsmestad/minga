@@ -72,6 +72,13 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, session_pid, {:approval_resolved, target, decision}),
     do: SessionEventWorkflow.approval_resolved(state, session_pid, target, decision)
 
+  def dispatch(%EditorState{} = state, session_pid, {:question_requested, target, question}),
+    do: SessionEventWorkflow.question_requested(state, session_pid, target, question)
+
+  def dispatch(%EditorState{} = state, session_pid, {event, target})
+      when event in [:question_answered, :question_cancelled, :question_interrupted],
+      do: SessionEventWorkflow.question_retired(state, session_pid, target)
+
   def dispatch(%EditorState{} = state, _session_pid, {:error, message}),
     do: SessionEventWorkflow.error(state, message)
 

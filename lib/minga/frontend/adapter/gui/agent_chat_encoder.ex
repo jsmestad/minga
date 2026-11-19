@@ -41,6 +41,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   # sectioned decoder, so this is backward/forward compatible.
   @section_chat_input_focused 0x09
   @section_chat_draft_attachment_count 0x0A
+  @section_chat_question 0x0B
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
@@ -112,11 +113,26 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
           [encode_section(@section_chat_draft_attachment_count, payload) | sections]
       end
 
+    sections = add_question_section(sections, model.pending_question)
+
     Writer.new(@command)
     |> Writer.uint8(:opcode, @op_gui_agent_chat)
     |> Writer.uint8(:section_count, Enum.count(sections))
     |> Writer.append(sections)
     |> Writer.finish()
+  end
+
+  @spec add_question_section([binary()], {pos_integer(), String.t()} | nil) :: [binary()]
+  defp add_question_section(sections, nil), do: sections
+
+  defp add_question_section(sections, {offer, prompt}) do
+    payload =
+      Writer.new(@command)
+      |> Writer.uint64(:question_offer, offer)
+      |> Writer.string16(:question_prompt, prompt)
+      |> Writer.finish()
+
+    [encode_section(@section_chat_question, payload) | sections]
   end
 
   @spec encode_prompt(AgentChat.t()) :: binary()

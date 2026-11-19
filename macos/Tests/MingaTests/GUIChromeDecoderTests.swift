@@ -2221,7 +2221,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _, _, _, _, _, let count, let offer) = cmd else {
+        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _, _, _, _, _, let count, let offer, _) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
         #expect(visible == false)
@@ -2245,7 +2245,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
         #expect(data[1] == 7)
-        guard case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptMode, let promptVisibleRows, let promptCompletion, _, _, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(visible == true)
         #expect(status == .thinking)
         #expect(model == "claude")
@@ -2271,7 +2271,7 @@ struct GUIAgentChatDecoderTests {
                                  promptLineCount: 2, promptCursorLine: 1, promptCursorCol: 4,
                                  promptVimMode: 1, promptVisibleRows: 2)
         let (command, consumed) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(let visible, let status, _, _, let prompt, _, let line, let col, let mode, let rows, _, _, _, _, _) = command else {
+        guard case .guiAgentChat(let visible, let status, _, _, let prompt, _, let line, let col, let mode, let rows, _, _, _, _, _, _) = command else {
             Issue.record("Expected agent chat")
             return
         }
@@ -2291,7 +2291,7 @@ struct GUIAgentChatDecoderTests {
         let data = buildChatData(prompt: prompt, promptCursorCol: byteOffset, promptVimMode: 1)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, let decodedPrompt, _, _, let decodedCursorCol, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, let decodedPrompt, _, _, let decodedCursorCol, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiAgentChat")
             return
         }
@@ -2315,7 +2315,7 @@ struct GUIAgentChatDecoderTests {
         data.insert(contentsOf: retired, at: 2 + buildSectionData(0x01, Data([1, 0])).count)
         data[1] += 1
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(let visible, _, let model, let thinkingLevel, let prompt, _, _, _, _, _, let promptCompletion, let pendingToolName, let pendingToolSummary, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(let visible, _, let model, let thinkingLevel, let prompt, _, _, _, _, _, let promptCompletion, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(size == data.count)
         #expect(visible == true)
         #expect(model == "claude")
@@ -2336,7 +2336,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(status: 2, model: "claude", pending: pendingPayload)
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(pendingToolName == "write_file")
         #expect(pendingToolSummary == "Writing to config.toml")
     }
@@ -3428,7 +3428,7 @@ struct GUIAgentHelpDecoderTests {
             #expect(visible == (payload[1] == 1))
             #expect(groups.isEmpty)
             let (next, consumed) = try decodeCommand(data: packet, offset: size)
-            guard case .guiAgentChat(let chatVisible, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = next else {
+            guard case .guiAgentChat(let chatVisible, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = next else {
                 Issue.record("Expected following Chat command"); return
             }
             #expect(!chatVisible)

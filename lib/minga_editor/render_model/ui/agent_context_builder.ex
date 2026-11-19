@@ -11,8 +11,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   @spec build(Context.t() | term()) :: AgentContext.t()
   def build(%Context{} = ctx) do
     activity = get_activity(ctx)
-    status = context_status(agent_status(ctx))
-    action = active_action(activity, pending_approval(ctx))
+    {status, action} = status_and_action(ctx, activity)
 
     if visible?(activity, status) do
       %AgentContext{
@@ -33,7 +32,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   @spec visible?(Context.t() | map()) :: boolean()
   def visible?(%Context{} = ctx) do
-    visible?(get_activity(ctx), context_status(agent_status(ctx)))
+    activity = get_activity(ctx)
+    {status, _action} = status_and_action(ctx, activity)
+    visible?(activity, status)
   end
 
   def visible?(state) when is_map(state) do
@@ -75,6 +76,21 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
        do: shell_state
 
   defp shell_state(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}), do: shell_state
+
+  @spec status_and_action(Context.t(), Activity.t()) ::
+          {AgentContext.status(), String.t() | nil}
+  defp status_and_action(
+         %Context{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}} = ctx,
+         activity
+       ) do
+    case TraditionalState.agent(shell_state).pending_question do
+      %MingaEditor.Agent.PendingQuestion{} -> {:needs_you, "Waiting for your answer"}
+      nil -> {context_status(agent_status(ctx)), active_action(activity, pending_approval(ctx))}
+    end
+  end
+
+  defp status_and_action(%Context{}, activity),
+    do: {:idle, active_action(activity, nil)}
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
   defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating], do: true

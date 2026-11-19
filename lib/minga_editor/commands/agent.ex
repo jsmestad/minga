@@ -2493,6 +2493,12 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.AgentDraftAttachmentSource.open/1
       },
       %Minga.Command{
+        name: :agent_answer_question,
+        description: "Answer Agent question",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentQuestionSource.open/1
+      },
+      %Minga.Command{
         name: :agent_pick_thinking,
         description: "Pick AI thinking level",
         requires_buffer: false,

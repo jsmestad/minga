@@ -7,6 +7,9 @@ defmodule MingaAgent.Session.TurnExecution do
 
   alias MingaAgent.EditBoundary
   alias MingaAgent.Event
+  alias MingaAgent.Question
+  alias MingaAgent.Question.Pending, as: PendingQuestion
+  alias MingaAgent.Question.Target, as: QuestionTarget
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
 
@@ -32,10 +35,12 @@ defmodule MingaAgent.Session.TurnExecution do
   @type activity ::
           :starting | :thinking | :completion | {:tool_execution, [active_tool(), ...]}
 
-  @typedoc "Runtime phase. Approval and nonterminal error presentation are orthogonal to provider activity within an active turn."
+  @type interaction :: ToolApproval.t() | PendingQuestion.t() | nil
+
+  @typedoc "Runtime phase. A turn has one blocking interaction slot, independent of provider activity and nonterminal errors."
   @type phase ::
           :idle
-          | {:active, activity(), ToolApproval.t() | nil, String.t() | nil}
+          | {:active, activity(), interaction(), String.t() | nil}
           | {:failure, String.t()}
 
   @typedoc "Public status retained at the Session API boundary."
@@ -78,11 +83,15 @@ defmodule MingaAgent.Session.TurnExecution do
           | :starting
           | :thinking
           | :approval_waiting
+          | :question_waiting
           | :tool_execution
           | :completion
           | :failure
   def phase(%__MODULE__{phase: {:active, _activity, %ToolApproval{}, _error}}),
     do: :approval_waiting
+
+  def phase(%__MODULE__{phase: {:active, _activity, %PendingQuestion{}, _error}}),
+    do: :question_waiting
 
   def phase(%__MODULE__{phase: {:active, activity, nil, _error}}),
     do: activity_phase(activity)
@@ -123,10 +132,19 @@ defmodule MingaAgent.Session.TurnExecution do
 
   @doc "Returns the current pending approval, if any."
   @spec pending_approval(t()) :: ToolApproval.t() | nil
-  def pending_approval(%__MODULE__{phase: {:active, _activity, approval, _error}}),
-    do: approval
+  def pending_approval(%__MODULE__{
+        phase: {:active, _activity, %ToolApproval{} = approval, _error}
+      }),
+      do: approval
 
   def pending_approval(%__MODULE__{}), do: nil
+
+  @doc "Returns the current question and its tool call identity without changing the turn."
+  @spec pending_question(t()) :: PendingQuestion.t() | nil
+  def pending_question(%__MODULE__{phase: {:active, _, %PendingQuestion{} = wait, _}}),
+    do: wait
+
+  def pending_question(%__MODULE__{}), do: nil
 
   @doc "Returns the current error message, if any."
   @spec error(t()) :: String.t() | nil
@@ -205,6 +223,46 @@ defmodule MingaAgent.Session.TurnExecution do
       do: {:accepted, %{execution | phase: {:active, activity, approval, error}}}
 
   def request_approval(%__MODULE__{}, %ToolApproval{}), do: :rejected
+
+  @doc "Installs an admitted clarification when the active turn has no blocking interaction."
+  @spec request_question(t(), PendingQuestion.t()) ::
+          {:ok, t()} | {:error, :turn_not_active | :interaction_pending}
+  def request_question(
+        %__MODULE__{phase: {:active, activity, nil, error}} = execution,
+        %PendingQuestion{} = wait
+      ),
+      do: {:ok, %{execution | phase: {:active, activity, wait, error}}}
+
+  def request_question(%__MODULE__{phase: {:active, _, _, _}}, %PendingQuestion{}),
+    do: {:error, :interaction_pending}
+
+  def request_question(%__MODULE__{}, %PendingQuestion{}), do: {:error, :turn_not_active}
+
+  @doc "Resolves only the named question. Invalid answers leave the wait active."
+  @spec resolve_question(t(), QuestionTarget.t(), Question.response()) ::
+          {:ok, PendingQuestion.t(), Question.outcome(), t()}
+          | {:error, :question_not_found | :invalid_answer}
+  def resolve_question(
+        %__MODULE__{phase: {:active, activity, %PendingQuestion{target: target} = wait, error}} =
+          execution,
+        target,
+        response
+      ) do
+    with {:ok, outcome} <- Question.resolve(wait.question, response) do
+      {:ok, wait, outcome, %{execution | phase: {:active, activity, nil, error}}}
+    end
+  end
+
+  def resolve_question(%__MODULE__{}, _target, _response), do: {:error, :question_not_found}
+
+  @doc "Withdraws a question without treating interruption as an answer or cancellation."
+  @spec interrupt_question(t()) :: {:interrupted, PendingQuestion.t(), t()} | :no_question
+  def interrupt_question(
+        %__MODULE__{phase: {:active, activity, %PendingQuestion{} = wait, error}} = execution
+      ),
+      do: {:interrupted, wait, %{execution | phase: {:active, activity, nil, error}}}
+
+  def interrupt_question(%__MODULE__{}), do: :no_question
 
   @doc "Resolves the matching pending approval and restores the active runtime phase."
   @spec resolve_approval(t(), String.t(), approval_decision()) ::
@@ -587,7 +645,7 @@ defmodule MingaAgent.Session.TurnExecution do
 
   defp clear_approval(%__MODULE__{} = execution), do: execution
 
-  @spec start_tool(t(), [active_tool()], ToolApproval.t() | nil, Event.ToolStart.t()) ::
+  @spec start_tool(t(), [active_tool()], interaction(), Event.ToolStart.t()) ::
           {:ok, trust_scope() | nil, t()} | {:error, :tool_already_active}
   defp start_tool(execution, tools, approval, event) do
     if List.keymember?(tools, event.tool_call_id, 0) do

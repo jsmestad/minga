@@ -649,6 +649,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp agent_status_fg(_colors), do: 0xFFFFFF
 
   @spec agent_tool_label(String.t() | nil) :: String.t()
+  defp agent_tool_label("ask_user"), do: " Clarification "
   defp agent_tool_label(name) when is_binary(name) and name != "", do: " ⚡ Running #{name} "
   defp agent_tool_label(_name), do: " ⚡ Running "
 

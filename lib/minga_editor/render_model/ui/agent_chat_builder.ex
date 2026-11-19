@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.DraftSave
   alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.Agent.PendingQuestion
   alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState.Panel
@@ -89,6 +90,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_visible_rows: visible_rows,
       draft_attachment_count: attachment_count(agent_ui.draft_save),
       draft_attachment_offer: attachment_offer(agent_ui.draft_save),
+      pending_question: pending_question(shell_agent.pending_question, session),
       prompt_completion: build_prompt_completion(panel),
       input_focused:
         panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
@@ -106,6 +108,16 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @spec attachment_offer(DraftSave.t() | nil) :: pos_integer() | nil
   defp attachment_offer(%DraftSave{offer: offer}), do: offer
   defp attachment_offer(nil), do: nil
+
+  @spec pending_question(PendingQuestion.t() | nil, pid()) ::
+          {pos_integer(), String.t()} | nil
+  defp pending_question(
+         %PendingQuestion{session: session, offer: offer, question: question},
+         session
+       ),
+       do: {offer, question.prompt}
+
+  defp pending_question(_question, _session), do: nil
 
   @spec retained_scope(term(), TraditionalState.t(), pid()) :: RetainedOutputTarget.scope() | nil
   defp retained_scope(%{target: %{session: session, epoch: epoch}}, shell_state, session) do

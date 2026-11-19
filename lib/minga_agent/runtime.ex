@@ -37,6 +37,21 @@ defmodule MingaAgent.Runtime do
   @spec get_session(String.t()) :: {:ok, pid()} | {:error, :not_found}
   defdelegate get_session(session_id), to: MingaAgent.SessionManager
 
+  @doc "Reads the exact pending clarification without taking its driver role."
+  @spec pending_question(GenServer.server()) ::
+          {MingaAgent.Question.Target.t(), MingaAgent.Question.t()} | nil
+  defdelegate pending_question(session), to: MingaAgent.Session
+
+  @doc "Answers or cancels the current clarification as the subscribed calling process."
+  @spec respond_to_question(
+          GenServer.server(),
+          MingaAgent.Question.Target.t(),
+          MingaAgent.Question.response()
+        ) :: :ok | {:error, term()}
+  def respond_to_question(session, target, response) do
+    MingaAgent.Session.respond_to_question_as(session, self(), target, response)
+  end
+
   # ── Tool operations ─────────────────────────────────────────────────────────
 
   @doc "Executes a tool by name with the given arguments."

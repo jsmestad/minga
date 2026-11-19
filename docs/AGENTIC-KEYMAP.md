@@ -87,6 +87,16 @@ When all hunks are resolved (accepted or rejected), the viewer returns to normal
 | `i` / `a` | Focus the input field |
 | `Enter` | Focus the input field |
 
+### Agent Questions
+
+When the Agent pauses to ask which output to keep, choose **Answer question** or press `SPC a Q` in Normal mode. Choose a listed answer, choose **Type an answer…** to enter your own, or select **Cancel question** to resume the turn without supplying an answer. Escape closes the picker without answering. Your composer draft stays separate.
+
+If the question does not fit in one preview, choose **Next question page** or **Previous question page**. Paging changes only the preview, not the pending answer or the draft.
+
+Choose **Inspect choice** when a label is too long for the list. Read its pages before choosing **Use choice**. **Back to question** returns without answering.
+
+An answer gives the Agent information, not permission. If the Agent later needs approval for a tool, it asks separately. See [Remote Agents](REMOTE_AGENTS.md#answer-a-remote-agent-question) for disconnect and restart behavior.
+
 ### Tool Approval
 
 An approval can arrive while you are writing the next message. Keep typing: the composer retains its focus, selection, and text composition. The approval card remains available without turning ordinary draft text into a decision.

@@ -58,11 +58,29 @@ Use `minga detach` to disconnect the local frontend. Detaching only removes the 
 
 Use `minga kill-session ssh://devbox/work/app` to end the session for that server-side working directory. Under the hood this calls the brokered `MingaAgent.RemoteAPI.stop_session/2`, which validates the session token and stops that session on the server.
 
+## Answer a remote Agent question
+
+If the Agent needs a decision before it can continue, the attached editor offers **Answer question**. A disconnect does not answer it. Reattach as the driver to inspect the same question and choose, type, or cancel. If the server restarts before it saves an answer, the recovered conversation records the interruption instead of inventing an answer or asking again automatically.
+
+A broker client that can present questions sets `questions?: true` when it calls `MingaAgent.RemoteAPI.attach/4`. The Session sends the private question receipt directly to the attached driver PID as `{:agent_question_attachment, session_pid, receipt}`. Do not log or persist it. Detach invalidates that receipt, even if the same process reattaches.
+
+A fresh conversation advertises `ask_user` only for a capable driver. A retained conversation keeps its original tool declaration when the driver changes. Without a capable driver, a new `ask_user` call returns an explicit refusal instead of waiting. Inspect the exact pending question with `MingaAgent.RemoteAPI.pending_question(session_id, token)`.
+
+For example, a driver can choose the second label in the question it displayed:
+
+```elixir
+{:ok, {target, question}} = MingaAgent.RemoteAPI.pending_question(session_id, token)
+# After the driver selects the second item in question.choices:
+MingaAgent.RemoteAPI.respond_to_question(session_id, token, {driver_pid, receipt}, target, {:choice, 1})
+```
+
+Choice indexes are zero based. Send `{:text, answer}` for a typed answer or `:cancel` to send no answer. The session token and the private receipt for the current driver are both required. A viewer, stale receipt, or stale target cannot change the turn. No response grants tool permission.
+
 ## Idle reclamation policy
 
 Detached sessions are reclaimed by `:agent_session_idle_timeout_ms`. The default is four hours (`14_400_000` ms). Set it to `0` to disable idle reclamation on hosts where sessions should remain until explicitly ended.
 
-The reclaimer only stops sessions with no attached clients and no active agent work. A session that is thinking, executing a tool, or waiting on a pending approval is never reclaimed out from under the user. When the active turn returns to idle and there are still no subscribers, the timeout starts again.
+The reclaimer only stops sessions with no attached clients and no active agent work. A session that is thinking, executing a tool, or waiting on an approval or question is never reclaimed out from under the user. When the active turn returns to idle and there are still no subscribers, the timeout starts again.
 
 Saved session files and the durable event log are still subject to their own retention settings, such as `:agent_session_retention_days` and `:event_retention_days`.
 

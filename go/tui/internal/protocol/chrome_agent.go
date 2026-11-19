@@ -137,6 +137,14 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 				chat.DraftAttachmentCount = section[0]
 				chat.DraftAttachmentOffer = binary.BigEndian.Uint64(section[1:])
 			}
+		case 0x0B:
+			if len(section) >= 10 {
+				offer := binary.BigEndian.Uint64(section)
+				if prompt, end, ok := readString16(section, 8); ok && end == len(section) && offer != 0 {
+					chat.QuestionOffer = offer
+					chat.QuestionPrompt = prompt
+				}
+			}
 		}
 	}
 	return chat, chat.ModelName, size

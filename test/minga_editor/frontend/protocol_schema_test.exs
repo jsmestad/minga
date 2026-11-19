@@ -278,7 +278,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       agent_tool_approval: 0x68,
       scroll_to_visual_rank: 0x69,
       agent_read_retained_output: 0x6A,
-      agent_composer_submit: 0x6B
+      agent_composer_submit: 0x6B,
+      agent_open_question: 0x6C
     )
   end
 

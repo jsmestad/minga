@@ -272,7 +272,9 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       )
     end
 
-    Commands.BufferManagement.handle_agent_session_down(state, pid, reason)
+    state
+    |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(pid)
+    |> Commands.BufferManagement.handle_agent_session_down(pid, reason)
   end
 
   def dispatch(state, :load_user_themes, _payload, _msg) do
@@ -388,11 +390,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec subscribe_through_ingest(pid() | nil, pid()) :: :ok | {:error, term()}
   defp subscribe_through_ingest(ingest, pid) when is_pid(ingest) do
-    MingaEditor.Agent.Ingest.subscribe_session(ingest, pid)
+    MingaEditor.Agent.Ingest.subscribe_session(ingest, pid, questions?: true)
   end
 
   defp subscribe_through_ingest(_ingest, pid) do
-    AgentSession.subscribe(pid, self())
+    AgentSession.subscribe(pid, self(), questions?: true)
   end
 
   @spec log_stale_agent_session_restart(SessionManager.SessionRestartedEvent.t(), term()) :: :ok

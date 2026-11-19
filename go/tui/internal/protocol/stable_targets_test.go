@@ -23,6 +23,7 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionAgentToolApproval":          false,
 		"GUIActionAgentReadRetainedOutput":    false,
 		"GUIActionAgentComposerSubmit":        false,
+		"GUIActionAgentOpenQuestion":          false,
 		"GUIActionSemanticItemActivate":       false,
 		"GUIActionHoverOpenAction":            false,
 		"GUIActionSidebarAction":              false,

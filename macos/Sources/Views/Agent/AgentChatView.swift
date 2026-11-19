@@ -24,6 +24,7 @@ public struct AgentChatView: View {
         case agentToolToggle(messageID: UInt32)
         case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
         case composerSubmit(offer: UInt64)
+        case openQuestion(offer: UInt64)
         case chatScrolledAwayFromBottom
         case chatReturnedToBottom
     }
@@ -131,6 +132,20 @@ public struct AgentChatView: View {
                         )
                     }
                 }
+            }
+
+            if let question = state.question {
+                HStack(spacing: Spacing.md) {
+                    Text(question.prompt)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Answer question") {
+                        sendAction?(.openQuestion(offer: question.offer))
+                    }
+                    .fixedSize()
+                }
+                .padding(.horizontal, Spacing.lg)
+                .padding(.vertical, Spacing.sm)
             }
 
             // Prompt (completion popup + input capsule)

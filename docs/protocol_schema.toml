@@ -1449,6 +1449,11 @@ value = 0x6A
 name = "agent_composer_submit"
 value = 0x6B
 
+# Opaque u64 offer for the current displayed Agent clarification.
+[[gui_actions]]
+name = "agent_open_question"
+value = 0x6C
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven

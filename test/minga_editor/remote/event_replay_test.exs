@@ -327,6 +327,10 @@ defmodule MingaEditor.Remote.EventReplayTest do
          "decision" => "approve"
        }, nil},
       {:approval_interrupted, %{}, nil},
+      {:question_requested, %{"tool_call_id" => "q1", "prompt" => "Which output?"}, nil},
+      {:question_answered, %{"tool_call_id" => "q1"}, nil},
+      {:question_cancelled, %{"tool_call_id" => "q1"}, nil},
+      {:question_interrupted, %{"tool_call_id" => "q1"}, nil},
       {:system_message, %{"message" => "connected"}, nil},
       {:status_changed, %{status: :thinking}, {:status_changed, :thinking}},
       {:waiting_for_input, %{}, {:status_changed, :idle}},

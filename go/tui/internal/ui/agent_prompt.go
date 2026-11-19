@@ -84,6 +84,9 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 	lines := make([]string, 0, placement.height)
 	if placement.border != 0 {
 		title := " " + agentComposerTitle(chat) + " "
+		if chat.QuestionOffer != 0 {
+			title = " Question: " + strings.Join(strings.Fields(chat.QuestionPrompt), " ") + " "
+		}
 		title = fit(title, max(width-2, 0))
 		lines = append(lines, base.Render(border.Render("╭"+title+strings.Repeat("─", max(width-2-lipgloss.Width(title), 0))+"╮")))
 	}
@@ -109,10 +112,12 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		}
 		lines = append(lines, base.Render(fitStyled(inner, width)))
 	}
-	control := agentComposerControlLabel(chat, placement.innerWidth)
+	control, question, attachments := agentComposerControls(chat, placement.innerWidth)
 	label := control
-	if attachments := agentComposerAttachmentLabel(placement.innerWidth, lipgloss.Width(control), chat.DraftAttachmentCount); attachments != "" {
-		label += " · " + attachments
+	for _, part := range []string{question, attachments} {
+		if part != "" {
+			label += " · " + part
+		}
 	}
 	if placement.innerWidth >= 48 {
 		const fullHint = " · Enter send · Shift+Enter newline"
@@ -134,6 +139,26 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		lines = append(lines, base.Render(border.Render("╰"+strings.Repeat("─", max(width-2, 0))+"╯")))
 	}
 	return lines
+}
+
+func agentComposerControls(chat protocol.AgentChat, width int) (control, question, attachments string) {
+	control = agentComposerControlLabel(chat, width)
+	used := lipgloss.Width(control)
+	if chat.QuestionOffer != 0 {
+		switch {
+		case width-used >= len(" · Answer question"):
+			question = "Answer question"
+		case width-used >= len(" · Question"):
+			question = "Question"
+		case width-used >= len(" · ?"):
+			question = "?"
+		}
+		if question != "" {
+			used += lipgloss.Width(" · ") + len(question)
+		}
+	}
+	attachments = agentComposerAttachmentLabel(width, used, chat.DraftAttachmentCount)
+	return control, question, attachments
 }
 
 func agentComposerAttachmentLabel(width, actionWidth int, count byte) string {
@@ -229,13 +254,20 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		return nil, false
 	}
 	chat, _ := m.agentChat()
-	controlWidth := lipgloss.Width(agentComposerControlLabel(chat, p.innerWidth))
+	control, question, attachments := agentComposerControls(chat, p.innerWidth)
+	controlWidth := lipgloss.Width(control)
 	start := p.col - p.prefix
 	if y != p.controlsRow || x < start {
 		return nil, false
 	}
-	attachmentStart := start + controlWidth + 3
-	if label := agentComposerAttachmentLabel(p.innerWidth, controlWidth, chat.DraftAttachmentCount); label != "" && x >= attachmentStart && x < attachmentStart+len(label) {
+	attachmentStart := start + controlWidth + lipgloss.Width(" · ")
+	if question != "" {
+		if x >= attachmentStart && x < attachmentStart+len(question) {
+			return protocol.EncodeGUIAgentOpenQuestion(chat.QuestionOffer), true
+		}
+		attachmentStart += len(question) + lipgloss.Width(" · ")
+	}
+	if attachments != "" && x >= attachmentStart && x < attachmentStart+len(attachments) {
 		return protocol.EncodeGUIExecuteCommand("agent_draft_attachments"), true
 	}
 	if x >= start+controlWidth {

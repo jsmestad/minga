@@ -2,6 +2,9 @@ defmodule MingaAgent.Session.TurnExecutionTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Event
+  alias MingaAgent.Question
+  alias MingaAgent.Question.Pending, as: PendingQuestion
+  alias MingaAgent.Question.Target, as: QuestionTarget
   alias MingaAgent.Session.TurnExecution
   alias MingaAgent.ToolApproval
 
@@ -107,6 +110,55 @@ defmodule MingaAgent.Session.TurnExecutionTest do
       waiting = state(mode, :approval_waiting)
       assert :rejected = TurnExecution.request_approval(waiting, approval)
     end
+  end
+
+  test "an active question excludes approvals and rejects stale or invalid answers" do
+    running = state(:exec, :thinking)
+    approval = approval("approval-1")
+    assert {:ok, question} = Question.new("Which greeting?", ["Hello", "Hi"])
+    assert {:ok, nil, running} = TurnExecution.tool_started(running, tool_start("q1", "ask_user"))
+
+    target = %QuestionTarget{
+      session_id: "s",
+      request_id: "r",
+      checkpoint_id: "c",
+      tool_call_id: "q1"
+    }
+
+    stale = %{target | checkpoint_id: "old"}
+
+    pending = %PendingQuestion{
+      target: target,
+      question: question,
+      reply_to: {self(), make_ref()},
+      monitor: make_ref()
+    }
+
+    assert {:error, :turn_not_active} =
+             TurnExecution.request_question(TurnExecution.new(), pending)
+
+    assert {:accepted, approval_wait} = TurnExecution.request_approval(running, approval)
+
+    assert {:error, :interaction_pending} =
+             TurnExecution.request_question(approval_wait, pending)
+
+    assert {:ok, wait} = TurnExecution.request_question(running, pending)
+    assert TurnExecution.phase(wait) == :question_waiting
+    assert TurnExecution.pending_approval(wait) == nil
+    assert :rejected = TurnExecution.request_approval(wait, approval)
+    assert {:error, :question_not_found} = TurnExecution.resolve_question(wait, stale, :cancel)
+    assert {:error, :invalid_answer} = TurnExecution.resolve_question(wait, target, {:choice, 2})
+
+    assert {:ok, ^pending, {:answered, "Hello"}, resumed} =
+             TurnExecution.resolve_question(wait, target, {:choice, 0})
+
+    assert TurnExecution.active_tools(resumed) == [{"q1", "ask_user"}]
+
+    assert {:error, :question_not_found} =
+             TurnExecution.resolve_question(resumed, target, :cancel)
+
+    assert {:ok, ^pending, :cancelled, _resumed} =
+             TurnExecution.resolve_question(wait, target, :cancel)
   end
 
   test "approval resolution rejects stale identity and returns the approved transition" do

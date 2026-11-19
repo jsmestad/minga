@@ -105,6 +105,7 @@ public enum OutboundAction: Equatable, Sendable {
     case agentToolToggle(messageID: UInt32)
     case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
     case agentComposerSubmit(offer: UInt64)
+    case agentOpenQuestion(offer: UInt64)
     case executeCommand(name: String)
     case openFile(path: String)
     case gitStageFile(path: String)

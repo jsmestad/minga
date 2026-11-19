@@ -20,10 +20,13 @@ defmodule MingaEditor.State.Agent do
   on `EditorState.workspace.agent_ui`.
   """
 
+  alias MingaAgent.Question
+  alias MingaAgent.Question.Target, as: QuestionTarget
   alias MingaAgent.RuntimeState
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.Agent.PendingQuestion
 
   @typedoc "Agent status (delegated from RuntimeState)."
   @type status :: RuntimeState.status()
@@ -39,13 +42,15 @@ defmodule MingaEditor.State.Agent do
           runtime: RuntimeState.t(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
-          pending_approval: approval() | nil
+          pending_approval: approval() | nil,
+          pending_question: PendingQuestion.t() | nil
         }
 
   defstruct runtime: %RuntimeState{},
             error: nil,
             spinner_timer: nil,
-            pending_approval: nil
+            pending_approval: nil,
+            pending_question: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -128,7 +133,8 @@ defmodule MingaEditor.State.Agent do
       agent
       | runtime: runtime,
         error: nil,
-        pending_approval: nil
+        pending_approval: nil,
+        pending_question: nil
     }
   end
 
@@ -145,6 +151,32 @@ defmodule MingaEditor.State.Agent do
   def clear_pending_approval(%__MODULE__{} = agent) do
     %{agent | pending_approval: nil}
   end
+
+  @doc "Replaces the question projection for the attached Session."
+  @spec project_question(t(), pid(), {QuestionTarget.t(), Question.t()} | nil) :: t()
+  def project_question(%__MODULE__{} = agent, _session, nil),
+    do: %{agent | pending_question: nil}
+
+  def project_question(
+        %__MODULE__{pending_question: %PendingQuestion{session: session, target: target}} = agent,
+        session,
+        {target, _question}
+      ),
+      do: agent
+
+  def project_question(%__MODULE__{} = agent, session, {target, question}),
+    do: %{agent | pending_question: PendingQuestion.new(session, target, question)}
+
+  @doc "Clears only the question retired by its originating Session."
+  @spec retire_question(t(), pid(), QuestionTarget.t()) :: t()
+  def retire_question(
+        %__MODULE__{pending_question: %PendingQuestion{session: session, target: target}} = agent,
+        session,
+        target
+      ),
+      do: %{agent | pending_question: nil}
+
+  def retire_question(%__MODULE__{} = agent, _session, _target), do: agent
 
   @doc "Returns the exact displayed approval attachment or a distinct refusal."
   @spec approval_for(t(), ApprovalTarget.t()) ::

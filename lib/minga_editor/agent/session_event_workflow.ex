@@ -18,6 +18,8 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaAgent.Question
+  alias MingaAgent.Question.Target, as: QuestionTarget
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaEditor.Agent.ConnectionSetup
@@ -60,6 +62,29 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> TraditionalWorkflow.resolve_agent_approval(target, session_pid)
     |> MingaEditor.schedule_render(16)
     |> AgentLifecycle.sync_transcript()
+  end
+
+  @doc "Presents the current Session question without taking composer focus."
+  @spec question_requested(EditorState.t(), pid(), QuestionTarget.t(), Question.t()) ::
+          EditorState.t()
+  def question_requested(%EditorState{} = state, session, target, question) do
+    agent = TraditionalState.agent(state.shell_runtime.state)
+    agent = AgentState.project_question(agent, session, {target, question})
+
+    state
+    |> TraditionalWorkflow.install_agent_state(agent)
+    |> MingaEditor.schedule_render(16)
+  end
+
+  @doc "Withdraws only the question retired by the originating Session."
+  @spec question_retired(EditorState.t(), pid(), QuestionTarget.t()) :: EditorState.t()
+  def question_retired(%EditorState{} = state, session, target) do
+    agent = TraditionalState.agent(state.shell_runtime.state)
+    agent = AgentState.retire_question(agent, session, target)
+
+    state
+    |> TraditionalWorkflow.install_agent_state(agent)
+    |> MingaEditor.schedule_render(16)
   end
 
   @doc "Restores queued prompts after an agent error and installs the visible error state."

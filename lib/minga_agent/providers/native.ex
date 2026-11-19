@@ -818,6 +818,12 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call({:preview_prefix, token, operation}, {owner, _}, %{subscriber: owner} = state)
       when is_reference(token) do
+    {operation, questions?} =
+      case operation do
+        {:with_questions, operation} -> {operation, true}
+        operation -> {operation, false}
+      end
+
     selection = prefix_selection(state.selection, operation)
 
     with {:ok, current} <- refresh_tool_registry_contributions(state),
@@ -834,7 +840,7 @@ defmodule MingaAgent.Providers.Native do
            PrefixStore.candidate(
              current.prefix_candidate,
              build_system_prompt(current.project_root, active_skills),
-             schemas,
+             question_schemas(schemas, questions?),
              identity,
              Enum.map(active_skills, & &1.name)
            ) do
@@ -2203,7 +2209,8 @@ defmodule MingaAgent.Providers.Native do
 
     {approval_baselines, concurrent_baselines} =
       Enum.split_with(baselines, fn {_index, tool_call, _before_content} ->
-        tool_requires_approval?(tool_call, lctx, initial_mode)
+        tool_call.name == "ask_user" or
+          tool_requires_approval?(tool_call, lctx, initial_mode)
       end)
 
     concurrent_tasks =
@@ -2214,29 +2221,31 @@ defmodule MingaAgent.Providers.Native do
       )
 
     try do
-      approval_results =
-        execute_sequential_tool_tasks(
-          lctx,
-          checkpoint_id,
-          approval_baselines
-        )
+      with {:ok, sequential_results} <-
+             execute_sequential_tool_tasks(lctx, checkpoint_id, approval_baselines) do
+        results =
+          (sequential_results ++ await_concurrent_tool_tasks(lctx, concurrent_tasks))
+          |> Enum.sort_by(fn {index, _result} -> index end)
 
-      results =
-        (approval_results ++ await_concurrent_tool_tasks(lctx, concurrent_tasks))
-        |> Enum.sort_by(fn {index, _result} -> index end)
-
-      case Enum.find(results, fn {_index, result} -> Map.has_key?(result, :persistence_error) end) do
-        nil ->
-          {:ok,
-           Enum.reduce(results, context, fn {_index, result}, ctx ->
-             Context.append(ctx, tool_result_message(result))
-           end)}
-
-        {_index, result} ->
-          {:error, result.persistence_error}
+        complete_tool_group(context, results)
       end
     after
       cleanup_concurrent_tool_tasks(lctx.provider_pid, concurrent_tasks)
+    end
+  end
+
+  @spec complete_tool_group(Context.t(), [{non_neg_integer(), tool_execution_result()}]) ::
+          {:ok, Context.t()} | {:error, term()}
+  defp complete_tool_group(context, results) do
+    case Enum.find(results, fn {_index, result} -> Map.has_key?(result, :persistence_error) end) do
+      nil ->
+        {:ok,
+         Enum.reduce(results, context, fn {_index, result}, ctx ->
+           Context.append(ctx, tool_result_message(result))
+         end)}
+
+      {_index, result} ->
+        {:error, result.persistence_error}
     end
   end
 
@@ -2244,26 +2253,31 @@ defmodule MingaAgent.Providers.Native do
           loop_ctx(),
           String.t(),
           [tool_baseline()]
-        ) :: [{non_neg_integer(), tool_execution_result()}]
+        ) :: {:ok, [{non_neg_integer(), tool_execution_result()}]} | {:error, term()}
   defp execute_sequential_tool_tasks(
          lctx,
          checkpoint_id,
          baselines
        ) do
-    Enum.flat_map(baselines, fn baseline ->
-      tasks =
-        start_concurrent_tool_tasks(
-          lctx,
-          checkpoint_id,
-          [baseline]
-        )
-
-      try do
-        await_concurrent_tool_tasks(lctx, tasks)
-      after
-        cleanup_concurrent_tool_tasks(lctx.provider_pid, tasks)
+    Enum.reduce_while(baselines, {:ok, []}, fn baseline, {:ok, results} ->
+      case execute_sequential_tool_task(lctx, checkpoint_id, baseline) do
+        {_index, %{persistence_error: reason}} -> {:halt, {:error, reason}}
+        result -> {:cont, {:ok, [result | results]}}
       end
     end)
+  end
+
+  @spec execute_sequential_tool_task(loop_ctx(), String.t(), tool_baseline()) ::
+          {non_neg_integer(), tool_execution_result()}
+  defp execute_sequential_tool_task(lctx, checkpoint_id, baseline) do
+    tasks = start_concurrent_tool_tasks(lctx, checkpoint_id, [baseline])
+
+    try do
+      [result] = await_concurrent_tool_tasks(lctx, tasks)
+      result
+    after
+      cleanup_concurrent_tool_tasks(lctx.provider_pid, tasks)
+    end
   end
 
   @typep approval_mode :: :none | :ask | :ask_all
@@ -3190,6 +3204,10 @@ defmodule MingaAgent.Providers.Native do
     schemas = ReqLLMAdapter.declarations(state.tools)
     {schemas, %{state | schema_cache: {state.tools, schemas}}}
   end
+
+  @spec question_schemas([map()], boolean()) :: [map()]
+  defp question_schemas(schemas, true), do: schemas
+  defp question_schemas(schemas, false), do: Enum.reject(schemas, &(&1.name == "ask_user"))
 
   @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [Tool.t()]
   defp refresh_base_tools(
