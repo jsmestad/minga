@@ -99,6 +99,35 @@ defmodule MingaAgent.SessionStoreTest do
     assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
   end
 
+  test "rename only acknowledges a durable name and leaves the draft and transcript intact", %{
+    tmp_dir: dir
+  } do
+    data = sample_data()
+    draft = draft_snapshot("Keep this draft")
+    assert :ok = SessionStore.save(data, dir)
+    assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+    path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+    before = File.read!(path)
+    refused = [fault_injector: %{before_session_snapshot_rename: {:error, :disk_full}}]
+
+    assert {:error, :disk_full} =
+             SessionStore.rename_conversation(data.id, "Rejected", dir, refused)
+
+    assert File.read!(path) == before
+
+    interrupted = [fault_injector: %{after_session_snapshot_rename: {:error, :interrupted}}]
+
+    assert {:ok, "Review"} =
+             SessionStore.rename_conversation(data.id, "Review", dir, interrupted)
+
+    assert {:ok, %{title: "Review"}} = SessionStore.load(data.id, dir)
+    assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+    after_rename = path |> File.read!() |> JSON.decode!()
+
+    assert pop_in(after_rename, ["conversation", "custom_title"]) ==
+             {"Review", JSON.decode!(before)}
+  end
+
   describe "draft snapshots" do
     test "selection capture rejects stale writes and keeps exact bytes after interrupted publication",
          %{tmp_dir: dir} do
@@ -783,6 +812,21 @@ defmodule MingaAgent.SessionStoreTest do
                "model" => data.model_name,
                "provider" => data.provider_name
              }
+
+      assert {:ok, "Older conversation"} =
+               SessionStore.rename_conversation(data.id, "Older conversation", dir, [])
+
+      renamed = path |> File.read!() |> JSON.decode!()
+      assert Map.pop(renamed, "custom_title") == {"Older conversation", record}
+      assert {:ok, %{title: "Older conversation"}} = SessionStore.load(data.id, dir)
+
+      legacy = record |> Map.put("version", 1) |> JSON.encode!()
+      File.write!(path, legacy)
+
+      assert {:error, :no_saved_conversation} =
+               SessionStore.rename_conversation(data.id, "New", dir, [])
+
+      assert File.read!(path) == legacy
     end
 
     test "version three and four executable snapshots retain their exact selection when upgraded",

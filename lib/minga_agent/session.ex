@@ -116,6 +116,7 @@ defmodule MingaAgent.Session do
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
+          custom_title: String.t() | nil,
           artifact_runtime: ArtifactRuntime.t() | nil,
           workdir: String.t() | nil,
           event_log_server: GenServer.server(),
@@ -344,6 +345,16 @@ defmodule MingaAgent.Session do
   def editor_snapshot(session) do
     GenServer.call(session, :editor_snapshot)
   end
+
+  @doc "Renames the exact displayed local conversation after its record commits."
+  @spec rename_conversation(ConnectionTarget.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def rename_conversation(%ConnectionTarget{session: session} = target, title)
+      when node(session) == node() and is_binary(title) do
+    GenServer.call(session, {:rename_conversation, target, title})
+  end
+
+  def rename_conversation(%ConnectionTarget{}, _title), do: {:error, :unsupported_session}
 
   @type composer_draft_operation ::
           :read
@@ -1044,6 +1055,7 @@ defmodule MingaAgent.Session do
 
     state = %{
       session_id: session_id,
+      custom_title: nil,
       artifact_runtime: Keyword.get(opts, :artifact_runtime),
       workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
@@ -1435,11 +1447,23 @@ defmodule MingaAgent.Session do
     {:reply, ensure_artifact_store(state), state}
   end
 
+  def handle_call({:rename_conversation, target, title}, {caller, _tag}, state)
+      when node(caller) == node() do
+    case rename_saved_conversation(state, target, title) do
+      {:ok, title} -> {:reply, {:ok, title}, %{state | custom_title: title}}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:rename_conversation, _target, _title}, _from, state),
+    do: {:reply, {:error, :unsupported_session}, state}
+
   def handle_call(:metadata, _from, state) do
     first_prompt = first_user_prompt(Transcript.messages(state.transcript))
 
     title =
-      readable_title(first_assistant_text(Transcript.messages(state.transcript))) ||
+      state.custom_title ||
+        readable_title(first_assistant_text(Transcript.messages(state.transcript))) ||
         readable_title(first_prompt)
 
     meta = %SessionMetadata{
@@ -2840,7 +2864,7 @@ defmodule MingaAgent.Session do
 
     state = cancel_save_timer(state)
     execution = TurnExecution.reset(source_execution)
-    state = %{state | session_id: session_id, created_at: now}
+    state = %{state | session_id: session_id, custom_title: nil, created_at: now}
     state = invalidate_connection(state, :conversation)
 
     transcript =
@@ -7508,6 +7532,20 @@ defmodule MingaAgent.Session do
   defp artifact_store_opts(%{artifact_runtime: %ArtifactRuntime{} = runtime}),
     do: [artifact_runtime: runtime]
 
+  @spec rename_saved_conversation(state(), ConnectionTarget.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp rename_saved_conversation(state, target, title) do
+    with :ok <- validate_connection_target(state, target),
+         :ok <- validate_composer_record(state, state.session_id) do
+      SessionStore.rename_conversation(
+        state.session_id,
+        title,
+        state.session_store_dir,
+        artifact_store_opts(state)
+      )
+    end
+  end
+
   @spec validate_composer_record(state(), String.t()) ::
           :ok | {:error, :not_persistent | :stale_target}
   defp validate_composer_record(%{session_id: record_id} = state, record_id) do
@@ -7577,6 +7615,7 @@ defmodule MingaAgent.Session do
           staged = %{
             state
             | session_id: record_id,
+              custom_title: nil,
               transcript: state.transcript |> Transcript.reset([]) |> Transcript.touch(now),
               continuation: Continuation.reset(state.continuation),
               checklist: Checklist.new(),
@@ -7771,6 +7810,7 @@ defmodule MingaAgent.Session do
       candidate = %{
         state
         | session_id: data.id,
+          custom_title: Map.get(data, :custom_title),
           transcript: transcript,
           continuation: data.continuation,
           checklist: Map.get(data, :checklist, Checklist.new()),
@@ -7923,6 +7963,7 @@ defmodule MingaAgent.Session do
     loaded = %{
       current
       | session_id: staged.session_id,
+        custom_title: staged.custom_title,
         transcript: staged.transcript,
         continuation: staged.continuation,
         checklist: staged.checklist,

@@ -2499,6 +2499,12 @@ defmodule MingaEditor.Commands.Agent do
         execute: &pick_thinking_level/1
       },
       %Minga.Command{
+        name: :agent_session_rename,
+        description: "Rename Agent session",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Prompt.AgentSessionRename.open/1
+      },
+      %Minga.Command{
         name: :agent_session_history,
         description: "Resume agent session",
         requires_buffer: false,

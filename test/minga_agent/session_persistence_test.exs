@@ -112,6 +112,78 @@ defmodule MingaAgent.SessionPersistenceTest do
     end
 
     @tag :tmp_dir
+    test "a saved Agent name survives reopening and later saves without changing its draft", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      original = %{
+        id: "rename-record",
+        timestamp: "2026-11-01T00:00:00Z",
+        model_name: "test-model",
+        messages: [{:user, "Original task"}],
+        usage: MingaAgent.TurnUsage.new(),
+        continuation: Continuation.new()
+      }
+
+      draft = %DraftSnapshot{
+        text: "still unsent",
+        cursor: {0, 12},
+        paste_blocks: [],
+        attachments: []
+      }
+
+      assert :ok = SessionStore.save(original, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(original.id, 0, draft, dir)
+      assert :ok = Session.load_session(session, original.id)
+      displayed = Session.editor_snapshot(session).connection.target
+
+      assert {:ok, "Release review"} = Session.rename_conversation(displayed, " Release review ")
+      assert Session.metadata(session).title == "Release review"
+
+      assert {:error, :invalid_session_title} =
+               Session.rename_conversation(displayed, "first\nsecond")
+
+      assert {:ok, %{title: "Release review", messages: [{:user, "Original task"}]}} =
+               SessionStore.load(original.id, dir)
+
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(original.id, dir)
+
+      assert :ok =
+               SessionStore.save(
+                 %{original | messages: original.messages ++ [{:assistant, "Later reply"}]},
+                 dir
+               )
+
+      assert :ok = Session.load_session(session, original.id)
+      assert Session.metadata(session).title == "Release review"
+
+      reopened =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      assert :ok = Session.load_session(reopened, original.id)
+      assert Session.metadata(reopened).title == "Release review"
+
+      unnamed = %{original | id: "unnamed-record", messages: [{:user, "Other task"}]}
+      assert :ok = SessionStore.save(unnamed, dir)
+      assert :ok = Session.load_session(reopened, unnamed.id)
+      assert Session.metadata(reopened).title == "Other task"
+
+      assert {:error, :stale_target} = Session.rename_conversation(displayed, "Incorrect target")
+      assert Session.metadata(session).title == "Release review"
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(original.id, dir)
+    end
+
+    @tag :tmp_dir
     test "targeted restore rejects the old conversation after an in-process reset", %{
       tmp_dir: dir
     } do

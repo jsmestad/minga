@@ -1448,6 +1448,10 @@ defmodule MingaEditor do
      MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, result)}
   end
 
+  def handle_info({:agent_session_rename_result, origin, result}, state) do
+    {:noreply, MingaEditor.UI.Prompt.AgentSessionRename.receive_result(state, origin, result)}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
