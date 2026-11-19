@@ -7,10 +7,30 @@ defmodule MingaAgent.ArtifactStoreTest do
   alias MingaAgent.ArtifactStore.Limits
   alias MingaAgent.ArtifactStore.Paths
   alias MingaAgent.ArtifactStore.CaptureSpec
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.Tool.Output.Range
   alias MingaAgent.Tool.Output.Reference
 
   @moduletag :tmp_dir
+
+  test "a composer selection reads its exact retained text only with the captured revision and owner",
+       %{tmp_dir: root} do
+    {quota, store} = start_pair(root, "composer-selection")
+    other = start_store(root, quota, "other-composer", {:store, make_ref()})
+    text = "selected e\u0301 and 日本語\nwith final newline\n"
+
+    assert {:ok, {:selection, source, label, _revision, captured} = attachment, _pin} =
+             DraftAttachment.capture_selection(store, "test.ex", "test.ex selection", text)
+
+    assert {:ok, ^text} = DraftAttachment.read_text(store, attachment)
+    assert {:error, :unauthorized} = DraftAttachment.read_text(other, attachment)
+
+    assert {:error, :invalid_attachment_snapshot} =
+             DraftAttachment.read_text(
+               store,
+               {:selection, source, label, "other-revision", captured}
+             )
+  end
 
   test "fetches exact binary, Unicode byte slices, and indexed item pages", %{tmp_dir: root} do
     {_quota, store} = start_pair(root, "exact-session")
@@ -139,10 +159,13 @@ defmodule MingaAgent.ArtifactStoreTest do
     assert {:ok, %{reference: reference}} = ArtifactStore.finish(store, capture, :complete)
     {:ok, full} = Range.new(:full, :bytes, 0, 8, 8)
 
+    assert {:ok, ^reference} = ArtifactStore.reference(store, reference.token)
+    assert {:error, :unauthorized} = ArtifactStore.reference(foreign, reference.token)
     assert {:error, :unauthorized} = ArtifactStore.fetch(foreign, reference, full)
 
     unknown = unknown_reference("authorized-session")
     assert {:error, :unknown_reference} = ArtifactStore.fetch(store, unknown, full)
+    assert {:error, :unknown_reference} = ArtifactStore.reference(store, unknown.token)
 
     assert :ok =
              ArtifactStore.pin(store, {:snapshot, "generation-1"}, [reference],
@@ -152,6 +175,7 @@ defmodule MingaAgent.ArtifactStoreTest do
     assert :ok = ArtifactStore.release(store, {:snapshot, "generation-1"})
     assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
     assert {:error, :expired} = ArtifactStore.fetch(store, reference, full)
+    assert {:error, :expired} = ArtifactStore.reference(store, reference.token)
   end
 
   test "pin replacement is atomic and cleanup never deletes referenced content", %{tmp_dir: root} do

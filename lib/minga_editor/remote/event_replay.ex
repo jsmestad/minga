@@ -197,12 +197,17 @@ defmodule MingaEditor.Remote.EventReplay do
     id = string_payload(item, "id")
     description = string_payload(item, "description")
 
-    if id != "" and description != "" do
+    with true <- id != "" and description != "",
+         {:ok, reference} <- OutputCodec.decode_reference(payload_value(item, "result_ref")) do
       %MingaAgent.TodoItem{
         id: id,
         description: description,
-        status: todo_status_payload(item)
+        status: todo_status_payload(item),
+        note: payload_value(item, "note"),
+        result_ref: reference
       }
+    else
+      _invalid -> nil
     end
   end
 
@@ -211,6 +216,7 @@ defmodule MingaEditor.Remote.EventReplay do
     case string_payload(item, "status") do
       "in_progress" -> :in_progress
       "done" -> :done
+      "blocked" -> :blocked
       _ -> :pending
     end
   end

@@ -128,6 +128,8 @@ defmodule MingaAgent.Tools do
     [
       read_file(),
       fetch_output(),
+      MingaAgent.Tools.Checklist.read_spec(),
+      MingaAgent.Tools.Checklist.write_spec(),
       write_file(),
       edit_file(),
       delete_file(),

@@ -298,7 +298,8 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :ok = Store.close(db)
   end
 
-  test "todo plans are recorded as JSON-safe payloads for replay", %{tmp_dir: tmp_dir} do
+  test "an unsolicited current-provider plan cannot replace or publish the Session checklist",
+       %{tmp_dir: tmp_dir} do
     log_name = unique_name("todo-log")
 
     log_pid =
@@ -317,19 +318,16 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
          hooks_enabled?: false}
       )
 
-    :sys.get_state(session)
+    assert :ok = Session.subscribe(session)
     assert :ok = Session.send_prompt(session, "plan this")
     assert_receive :todo_provider_finished, @event_timeout
 
+    refute_received {:agent_event, ^session, {:todo_plan_updated, _}}
+    assert {0, []} = MingaAgent.Checklist.snapshot(Session.editor_snapshot(session).checklist)
+
     db = open_read_connection!(tmp_dir, log_pid)
-    events = wait_for_event(db, "todo-session", :todo_plan_updated, session, log_pid)
-    todo_event = Enum.find(events, &(&1.event_type == :todo_plan_updated))
-
-    assert todo_event.payload["todos"] == [
-             %{"id" => "1", "description" => "Inspect files", "status" => "in_progress"}
-           ]
-
-    assert JSON.decode!(JSON.encode!(todo_event.payload)) == todo_event.payload
+    events = wait_for_event(db, "todo-session", :agent_end, session, log_pid)
+    refute Enum.any?(events, &(&1.event_type == :todo_plan_updated))
     :ok = Store.close(db)
   end
 

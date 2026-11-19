@@ -15,9 +15,12 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores
+  alias MingaAgent.Checklist
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.ModelSelection
   alias MingaAgent.ArtifactStorage.FaultInjector
+  alias MingaAgent.Session.ChecklistArchive
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Transcript
@@ -70,7 +73,9 @@ defmodule MingaAgent.SessionStore do
           optional(:branches) => [MingaAgent.Branch.t()],
           optional(:message_ids) => [pos_integer()],
           optional(:pinned_ids) => MapSet.t(pos_integer()),
-          optional(:memory) => String.t() | nil
+          optional(:memory) => String.t() | nil,
+          optional(:checklist) => Checklist.t(),
+          optional(:checklist_archive) => ChecklistArchive.t()
         }
 
   @typep deserialized_transcript_session :: %{
@@ -130,6 +135,40 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
+  @doc "Commits the admitted request and consumes the exact draft revision in the same record."
+  @spec save_submitted_draft(session_data(), draft_revision(), String.t() | nil, keyword()) ::
+          :ok | {:error, term()}
+  def save_submitted_draft(%{id: id} = data, expected, config_dir, opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn ->
+        commit_submitted_draft(path, id, data, expected, opts)
+      end)
+    end
+  end
+
+  @spec commit_submitted_draft(
+          String.t(),
+          String.t(),
+          session_data(),
+          draft_revision(),
+          keyword()
+        ) ::
+          :ok | {:error, term()}
+  defp commit_submitted_draft(path, id, data, expected, opts) do
+    with {:ok, previous, previous_generation} <- read_record_for_write(path, id, opts),
+         {:ok, {^expected, %DraftSnapshot{attachments: [_ | _]}}} <- decode_presentation(previous),
+         presentation = %{"revision" => expected + 1, "draft" => nil},
+         {:ok, encoded} <- encode_snapshot(data, presentation) do
+      save_record(path, id, encoded, previous_generation, opts, :admit_draft)
+    else
+      {:ok, {revision, _draft}} -> {:error, {:stale_draft_revision, revision}}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @spec commit_conversation(String.t(), String.t(), session_data(), keyword()) ::
           :ok | {:error, term()}
   defp commit_conversation(path, id, data, opts) do
@@ -161,6 +200,82 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
+  @doc "Reads an exact attachment only while its identity belongs to the unsent draft."
+  @spec read_draft_attachment(String.t(), DraftAttachment.identity(), String.t() | nil, keyword()) ::
+          {:ok, DraftSnapshot.attachment(), String.t()} | {:error, term()}
+  def read_draft_attachment(id, identity, config_dir, opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn -> fetch_draft_attachment(path, id, identity, opts) end)
+    end
+  end
+
+  @spec fetch_draft_attachment(String.t(), String.t(), DraftAttachment.identity(), keyword()) ::
+          {:ok, DraftSnapshot.attachment(), String.t()} | {:error, term()}
+  defp fetch_draft_attachment(path, id, identity, opts) do
+    with {:ok, _revision, %DraftSnapshot{attachments: attachments}} <-
+           read_committed_presentation(path, id, opts),
+         {_, _, _, _, _} = attachment <-
+           Enum.find(attachments, &(DraftAttachment.identity(&1) == identity)),
+         {:ok, store} <- ensure_artifact_store(id, opts),
+         {:ok, text} <- DraftAttachment.read_text(store, attachment) do
+      {:ok, attachment, text}
+    else
+      {:error, _reason} = error -> error
+      _missing -> {:error, :attachment_not_in_draft}
+    end
+  end
+
+  @doc "Loads the entire ordered set shown by the composer, or rejects without returning partial context."
+  @spec resolve_draft_attachments(
+          String.t(),
+          [DraftAttachment.identity()],
+          String.t() | nil,
+          keyword()
+        ) ::
+          {:ok, draft_revision(), [{DraftSnapshot.attachment(), String.t()}]} | {:error, term()}
+  def resolve_draft_attachments(id, [_ | _] = shown, config_dir, opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn -> resolve_shown_attachments(path, id, shown, opts) end)
+    end
+  end
+
+  @spec resolve_shown_attachments(String.t(), String.t(), [DraftAttachment.identity()], keyword()) ::
+          {:ok, draft_revision(), [{DraftSnapshot.attachment(), String.t()}]} | {:error, term()}
+  defp resolve_shown_attachments(path, id, shown, opts) do
+    with {:ok, revision, %DraftSnapshot{attachments: attachments}} <-
+           read_committed_presentation(path, id, opts),
+         ^shown <- Enum.map(attachments, &DraftAttachment.identity/1),
+         {:ok, store} <- ensure_artifact_store(id, opts),
+         {:ok, resolved} <- resolve_attachment_text(store, attachments, [], 0) do
+      {:ok, revision, resolved}
+    else
+      {:error, _reason} = error -> error
+      _changed -> {:error, :draft_attachments_changed}
+    end
+  end
+
+  @spec resolve_attachment_text(
+          GenServer.server(),
+          [DraftSnapshot.attachment()],
+          [{DraftSnapshot.attachment(), String.t()}],
+          non_neg_integer()
+        ) :: {:ok, [{DraftSnapshot.attachment(), String.t()}]} | {:error, term()}
+  defp resolve_attachment_text(_store, [], results, _bytes), do: {:ok, Enum.reverse(results)}
+
+  defp resolve_attachment_text(store, [attachment | rest], results, bytes) do
+    with {:ok, text} <- DraftAttachment.read_text(store, attachment),
+         total = bytes + byte_size(text),
+         true <- total <= 1_048_576 || {:error, :draft_attachments_too_large} do
+      resolve_attachment_text(store, rest, [{attachment, text} | results], total)
+    end
+  end
+
   @doc """
   Saves the next draft revision without changing the conversation. Exact retries are idempotent.
 
@@ -176,20 +291,112 @@ defmodule MingaAgent.SessionStore do
           {:ok, draft_revision()} | {:error, term()}
   def save_presentation(id, expected, draft, config_dir \\ nil, opts \\ [])
       when is_binary(id) and is_integer(expected) and expected >= 0 and is_list(opts) do
+    write_presentation(id, config_dir, expected, draft, opts, :ordinary)
+  end
+
+  @doc "Commits an explicit attachment removal, confirming an interrupted rename before reporting success."
+  @spec save_attachment_removal(
+          String.t(),
+          draft_revision(),
+          DraftSnapshot.t() | nil,
+          String.t() | nil,
+          keyword()
+        ) ::
+          {:ok, draft_revision()} | {:error, term()}
+  def save_attachment_removal(id, expected, draft, config_dir, opts) do
+    write_presentation(id, config_dir, expected, draft, opts, :attach_draft)
+  end
+
+  @spec write_presentation(
+          String.t(),
+          String.t() | nil,
+          draft_revision(),
+          DraftSnapshot.t() | nil,
+          keyword(),
+          :ordinary | :attach_draft
+        ) ::
+          {:ok, draft_revision()} | {:error, term()}
+  defp write_presentation(id, config_dir, expected, draft, opts, mode) do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
          true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
          {:ok, encoded_draft} <- encode_draft(draft) do
       with_record_workflow(path, fn ->
-        commit_presentation(path, id, expected, encoded_draft, opts)
+        commit_presentation(path, id, expected, encoded_draft, opts, mode)
       end)
     end
   end
 
-  @spec commit_presentation(String.t(), String.t(), draft_revision(), map() | nil, keyword()) ::
+  @doc "Captures explicit selection text and commits it with the exact composer revision."
+  @spec attach_selection(
+          String.t(),
+          draft_revision(),
+          DraftSnapshot.t(),
+          {String.t(), String.t(), String.t()},
+          String.t() | nil,
+          keyword()
+        ) :: {:ok, draft_revision(), DraftSnapshot.attachment()} | {:error, term()}
+  def attach_selection(id, expected, %DraftSnapshot{} = draft, selection, config_dir, opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with_record_workflow(path, fn ->
+        attach_selection_at_revision(path, id, expected, draft, selection, opts)
+      end)
+    end
+  end
+
+  @spec attach_selection_at_revision(
+          String.t(),
+          String.t(),
+          draft_revision(),
+          DraftSnapshot.t(),
+          {String.t(), String.t(), String.t()},
+          keyword()
+        ) :: {:ok, draft_revision(), DraftSnapshot.attachment()} | {:error, term()}
+  defp attach_selection_at_revision(path, id, expected, draft, {source, label, text}, opts) do
+    with {:ok, record, generation} <- read_record_for_write(path, id, opts),
+         {:ok, {^expected, _draft}} <- decode_presentation(record),
+         {:ok, store} <- ensure_artifact_store(id, opts),
+         {:ok, attachment, pin} <- DraftAttachment.capture_selection(store, source, label, text) do
+      updated = %{draft | attachments: [attachment | draft.attachments]}
+
+      result =
+        with {:ok, encoded} <- encode_draft(updated),
+             {:ok, revision} <-
+               save_presentation_revision(
+                 path,
+                 id,
+                 {record, generation, expected},
+                 expected,
+                 encoded,
+                 opts,
+                 :attach_draft
+               ) do
+          {:ok, revision, attachment}
+        end
+
+      # An ambiguous rename leaves the candidate snapshot pin intact. Only the delivery pin is released here.
+      _ = ArtifactStore.release(store, pin)
+      result
+    else
+      {:ok, {revision, _draft}} -> {:error, {:stale_draft_revision, revision}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec commit_presentation(
+          String.t(),
+          String.t(),
+          draft_revision(),
+          map() | nil,
+          keyword(),
+          :ordinary | :attach_draft
+        ) ::
           {:ok, draft_revision()} | {:error, term()}
-  defp commit_presentation(path, id, expected, draft, opts) do
+  defp commit_presentation(path, id, expected, draft, opts, mode) do
     with {:ok, previous, generation} <- read_record_for_write(path, id, opts),
          {:ok, {revision, _draft}} <- decode_presentation(previous) do
       save_presentation_revision(
@@ -198,7 +405,8 @@ defmodule MingaAgent.SessionStore do
         {previous, generation, revision},
         expected,
         draft,
-        opts
+        opts,
+        mode
       )
     end
   end
@@ -209,15 +417,24 @@ defmodule MingaAgent.SessionStore do
           {map(), String.t() | nil, draft_revision()},
           draft_revision(),
           map() | nil,
-          keyword()
+          keyword(),
+          :ordinary | :attach_draft
         ) :: {:ok, draft_revision()} | {:error, term()}
-  defp save_presentation_revision(path, id, {record, generation, expected}, expected, draft, opts) do
+  defp save_presentation_revision(
+         path,
+         id,
+         {record, generation, expected},
+         expected,
+         draft,
+         opts,
+         mode
+       ) do
     revision = expected + 1
 
     with {:ok, record} <- editable_presentation_record(record, id),
          record = Map.put(record, "presentation", %{"revision" => revision, "draft" => draft}),
          {:ok, encoded} <- encode_record(record, id),
-         :ok <- save_record(path, id, encoded, generation, opts) do
+         :ok <- save_record(path, id, encoded, generation, opts, mode) do
       {:ok, revision}
     end
   end
@@ -228,7 +445,8 @@ defmodule MingaAgent.SessionStore do
          {%{"presentation" => %{"draft" => draft}} = record, generation, revision},
          expected,
          draft,
-         opts
+         opts,
+         _mode
        )
        when revision == expected + 1 do
     with :ok <- reconcile_presentation_record(id, record, generation, opts), do: {:ok, revision}
@@ -240,7 +458,8 @@ defmodule MingaAgent.SessionStore do
          {_record, _generation, revision},
          _expected,
          _draft,
-         _opts
+         _opts,
+         _mode
        ),
        do: {:error, {:stale_draft_revision, revision}}
 
@@ -322,10 +541,18 @@ defmodule MingaAgent.SessionStore do
           String.t(),
           {String.t(), [Reference.t()], String.t()},
           String.t() | nil,
-          keyword()
+          keyword(),
+          :ordinary | :attach_draft | :admit_draft
         ) ::
           :ok | {:error, term()}
-  defp save_record(path, id, {json, references, generation}, previous_generation, opts) do
+  defp save_record(
+         path,
+         id,
+         {json, references, generation},
+         previous_generation,
+         opts,
+         mode \\ :ordinary
+       ) do
     with :ok <- ensure_private_dir(Path.dirname(path)),
          {:ok, store} <- pin_candidate(id, generation, references, opts) do
       case atomic_write_private_result(path, json, fault_injector(opts)) do
@@ -336,9 +563,30 @@ defmodule MingaAgent.SessionStore do
           release_failed_candidate(id, store, previous_generation, generation)
           {:error, reason}
 
+        {:error, reason, :after_rename} when mode in [:admit_draft, :attach_draft] ->
+          confirm_draft_commit(
+            Path.dirname(path),
+            {id, store, generation, references},
+            mode,
+            reason
+          )
+
         {:error, reason, :after_rename} ->
           {:error, reason}
       end
+    end
+  end
+
+  @spec confirm_draft_commit(
+          String.t(),
+          {String.t(), GenServer.server() | nil, String.t(), [Reference.t()]},
+          :attach_draft | :admit_draft,
+          term()
+        ) :: :ok | {:error, term()}
+  defp confirm_draft_commit(directory, {id, store, generation, references}, mode, reason) do
+    case sync_directory(directory) do
+      :ok -> finish_committed_snapshot(id, store, generation, references)
+      {:error, sync_reason} -> {:error, {:draft_commit_uncertain, mode, reason, sync_reason}}
     end
   end
 
@@ -441,7 +689,30 @@ defmodule MingaAgent.SessionStore do
           []
       end)
 
-    transcript_references ++ ContinuationCodec.references(candidate["continuation"])
+    transcript_references ++
+      ContinuationCodec.references(candidate["continuation"]) ++
+      checklist_references(candidate["checklist"]) ++
+      checklist_archive_references(candidate["checklist_archive"])
+  end
+
+  @spec checklist_references(term()) :: [Reference.t()]
+  defp checklist_references(nil), do: []
+
+  defp checklist_references(encoded) do
+    case Checklist.decode(encoded) do
+      {:ok, checklist} -> Checklist.references(checklist)
+      {:error, :invalid_checklist} -> []
+    end
+  end
+
+  @spec checklist_archive_references(term()) :: [Reference.t()]
+  defp checklist_archive_references(nil), do: []
+
+  defp checklist_archive_references(encoded) do
+    case ChecklistArchive.decode(encoded) do
+      {:ok, archive} -> ChecklistArchive.references(archive)
+      {:error, :invalid_checklist_archive} -> []
+    end
   end
 
   @spec canonical_references([Reference.t()]) :: [Reference.t()]
@@ -1406,6 +1677,22 @@ defmodule MingaAgent.SessionStore do
       "memory" => Map.get(data, :memory),
       "continuation" => ContinuationCodec.encode(data.continuation)
     }
+    |> put_checklist(Map.get(data, :checklist))
+    |> put_checklist_archive(Map.get(data, :checklist_archive))
+  end
+
+  @spec put_checklist(map(), Checklist.t() | nil) :: map()
+  defp put_checklist(data, nil), do: data
+  defp put_checklist(data, checklist), do: Map.put(data, "checklist", Checklist.encode(checklist))
+
+  @spec put_checklist_archive(map(), ChecklistArchive.t() | nil) :: map()
+  defp put_checklist_archive(data, nil), do: data
+
+  defp put_checklist_archive(data, archive) do
+    case ChecklistArchive.encode(archive) do
+      nil -> data
+      encoded -> Map.put(data, "checklist_archive", encoded)
+    end
   end
 
   @spec serialize_model_selection(ModelSelection.t() | nil) :: map() | nil
@@ -1484,11 +1771,30 @@ defmodule MingaAgent.SessionStore do
 
     with {:ok, continuation} <- ContinuationCodec.decode(data["continuation"]),
          {:ok, continuation} <-
-           Continuation.restore_tool_outcomes(continuation, data["version"], transcript) do
-      session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation)
-      {:ok, session}
+           Continuation.restore_tool_outcomes(continuation, data["version"], transcript),
+         session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation),
+         {:ok, session} <- restore_checklist(session, data) do
+      restore_checklist_archive(session, data)
     end
   end
+
+  @spec restore_checklist(session_data(), map()) ::
+          {:ok, session_data()} | {:error, :invalid_checklist}
+  defp restore_checklist(session, %{"checklist" => encoded}) do
+    with {:ok, checklist} <- Checklist.decode(encoded),
+         do: {:ok, Map.put(session, :checklist, checklist)}
+  end
+
+  defp restore_checklist(session, _older_record), do: {:ok, session}
+
+  @spec restore_checklist_archive(session_data(), map()) ::
+          {:ok, session_data()} | {:error, :invalid_checklist_archive}
+  defp restore_checklist_archive(session, %{"checklist_archive" => encoded}) do
+    with {:ok, archive} <- ChecklistArchive.decode(encoded),
+         do: {:ok, Map.put(session, :checklist_archive, archive)}
+  end
+
+  defp restore_checklist_archive(session, _older_record), do: {:ok, session}
 
   @spec restore_selection_data(2 | 3 | 4 | 5 | 6, map(), session_data()) ::
           {:ok, session_data()} | {:error, term()}

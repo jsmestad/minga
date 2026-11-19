@@ -26,6 +26,8 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.UI.Picker.AgentChecklistSource
+  alias MingaEditor.UI.Picker.AgentDraftAttachmentSource
   alias MingaEditor.UI.Picker.AgentHistorySource
   alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.WorkspaceWorkflow
@@ -145,6 +147,8 @@ defmodule MingaEditor.TabWorkflow do
     |> rebuild_switched_agent(target)
     |> ensure_agent_composer(target)
     |> AgentHistorySource.dismiss_if_stale()
+    |> AgentChecklistSource.dismiss_if_stale()
+    |> AgentDraftAttachmentSource.dismiss_if_stale()
     |> maybe_restart_incoming_spinner()
   end
 
@@ -268,6 +272,7 @@ defmodule MingaEditor.TabWorkflow do
         state
     end
     |> AgentRetainedOutputSource.dismiss_if_stale()
+    |> AgentChecklistSource.dismiss_if_stale()
   end
 
   @spec clear_replayed_events(EditorState.t(), non_neg_integer()) :: EditorState.t()

@@ -238,7 +238,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert "list_mcp_tools" in tool_names
     assert "call_mcp_tool" in tool_names
     refute "mcp_local_tools__echo_text" in tool_names
-    assert "todo_write" in tool_names
+    refute Enum.any?(tool_names, &(&1 in ["todo_read", "todo_write"]))
     refute_receive {:mcp_transport_started, "Local Tools", _transport}, 50
   end
 

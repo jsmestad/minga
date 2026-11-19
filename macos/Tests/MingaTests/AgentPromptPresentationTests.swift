@@ -356,7 +356,7 @@ struct AgentPromptPresentationTests {
         editor.mouseUp(with: up)
         editor.insertText("typed 界", replacementRange: NSRange(location: NSNotFound, length: 0))
         let typed = spy.actions.compactMap { action -> UInt32? in
-            if case .keyPress(let codepoint, _, _) = action { return codepoint }
+            if case .keyPress(let codepoint, _, _, _) = action { return codepoint }
             return nil
         }
         #expect(typed == "typed 界".unicodeScalars.map(\.value))

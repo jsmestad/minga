@@ -21,6 +21,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaEditor.Agent.ConnectionSetup
+  alias MingaEditor.UI.Picker.AgentDraftAttachmentSource
   alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
@@ -84,6 +85,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     )
     |> ConnectionSetup.retire_prompt(connection)
     |> AgentRetainedOutputSource.dismiss_if_stale()
+    |> AgentDraftAttachmentSource.dismiss_if_stale()
     |> MingaEditor.schedule_render(16)
   end
 

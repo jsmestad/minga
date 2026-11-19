@@ -219,4 +219,5 @@ const (
 	GUIActionAgentToolApproval          byte = 0x68
 	GUIActionScrollToVisualRank         byte = 0x69
 	GUIActionAgentReadRetainedOutput    byte = 0x6A
+	GUIActionAgentComposerSubmit        byte = 0x6B
 )

@@ -347,7 +347,9 @@ defmodule Minga.Integration.GUIProtocolTest do
             status: Map.get(d, :status, :idle),
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
-            prompt: Map.get(d, :prompt, "")
+            prompt: Map.get(d, :prompt, ""),
+            draft_attachment_count: Map.get(d, :draft_attachment_count, 0),
+            draft_attachment_offer: Map.get(d, :draft_attachment_offer)
           }
       end
 
@@ -366,6 +368,30 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "GUI chrome opcode round-trip" do
+    test "Agent chat reports saved attachments without changing the draft text", %{
+      harness: harness
+    } do
+      for {count, offer} <- [{2, 90_000_000_000}, {0, 90_000_000_001}, {0, nil}] do
+        wire_offer = offer || 0
+
+        cmd =
+          encode_gui_agent_chat(%{
+            visible: true,
+            prompt: "Keep this draft",
+            draft_attachment_count: count,
+            draft_attachment_offer: offer
+          })
+
+        assert %{
+                 "visible" => true,
+                 "prompt" => "Keep this draft",
+                 "draft_attachment_count" => ^count,
+                 "draft_attachment_offer" => ^wire_offer
+               } =
+                 round_trip(harness, cmd, "gui_agent_chat")
+      end
+    end
+
     test "gui_theme encodes and decodes correctly", %{harness: harness} do
       model =
         :doom_one

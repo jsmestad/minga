@@ -20,12 +20,14 @@ defmodule MingaAgent.Session do
 
   alias Minga.Config.Options
   alias MingaAgent.Branch
+  alias MingaAgent.Checklist
   alias Minga.Extension.CodeLease
   alias MingaAgent.CodexModels
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Credentials.Secret
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.Event
   alias MingaAgent.EventLog
@@ -50,6 +52,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
+  alias MingaAgent.Session.ChecklistArchive
   alias MingaAgent.Session.Connection
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
@@ -125,6 +128,8 @@ defmodule MingaAgent.Session do
           turn_execution: TurnExecution.t(),
           transcript: Transcript.t(),
           continuation: Continuation.t(),
+          checklist: Checklist.t(),
+          checklist_archive: ChecklistArchive.t(),
           subscriber_lifecycle: SubscriberLifecycle.t(),
           tool_approval_policy: tool_approval_policy(),
           tool_authority: map(),
@@ -222,6 +227,17 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:send_prompt_for_id, expected_session_id, content}, timeout)
   end
 
+  @doc "Submits the displayed set of retained draft attachments to the still-matching local record."
+  @spec send_attached_prompt(
+          GenServer.server(),
+          String.t(),
+          [DraftAttachment.identity()],
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: {:ok, non_neg_integer()} | {:accepted, non_neg_integer(), term()} | {:error, term()}
+  def send_attached_prompt(session, record_id, [_ | _] = shown, content) do
+    GenServer.call(session, {:send_attached_prompt, record_id, shown, content})
+  end
+
   @doc "Aborts only when the Session still has the expected identity."
   @spec abort_for_id(GenServer.server(), String.t()) :: :ok | {:error, :session_id_changed}
   def abort_for_id(session, expected_session_id) when is_binary(expected_session_id) do
@@ -316,6 +332,7 @@ defmodule MingaAgent.Session do
           pending_approval: PublicApproval.t() | nil,
           error: String.t() | nil,
           active_tool_name: String.t() | nil,
+          checklist: Checklist.t(),
           credentials_configured: boolean(),
           credential_readiness: Credentials.readiness(),
           model_selection: ModelSelection.t() | nil,
@@ -329,7 +346,11 @@ defmodule MingaAgent.Session do
   end
 
   @type composer_draft_operation ::
-          :read | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          :read
+          | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:remove_attachment, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:attach_selection, SessionStore.draft_revision(), DraftSnapshot.t(),
+             {String.t(), String.t(), String.t()}}
 
   @type composer_draft_correlation :: reference() | {non_neg_integer(), reference()}
 
@@ -344,6 +365,12 @@ defmodule MingaAgent.Session do
       when is_binary(record_id) do
     GenServer.cast(session, {:composer_draft, self(), record_id, correlation, operation})
   end
+
+  @doc "Reads an exact unsent attachment only from the specified local record."
+  @spec read_draft_attachment(GenServer.server(), String.t(), DraftAttachment.identity()) ::
+          {:ok, DraftSnapshot.attachment(), String.t()} | {:error, term()}
+  def read_draft_attachment(session, record_id, identity),
+    do: GenServer.call(session, {:read_draft_attachment, record_id, identity})
 
   @doc """
   Admits explicitly requested setup against an exact live target.
@@ -1038,6 +1065,8 @@ defmodule MingaAgent.Session do
           make_ref()
         ),
       continuation: Continuation.new(),
+      checklist: Checklist.new(),
+      checklist_archive: ChecklistArchive.new(),
       subscriber_lifecycle: SubscriberLifecycle.new(),
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
       tool_authority: %{
@@ -1119,6 +1148,32 @@ defmodule MingaAgent.Session do
       ) do
     handle_prompt(content, :steering, state)
   end
+
+  def handle_call({:send_attached_prompt, record_id, shown, content}, {caller, _tag}, state)
+      when node(caller) == node() do
+    handle_attached_prompt(state, record_id, shown, content)
+  end
+
+  def handle_call({:send_attached_prompt, _record_id, _shown, _content}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call({:read_draft_attachment, record_id, identity}, {caller, _tag}, state)
+      when node(caller) == node() do
+    result =
+      with :ok <- validate_composer_record(state, record_id) do
+        SessionStore.read_draft_attachment(
+          record_id,
+          identity,
+          state.session_store_dir,
+          artifact_store_opts(state)
+        )
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:read_draft_attachment, _record_id, _identity}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
 
   def handle_call(
         {:abort_for_id, expected_session_id},
@@ -1342,6 +1397,7 @@ defmodule MingaAgent.Session do
         public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
       error: TurnExecution.error(state.turn_execution),
       active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
+      checklist: state.checklist,
       credentials_configured: state.credentials_configured,
       credential_readiness: state.credential_readiness,
       model_selection: state.model_selection,
@@ -1876,6 +1932,10 @@ defmodule MingaAgent.Session do
     start_tool_invocation(state, invocation, worker)
   end
 
+  def handle_call({:checklist_invocation, %Invocation{} = invocation}, {worker, _}, state) do
+    reply_to_checklist_invocation(state, invocation, worker)
+  end
+
   def handle_call({:tool_storage_failed, %Invocation{} = invocation, reason}, {worker, _}, state) do
     record_tool_storage_failure(state, invocation, worker, reason)
   end
@@ -2275,7 +2335,10 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec invocation_declaration(state(), Invocation.t()) :: {:ok, map()} | {:error, term()}
+  @spec invocation_declaration(state(), Invocation.t(), :pending | :admitted) ::
+          {:ok, map()} | {:error, term()}
+  defp invocation_declaration(state, invocation, phase \\ :pending)
+
   defp invocation_declaration(
          %{
            continuation: %Continuation{
@@ -2283,7 +2346,8 @@ defmodule MingaAgent.Session do
              tool_checkpoint: %{} = checkpoint
            }
          },
-         invocation
+         invocation,
+         phase
        ) do
     with true <-
            request.request_id == invocation.request_id and
@@ -2293,7 +2357,7 @@ defmodule MingaAgent.Session do
          %{name: name, arguments: arguments, status: status} <-
            Enum.find(checkpoint.calls, &(&1.tool_call_id == invocation.call_id)),
          true <-
-           name == invocation.name and arguments == invocation.arguments and status == :pending,
+           name == invocation.name and arguments == invocation.arguments and status == phase,
          %MingaAgent.Session.Prefix{schemas: schemas} <- request.prefix,
          %{} = declaration <- Enum.find(schemas, &(&1.name == name)) do
       {:ok, declaration}
@@ -2302,7 +2366,116 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp invocation_declaration(_state, _invocation), do: {:error, :stale_request}
+  defp invocation_declaration(_state, _invocation, _phase), do: {:error, :stale_request}
+
+  @spec reply_to_checklist_invocation(state(), Invocation.t(), pid()) :: {:reply, term(), state()}
+  defp reply_to_checklist_invocation(state, invocation, worker) do
+    key = Invocation.key(invocation)
+
+    with %{invocation: ^invocation, worker: ^worker, started: true, failure: nil} <-
+           Map.get(state.tool_authority.invocations, key),
+         {:ok, _declaration} <- invocation_declaration(state, invocation, :admitted) do
+      apply_checklist_invocation(state, invocation)
+    else
+      _stale -> {:reply, {:error, :stale_invocation}, state}
+    end
+  end
+
+  @spec apply_checklist_invocation(state(), Invocation.t()) :: {:reply, term(), state()}
+  defp apply_checklist_invocation(state, %Invocation{name: "todo_read", arguments: arguments})
+       when map_size(arguments) == 0 do
+    {:reply, {:page, state.checklist, Persistence.enabled?(state.persistence), 0}, state}
+  end
+
+  defp apply_checklist_invocation(
+         state,
+         %Invocation{
+           name: "todo_read",
+           arguments: %{"offset" => offset, "expected_revision" => expected}
+         }
+       )
+       when is_integer(offset) and offset in 1..100 and is_integer(expected) and expected >= 0 do
+    {revision, tasks} = Checklist.snapshot(state.checklist)
+
+    case {revision == expected, offset < length(tasks)} do
+      {true, true} ->
+        {:reply, {:page, state.checklist, Persistence.enabled?(state.persistence), offset}, state}
+
+      {false, _} ->
+        {:reply, {:error, {:stale_revision, revision}}, state}
+
+      {true, false} ->
+        {:reply, {:error, :invalid_checklist_offset}, state}
+    end
+  end
+
+  defp apply_checklist_invocation(
+         state,
+         %Invocation{
+           name: "todo_write",
+           arguments: %{"expected_revision" => expected, "tasks" => items}
+         }
+       )
+       when is_integer(expected) and expected >= 0 and is_list(items) do
+    {revision, _tasks} = Checklist.snapshot(state.checklist)
+
+    with true <- revision == expected or {:error, {:stale_revision, revision}},
+         {:ok, resolved} <- resolve_checklist_references(state, items),
+         {:ok, checklist} <- Checklist.replace(state.checklist, expected, resolved),
+         {:ok, committed} <-
+           persist_session_transition(%{state | checklist: checklist}) do
+      response =
+        {:written, expected + 1, length(items), Persistence.enabled?(committed.persistence)}
+
+      {:reply, response, publish_checklist(committed)}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp apply_checklist_invocation(state, _invocation),
+    do: {:reply, {:error, :invalid_checklist_invocation}, state}
+
+  @spec publish_checklist(state()) :: state()
+  defp publish_checklist(state) do
+    {_revision, todos} = Checklist.snapshot(state.checklist)
+    broadcast(state, {:todo_plan_updated, todos})
+  end
+
+  @spec resolve_checklist_references(state(), [term()]) :: {:ok, [map()]} | {:error, term()}
+  defp resolve_checklist_references(state, items),
+    do: resolve_checklist_references(state, items, 100, [])
+
+  @spec resolve_checklist_references(state(), [term()], non_neg_integer(), [map()]) ::
+          {:ok, [map()]} | {:error, term()}
+  defp resolve_checklist_references(_state, [], _remaining, resolved),
+    do: {:ok, Enum.reverse(resolved)}
+
+  defp resolve_checklist_references(state, [item | rest], remaining, resolved)
+       when remaining > 0 do
+    with {:ok, item} <- resolve_checklist_reference(state, item),
+         do: resolve_checklist_references(state, rest, remaining - 1, [item | resolved])
+  end
+
+  defp resolve_checklist_references(_state, _items, 0, _resolved),
+    do: {:error, :invalid_checklist}
+
+  @spec resolve_checklist_reference(state(), term()) :: {:ok, map()} | {:error, term()}
+  defp resolve_checklist_reference(state, %{"result_ref" => token} = item)
+       when is_binary(token) and byte_size(token) <= 140 do
+    with {:ok, store} <- ensure_artifact_store(state),
+         {:ok, reference} <- ArtifactStore.reference(store, token) do
+      {:ok, %{item | "result_ref" => reference}}
+    end
+  end
+
+  defp resolve_checklist_reference(_state, %{"result_ref" => nil} = item), do: {:ok, item}
+
+  defp resolve_checklist_reference(_state, %{"result_ref" => _invalid}),
+    do: {:error, :invalid_checklist}
+
+  defp resolve_checklist_reference(_state, item) when is_map(item), do: {:ok, item}
+  defp resolve_checklist_reference(_state, _item), do: {:error, :invalid_checklist}
 
   @spec fetch_prepared_invocation(state(), Invocation.t(), pid()) ::
           {:ok, map()} | {:error, term()}
@@ -2544,7 +2717,22 @@ defmodule MingaAgent.Session do
 
     case Continuation.branch_at(state.continuation, branch.name, selected_id) do
       {:ok, continuation} ->
-        candidate = %{state | transcript: transcript, continuation: continuation}
+        {checklist, archive} =
+          ChecklistArchive.fork(
+            state.checklist_archive,
+            branch.name,
+            selected_id,
+            state.checklist
+          )
+
+        candidate = %{
+          state
+          | transcript: transcript,
+            continuation: continuation,
+            checklist: checklist,
+            checklist_archive: archive
+        }
+
         commit_branch_at(state, candidate, turn_index, branch.name)
 
       {:error, reason} ->
@@ -2558,7 +2746,7 @@ defmodule MingaAgent.Session do
     with :ok <- validate_branch_model(candidate),
          {:ok, committed} <- commit_conversation_transition(state, candidate) do
       {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
-       committed}
+       publish_checklist(committed)}
     else
       {:error, reason, failed} ->
         {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
@@ -2571,17 +2759,25 @@ defmodule MingaAgent.Session do
   @spec reply_to_switch_branch(state(), Transcript.t(), String.t()) ::
           {:reply, term(), state()}
   defp reply_to_switch_branch(state, transcript, branch_name) do
+    {checklist, archive} = ChecklistArchive.switch(state.checklist_archive, branch_name)
+
+    candidate = %{
+      state
+      | transcript: transcript,
+        checklist: checklist,
+        checklist_archive: archive
+    }
+
     case Continuation.switch_branch(state.continuation, branch_name) do
       {:ok, continuation} ->
-        candidate = %{state | transcript: transcript, continuation: continuation}
-        commit_branch_switch(state, candidate)
+        commit_branch_switch(state, %{candidate | continuation: continuation})
 
       {:error, :branch_not_resumable}
       when state.continuation.provenance == :legacy_reconstructed ->
         continuation = Continuation.import_legacy(Transcript.messages(transcript))
 
         candidate =
-          %{state | transcript: transcript, continuation: continuation}
+          %{candidate | continuation: continuation}
           |> append_system_message(
             "This explicitly imported legacy branch is portable reconstructed text. It is not a lossless continuation and no tool, attachment, or provider metadata was invented.",
             :info
@@ -2598,7 +2794,7 @@ defmodule MingaAgent.Session do
   defp commit_branch_switch(state, candidate) do
     with :ok <- validate_branch_model(candidate),
          {:ok, committed} <- commit_conversation_transition(state, candidate) do
-      {:reply, :ok, committed}
+      {:reply, :ok, publish_checklist(committed)}
     else
       {:error, reason, failed} ->
         {:reply, {:error, {:conversation_persistence_failed, reason}}, failed}
@@ -2656,6 +2852,8 @@ defmodule MingaAgent.Session do
       state
       | transcript: transcript,
         continuation: Continuation.reset(state.continuation),
+        checklist: Checklist.new(),
+        checklist_archive: ChecklistArchive.new(),
         tool_authority: %{state.tool_authority | revision: make_ref(), invocations: %{}}
     }
 
@@ -2669,7 +2867,9 @@ defmodule MingaAgent.Session do
 
     state = Map.put(state, :turn_execution, execution)
 
-    notify_messages_changed(state)
+    state
+    |> publish_checklist()
+    |> notify_messages_changed()
   end
 
   @impl GenServer
@@ -2691,7 +2891,8 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state) do
+  def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state)
+      when is_pid(caller) and node(caller) == node() do
     result =
       with :ok <- validate_composer_record(state, record_id) do
         composer_draft(state, record_id, operation)
@@ -2700,6 +2901,9 @@ defmodule MingaAgent.Session do
     send(caller, {:composer_draft_result, self(), record_id, correlation, result})
     {:noreply, state}
   end
+
+  def handle_cast({:composer_draft, _caller, _record_id, _correlation, _operation}, state),
+    do: {:noreply, state}
 
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
@@ -3115,7 +3319,7 @@ defmodule MingaAgent.Session do
 
     case Continuation.complete(state.continuation, outcome, transcript_id) do
       {:ok, continuation} ->
-        {%{state | continuation: continuation}, :accepted}
+        {%{state | continuation: continuation} |> freeze_checklist(transcript_id), :accepted}
 
       {:error, reason} ->
         state = cancel_provider_request(state)
@@ -3132,6 +3336,12 @@ defmodule MingaAgent.Session do
 
         {state, {:rejected, message}}
     end
+  end
+
+  @spec freeze_checklist(state(), pos_integer()) :: state()
+  defp freeze_checklist(state, transcript_id) do
+    archive = ChecklistArchive.record(state.checklist_archive, transcript_id, state.checklist)
+    %{state | checklist_archive: archive}
   end
 
   @spec boundary_transcript_id(Transcript.t()) :: pos_integer()
@@ -3176,10 +3386,12 @@ defmodule MingaAgent.Session do
           %{optional(String.t()) => Output.t()}
         ) :: state()
   defp finish_interrupted_checkpoint_reconciliation(state, outputs) do
+    transcript_id = boundary_transcript_id(state.transcript)
+
     {continuation, reconciliation} =
       Continuation.reconcile_interrupted(
         state.continuation,
-        boundary_transcript_id(state.transcript),
+        transcript_id,
         outputs
       )
 
@@ -3189,6 +3401,7 @@ defmodule MingaAgent.Session do
     candidate =
       state
       |> Map.put(:continuation, continuation)
+      |> freeze_checklist(transcript_id)
       |> reconcile_transcript_tool_calls(reconciliation)
       |> append_system_message(
         "Interrupted tool-call group reconciled without replay: " <>
@@ -3338,15 +3551,19 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec persist_boundary_candidate(state(), state()) :: {state(), :ok | {:error, term()}}
-  defp persist_boundary_candidate(state, candidate) do
-    case save_to_disk(candidate) do
+  @spec persist_boundary_candidate(state(), state(), :preserve | non_neg_integer()) ::
+          {state(), :ok | {:error, term()}}
+  defp persist_boundary_candidate(state, candidate, draft_revision \\ :preserve) do
+    case save_to_disk(candidate, draft_revision) do
       :ok ->
         {persistence, timer_to_cancel} = Persistence.cancel(candidate.persistence)
         cancel_runtime_timer(timer_to_cancel)
 
         persisted = %{candidate | persistence: Persistence.saved(persistence)}
         {announce_resumable_boundary(persisted, candidate.continuation), :ok}
+
+      {:error, {:draft_commit_uncertain, :admit_draft, _, _}} = error ->
+        {state, error}
 
       {:error, reason} ->
         Minga.Log.error(
@@ -3887,24 +4104,62 @@ defmodule MingaAgent.Session do
   defp validate_approval_liveness(_state, _tool_call_id),
     do: {:error, :approval_not_found}
 
+  @spec handle_attached_prompt(
+          state(),
+          String.t(),
+          [DraftAttachment.identity()],
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: {:reply, term(), state()} | {:stop, term(), term(), state()}
+  defp handle_attached_prompt(state, record_id, shown, content) do
+    with :ok <- validate_composer_record(state, record_id),
+         false <- TurnExecution.active?(state.turn_execution),
+         {:ok, revision, retained} <-
+           SessionStore.resolve_draft_attachments(
+             record_id,
+             shown,
+             state.session_store_dir,
+             artifact_store_opts(state)
+           ),
+         {:ok, prompt} <-
+           DraftAttachment.append_to_prompt(content, retained, state.model_selection) do
+      case handle_prompt(prompt, :steering, state, revision) do
+        {:reply,
+         {:error,
+          {:conversation_persistence_failed, {:draft_commit_uncertain, :admit_draft, _, _}} =
+              reason}, failed} ->
+          {:stop, reason, {:error, reason}, failed}
+
+        reply ->
+          reply
+      end
+    else
+      true -> {:reply, {:error, :attachment_send_busy}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
   @spec handle_prompt(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           TurnExecution.prompt_kind(),
-          state()
-        ) :: {:reply, :ok | {:queued, TurnExecution.prompt_kind()} | {:error, term()}, state()}
+          state(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp handle_prompt(content, kind, state, draft_revision \\ :preserve)
+
   defp handle_prompt(
          _content,
          _kind,
-         %{continuation: %Continuation{tool_checkpoint: %{}}} = state
+         %{continuation: %Continuation{tool_checkpoint: %{}}} = state,
+         _draft_revision
        ) do
     {:reply, {:error, :effect_reconciliation_required}, state}
   end
 
-  defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state) do
+  defp handle_prompt(_content, _kind, %{credential_readiness: :checking} = state, _draft_revision) do
     {:reply, {:error, :credentials_pending}, state}
   end
 
-  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state) do
+  defp handle_prompt(_content, _kind, %{credentials_configured: false} = state, _draft_revision) do
     # No usable provider yet. Refuse locally so callers can preserve the draft instead of clearing it.
     {:reply, {:error, :credentials_not_configured}, state}
   end
@@ -3912,7 +4167,8 @@ defmodule MingaAgent.Session do
   defp handle_prompt(
          content,
          kind,
-         %{provider: provider} = state
+         %{provider: provider} = state,
+         draft_revision
        )
        when ProviderLifecycle.is_detached(provider) do
     {state, refresh_result} = refresh_credentials_state_result(state)
@@ -3925,29 +4181,33 @@ defmodule MingaAgent.Session do
         {:reply, {:error, :provider_not_ready}, state}
 
       {_provider, :ok} ->
-        handle_prompt(content, kind, state)
+        handle_prompt(content, kind, state, draft_revision)
     end
   end
 
-  defp handle_prompt(content, kind, state) do
+  defp handle_prompt(content, kind, state, draft_revision) do
     case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
+      {:queued, _execution} when is_integer(draft_revision) ->
+        {:reply, {:error, :attachment_send_busy}, state}
+
       {:queued, execution} ->
         state = broadcast(state, {:prompt_queued, content, kind})
         {:reply, {:queued, kind}, %{state | turn_execution: execution}}
 
       {:send_now, execution} ->
-        send_new_turn(content, state, execution)
+        send_new_turn(content, state, execution, draft_revision)
     end
   end
 
   @spec send_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
-          TurnExecution.t()
-        ) :: {:reply, :ok | {:error, term()}, state()}
-  defp send_new_turn(content, state, execution) do
+          TurnExecution.t(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp send_new_turn(content, state, execution, draft_revision) do
     case dispatch_user_prompt_submit(state, content) do
-      :ok -> begin_new_turn(content, state, execution)
+      :ok -> begin_new_turn(content, state, execution, draft_revision)
       {:error, %HookResult{} = result} -> reply_to_prompt_veto(state, result)
     end
   end
@@ -3955,12 +4215,13 @@ defmodule MingaAgent.Session do
   @spec begin_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
-          TurnExecution.t()
-        ) :: {:reply, :ok | {:error, term()}, state()}
-  defp begin_new_turn(content, state, execution) do
+          TurnExecution.t(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp begin_new_turn(content, state, execution, draft_revision) do
     case prepare_provider_request(state) do
       {:ok, prepared} ->
-        admit_new_turn(content, prepared, execution)
+        admit_new_turn(content, prepared, execution, draft_revision)
 
       {:error, reason} ->
         reply_to_prompt_admission_failure(state, reason)
@@ -3970,13 +4231,14 @@ defmodule MingaAgent.Session do
   @spec admit_new_turn(
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
-          TurnExecution.t()
-        ) :: {:reply, :ok | {:error, term()}, state()}
-  defp admit_new_turn(content, state, execution) do
+          TurnExecution.t(),
+          :preserve | non_neg_integer()
+        ) :: {:reply, term(), state()}
+  defp admit_new_turn(content, state, execution, draft_revision) do
     {user_message, send_content} = build_user_message(content)
     candidate = append_msg(state, user_message)
 
-    case admit_provider_request(state, candidate, send_content) do
+    case admit_provider_request(state, candidate, send_content, draft_revision) do
       {:ok, request, admitted} ->
         admitted =
           admitted
@@ -3984,11 +4246,22 @@ defmodule MingaAgent.Session do
           |> notify_messages_changed()
 
         dispatch_new_turn_request(admitted, request, execution)
+        |> acknowledge_consumed_draft(draft_revision)
 
       {:error, reason, failed_state} ->
         reply_to_prompt_admission_failure(failed_state, reason)
     end
   end
+
+  @spec acknowledge_consumed_draft({:reply, term(), state()}, :preserve | non_neg_integer()) ::
+          {:reply, term(), state()}
+  defp acknowledge_consumed_draft(reply, :preserve), do: reply
+
+  defp acknowledge_consumed_draft({:reply, :ok, state}, revision),
+    do: {:reply, {:ok, revision + 1}, state}
+
+  defp acknowledge_consumed_draft({:reply, {:error, reason}, state}, revision),
+    do: {:reply, {:accepted, revision + 1, reason}, state}
 
   @spec dispatch_new_turn_request(state(), Request.t(), TurnExecution.t()) ::
           {:reply, :ok | {:error, term()}, state()}
@@ -4109,9 +4382,7 @@ defmodule MingaAgent.Session do
     |> notify_messages_changed()
   end
 
-  defp handle_provider_event(%Event.TodoPlan{todos: todos}, state) do
-    broadcast(state, {:todo_plan_updated, todos})
-  end
+  defp handle_provider_event(%Event.TodoPlan{}, state), do: state
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
     case validate_approval_liveness(state, event.tool_call_id) do
@@ -5459,7 +5730,13 @@ defmodule MingaAgent.Session do
       "description" => todo_value(todo, :description),
       "status" => todo_status_payload(todo_value(todo, :status))
     }
+    |> put_todo_detail("note", todo_value(todo, :note))
+    |> put_todo_detail("result_ref", OutputCodec.encode_reference(todo_value(todo, :result_ref)))
   end
+
+  @spec put_todo_detail(map(), String.t(), term()) :: map()
+  defp put_todo_detail(payload, _key, nil), do: payload
+  defp put_todo_detail(payload, key, value), do: Map.put(payload, key, value)
 
   @spec todo_value(map(), atom()) :: term()
   defp todo_value(todo, key) do
@@ -5546,9 +5823,10 @@ defmodule MingaAgent.Session do
   @spec admit_provider_request(
           state(),
           state(),
-          String.t() | [ReqLLM.Message.ContentPart.t()]
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :preserve | non_neg_integer()
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
-  defp admit_provider_request(previous, candidate, content) do
+  defp admit_provider_request(previous, candidate, content, draft_revision \\ :preserve) do
     with {:ok, turn_id} <- request_turn_id(candidate),
          request_id = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
          {:ok, request, continuation} <-
@@ -5558,7 +5836,7 @@ defmodule MingaAgent.Session do
       {persisted, save_result} =
         if Persistence.enabled?(candidate.persistence) do
           durable = %{candidate | continuation: Continuation.mark_durable(continuation)}
-          persist_boundary_candidate(previous, durable)
+          persist_boundary_candidate(previous, durable, draft_revision)
         else
           {candidate, :ok}
         end
@@ -5799,8 +6077,10 @@ defmodule MingaAgent.Session do
   defp start_provider_process(state) do
     provider_opts =
       case {state.provider.module, state.session_manager} do
-        {MingaAgent.Providers.Native, manager} when is_pid(manager) ->
-          Keyword.put(state.provider.opts, :session_manager, manager)
+        {MingaAgent.Providers.Native, manager} ->
+          state.provider.opts
+          |> Keyword.put(:session_checklist?, true)
+          |> maybe_put_session_manager(manager)
 
         _provider ->
           state.provider.opts
@@ -5811,6 +6091,12 @@ defmodule MingaAgent.Session do
       {:error, reason} -> {:error, reason, state}
     end
   end
+
+  @spec maybe_put_session_manager(keyword(), pid() | nil) :: keyword()
+  defp maybe_put_session_manager(opts, manager) when is_pid(manager),
+    do: Keyword.put(opts, :session_manager, manager)
+
+  defp maybe_put_session_manager(opts, _manager), do: opts
 
   @spec release_provider_lease(CodeLease.t() | nil) :: :ok
   defp release_provider_lease(nil), do: :ok
@@ -7168,8 +7454,8 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec save_to_disk(state()) :: :ok | {:error, term()}
-  defp save_to_disk(state) do
+  @spec save_to_disk(state(), :preserve | non_neg_integer()) :: :ok | {:error, term()}
+  defp save_to_disk(state, draft_revision \\ :preserve) do
     if Persistence.enabled?(state.persistence) do
       now = DateTime.to_iso8601(DateTime.utc_now())
       last_message_at = DateTime.to_iso8601(Transcript.last_changed_at(state.transcript))
@@ -7194,10 +7480,23 @@ defmodule MingaAgent.Session do
         usage: Transcript.usage(state.transcript),
         branches: Transcript.branches(state.transcript),
         memory: Memory.read(state.session_store_dir),
+        checklist: state.checklist,
+        checklist_archive: state.checklist_archive,
         continuation: state.continuation
       }
 
-      SessionStore.save(data, state.session_store_dir, artifact_store_opts(state))
+      case draft_revision do
+        :preserve ->
+          SessionStore.save(data, state.session_store_dir, artifact_store_opts(state))
+
+        revision ->
+          SessionStore.save_submitted_draft(
+            data,
+            revision,
+            state.session_store_dir,
+            artifact_store_opts(state)
+          )
+      end
     else
       :ok
     end
@@ -7227,6 +7526,7 @@ defmodule MingaAgent.Session do
 
   @spec composer_draft(state(), String.t(), composer_draft_operation()) ::
           {:ok, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:ok, SessionStore.draft_revision(), DraftSnapshot.attachment()}
           | {:ok, SessionStore.draft_revision()}
           | {:error, term()}
   defp composer_draft(state, record_id, :read) do
@@ -7238,6 +7538,27 @@ defmodule MingaAgent.Session do
       record_id,
       expected,
       draft,
+      state.session_store_dir,
+      artifact_store_opts(state)
+    )
+  end
+
+  defp composer_draft(state, record_id, {:remove_attachment, expected, draft}) do
+    SessionStore.save_attachment_removal(
+      record_id,
+      expected,
+      draft,
+      state.session_store_dir,
+      artifact_store_opts(state)
+    )
+  end
+
+  defp composer_draft(state, record_id, {:attach_selection, expected, draft, selection}) do
+    SessionStore.attach_selection(
+      record_id,
+      expected,
+      draft,
+      selection,
       state.session_store_dir,
       artifact_store_opts(state)
     )
@@ -7257,7 +7578,9 @@ defmodule MingaAgent.Session do
             state
             | session_id: record_id,
               transcript: state.transcript |> Transcript.reset([]) |> Transcript.touch(now),
-              continuation: Continuation.reset(state.continuation)
+              continuation: Continuation.reset(state.continuation),
+              checklist: Checklist.new(),
+              checklist_archive: ChecklistArchive.new()
           }
 
           {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
@@ -7450,6 +7773,8 @@ defmodule MingaAgent.Session do
         | session_id: data.id,
           transcript: transcript,
           continuation: data.continuation,
+          checklist: Map.get(data, :checklist, Checklist.new()),
+          checklist_archive: Map.get(data, :checklist_archive, ChecklistArchive.new()),
           provider: lifecycle,
           credential_readiness: credential_readiness,
           credentials_configured: credentials_configured,
@@ -7600,6 +7925,8 @@ defmodule MingaAgent.Session do
       | session_id: staged.session_id,
         transcript: staged.transcript,
         continuation: staged.continuation,
+        checklist: staged.checklist,
+        checklist_archive: staged.checklist_archive,
         persistence: persistence,
         provider: staged.provider,
         credential_readiness: staged.credential_readiness,
@@ -7632,7 +7959,7 @@ defmodule MingaAgent.Session do
   defp finish_loaded_session_restore(state) do
     broadcast(state, {:status_changed, :idle})
     broadcast(state, :messages_changed)
-    {:ok, state}
+    {:ok, publish_checklist(state)}
   end
 
   @spec reconcile_loaded_checkpoint(state()) ::
@@ -7660,10 +7987,12 @@ defmodule MingaAgent.Session do
   defp reconcile_loaded_checkpoint(state) do
     case reconciliation_outputs(state) do
       {:ok, outputs} ->
+        transcript_id = boundary_transcript_id(state.transcript)
+
         {continuation, reconciliation} =
           Continuation.reconcile_interrupted(
             state.continuation,
-            boundary_transcript_id(state.transcript),
+            transcript_id,
             outputs
           )
 
@@ -7679,6 +8008,7 @@ defmodule MingaAgent.Session do
         candidate =
           state
           |> Map.put(:continuation, continuation)
+          |> freeze_checklist(transcript_id)
           |> reconcile_transcript_tool_calls(reconciliation)
           |> append_system_message(message, if(indeterminate_count == 0, do: :info, else: :error))
 

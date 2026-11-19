@@ -2,6 +2,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   @moduledoc "Saves and restores draft presentation against its original workspace and record."
 
   alias Minga.Buffer
+  alias MingaAgent.DraftAttachment
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.Session
   alias MingaEditor.Agent.{DraftSave, PromptBuffer, UIState}
@@ -15,6 +16,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   @typep result ::
            {:ok, DraftSave.revision(), DraftSnapshot.t() | nil}
+           | {:ok, DraftSave.revision(), DraftSnapshot.attachment()}
            | {:ok, DraftSave.revision()}
            | {:error, term()}
 
@@ -123,7 +125,11 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     :exit, _reason -> false
   end
 
-  defp unconfirmed?(_ui, %DraftSave{request: {:saving, _, _, _, _}}), do: true
+  defp unconfirmed?(_ui, %DraftSave{request: {phase, _, _, _, _}})
+       when phase in [:saving, :attaching],
+       do: true
+
+  defp unconfirmed?(_ui, %DraftSave{request: {:removing, _, _, _, _, _}}), do: true
   defp unconfirmed?(ui, _save), do: not PromptBuffer.input_empty?(ui)
 
   @doc "Checks the outgoing composer before an existing Session process changes records."
@@ -138,7 +144,10 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           do: :ok,
           else: {:error, pending_notice(state, buffer)}
 
-      %DraftSave{request: {:saving, _, _, _, _}} ->
+      %DraftSave{request: {phase, _, _, _, _}} when phase in [:saving, :attaching] ->
+        {:error, reopen_notice(state)}
+
+      %DraftSave{request: {:removing, _, _, _, _, _}} ->
         {:error, reopen_notice(state)}
 
       _unconfirmed ->
@@ -152,6 +161,38 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   @doc "Attaches a fresh prompt after a different durable record has been successfully opened."
   @spec after_reopen(State.t(), pid(), String.t()) :: State.t()
+  def after_reopen(
+        %State{
+          workspace: %{
+            agent_ui:
+              %UIState{
+                draft_save:
+                  %DraftSave{target: {session, incoming}, request: :attachment_review_required} =
+                    save
+              } = ui
+          }
+        } = state,
+        session,
+        incoming
+      ) do
+    case tab_bar(state) do
+      %TabBar{} = tabs ->
+        ref = make_ref()
+        owner = TabBar.active_workspace_id(tabs)
+        :ok = Session.request_composer_draft(session, incoming, {owner, ref}, :read)
+
+        Workflow.install_agent_ui(
+          state,
+          UIState.project_draft_save(ui, DraftSave.review_attachments(save, ref))
+        )
+
+      nil ->
+        state
+    end
+  catch
+    :exit, _reason -> report(state, :failed)
+  end
+
   def after_reopen(
         %State{
           workspace: %{agent_ui: %UIState{draft_save: %DraftSave{target: {session, incoming}}}}
@@ -223,6 +264,120 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       _no_matching_composer -> state
     end
   end
+
+  @doc "Commits a captured selection only to the explicitly chosen, still-bound composer."
+  @spec attach_selection(
+          State.t(),
+          non_neg_integer(),
+          DraftSave.target(),
+          {String.t(), String.t()}
+        ) ::
+          State.t()
+  def attach_selection(state, owner, target, {source, text}) do
+    update_origin(state, owner, &capture_selection(&1, owner, target, source, text))
+  end
+
+  @doc "Removes only the identified captured revision from the still-bound composer."
+  @spec remove_attachment(
+          State.t(),
+          non_neg_integer(),
+          DraftSave.target(),
+          DraftAttachment.identity()
+        ) ::
+          State.t()
+  def remove_attachment(state, owner, target, identity) do
+    update_origin(state, owner, &commit_attachment_removal(&1, owner, target, identity))
+  end
+
+  @spec commit_attachment_removal(
+          UIState.t(),
+          non_neg_integer(),
+          DraftSave.target(),
+          DraftAttachment.identity()
+        ) ::
+          {term(), UIState.t()}
+  defp commit_attachment_removal(
+         %UIState{
+           draft_save: %DraftSave{target: {session, id} = target, buffer: buffer} = save,
+           panel: %{prompt_buffer: buffer}
+         } = ui,
+         owner,
+         target,
+         identity
+       ) do
+    ref = make_ref()
+    marker = Buffer.inspection_marker(buffer)
+
+    with {:ok, revision, pending, remaining} <-
+           DraftSave.begin_removal(save, ref, marker, identity),
+         {:ok, snapshot} <- PromptBuffer.draft_snapshot(ui, remaining) do
+      :ok =
+        Session.request_composer_draft(
+          session,
+          id,
+          {owner, ref},
+          {:remove_attachment, revision, snapshot}
+        )
+
+      {:unchanged, UIState.project_draft_save(ui, pending)}
+    else
+      {:error, :private_input} -> {:private_attachment, ui}
+      _not_ready -> {:attachment_not_ready, ui}
+    end
+  catch
+    :exit, _reason -> {:attachment_not_ready, ui}
+  end
+
+  defp commit_attachment_removal(ui, _owner, _target, _identity),
+    do: {:attachment_not_ready, ui}
+
+  @spec capture_selection(
+          UIState.t(),
+          non_neg_integer(),
+          DraftSave.target(),
+          String.t(),
+          String.t()
+        ) ::
+          {term(), UIState.t()}
+  defp capture_selection(
+         %UIState{
+           draft_save: %DraftSave{target: {session, id} = target, buffer: buffer} = save,
+           panel: %{prompt_buffer: buffer}
+         } = ui,
+         owner,
+         target,
+         source,
+         text
+       ) do
+    ref = make_ref()
+    marker = Buffer.inspection_marker(buffer)
+
+    with {:ok, revision, pending} <- DraftSave.begin_attachment(save, ref, marker),
+         {:ok, snapshot} <- PromptBuffer.draft_snapshot(ui, save.attachments) do
+      snapshot =
+        snapshot || %DraftSnapshot{text: "", cursor: {0, 0}, paste_blocks: [], attachments: []}
+
+      selection = {source, Path.basename(source), text}
+
+      :ok =
+        Session.request_composer_draft(
+          session,
+          id,
+          {owner, ref},
+          {:attach_selection, revision, snapshot, selection}
+        )
+
+      {:unchanged, UIState.project_draft_save(ui, pending)}
+    else
+      {:error, :private_input} -> {:private_attachment, ui}
+      _not_ready -> {:attachment_not_ready, ui}
+    end
+  catch
+    :exit, _reason -> {:attachment_not_ready, ui}
+  end
+
+  defp capture_selection(ui, _owner, _target, _source, _text),
+    do: {:attachment_not_ready, ui}
 
   @spec owns_draft_buffer?(Workspace.t(), pid()) :: boolean()
   defp owns_draft_buffer?(
@@ -326,9 +481,42 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
         {:restored, arm(installed, owner)}
 
+      :edited when is_struct(draft, DraftSnapshot) and draft.attachments != [] ->
+        {:failed, UIState.project_draft_save(ui, DraftSave.conflicted(save, draft))}
+
       :edited ->
         fail_result(ui, save, ref, :blocked)
     end
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:reviewing_attachments, ref}} = save,
+         owner,
+         ref,
+         {:ok, revision, draft}
+       )
+       when is_struct(draft, DraftSnapshot) or is_nil(draft) do
+    reviewed = DraftSave.attachments_reviewed(save, revision, draft)
+    {:attachments_reloaded, arm(UIState.project_draft_save(ui, reviewed), owner)}
+  end
+
+  defp apply_result(ui, save, owner, ref, {:ok, revision, {_kind, _, _, _, _} = attachment}) do
+    case DraftSave.attached(save, ref, revision, attachment) do
+      {:ok, saved} -> {:attached, arm(UIState.project_draft_save(ui, saved), owner)}
+      :stale -> {:unchanged, ui}
+    end
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:removing, ref, _, _, _, _}} = save,
+         owner,
+         ref,
+         {:ok, revision}
+       ) do
+    {:ok, saved} = DraftSave.saved(save, ref, revision)
+    {:attachment_removed, arm(UIState.project_draft_save(ui, saved), owner)}
   end
 
   defp apply_result(ui, save, owner, ref, {:ok, revision}) do
@@ -340,6 +528,15 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp apply_result(ui, save, _owner, ref, {:error, {:stale_draft_revision, _}}),
     do: fail_result(ui, save, ref, :blocked)
+
+  defp apply_result(
+         ui,
+         save,
+         _owner,
+         ref,
+         {:error, {:draft_commit_uncertain, :attach_draft, _, _}}
+       ),
+       do: fail_result(ui, save, ref, :blocked)
 
   defp apply_result(ui, save, _owner, ref, {:error, reason})
        when reason in [:stale_target, :not_persistent],
@@ -406,7 +603,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           State.t()
   defp update_inactive(state, tabs, owner, update) do
     case TabBar.get_workspace(tabs, owner) do
-      %Workspace{payload: %Agent{agent_ui: %UIState{} = ui}} ->
+      %Workspace{label: label, payload: %Agent{agent_ui: %UIState{} = ui}} ->
         {outcome, updated} = update.(ui)
 
         shell =
@@ -420,16 +617,30 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell)
         }
 
-        if outcome == :failed,
-          do: Minga.API.message("An inactive Agent draft could not be saved or restored."),
-          else: :ok
-
-        state
+        report_inactive(state, outcome, label)
 
       _other ->
         state
     end
   end
+
+  @spec report_inactive(State.t(), term(), String.t()) :: State.t()
+  defp report_inactive(state, :failed, _label) do
+    Minga.API.message("An inactive Agent draft could not be saved or restored.")
+    state
+  end
+
+  defp report_inactive(state, :attached, label) do
+    state
+    |> NoticeWorkflow.publish("Selection snapshot attached to #{label}.")
+    |> MingaEditor.schedule_render(16)
+  end
+
+  defp report_inactive(state, outcome, _label)
+       when outcome in [:private_attachment, :attachment_not_ready],
+       do: report(state, outcome)
+
+  defp report_inactive(state, _outcome, _label), do: state
 
   @spec report(State.t(), term()) :: State.t()
   defp report(state, :failed) do
@@ -442,6 +653,35 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   end
 
   defp report(state, :restored), do: MingaEditor.schedule_render(state, 16)
+
+  defp report(state, :attachments_reloaded),
+    do:
+      state
+      |> NoticeWorkflow.publish("Saved attachments reloaded. Open Attachments to review them.")
+      |> MingaEditor.schedule_render(16)
+
+  defp report(state, :attachment_removed),
+    do:
+      state
+      |> NoticeWorkflow.publish("Snapshot removed from the draft.")
+      |> MingaEditor.schedule_render(16)
+
+  defp report(state, :attached),
+    do:
+      state
+      |> NoticeWorkflow.publish("Selection snapshot attached.")
+      |> MingaEditor.schedule_render(16)
+
+  defp report(state, :private_attachment),
+    do: NoticeWorkflow.publish(state, "Selections cannot be attached to credential input.")
+
+  defp report(state, :attachment_not_ready),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Attachment not saved. Select a ready Agent composer and try again."
+      )
+
   defp report(state, :unchanged), do: state
 
   @spec tab_bar(State.t()) :: TabBar.t() | nil

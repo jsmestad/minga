@@ -6,8 +6,14 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   alias Minga.Config.Options
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.ProjectView
+  alias MingaAgent.ArtifactStore
+  alias MingaAgent.ArtifactStore.CaptureSpec
+  alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactSupervisor
+  alias MingaAgent.Checklist
   alias MingaAgent.Credentials
+  alias MingaAgent.DraftAttachment
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.OAuth
@@ -811,6 +817,65 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
            end)
   end
 
+  test "a fork before a same-user continuation restores its own checklist through restart",
+       context do
+    requests = :atomics.new(1, [])
+    task = %{"id" => "verify", "description" => "Verify the build"}
+
+    client = fn model, _messages, _options ->
+      chunks =
+        case :atomics.add_get(requests, 1, 1) do
+          1 ->
+            args = %{"expected_revision" => 0, "tasks" => [Map.put(task, "status", "done")]}
+            response_chunks(true, 1, tool_calls: [{"todo_write", args, "branch-initial"}])
+
+          3 ->
+            args = %{"expected_revision" => 1, "tasks" => [Map.put(task, "status", "blocked")]}
+            response_chunks(true, 3, tool_calls: [{"todo_write", args, "branch-later"}])
+
+          count ->
+            response_chunks(false, count, [])
+        end
+
+      stream_response(model, chunks)
+    end
+
+    session = start_session(context, provider_opts: [llm_client: client])
+    assert :ok = Session.send_prompt(session, "Finish the task")
+    await_done(session, "todo_write")
+
+    first_answer =
+      Enum.find_index(Session.messages(session), &match?({:assistant, "finished"}, &1))
+
+    assert :ok = Session.continue(session)
+    await_done(session, "todo_write")
+
+    assert [{:user, "Finish the task"}] =
+             Enum.filter(Session.messages(session), &match?({:user, _}, &1))
+
+    assert {2, [%{id: "verify", status: :blocked}]} =
+             Checklist.snapshot(Session.editor_snapshot(session).checklist)
+
+    assert {:ok, _message} = Session.branch_at(session, first_answer)
+
+    assert {1, [%{id: "verify", status: :done}]} =
+             Checklist.snapshot(Session.editor_snapshot(session).checklist)
+
+    record = Session.session_id(session)
+    assert :ok = stop_supervised!({:session, context.suffix})
+
+    session = start_session(context, tool_call?: false)
+    assert :ok = Session.load_session(session, record)
+
+    assert {1, [%{id: "verify", status: :done}]} =
+             Checklist.snapshot(Session.editor_snapshot(session).checklist)
+
+    assert :ok = Session.switch_branch(session, 0)
+
+    assert {2, [%{id: "verify", status: :blocked}]} =
+             Checklist.snapshot(Session.editor_snapshot(session).checklist)
+  end
+
   test "a rejected model change during provider backoff preserves the scheduled restart",
        context do
     session =
@@ -1043,6 +1108,260 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert first_wire["instructions"] =~ "Selected project instructions for this fixture."
     refute first_wire["instructions"] =~ "notebook_write"
     assert Enum.take(next_wire["input"], length(first_wire["input"])) == first_wire["input"]
+  end
+
+  test "the model reads the checklist after compaction and restart and rejects a stale write",
+       context do
+    items = [
+      %{
+        "id" => "build",
+        "description" => "Build the editor",
+        "status" => "done",
+        "note" => "Build passed"
+      },
+      %{
+        "id" => "verify",
+        "description" => "Verify on hardware",
+        "status" => "blocked",
+        "note" => "Hardware unavailable"
+      }
+    ]
+
+    session =
+      start_session(context,
+        tool_calls: [
+          {"todo_write", %{"expected_revision" => 0, "tasks" => items}, "checklist-first"}
+        ]
+      )
+
+    assert :ok = Session.send_prompt(session, "Save the task state")
+    await_done(session, "todo_write")
+    assert_receive {:transport_request, 2, written, _options}, @timeout
+
+    assert %{"revision" => 1, "durable" => true, "task_count" => 2} =
+             tool_json(written, "checklist-first")
+
+    Enum.each(1..4, fn turn ->
+      assert :ok = Session.send_prompt(session, "Ordinary turn #{turn}")
+      await_idle(session)
+    end)
+
+    assert {:ok, "Context compacted" <> _details} = Session.compact(session)
+
+    record = Session.session_id(session)
+
+    assert :ok = stop_supervised!({:session, context.suffix})
+
+    session =
+      start_session(context,
+        tool_calls: [
+          {"todo_write", %{"expected_revision" => 0, "tasks" => []}, "checklist-stale"},
+          {"todo_read", %{}, "checklist-read"}
+        ]
+      )
+
+    assert :ok = Session.load_session(session, record)
+    assert :ok = Session.send_prompt(session, "Continue the restored task list")
+    await_done(session, "todo_read")
+    assert_receive {:transport_request, 2, restored, _options}, @timeout
+
+    assert %{"revision" => 1, "durable" => true, "tasks" => restored_tasks, "next_offset" => nil} =
+             tool_json(restored, "checklist-read")
+
+    assert Enum.map(restored_tasks, &Map.drop(&1, ["result_ref"])) == items
+
+    assert tool_text(restored, "checklist-stale") =~ "stale_revision"
+
+    assert {:ok, saved} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert {1, [%{id: "build", status: :done}, %{id: "verify", status: :blocked}]} =
+             Checklist.snapshot(saved.checklist)
+  end
+
+  test "the provider reads every maximal checklist row without clipping JSON or losing the result token",
+       context do
+    id = "checklist-max-#{context.suffix}"
+    {:ok, store} = ArtifactStores.ensure_record(id, context.runtime)
+
+    {:ok, spec} =
+      CaptureSpec.new(
+        media_type: "text/plain",
+        mode: :bytes,
+        owner_pid: self(),
+        delivery_key: {:delivery, "checklist-fixture", "retained-result"}
+      )
+
+    assert {:ok, capture} = ArtifactStore.begin(store, spec)
+    assert {:ok, _progress} = ArtifactStore.append(store, capture, "build receipt")
+    assert {:ok, %{reference: %{token: token}}} = ArtifactStore.finish(store, capture, :complete)
+
+    tasks =
+      for i <- 1..100 do
+        %{
+          "id" => "task-#{i}",
+          "description" => String.duplicate("d", 512),
+          "status" => "blocked",
+          "note" => String.duplicate("n", 2048),
+          "result_ref" => if(i == 100, do: token)
+        }
+      end
+
+    owner = self()
+    requests = :atomics.new(1, [])
+
+    client = fn model, messages, _options ->
+      count = :atomics.add_get(requests, 1, 1)
+      call = checklist_page_call(count, messages, tasks, owner)
+
+      chunks =
+        if call,
+          do: response_chunks(true, count, tool_calls: [call]),
+          else: response_chunks(false, count, [])
+
+      stream_response(model, chunks)
+    end
+
+    session =
+      start_session(context, provider_opts: [llm_client: client], session_opts: [session_id: id])
+
+    assert :ok = Session.send_prompt(session, "Read and verify every task")
+    assert_receive {:checklist_write, %{"revision" => 1, "task_count" => 100}}, @timeout
+    assert checklist_pages([]) == tasks
+    assert_receive {:stale_checklist_page, error}, @timeout
+    assert error =~ "stale_revision"
+    await_idle(session)
+  end
+
+  defp checklist_page_call(1, _messages, tasks, _owner),
+    do: {"todo_write", %{"expected_revision" => 0, "tasks" => tasks}, "write-max"}
+
+  defp checklist_page_call(2, messages, _tasks, owner) do
+    send(owner, {:checklist_write, tool_json(messages, "write-max")})
+    {"todo_read", %{}, "page-2"}
+  end
+
+  defp checklist_page_call(count, messages, _tasks, owner) do
+    case List.last(messages).tool_call_id do
+      "stale-page" ->
+        send(owner, {:stale_checklist_page, tool_text(messages, "stale-page")})
+        nil
+
+      "page-" <> _ = id ->
+        %{"revision" => 1, "tasks" => rows, "next_offset" => next} = tool_json(messages, id)
+        send(owner, {:checklist_page, rows, next})
+
+        if is_integer(next),
+          do: {"todo_read", %{"offset" => next, "expected_revision" => 1}, "page-#{count}"},
+          else: {"todo_read", %{"offset" => 1, "expected_revision" => 0}, "stale-page"}
+    end
+  end
+
+  defp checklist_pages(reversed) do
+    assert_receive {:checklist_page, rows, next}, @timeout
+    pages = [rows | reversed]
+    if is_nil(next), do: pages |> Enum.reverse() |> Enum.concat(), else: checklist_pages(pages)
+  end
+
+  test "failed checklist publication never replaces in-memory or durable state", context do
+    args = %{
+      "expected_revision" => 0,
+      "tasks" => [%{"id" => "verify", "description" => "Run checks", "status" => "in_progress"}]
+    }
+
+    session =
+      start_session(context,
+        tool_calls: [{"todo_write", args, "checklist-denied-write"}]
+      )
+
+    backup = Path.join(context.dir, "records-before-checklist-write")
+
+    restore_store = fn ->
+      if File.dir?(backup) do
+        File.rm!(context.store_dir)
+        File.rename!(backup, context.store_dir)
+      end
+    end
+
+    on_exit(restore_store)
+
+    debug = fn
+      :ready,
+      {:in, {:"$gen_call", _worker, {:checklist_invocation, %{name: "todo_write"}}}},
+      _metadata ->
+        File.rename!(context.store_dir, backup)
+        File.write!(context.store_dir, "snapshot storage unavailable")
+        :denied
+
+      phase, _event, _metadata ->
+        phase
+    end
+
+    assert :ok = :sys.install(session, {debug, :ready})
+    assert :ok = Session.send_prompt(session, "Save a task while storage is unavailable")
+
+    assert_receive {:agent_event, ^session,
+                    {:error, "Tool state could not be saved." <> _recovery}},
+                   @timeout
+
+    restore_store.()
+
+    assert Checklist.snapshot(Session.editor_snapshot(session).checklist) == {0, []}
+    refute_received {:agent_event, ^session, {:todo_plan_updated, [_ | _]}}
+    refute_received {:transport_request, 2, _messages, _options}
+
+    record = Session.session_id(session)
+
+    assert {:ok, saved} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert Checklist.snapshot(saved.checklist) == {0, []}
+  end
+
+  defp tool_json(messages, id), do: messages |> tool_text(id) |> JSON.decode!()
+
+  defp tool_text(messages, id) do
+    message = Enum.find(messages, &(&1.role == :tool and &1.tool_call_id == id))
+    Enum.map_join(message.content, "", & &1.text)
+  end
+
+  test "attached send refuses a changed selection set and sends the exact retained snapshot",
+       context do
+    session = start_session(context, tool_call?: false)
+    id = Session.session_id(session)
+    opts = [artifact_runtime: context.runtime]
+
+    draft = %DraftSnapshot{
+      text: "Explain this",
+      cursor: {0, 12},
+      paste_blocks: [],
+      attachments: []
+    }
+
+    text = "αβ\ntrailing spaces  \n"
+    selection = {"example.ex", "example.ex", text}
+
+    assert {:ok, 1, attachment} =
+             SessionStore.attach_selection(id, 0, draft, selection, context.store_dir, opts)
+
+    {token, _digest} = identity = DraftAttachment.identity(attachment)
+    messages_before = Session.messages(session)
+
+    assert {:error, :draft_attachments_changed} =
+             Session.send_attached_prompt(session, id, [{token, "wrong revision"}], draft.text)
+
+    refute_received {:transport_request, _, _, _}
+    assert Session.messages(session) == messages_before
+    assert {:ok, 2} = Session.send_attached_prompt(session, id, [identity], draft.text)
+    assert_receive {:transport_request, 1, messages, _options}, @timeout
+
+    assert [%{type: :text, text: "Explain this"}, %{type: :text, text: snapshot}] =
+             List.last(messages).content
+
+    assert snapshot == "\n\nSelection snapshot: example.ex\n" <> text
+    await_idle(session)
+    assert {:ok, _conversation} = SessionStore.load(id, context.store_dir, opts)
+    assert {:ok, 2, nil} = SessionStore.read_presentation(id, context.store_dir, opts)
   end
 
   test "equal source reloads and OAuth provider restart preserve opaque history and selected skills",

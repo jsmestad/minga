@@ -34,6 +34,7 @@ defmodule MingaEditor.Commands.Agent do
 
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Agent.DraftSave
   alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
@@ -736,7 +737,7 @@ defmodule MingaEditor.Commands.Agent do
   defp resolve_and_deliver_prompt(state, text, model) do
     case resolve_prompt_for_session(state, text, model) do
       {:ok, resolved} ->
-        deliver_prompt(state, resolved)
+        deliver_composer(state, resolved, :steering)
 
       {:error, msg} ->
         NoticeWorkflow.publish(state, msg)
@@ -816,12 +817,89 @@ defmodule MingaEditor.Commands.Agent do
   defp resolve_and_deliver_follow_up(state, text, model) do
     case resolve_prompt_for_session(state, text, model) do
       {:ok, resolved} ->
-        deliver_follow_up(state, resolved)
+        deliver_composer(state, resolved, :follow_up)
 
       {:error, msg} ->
         NoticeWorkflow.publish(state, msg)
     end
   end
+
+  @spec deliver_composer(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :steering | :follow_up
+        ) ::
+          state()
+  defp deliver_composer(state, resolved, kind) do
+    case DraftSave.submission(
+           state.workspace.agent_ui.draft_save,
+           state.frontend.composer_input_offer
+         ) do
+      :ordinary when kind == :steering -> deliver_prompt(state, resolved)
+      :ordinary -> deliver_follow_up(state, resolved)
+      {:error, message} -> NoticeWorkflow.publish(state, message)
+      {:attached, target, shown} -> deliver_attached_composer(state, target, shown, resolved)
+    end
+  end
+
+  @spec deliver_attached_composer(
+          state(),
+          DraftSave.target(),
+          [MingaAgent.DraftAttachment.identity()],
+          String.t() | [ReqLLM.Message.ContentPart.t()]
+        ) :: state()
+  defp deliver_attached_composer(state, {session, record}, shown, content) do
+    if Runtime.active_session(state.shell_runtime) == session do
+      case Session.send_attached_prompt(session, record, shown, content) do
+        {:ok, revision} ->
+          clear_attached_composer(state, revision)
+
+        {:accepted, revision, _reason} ->
+          state
+          |> clear_attached_composer(revision)
+          |> NoticeWorkflow.publish(
+            "Prompt saved in the conversation, but the provider could not start it."
+          )
+
+        {:error, reason} ->
+          NoticeWorkflow.publish(state, attached_submit_error(reason))
+      end
+    else
+      NoticeWorkflow.publish(state, "The Agent conversation changed. The draft was not sent.")
+    end
+  end
+
+  @spec clear_attached_composer(state(), DraftSave.revision()) :: state()
+  defp clear_attached_composer(state, revision) do
+    state
+    |> clear_input_after_submit()
+    |> update_agent_ui(fn %UIState{draft_save: %DraftSave{buffer: buffer} = save} = ui ->
+      UIState.project_draft_save(
+        ui,
+        DraftSave.sent(save, revision, Buffer.inspection_marker(buffer))
+      )
+    end)
+  end
+
+  @spec attached_submit_error(term()) :: String.t()
+  defp attached_submit_error(:attachment_send_busy),
+    do: "Wait for the active turn before sending attachments. The draft was kept."
+
+  defp attached_submit_error(:draft_attachments_changed),
+    do: "The saved attachments changed. Reopen the draft and review them before sending."
+
+  defp attached_submit_error(:draft_attachments_too_large),
+    do: "The attachments exceed this route's prompt limit. Remove context before sending."
+
+  defp attached_submit_error(:attachment_route_unsupported),
+    do: "The selected route cannot send these text attachments. Choose a text model."
+
+  defp attached_submit_error(:provider_not_ready), do: provider_starting_status()
+  defp attached_submit_error(:credentials_pending), do: credentials_pending_status()
+  defp attached_submit_error(:credentials_not_configured), do: credentials_missing_status()
+
+  defp attached_submit_error(_reason),
+    do: "The attached prompt was not submitted. The draft was kept."
 
   @spec prompt_submit_status(state(), Panel.t()) :: prompt_submit_status()
   defp prompt_submit_status(state, panel) do
@@ -2380,6 +2458,23 @@ defmodule MingaEditor.Commands.Agent do
         description: "Read retained Agent messages",
         requires_buffer: false,
         execute: &MingaEditor.UI.Picker.AgentHistorySource.open/1
+      },
+      %Minga.Command{
+        name: :agent_checklist,
+        description: "Inspect Agent checklist",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentChecklistSource.open/1
+      },
+      %Minga.Command{
+        name: :agent_attach_selection,
+        description: "Attach selected text to an Agent draft",
+        execute: &MingaEditor.UI.Picker.SelectionAttachmentTargetSource.open/1
+      },
+      %Minga.Command{
+        name: :agent_draft_attachments,
+        description: "Inspect Agent draft attachments",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentDraftAttachmentSource.open/1
       },
       %Minga.Command{
         name: :agent_pick_thinking,

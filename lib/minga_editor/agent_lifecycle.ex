@@ -9,6 +9,8 @@ defmodule MingaEditor.AgentLifecycle do
   These orchestration workflows start or query session and prompt processes, then install state through its owners.
   """
 
+  alias MingaAgent.Checklist
+  alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.MarkdownHighlight
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
@@ -96,8 +98,16 @@ defmodule MingaEditor.AgentLifecycle do
 
     state
     |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(agent)
-    |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(ui)
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(project_checklist(ui, snapshot))
   end
+
+  @spec project_checklist(UIState.t(), AgentSession.editor_snapshot()) :: UIState.t()
+  defp project_checklist(ui, %{checklist: checklist}) do
+    {_revision, todos} = Checklist.snapshot(checklist)
+    UIState.replace_activity(ui, Activity.set_todos(ui.view.activity, todos))
+  end
+
+  defp project_checklist(ui, _legacy_snapshot), do: ui
 
   @spec safe_editor_snapshot(pid()) :: map() | nil
   defp safe_editor_snapshot(session_pid) do

@@ -309,7 +309,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stamp the latency correlation sequence (ticket #2215) before
 		// encoding so the resulting frame's commit_frame resolves the sample.
 		seq := m.latency.Stamp()
-		if packet, ok := keyPacket(msg, seq); ok {
+		chat, _ := m.agentChat()
+		if packet, ok := keyPacket(msg, seq, chat.DraftAttachmentOffer); ok {
 			m.send(packet)
 		}
 		switch component {

@@ -199,6 +199,8 @@ public struct AgentContextBar: View {
             return "Now: \(todo.description)"
         case 2:
             return "Done: \(todo.description)"
+        case 3:
+            return "Blocked: \(todo.description)"
         default:
             return "Next: \(todo.description)"
         }

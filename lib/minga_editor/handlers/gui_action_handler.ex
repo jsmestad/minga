@@ -129,6 +129,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:agent_prompt_scroll, window_id, generation, delta}),
     do: MingaEditor.Agent.PromptInput.scroll(state, window_id, generation, delta)
 
+  defp dispatch_action(state, {:agent_composer_submit, offer}),
+    do: MingaEditor.Agent.PromptInput.with_offer(state, offer, &AgentCommands.submit_prompt/1)
+
   defp dispatch_action(state, {:file_dialog_result, request_id, result}),
     do: BufferManagement.handle_file_dialog_result(state, request_id, result)
 

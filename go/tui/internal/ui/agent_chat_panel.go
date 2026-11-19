@@ -334,6 +334,12 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 		history := m.zones.Mark(zoneIDAgentHistory, muted.Render("[History]"))
 		help = history + " " + help
 	}
+	prefix := title + muted.Render("  ")
+	const tasksLabel = "[Tasks]"
+	if width >= 50 && lipgloss.Width(prefix+identity+right+help)+len(tasksLabel)+3 <= width {
+		tasks := m.zones.Mark(zoneIDAgentChecklist, muted.Render(tasksLabel))
+		help = tasks + " " + help
+	}
 	helpWidth := lipgloss.Width(help)
 	if width <= helpWidth {
 		return base.Render(help)
@@ -341,7 +347,6 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 	rightBudget := max(width-helpWidth-1, 0)
 	right = fitStyled(right, min(lipgloss.Width(right), rightBudget))
 	leftBudget := max(width-lipgloss.Width(right)-helpWidth-2, 0)
-	prefix := title + muted.Render("  ")
 	identityBudget := max(leftBudget-lipgloss.Width(prefix), 0)
 	identity = lipgloss.NewStyle().Inline(true).MaxWidth(identityBudget).Render(identity)
 	if identityBudget == 0 {

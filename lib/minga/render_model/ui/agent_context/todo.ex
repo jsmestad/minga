@@ -1,7 +1,7 @@
 defmodule Minga.RenderModel.UI.AgentContext.Todo do
   @moduledoc false
 
-  @type status :: :pending | :in_progress | :done
+  @type status :: :pending | :in_progress | :done | :blocked
 
   @type t :: %__MODULE__{
           status: status(),
