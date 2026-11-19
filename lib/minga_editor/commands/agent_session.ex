@@ -411,8 +411,11 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec subscribe_active_session(state(), pid()) :: :ok | {:error, term()}
   defp subscribe_active_session(state, pid) do
     case state.agent_connection.agent_ingest do
-      ingest when is_pid(ingest) -> MingaEditor.Agent.Ingest.subscribe_session(ingest, pid)
-      _ -> Session.subscribe(pid)
+      ingest when is_pid(ingest) ->
+        MingaEditor.Agent.Ingest.subscribe_session(ingest, pid, questions?: true)
+
+      _ ->
+        Session.subscribe(pid, self(), questions?: true)
     end
   end
 
@@ -590,9 +593,10 @@ defmodule MingaEditor.Commands.AgentSession do
        ) do
     case TabBar.find_by_session(tb, session) do
       %Tab{payload: %Agent{remote_session_id: session_id}} when is_binary(session_id) ->
-        case detach_remote_session_by_id(node(session), session_id) do
+        case detach_remote_session_by_id(state, session, session_id) do
           :ok ->
             state
+            |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(session)
             |> clear_restart_session(session)
             |> mark_remote_session_disconnected(session_id)
             |> NoticeWorkflow.publish("Detached remote session #{session_id}")
@@ -614,13 +618,12 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp detach_remote_session(state, _session), do: state
 
-  @spec detach_remote_session_by_id(node(), String.t()) :: :ok | {:error, term()}
-  defp detach_remote_session_by_id(remote_node, session_id),
-    do:
-      Process.get(:minga_editor_remote_detach, &SessionClient.detach/2).(
-        remote_node,
-        session_id
-      )
+  @spec detach_remote_session_by_id(state(), pid(), String.t()) :: :ok | {:error, term()}
+  defp detach_remote_session_by_id(state, session, session_id) do
+    authority = MingaEditor.Agent.QuestionResponse.remote_authority(state, session, self())
+    detach = fn remote_node, id -> SessionClient.detach(remote_node, id, authority) end
+    Process.get(:minga_editor_remote_detach, detach).(node(session), session_id)
+  end
 
   @spec mark_remote_session_disconnected(state(), String.t()) :: state()
   defp mark_remote_session_disconnected(

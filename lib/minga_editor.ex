@@ -1337,6 +1337,16 @@ defmodule MingaEditor do
     route_agent_event(state, session_pid, event)
   end
 
+  def handle_info({:agent_question_attachment, session, receipt}, state)
+      when is_pid(session) and node(session) != node() and is_binary(receipt) and
+             byte_size(receipt) == 32 do
+    {:noreply, MingaEditor.Agent.QuestionResponse.bind_remote_attachment(state, session, receipt)}
+  end
+
+  def handle_info({:agent_question_response_failed, offer, reason}, state) do
+    {:noreply, MingaEditor.Agent.QuestionResponse.failed(state, offer, reason)}
+  end
+
   # Coalesced agent stream batch from MingaEditor.Agent.Ingest (#2289). One
   # batch replaces N per-delta messages: applied once (one bump_message_version,
   # one :sync_agent_transcript, one render) instead of once per delta, so streaming

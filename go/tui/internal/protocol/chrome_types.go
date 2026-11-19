@@ -500,6 +500,8 @@ type AgentChat struct {
 	InputFocused         bool
 	DraftAttachmentCount byte
 	DraftAttachmentOffer uint64
+	QuestionOffer        uint64
+	QuestionPrompt       string
 	Pending              string
 	Completion           []string
 }

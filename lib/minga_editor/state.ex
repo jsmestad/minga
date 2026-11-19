@@ -147,6 +147,22 @@ defmodule MingaEditor.State do
   def accept_file_dialog_transition(%__MODULE__{} = state, %FrontendState{} = frontend),
     do: %{state | frontend: frontend}
 
+  @doc "Records the private receipt for an attached remote question driver."
+  @spec remember_remote_question_receipt(t(), pid(), binary()) :: t()
+  def remember_remote_question_receipt(%__MODULE__{} = state, session, receipt) do
+    connection =
+      AgentConnection.remember_question_receipt(state.agent_connection, session, receipt)
+
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Retires the private receipt when the remote question driver disconnects."
+  @spec retire_remote_question_receipt(t(), pid()) :: t()
+  def retire_remote_question_receipt(%__MODULE__{} = state, session) do
+    connection = AgentConnection.forget_question_receipt(state.agent_connection, session)
+    %{state | agent_connection: connection}
+  end
+
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
   @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
   def accept_extension_event_result(

@@ -132,6 +132,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:agent_composer_submit, offer}),
     do: MingaEditor.Agent.PromptInput.with_offer(state, offer, &AgentCommands.submit_prompt/1)
 
+  defp dispatch_action(state, {:agent_open_question, offer}),
+    do: MingaEditor.UI.Picker.AgentQuestionSource.open(state, offer)
+
   defp dispatch_action(state, {:file_dialog_result, request_id, result}),
     do: BufferManagement.handle_file_dialog_result(state, request_id, result)
 

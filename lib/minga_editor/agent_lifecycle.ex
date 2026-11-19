@@ -65,14 +65,15 @@ defmodule MingaEditor.AgentLifecycle do
     agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
     agent =
-      AgentState.apply_session_snapshot(
-        agent,
+      agent
+      |> AgentState.apply_session_snapshot(
         session_pid,
         Map.get(snapshot, :status, :idle),
         Map.get(snapshot, :pending_approval),
         Map.get(snapshot, :error),
         Map.get(snapshot, :active_tool_name)
       )
+      |> AgentState.project_question(session_pid, Map.get(snapshot, :pending_question))
 
     ui = state.workspace.agent_ui
 

@@ -80,6 +80,77 @@ defmodule MingaAgent.Session.SubscriberLifecycle do
   @spec driver?(t(), pid()) :: boolean()
   def driver?(%__MODULE__{} = lifecycle, pid) when is_pid(pid), do: driver(lifecycle) == pid
 
+  @doc "Enables question presentation for an attached subscriber without changing its role."
+  @spec support_questions(t(), pid()) :: t()
+  def support_questions(%__MODULE__{attachments: attachments} = lifecycle, pid)
+      when is_map_key(attachments, pid) do
+    %{
+      lifecycle
+      | attachments: Map.update!(attachments, pid, &SubscriberAttachment.support_questions/1)
+    }
+  end
+
+  @doc "Binds a private remote proof to the currently monitored attachment."
+  @spec remote_question_access(t(), pid(), binary()) :: {binary() | nil, t()}
+  def remote_question_access(%__MODULE__{attachments: attachments} = lifecycle, pid, candidate)
+      when is_map_key(attachments, pid) and is_binary(candidate) do
+    attachment = Map.fetch!(attachments, pid)
+    {receipt, attached} = SubscriberAttachment.remote_question_access(attachment, candidate)
+    {receipt, %{lifecycle | attachments: Map.put(attachments, pid, attached)}}
+  end
+
+  @doc "Checks current driver ownership and the matching local or private remote authority."
+  @spec question_driver?(t(), pid() | {pid(), binary()}) :: boolean()
+  def question_driver?(%__MODULE__{attachments: attachments}, pid)
+      when is_pid(pid) and node(pid) == node() do
+    match?(
+      %SubscriberAttachment{role: :driver, question_access: :local},
+      Map.get(attachments, pid)
+    )
+  end
+
+  def question_driver?(%__MODULE__{attachments: attachments}, {pid, receipt})
+      when is_pid(pid) and is_binary(receipt) and byte_size(receipt) == 32 do
+    case Map.get(attachments, pid) do
+      %SubscriberAttachment{role: :driver, question_access: {:remote, current}} ->
+        :crypto.hash_equals(current, receipt)
+
+      _other ->
+        false
+    end
+  end
+
+  def question_driver?(%__MODULE__{}, _authority), do: false
+
+  @doc "Authorizes broker detach without letting a shared session token evict a question driver."
+  @spec authorize_broker_detach(t(), pid() | {pid(), binary()}) ::
+          {:ok, pid()} | {:error, :not_driver}
+  def authorize_broker_detach(%__MODULE__{attachments: attachments}, pid) when is_pid(pid) do
+    case Map.get(attachments, pid) do
+      %SubscriberAttachment{role: :driver, question_access: access} when access != :none ->
+        {:error, :not_driver}
+
+      _unprotected ->
+        {:ok, pid}
+    end
+  end
+
+  def authorize_broker_detach(%__MODULE__{} = lifecycle, {pid, _receipt} = authority)
+      when is_pid(pid) do
+    if question_driver?(lifecycle, authority), do: {:ok, pid}, else: {:error, :not_driver}
+  end
+
+  def authorize_broker_detach(%__MODULE__{}, _authority), do: {:error, :not_driver}
+
+  @doc "Returns whether the current driver can resolve a structured question."
+  @spec driver_supports_questions?(t()) :: boolean()
+  def driver_supports_questions?(%__MODULE__{attachments: attachments}) do
+    Enum.any?(attachments, fn
+      {_pid, %SubscriberAttachment{role: :driver, question_access: access}} -> access != :none
+      _attachment -> false
+    end)
+  end
+
   @doc "Returns the installed reclaim timer reference."
   @spec reclaim_timer(t()) :: reference() | nil
   def reclaim_timer(%__MODULE__{reclaim_timer: timer_ref}), do: timer_ref

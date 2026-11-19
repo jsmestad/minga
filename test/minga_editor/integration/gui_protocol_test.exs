@@ -349,7 +349,8 @@ defmodule Minga.Integration.GUIProtocolTest do
             thinking_level: Map.get(d, :thinking_level, ""),
             prompt: Map.get(d, :prompt, ""),
             draft_attachment_count: Map.get(d, :draft_attachment_count, 0),
-            draft_attachment_offer: Map.get(d, :draft_attachment_offer)
+            draft_attachment_offer: Map.get(d, :draft_attachment_offer),
+            pending_question: Map.get(d, :pending_question)
           }
       end
 
@@ -390,6 +391,28 @@ defmodule Minga.Integration.GUIProtocolTest do
                } =
                  round_trip(harness, cmd, "gui_agent_chat")
       end
+    end
+
+    test "Agent chat carries the maximal question without overwriting the draft", %{
+      harness: harness
+    } do
+      draft = %{visible: true, prompt: "Keep this draft"}
+      offer = 90_000_000_001
+      question = String.duplicate("é", 2_048)
+      plain = encode_gui_agent_chat(draft)
+      pending = encode_gui_agent_chat(Map.put(draft, :pending_question, {offer, question}))
+
+      assert byte_size(pending) - byte_size(plain) == 4_109
+
+      assert %{
+               "question_offer" => ^offer,
+               "question_prompt" => ^question,
+               "prompt" => "Keep this draft"
+             } =
+               round_trip(harness, pending, "gui_agent_chat")
+
+      assert %{"question_offer" => 0, "question_prompt" => ""} =
+               round_trip(harness, plain, "gui_agent_chat")
     end
 
     test "gui_theme encodes and decodes correctly", %{harness: harness} do

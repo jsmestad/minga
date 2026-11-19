@@ -119,6 +119,287 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     }
   end
 
+  for {response, outcome} <- [
+        {{:choice, 1}, %{"status" => "answered", "answer" => "Keep existing output"}},
+        {{:text, "Keep café output"}, %{"status" => "answered", "answer" => "Keep café output"}},
+        {:cancel, %{"status" => "cancelled"}}
+      ] do
+    test "a capable driver resolves one exact durable clarification with #{inspect(response)}",
+         context do
+      prompt = "Which behavior should I preserve?"
+      choices = ["Keep output format", "Keep existing output"]
+
+      session =
+        start_session(context,
+          questions?: true,
+          tool_calls: [{"ask_user", %{"prompt" => prompt, "choices" => choices}, "clarify-1"}]
+        )
+
+      assert :ok = Session.send_prompt(session, "Clarify the behavior")
+      assert_receive {:transport_request, 1, _, options}, @timeout
+      assert Enum.any?(options[:tools], &(&1.name == "ask_user"))
+
+      assert_receive {:agent_event, ^session, {:question_requested, target, question}}, @timeout
+      assert %{prompt: ^prompt, choices: ^choices} = question
+      assert {^target, ^question} = Session.pending_question(session)
+      refute_receive {:transport_request, 2, _, _}, 0
+      assert :ok = Session.unsubscribe(session)
+      assert {^target, ^question} = Session.pending_question(session)
+      assert :ok = Session.subscribe(session, self(), role: :viewer, questions?: true)
+
+      assert {:error, :not_driver} =
+               Session.respond_to_question_as(session, self(), target, :cancel)
+
+      assert :ok = Session.claim_driver(session, self())
+
+      assert {:error, :invalid_answer} =
+               Session.respond_to_question_as(session, self(), target, {:choice, 12})
+
+      assert :ok =
+               Session.respond_to_question_as(
+                 session,
+                 self(),
+                 target,
+                 unquote(Macro.escape(response))
+               )
+
+      assert {:error, :question_not_found} =
+               Session.respond_to_question_as(session, self(), target, :cancel)
+
+      assert_receive {:transport_request, 2, messages, _}, @timeout
+      assert [%{tool_call_id: "clarify-1"} = result] = Enum.filter(messages, &(&1.role == :tool))
+
+      assert JSON.decode!(Enum.map_join(result.content, "", & &1.text)) ==
+               unquote(Macro.escape(outcome))
+
+      await_done(session, "ask_user")
+      assert saved_tool_result(context, session, "clarify-1").content == result.content
+      assert Session.list_tool_trust(session) == %{}
+    end
+  end
+
+  test "a session without a capable driver does not advertise clarification", context do
+    session = start_session(context, tool_call?: false)
+    assert :ok = Session.send_prompt(session, "No clarification surface")
+    assert_receive {:transport_request, 1, _, options}, @timeout
+    refute Enum.any?(options[:tools], &(&1.name == "ask_user"))
+    await_idle(session)
+  end
+
+  for initially_capable? <- [true, false] do
+    test "retained native history does not change its tool schema when driver capability was #{initially_capable?}",
+         context do
+      initial = unquote(initially_capable?)
+      session = start_session(context, questions?: initial, tool_call?: false)
+
+      assert :ok = Session.send_prompt(session, "Before capability change")
+      assert_receive {:transport_request, 1, _, before}, @timeout
+      assert Enum.any?(before[:tools], &(&1.name == "ask_user")) == initial
+      await_idle(session)
+
+      assert :ok = Session.unsubscribe(session)
+      assert :ok = Session.subscribe(session, self(), questions?: not initial)
+
+      assert :ok = Session.send_prompt(session, "After capability change")
+      assert_receive {:transport_request, 2, _, current}, @timeout
+      assert Enum.any?(current[:tools], &(&1.name == "ask_user")) == initial
+      await_idle(session)
+    end
+  end
+
+  for answer_queued_first? <- [true, false] do
+    test "a dead clarification worker cannot answer or open the next question, answer queued first: #{answer_queued_first?}",
+         context do
+      session =
+        start_session(context,
+          questions?: true,
+          tool_calls: [
+            {"ask_user", %{"prompt" => "Which output?"}, "first-question"},
+            {"ask_user", %{"prompt" => "Which format?"}, "second-question"}
+          ]
+        )
+
+      assert :ok = Session.send_prompt(session, "Clarify both settings")
+      assert_receive {:agent_event, ^session, {:question_requested, target, _}}, @timeout
+      assert target.tool_call_id == "first-question"
+
+      %{turn_execution: execution} = :sys.get_state(session)
+      %{reply_to: {worker, _}} = Session.TurnExecution.pending_question(execution)
+
+      if unquote(answer_queued_first?) do
+        assert :ok = :sys.suspend(session)
+        reply = make_ref()
+
+        try do
+          send(
+            session,
+            {:"$gen_call", {self(), reply}, {:respond_to_question_as, self(), target, :cancel}}
+          )
+
+          stop_question_worker(worker)
+        after
+          :sys.resume(session)
+        end
+
+        assert_receive {^reply, {:error, :question_not_found}}, @timeout
+      else
+        stop_question_worker(worker)
+      end
+
+      assert_receive {:agent_event, ^session, {:question_interrupted, ^target}}, @timeout
+      assert_receive {:agent_event, ^session, {:error, _message}}, @timeout
+      assert Session.pending_question(session) == nil
+
+      assert {:error, :question_not_found} =
+               Session.respond_to_question_as(session, self(), target, :cancel)
+
+      refute_receive {:agent_event, ^session, {:question_cancelled, ^target}}, 0
+      refute_receive {:agent_event, ^session, {:question_requested, _, _}}, 0
+      refute_receive {:transport_request, 2, _, _}, 0
+    end
+  end
+
+  test "aborting a waiting clarification retires its exact target without answering", context do
+    session =
+      start_session(context,
+        questions?: true,
+        tool_calls: [{"ask_user", %{"prompt" => "Which output?"}, "interrupted-question"}]
+      )
+
+    assert :ok = Session.send_prompt(session, "Clarify first")
+    assert_receive {:agent_event, ^session, {:question_requested, target, _}}, @timeout
+    assert :ok = Session.abort(session)
+    assert_receive {:agent_event, ^session, {:question_interrupted, ^target}}, @timeout
+    assert Session.pending_question(session) == nil
+
+    assert {:error, :question_not_found} =
+             Session.respond_to_question_as(session, self(), target, {:text, "Too late"})
+
+    refute_receive {:transport_request, 2, _, _}, 0
+  end
+
+  test "reopening a waiting clarification makes the interruption explicit without asking again",
+       context do
+    session =
+      start_session(context,
+        questions?: true,
+        tool_calls: [{"ask_user", %{"prompt" => "Which output?"}, "restart-question"}]
+      )
+
+    record = Session.session_id(session)
+    assert :ok = Session.send_prompt(session, "Clarify before restart")
+    assert_receive {:transport_request, 1, _, _}, @timeout
+    assert_receive {:agent_event, ^session, {:question_requested, target, _}}, @timeout
+    assert :ok = stop_supervised!({:session, context.suffix})
+
+    restored = start_session(context, questions?: true, tool_call?: false)
+    assert :ok = Session.load_session(restored, record)
+    assert Session.pending_question(restored) == nil
+
+    assert {:error, :question_not_found} =
+             Session.respond_to_question_as(restored, self(), target, {:text, "Too late"})
+
+    result = saved_tool_result(context, restored, "restart-question")
+    assert Enum.map_join(result.content, "", & &1.text) =~ "Clarification interrupted"
+    refute_receive {:transport_request, _, _, _}, 0
+  end
+
+  test "the broker requires private driver proof and preserves the exact question across detach",
+       context do
+    alias MingaAgent.RemoteAPI
+
+    opts =
+      native_session_options(context,
+        tool_calls: [{"ask_user", %{"prompt" => "Which output?"}, "remote-question"}]
+      )
+
+    assert {:ok, %{session_id: id, pid: session, token: token}} = RemoteAPI.start_session(opts)
+    on_exit(fn -> RemoteAPI.stop_session(id, token) end)
+
+    assert {:ok, %{role: :driver}} =
+             RemoteAPI.attach(id, token, self(), role: :driver, questions?: true)
+
+    assert_receive {:agent_question_attachment, ^session, original_receipt}, @timeout
+
+    assert :ok = RemoteAPI.send_prompt(id, token, self(), "Clarify remotely")
+    assert_receive {:transport_request, 1, _, _}, @timeout
+    assert_receive {:agent_event, ^session, {:question_requested, target, question}}, @timeout
+
+    driver = self()
+
+    viewer =
+      Task.async(fn ->
+        assert {:ok, %{role: :viewer}} =
+                 RemoteAPI.attach(id, token, self(), role: :viewer, questions?: true)
+
+        assert {:error, :not_driver} = RemoteAPI.detach(id, token, driver)
+        assert {:error, :not_driver} = RemoteAPI.detach(id, token, {driver, <<0::256>>})
+
+        assert {:error, :invalid_event_cursor} =
+                 RemoteAPI.attach(id, token, driver, role: :driver, last_seen_event_id: -1)
+
+        assert {:error, :driver_taken} = Session.claim_driver(session, self())
+
+        assert {:error, :not_driver} =
+                 RemoteAPI.respond_to_question(id, token, driver, target, :cancel)
+
+        assert {:error, :not_driver} =
+                 RemoteAPI.respond_to_question(
+                   id,
+                   token,
+                   {driver, :binary.copy(<<0>>, 32)},
+                   target,
+                   :cancel
+                 )
+
+        refute_received {:agent_question_attachment, ^session, _}
+        :ok
+      end)
+
+    assert :ok = Task.await(viewer)
+    assert {:ok, {^target, ^question}} = RemoteAPI.pending_question(id, token)
+
+    assert {:error, :not_driver} =
+             Session.respond_to_question_as(session, driver, target, :cancel)
+
+    assert :driver = Session.subscriber_role(session, driver)
+    assert :ok = RemoteAPI.detach(id, token, {driver, original_receipt})
+    assert {:error, :unauthorized} = RemoteAPI.pending_question(id, "invalid token")
+    assert {:ok, {^target, ^question}} = RemoteAPI.pending_question(id, token)
+
+    assert {:error, :not_driver} =
+             RemoteAPI.respond_to_question(id, token, {driver, original_receipt}, target, :cancel)
+
+    assert {:ok, %{role: :viewer}} = RemoteAPI.attach(id, token, self(), role: :viewer)
+
+    assert {:error, :not_driver} =
+             RemoteAPI.respond_to_question(id, token, {driver, original_receipt}, target, :cancel)
+
+    assert :ok = RemoteAPI.detach(id, token, self())
+
+    assert {:ok, %{role: :driver, snapshot: %{pending_question: {^target, ^question}}}} =
+             RemoteAPI.attach(id, token, self(), role: :driver, questions?: true)
+
+    assert_receive {:agent_question_attachment, ^session, current_receipt}, @timeout
+
+    assert {:error, :not_driver} =
+             RemoteAPI.respond_to_question(id, token, {driver, original_receipt}, target, :cancel)
+
+    assert :ok =
+             RemoteAPI.respond_to_question(id, token, {driver, current_receipt}, target, :cancel)
+
+    assert_receive {:transport_request, 2, messages, _}, @timeout
+
+    assert [%{tool_call_id: "remote-question"} = result] =
+             Enum.filter(messages, &(&1.role == :tool))
+
+    assert JSON.decode!(Enum.map_join(result.content, "", & &1.text)) == %{
+             "status" => "cancelled"
+           }
+
+    await_done(session, "ask_user")
+  end
+
   for model_id <- ["gpt-6.1-sol", "gpt-5.6-luna", "gpt-5.6-terra"] do
     test "#{model_id} preserves its actual wire prefix and opaque reasoning through restart",
          context do
@@ -2488,6 +2769,17 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   end
 
   defp start_session(context, opts \\ []) do
+    session_opts = native_session_options(context, opts)
+    session = start_supervised!({Session, session_opts}, id: {:session, context.suffix})
+
+    assert :ok =
+             Session.subscribe(session, self(), questions?: Keyword.get(opts, :questions?, false))
+
+    assert is_pid(Session.get_provider(session))
+    session
+  end
+
+  defp native_session_options(context, opts) do
     owner = self()
     calls = :atomics.new(1, [])
     model = Keyword.get(opts, :model, "openai:gpt-6.1-sol")
@@ -2550,11 +2842,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
         |> Keyword.merge(Keyword.get(opts, :provider_opts, []))
     ]
 
-    session_opts = Keyword.merge(session_opts, Keyword.get(opts, :session_opts, []))
-    session = start_supervised!({Session, session_opts}, id: {:session, context.suffix})
-    assert :ok = Session.subscribe(session)
-    assert is_pid(Session.get_provider(session))
-    session
+    Keyword.merge(session_opts, Keyword.get(opts, :session_opts, []))
   end
 
   defp response_chunks(true, _count, opts) do
@@ -2612,7 +2900,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert Session.editor_snapshot(session).status == :idle
   end
 
-  defp saved_tool_result(context, session) do
+  defp stop_question_worker(worker) do
+    monitor = Process.monitor(worker)
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, @timeout
+  end
+
+  defp saved_tool_result(context, session, tool_call_id \\ "prefix-call") do
     assert {:ok, saved} =
              SessionStore.load(Session.session_id(session), context.store_dir,
                artifact_runtime: context.runtime
@@ -2620,7 +2914,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     Enum.find(
       saved.continuation.messages,
-      &(&1.role == :tool and &1.tool_call_id == "prefix-call")
+      &(&1.role == :tool and &1.tool_call_id == tool_call_id)
     )
   end
 

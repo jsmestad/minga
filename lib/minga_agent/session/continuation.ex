@@ -1483,6 +1483,18 @@ defmodule MingaAgent.Session.Continuation do
   defp reconciliation_result(%{status: {:completed, %Message{} = message}}, _output),
     do: {message, :completed}
 
+  defp reconciliation_result(%{name: "ask_user", status: :admitted} = call, _output) do
+    message =
+      Context.tool_result_message(
+        call.name,
+        call.tool_call_id,
+        "Clarification interrupted before an answer was saved. No answer was assumed.",
+        %{is_error: true, tool_outcome: :error, minga_effect_status: :indeterminate}
+      )
+
+    {message, :indeterminate}
+  end
+
   defp reconciliation_result(%{status: :admitted} = call, output) do
     metadata =
       %{is_error: true, tool_outcome: :error, minga_effect_status: :indeterminate}

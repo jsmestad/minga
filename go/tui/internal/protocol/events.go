@@ -277,6 +277,13 @@ func EncodeGUIAgentComposerSubmit(offer uint64) []byte {
 	return packet[:]
 }
 
+// EncodeGUIAgentOpenQuestion opens the exact question shown in the committed chat.
+func EncodeGUIAgentOpenQuestion(offer uint64) []byte {
+	packet := [10]byte{generated.OPGuiAction, generated.GUIActionAgentOpenQuestion}
+	binary.BigEndian.PutUint64(packet[2:], offer)
+	return packet[:]
+}
+
 func EncodeGUIAgentToolToggle(messageID uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
 }

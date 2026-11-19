@@ -6,6 +6,7 @@ defmodule Minga.RenderModel.UI.AgentChat.ToolArgSummary do
   """
 
   @spec summarize(String.t(), map()) :: String.t()
+  def summarize("ask_user", _args), do: "Clarification"
   def summarize("shell", %{"command" => cmd}), do: cmd
   def summarize("shell", %{command: cmd}), do: cmd
   def summarize("read_file", %{"path" => path}), do: path

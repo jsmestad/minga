@@ -52,7 +52,7 @@ defmodule MingaEditor.Remote.SessionClient do
   def attach_driver(remote_node, session_id, token, last_seen_event_id, client_pid)
       when is_atom(remote_node) and is_binary(session_id) and is_binary(token) and
              is_integer(last_seen_event_id) and last_seen_event_id >= 0 and is_pid(client_pid) do
-    opts = [role: :driver, last_seen_event_id: last_seen_event_id]
+    opts = [role: :driver, last_seen_event_id: last_seen_event_id, questions?: true]
 
     case erpc(remote_node, :attach, [session_id, token, client_pid, opts], 10_000) do
       {:ok, %AttachResult{role: :driver} = result} -> {:ok, result}
@@ -95,12 +95,32 @@ defmodule MingaEditor.Remote.SessionClient do
     end
   end
 
+  @doc "Resolves the exact remote question as the attached driver."
+  @spec respond_to_question(
+          pid(),
+          MingaAgent.Question.Target.t(),
+          MingaAgent.Question.response(),
+          {pid(), binary()}
+        ) ::
+          :ok | {:error, term()}
+  def respond_to_question(remote_pid, target, response, {driver, receipt} = authority)
+      when is_pid(remote_pid) and is_pid(driver) and is_binary(receipt) do
+    with {:ok, session_id, token} <- credentials_for_pid(remote_pid) do
+      erpc(
+        node(remote_pid),
+        :respond_to_question,
+        [session_id, token, authority, target, response],
+        10_000
+      )
+    end
+  end
+
   @doc "Detaches a client from a remote session by id."
-  @spec detach(remote_node(), session_id(), pid()) :: :ok | {:error, term()}
-  def detach(remote_node, session_id, client_pid \\ self())
-      when is_atom(remote_node) and is_binary(session_id) and is_pid(client_pid) do
+  @spec detach(remote_node(), session_id(), pid() | {pid(), binary()}) :: :ok | {:error, term()}
+  def detach(remote_node, session_id, authority \\ self())
+      when is_atom(remote_node) and is_binary(session_id) do
     with {:ok, token} <- session_token(remote_node, session_id) do
-      erpc(remote_node, :detach, [session_id, token, client_pid], 5_000)
+      erpc(remote_node, :detach, [session_id, token, authority], 5_000)
     end
   end
 

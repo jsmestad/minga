@@ -60,19 +60,27 @@ defmodule MingaAgent.RemoteAPI do
     |> Enum.flat_map(&session_info_if_live/1)
   end
 
-  @doc "Attaches a client process to a session as driver or viewer."
+  @doc "Attaches a client. A capable driver receives its private question receipt directly on the subscriber PID."
   @spec attach(String.t(), String.t(), pid(), keyword()) ::
           {:ok, attach_result()} | {:error, term()}
   def attach(session_id, token, subscriber_pid, opts \\ [])
       when is_binary(session_id) and is_binary(token) and is_pid(subscriber_pid) do
     role = Keyword.get(opts, :role, :viewer)
     last_seen_event_id = Keyword.get(opts, :last_seen_event_id, 0)
+    questions? = Keyword.get(opts, :questions?, false) == true
 
     with :ok <- validate_attach_role(role),
          :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id),
-         :ok <- Session.subscribe(pid, subscriber_pid, role: role) do
-      attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id)
+         {:ok, attachment} <- Session.broker_attach(pid, subscriber_pid, role, questions?) do
+      attach_after_subscribe(
+        pid,
+        session_id,
+        token,
+        subscriber_pid,
+        last_seen_event_id,
+        attachment
+      )
     end
   end
 
@@ -80,13 +88,13 @@ defmodule MingaAgent.RemoteAPI do
   defp validate_attach_role(role) when role in [:driver, :viewer], do: :ok
   defp validate_attach_role(_role), do: {:error, :invalid_role}
 
-  @doc "Detaches a client process from a session without stopping the session."
-  @spec detach(String.t(), String.t(), pid()) :: :ok | {:error, term()}
-  def detach(session_id, token, client_pid)
-      when is_binary(session_id) and is_binary(token) and is_pid(client_pid) do
+  @doc "Detaches a client. A protected driver must provide its current private receipt."
+  @spec detach(String.t(), String.t(), pid() | {pid(), binary()}) :: :ok | {:error, term()}
+  def detach(session_id, token, authority)
+      when is_binary(session_id) and is_binary(token) do
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id) do
-      Session.unsubscribe(pid, client_pid)
+      Session.broker_detach(pid, authority)
     end
   end
 
@@ -178,6 +186,42 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
+  @doc "Reads a clarification after authorizing access to the remote session."
+  @spec pending_question(String.t(), String.t()) ::
+          {:ok, {MingaAgent.Question.Target.t(), MingaAgent.Question.t()} | nil}
+          | {:error, term()}
+  def pending_question(session_id, token) when is_binary(session_id) and is_binary(token) do
+    with :ok <- authorize(session_id, token),
+         {:ok, pid} <- SessionManager.get_session(session_id) do
+      {:ok, Session.pending_question(pid)}
+    end
+  end
+
+  @doc "Answers or cancels the displayed clarification using the private current attachment receipt."
+  @spec respond_to_question(
+          String.t(),
+          String.t(),
+          {pid(), binary()} | pid(),
+          MingaAgent.Question.Target.t(),
+          MingaAgent.Question.response()
+        ) :: :ok | {:error, term()}
+  def respond_to_question(
+        session_id,
+        token,
+        {client, receipt} = authority,
+        %MingaAgent.Question.Target{} = target,
+        response
+      )
+      when is_binary(session_id) and is_binary(token) and is_pid(client) and is_binary(receipt) do
+    with :ok <- authorize(session_id, token),
+         {:ok, pid} <- SessionManager.get_session(session_id) do
+      Session.respond_to_question_as(pid, authority, target, response)
+    end
+  end
+
+  def respond_to_question(_session_id, _token, _without_receipt, _target, _response),
+    do: {:error, :not_driver}
+
   @doc "Stops a session through the broker."
   @spec stop_session(String.t(), String.t()) :: :ok | {:error, term()}
   def stop_session(session_id, token) when is_binary(session_id) and is_binary(token) do
@@ -247,9 +291,22 @@ defmodule MingaAgent.RemoteAPI do
     end
   end
 
-  @spec attach_after_subscribe(pid(), String.t(), String.t(), pid(), non_neg_integer()) ::
-          {:ok, attach_result()} | {:error, term()}
-  defp attach_after_subscribe(pid, session_id, token, subscriber_pid, last_seen_event_id) do
+  @spec attach_after_subscribe(
+          pid(),
+          String.t(),
+          String.t(),
+          pid(),
+          non_neg_integer(),
+          Session.broker_attachment()
+        ) :: {:ok, attach_result()} | {:error, term()}
+  defp attach_after_subscribe(
+         pid,
+         session_id,
+         token,
+         subscriber_pid,
+         last_seen_event_id,
+         attachment
+       ) do
     case event_catchup(session_id, last_seen_event_id) do
       {:ok, events, latest_event_id} ->
         info = session_info(session_id, pid, token)
@@ -262,7 +319,7 @@ defmodule MingaAgent.RemoteAPI do
          )}
 
       {:error, _reason} = error ->
-        Session.unsubscribe(pid, subscriber_pid)
+        Session.rollback_broker_attach(pid, attachment)
         error
     end
   end

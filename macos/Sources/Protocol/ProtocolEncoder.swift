@@ -210,6 +210,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return messageID == 0 || (offer.high == 0 && offer.low == 0) ? .invalidPayload("Retained output requires a tool message identity and displayed offer") : nil
         case .agentComposerSubmit(let offer):
             return offer == 0 ? .invalidPayload("Agent submit requires a displayed composer offer") : nil
+        case .agentOpenQuestion(let offer):
+            return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
         case .agentToolApproval(let sessionId, let requestId, let toolCallId, _):
             guard !sessionId.isEmpty, !requestId.isEmpty, !toolCallId.isEmpty else {
                 return .invalidPayload("Tool approval requires session, request, and tool call identity")
@@ -382,6 +384,12 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             var buf = Data(count: 10)
             buf[0] = OP_GUI_ACTION
             buf[1] = GUI_ACTION_AGENT_COMPOSER_SUBMIT
+            writeU64(&buf, 2, offer)
+            writeFrame(buf)
+        case .agentOpenQuestion(let offer):
+            var buf = Data(count: 10)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_AGENT_OPEN_QUESTION
             writeU64(&buf, 2, offer)
             writeFrame(buf)
         case .executeCommand(let name): encodeExecuteCommand(name: name)

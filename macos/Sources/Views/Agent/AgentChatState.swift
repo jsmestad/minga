@@ -498,6 +498,7 @@ public final class AgentChatState {
     public var promptVisibleRows: UInt8 = 1
     public private(set) var draftAttachmentCount: UInt8 = 0
     public private(set) var draftAttachmentOffer: UInt64 = 0
+    public private(set) var question: AgentQuestionOffer?
     /// Production font pitch projected only at accepted editor-frame publication.
     public private(set) var promptRowPitch: CGFloat = 0
 
@@ -515,6 +516,7 @@ public final class AgentChatState {
     public var promptCompletion: Wire.PromptCompletion?
 
     public var statusLabel: String {
+        if question != nil { return "Waiting for your answer" }
         switch status {
         case .idle: return "idle"
         case .thinking: return "thinking"
@@ -526,7 +528,7 @@ public final class AgentChatState {
         }
     }
 
-    public var isThinking: Bool { status.isWorking }
+    public var isThinking: Bool { question == nil && status.isWorking }
     public var hasActiveTurn: Bool { status.hasActiveTurn }
 
     public var displayModel: String {
@@ -555,7 +557,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -569,6 +571,7 @@ public final class AgentChatState {
         self.promptCompletion = promptCompletion
         self.draftAttachmentCount = draftAttachmentCount
         self.draftAttachmentOffer = draftAttachmentOffer
+        self.question = question
         self.promptVersion += 1
     }
 
@@ -736,6 +739,7 @@ public final class AgentChatState {
         visible = false
         draftAttachmentCount = 0
         draftAttachmentOffer = 0
+        question = nil
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: [],

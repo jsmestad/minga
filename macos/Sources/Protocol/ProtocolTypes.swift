@@ -15,6 +15,17 @@
 
 import Foundation
 
+/// A pending clarification as shown in the committed Agent workspace.
+public struct AgentQuestionOffer: Sendable, Equatable {
+    public let offer: UInt64
+    public let prompt: String
+
+    public init(offer: UInt64, prompt: String) {
+        self.offer = offer
+        self.prompt = prompt
+    }
+}
+
 /// Config setting value encoded in GUI config actions and state pushes.
 public enum SettingValue: Sendable, Equatable {
     case bool(Bool)

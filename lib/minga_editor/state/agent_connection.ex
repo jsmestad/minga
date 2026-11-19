@@ -9,12 +9,15 @@ defmodule MingaEditor.State.AgentConnection do
   @type t :: %__MODULE__{
           agent_ingest: pid() | nil,
           agent_provider_module: module() | nil,
-          agent_provider_opts: keyword()
+          agent_provider_opts: keyword(),
+          question_receipts: %{pid() => binary()}
         }
 
+  @derive {Inspect, except: [:question_receipts]}
   defstruct agent_ingest: nil,
             agent_provider_module: nil,
-            agent_provider_opts: []
+            agent_provider_opts: [],
+            question_receipts: %{}
 
   @doc "Creates agent connection state from startup provider configuration."
   @spec new(module() | nil, keyword()) :: t()
@@ -30,4 +33,16 @@ defmodule MingaEditor.State.AgentConnection do
   def connect_ingest(%__MODULE__{} = connection, ingest)
       when is_pid(ingest) or is_nil(ingest),
       do: %{connection | agent_ingest: ingest}
+
+  @doc "Keeps the private remote driver receipt only in live editor memory."
+  @spec remember_question_receipt(t(), pid(), binary()) :: t()
+  def remember_question_receipt(%__MODULE__{} = connection, session, receipt)
+      when is_pid(session) and is_binary(receipt) and byte_size(receipt) == 32 do
+    %{connection | question_receipts: Map.put(connection.question_receipts, session, receipt)}
+  end
+
+  @doc "Drops a remote driver's local receipt when its session goes away."
+  @spec forget_question_receipt(t(), pid()) :: t()
+  def forget_question_receipt(%__MODULE__{} = connection, session) when is_pid(session),
+    do: %{connection | question_receipts: Map.delete(connection.question_receipts, session)}
 end

@@ -20,6 +20,10 @@ defmodule MingaAgent.EventLog.EventRecord do
           | :approval_requested
           | :approval_resolved
           | :approval_interrupted
+          | :question_requested
+          | :question_answered
+          | :question_cancelled
+          | :question_interrupted
           | :system_message
           | :status_changed
           | :waiting_for_input

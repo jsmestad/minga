@@ -423,5 +423,7 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_agent_read_retained_output, do: 0x6A
   @spec gui_action_agent_composer_submit() :: non_neg_integer()
   def gui_action_agent_composer_submit, do: 0x6B
+  @spec gui_action_agent_open_question() :: non_neg_integer()
+  def gui_action_agent_open_question, do: 0x6C
 
 end

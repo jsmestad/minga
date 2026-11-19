@@ -130,6 +130,7 @@ defmodule MingaAgent.Tools do
       fetch_output(),
       MingaAgent.Tools.Checklist.read_spec(),
       MingaAgent.Tools.Checklist.write_spec(),
+      MingaAgent.Tools.AskUser.spec(),
       write_file(),
       edit_file(),
       delete_file(),

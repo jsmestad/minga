@@ -261,7 +261,7 @@ func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) s
 	if messageCount == 1 {
 		label = "message"
 	}
-	status := fmt.Sprintf(" %d %s · %s", messageCount, label, agentChatStatusLabel(chat.Status))
+	status := fmt.Sprintf(" %d %s · %s", messageCount, label, agentChatStatusLabel(agentPresentationStatus(chat)))
 	if chat.ThinkingLevel != "" {
 		status += " · thinking " + chat.ThinkingLevel
 	}
@@ -321,7 +321,7 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 		title = icon
 	}
 
-	right := m.renderAgentStatusBadge(chat.Status)
+	right := m.renderAgentStatusBadge(agentPresentationStatus(chat))
 	if chat.ThinkingLevel != "" && width >= 56 {
 		right += muted.Render("  ◌ " + chat.ThinkingLevel)
 	}
@@ -387,7 +387,7 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 	lines := []string{m.renderAgentDetailFrame("top", "◇ Session", width)}
 	lines = append(lines, m.renderAgentDetailRow("Provider", nonEmpty(provider, "unknown"), width))
 	lines = append(lines, m.renderAgentDetailRow("Model", nonEmpty(model, "not selected"), width))
-	lines = append(lines, m.renderAgentDetailRow("State", agentChatStatusLabel(chat.Status), width))
+	lines = append(lines, m.renderAgentDetailRow("State", agentChatStatusLabel(agentPresentationStatus(chat)), width))
 	if chat.ThinkingLevel != "" {
 		lines = append(lines, m.renderAgentDetailRow("Thinking", chat.ThinkingLevel, width))
 	}
@@ -524,7 +524,7 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusIterating())
 	case 3: // error
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusErrored())
-	case 4, 5: // planning, awaiting approval
+	case 4, 5, agentStatusQuestionWaiting: // planning, awaiting input
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou())
 	default: // idle
 		style = style.Foreground(p.AgentStatusIdle()).Background(p.SurfaceAlt())
@@ -534,6 +534,15 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 
 func (m Model) agentSpinner() string {
 	return m.agent.spinner()
+}
+
+const agentStatusQuestionWaiting = 6
+
+func agentPresentationStatus(chat protocol.AgentChat) byte {
+	if chat.QuestionOffer != 0 {
+		return agentStatusQuestionWaiting
+	}
+	return chat.Status
 }
 
 func agentChatStatusLabel(status byte) string {
@@ -548,6 +557,8 @@ func agentChatStatusLabel(status byte) string {
 		return "planning"
 	case 5:
 		return "Awaiting approval"
+	case agentStatusQuestionWaiting:
+		return "Waiting for your answer"
 	default:
 		return "idle"
 	}
