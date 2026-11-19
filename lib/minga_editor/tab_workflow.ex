@@ -9,6 +9,7 @@ defmodule MingaEditor.TabWorkflow do
   installs only the atomic immutable tab transition.
   """
 
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.HighlightSync
@@ -39,7 +40,10 @@ defmodule MingaEditor.TabWorkflow do
 
     case switch_target(state, target_id) do
       :unchanged ->
-        state
+        case Runtime.active_tab(state.shell_runtime) do
+          %Tab{id: ^target_id} = target -> ensure_agent_composer(state, target)
+          _tab -> state
+        end
 
       :accepted ->
         candidate = stash_active_workspace_agent_ui(state)
@@ -109,32 +113,54 @@ defmodule MingaEditor.TabWorkflow do
     state
     |> EditorState.restore_tab_context(context)
     |> sync_active_workspace_agent_ui()
+    |> ensure_active_agent_composer()
     |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
   end
 
   @doc "Transfers the active workspace agent presentation and replays pending foreground catch-up events."
   @spec sync_active_workspace_agent_ui(EditorState.t()) :: EditorState.t()
-  def sync_active_workspace_agent_ui(
-        %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state
-      ) do
+  def sync_active_workspace_agent_ui(%EditorState{} = state),
+    do: sync_active_workspace_agent_ui(state, :current)
+
+  @spec sync_active_workspace_agent_ui(EditorState.t(), :current | :incoming) :: EditorState.t()
+  defp sync_active_workspace_agent_ui(
+         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state,
+         source
+       ) do
     case TraditionalState.tab_bar(shell_state) do
-      %TabBar{} = tab_bar -> sync_from_tab_bar(state, tab_bar)
+      %TabBar{} = tab_bar -> sync_from_tab_bar(state, tab_bar, source)
       nil -> state
     end
   end
 
-  def sync_active_workspace_agent_ui(%EditorState{} = state), do: state
+  defp sync_active_workspace_agent_ui(%EditorState{} = state, _source), do: state
 
   @spec finish_switch(EditorState.t(), Tab.t()) :: EditorState.t()
   defp finish_switch(state, target) do
     state
-    |> sync_active_workspace_agent_ui()
+    |> sync_active_workspace_agent_ui(:incoming)
     |> ModalWorkflow.dismiss_if_stale()
     |> TraditionalWorkflow.install_agent_spinner_stop()
     |> rebuild_switched_agent(target)
+    |> ensure_agent_composer(target)
     |> AgentHistorySource.dismiss_if_stale()
     |> maybe_restart_incoming_spinner()
   end
+
+  @spec ensure_active_agent_composer(EditorState.t()) :: EditorState.t()
+  defp ensure_active_agent_composer(state),
+    do: ensure_agent_composer(state, Runtime.active_tab(state.shell_runtime))
+
+  @spec ensure_agent_composer(EditorState.t(), Tab.t() | nil) :: EditorState.t()
+  defp ensure_agent_composer(state, %Tab{kind: :agent}) do
+    if is_pid(Runtime.active_session(state.shell_runtime)) do
+      TraditionalWorkflow.install_agent_ui(state, PromptBuffer.ensure(state.workspace.agent_ui))
+    else
+      state
+    end
+  end
+
+  defp ensure_agent_composer(state, _tab), do: state
 
   @spec switch_target(EditorState.t(), Tab.id()) :: :accepted | :unchanged
   defp switch_target(
@@ -185,8 +211,8 @@ defmodule MingaEditor.TabWorkflow do
     end
   end
 
-  @spec sync_from_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
-  defp sync_from_tab_bar(state, tab_bar) do
+  @spec sync_from_tab_bar(EditorState.t(), TabBar.t(), :current | :incoming) :: EditorState.t()
+  defp sync_from_tab_bar(state, tab_bar, source) do
     case TabBar.active_workspace(tab_bar) do
       %Workspace{id: workspace_id, payload: %WorkspaceAgent{agent_ui: %UIState{} = agent_ui}} ->
         agent_ui = activate_agent_ui(state.workspace, agent_ui)
@@ -202,8 +228,13 @@ defmodule MingaEditor.TabWorkflow do
 
         replay_pending_events(state, tab_bar)
 
-      %Workspace{payload: %WorkspaceAgent{agent_ui: nil}} ->
+      %Workspace{payload: %WorkspaceAgent{agent_ui: nil}} when source == :current ->
         workspace = SessionState.set_agent_ui(state.workspace, state.workspace.agent_ui)
+        replay_pending_events(%{state | workspace: workspace}, tab_bar)
+
+      %Workspace{payload: %WorkspaceAgent{agent_ui: nil}} ->
+        agent_ui = activate_agent_ui(state.workspace, UIState.new())
+        workspace = SessionState.set_agent_ui(state.workspace, agent_ui)
         replay_pending_events(%{state | workspace: workspace}, tab_bar)
 
       _workspace ->

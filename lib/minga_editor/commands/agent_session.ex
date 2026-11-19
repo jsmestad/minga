@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.HighlightSync
   alias MingaEditor.Remote.EventReplay
@@ -141,12 +142,27 @@ defmodule MingaEditor.Commands.AgentSession do
         state
         |> ensure_agent_workspace(pid, project_view)
         |> AgentLifecycle.rebuild_agent_from_session(pid)
+        |> prepare_started_composer()
 
       {:error, reason} ->
         maybe_discard_project_view(project_view, created_project_view?)
         msg = format_session_error(reason)
         Minga.Log.error(:agent, "[Agent] #{msg}")
         MingaEditor.Shell.Traditional.Workflow.install_agent_error(state, msg)
+    end
+  end
+
+  @spec prepare_started_composer(state()) :: state()
+  defp prepare_started_composer(state) do
+    case Runtime.active_tab_kind(state.shell_runtime) do
+      :agent ->
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          PromptBuffer.ensure(state.workspace.agent_ui)
+        )
+
+      _kind ->
+        state
     end
   end
 
@@ -172,11 +188,10 @@ defmodule MingaEditor.Commands.AgentSession do
              is_binary(token) and is_integer(last_seen_event_id) and last_seen_event_id >= 0 do
     case remote_attach(remote_pid, session_id, token, last_seen_event_id) do
       {:ok, messages, snapshot, events, latest_event_id} ->
-        {state, tab_id} = create_remote_agent_tab(state, server_name)
+        {state, tab_id} = insert_remote_agent_tab(state, remote_pid)
 
         state =
           state
-          |> ensure_agent_workspace(remote_pid, nil)
           |> set_remote_workspace(
             server_name,
             session_id,
@@ -184,7 +199,7 @@ defmodule MingaEditor.Commands.AgentSession do
             :connected,
             latest_event_id
           )
-          |> rebuild_agent_from_tab(tab_id)
+          |> MingaEditor.TabWorkflow.switch(tab_id)
           |> AgentLifecycle.cache_messages(messages)
           |> EventReplay.replay_active(remote_pid, events)
           |> apply_remote_snapshot(remote_pid, snapshot)
@@ -455,10 +470,10 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
-  @spec create_remote_agent_tab(state(), String.t()) :: {state(), Tab.id()}
-  defp create_remote_agent_tab(
+  @spec insert_remote_agent_tab(state(), pid()) :: {state(), Tab.id()}
+  defp insert_remote_agent_tab(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         _server_name
+         session
        ) do
     context =
       MingaEditor.State.Tab.Context.new_agent(
@@ -466,8 +481,18 @@ defmodule MingaEditor.Commands.AgentSession do
         state.workspace.file_tree.project_root
       )
 
-    {tb, tab} = TabBar.add(tb, :agent, "Agent")
-    tb = TabBar.update_context(tb, tab.id, context)
+    {tb, tab} = TabBar.insert(tb, :agent, "Agent")
+
+    {tb, workspace} =
+      case TabBar.find_workspace_by_session(tb, session) do
+        %Workspace{} = existing -> {tb, existing}
+        nil -> TabBar.add_workspace(tb, "Agent", session)
+      end
+
+    tb =
+      tb
+      |> TabBar.move_tab_to_workspace(tab.id, workspace.id)
+      |> TabBar.update_context(tab.id, context)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(
@@ -484,7 +509,7 @@ defmodule MingaEditor.Commands.AgentSession do
     {state, tab.id}
   end
 
-  defp create_remote_agent_tab(state, _server_name) do
+  defp insert_remote_agent_tab(state, _session) do
     {state, 0}
   end
 
@@ -544,19 +569,6 @@ defmodule MingaEditor.Commands.AgentSession do
          _latest_event_id
        ),
        do: state
-
-  @spec rebuild_agent_from_tab(state(), Tab.id()) :: state()
-  defp rebuild_agent_from_tab(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         tab_id
-       ) do
-    case TabBar.get(tb, tab_id) do
-      %Tab{} = tab -> MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
-      nil -> state
-    end
-  end
-
-  defp rebuild_agent_from_tab(state, _tab_id), do: state
 
   @spec apply_remote_snapshot(state(), pid(), Session.editor_snapshot()) :: state()
   defp apply_remote_snapshot(
