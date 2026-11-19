@@ -58,6 +58,7 @@ defmodule MingaAgent.Tool.Executor do
               invocation.checkpoint_id,
               invocation.call_id
             )
+            |> Context.bind_session_invocation(session, invocation)
 
           execute_current(spec, invocation.arguments, context)
           |> retain_session_result(context, session, invocation)

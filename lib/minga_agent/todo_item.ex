@@ -1,24 +1,23 @@
 defmodule MingaAgent.TodoItem do
-  @moduledoc """
-  A single todo item in the agent's internal task list.
+  @moduledoc "One stable, inspectable task in an Agent session's checklist."
 
-  The agent uses todos to track progress on multi-step operations.
-  Each item has a unique id, a description, and a status that progresses
-  from `:pending` through `:in_progress` to `:done`.
-  """
-
+  alias MingaAgent.Tool.Output.Reference
   @typedoc "Todo item status."
-  @type status :: :pending | :in_progress | :done
+  @type status :: :pending | :in_progress | :blocked | :done
 
   @typedoc "A todo item."
   @type t :: %__MODULE__{
           id: String.t(),
           description: String.t(),
-          status: status()
+          status: status(),
+          note: String.t() | nil,
+          result_ref: Reference.t() | nil
         }
 
   @enforce_keys [:id, :description]
   defstruct id: nil,
             description: nil,
-            status: :pending
+            status: :pending,
+            note: nil,
+            result_ref: nil
 end

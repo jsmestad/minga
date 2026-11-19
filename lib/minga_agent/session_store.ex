@@ -15,9 +15,11 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStores
+  alias MingaAgent.Checklist
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.ModelSelection
   alias MingaAgent.ArtifactStorage.FaultInjector
+  alias MingaAgent.Session.ChecklistArchive
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Transcript
@@ -70,7 +72,9 @@ defmodule MingaAgent.SessionStore do
           optional(:branches) => [MingaAgent.Branch.t()],
           optional(:message_ids) => [pos_integer()],
           optional(:pinned_ids) => MapSet.t(pos_integer()),
-          optional(:memory) => String.t() | nil
+          optional(:memory) => String.t() | nil,
+          optional(:checklist) => Checklist.t(),
+          optional(:checklist_archive) => ChecklistArchive.t()
         }
 
   @typep deserialized_transcript_session :: %{
@@ -441,7 +445,30 @@ defmodule MingaAgent.SessionStore do
           []
       end)
 
-    transcript_references ++ ContinuationCodec.references(candidate["continuation"])
+    transcript_references ++
+      ContinuationCodec.references(candidate["continuation"]) ++
+      checklist_references(candidate["checklist"]) ++
+      checklist_archive_references(candidate["checklist_archive"])
+  end
+
+  @spec checklist_references(term()) :: [Reference.t()]
+  defp checklist_references(nil), do: []
+
+  defp checklist_references(encoded) do
+    case Checklist.decode(encoded) do
+      {:ok, checklist} -> Checklist.references(checklist)
+      {:error, :invalid_checklist} -> []
+    end
+  end
+
+  @spec checklist_archive_references(term()) :: [Reference.t()]
+  defp checklist_archive_references(nil), do: []
+
+  defp checklist_archive_references(encoded) do
+    case ChecklistArchive.decode(encoded) do
+      {:ok, archive} -> ChecklistArchive.references(archive)
+      {:error, :invalid_checklist_archive} -> []
+    end
   end
 
   @spec canonical_references([Reference.t()]) :: [Reference.t()]
@@ -1406,6 +1433,22 @@ defmodule MingaAgent.SessionStore do
       "memory" => Map.get(data, :memory),
       "continuation" => ContinuationCodec.encode(data.continuation)
     }
+    |> put_checklist(Map.get(data, :checklist))
+    |> put_checklist_archive(Map.get(data, :checklist_archive))
+  end
+
+  @spec put_checklist(map(), Checklist.t() | nil) :: map()
+  defp put_checklist(data, nil), do: data
+  defp put_checklist(data, checklist), do: Map.put(data, "checklist", Checklist.encode(checklist))
+
+  @spec put_checklist_archive(map(), ChecklistArchive.t() | nil) :: map()
+  defp put_checklist_archive(data, nil), do: data
+
+  defp put_checklist_archive(data, archive) do
+    case ChecklistArchive.encode(archive) do
+      nil -> data
+      encoded -> Map.put(data, "checklist_archive", encoded)
+    end
   end
 
   @spec serialize_model_selection(ModelSelection.t() | nil) :: map() | nil
@@ -1484,11 +1527,30 @@ defmodule MingaAgent.SessionStore do
 
     with {:ok, continuation} <- ContinuationCodec.decode(data["continuation"]),
          {:ok, continuation} <-
-           Continuation.restore_tool_outcomes(continuation, data["version"], transcript) do
-      session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation)
-      {:ok, session}
+           Continuation.restore_tool_outcomes(continuation, data["version"], transcript),
+         session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation),
+         {:ok, session} <- restore_checklist(session, data) do
+      restore_checklist_archive(session, data)
     end
   end
+
+  @spec restore_checklist(session_data(), map()) ::
+          {:ok, session_data()} | {:error, :invalid_checklist}
+  defp restore_checklist(session, %{"checklist" => encoded}) do
+    with {:ok, checklist} <- Checklist.decode(encoded),
+         do: {:ok, Map.put(session, :checklist, checklist)}
+  end
+
+  defp restore_checklist(session, _older_record), do: {:ok, session}
+
+  @spec restore_checklist_archive(session_data(), map()) ::
+          {:ok, session_data()} | {:error, :invalid_checklist_archive}
+  defp restore_checklist_archive(session, %{"checklist_archive" => encoded}) do
+    with {:ok, archive} <- ChecklistArchive.decode(encoded),
+         do: {:ok, Map.put(session, :checklist_archive, archive)}
+  end
+
+  defp restore_checklist_archive(session, _older_record), do: {:ok, session}
 
   @spec restore_selection_data(2 | 3 | 4 | 5 | 6, map(), session_data()) ::
           {:ok, session_data()} | {:error, term()}

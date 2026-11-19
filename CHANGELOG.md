@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
+- Agent workspaces have a **Tasks** inspector. The checklist, blockers, and retained results survive restart and follow the selected conversation branch.
 
 ### Changed
 

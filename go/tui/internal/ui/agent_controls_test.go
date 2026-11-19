@@ -368,20 +368,31 @@ func TestNarrowApprovalOnlyOffersFullyVisibleDecisions(t *testing.T) {
 
 func TestAgentHeaderStatusAndThinkingAreNotNamedButtons(t *testing.T) {
 	model, out := newAgentControlModel(t, true)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = updated.(Model)
 	_ = model.View()
 	identity := waitForZone(t, model, zoneIDAgentModel)
+	tasks := waitForZone(t, model, zoneIDAgentChecklist)
 	history := waitForZone(t, model, zoneIDAgentHistory)
-	if identity.EndX+1 >= history.StartX {
-		t.Fatal("fixture must present the static status and thinking area between model and History")
+	if identity.EndX+1 >= tasks.StartX {
+		t.Fatal("fixture must present the static status and thinking area between model and Tasks")
 	}
-	for x := identity.EndX + 1; x < history.StartX; x++ {
+	for x := identity.EndX + 1; x < tasks.StartX; x++ {
 		drainOutboundPackets(out)
 		model = driveAgentControlSGR(t, model, x, identity.StartY, 'M', false)
 		assertNoAgentNamedOperation(t, drainOutboundPackets(out))
 	}
-	drainOutboundPackets(out)
-	driveAgentControlSGR(t, model, history.StartX, history.StartY, 'M', true)
-	assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIExecuteCommand("agent_retained_history"), 1)
+	for _, control := range []struct {
+		x, y    int
+		command string
+	}{
+		{tasks.StartX, tasks.StartY, "agent_checklist"},
+		{history.StartX, history.StartY, "agent_retained_history"},
+	} {
+		drainOutboundPackets(out)
+		model = driveAgentControlSGR(t, model, control.x, control.y, 'M', true)
+		assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIExecuteCommand(control.command), 1)
+	}
 }
 
 func TestApprovalReplacementRetainsTargetOccurrencesAndResourceTotals(t *testing.T) {

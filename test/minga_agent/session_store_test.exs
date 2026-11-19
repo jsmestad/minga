@@ -67,6 +67,37 @@ defmodule MingaAgent.SessionStoreTest do
     }
   end
 
+  test "saves checklist facts without changing the conversation or its unsent draft", %{
+    tmp_dir: dir
+  } do
+    data = sample_data("checklist-with-draft")
+    draft = draft_snapshot("Unsent alongside the checklist")
+
+    tasks = [
+      %{
+        "id" => "review",
+        "description" => "Review",
+        "status" => "blocked",
+        "note" => "Waiting for a decision"
+      }
+    ]
+
+    assert {:ok, checklist} = MingaAgent.Checklist.replace(MingaAgent.Checklist.new(), 0, tasks)
+
+    assert :ok = SessionStore.save(data, dir)
+    assert {:ok, previous} = SessionStore.load(data.id, dir)
+    refute Map.has_key?(previous, :checklist)
+    assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+    assert :ok = SessionStore.save(Map.put(data, :checklist, checklist), dir)
+    assert {:ok, restored} = SessionStore.load(data.id, dir)
+    assert Map.delete(restored, :checklist) == previous
+
+    assert MingaAgent.Checklist.snapshot(restored.checklist) ==
+             MingaAgent.Checklist.snapshot(checklist)
+
+    assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+  end
+
   describe "draft snapshots" do
     test "draft-only records do not impersonate a conversation and survive its first save", %{
       tmp_dir: dir
@@ -247,6 +278,40 @@ defmodule MingaAgent.SessionStoreTest do
 
       assert {:error, :draft_too_large} = SessionStore.save_presentation(id, 1, too_large, dir)
       assert {:ok, 1, ^original} = SessionStore.read_presentation(id, dir)
+    end
+
+    test "checklist-only evidence remains pinned across ordinary draft writes", %{tmp_dir: dir} do
+      id = "checklist-evidence"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {output, delivery} = store_output(store, "check-result", "verified evidence", "text/plain")
+
+      tasks = [
+        %{
+          "id" => "check",
+          "description" => "Record verified evidence",
+          "status" => "done",
+          "result_ref" => output.reference
+        }
+      ]
+
+      assert {:ok, checklist} = MingaAgent.Checklist.replace(MingaAgent.Checklist.new(), 0, tasks)
+      data = Map.put(sample_data(id), :checklist, checklist)
+
+      assert :ok = SessionStore.save(data, dir, opts)
+      assert :ok = ArtifactStore.release(store, delivery)
+
+      assert {:ok, 1} =
+               SessionStore.save_presentation(id, 0, draft_snapshot("Keep editing"), dir, opts)
+
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "verified evidence"}} =
+               ArtifactStore.fetch(store, output.reference, output.selection)
+
+      assert {:ok, %{checklist: restored}} = SessionStore.load(id, dir, opts)
+      assert MingaAgent.Checklist.references(restored) == [output.reference]
     end
 
     test "draft and conversation pins reconcile together after uncertain draft rename", %{

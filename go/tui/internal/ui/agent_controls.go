@@ -77,6 +77,7 @@ func (m Model) agentDisplayedControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		{zoneIDAgentModel, "agent_pick_model"},
 		{zoneIDAgentHeaderHelp, "agent_toggle_help"},
 		{zoneIDAgentHistory, "agent_retained_history"},
+		{zoneIDAgentChecklist, "agent_checklist"},
 	} {
 		if zone := m.zones.Get(control.zone); zone != nil && zone.InBounds(msg) {
 			return protocol.EncodeGUIExecuteCommand(control.command), true

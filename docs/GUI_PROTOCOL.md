@@ -1121,7 +1121,7 @@ Per todo:
 `status`: 0 = idle, 1 = working, 2 = iterating, 3 = needs_you, 4 = done, 5 = errored.
 `can_approve` is currently false. Tool decisions belong to request-bound `approval_tool_call` cards, not the context bar. A pending approval projects `status = needs_you` and names the waiting tool in `active_action`.
 `dispatch_timestamp` is Unix seconds. `review_hint` is currently empty; Review and tool approval have separate controls.
-`todo_count` is the number of visible todo items in the snapshot. The todo list is the editor's live projection of the provider plan, not a separate provider-only state. A hidden context may omit the progress and todo tail after `can_approve`; frontends must treat missing tail fields as empty progress and no todos for legacy compatibility.
+`todo_count` is the number of visible items in the Session-owned checklist snapshot. Each item status is 0 = pending, 1 = in progress, 2 = done, or 3 = blocked. A hidden context may omit the progress and checklist tail after `can_approve`; frontends must treat missing tail fields as empty progress and no checklist items for legacy compatibility.
 
 ### 0x98 — gui_workspaces
 

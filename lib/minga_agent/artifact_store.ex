@@ -70,6 +70,11 @@ defmodule MingaAgent.ArtifactStore do
     GenServer.call(server, {:fetch, reference, range})
   end
 
+  @doc "Resolves a retained token in this session to its canonical immutable reference."
+  @spec reference(server(), String.t()) :: {:ok, Reference.t()} | {:error, error_reason()}
+  def reference(server, token) when is_binary(token),
+    do: GenServer.call(server, {:reference, token})
+
   @doc """
   Returns the retained capture for a canonical delivery key.
 
@@ -149,6 +154,9 @@ defmodule MingaAgent.ArtifactStore do
     {reply, next_state} = State.fetch(state, reference, range)
     {:reply, reply, next_state}
   end
+
+  def handle_call({:reference, token}, _from, state),
+    do: {:reply, State.reference(state, token), state}
 
   def handle_call({:lookup_delivery, delivery_key}, _from, state) do
     {reply, next_state} = State.lookup_delivery(state, delivery_key)

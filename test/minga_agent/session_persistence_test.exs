@@ -4,6 +4,7 @@ defmodule MingaAgent.SessionPersistenceTest do
   alias MingaAgent.ArtifactStore
   alias MingaAgent.ArtifactStore.CaptureSpec
   alias MingaAgent.ArtifactStores
+  alias MingaAgent.Checklist
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.TranscriptEntry
   alias MingaAgent.Session.Continuation
@@ -76,12 +77,36 @@ defmodule MingaAgent.SessionPersistenceTest do
           session_store_dir: dir
         )
 
+      {:ok, checklist} =
+        Checklist.replace(Checklist.new(), 0, [
+          %{"id" => "prior-task", "description" => "Only in the original conversation"}
+        ])
+
+      assert :ok =
+               SessionStore.save(
+                 %{
+                   id: "original-record",
+                   timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+                   model_name: "test-model",
+                   messages: [{:user, "Original task"}],
+                   usage: MingaAgent.TurnUsage.new(),
+                   continuation: Continuation.new(),
+                   checklist: checklist
+                 },
+                 dir
+               )
+
+      assert :ok = Session.load_session(session, "original-record")
+      assert Session.editor_snapshot(session).checklist == checklist
+
       record_id = "unsent-record"
       draft = %DraftSnapshot{text: "not sent", cursor: {0, 8}, paste_blocks: [], attachments: []}
       assert {:ok, 1} = SessionStore.save_presentation(record_id, 0, draft, dir)
       assert :ok = Session.load_session(session, record_id)
       assert Session.session_id(session) == record_id
       assert [] = Session.messages(session)
+      assert Session.editor_snapshot(session).checklist == Checklist.new()
+      assert {:ok, %{checklist: ^checklist}} = SessionStore.load("original-record", dir)
       assert {:ok, 1, ^draft} = request_draft(session, record_id, :read)
       assert {:error, :enoent} = SessionStore.load(record_id, dir)
     end

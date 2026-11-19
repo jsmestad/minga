@@ -13,6 +13,7 @@ const (
 	zoneIDAgentHeaderHelp = "agent:header-help"
 	zoneIDAgentHelpClose  = "agent:help-close"
 	zoneIDAgentHistory    = "agent:history"
+	zoneIDAgentChecklist  = "agent:checklist"
 )
 
 func (m Model) agentHelp() (protocol.AgentHelp, bool) {

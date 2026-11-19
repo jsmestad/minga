@@ -233,6 +233,7 @@ defmodule Minga.Keymap.Scope.Agent do
          {"SPC a q", "Dequeue to editor"},
          {"SPC a f", "Queue follow-up from input"},
          {"SPC a m", "Pick agent model"},
+         {"SPC a k / /tasks", "Inspect the conversation checklist"},
          {"SPC a c", "Copy file to workspace…"},
          {"SPC a o", "Open remote file"},
          {"SPC a T", "Pick thinking level"}

@@ -83,7 +83,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
         },
         todos: [
           %Todo{description: "Inspect files", status: :done},
-          %Todo{description: "Run tests", status: :in_progress}
+          %Todo{description: "Run tests", status: :in_progress},
+          %Todo{description: "Lab offline", status: :blocked}
         ]
       }
 
@@ -94,8 +95,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
       timestamp_unix = DateTime.to_unix(ts)
 
       assert <<1::8, ^task_len::16, "Done", ^timestamp_unix::64, 3::8, 1::8, 5::16, "shell",
-               2::16, 1::16, 33::16, "Review: approve or reject changes", 2::8, 2::8, 13::16,
-               "Inspect files", 1::8, 9::16, "Run tests">> = payload
+               2::16, 1::16, 33::16, "Review: approve or reject changes", 3::8, 2::8, 13::16,
+               "Inspect files", 1::8, 9::16, "Run tests", 3::8, 11::16, "Lab offline">> = payload
     end
 
     test "rejects a todo count that exceeds u8" do

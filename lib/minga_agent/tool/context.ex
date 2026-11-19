@@ -6,6 +6,7 @@ defmodule MingaAgent.Tool.Context do
   """
 
   alias MingaAgent.ToolRouter
+  alias MingaAgent.Tool.Invocation
   alias MingaAgent.ToolRouter.Context, as: RouterContext
 
   @type capture_key :: {:delivery, String.t(), String.t()}
@@ -19,6 +20,7 @@ defmodule MingaAgent.Tool.Context do
           capture_key: capture_key() | nil,
           image_tool_result_delivery: image_tool_result_delivery(),
           session_id: String.t() | nil,
+          session_invocation: {GenServer.server(), Invocation.t()} | nil,
           metadata: map()
         }
 
@@ -30,6 +32,7 @@ defmodule MingaAgent.Tool.Context do
     :capture_key,
     :image_tool_result_delivery,
     :session_id,
+    :session_invocation,
     metadata: %{}
   ]
 
@@ -73,6 +76,12 @@ defmodule MingaAgent.Tool.Context do
       | artifact_store: artifact_store,
         capture_key: {:delivery, checkpoint_id, tool_call_id}
     }
+  end
+
+  @doc "Binds the admitted invocation to the Session that authorized it."
+  @spec bind_session_invocation(t(), GenServer.server(), Invocation.t()) :: t()
+  def bind_session_invocation(%__MODULE__{} = context, session, %Invocation{} = invocation) do
+    %{context | session_invocation: {session, invocation}}
   end
 
   @doc "Returns opts accepted by `MingaAgent.Tools.all/1`."
