@@ -134,7 +134,7 @@ func TestWrappedResidentWheelFillsEOFAndRebasesSameLineEcho(t *testing.T) {
 		t.Fatalf("scrollbar should reach its visual endpoint at EOF: %+v", sb)
 	}
 	assertTextTarget(t, model, model.layout.body.X+6, model.layout.body.Y, 7, 70, 2, 3, 1)
-	if cursor := model.residentCursor(); cursor == nil || cursor.Y != 1 || cursor.X != 8 {
+	if cursor := model.residentCursor(); cursor == nil || cursor.Y != model.layout.grid.Y+1 || cursor.X != 8 {
 		t.Fatalf("resident cursor did not retain its visual rank: %+v", cursor)
 	}
 	windowAtEOF := model.windows[7]
