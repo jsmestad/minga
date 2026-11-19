@@ -265,6 +265,32 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
                _::binary>> = Codec.encode_message_body({:assistant_markdown, [block]})
     end
 
+    test "wide styled text preserves whole Unicode graphemes, order, style and links" do
+      head = :binary.copy("x", 65_534)
+      tail = "👨‍👩‍👧‍👦 after the boundary"
+      run = {head <> tail, 0x123456, 0xFEDCBA, 0x02, "https://example.com"}
+
+      assert <<0x07, 1::16, 2::16, 65_534::16, ^head::binary-size(65_534), 0x123456::24,
+               0xFEDCBA::24, 0x0A, 19::16, "https://example.com", len::16, rest::binary-size(len),
+               0x123456::24, 0xFEDCBA::24, 0x0A, 19::16, "https://example.com">> =
+               Codec.encode_message_body({:styled_assistant, [[run]]})
+
+      assert rest == tail
+    end
+
+    test "one combining sequence wider than a field preserves every valid UTF-8 byte" do
+      grapheme = "a" <> String.duplicate("\u0301", 70_000)
+      suffix = "next grapheme"
+
+      assert <<0x07, 1::16, 4::16, first_size::16, first::binary-size(first_size), 0::56,
+               next_size::16, next::binary-size(next_size), 0::56, rest_size::16,
+               rest::binary-size(rest_size), 0::56, 13::16, ^suffix::binary-size(13), 0::56>> =
+               Codec.encode_message_body({:styled_assistant, [[{grapheme <> suffix, 0, 0, 0}]]})
+
+      assert Enum.all?([first, next, rest], &String.valid?/1)
+      assert first <> next <> rest == grapheme
+    end
+
     test "plain and styled tool messages retain each committed outcome independently of the error flag" do
       for {status, status_byte} <- [
             running: 0,
