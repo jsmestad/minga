@@ -1,5 +1,5 @@
 defmodule MingaEditor.Agent.SelectionAttachment do
-  @moduledoc "Captures the exact selected text before choosing an Agent composer destination."
+  @moduledoc "Captures selected text or the current buffer before choosing an Agent composer destination."
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
@@ -10,8 +10,8 @@ defmodule MingaEditor.Agent.SelectionAttachment do
 
   @max_bytes MingaAgent.DraftAttachment.max_bytes()
 
-  @type source :: {String.t(), String.t()}
-  @type rejection :: :no_selection | :selection_too_large | :source_unavailable
+  @type source :: MingaAgent.DraftAttachment.text_snapshot()
+  @type rejection :: :no_selection | :source_too_large | :source_unavailable | :empty_buffer
 
   @doc "Captures file label and selected bytes from one immutable Buffer document."
   @spec capture(State.t()) :: {:ok, source()} | {:error, rejection()}
@@ -29,13 +29,35 @@ defmodule MingaEditor.Agent.SelectionAttachment do
     document = Buffer.snapshot(buffer)
 
     with {:ok, text} <- text(document, kind, anchor) do
-      {:ok, {Buffer.file_path(buffer) || "Untitled selection", text}}
+      source = Buffer.file_path(buffer) || "Untitled selection"
+      {:ok, {:selection, source, Path.basename(source), text}}
     end
   catch
     :exit, _reason -> {:error, :source_unavailable}
   end
 
   def capture(%State{}), do: {:error, :no_selection}
+
+  @doc "Captures the current editor buffer, including edits not yet saved to disk."
+  @spec capture_buffer(State.t()) :: {:ok, source()} | {:error, rejection()}
+  def capture_buffer(%State{workspace: %{keymap_scope: :editor, buffers: %{active: buffer}}})
+      when is_pid(buffer) do
+    case Buffer.bounded_content_with_path(buffer, @max_bytes) do
+      {:ok, "", _path} ->
+        {:error, :empty_buffer}
+
+      {:ok, text, path} ->
+        source = path || "Untitled buffer"
+        {:ok, {:buffer, source, Path.basename(source), text}}
+
+      {:error, :too_large} ->
+        {:error, :source_too_large}
+    end
+  catch
+    :exit, _reason -> {:error, :source_unavailable}
+  end
+
+  def capture_buffer(%State{}), do: {:error, :source_unavailable}
 
   @spec text(Document.t(), VisualState.selection_type(), Document.position()) ::
           {:ok, String.t()} | {:error, rejection()}
@@ -53,7 +75,7 @@ defmodule MingaEditor.Agent.SelectionAttachment do
 
   defp extract(_document, %Selection{span: %Span{start: first, stop: last}})
        when last - first > @max_bytes,
-       do: {:error, :selection_too_large}
+       do: {:error, :source_too_large}
 
   defp extract(document, selection),
     do: {:ok, :binary.copy(Selection.contents(document, selection))}

@@ -265,16 +265,16 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     end
   end
 
-  @doc "Commits a captured selection only to the explicitly chosen, still-bound composer."
-  @spec attach_selection(
+  @doc "Commits a captured snapshot only to the explicitly chosen, still-bound composer."
+  @spec attach_text(
           State.t(),
           non_neg_integer(),
           DraftSave.target(),
-          {String.t(), String.t()}
+          DraftAttachment.text_snapshot()
         ) ::
           State.t()
-  def attach_selection(state, owner, target, {source, text}) do
-    update_origin(state, owner, &capture_selection(&1, owner, target, source, text))
+  def attach_text(state, owner, target, snapshot) do
+    update_origin(state, owner, &capture_text(&1, owner, target, snapshot))
   end
 
   @doc "Removes only the identified captured revision from the still-bound composer."
@@ -331,40 +331,36 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp commit_attachment_removal(ui, _owner, _target, _identity),
     do: {:attachment_not_ready, ui}
 
-  @spec capture_selection(
+  @spec capture_text(
           UIState.t(),
           non_neg_integer(),
           DraftSave.target(),
-          String.t(),
-          String.t()
+          DraftAttachment.text_snapshot()
         ) ::
           {term(), UIState.t()}
-  defp capture_selection(
+  defp capture_text(
          %UIState{
            draft_save: %DraftSave{target: {session, id} = target, buffer: buffer} = save,
            panel: %{prompt_buffer: buffer}
          } = ui,
          owner,
          target,
-         source,
-         text
+         snapshot
        ) do
     ref = make_ref()
     marker = Buffer.inspection_marker(buffer)
 
     with {:ok, revision, pending} <- DraftSave.begin_attachment(save, ref, marker),
-         {:ok, snapshot} <- PromptBuffer.draft_snapshot(ui, save.attachments) do
-      snapshot =
-        snapshot || %DraftSnapshot{text: "", cursor: {0, 0}, paste_blocks: [], attachments: []}
-
-      selection = {source, Path.basename(source), text}
+         {:ok, draft} <- PromptBuffer.draft_snapshot(ui, save.attachments) do
+      draft =
+        draft || %DraftSnapshot{text: "", cursor: {0, 0}, paste_blocks: [], attachments: []}
 
       :ok =
         Session.request_composer_draft(
           session,
           id,
           {owner, ref},
-          {:attach_selection, revision, snapshot, selection}
+          {:attach_text, revision, draft, snapshot}
         )
 
       {:unchanged, UIState.project_draft_save(ui, pending)}
@@ -376,7 +372,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     :exit, _reason -> {:attachment_not_ready, ui}
   end
 
-  defp capture_selection(ui, _owner, _target, _source, _text),
+  defp capture_text(ui, _owner, _target, _snapshot),
     do: {:attachment_not_ready, ui}
 
   @spec owns_draft_buffer?(Workspace.t(), pid()) :: boolean()
@@ -632,7 +628,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp report_inactive(state, :attached, label) do
     state
-    |> NoticeWorkflow.publish("Selection snapshot attached to #{label}.")
+    |> NoticeWorkflow.publish("Snapshot attached to #{label}.")
     |> MingaEditor.schedule_render(16)
   end
 
@@ -669,11 +665,11 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   defp report(state, :attached),
     do:
       state
-      |> NoticeWorkflow.publish("Selection snapshot attached.")
+      |> NoticeWorkflow.publish("Snapshot attached.")
       |> MingaEditor.schedule_render(16)
 
   defp report(state, :private_attachment),
-    do: NoticeWorkflow.publish(state, "Selections cannot be attached to credential input.")
+    do: NoticeWorkflow.publish(state, "Snapshots cannot be attached to credential input.")
 
   defp report(state, :attachment_not_ready),
     do:

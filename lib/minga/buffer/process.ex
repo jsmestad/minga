@@ -484,6 +484,14 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :content_with_version)
   end
 
+  @doc "Returns the complete text and file path from one buffer state only if the text fits."
+  @spec bounded_content_with_path(GenServer.server(), non_neg_integer()) ::
+          {:ok, String.t(), String.t() | nil} | {:error, :too_large}
+  def bounded_content_with_path(server, max_bytes)
+      when is_integer(max_bytes) and max_bytes >= 0 do
+    GenServer.call(server, {:bounded_content_with_path, max_bytes})
+  end
+
   @doc "Returns a byte-bounded prefix, mutation version, and whether it is the whole buffer."
   @spec content_prefix_with_version(GenServer.server(), non_neg_integer()) ::
           {binary(), non_neg_integer(), boolean()}
@@ -1742,6 +1750,14 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:content_with_version, _from, state) do
     {:reply, {Document.content(state.document), BufState.version(state)}, state}
+  end
+
+  def handle_call({:bounded_content_with_path, max_bytes}, _from, state) do
+    if Document.content_byte_size(state.document) <= max_bytes do
+      {:reply, {:ok, Document.content(state.document), state.file_path}, state}
+    else
+      {:reply, {:error, :too_large}, state}
+    end
   end
 
   def handle_call({:content_prefix_with_version, max_bytes}, _from, state) do

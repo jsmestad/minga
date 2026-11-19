@@ -69,13 +69,15 @@ A failed checkpoint or result save blocks further model execution. Minga preserv
 
 Managed Session restart also waits for the prior provider and every registered effect worker to exit. A new generation cannot overlap an effect from the previous generation. Stopping or exhausting restart attempts keeps the session ID reserved until the Session, provider, and workers are down. The ownership and generation contract is described in [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery).
 
-## Keep a selected excerpt with an unsent draft
+## Keep source snapshots with an unsent draft
 
 Open a local Agent workspace, then select text in a file. In Vim Visual mode, press `A` and choose the destination Agent workspace. On macOS, you can also choose **Attach Selection to Agent Draft** from the editor context menu.
 
+To capture the whole current buffer, including changes you have not saved, press `SPC a b` from the editor or choose **Attach Current Buffer to Agent Draft** in the macOS editor context menu. Choose the destination Agent workspace. The attachment is labeled **Buffer snapshot** and does not read the file from disk. The limit is 32 KiB per snapshot.
+
 In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a j` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
 
-An unsent selection stays with its original local conversation after restart. Sending an attached prompt saves the exact displayed selection with the accepted request and clears the unsent draft. If the selection changed, the route cannot accept it, or an active turn prevents sending, Minga keeps the draft and explains what to do before retrying.
+An unsent snapshot stays with its original local conversation after restart. Sending an attached prompt saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale, the route cannot accept it, or an active turn prevents sending, Minga keeps the draft and explains what to do before retrying.
 
 ## Retained tool output
 

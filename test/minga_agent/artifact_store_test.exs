@@ -20,7 +20,10 @@ defmodule MingaAgent.ArtifactStoreTest do
     text = "selected e\u0301 and 日本語\nwith final newline\n"
 
     assert {:ok, {:selection, source, label, _revision, captured} = attachment, _pin} =
-             DraftAttachment.capture_selection(store, "test.ex", "test.ex selection", text)
+             DraftAttachment.capture_text(
+               store,
+               {:selection, "test.ex", "test.ex selection", text}
+             )
 
     assert {:ok, ^text} = DraftAttachment.read_text(store, attachment)
     assert {:error, :unauthorized} = DraftAttachment.read_text(other, attachment)

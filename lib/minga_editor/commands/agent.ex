@@ -2471,6 +2471,11 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.SelectionAttachmentTargetSource.open/1
       },
       %Minga.Command{
+        name: :agent_attach_buffer,
+        description: "Attach current buffer to an Agent draft",
+        execute: &MingaEditor.UI.Picker.SelectionAttachmentTargetSource.open_buffer/1
+      },
+      %Minga.Command{
         name: :agent_draft_attachments,
         description: "Inspect Agent draft attachments",
         requires_buffer: false,

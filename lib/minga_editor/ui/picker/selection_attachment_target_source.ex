@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias MingaAgent.DraftAttachment
   alias MingaEditor.Agent.{DraftSave, DraftWorkflow, SelectionAttachment, UIState}
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
@@ -14,16 +15,27 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
 
   @doc "Captures the selected bytes before the user starts choosing a destination."
   @spec open(State.t()) :: State.t()
-  def open(state) do
-    case SelectionAttachment.capture(state) do
-      {:ok, source} ->
-        context = %{source: source}
+  def open(state), do: open_snapshot(state, SelectionAttachment.capture(state))
+
+  @doc "Captures the current buffer before the user starts choosing a destination."
+  @spec open_buffer(State.t()) :: State.t()
+  def open_buffer(state), do: open_snapshot(state, SelectionAttachment.capture_buffer(state))
+
+  @spec open_snapshot(
+          State.t(),
+          {:ok, SelectionAttachment.source()} | {:error, SelectionAttachment.rejection()}
+        ) ::
+          State.t()
+  defp open_snapshot(state, captured) do
+    case captured do
+      {:ok, snapshot} ->
+        context = %{source: snapshot}
 
         case candidates(Context.from_editor_state(state, context)) do
           [] ->
             NoticeWorkflow.publish(
               state,
-              "Open a local Agent composer before attaching a selection."
+              "Open a local Agent composer before attaching a snapshot."
             )
 
           [_ | _] ->
@@ -33,23 +45,26 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
       {:error, :no_selection} ->
         NoticeWorkflow.publish(state, "Select text before attaching it.")
 
-      {:error, :selection_too_large} ->
-        NoticeWorkflow.publish(state, "Select at most 32 KiB of text to attach.")
+      {:error, :source_too_large} ->
+        NoticeWorkflow.publish(state, "Attach at most 32 KiB of text.")
+
+      {:error, :empty_buffer} ->
+        NoticeWorkflow.publish(state, "The current buffer is empty.")
 
       {:error, :source_unavailable} ->
-        NoticeWorkflow.publish(state, "The selected text is no longer available.")
+        NoticeWorkflow.publish(state, "The attachment source is no longer available.")
     end
   end
 
   @impl true
   @spec title() :: String.t()
-  def title, do: "Attach selection snapshot to Agent"
+  def title, do: "Attach snapshot to Agent"
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{
         tab_bar: %TabBar{workspaces: workspaces},
-        picker_ui: %{context: %{source: source}}
+        picker_ui: %{context: %{source: {kind, _, _, _} = source}}
       }) do
     for %Workspace{
           id: id,
@@ -61,7 +76,7 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
       %Item{
         id: {id, target},
         label: label,
-        description: "Selection snapshot",
+        description: DraftAttachment.snapshot_label(kind),
         meta: %{source: source}
       }
     end
@@ -72,7 +87,7 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
   @impl true
   @spec on_select(Item.t(), State.t()) :: State.t()
   def on_select(%Item{id: {owner, target}, meta: %{source: source}}, state),
-    do: DraftWorkflow.attach_selection(state, owner, target, source)
+    do: DraftWorkflow.attach_text(state, owner, target, source)
 
   def on_select(_item, state), do: state
 end

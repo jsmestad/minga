@@ -1325,7 +1325,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     Enum.map_join(message.content, "", & &1.text)
   end
 
-  test "attached send refuses a changed selection set and sends the exact retained snapshot",
+  test "attached send rejects stale revisions and preserves distinct buffer and selection snapshots",
        context do
     session = start_session(context, tool_call?: false)
     id = Session.session_id(session)
@@ -1339,29 +1339,56 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     }
 
     text = "αβ\ntrailing spaces  \n"
-    selection = {"example.ex", "example.ex", text}
+    selection = {:selection, "example.ex", "example.ex", text}
 
     assert {:ok, 1, attachment} =
-             SessionStore.attach_selection(id, 0, draft, selection, context.store_dir, opts)
+             SessionStore.attach_text(id, 0, draft, selection, context.store_dir, opts)
 
     {token, _digest} = identity = DraftAttachment.identity(attachment)
+    unsaved_text = "Unsaved edit\n" <> text
+    buffer = {:buffer, "example.ex", "example.ex", unsaved_text}
+
+    assert {:ok, 2, whole_buffer} =
+             SessionStore.attach_text(
+               id,
+               1,
+               %{draft | attachments: [attachment]},
+               buffer,
+               context.store_dir,
+               opts
+             )
+
+    buffer_identity = DraftAttachment.identity(whole_buffer)
     messages_before = Session.messages(session)
 
     assert {:error, :draft_attachments_changed} =
-             Session.send_attached_prompt(session, id, [{token, "wrong revision"}], draft.text)
+             Session.send_attached_prompt(
+               session,
+               id,
+               [buffer_identity, {token, "wrong revision"}],
+               draft.text
+             )
 
     refute_received {:transport_request, _, _, _}
     assert Session.messages(session) == messages_before
-    assert {:ok, 2} = Session.send_attached_prompt(session, id, [identity], draft.text)
+
+    assert {:ok, 3} =
+             Session.send_attached_prompt(session, id, [buffer_identity, identity], draft.text)
+
     assert_receive {:transport_request, 1, messages, _options}, @timeout
 
-    assert [%{type: :text, text: "Explain this"}, %{type: :text, text: snapshot}] =
+    assert [
+             %{type: :text, text: "Explain this"},
+             %{type: :text, text: buffer_snapshot},
+             %{type: :text, text: selection_snapshot}
+           ] =
              List.last(messages).content
 
-    assert snapshot == "\n\nSelection snapshot: example.ex\n" <> text
+    assert buffer_snapshot == "\n\nBuffer snapshot: example.ex\n" <> unsaved_text
+    assert selection_snapshot == "\n\nSelection snapshot: example.ex\n" <> text
     await_idle(session)
     assert {:ok, _conversation} = SessionStore.load(id, context.store_dir, opts)
-    assert {:ok, 2, nil} = SessionStore.read_presentation(id, context.store_dir, opts)
+    assert {:ok, 3, nil} = SessionStore.read_presentation(id, context.store_dir, opts)
   end
 
   test "equal source reloads and OAuth provider restart preserve opaque history and selected skills",

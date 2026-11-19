@@ -349,8 +349,8 @@ defmodule MingaAgent.Session do
           :read
           | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
           | {:remove_attachment, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
-          | {:attach_selection, SessionStore.draft_revision(), DraftSnapshot.t(),
-             {String.t(), String.t(), String.t()}}
+          | {:attach_text, SessionStore.draft_revision(), DraftSnapshot.t(),
+             DraftAttachment.text_snapshot()}
 
   @type composer_draft_correlation :: reference() | {non_neg_integer(), reference()}
 
@@ -7541,12 +7541,12 @@ defmodule MingaAgent.Session do
     )
   end
 
-  defp composer_draft(state, record_id, {:attach_selection, expected, draft, selection}) do
-    SessionStore.attach_selection(
+  defp composer_draft(state, record_id, {:attach_text, expected, draft, snapshot}) do
+    SessionStore.attach_text(
       record_id,
       expected,
       draft,
-      selection,
+      snapshot,
       state.session_store_dir,
       artifact_store_opts(state)
     )
