@@ -1387,23 +1387,27 @@ struct AgentChatViewTests {
         return state
     }
 
-    @Test("Truncated transcript shows older messages omitted indicator")
-    @MainActor func truncatedTranscriptIndicator() throws {
+    @Test("Truncated transcript offers to browse retained messages")
+    @MainActor func truncatedTranscriptOpensHistory() throws {
         let state = chatState()
         state.applyTranscript(mode: 0, epoch: 1, truncated: true, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "Hello"))])
+        let spy = SpyEncoder()
 
-        let body = try AgentChatView(state: state, isInsertMode: false, sendAction: nil)
+        let body = try AgentChatView(state: state, isInsertMode: false, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
             .environment(\.themeColors, ThemeColors())
             .inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        let labels = body.findAll(ViewType.Text.self).compactMap { try? $0.accessibilityLabel().string() }
+        let buttons = try body.findAll(ViewType.Button.self)
+        let history = try #require(buttons.first(where: {
+            (try? $0.labelView().text().string()) == "Browse earlier messages"
+        }))
 
-        #expect(strings.contains("Older messages omitted"))
+        try history.tap()
+        #expect(spy.actions.contains(.executeCommand(name: "agent_retained_history")))
         #expect(strings.contains("Hello"))
-        #expect(labels.contains("Older messages omitted"))
     }
 
-    @Test("Non-truncated transcript hides older messages omitted indicator")
+    @Test("Complete transcript hides the browse earlier messages action")
     @MainActor func nonTruncatedTranscriptIndicatorHidden() throws {
         let state = chatState()
         state.applyTranscript(mode: 0, epoch: 1, truncated: false, baseCount: 0, messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "Hello"))])
@@ -1413,7 +1417,7 @@ struct AgentChatViewTests {
             .inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        #expect(!strings.contains("Older messages omitted"))
+        #expect(!strings.contains("Browse earlier messages"))
         #expect(strings.contains("Hello"))
     }
 
