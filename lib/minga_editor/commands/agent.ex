@@ -364,34 +364,30 @@ defmodule MingaEditor.Commands.Agent do
             state.workspace.file_tree.project_root
           )
 
-        # Create agent tab in the background (don't switch to it).
-        # Group creation happens later in start_agent_session when the session pid is available.
         tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "File"))
         original_active_id = tab_bar.active_id
         {tb, new_tab} = TabBar.add(tab_bar, :agent, "Agent")
-        tb = TabBar.update_context(tb, new_tab.id, context)
 
-        # Switch back to the original active tab
-        tb = TabBar.switch_to(tb, original_active_id)
+        tb =
+          tb
+          |> TabBar.update_context(new_tab.id, context)
+          |> TabBar.switch_to(original_active_id)
 
-        shell_state =
-          MingaEditor.Shell.Traditional.State.install_tab_bar(
-            MingaEditor.Shell.Runtime.state(state.shell_runtime),
-            tb
-          )
+        install_owned_agent_tab(state, tb, new_tab.id)
 
-        %{
-          state
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(
-                state.shell_runtime,
-                shell_state
-              )
-        }
+      %Tab{id: id, group_id: 0} ->
+        install_owned_agent_tab(state, state.shell_runtime.state.tab_bar, id)
 
       _existing ->
         state
     end
+  end
+
+  @spec install_owned_agent_tab(state(), TabBar.t(), Tab.id()) :: state()
+  defp install_owned_agent_tab(state, tab_bar, tab_id) do
+    {tabs, workspace} = TabBar.add_workspace(tab_bar, "Agent")
+    tabs = TabBar.move_tab_to_workspace(tabs, tab_id, workspace.id)
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tabs)
   end
 
   @doc """
@@ -443,10 +439,11 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec activate_agent_view(state(), UIState.View.return_target()) :: state()
   defp activate_agent_view(state, return_target) do
-    update_agent_ui(
-      state,
-      &UIState.activate(&1, return_target.windows, return_target.file_tree, return_target)
-    )
+    update_agent_ui(state, fn ui ->
+      ui
+      |> UIState.activate(return_target.windows, return_target.file_tree, return_target)
+      |> PromptBuffer.ensure()
+    end)
   end
 
   @doc "Reveals an already resolved Agent tab without toggling it or starting a session."
@@ -457,7 +454,7 @@ defmodule MingaEditor.Commands.Agent do
 
     case {TabBar.get(tab_bar, agent_tab_id), Runtime.active_tab(state.shell_runtime)} do
       {%Tab{kind: :agent}, %Tab{id: ^agent_tab_id}} ->
-        state
+        MingaEditor.TabWorkflow.switch(state, agent_tab_id)
 
       {%Tab{kind: :agent}, _current} ->
         return_target = build_return_target(state)
@@ -1182,22 +1179,22 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec new_agent_session(state()) :: state()
   def new_agent_session(state) do
+    thinking_level = state.workspace.agent_ui.panel.thinking_level
+
     state
     |> create_active_agent_tab()
-    |> reset_agent_state_for_new_session()
+    |> reset_agent_state_for_new_session(thinking_level)
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
     |> scope_focus_input()
   end
 
-  @spec reset_agent_state_for_new_session(state()) :: state()
-  defp reset_agent_state_for_new_session(state) do
-    old_panel = state.workspace.agent_ui.panel
-
+  @spec reset_agent_state_for_new_session(state(), String.t() | nil) :: state()
+  defp reset_agent_state_for_new_session(state, thinking_level) do
     state = TraditionalWorkflow.install_agent_state(state, %AgentState{})
 
     agent_ui =
       UIState.new()
-      |> UIState.set_thinking_level(old_panel.thinking_level)
+      |> UIState.set_thinking_level(thinking_level)
       |> UIState.toggle()
       |> UIState.activate(state.workspace.windows, state.workspace.file_tree)
 

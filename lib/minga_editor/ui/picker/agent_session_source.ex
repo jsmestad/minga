@@ -14,6 +14,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.TabBar
@@ -44,9 +45,19 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: {_id, {:tab, tab_id}}}, state) do
-    MingaEditor.TabWorkflow.switch(state, tab_id)
+  def on_select(
+        %Item{id: {id, {:tab, tab_id, session}}},
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
+      ) do
+    with %Tab{kind: :agent, payload: %TabAgent{session: ^session}} <- TabBar.get(tab_bar, tab_id),
+         true <- current_tab_session?(id, tab_id, session) do
+      MingaEditor.TabWorkflow.switch(state, tab_id)
+    else
+      _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
+    end
   end
+
+  def on_select(%Item{id: {_id, {:tab, _tab_id, _session}}}, state), do: state
 
   def on_select(%Item{id: {_id, {:remote, server_name, session_id, remote_pid, token}}}, state) do
     Agent.connect_remote_session(state, server_name, session_id, remote_pid, token)
@@ -99,6 +110,17 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
+  @spec current_tab_session?(String.t() | Tab.id(), Tab.id(), pid() | nil) :: boolean()
+  defp current_tab_session?(tab_id, tab_id, nil), do: true
+
+  defp current_tab_session?(id, _tab_id, pid) when is_binary(id) and is_pid(pid) do
+    Session.session_id(pid) == id
+  catch
+    :exit, _reason -> false
+  end
+
+  defp current_tab_session?(_id, _tab_id, _session), do: false
+
   @spec legacy_import_failure_message(term()) :: String.t()
   defp legacy_import_failure_message({:legacy_import_persistence_failed, _reason}),
     do: "Could not save the imported history. The original legacy record remains unchanged."
@@ -122,7 +144,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     case session_metadata(session) do
       {:ok, meta} ->
         %Item{
-          id: {meta.id, {:tab, tab.id}},
+          id: {meta.id, {:tab, tab.id, session}},
           label: format_label(meta, is_active),
           description: format_desc(meta),
           search_text: meta.first_prompt || ""
@@ -130,7 +152,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
       :error ->
         label = if is_active, do: "\u{2022} #{tab.label}", else: tab.label
-        %Item{id: {tab.id, {:tab, tab.id}}, label: label, description: "No session"}
+        description = if is_nil(session), do: "No session", else: "Session identity unavailable"
+        %Item{id: {tab.id, {:tab, tab.id, session}}, label: label, description: description}
     end
   end
 
