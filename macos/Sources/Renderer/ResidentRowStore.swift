@@ -360,7 +360,7 @@ public struct ResidentSemanticStore: Sendable {
         -> ResidentSemanticStore
     {
         guard update.version == 1, update.mode == 0 || update.mode == 1,
-            content.rowStore.mode == .sequential, update.contentEpoch == content.contentEpoch,
+            content.rowStore.mode.isResident, update.contentEpoch == content.contentEpoch,
             update.rowCount <= Self.maximumRows, Int(update.rowCount) == content.rowStore.count,
             update.revision > 0
         else { throw ResidentSemanticStoreError.invalid }
@@ -926,6 +926,8 @@ public enum ResidentRowStoreError: Error, Sendable, Equatable {
     case contentHashMismatch(rowID: UInt64, expected: UInt32, actual: UInt32)
     /// The exact resulting resident weight exceeds policy or overflows.
     case resourcePolicy
+    /// Wrapped residence admits only source starts and soft-wrap continuations.
+    case unsupportedWrappedRowKind(GUIVisualRowType)
 }
 
 /// One resolved immutable-base splice for atomic store application.
@@ -964,6 +966,11 @@ public enum ResidentRowStoreMode: Sendable, Equatable {
     case windowed
     /// The store is a complete unwrapped document, so row rank is the current buffer line.
     case sequential
+    /// The complete document has one normal row per source line, then its continuations.
+    case sequentialWrapped
+
+    /// Whether row and semantic deltas address the complete document by visual rank.
+    public var isResident: Bool { self != .windowed }
 }
 
 public struct ResidentRowStore: Sendable {
@@ -977,6 +984,7 @@ public struct ResidentRowStore: Sendable {
         let rows: [GUIVisualRow]
         let minBufferLine: UInt32
         let maxBufferLine: UInt32
+        let normalStartCount: Int
         let resourceWeight: FrameResourceWeight
 
         init(id: UInt64, rows: [GUIVisualRow]) {
@@ -984,9 +992,14 @@ public struct ResidentRowStore: Sendable {
             self.rows = rows
             minBufferLine = rows.first?.bufLine ?? 0
             maxBufferLine = rows.last?.bufLine ?? 0
-            resourceWeight = rows.reduce(into: FrameResourceWeight()) { weight, row in
+            var weight = FrameResourceWeight()
+            var starts = 0
+            for row in rows {
                 weight = weight.addingPrevalidated(ResidentRowStore.weight(of: row))
+                if row.rowType == .normal { starts += 1 }
             }
+            resourceWeight = weight
+            normalStartCount = starts
         }
     }
 
@@ -997,6 +1010,7 @@ public struct ResidentRowStore: Sendable {
         let right: Node?
         let rowCount: Int
         let chunkCount: Int
+        let normalStartCount: Int
         let minBufferLine: UInt32
         let maxBufferLine: UInt32
         let resourceWeight: FrameResourceWeight
@@ -1008,6 +1022,7 @@ public struct ResidentRowStore: Sendable {
             self.right = right
             rowCount = (left?.rowCount ?? 0) + chunk.rows.count + (right?.rowCount ?? 0)
             chunkCount = (left?.chunkCount ?? 0) + 1 + (right?.chunkCount ?? 0)
+            normalStartCount = (left?.normalStartCount ?? 0) + chunk.normalStartCount + (right?.normalStartCount ?? 0)
             minBufferLine = left?.minBufferLine ?? chunk.minBufferLine
             maxBufferLine = right?.maxBufferLine ?? chunk.maxBufferLine
             resourceWeight = (left?.resourceWeight ?? FrameResourceWeight())
@@ -1155,7 +1170,7 @@ public struct ResidentRowStore: Sendable {
         limit: FrameResourceWeight? = nil
     ) throws {
         do {
-            try Self.validateRows(rows, validatesBufferLineOrder: mode == .windowed)
+            try Self.validateRows(rows, mode: mode)
             try Self.validate(resourceWeight, limit: limit)
         } catch let error as ResidentRowStoreError {
             throw error
@@ -1174,6 +1189,8 @@ public struct ResidentRowStore: Sendable {
 
     /// Number of resident visual rows.
     public var count: Int { storage.root?.rowCount ?? 0 }
+    /// Number of normal source starts, cached across persistent subtree edits.
+    public var normalStartCount: Int { storage.root?.normalStartCount ?? 0 }
     /// Whether the store contains no rows.
     public var isEmpty: Bool { count == 0 }
     /// Number of sequence leaf chunks.
@@ -1194,7 +1211,7 @@ public struct ResidentRowStore: Sendable {
     public mutating func replaceAll(
         with rows: [GUIVisualRow], limit: FrameResourceWeight? = nil
     ) throws {
-        try Self.validateRows(rows, validatesBufferLineOrder: mode == .windowed)
+        try Self.validateRows(rows, mode: mode)
         let resultingWeight = try Self.weight(of: rows)
         try Self.validate(resultingWeight, limit: limit)
         ensureUniqueStorage()
@@ -1209,25 +1226,46 @@ public struct ResidentRowStore: Sendable {
         storage.counters.fullResets += 1
     }
 
-    /// Returns a row by visual index in O(log chunks).
+    /// Returns a projected row by visual index, inspecting at most one chunk.
     public func row(at index: Int) -> GUIVisualRow? {
-        guard let row = rawRow(at: index) else { return nil }
-        return projected(row, at: index)
+        guard let location = locateRow(at: index, countSourceStarts: mode == .sequentialWrapped) else { return nil }
+        let row = location.chunk.rows[location.offset]
+        switch mode {
+        case .windowed:
+            return row
+        case .sequential:
+            return Self.projected(row, bufferLine: index)
+        case .sequentialWrapped:
+            var starts = location.startsBeforeChunk
+            for row in location.chunk.rows[...location.offset] where row.rowType == .normal { starts += 1 }
+            guard starts > 0 else { return nil }
+            return Self.projected(row, bufferLine: starts - 1)
+        }
     }
 
-    /// Returns stored row metadata without applying the sequential rank projection.
+    /// Returns the immutable wire row for identity checks, without source projection.
     private func rawRow(at index: Int) -> GUIVisualRow? {
+        guard let location = locateRow(at: index) else { return nil }
+        return location.chunk.rows[location.offset]
+    }
+
+    private func locateRow(at index: Int, countSourceStarts: Bool = false)
+        -> (chunk: Chunk, offset: Int, startsBeforeChunk: Int)?
+    {
         guard index >= 0, index < count else { return nil }
         var node = storage.root
         var remaining = index
+        var startsBeforeChunk = 0
         while let current = node {
             let leftCount = current.left?.rowCount ?? 0
             if remaining < leftCount {
                 node = current.left
-            } else if remaining < leftCount + current.chunk.rows.count {
-                return current.chunk.rows[remaining - leftCount]
             } else {
-                remaining -= leftCount + current.chunk.rows.count
+                if countSourceStarts { startsBeforeChunk += current.left?.normalStartCount ?? 0 }
+                let offset = remaining - leftCount
+                if offset < current.chunk.rows.count { return (current.chunk, offset, startsBeforeChunk) }
+                if countSourceStarts { startsBeforeChunk += current.chunk.normalStartCount }
+                remaining = offset - current.chunk.rows.count
                 node = current.right
             }
         }
@@ -1289,8 +1327,38 @@ public struct ResidentRowStore: Sendable {
     public func lowerBound(bufferLine: UInt32) -> Int {
         if mode == .sequential {
             return min(Int(bufferLine), count)
+        } else if mode == .sequentialWrapped {
+            return visualRank(ofSourceLine: Int(bufferLine)) ?? count
         }
         return Self.lowerBound(node: storage.root, bufferLine: bufferLine, base: 0) ?? count
+    }
+
+    /// Selects the zero-based normal start in a wrapped document by source line.
+    private func visualRank(ofSourceLine line: Int) -> Int? {
+        guard line >= 0, line < normalStartCount else { return nil }
+        var node = storage.root
+        var remaining = line
+        var rank = 0
+        while let current = node {
+            let leftStarts = current.left?.normalStartCount ?? 0
+            if remaining < leftStarts {
+                node = current.left
+                continue
+            }
+            remaining -= leftStarts
+            rank += current.left?.rowCount ?? 0
+            if remaining < current.chunk.normalStartCount {
+                for (offset, row) in current.chunk.rows.enumerated() where row.rowType == .normal {
+                    if remaining == 0 { return rank + offset }
+                    remaining -= 1
+                }
+                return nil
+            }
+            remaining -= current.chunk.normalStartCount
+            rank += current.chunk.rows.count
+            node = current.right
+        }
+        return nil
     }
 
     /// Visits exactly the requested row range plus O(log chunks) index nodes.
@@ -1299,16 +1367,11 @@ public struct ResidentRowStore: Sendable {
         let upper = min(max(range.upperBound, lower), count)
         var rows: [GUIVisualRow] = []
         rows.reserveCapacity(upper - lower)
-        var touched = Set<UInt64>()
-        Self.collect(storage.root, nodeStart: 0, range: lower..<upper, rows: &rows, touched: &touched)
-        if mode == .sequential {
-            rows = rows.enumerated().map { offset, row in
-                projected(row, at: lower + offset)
-            }
-        }
+        var touched = 0
+        collect(storage.root, nodeStart: 0, startsBeforeNode: 0, range: lower..<upper, rows: &rows, touched: &touched)
         var counters = ResidentRowStoreCounters()
         counters.rowsVisited = rows.count
-        counters.chunksTouched = touched.count
+        counters.chunksTouched = touched
         return (rows, counters)
     }
 
@@ -1341,9 +1404,7 @@ public struct ResidentRowStore: Sendable {
                     index: splice.startIndex, removeCount: splice.deleteCount, rowCount: baseRowCount
                 )
             }
-            try Self.validateRows(
-                splice.insertedRows, validatesBufferLineOrder: mode == .windowed
-            )
+            try Self.validateRows(splice.insertedRows, mode: mode)
             previousStart = splice.startIndex
             previousEnd = splice.startIndex + splice.deleteCount
             computed = computed - splice.deleteCount + splice.insertedRows.count
@@ -1375,8 +1436,9 @@ public struct ResidentRowStore: Sendable {
         } catch is FrameResourceError {
             throw ResidentRowStoreError.resourcePolicy
         }
+        guard !splices.isEmpty else { return }
 
-        if !splices.isEmpty, let replacements = try inPlaceReplacements(for: splices) {
+        if let replacements = try inPlaceReplacements(for: splices) {
             var staged = self
             staged.applyInPlaceReplacements(replacements)
             staged.storage.resourceWeight = try staged.storage.resourceWeight
@@ -1387,6 +1449,7 @@ public struct ResidentRowStore: Sendable {
         }
 
         var staged = self
+        staged.ensureUniqueStorage()
         staged.storage.counters.resourceWeightRowsVisited += resourceWeightRowsVisited
         var coordinateAdjustment = 0
         for splice in splices {
@@ -1429,11 +1492,11 @@ public struct ResidentRowStore: Sendable {
             throw ResidentRowStoreError.resourcePolicy
         }
 
-        let removedIDs = Set((index..<(index + removeCount)).compactMap { row(at: $0)?.rowId })
+        let removedIDs = Set((index..<(index + removeCount)).compactMap { rawRow(at: $0)?.rowId })
         for row in insertedRows where storage.locators[row.rowId] != nil && !removedIDs.contains(row.rowId) {
             throw ResidentRowStoreError.duplicateRowID(row.rowId)
         }
-        try Self.validateRows(insertedRows, validatesBufferLineOrder: mode == .windowed)
+        try Self.validateRows(insertedRows, mode: mode)
         if mode == .windowed, let first = insertedRows.first, index > 0, let previous = row(at: index - 1), previous.bufLine > first.bufLine {
             throw ResidentRowStoreError.unsortedBufferLine(previous: previous.bufLine, next: first.bufLine)
         }
@@ -1540,7 +1603,7 @@ public struct ResidentRowStore: Sendable {
         var previousBufferLine: UInt32?
         for chunk in chunks {
             for (offset, row) in chunk.rows.enumerated() {
-                guard (mode == .sequential || previousBufferLine.map({ $0 <= row.bufLine }) ?? true),
+                guard (mode.isResident || previousBufferLine.map({ $0 <= row.bufLine }) ?? true),
                       ids.insert(row.rowId).inserted,
                       let locator = storage.locators[row.rowId],
                       locator.chunkID == chunk.id,
@@ -1790,8 +1853,8 @@ public struct ResidentRowStore: Sendable {
         )
     }
 
-    static func validateRows(
-        _ rows: [GUIVisualRow], validatesBufferLineOrder: Bool = true
+    private static func validateRows(
+        _ rows: [GUIVisualRow], mode: ResidentRowStoreMode
     ) throws {
         var ids = Set<UInt64>()
         var previousBufferLine: UInt32?
@@ -1799,17 +1862,20 @@ public struct ResidentRowStore: Sendable {
             if !ids.insert(row.rowId).inserted {
                 throw ResidentRowStoreError.duplicateRowID(row.rowId)
             }
-            if validatesBufferLineOrder, let previousBufferLine, previousBufferLine > row.bufLine {
+            if mode == .sequentialWrapped, row.rowType != .normal, row.rowType != .wrapContinuation {
+                throw ResidentRowStoreError.unsupportedWrappedRowKind(row.rowType)
+            }
+            if mode == .windowed, let previousBufferLine, previousBufferLine > row.bufLine {
                 throw ResidentRowStoreError.unsortedBufferLine(previous: previousBufferLine, next: row.bufLine)
             }
             previousBufferLine = row.bufLine
         }
     }
 
-    private func projected(_ row: GUIVisualRow, at index: Int) -> GUIVisualRow {
-        guard mode == .sequential, row.bufLine != UInt32(index) else { return row }
+    private static func projected(_ row: GUIVisualRow, bufferLine: Int) -> GUIVisualRow {
+        guard row.bufLine != UInt32(bufferLine) else { return row }
         return GUIVisualRow(
-            rowType: row.rowType, rowId: row.rowId, bufLine: UInt32(index),
+            rowType: row.rowType, rowId: row.rowId, bufLine: UInt32(bufferLine),
             contentHash: row.contentHash, text: row.text, spans: row.spans
         )
     }
@@ -1901,23 +1967,39 @@ public struct ResidentRowStore: Sendable {
         )
     }
 
-    private static func collect(_ node: Node?, nodeStart: Int, range: Range<Int>,
-                                rows: inout [GUIVisualRow], touched: inout Set<UInt64>) {
-        guard let node else { return }
+    private func collect(_ node: Node?, nodeStart: Int, startsBeforeNode: Int, range: Range<Int>,
+                         rows: inout [GUIVisualRow], touched: inout Int) {
+        guard let node, !range.isEmpty else { return }
         let leftCount = node.left?.rowCount ?? 0
         let chunkStart = nodeStart + leftCount
         let chunkEnd = chunkStart + node.chunk.rows.count
+        let startsBeforeChunk = startsBeforeNode + (node.left?.normalStartCount ?? 0)
         if range.lowerBound < chunkStart {
-            collect(node.left, nodeStart: nodeStart, range: range, rows: &rows, touched: &touched)
+            collect(node.left, nodeStart: nodeStart, startsBeforeNode: startsBeforeNode, range: range, rows: &rows, touched: &touched)
         }
         let overlapStart = max(range.lowerBound, chunkStart)
         let overlapEnd = min(range.upperBound, chunkEnd)
         if overlapStart < overlapEnd {
-            touched.insert(node.chunk.id)
-            rows.append(contentsOf: node.chunk.rows[(overlapStart - chunkStart)..<(overlapEnd - chunkStart)])
+            touched += 1
+            let offsets = (overlapStart - chunkStart)..<(overlapEnd - chunkStart)
+            switch mode {
+            case .windowed:
+                rows.append(contentsOf: node.chunk.rows[offsets])
+            case .sequential:
+                for index in offsets {
+                    rows.append(Self.projected(node.chunk.rows[index], bufferLine: chunkStart + index))
+                }
+            case .sequentialWrapped:
+                var starts = startsBeforeChunk
+                for row in node.chunk.rows[..<offsets.lowerBound] where row.rowType == .normal { starts += 1 }
+                for row in node.chunk.rows[offsets] {
+                    if row.rowType == .normal { starts += 1 }
+                    rows.append(Self.projected(row, bufferLine: max(starts - 1, 0)))
+                }
+            }
         }
         if range.upperBound > chunkEnd {
-            collect(node.right, nodeStart: chunkEnd, range: range, rows: &rows, touched: &touched)
+            collect(node.right, nodeStart: chunkEnd, startsBeforeNode: startsBeforeChunk + node.chunk.normalStartCount, range: range, rows: &rows, touched: &touched)
         }
     }
 }

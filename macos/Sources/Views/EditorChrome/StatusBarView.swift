@@ -372,6 +372,7 @@ public struct StatusBarView: View {
         case .executingTool: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
         case .error: return "Error"
         case .planning: return "PLAN"
+        case .approvalWaiting: return state.activeToolName.isEmpty ? "Awaiting approval" : "Awaiting approval for \(state.activeToolName)"
         case .unknown: return nil
         }
     }
@@ -383,6 +384,7 @@ public struct StatusBarView: View {
         case .executingTool: return state.activeToolName.isEmpty ? "Agent executing tools" : "Agent running \(state.activeToolName)"
         case .error: return "Agent error"
         case .planning: return "Agent plan mode"
+        case .approvalWaiting: return state.activeToolName.isEmpty ? "Agent awaiting approval" : "Agent awaiting approval for \(state.activeToolName)"
         case .unknown: return "Agent status"
         }
     }
@@ -429,6 +431,11 @@ public struct StatusBarView: View {
                 .frame(width: 14, height: barHeight)
         case .planning:
             Image(systemName: "pencil.and.outline")
+                .font(Typography.font(.micro))
+                .foregroundStyle(theme.agentStatusNeedsYou)
+                .frame(width: 14, height: barHeight)
+        case .approvalWaiting:
+            Image(systemName: "hand.raised.fill")
                 .font(Typography.font(.micro))
                 .foregroundStyle(theme.agentStatusNeedsYou)
                 .frame(width: 14, height: barHeight)

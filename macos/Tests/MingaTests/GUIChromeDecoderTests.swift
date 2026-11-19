@@ -2262,6 +2262,26 @@ struct GUIAgentChatDecoderTests {
         #expect(promptCompletion?.candidates.first?.description == "run command")
     }
 
+    @Test("Agent chat decodes approval waiting without changing the composer",
+          arguments: [UInt8(0), 1, 2, 3, 4, 5])
+    func decodeAgentActivityBytes(rawValue: UInt8) throws {
+        let data = buildChatData(status: rawValue, model: "test", prompt: "unfinished draft",
+                                 promptLineCount: 2, promptCursorLine: 1, promptCursorCol: 4,
+                                 promptVimMode: 1, promptVisibleRows: 2)
+        let (command, consumed) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentChat(let visible, let status, _, _, let prompt, _, let line, let col, let mode, let rows, _, _, _) = command else {
+            Issue.record("Expected agent chat")
+            return
+        }
+        #expect(consumed == data.count && visible)
+        #expect(status == AgentStatus(rawValue: rawValue))
+        #expect(prompt == "unfinished draft")
+        #expect(line == 1 && col == 4 && mode == .insert && rows == 2)
+        if rawValue == 5 {
+            #expect(status == .approvalWaiting && status.hasActiveTurn && !status.isWorking)
+        }
+    }
+
     @Test("Decode gui_agent_chat preserves prompt cursor as a UTF-8 byte offset")
     func decodePromptCursorByteOffset() throws {
         let prompt = "café 👩‍💻"
@@ -3171,6 +3191,41 @@ struct AgentTranscriptDecoderTests {
         #expect(approvalPreview == ["mix test"])
         guard case .assistantMarkdown(let blocks) = messages[6].content else { Issue.record("Expected markdown"); return }
         #expect(blocks[0].isComplete)
+    }
+
+    @Test("Plain and styled tools decode every committed outcome without using the error boolean",
+          arguments: [UInt8(0), 1, 2, 3, 4, 5])
+    func toolOutcomeBytes(status: UInt8) throws {
+        let explanation = "Approval expired before execution"
+        var plain = Data([0x04, status, 1, 0])
+        appendU32(&plain, 0)
+        appendString16(&plain, "shell")
+        appendString16(&plain, "command")
+        appendU32(&plain, UInt32(explanation.utf8.count))
+        plain.append(contentsOf: explanation.utf8)
+        plain.append(0) // auto-approved scope
+
+        var styled = Data([0x08, status, 1, 0])
+        appendU32(&styled, 0)
+        appendString16(&styled, "shell")
+        appendString16(&styled, "command")
+        styled.append(styledLines([styledRun(explanation)]))
+        styled.append(0)
+
+        let data = buildFullReplace(epoch: 9, entries: [(id: 1, body: plain), (id: 2, body: styled)])
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiAgentTranscript(_, _, _, _, _, let messages) = command,
+              messages.count == 2,
+              case .toolCall(_, _, let plainStatus, let plainError, _, _, let duration, let result, _, _) = messages[0].content,
+              case .styledToolCall(_, _, let styledStatus, let styledError, _, _, _, let lines, _, _) = messages[1].content else {
+            Issue.record("Expected plain and styled committed tool results")
+            return
+        }
+        #expect(plainStatus == status && styledStatus == status)
+        #expect(plainError && styledError)
+        #expect(duration == 0 && result == explanation)
+        #expect(lines[0][0].text == explanation)
     }
 
     @Test("approval rejects every truncated body instead of accepting an ID-less payload")

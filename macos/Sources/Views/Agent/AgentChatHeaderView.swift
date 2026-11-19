@@ -78,7 +78,7 @@ public struct AgentChatHeaderView: View {
 
     private var modelPickerButton: some View {
         Button {
-            if !state.isThinking {
+            if !state.hasActiveTurn {
                 sendAction?(.executeCommand(name: "agent_pick_model"))
             }
         } label: {
@@ -88,32 +88,32 @@ public struct AgentChatHeaderView: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Typography.font(.micro, weight: .semibold))
             }
-            .foregroundStyle(state.isThinking ? theme.agentSecondaryFg : theme.agentHeaderFg)
+            .foregroundStyle(state.hasActiveTurn ? theme.agentSecondaryFg : theme.agentHeaderFg)
             .padding(.horizontal, Spacing.sm)
             .padding(.vertical, Spacing.xs)
-            .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isModelHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+            .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isModelHovered && !state.hasActiveTurn ? theme.agentTextFg.opacity(0.06) : Color.clear))
         }
         .buttonStyle(.plain)
-        .allowsHitTesting(!state.isThinking)
+        .allowsHitTesting(!state.hasActiveTurn)
         .help("Pick model (SPC a m)")
         .accessibilityLabel("Agent model")
         .accessibilityValue(state.displayModel.isEmpty ? "Agent" : state.displayModel)
-        .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens the model picker")
+        .accessibilityHint(state.hasActiveTurn ? "Disabled while the agent turn is active" : "Opens the model picker")
         .accessibilityAddTraits(.isButton)
         .onHover { isModelHovered = $0 }
-        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
+        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.hasActiveTurn))
     }
 
     // MARK: - Thinking level
 
     @ViewBuilder
     private var thinkingLevelMenu: some View {
-        if state.isThinking {
+        if state.hasActiveTurn {
             thinkingLevelLabel
                 .help("Pick thinking level (SPC a T)")
                 .accessibilityLabel("Agent thinking level")
                 .accessibilityValue(state.thinkingLabel)
-                .accessibilityHint("Disabled while the agent is streaming")
+                .accessibilityHint("Disabled while the agent turn is active")
                 .accessibilityAddTraits(.isButton)
         } else {
             Menu {
@@ -155,10 +155,10 @@ public struct AgentChatHeaderView: View {
             Image(systemName: "chevron.down")
                 .font(Typography.font(.symbol, weight: .semibold))
         }
-        .foregroundStyle(state.isThinking ? theme.agentSecondaryFg : theme.agentHeaderFg.opacity(0.9))
+        .foregroundStyle(state.hasActiveTurn ? theme.agentSecondaryFg : theme.agentHeaderFg.opacity(0.9))
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
-        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isThinkingHovered && !state.hasActiveTurn ? theme.agentTextFg.opacity(0.06) : Color.clear))
     }
 
     private func thinkingDisplayName(_ level: String) -> String {
@@ -180,6 +180,7 @@ public struct AgentChatHeaderView: View {
         case .executingTool: return Color.orange
         case .error: return Color.red
         case .planning: return theme.agentStatusNeedsYou
+        case .approvalWaiting: return theme.agentStatusNeedsYou
         case .unknown: return Color.gray
         }
     }

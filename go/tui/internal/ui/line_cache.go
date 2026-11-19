@@ -56,8 +56,9 @@ type lineCache struct {
 // even across vertical scroll, where the BEAM re-emits a row at a new index and
 // its old key would otherwise linger forever.
 type windowLineCache struct {
-	context uint64
-	rows    map[lineCacheKey]string
+	context        uint64
+	residentGutter *protocol.ResidentGutterEntries
+	rows           map[lineCacheKey]string
 }
 
 // lineCacheKey identifies a cached rendered row within a window context. The
@@ -118,27 +119,29 @@ func (c *lineCache) takeCounters() (hits, misses uint64) {
 // re-emits a stable row at a shifted index) would keep adding new {id,hash,idx}
 // keys while the old-index entries lingered for the life of the session.
 type windowRenderBuilder struct {
-	cache    *lineCache
-	windowID uint16
-	context  uint64
-	prev     map[lineCacheKey]string // previous frame's rows, read-only lookups
-	next     map[lineCacheKey]string // this frame's rows, populated as we render
+	cache          *lineCache
+	windowID       uint16
+	context        uint64
+	residentGutter *protocol.ResidentGutterEntries
+	prev           map[lineCacheKey]string // previous frame's rows, read-only lookups
+	next           map[lineCacheKey]string // this frame's rows, populated as we render
 }
 
 // beginWindowRender starts a fresh per-frame map for the window. It captures the
 // prior map for lookups only when the context still matches; a context change
 // means no prior line is reusable, so prev stays nil and every row misses.
-func (c *lineCache) beginWindowRender(windowID uint16, context uint64) *windowRenderBuilder {
+func (c *lineCache) beginWindowRender(windowID uint16, context uint64, residentGutter *protocol.ResidentGutterEntries) *windowRenderBuilder {
 	if c == nil {
 		return nil
 	}
 	b := &windowRenderBuilder{
-		cache:    c,
-		windowID: windowID,
-		context:  context,
-		next:     map[lineCacheKey]string{},
+		cache:          c,
+		windowID:       windowID,
+		context:        context,
+		residentGutter: residentGutter,
+		next:           map[lineCacheKey]string{},
 	}
-	if entry, ok := c.windows[windowID]; ok && entry.context == context {
+	if entry, ok := c.windows[windowID]; ok && entry.context == context && entry.residentGutter == residentGutter {
 		b.prev = entry.rows
 	}
 	return b
@@ -173,7 +176,7 @@ func (b *windowRenderBuilder) commit() {
 	if b == nil || b.cache == nil {
 		return
 	}
-	b.cache.windows[b.windowID] = &windowLineCache{context: b.context, rows: b.next}
+	b.cache.windows[b.windowID] = &windowLineCache{context: b.context, residentGutter: b.residentGutter, rows: b.next}
 }
 
 // windowContextFingerprint folds every input that affects a window's row
@@ -222,6 +225,9 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 		writeUint(uint64(residentSemantics.rowRevision))
 	} else {
 		writeBool(window.Cursorline.Visible)
+		if window.Scroll.Wrapped {
+			writeUint(uint64(m.presentationPayloadStart(window)))
+		}
 		writeUint(uint64(window.Cursorline.Row))
 		writeUint(uint64(window.Cursorline.BG))
 	}
@@ -263,8 +269,8 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 		}
 	}
 
-	// Gutter (line numbers, signs, cursor line) renders to the left of each row
-	// and is indexed by row, so its full identity is part of the context.
+	// The cache compares immutable sparse gutter snapshots by identity. Their
+	// per-frame display metadata and dense windowed entries are hashed here.
 	writeBool(hasGutter)
 	if hasGutter {
 		writeUint(uint64(gutter.SignColWidth))
@@ -273,27 +279,14 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 		writeUint(uint64(gutter.CursorLine))
 		writeUint(uint64(gutter.ContentHeight))
 		writeUint(uint64(gutter.EntryCount()))
-		writeEntry := func(entry protocol.GutterEntry) {
-			writeUint(uint64(entry.BufferLine))
-			writeUint(uint64(entry.SignType))
-			writeUint(uint64(entry.DisplayType))
-			writeUint(uint64(entry.FoldEndLine))
-			writeUint(uint64(entry.SignFG))
-			writeStr(entry.SignText)
-		}
-		if gutter.Resident != nil {
-			writeUint(uint64(gutter.Resident.ContentEpoch))
-			indexes := make([]uint32, 0, len(gutter.Resident.Overrides))
-			for index := range gutter.Resident.Overrides {
-				indexes = append(indexes, index)
-			}
-			sort.Slice(indexes, func(i, j int) bool { return indexes[i] < indexes[j] })
-			for _, index := range indexes {
-				writeEntry(gutter.Resident.Overrides[index])
-			}
-		} else {
+		if gutter.Resident == nil {
 			for _, entry := range gutter.Entries {
-				writeEntry(entry)
+				writeUint(uint64(entry.BufferLine))
+				writeUint(uint64(entry.SignType))
+				writeUint(uint64(entry.DisplayType))
+				writeUint(uint64(entry.FoldEndLine))
+				writeUint(uint64(entry.SignFG))
+				writeStr(entry.SignText)
 			}
 		}
 	}

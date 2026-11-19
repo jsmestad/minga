@@ -9,7 +9,6 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -20,6 +19,8 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaAgent.Session
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaEditor.Agent.ConnectionSetup
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
 
@@ -39,7 +40,12 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   end
 
   @doc "Clears only the resolved approval attachment, renders, and synchronizes the transcript."
-  @spec approval_resolved(EditorState.t(), pid(), ApprovalTarget.t(), Session.approval_decision()) ::
+  @spec approval_resolved(
+          EditorState.t(),
+          pid(),
+          ApprovalTarget.t(),
+          Session.approval_decision() | :approval_timeout | :interrupted
+        ) ::
           EditorState.t()
   def approval_resolved(
         %EditorState{} = state,
@@ -63,13 +69,31 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> MingaEditor.schedule_render(16)
   end
 
+  @doc "Installs the originating Session's canonical connection facts without moving focus."
+  @spec connection_changed(EditorState.t(), pid(), ConnectionSnapshot.t()) :: EditorState.t()
+  def connection_changed(
+        %EditorState{} = state,
+        session_pid,
+        %ConnectionSnapshot{target: %{session: session_pid}} = connection
+      )
+      when is_pid(session_pid) do
+    state
+    |> TraditionalWorkflow.install_agent_ui(
+      UIState.project_connection(state.workspace.agent_ui, connection)
+    )
+    |> ConnectionSetup.retire_prompt(connection)
+    |> MingaEditor.schedule_render(16)
+  end
+
+  def connection_changed(%EditorState{} = state, _session_pid, _connection), do: state
+
   @doc "Updates explicit credential readiness and schedules a render."
   @spec credentials_status(EditorState.t(), MingaAgent.Credentials.readiness()) :: EditorState.t()
   def credentials_status(%EditorState{} = state, readiness)
       when readiness in [:checking, :configured, :unconfigured] do
     state
-    |> TraditionalWorkflow.install_agent_panel(
-      Panel.set_credential_readiness(state.workspace.agent_ui.panel, readiness)
+    |> TraditionalWorkflow.install_agent_ui(
+      UIState.project_credential_readiness(state.workspace.agent_ui, readiness)
     )
     |> MingaEditor.schedule_render(16)
   end

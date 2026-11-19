@@ -28,6 +28,9 @@ defmodule MingaEditor.State.Agent do
   @typedoc "Agent status (delegated from RuntimeState)."
   @type status :: RuntimeState.status()
 
+  @typedoc "Presentation status calculated from runtime and the exact pending approval."
+  @type display_status :: status() | :approval_waiting
+
   @typedoc "A displayed approval and its originating Session attachment."
   @type approval :: PendingApproval.t()
 
@@ -49,6 +52,15 @@ defmodule MingaEditor.State.Agent do
   @doc "Returns the agent lifecycle status from RuntimeState."
   @spec status(t()) :: status()
   def status(%__MODULE__{runtime: rt}), do: rt.status
+
+  @doc "Returns the presentation status without changing execution or busy state."
+  @spec display_status(t()) :: display_status()
+  def display_status(%__MODULE__{runtime: runtime, pending_approval: pending_approval}) do
+    MingaAgent.Session.TurnExecution.display_status(
+      runtime.status,
+      PendingApproval.public(pending_approval)
+    )
+  end
 
   @doc "Sets the agent status (delegates to RuntimeState)."
   @spec set_status(t(), status()) :: t()

@@ -55,19 +55,25 @@ defmodule MingaEditor.PromptUI do
   - `:default` — pre-filled text (default: `""`)
   - `:context` — arbitrary map passed through to the handler (default: `nil`)
   - `:label` — prompt label override (default: `handler_module.label()`)
+  - `:sensitive` — mask presentation and exclude input from key history (default: `false`)
   """
   @spec open(state(), module(), keyword()) :: state()
   def open(state, handler_module, opts \\ []) do
     default_text = Keyword.get(opts, :default, "")
     context = Keyword.get(opts, :context)
     label = Keyword.get(opts, :label, handler_module.label())
+    sensitive = Keyword.get(opts, :sensitive, false)
+
+    unless is_boolean(sensitive), do: raise(ArgumentError, ":sensitive must be a boolean")
 
     prompt_state = %PromptState{
       handler: handler_module,
+      generation: Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1,
       text: default_text,
       cursor: String.length(default_text),
       label: label,
-      context: context
+      context: context,
+      sensitive: sensitive
     }
 
     ModalWorkflow.open(state, {:prompt, PromptPayload.new(prompt_state)})
@@ -84,6 +90,27 @@ defmodule MingaEditor.PromptUI do
   """
   @spec open?(state()) :: boolean()
   def open?(state), do: ModalOverlay.match(state.shell_runtime.state.modal, :prompt)
+
+  @doc "Returns whether the current input belongs to a sensitive prompt."
+  @spec sensitive_input?(state()) :: boolean()
+  def sensitive_input?(%{
+        shell_runtime: %{state: %{modal: {:prompt, %{prompt_ui: %PromptState{} = prompt}}}}
+      }),
+      do: PromptState.sensitive?(prompt)
+
+  def sensitive_input?(_state), do: false
+
+  @doc "Invokes the existing submit or cancel operation for the exact offered prompt."
+  @spec activate(state(), non_neg_integer(), binary()) :: state()
+  def activate(state, generation, item_id) do
+    prompt = current_prompt(state)
+
+    case PromptState.resolve_activation(prompt, generation, item_id) do
+      {:ok, :submit} -> do_submit(state, prompt)
+      {:ok, :cancel} -> do_cancel(state, prompt)
+      {:error, _reason} -> state
+    end
+  end
 
   @doc """
   Handles a key event while the prompt is active.
@@ -132,10 +159,7 @@ defmodule MingaEditor.PromptUI do
   within the text (not including the label width).
   """
   @spec render_data(state()) :: {String.t(), String.t(), non_neg_integer()}
-  def render_data(state) do
-    prompt = current_prompt(state)
-    {prompt.label, prompt.text, prompt.cursor}
-  end
+  def render_data(state), do: state |> current_prompt() |> PromptState.render_data()
 
   @doc "Inserts decoded paste text at the prompt cursor."
   @spec insert_text(state(), String.t()) :: state()

@@ -480,7 +480,7 @@ enum PreviewRegistry {
         )
         guard let content = try? GUIWindowContent(
             windowId: 65534, fullRefresh: true, contentEpoch: 1,
-            cursorVisible: !state.status.isWorking, cursorRow: 0,
+            cursorVisible: !state.status.hasActiveTurn, cursorRow: 0,
             cursorCol: UInt16(clamping: state.prompt.utf16.count),
             cursorShape: state.promptMode.usesBlockCursor ? .block : .beam,
             rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [],

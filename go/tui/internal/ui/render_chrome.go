@@ -41,7 +41,7 @@ func (m Model) headerLines() []string {
 		if title == "" {
 			title = "Minga"
 		}
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(mainWidth).Render(title))
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(mainWidth).Render(fitStyled(title, mainWidth)))
 	}
 
 	if sidebarWidth > 0 {
@@ -264,9 +264,14 @@ func (m Model) footerLines() []string {
 }
 
 func (m Model) renderStatusSegments(status protocol.StatusBar) string {
-	left := m.renderSegmentList(status.Left)
-	right := m.renderSegmentList(status.Right)
 	message := m.renderStatusMessage(status.Message)
+	messageWidth := lipgloss.Width(message)
+	left := m.renderSegmentList(status.Left)
+	leftWidth := lipgloss.Width(left)
+	if messageWidth > 0 && messageWidth > m.width-leftWidth {
+		return fitStyled(message, m.width)
+	}
+	right := m.renderSegmentList(status.Right)
 	// Prepend a devicon for the current file type before the right segments.
 	if status.Filename != "" {
 		icon := devIconForPath(status.Filename, false)
@@ -286,16 +291,13 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 		pending := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys + "  ")
 		right = pending + right
 	}
-	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
-	messageWidth := lipgloss.Width(message)
-	available := max(m.width-leftWidth-rightWidth, 1)
-	if messageWidth > available {
-		// Feedback decoration and metadata are already styled. Truncate that one
-		// finalized value so narrow widths cannot fall back to the raw notice.
-		message = fitStyled(message, available)
-		messageWidth = lipgloss.Width(message)
+	if messageWidth > 0 && messageWidth > m.width-leftWidth-rightWidth {
+		// Keep the notice readable before optional file and cursor statistics.
+		right = ""
+		rightWidth = 0
 	}
+	available := max(m.width-leftWidth-rightWidth, 1)
 	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
 	rightSpacer := strings.Repeat(" ", max(available-messageWidth-lipgloss.Width(leftSpacer), 0))
 	spacerStyle := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
@@ -458,6 +460,9 @@ func (m Model) renderGitStatus(git protocol.GitStatus) string {
 }
 
 func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
+	if mini.Mode == 10 && len(mini.Items) > 0 {
+		return m.renderPromptChoices(mini)
+	}
 	prompt := mini.Prompt
 	if prompt == "" {
 		prompt = "> "
@@ -644,7 +649,13 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	}
 	end := min(start+rowBudget, len(picker.Items))
 	for index := start; index < end; index++ {
-		lines = append(lines, m.renderPickerItemRow(title, picker.Items[index], index == selected, width))
+		item := picker.Items[index]
+		row := m.renderPickerItemRow(title, item, index == selected, width)
+		if slot := index - start; slot < len(m.zones.picker.items) && item.ActivationID != 0 {
+			m.zones.picker.items[slot] = item.ActivationID
+			row = m.zones.Mark(pickerPointerZone(slot), row)
+		}
+		lines = append(lines, row)
 	}
 	for len(lines) < height {
 		lines = append(lines, panelStyle.Render(strings.Repeat(" ", max(width, 1))))

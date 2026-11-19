@@ -1,7 +1,15 @@
 defmodule Minga.RenderModel.UI.StatusBar.Agent do
   @moduledoc false
 
-  @type status :: :idle | :thinking | :tool_executing | :error | :plan | :inactive | nil
+  @type status ::
+          :idle
+          | :thinking
+          | :tool_executing
+          | :error
+          | :plan
+          | :approval_waiting
+          | :inactive
+          | nil
 
   @type t :: %__MODULE__{
           model_name: String.t(),

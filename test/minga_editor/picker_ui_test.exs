@@ -8,6 +8,7 @@ defmodule MingaEditor.PickerUITest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Input.Picker, as: PickerInput
   alias MingaEditor.PickerUI
@@ -838,6 +839,41 @@ defmodule MingaEditor.PickerUITest do
       assert result.shell_runtime.state.notice == state.shell_runtime.state.notice
       assert result.render.render_correlation.keyframe_pending?
       refute Map.has_key?(result, :selected_item_id)
+    end
+
+    test "pointer dismissal closes only the offered picker without selecting a row" do
+      picker = Picker.new([%Item{id: :first, label: "first"}], title: "Test")
+
+      picker_state =
+        %PickerState{picker: picker, source: NoBulkActionsSource, restore: 0}
+        |> PickerState.begin_query_session()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+
+      generation = picker_state.activation_offer.generation
+      action = Minga.Protocol.Opcodes.gui_action_semantic_item_activate()
+      stale_generation = generation + 1
+
+      assert {:ok, stale} =
+               ProtocolGUI.decode_gui_action(action, <<2, 3, stale_generation::32, 0::16>>)
+
+      assert GuiActionHandler.dispatch(state, stale).shell_runtime.state.modal ==
+               state.shell_runtime.state.modal
+
+      assert {:ok, malformed} =
+               ProtocolGUI.decode_gui_action(action, <<2, 3, generation::32, 4::16, 1::32>>)
+
+      assert GuiActionHandler.dispatch(state, malformed).shell_runtime.state.modal ==
+               state.shell_runtime.state.modal
+
+      assert {:ok, dismiss} =
+               ProtocolGUI.decode_gui_action(action, <<2, 3, generation::32, 0::16>>)
+
+      dismissed = GuiActionHandler.dispatch(state, dismiss)
+      assert dismissed.shell_runtime.state.modal == :none
+      refute Map.has_key?(dismissed, :selected_item_id)
     end
 
     test "GUI dispatch activates the exact action captured when the menu opened" do

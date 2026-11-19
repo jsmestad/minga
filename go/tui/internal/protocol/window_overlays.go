@@ -51,6 +51,8 @@ type Rect = generated.Rect
 type ScrollPresentation struct {
 	WindowID              uint16
 	ResetRequired         bool
+	Wrapped               bool
+	CanPanHorizontally    bool
 	AnchorTop             uint32
 	AnchorLeft            uint16
 	AnchorVisualRowOffset uint16
@@ -60,11 +62,12 @@ type ScrollPresentation struct {
 	OverscanEndLine       uint32
 	ContentEpoch          uint32
 	LayoutGeneration      uint32
-	// ScrollSeq is the monotonic scroll-authority sequence (#2661). The TUI
-	// does not use local-presentation scroll offsets, so it only carries this
-	// field through for parity with the wire format; it does not change any
-	// TUI-visible rendering or input behavior.
+	// ScrollSeq advances on a BEAM-authoritative move, not a routine wheel echo.
 	ScrollSeq uint32
+	// HorizontalPanAck is the last horizontal intent processed for this pane.
+	HorizontalPanAck uint32
+	// HorizontalPanLimit is the rightmost left edge for the committed visible rows.
+	HorizontalPanLimit uint16
 }
 
 type PaneGeometry struct {
@@ -79,7 +82,7 @@ type PaneGeometry struct {
 	ViewportRows    uint16
 	ViewportCols    uint16
 	TotalLines      uint32
-	VisualRowOffset uint16
+	VisualRowOffset uint32
 	TotalVisualRows uint32
 	LineNumberWidth uint16
 	SignColWidth    uint16
@@ -165,6 +168,8 @@ func decodeScrollPresentation(section []byte, window *WindowContent) {
 	window.Scroll = ScrollPresentation{
 		WindowID:              gen.WindowID,
 		ResetRequired:         gen.Flags&0x01 != 0,
+		Wrapped:               gen.Flags&0x02 != 0,
+		CanPanHorizontally:    gen.Flags&0x04 != 0,
 		AnchorTop:             gen.AnchorTop,
 		AnchorLeft:            gen.AnchorLeft,
 		AnchorVisualRowOffset: gen.AnchorVisualRowOffset,
@@ -175,6 +180,8 @@ func decodeScrollPresentation(section []byte, window *WindowContent) {
 		ContentEpoch:          gen.ContentEpoch,
 		LayoutGeneration:      gen.LayoutGeneration,
 		ScrollSeq:             gen.ScrollSeq,
+		HorizontalPanAck:      gen.HorizontalPanAck,
+		HorizontalPanLimit:    gen.HorizontalPanLimit,
 	}
 	window.ScrollSet = true
 }

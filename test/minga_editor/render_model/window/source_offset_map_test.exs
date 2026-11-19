@@ -116,6 +116,24 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMapTest do
       assert SourceOffsetMap.composed_utf16_to_source_byte(map, 4, :end) == 1
     end
 
+    test "bulk boundary lookup has the same affinity at every tab and astral boundary" do
+      source = String.duplicate("\t😀", 80)
+      composed = "    😀" <> String.duplicate("  😀", 79)
+      map = SourceOffsetMap.new(source, composed, Decorations.new(), 0, tab_width: 4)
+
+      boundaries =
+        for offset <- 0..map.composed_end_utf16,
+            affinity <- [:start, :end],
+            do: {offset, affinity}
+
+      expected =
+        Enum.map(boundaries, fn {offset, affinity} ->
+          SourceOffsetMap.composed_utf16_to_source_byte(map, offset, affinity)
+        end)
+
+      assert SourceOffsetMap.composed_utf16_to_source_bytes(map, boundaries) == expected
+    end
+
     test "unmapped fold summary text anchors to source end-of-line" do
       map = SourceOffsetMap.new("abc", "abc ··· 2 lines", Decorations.new(), 0)
 

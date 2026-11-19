@@ -128,7 +128,7 @@ defmodule MingaAgent.Providers.Native.OutputHydrationTest do
       "read_file",
       call_id,
       [ContentPart.text("[image retained]")],
-      Map.merge(metadata, %{output: output})
+      Map.merge(metadata, %{output: output, tool_outcome: :complete, is_error: false})
     )
   end
 

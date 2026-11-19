@@ -68,6 +68,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.Prefix
   alias MingaAgent.Session.PrefixStore
+  alias MingaAgent.Session.PortableHistory
   alias MingaAgent.Credentials
   alias MingaAgent.Skills
   alias MingaAgent.TokenEstimator
@@ -636,8 +637,9 @@ defmodule MingaAgent.Providers.Native do
          state,
          %Request{epoch_id: id, prefix: %Prefix{epoch_id: id, schemas: schemas}} = request
        ) do
-    with :ok <- validate_tool_capability(state.selection, schemas) do
-      validate_image_capability(state.selection, request.messages)
+    with :ok <- validate_tool_capability(state.selection, schemas),
+         :ok <- validate_image_capability(state.selection, request.messages) do
+      validate_video_capability(state.selection, request.messages)
     end
   end
 
@@ -684,6 +686,68 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp image_content?(_content), do: false
+
+  @spec validate_video_capability(ModelSelection.t(), [ReqLLM.Message.t()]) ::
+          :ok | {:error, String.t()}
+  defp validate_video_capability(selection, messages) do
+    if not video_input_supported?(selection) and
+         Enum.any?(messages, fn message ->
+           Enum.any?(message.content, &match?(%ContentPart{type: :video_url}, &1))
+         end),
+       do:
+         {:error,
+          "#{selection.route.display_name} cannot receive this conversation's video attachments. Keep the current model or choose a video-capable route."},
+       else: :ok
+  end
+
+  @spec video_input_supported?(ModelSelection.t()) :: boolean()
+  defp video_input_supported?(%ModelSelection{
+         route: %{
+           execution: %{wire_protocol: "google_generate_content"},
+           metadata: %{modalities: modalities}
+         }
+       })
+       when is_map(modalities) do
+    inputs = Map.get(modalities, :input, Map.get(modalities, "input", []))
+    is_list(inputs) and (:video in inputs or "video" in inputs)
+  end
+
+  defp video_input_supported?(_selection), do: false
+
+  @spec validate_file_capability(ModelSelection.t(), [ReqLLM.Message.t()]) ::
+          :ok | {:error, String.t()}
+  defp validate_file_capability(
+         %ModelSelection{route: %{execution: %{wire_protocol: protocol}}},
+         _messages
+       )
+       when protocol in [
+              "anthropic_messages",
+              "openai_responses",
+              "openai_codex_responses",
+              "google_generate_content"
+            ],
+       do: :ok
+
+  defp validate_file_capability(
+         %ModelSelection{
+           route: %{request_provider: :openrouter, execution: %{wire_protocol: "openai_chat"}}
+         },
+         _messages
+       ),
+       do: :ok
+
+  defp validate_file_capability(_selection, messages),
+    do: ReqLLM.Provider.Defaults.validate_image_only_attachments(Context.new(messages))
+
+  @spec validate_retained_history(Prefix.t(), [ReqLLM.Message.t()]) :: :ok | {:error, String.t()}
+  defp validate_retained_history(%Prefix{identity: %{native_contract: :unknown}}, messages) do
+    case PortableHistory.convert(messages, :retain) do
+      {:ok, _portable, _counts} -> :ok
+      {:error, reason} -> {:error, PortableHistory.message(reason)}
+    end
+  end
+
+  defp validate_retained_history(_prefix, _messages), do: :ok
 
   @impl GenServer
   def handle_call({:send_prompt, _request}, _from, %{streaming: true} = state) do
@@ -749,10 +813,11 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  def handle_call({:preview_prefix, _operation}, _from, %{prefix_preview: %{}} = state),
+  def handle_call({:preview_prefix, _token, _operation}, _from, %{prefix_preview: %{}} = state),
     do: {:reply, {:error, :prefix_transition_active}, state}
 
-  def handle_call({:preview_prefix, operation}, {owner, _}, %{subscriber: owner} = state) do
+  def handle_call({:preview_prefix, token, operation}, {owner, _}, %{subscriber: owner} = state)
+      when is_reference(token) do
     selection = prefix_selection(state.selection, operation)
 
     with {:ok, current} <- refresh_tool_registry_contributions(state),
@@ -773,8 +838,6 @@ defmodule MingaAgent.Providers.Native do
              identity,
              Enum.map(active_skills, & &1.name)
            ) do
-      token = make_ref()
-
       preview = %{
         token: token,
         owner: owner,
@@ -790,20 +853,29 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  def handle_call({:preview_prefix, _operation}, _from, state),
+  def handle_call({:preview_prefix, _token, _operation}, _from, state),
     do: {:reply, {:error, :not_session_owner}, state}
+
+  def handle_call(
+        {:validate_prefix_preview, token, messages},
+        {owner, _},
+        %{prefix_preview: %{token: token, owner: owner} = preview} = state
+      ) do
+    result =
+      with :ok <- validate_tool_capability(preview.selection, preview.prefix.schemas),
+           :ok <- validate_image_capability(preview.selection, messages),
+           :ok <- validate_video_capability(preview.selection, messages),
+           :ok <- validate_file_capability(preview.selection, messages) do
+        validate_retained_history(preview.prefix, messages)
+      end
+
+    {:reply, result, state}
+  end
 
   def handle_call({:commit_prefix_preview, token}, {owner, _}, state),
     do: commit_prefix_preview(state, token, owner)
 
-  def handle_call({:discard_prefix_preview, token}, {owner, _}, state) do
-    case state.prefix_preview do
-      %{token: ^token, owner: ^owner} -> {:reply, :ok, %{state | prefix_preview: nil}}
-      _stale -> {:reply, {:error, :stale_prefix_preview}, state}
-    end
-  end
-
-  def handle_call({:dispatch_auth, %Prefix{identity: identity}, retained?}, _from, state) do
+  def handle_call({:dispatch_auth, %Prefix{identity: identity}, _retained?}, _from, state) do
     with {:ok, authentication} <-
            Credentials.bind_request(
              state.selection.credential,
@@ -814,8 +886,7 @@ defmodule MingaAgent.Providers.Native do
            ModelSelection.replay_identity(state.selection, authentication.identity),
          true <-
            current_identity == identity or
-             Prefix.requalifies_replay_identity?(identity, current_identity),
-         true <- not retained? or current_identity.native_contract != :unknown do
+             Prefix.requalifies_replay_identity?(identity, current_identity) do
       {:reply, {:ok, authentication.material}, %{state | authentication: authentication}}
     else
       false ->
@@ -1162,6 +1233,7 @@ defmodule MingaAgent.Providers.Native do
     loop_context = %LoopCtx{
       provider_pid: self(),
       request: request,
+      history_projection: portable_request_history(request, state.prefix_candidate),
       session_pid: state.subscriber,
       selection: state.selection,
       config: state.config,
@@ -1181,6 +1253,15 @@ defmodule MingaAgent.Providers.Native do
 
     task = Task.async(fn -> run_agent_loop(loop_context, context) end)
     %{state | task: task}
+  end
+
+  @spec handle_cast({:discard_prefix_preview, reference(), pid()}, state()) :: {:noreply, state()}
+  @impl GenServer
+  def handle_cast({:discard_prefix_preview, token, owner}, state) do
+    case state.prefix_preview do
+      %{token: ^token, owner: ^owner} -> {:noreply, %{state | prefix_preview: nil}}
+      _stale -> {:noreply, state}
+    end
   end
 
   @impl GenServer
@@ -1847,6 +1928,13 @@ defmodule MingaAgent.Providers.Native do
           "Retained image integrity check failed: #{inspect(reason)}",
           error
         )
+
+      {:error, reason} ->
+        reported_error(
+          lctx,
+          "Conversation history cannot be sent to this model: #{inspect(reason)}",
+          reason
+        )
     end
   end
 
@@ -1870,15 +1958,41 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @spec outbound_messages(loop_ctx(), [ReqLLM.Message.t()]) ::
-          {:ok, [ReqLLM.Message.t()]} | {:error, OutputHydration.error_reason()}
+          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
   defp outbound_messages(lctx, messages) do
-    delivery = ModelSelection.image_tool_result_delivery(lctx.selection)
+    with {:ok, messages} <- project_request_history(lctx.history_projection, messages) do
+      delivery = ModelSelection.image_tool_result_delivery(lctx.selection)
 
-    case project_outbound_messages(lctx, messages, delivery, nil) do
-      :unchanged -> {:ok, messages}
-      result -> result
+      case project_outbound_messages(lctx, messages, delivery, nil) do
+        :unchanged -> {:ok, messages}
+        result -> result
+      end
     end
   end
+
+  @spec portable_request_history(Request.t(), Prefix.t() | :unknown) ::
+          :unchanged | {:ok, non_neg_integer(), [ReqLLM.Message.t()]} | {:error, term()}
+  defp portable_request_history(%Request{messages: messages}, %Prefix{
+         identity: %{native_contract: :unknown}
+       }) do
+    retained_count = length(messages) - 1
+
+    case PortableHistory.convert(Enum.take(messages, retained_count), :retain) do
+      {:ok, portable, _counts} -> {:ok, retained_count, portable}
+      {:error, reason} -> {:error, {:portable_history_incompatible, reason}}
+    end
+  end
+
+  defp portable_request_history(_request, _current_prefix), do: :unchanged
+
+  @spec project_request_history(term(), [ReqLLM.Message.t()]) ::
+          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
+  defp project_request_history(:unchanged, messages), do: {:ok, messages}
+
+  defp project_request_history({:ok, count, portable}, messages),
+    do: {:ok, Enum.concat(portable, Enum.drop(messages, count))}
+
+  defp project_request_history({:error, _reason} = error, _messages), do: error
 
   @spec project_outbound_messages(
           loop_ctx(),
@@ -2173,6 +2287,8 @@ defmodule MingaAgent.Providers.Native do
            required(:result_text) => String.t(),
            required(:output) => Output.t(),
            required(:is_error) => boolean(),
+           optional(:outcome) => MingaAgent.ToolCall.outcome(),
+           optional(:reason) => MingaAgent.ToolCall.terminal_reason(),
            optional(:persistence_error) => term()
          }
 
@@ -2418,7 +2534,7 @@ defmodule MingaAgent.Providers.Native do
             ModelSelection.image_tool_result_delivery(lctx.selection)
           )
 
-        {result_text, is_error, post_dispatched?, output} =
+        {result_text, outcome, reason, post_dispatched?, output} =
           execute_with_approval(
             lctx,
             tool_call,
@@ -2426,6 +2542,7 @@ defmodule MingaAgent.Providers.Native do
           )
 
         output = output || deterministic_output(result_text)
+        is_error = outcome != :complete
 
         unless post_dispatched? do
           dispatch_post_tool_use(tool_call, result_text, is_error, output, lctx.config)
@@ -2437,7 +2554,9 @@ defmodule MingaAgent.Providers.Native do
           tool_call: tool_call,
           result_text: result_text,
           output: output,
-          is_error: is_error
+          is_error: is_error,
+          outcome: outcome,
+          reason: reason
         }
       rescue
         e ->
@@ -2492,7 +2611,7 @@ defmodule MingaAgent.Providers.Native do
       %{tool_call: tool_call} ->
         case persist_tool_execution_result(lctx, checkpoint_id, result, 3) do
           :ok ->
-            emit_tool_end(lctx, tool_call, result.result_text, result.output, result.is_error)
+            emit_tool_end(lctx, tool_call, result)
             result
 
           {:error, reason} ->
@@ -2537,14 +2656,16 @@ defmodule MingaAgent.Providers.Native do
       {:error, {:tool_outcome_call_failed, reason}}
   end
 
-  @spec emit_tool_end(loop_ctx(), map(), String.t(), Output.t(), boolean()) :: :ok
-  defp emit_tool_end(lctx, tool_call, result_text, output, is_error) do
+  @spec emit_tool_end(loop_ctx(), map(), tool_execution_result()) :: :ok
+  defp emit_tool_end(lctx, tool_call, result) do
     emit(lctx, %Event.ToolEnd{
       tool_call_id: tool_call.id,
       name: tool_call.name,
-      result: result_text,
-      output: output,
-      is_error: is_error
+      result: result.result_text,
+      output: result.output,
+      outcome: result.outcome,
+      reason: result.reason,
+      is_error: result.outcome != :complete
     })
   end
 
@@ -2553,25 +2674,33 @@ defmodule MingaAgent.Providers.Native do
          tool_call: tool_call,
          result_text: result_text,
          output: output,
-         is_error: is_error
+         outcome: outcome,
+         reason: reason
        }) do
-    meta = %{is_error: is_error, output: output}
+    meta = %{is_error: outcome != :complete, output: output, tool_outcome: outcome}
+    meta = tool_result_reason(meta, reason)
     Context.tool_result_message(tool_call.name, tool_call.id, result_text, meta)
   end
+
+  defp tool_result_reason(meta, nil), do: meta
+
+  defp tool_result_reason(meta, :approval_timeout),
+    do: Map.put(meta, :tool_outcome_reason, :approval_timeout)
 
   @spec execute_with_approval(
           loop_ctx(),
           map(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp execute_with_approval(lctx, tool_call, tool_context) do
     invocation = Invocation.new(lctx.request, tool_call.effect_checkpoint_id, tool_call)
 
     case GenServer.call(lctx.session_pid, {:prepare_tool_invocation, invocation}) do
       {:ok, :ready} -> execute_live_tool(lctx, tool_call, invocation, tool_context)
       {:ok, :approval_required} -> request_approval(lctx, tool_call, invocation, tool_context)
-      {:refused, reason} -> {"Tool refused: #{inspect(reason)}", true, false, nil}
+      {:refused, reason} -> {"Tool refused: #{inspect(reason)}", :denied, nil, false, nil}
       {:error, reason} -> throw({:effect_admission_failed, reason})
     end
   end
@@ -2660,7 +2789,8 @@ defmodule MingaAgent.Providers.Native do
           Invocation.t(),
           ToolContext.t()
         ) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp request_approval(lctx, tool_call, invocation, tool_context) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send_agent_event(lctx.provider_pid, lctx.request, %Event.ToolApproval{
@@ -2678,18 +2808,19 @@ defmodule MingaAgent.Providers.Native do
         execute_live_tool(lctx, tool_call, invocation, tool_context)
 
       {:tool_approval_response, ^call_id, :reject} ->
-        {"Tool rejected by user", true, false, nil}
+        {"Tool rejected by user", :denied, nil, false, nil}
 
       {:tool_approval_response, ^call_id, {:reject, message}} ->
-        {message, true, false, nil}
+        {message, :denied, nil, false, nil}
     after
       lctx.config.approval_timeout_ms ->
-        {"Tool approval timed out", true, false, nil}
+        {"Tool approval timed out", :error, :approval_timeout, false, nil}
     end
   end
 
   @spec execute_live_tool(loop_ctx(), map(), Invocation.t(), ToolContext.t()) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp execute_live_tool(lctx, tool_call, invocation, tool_context) do
     tool_context =
       tool_context_with_call_metadata(tool_context, tool_call, lctx.provider_pid, lctx.request)
@@ -2860,24 +2991,29 @@ defmodule MingaAgent.Providers.Native do
        do: context
 
   @spec format_executor_result(ToolExecutor.result()) ::
-          {String.t(), boolean(), boolean(), Output.t() | nil}
+          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+           boolean(), Output.t() | nil}
   defp format_executor_result({:storage_error, reason}),
     do: throw({:tool_storage_failed, reason})
 
   defp format_executor_result({:ok, %Output{} = output}),
-    do: {format_output(output), false, false, output}
+    do: {format_output(output), :complete, nil, false, output}
 
   defp format_executor_result({:error, %Output{} = output}),
-    do: {format_output(output), true, false, output}
+    do: {format_output(output), :error, nil, false, output}
 
   defp format_executor_result({:error, %Limitation{} = limitation}),
-    do: {Limitation.message(limitation), true, false, nil}
+    do: {Limitation.message(limitation), :error, nil, false, nil}
 
   defp format_executor_result({:ok, result}),
-    do: {format_tool_result(result), false, false, nil}
+    do: {format_tool_result(result), :complete, nil, false, nil}
+
+  defp format_executor_result({:error, {kind, _detail} = reason})
+       when kind in [:tool_refused, :tool_denied, :hook_veto],
+       do: {format_error(reason), :denied, nil, false, nil}
 
   defp format_executor_result({:error, reason}),
-    do: {format_error(reason), true, false, nil}
+    do: {format_error(reason), :error, nil, false, nil}
 
   @spec format_output(Output.t()) :: String.t()
   defp format_output(
@@ -3200,7 +3336,7 @@ defmodule MingaAgent.Providers.Native do
           :current
           | {:activate, String.t()}
           | {:deactivate, String.t()}
-          | {:model, ModelSelection.t()}
+          | {:model, ModelSelection.t(), :exact | {:handoff, :retain | :reject}}
           | {:selected, term(), [String.t()]}
         ) ::
           {:ok, [Skills.skill()], term()} | {:error, term()}
@@ -3209,7 +3345,7 @@ defmodule MingaAgent.Providers.Native do
 
     case operation do
       :current -> {:ok, active, :ok}
-      {:model, %ModelSelection{}} -> {:ok, active, :ok}
+      {:model, %ModelSelection{}, _changed?} -> {:ok, active, :ok}
       update -> preview_skills(%{state | active_skills: active}, update)
     end
   end
@@ -3218,7 +3354,8 @@ defmodule MingaAgent.Providers.Native do
     do:
       {:ok, load_active_skills(state.project_root, Enum.map(state.active_skills, & &1.name)), :ok}
 
-  defp preview_skills(state, {:model, %ModelSelection{}}), do: preview_skills(state, :current)
+  defp preview_skills(state, {:model, %ModelSelection{}, _changed?}),
+    do: preview_skills(state, :current)
 
   defp preview_skills(state, {:activate, name}) do
     if Enum.any?(state.active_skills, &(&1.name == name)) do
@@ -3241,7 +3378,9 @@ defmodule MingaAgent.Providers.Native do
   defp prefix_selection(current, {:selected, operation, _names}),
     do: prefix_selection(current, operation)
 
-  defp prefix_selection(_current, {:model, %ModelSelection{} = selection}), do: selection
+  defp prefix_selection(_current, {:model, %ModelSelection{} = selection, _changed?}),
+    do: selection
+
   defp prefix_selection(current, _operation), do: current
 
   @spec commit_prefix_preview(state(), reference(), pid()) :: {:reply, term(), state()}
@@ -3732,19 +3871,19 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp auth_hint_for_provider("openai") do
-    "Run /auth openai <key>, sign in with /login for Codex models, or pick another configured model with /model."
+    "Run /auth openai to enter a key, sign in with /login for Codex models, or pick another configured model with /model."
   end
 
   defp auth_hint_for_provider("anthropic") do
-    "Run /auth anthropic <key> or pick another configured model with /model."
+    "Run /auth anthropic to enter a key, or pick another configured model with /model."
   end
 
   defp auth_hint_for_provider("google") do
-    "Run /auth google <key> or pick another configured model with /model."
+    "Run /auth google to enter a key, or pick another configured model with /model."
   end
 
   defp auth_hint_for_provider(_provider) do
-    "Run /auth to add an API key, sign in with /login, or pick another configured model with /model."
+    "Choose a provider with /model, check credential status with /auth, or sign in with /login."
   end
 
   @spec notify_lifecycle(pid(), Event.Error.t()) :: Event.Error.t()

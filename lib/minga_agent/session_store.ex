@@ -25,10 +25,10 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Reference
 
-  @version 5
+  @version 6
   @legacy_version 2
 
-  @typep snapshot_schema :: 2 | 4 | 5 | :model_v3 | :retention_v3
+  @typep snapshot_schema :: 2 | 4 | 5 | 6 | :model_v3 | :retention_v3
 
   @typedoc "Session metadata for the picker (without full message content)."
   @type session_meta :: %{
@@ -391,7 +391,7 @@ defmodule MingaAgent.SessionStore do
   @spec artifact_authority(map()) ::
           {:ok, String.t() | nil, [Reference.t()]} | {:error, :invalid_session_record}
   defp artifact_authority(%{"version" => version, "artifact_generation" => generation} = data)
-       when version in [3, @version] do
+       when version in [3, 5, @version] do
     references = snapshot_references(data)
 
     if generation == snapshot_generation(references),
@@ -540,7 +540,7 @@ defmodule MingaAgent.SessionStore do
 
   @spec load_versioned_record(map(), String.t()) :: {:ok, session_data()} | {:error, term()}
   defp load_versioned_record(%{"version" => version} = data, session_id)
-       when version in [2, 3, 4, @version] do
+       when version in [2, 3, 4, 5, @version] do
     with :ok <- validate_versioned_record(data, session_id),
          {:ok, session} <- deserialize(data) do
       restore_selection_data(version, data, session)
@@ -548,7 +548,7 @@ defmodule MingaAgent.SessionStore do
   end
 
   defp load_versioned_record(%{"version" => version}, _session_id)
-       when version not in [nil, 1, 2, 3, 4, @version],
+       when version not in [nil, 1, 2, 3, 4, 5, @version],
        do: {:error, {:unknown_session_version, version}}
 
   defp load_versioned_record(_data, _session_id), do: {:error, :legacy_import_required}
@@ -615,7 +615,7 @@ defmodule MingaAgent.SessionStore do
   @spec snapshot_schema(map()) :: snapshot_schema()
   defp snapshot_schema(%{"version" => 3, "artifact_generation" => _generation}), do: :retention_v3
   defp snapshot_schema(%{"version" => 3}), do: :model_v3
-  defp snapshot_schema(%{"version" => version}) when version in [2, 4, @version], do: version
+  defp snapshot_schema(%{"version" => version}) when version in [2, 4, 5, @version], do: version
 
   @spec non_empty_string?(term()) :: boolean()
   defp non_empty_string?(value), do: is_binary(value) and value != ""
@@ -630,7 +630,7 @@ defmodule MingaAgent.SessionStore do
          not Map.has_key?(data, "model_selection") and not Map.has_key?(data, "selection_intent")
 
   defp valid_model_selection_field?(%{"version" => version} = data)
-       when version in [3, 4, @version] do
+       when version in [3, 4, 5, @version] do
     is_map(data["model_selection"]) or is_map(data["selection_intent"])
   end
 
@@ -664,7 +664,7 @@ defmodule MingaAgent.SessionStore do
 
   defp valid_snapshot_message?(%{"type" => "tool_call"} = message, version) do
     non_empty_string?(message["id"]) and non_empty_string?(message["name"]) and
-      is_map(message["args"]) and message["status"] in ["running", "complete", "error"] and
+      is_map(message["args"]) and valid_tool_terminal?(message, version) and
       (is_nil(message["result"]) or is_binary(message["result"])) and
       is_boolean(message["is_error"]) and is_boolean(message["collapsed"]) and
       valid_persisted_output?(message, version)
@@ -681,16 +681,50 @@ defmodule MingaAgent.SessionStore do
 
   defp valid_snapshot_message?(_message, _version), do: false
 
+  @spec valid_tool_terminal?(map(), snapshot_schema()) :: boolean()
+  defp valid_tool_terminal?(message, @version) do
+    valid_tool_reason?(message["status"], Map.fetch(message, "terminal_reason")) and
+      valid_tool_error_flag?(message["status"], message["is_error"]) and
+      valid_tool_duration?(message["status"], message["terminal_reason"], message["duration_ms"])
+  end
+
+  defp valid_tool_terminal?(message, _legacy),
+    do:
+      message["status"] in ["running", "complete", "error"] and is_nil(message["terminal_reason"])
+
+  defp valid_tool_reason?("error", {:ok, "approval_timeout"}), do: true
+
+  defp valid_tool_reason?(status, {:ok, nil})
+       when status in ["running", "complete", "denied", "cancelled", "error"], do: true
+
+  defp valid_tool_reason?(_status, _reason), do: false
+
+  defp valid_tool_error_flag?(status, false) when status in ["running", "complete"], do: true
+
+  defp valid_tool_error_flag?(status, true) when status in ["denied", "cancelled", "error"],
+    do: true
+
+  defp valid_tool_error_flag?(_status, _flag), do: false
+
+  defp valid_tool_duration?("denied", nil, nil), do: true
+  defp valid_tool_duration?("denied", nil, _duration), do: false
+  defp valid_tool_duration?("error", "approval_timeout", nil), do: true
+  defp valid_tool_duration?("error", "approval_timeout", _duration), do: false
+  defp valid_tool_duration?(_status, _reason, nil), do: true
+
+  defp valid_tool_duration?(_status, _reason, duration),
+    do: is_integer(duration) and duration >= 0
+
   @spec valid_persisted_output?(map(), snapshot_schema()) :: boolean()
   defp valid_persisted_output?(message, schema) when schema in [@legacy_version, 4, :model_v3],
     do: not Map.has_key?(message, "output")
 
   defp valid_persisted_output?(%{"output" => nil}, schema)
-       when schema in [:retention_v3, @version],
+       when schema in [:retention_v3, 5, @version],
        do: true
 
   defp valid_persisted_output?(%{"output" => encoded}, schema)
-       when schema in [:retention_v3, @version] and is_map(encoded),
+       when schema in [:retention_v3, 5, @version] and is_map(encoded),
        do: match?({:ok, %Output{}}, OutputCodec.decode(encoded))
 
   defp valid_persisted_output?(_message, _version), do: false
@@ -754,7 +788,7 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  defp valid_record_generation?(data, @version),
+  defp valid_record_generation?(data, version) when version in [5, @version],
     do: valid_generation?(data["artifact_generation"])
 
   @spec valid_v2_usage?(term()) :: boolean()
@@ -1029,6 +1063,7 @@ defmodule MingaAgent.SessionStore do
       "name" => tc.name,
       "args" => tc.args,
       "status" => Atom.to_string(tc.status),
+      "terminal_reason" => serialize_terminal_reason(tc.terminal_reason),
       "result" => tc.result,
       "output" => serialize_output(tc.output),
       "is_error" => tc.is_error,
@@ -1045,6 +1080,9 @@ defmodule MingaAgent.SessionStore do
 
   defp serialize_message({:usage, %MingaAgent.TurnUsage{} = usage}),
     do: %{"type" => "usage", "data" => serialize_usage(usage)}
+
+  defp serialize_terminal_reason(nil), do: nil
+  defp serialize_terminal_reason(:approval_timeout), do: "approval_timeout"
 
   @spec serialize_output(Output.t() | nil) :: map() | nil
   defp serialize_output(nil), do: nil
@@ -1067,17 +1105,18 @@ defmodule MingaAgent.SessionStore do
 
   @spec deserialize(map()) :: {:ok, session_data()} | {:error, term()}
   defp deserialize(data) do
-    with {:ok, continuation} <- ContinuationCodec.decode(data["continuation"]) do
-      session =
-        data
-        |> deserialize_legacy()
-        |> Map.put(:continuation, continuation)
+    timestamp = string_or_default(data["timestamp"], "")
+    transcript = deserialize_transcript(data, timestamp)
 
+    with {:ok, continuation} <- ContinuationCodec.decode(data["continuation"]),
+         {:ok, continuation} <-
+           Continuation.restore_tool_outcomes(continuation, data["version"], transcript) do
+      session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation)
       {:ok, session}
     end
   end
 
-  @spec restore_selection_data(2 | 3 | 4 | 5, map(), session_data()) ::
+  @spec restore_selection_data(2 | 3 | 4 | 5 | 6, map(), session_data()) ::
           {:ok, session_data()} | {:error, term()}
   defp restore_selection_data(2, data, session) do
     {:ok,
@@ -1093,7 +1132,7 @@ defmodule MingaAgent.SessionStore do
        when not is_map_key(data, "model_selection") and not is_map_key(data, "selection_intent"),
        do: restore_selection_data(2, data, session)
 
-  defp restore_selection_data(version, data, session) when version in [3, 4, @version] do
+  defp restore_selection_data(version, data, session) when version in [3, 4, 5, @version] do
     case data["model_selection"] do
       selection when is_map(selection) ->
         case ModelSelection.decode(selection) do
@@ -1118,7 +1157,12 @@ defmodule MingaAgent.SessionStore do
   @spec deserialize_legacy(map()) :: deserialized_transcript_session()
   defp deserialize_legacy(data) do
     timestamp = string_or_default(data["timestamp"], "")
-    transcript = deserialize_transcript(data, timestamp)
+    deserialize_legacy(data, deserialize_transcript(data, timestamp))
+  end
+
+  @spec deserialize_legacy(map(), Transcript.t()) :: deserialized_transcript_session()
+  defp deserialize_legacy(data, transcript) do
+    timestamp = string_or_default(data["timestamp"], "")
     session = deserialize_session(data, timestamp, transcript)
 
     case Map.fetch(data, "memory") do
@@ -1193,6 +1237,7 @@ defmodule MingaAgent.SessionStore do
         name: raw["name"],
         args: raw["args"] || %{},
         status: deserialize_tool_status(raw["status"]),
+        terminal_reason: deserialize_terminal_reason(raw["terminal_reason"]),
         result: raw["result"] || "",
         output: deserialize_output(raw["output"]),
         is_error: Map.get(raw, "is_error", false),
@@ -1288,10 +1333,15 @@ defmodule MingaAgent.SessionStore do
   defp deserialize_tool_status("running"), do: :running
   defp deserialize_tool_status("complete"), do: :complete
   defp deserialize_tool_status("error"), do: :error
+  defp deserialize_tool_status("denied"), do: :denied
+  defp deserialize_tool_status("cancelled"), do: :cancelled
 
   defp deserialize_tool_status(status) do
     raise ArgumentError, "unsupported persisted tool status: #{inspect(status)}"
   end
+
+  defp deserialize_terminal_reason(nil), do: nil
+  defp deserialize_terminal_reason("approval_timeout"), do: :approval_timeout
 
   @spec deserialize_system_level(String.t() | nil) :: MingaAgent.Message.system_level()
   defp deserialize_system_level("error"), do: :error
@@ -1342,7 +1392,7 @@ defmodule MingaAgent.SessionStore do
   defp load_meta(path) do
     with {:ok, json} <- File.read(path),
          {:ok, data} when is_map(data) <- decode_json(json),
-         true <- data["version"] in [nil, 1, 2, 3, 4, @version] do
+         true <- data["version"] in [nil, 1, 2, 3, 4, 5, @version] do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
       timestamp = data["timestamp"] || ""
@@ -1373,11 +1423,11 @@ defmodule MingaAgent.SessionStore do
          "version" => version,
          "continuation" => %{"provenance" => "legacy_reconstructed"}
        })
-       when version in [2, 3, 4, @version],
+       when version in [2, 3, 4, 5, @version],
        do: :legacy_reconstructed
 
   defp continuation_kind(%{"version" => version})
-       when version in [2, 3, 4, @version],
+       when version in [2, 3, 4, 5, @version],
        do: :lossless
 
   defp continuation_kind(_data), do: :legacy_import_required

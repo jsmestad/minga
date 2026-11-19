@@ -700,21 +700,6 @@ struct MouseInputTests {
         #expect(spy.mouseEventCalls.isEmpty)
     }
 
-    @Test("presentation scroll normalization shifts fold hit testing vertically only")
-    @MainActor func presentationScrollNormalizationShiftsFoldHitTestingVerticallyOnly() {
-        let normalized = EditorNSView.presentationNormalizedGutterPoint(
-            NSPoint(x: 18.0, y: 3.0),
-            presentation: EditorNSView.LocalScrollPresentation(windowId: 7, offset: CGPoint(x: 0, y: 8.0)),
-            targetGutterRect: GUICellRect(row: 0, col: 2, width: 6, height: 4),
-            cellWidth: 8.0,
-            cellHeight: 8.0
-        )
-
-        #expect(normalized.x == 18.0)
-        #expect(Int(normalized.y / 8.0) == 1)
-        #expect(normalized.y > 3.0)
-    }
-
     @Test("mouseDown ignores committed-but-unpresented gutter data")
     @MainActor func staleGutterIgnoredForHitTesting() throws {
         let spy = SpyEncoder()
@@ -748,26 +733,6 @@ struct MouseInputTests {
     }
 
     // MARK: - Mouse move (deduplication)
-
-    @Test("smooth scroll target resets when pointer leaves target pane")
-    func smoothScrollTargetResetsWhenPointerLeavesTargetPane() {
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, hasPixelOffset: true) == true)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: nil, hasPixelOffset: true) == true)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 1, hasPixelOffset: true) == false)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: 1, pointerWindowId: 2, hasPixelOffset: false) == false)
-        #expect(EditorNSView.shouldResetSmoothScrollTarget(currentTargetWindowId: nil, pointerWindowId: 2, hasPixelOffset: true) == false)
-    }
-
-    @Test("smooth scroll routing keeps the gesture target cell after the pointer moves")
-    func smoothScrollRoutingKeepsGestureTargetCell() {
-        let routedTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: (row: 5, col: 12), row: 5, col: 40)
-        #expect(routedTarget.row == 5)
-        #expect(routedTarget.col == 12)
-
-        let fallbackTarget = EditorNSView.smoothScrollEventCellPosition(targetCell: nil, row: 5, col: 40)
-        #expect(fallbackTarget.row == 5)
-        #expect(fallbackTarget.col == 40)
-    }
 
     @Test("presentation scroll offset suppresses negative horizontal normalization when scrollLeft is zero")
     func presentationScrollOffsetSuppressesNegativeHorizontalNormalization() {

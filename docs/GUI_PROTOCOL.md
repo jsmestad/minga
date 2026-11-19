@@ -225,7 +225,7 @@ Flags bits:
   bit 2: is_agent (always 0 in the active-workspace projection)
   bit 3: has_attention
   bits 4-6: kind-scoped status. When is_agent=1: agent_status (0=idle,
-            1=thinking, 2=tool_executing, 3=error, 4=plan). When is_agent=0:
+            1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting). When is_agent=0:
             bit 4 = is_ephemeral (file tab backed by no file on disk, e.g.
             Untitled-1); bits 5-6 reserved.
   bit 7: is_pinned
@@ -355,7 +355,7 @@ The optional Review section identifies a read-only review, not an editable buffe
 
 Back resumes the retained draft without changing its text, cursor, selection or editing mode. It restores input focus through the BEAM owner; frontends do not infer draft focus from the displayed mode label.
 
-`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` is the currently running tool label when the agent status is `tool_executing`; it is empty otherwise.
+`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` names the executing tool for `tool_executing` or the waiting invocation for `approval_waiting`; it is empty otherwise.
 
 `cursor_line` and `cursor_col` are 1-indexed on the wire.
 
@@ -369,11 +369,11 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
 Parser status: 0=available, 1=unavailable, 2=restarting
 
-Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting
 
 Workspace kind: 0=manual, 1=agent. Workspace status uses the same values as agent status. Workspace flags: bit 0=attention, bit 1=closeable.
 
-Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
+Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting
 
 Macro recording: 0=not recording, 1-26=recording register a-z
 
@@ -496,7 +496,9 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 | 0x09 | InputFocused | `input_focused(1)` |
 
-Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
+Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
+
+Approval waiting is a presentation status, not a new execution or busy state. Render it without an execution animation, but keep Stop available because the turn is still active.
 
 Pending approval payload:
 ```
@@ -721,6 +723,7 @@ Flags:
   bit 0: full_refresh (1 = all rows changed, 0 = incremental)
   bit 2: sequential resident rows (buffer line equals row-store index; full 0x80 replaces mode, A1/A2 inherit it)
   bit 1: cursor_visible (1 = show cursor, 0 = hide cursor)
+  bit 3: wrapped resident rows (mutually exclusive with bit 2; full 0x80 replaces mode, A1/A2 inherit it)
 
 Cursor shape: 0 = block, 1 = beam, 2 = underline
 
@@ -777,15 +780,17 @@ Cursorline section:
 ScrollPresentation section:
   window_id(2) + flags(1) + anchor_top(4) + anchor_left(2) + anchor_visual_row_offset(2)
   + visible_start_line(4) + visible_end_line(4) + overscan_start_line(4) + overscan_end_line(4)
-  + content_epoch(4) + layout_generation(4) + scroll_seq(4)
+  + content_epoch(4) + layout_generation(4) + scroll_seq(4) + horizontal_pan_ack(4) + horizontal_pan_limit(2)
 
 ScrollPresentation flags:
   bit 0: reset_required. The client must discard any local presentation offset, velocity, and reconciliation target before using this frame as a new anchor.
+  bit 1: effective wrapping is active. If the store is windowed, whole-row vertical motion follows commits. Wrapped resident stores can present it locally.
+  bit 2: the BEAM accepts horizontal pan intents for this pane. False for wrapped panes and non-buffer surfaces.
 
 Pane geometry section:
   window_id(2)
   total_rect(8) + content_rect(8) + text_rect(8) + gutter_rect(8) + clip_rect(8)
-  viewport_top(4) + viewport_left(2) + viewport_rows(2) + viewport_cols(2) + total_lines(4) + visual_row_offset(2) + total_visual_rows(4)
+  viewport_top(4) + viewport_left(2) + viewport_rows(2) + viewport_cols(2) + total_lines(4) + visual_row_offset(4) + total_visual_rows(4)
   line_number_width(2) + sign_col_width(2) + hit_region_count(1)
   Per hit region: kind(1) + rect(8) + window_id(2)
 
@@ -800,11 +805,17 @@ Accessibility label section:
 
 The accessibility label names the pane's BEAM-owned buffer identity. It uses the buffer display name, a read-only suffix when applicable, and `[no file]` when the pane has no file identity. `generation` changes when a pane ID presents different content, so the BEAM can reject a queued native focus action for a stale pane lifetime. The cursor uses `0xFFFF` and `0xFFFFFFFF` when absent. Cursor and selection offsets are row-local UTF-16 boundaries resolved by the BEAM from the exact composed visual rows. This mapping covers zero-width tabs and does not ask native clients to reinterpret source positions. Native frontends expose one virtual text area for each visible pane. They derive its value, selection, bounds, and active-pane state from the exact visible presentation snapshot, never from a newer committed but unpresented frame. The editor container is an accessibility group and must not repeat the pane text.
 
-The `ScrollPresentation` section is the shared contract for local scroll feel (an **offset transform** in the local-presentation taxonomy; see ARCHITECTURE.md "Frontend-local interaction state"). The BEAM commits an anchor (`anchor_top`, `anchor_left`, `anchor_visual_row_offset`) and identifies the row/content/layout basis for that anchor with the frame transaction, `content_epoch`, row IDs/content hashes, and `layout_generation`. The frontend may keep ephemeral presentation state (local offset, velocity or momentum, overscan consumption, and reconciliation target) derived from this section, but that state is not editor state and may be discarded at any time. The reconciliation key for offset transforms is `{contentEpoch, layoutGeneration, anchorTop, anchorLeft}`: any change in this key means the BEAM moved the anchor and local offsets must be discarded. `visible_end_line` and `overscan_end_line` are exclusive bounds, so the visible and overscan line ranges are half-open: `start_line <= line < end_line`. Local presentation scroll is safe only inside `clip_rect` and only while the needed rows are already committed or retained inside `overscan_start_line..overscan_end_line`; when the range is only the visible range, the client must not expose blank space by extrapolating beyond cached rows.
+For an unwrapped, windowed buffer, the source cursor position may also be present when only the committed horizontal clip hides the caret. It lets the frontend draw the caret if a local pan reveals it. The committed cursor-visibility flag remains unchanged.
+
+The `ScrollPresentation` section is the shared contract for local scroll feel (an **offset transform** in the local-presentation taxonomy; see ARCHITECTURE.md "Frontend-local interaction state"). The BEAM commits an anchor (`anchor_top`, `anchor_left`, `anchor_visual_row_offset`) and identifies its basis with the frame transaction, `content_epoch`, row IDs/content hashes, and `layout_generation`. The frontend may keep discardable local offsets, velocity, or a pending reconciliation target. A changed content or layout basis invalidates those offsets. An anchor change on the same basis can instead acknowledge scroll intent, as described below. The visible and overscan line ranges are half-open: `start_line <= line < end_line`. Local scrolling must stay inside `clip_rect` and must not expose uncached rows outside `overscan_start_line..overscan_end_line`.
 
 `scroll_seq` (#2661, #2652) is a monotonic scroll-authority sequence, additive to the reconciliation key above. It advances on either of two signals: (a) the BEAM commits a viewport top that differs from both the previous committed top and the frontend-reported free-scroll top (a genuine BEAM-initiated anchor move: a cursor-must-stay-visible re-attach, or a jump that moved the top); or (b) an authoritative viewport-jump command explicitly marked the window, which bumps even when the committed top is unchanged. Always-authoritative commands (view centering `zz`/`zt`/`zb`, line/page scrolls `ctrl-e`/`ctrl-y`/`ctrl-d`/`ctrl-u`/`ctrl-f`/`ctrl-b`, document jumps `gg`/`G`, goto-line, search cancel) mark at dispatch; failable jumps (search hits `n`/`N`/`/`/`?`, mark jumps `'`/`` ` ``, bracket match `%`, the LSP goto family) mark only in their success branch, so a no-op (failed search, no matching bracket, unset mark, LSP miss) never discards a local offset. The authoritative set lives in `MingaEditor.Commands` (`@authoritative_scroll_commands`) plus those success-branch marks — that code, not this paragraph, is the source of truth. A frontend must discard its local offset whenever `scroll_seq` increases, even if `anchorTop`/`anchorLeft`/`layoutGeneration`/`contentEpoch` happen to be unchanged. This resolves the race where a BEAM-initiated jump lands on the same top the frontend was showing under its local offset (a `zz` while already centered, a search hit already on screen): the anchor-key check alone cannot tell that apart from a routine echo, but the explicit sequence bump does. A jump that also moves the top bumps `scroll_seq` exactly once. `H`/`M`/`L` are pure cursor motion within the visible screen and deliberately do not mark; they bump only through signal (a) when they move the committed top.
 
 **Free-scroll zone (#2661).** For a window with full-document residence (#2653/#2658), the frontend applies wheel/trackpad input as an immediate local pixel offset over the resident row textures on the same frame the input arrives, with no BEAM round trip on the render path. It reports scroll intent promptly on the existing scroll-intent channel (the `scroll_batch` opcode) so the BEAM can track cursor position and resolve viewport-relative commands (`H`, `M`, `L`, `zt`, `zz`, `zb`) against the reported top; because scroll reports and key events share the same ordered input channel, later commands always resolve against the most recent report. Every wheel/trackpad report is an *echo*: the committed top matches the top the frontend already reported, so it never advances `scroll_seq`. Wheel/trackpad scrolling is VSCode-style (#2684): it moves only the viewport and never the cursor, at any distance or velocity. The cursor may scroll out of view; when it does, the caret and cursorline disappear (see the cursorline note below) and the next cursor-moving keypress re-anchors the view via the existing cursor-follow. Explicit scroll commands (`ctrl-e`/`ctrl-y`, `ctrl-d`/`ctrl-u`/`ctrl-f`/`ctrl-b`, `zz` family) keep their vim cursor semantics; only wheel/trackpad input is viewport-only. Because the committed top always equals the reported top, `scroll_seq` stays put — advancing it on every wheel frame would prescribe a frontend discard per frame during a long scroll gesture, i.e. a re-anchor storm. Only BEAM-initiated anchor moves (jumps, `ctrl-d`/`ctrl-u`, `zz`, cursor-must-stay-visible re-attach) advance `scroll_seq`. This is windowed-window- and residence-off-safe: the free-scroll zone activates only where the BEAM's overscan range already covers the motion (`overscan_start_line..overscan_end_line`), which the existing local-offset compositor already gates on, so windowed windows and residence-off configurations keep today's behavior unchanged.
+
+Horizontal gestures send `horizontal_pan` (0x12) with a pane ID, signed display columns, and a nonzero intent sequence. The BEAM sets `anchor_left` and echoes the latest processed intent sequence in `horizontal_pan_ack` without moving the caret or advancing `scroll_seq`. Frontends keep the displayed position stable across intermediate echoes. They retire the offset when the latest sent intent is acknowledged, not merely when the echoed column matches the prediction. A BEAM re-anchor that changes either axis advances `scroll_seq` and discards the prediction.
+
+The BEAM computes `horizontal_pan_limit` from the widest composed row in the visible pane, excluding overscan, and the usable viewport width. A terminal scrollbar leaves one fewer column for text. Both frontends use this limit for rightward prediction; the BEAM uses the same limit when committing a pan. If the limit shrinks below the current left column, a leftward gesture can still return progressively.
 
 **Drag-defers rule (#2661).** During an active selection drag (left mouse button held down over buffer content, not a pane-divider or scrollbar-thumb drag), local presentation scrolling defers to BEAM-authoritative anchors: the frontend suppresses its local pixel offset and renders the plain committed frame instead. Drag-autoscroll (crossing the top/bottom edge while dragging a selection) is entirely BEAM-owned. Scroll-intent reports keep going out normally during a drag; only the local offset *presentation* is suppressed, so there is no visible conflict between the two scroll mechanisms. This means scrolling while dragging a selection intentionally feels heavier than free-scroll: it waits on the BEAM round trip rather than rendering locally on the same frame. That extra latency is by design (selection extent and autoscroll are BEAM-owned, so the frontend must not layer a local offset on top), not a bug to be "fixed" by re-enabling the local offset during a drag.
 
@@ -1048,6 +1059,8 @@ Typed body payloads:
 0x0A (assistant_markdown): type(1) + block_count(2) + blocks...
 ```
 
+For `tool_call` (`0x04`) and `styled_tool_call` (`0x08`), `status` is authoritative: 0 = running, 1 = complete, 2 = error, 3 = denied, 4 = cancelled, 5 = approval_expired. The retained `error` flag does not override this outcome. Denial, known cancellation, and approval expiry carry no execution duration (`duration_ms = 0`); a human approval wait must not appear as tool execution time. An error known to have occurred without execution also carries no execution duration. An admitted effect with an unknown result is an error with its retained explanation and output, not a fabricated cancellation or completion.
+
 Markdown block payloads are BEAM-authored semantic structure. Frontends must render these blocks directly and must not infer code cards from styled-run flags, decorative rails, or all-code lines. Each block starts with `block_id(4) + kind(1) + flags(1)` and then a kind-specific payload:
 
 - `0x01 paragraph`: `line_count(2) + styled_lines`
@@ -1104,8 +1117,8 @@ Per todo:
 ```
 
 `status`: 0 = idle, 1 = working, 2 = iterating, 3 = needs_you, 4 = done, 5 = errored.
-`can_approve` means the agent is waiting on the user to approve or reject the current work. Frontends should treat it as the source of truth for the review affordance, and render the needs-you state when it is set.
-`dispatch_timestamp` is Unix seconds. `review_hint` is the short review copy shown next to the progress summary.
+`can_approve` is currently false. Tool decisions belong to request-bound `approval_tool_call` cards, not the context bar. A pending approval projects `status = needs_you` and names the waiting tool in `active_action`.
+`dispatch_timestamp` is Unix seconds. `review_hint` is currently empty; Review and tool approval have separate controls.
 `todo_count` is the number of visible todo items in the snapshot. The todo list is the editor's live projection of the provider plan, not a separate provider-only state. A hidden context may omit the progress and todo tail after `can_approve`; frontends must treat missing tail fields as empty progress and no todos for legacy compatibility.
 
 ### 0x98 — gui_workspaces
@@ -1130,7 +1143,7 @@ Per visible tab:
   + path_len(2) + path(path_len) + tint_color_rgb(4)
 ```
 
-`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned, bit 6 = ephemeral (file tab backed by no file on disk, e.g. Untitled-1). `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
+`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned, bit 6 = ephemeral (file tab backed by no file on disk, e.g. Untitled-1). `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes the active workspace's agent tab first when present, followed by its file tabs. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 
@@ -1265,6 +1278,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x66 | agent_prompt_fit | window_id(2) + generation(8) + columns(2) + max_rows(2) | Report the maximum physical inner text allocation for committed prompt window 65534 |
 | 0x67 | agent_prompt_scroll | window_id(2) + generation(8) + delta_rows(4, signed) | Scroll the committed prompt by wrapped visual rows; positive is down |
 | 0x68 | agent_tool_approval | session_id(string16) + request_id(string16) + tool_call_id(string16) + decision(1) | Resolve only the displayed session's admitted request and pending tool call |
+| 0x69 | scroll_to_visual_rank | window_id(2) + presentation_id(8) + rank(4) | Scroll the named wrapped resident pane to a visual row without moving its cursor or focus. The BEAM ignores stale presentations. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -1278,7 +1292,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
 | 0x42 | git_open_diff | path_len(2) + path(path_len) + section(1) | Open a diff view for a git status file in the selected section |
 
-`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, `5 = timeline`, and `6 = review`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item` and `2 = activate action`. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry; intent `2` reviews the exact offered full file path. Review intents are `1 = back to chat` and `2 = review latest`. Review uses the opaque item ID and generation from status section 0x10, bound to the shell registration, workspace/session, tab, pane incarnation and selected source. Refresh is offered only while stale.
+`semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, `5 = timeline`, and `6 = review`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item`, `2 = activate action`, and `3 = dismiss`. Dismissal sends the visible picker's activation generation and an empty item ID. A stale dismissal cannot close a replacement picker. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry; intent `2` reviews the exact offered full file path. Review intents are `1 = back to chat` and `2 = review latest`. Review uses the opaque item ID and generation from status section 0x10, bound to the shell registration, workspace/session, tab, pane incarnation and selected source. Refresh is offered only while stale.
 
 All targeted handling resolves the BEAM-issued identity before applying the action. A stale generation or missing target leaves editor semantics unchanged, logs a warning with the surface, generation, ID, and reason, and resets frontend render observations so the next frame is authoritative. Tab actions retain their monotonic, non-reused tab IDs and separate sub-opcodes. Destination positions such as `tab_reorder.new_index` are not target identities.
 
@@ -1540,9 +1554,11 @@ A client reports text hits using that presentation ID, the absolute row-store ra
 
 For a windowed wrapped payload, `ScrollPresentation.anchor_visual_row_offset` counts continuation rows retained before the visible anchor in that payload. Rows already trimmed from the payload are not counted again. The document viewport's visual-row offset can therefore differ from the payload-relative offset.
 
+In a wrapped resident store, each source line starts with a normal row followed by its continuation rows. Count normal rows to recover current source line numbers after a splice; the embedded `buf_line` can be historical. A2 splices and A9 layers use visual ranks, while sparse gutter overrides use source lines. The viewport's logical top selects the group's first rank, and `anchor_visual_row_offset` advances within that full group. Clamp local movement to `max(total_visual_rows - viewport_rows, 0)`. Elastic presentation must not add pending row motion beyond that bound.
+
 ## Resident Semantics (0xA9)
 
-`gui_resident_semantics` publishes renderer-owned semantics beside a sequential resident row store. It uses a u32 length envelope. All row coordinates are absolute u32 ranks in the retained store. Clients clip and rebase the committed model for the locally displayed slice; they do not recompute indentation, diagnostics, annotations, selection, or cursor policy.
+`gui_resident_semantics` publishes renderer-owned semantics beside a resident row store. It uses a u32 length envelope. All row coordinates are absolute u32 visual ranks in the retained store. Clients clip and rebase the committed model for the locally displayed slice; they do not recompute indentation, diagnostics, annotations, selection, or cursor policy.
 
 Resident `gui_window_content` commands omit the viewport selection, search, diagnostics, document highlight, annotation, and cursorline sections, and resident frame metadata omits legacy `gui_cursorline` and `gui_indent_guides`. Their legacy cursor and accessibility cursor fields are absent or hidden; the client projects cursor and selection accessibility from the committed resident semantics and local text slice. Search and document highlight colors remain part of each retained row's composed spans. Windowed frames keep the legacy viewport sections and metadata.
 

@@ -71,5 +71,5 @@ func (m Model) charmInput(prompt string, value string, cursor uint16) string {
 	input.SetValue(value)
 	input.SetCursor(int(cursor))
 	input.Focus()
-	return lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Width(m.width).Render(fit(input.View(), m.width))
+	return lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Render(fitStyled(input.View(), m.width))
 }

@@ -10,7 +10,8 @@ struct SemanticProtocolTypesTests {
             (1, .thinking),
             (2, .executingTool),
             (3, .error),
-            (4, .planning)
+            (4, .planning),
+            (5, .approvalWaiting)
         ]
 
         for (rawValue, expected) in known {
@@ -21,6 +22,31 @@ struct SemanticProtocolTypesTests {
 
         #expect(AgentStatus(rawValue: 0xFE) == .unknown(rawValue: 0xFE))
         #expect(AgentStatus(rawValue: 0xFE).rawValue == 0xFE)
+    }
+
+    @Test("Approval waiting keeps Stop without executing-work animation")
+    func activeTurnStatuses() {
+        let cases: [(AgentStatus, Bool, Bool)] = [
+            (.idle, false, false), (.thinking, true, true),
+            (.executingTool, true, true), (.error, false, false),
+            (.planning, false, false), (.approvalWaiting, true, false),
+            (.unknown(rawValue: 255), false, false)
+        ]
+        for (status, active, animated) in cases {
+            #expect(status.hasActiveTurn == active)
+            #expect(status.isWorking == animated)
+        }
+    }
+
+    @Test("Tool statuses preserve committed outcomes and future values")
+    func toolStatuses() {
+        let known: [ToolCallStatus] = [.running, .complete, .error, .denied, .cancelled, .approvalExpired]
+        for (byte, expected) in known.enumerated() {
+            #expect(ToolCallStatus(rawValue: UInt8(byte)) == expected)
+            #expect(expected.rawValue == UInt8(byte))
+        }
+        #expect(ToolCallStatus(rawValue: 255) == .unknown(rawValue: 255))
+        #expect(ToolCallStatus(rawValue: 255).rawValue == 255)
     }
 
     @Test("Context-card statuses preserve future values")

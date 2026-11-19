@@ -517,6 +517,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       _ = Session.messages(session)
 
       :ok = Session.abort(session)
+      refute_received {:agent_event, ^session, {:approval_resolved, _target, _resolution}}
 
       send_provider_event(session, %Event.ToolStart{
         tool_call_id: "tc-stale",
@@ -582,6 +583,7 @@ defmodule MingaAgent.SessionLifecycleTest do
     test "stops receiving events after unsubscribe" do
       session = start_subscribed_session()
       assert_receive {:agent_event, ^session, {:credentials_status, :configured}}
+      assert_receive {:agent_event, ^session, {:connection_changed, _snapshot}}
 
       :ok = Session.unsubscribe(session)
 
@@ -608,7 +610,12 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}
+        %Event.ToolEnd{
+          tool_call_id: "tc1",
+          name: "read_file",
+          outcome: :complete,
+          result: "contents"
+        }
       )
 
       snapshot = Session.editor_snapshot(session)
@@ -635,7 +642,12 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}
+        %Event.ToolEnd{
+          tool_call_id: "tc1",
+          name: "read_file",
+          outcome: :complete,
+          result: "contents"
+        }
       )
 
       snapshot = Session.editor_snapshot(session)
@@ -643,7 +655,7 @@ defmodule MingaAgent.SessionLifecycleTest do
 
       send_provider_event(
         session,
-        %Event.ToolEnd{tool_call_id: "tc2", name: "shell", result: "output"}
+        %Event.ToolEnd{tool_call_id: "tc2", name: "shell", outcome: :complete, result: "output"}
       )
 
       snapshot = Session.editor_snapshot(session)

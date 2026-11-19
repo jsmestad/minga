@@ -164,15 +164,6 @@ defmodule MingaEditor.State.Windows do
     end
   end
 
-  @doc "Scrolls one window horizontally."
-  @spec scroll_horizontal(t(), Window.id(), integer()) :: t()
-  def scroll_horizontal(%__MODULE__{} = state, id, delta) do
-    case fetch(state, id) do
-      {:ok, window} -> replace_window(state, id, Window.scroll_horizontal(window, delta))
-      :error -> state
-    end
-  end
-
   @doc "Replaces fold ranges in one window."
   @spec set_fold_ranges(t(), Window.id(), list()) :: t()
   def set_fold_ranges(%__MODULE__{} = state, id, ranges) when is_list(ranges) do

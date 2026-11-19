@@ -11,6 +11,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.HoverPopup
   alias MingaEditor.SignatureHelp
   alias MingaEditor.Shell.Traditional.AgentSurfaces
+  alias MingaEditor.Agent.ConnectionPrompt
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.Flashes
   alias MingaEditor.Shell.Traditional.GitToast
@@ -25,6 +26,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.InlineEdit
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.Prompt
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
@@ -65,6 +67,15 @@ defmodule MingaEditor.Shell.Traditional.State do
             input: %InputState{},
             signature_help: nil,
             tool_prompts: %ToolPrompts{}
+
+  @doc "Returns presentation state safe to retain outside the input owner."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{modal: modal} = state) do
+    case ModalOverlay.render_snapshot(modal) do
+      ^modal -> state
+      snapshot -> %{state | modal: snapshot}
+    end
+  end
 
   @doc "Installs the configured missing-tool prompt suppression policy."
   @spec install_tool_prompt_suppression(t(), boolean()) :: t()
@@ -387,12 +398,22 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec tab_bar(t()) :: TabBar.t() | nil
   def tab_bar(%__MODULE__{tab_bar: tab_bar}), do: tab_bar
 
-  @doc "Installs an exact tab-bar value or clears it with nil."
+  @doc "Installs a tab bar and discards credential input when its owning workspace leaves."
   @spec install_tab_bar(t(), TabBar.t() | nil) :: t()
-  def install_tab_bar(%__MODULE__{} = state, nil), do: %{state | tab_bar: nil}
+  def install_tab_bar(
+        %__MODULE__{
+          modal: {:prompt, %{prompt_ui: %Prompt{context: %ConnectionPrompt{workspace_id: id}}}}
+        } = state,
+        tab_bar
+      )
+      when is_nil(tab_bar) or is_struct(tab_bar, TabBar) do
+    active_id = if tab_bar, do: TabBar.active_workspace_id(tab_bar)
+    state = if active_id == id, do: state, else: close_modal(state)
+    %{state | tab_bar: tab_bar}
+  end
 
-  def install_tab_bar(%__MODULE__{} = state, %TabBar{} = tab_bar),
-    do: %{state | tab_bar: tab_bar}
+  def install_tab_bar(%__MODULE__{} = state, %TabBar{} = tab_bar), do: %{state | tab_bar: tab_bar}
+  def install_tab_bar(%__MODULE__{} = state, nil), do: %{state | tab_bar: nil}
 
   @doc "Retires every exact reference to a dead buffer from the Traditional tab bar."
   @spec retire_buffer(t(), pid()) :: t()

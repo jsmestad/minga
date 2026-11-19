@@ -660,6 +660,61 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.cursor_col == 12
     end
 
+    test "wrapped resident promotion retains whole source groups and splices visual rows" do
+      state = gui_state(rows: 8, cols: 20, content: "abcdefghijABCDEFGHIJ\nstable\nend")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+
+      :ok =
+        BufferProcess.batch_decorations(buffer, fn decorations ->
+          {_id, decorations} = Decorations.add_annotation(decorations, 1, "stable note")
+          decorations
+        end)
+
+      {[arming], _, state} = build_content(state)
+      assert arming.window_model.row_store_mode == :windowed
+
+      {[hydrated], _, state} = build_content(state)
+      model = hydrated.window_model
+      assert model.wrapped
+      assert model.row_store_mode == {:resident, 4}
+      assert model.geometry.viewport.total_visual_rows == 4
+      assert model.geometry.viewport.total_lines == 3
+      assert model.gutter.entries.line_count == 3
+      assert {:replace, [%{row: 2, text: "stable note"}]} = model.resident_semantics.annotations
+      [_, _, suffix_id, end_id] = resident_row_ids(state)
+
+      :ok = BufferProcess.insert_text(buffer, "abcdefghijklmn")
+      {[edited], _, state} = build_content(state)
+      model = edited.window_model
+
+      assert model.row_store_mode == {:resident, 5}
+      assert model.geometry.viewport.total_lines == 3
+      assert model.resident_semantics.header.last_row_id == end_id
+      assert %{base_row_count: 4, result_row_count: 5, splices: [splice]} = model.row_delta
+      assert %{start_index: 0, delete_count: 2, insert_rows: [_, _, _]} = splice
+
+      assert [%{start_row: 0, delete_count: 2, insert_count: 3}] =
+               model.resident_semantics.row_splices
+
+      assert [_, _, _, ^suffix_id, ^end_id] = resident_row_ids(state)
+
+      :ok =
+        BufferProcess.batch_decorations(buffer, fn decorations ->
+          {_id, decorations} = Decorations.add_annotation(decorations, 0, "head note")
+          decorations
+        end)
+
+      {[annotated], _, state} = build_content(state)
+      assert %{splices: []} = annotated.window_model.row_delta
+
+      assert {:replace, [%{row: 0, text: "head note"}, %{row: 3, text: "stable note"}]} =
+               annotated.window_model.resident_semantics.annotations
+
+      assert [_, _, _, ^suffix_id, ^end_id] = resident_row_ids(state)
+    end
+
     test "wrapped cursor projection uses source bytes across a multibyte boundary" do
       content = String.duplicate("é", 14) <> "z"
       state = gui_state(cols: 20, content: content)
@@ -675,6 +730,31 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.cursor_row == 1
       assert model.cursor_col == 0
       assert model.accessibility_cursor == {1, 0}
+    end
+
+    test "insert caret stays before the window-fold summary in a wrapped pane" do
+      state = gui_state(content: "x\nfolded\nalso folded\nlast")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert :ok = BufferProcess.move_to(buffer, {0, 1})
+
+      id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, id)
+
+      window =
+        window |> EditorWindow.set_fold_ranges([FoldRange.new!(0, 2)]) |> EditorWindow.fold_at(0)
+
+      windows = %{state.workspace.windows | map: Map.put(state.workspace.windows.map, id, window)}
+
+      workspace =
+        state.workspace
+        |> SessionState.set_windows(windows)
+        |> SessionState.transition_mode(:insert)
+
+      {[wf], _cursor, _state} = build_content(%{state | workspace: workspace})
+      assert [%{row_type: :fold_start, text: "x ··· 2 lines"} | _] = wf.window_model.rows
+      assert wf.window_model.cursor_col == 1
+      assert wf.window_model.accessibility_cursor == {0, 1}
     end
 
     test "wrapped cursor projection follows a tab presentation split across rows" do
@@ -1337,7 +1417,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert fold_gutter.display_type == :fold_start
     end
 
-    test "wrapped geometry reports total visual rows for the whole buffer" do
+    test "first windowed wrapped paint does not advertise an exact document extent" do
       content = Enum.map_join(1..10, "\n", fn _idx -> "abcdefghijABCDEFGHIJ" end)
       state = gui_state(rows: 4, cols: 20, content: content)
       buffer = state.workspace.buffers.active
@@ -1346,7 +1426,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       {[wf], _cursor, _state} = build_content(state)
 
-      assert wf.window_model.geometry.viewport.total_visual_rows == 20
+      assert wf.window_model.row_store_mode == :windowed
+      assert wf.window_model.geometry.viewport.total_visual_rows == 0
     end
 
     test "wrapped presentation payload keeps document visual offset separate from payload overscan" do

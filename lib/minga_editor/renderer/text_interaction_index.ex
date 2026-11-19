@@ -6,7 +6,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
   alias MingaEditor.Renderer.TextPresentation
 
   @type root_ref :: reference()
-  @type current_root :: {pid(), root_ref()}
+  @type current_root :: {pid(), root_ref() | nil}
   @type t :: %__MODULE__{
           table: :ets.table(),
           current_roots: %{optional(pos_integer()) => current_root()},
@@ -32,15 +32,32 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
 
     :ets.insert(
       index.table,
-      {{:lease, presentation.window_id, presentation.presentation_id},
-       {presentation.buffer, presentation.source_version, rows}}
+      {{:lease, presentation.window_id, presentation.presentation_id}, lease(presentation, rows)}
     )
 
     retain_rows(index.table, rows)
 
     index
-    |> swap_current(presentation.window_id, presentation.buffer, rows)
+    |> update_current_geometry(presentation, rows)
     |> Map.put(:last_publication_nodes, published_nodes)
+  end
+
+  @doc "Replaces current wrap geometry without retaining a frontend-visible input lease."
+  @spec publish_current(t(), TextPresentation.t()) :: t()
+  def publish_current(
+        %__MODULE__{} = index,
+        %TextPresentation{identity: {:wrapped_resident, _, _, _}} = presentation
+      ) do
+    {rows, _published_nodes} = publish_rows(index.table, presentation.rows)
+    update_current_geometry(index, presentation, rows)
+  end
+
+  def publish_current(%__MODULE__{} = index, %TextPresentation{} = presentation),
+    do: update_current_geometry(index, presentation, :none)
+
+  defp update_current_geometry(index, presentation, rows) do
+    root = publish_scroll_geometry(index.table, presentation, rows)
+    swap_current(index, presentation.window_id, presentation.buffer, root)
   end
 
   @doc "Makes one already-published candidate active."
@@ -60,7 +77,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
     key = {:lease, presentation.window_id, presentation.presentation_id}
 
     case :ets.take(table, key) do
-      [{^key, {_buffer, _source_version, rows}}] ->
+      [{^key, {_buffer, _source_version, rows, _scroll_request, _settled_scroll_seq}}] ->
         delete_active_if_exact(table, presentation.window_id, presentation.presentation_id)
         release_rows(table, rows)
         index
@@ -77,6 +94,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
       if MapSet.member?(window_ids, window_id) do
         acc
       else
+        clear_scroll_geometry(acc.table, window_id)
         release_root(acc.table, root)
         %{acc | current_roots: Map.delete(acc.current_roots, window_id)}
       end
@@ -88,6 +106,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
   def drop_buffer(%__MODULE__{} = index, buffer) when is_pid(buffer) do
     Enum.reduce(index.current_roots, index, fn
       {window_id, {^buffer, root}}, acc ->
+        clear_scroll_geometry(acc.table, window_id)
         release_root(acc.table, root)
         %{acc | current_roots: Map.delete(acc.current_roots, window_id)}
 
@@ -120,7 +139,8 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
   defp publish_node(_table, nil), do: {nil, 0}
 
   defp publish_node(table, tree) do
-    {:ok, {ref, size, left, left_size, entries, right}} = ResidentStore.interaction_node(tree)
+    {:ok, {ref, size, lines, left, left_size, left_lines, starts, entries, right}} =
+      ResidentStore.interaction_node(tree)
 
     if :ets.member(table, {:node_header, ref}) do
       {ref, 0}
@@ -129,7 +149,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
       {right_ref, right_count} = publish_node(table, right)
 
       :ets.insert(table, [
-        {{:node_header, ref}, {size, left_ref, left_size, tuple_size(entries), right_ref}},
+        {{:node_header, ref}, {size, lines, left_ref, left_size, left_lines, starts, right_ref}},
         {{:node_entries, ref}, entries},
         {{:node_refs, ref}, 0}
       ])
@@ -140,14 +160,70 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
     end
   end
 
+  defp lease(
+         %TextPresentation{identity: {:wrapped_resident, _, request, _}} = presentation,
+         rows
+       ) do
+    {presentation.buffer, presentation.source_version, rows, request,
+     presentation.settled_scroll_seq}
+  end
+
+  defp lease(%TextPresentation{} = presentation, rows),
+    do: {presentation.buffer, presentation.source_version, rows, nil, nil}
+
+  defp publish_scroll_geometry(
+         table,
+         %TextPresentation{identity: {:wrapped_resident, basis, _, _}} = presentation,
+         {:resident, root}
+       )
+       when is_reference(root) do
+    :ets.delete(table, {:windowed_wrap_counts, presentation.window_id})
+
+    :ets.insert(
+      table,
+      {{:scroll_root, presentation.window_id},
+       {presentation.buffer, presentation.source_version, basis, root,
+        presentation.settled_scroll_seq}}
+    )
+
+    {:current, root}
+  end
+
+  defp publish_scroll_geometry(table, presentation, rows) do
+    :ets.delete(table, {:scroll_root, presentation.window_id})
+    key = {:windowed_wrap_counts, presentation.window_id}
+
+    case TextPresentation.windowed_wrap_counts(presentation) do
+      {basis, counts} ->
+        :ets.insert(
+          table,
+          {key, {presentation.buffer, presentation.source_version, basis, counts}}
+        )
+
+        {:current, nil}
+
+      nil ->
+        :ets.delete(table, key)
+        current_row_root(rows)
+    end
+  end
+
+  defp current_row_root({:resident, root}) when is_reference(root), do: {:current, root}
+  defp current_row_root(_rows), do: :none
+
+  defp clear_scroll_geometry(table, window_id) do
+    :ets.delete(table, {:scroll_root, window_id})
+    :ets.delete(table, {:windowed_wrap_counts, window_id})
+  end
+
   @spec swap_current(
           t(),
           pos_integer(),
           pid(),
-          {:resident, root_ref() | nil} | {:windowed, tuple()}
+          {:current, root_ref() | nil} | :none
         ) ::
           t()
-  defp swap_current(index, window_id, buffer, {:resident, root}) when is_reference(root) do
+  defp swap_current(index, window_id, buffer, {:current, root}) do
     case Map.get(index.current_roots, window_id) do
       {^buffer, ^root} ->
         index
@@ -159,7 +235,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
     end
   end
 
-  defp swap_current(index, window_id, _buffer, _rows) do
+  defp swap_current(index, window_id, _buffer, :none) do
     case Map.pop(index.current_roots, window_id) do
       {nil, _roots} ->
         index
@@ -201,7 +277,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
     header_key = {:node_header, root}
 
     case :ets.take(table, header_key) do
-      [{^header_key, {_size, left, _left_size, _own_size, right}}] ->
+      [{^header_key, {_, _, left, _, _, _, right}}] ->
         :ets.delete(table, {:node_entries, root})
         :ets.delete(table, {:node_refs, root})
         release_root(table, left)

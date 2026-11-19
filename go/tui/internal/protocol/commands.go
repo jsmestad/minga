@@ -166,6 +166,9 @@ type WindowContent struct {
 	// SequentialRows marks a complete non-wrapped row store whose current
 	// BufferLine is always its resident index. Structural deltas retain the mode.
 	SequentialRows bool
+	// WrappedResidentRows marks a complete row store grouped by logical line.
+	// The first row of each group is normal; its remaining rows are continuations.
+	WrappedResidentRows bool
 }
 
 type Cursorline struct {
@@ -179,6 +182,11 @@ type WindowRowSplice struct {
 	DeleteCount uint32
 	InsertRows  []WindowRow
 }
+
+const (
+	WindowRowNormal           byte = 0
+	WindowRowWrapContinuation byte = 4
+)
 
 type WindowRow struct {
 	Ref         bool
@@ -450,7 +458,8 @@ func decodeWindowHeader(opcode byte, section []byte, window *WindowContent) bool
 		window.ScrollLeftSet = true
 		window.ContentEpoch = hdr.ContentEpoch
 		window.SequentialRows = hdr.Flags&0x04 != 0
-		return true
+		window.WrappedResidentRows = hdr.Flags&0x08 != 0
+		return !window.SequentialRows || !window.WrappedResidentRows
 	}
 
 	// Delta header has a different wire layout from the full header.

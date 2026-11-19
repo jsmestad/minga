@@ -226,10 +226,16 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
     private_keys =
       case metadata do
         %{output: output} when is_struct(output, Output) or is_nil(output) ->
-          [:output, :minga_effect_status, :image_tool_result_delivery]
+          [
+            :output,
+            :minga_effect_status,
+            :image_tool_result_delivery,
+            :tool_outcome,
+            :tool_outcome_reason
+          ]
 
         _provider_output ->
-          [:minga_effect_status, :image_tool_result_delivery]
+          [:minga_effect_status, :image_tool_result_delivery, :tool_outcome, :tool_outcome_reason]
       end
 
     projected = Map.drop(metadata, private_keys)

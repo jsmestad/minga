@@ -8,6 +8,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   alias MingaAgent.ProjectView
   alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Credentials
+  alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.OAuth
   alias MingaAgent.Providers.Native
@@ -262,7 +263,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     refute File.exists?(target(context))
   end
 
-  test "removed sources refuse effects and unsupported replay retains actionable context",
+  test "removed sources refuse effects while the active unqualified request finishes",
        context do
     install_write_tool(context)
     before_start_barrier()
@@ -280,17 +281,24 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       count = :atomics.add_get(calls, 1, 1)
       send(owner, {:transport_request, count, messages, options})
 
-      stream_response(model, [
-        StreamChunk.thinking("opaque fixture summary", %{
-          signature: "fixture-refused-opaque",
-          encrypted?: true,
-          provider: :openai_codex,
-          format: "openai-responses-v1",
-          provider_data: %{"type" => "reasoning", "id" => "rs_refused_fixture"}
-        }),
-        StreamChunk.tool_call("prefix_write", %{"path" => "effect.txt"}, %{id: "prefix-call"}),
-        StreamChunk.meta(%{finish_reason: :tool_use})
-      ])
+      chunks =
+        if count == 1 do
+          [
+            StreamChunk.thinking("opaque fixture summary", %{
+              signature: "fixture-refused-opaque",
+              encrypted?: true,
+              provider: :openai_codex,
+              format: "openai-responses-v1",
+              provider_data: %{"type" => "reasoning", "id" => "rs_refused_fixture"}
+            }),
+            StreamChunk.tool_call("prefix_write", %{"path" => "effect.txt"}, %{id: "prefix-call"}),
+            StreamChunk.meta(%{finish_reason: :tool_use})
+          ]
+        else
+          [StreamChunk.text("refused"), StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      stream_response(model, chunks)
     end
 
     session =
@@ -317,35 +325,16 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
              )
            end)
 
-    assert 1 == :erlang.trace(session, true, [:receive])
     assert :ok = ToolRegistry.unregister_source(context.registry, @source)
     send(worker, :continue_start)
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
-    assert_receive {:trace, ^session, :receive,
-                    {:agent_provider_event, _request_id,
-                     %MingaAgent.Event.Error{
-                       kind: :context_transition_required,
-                       message: native_message
-                     }}},
-                   @timeout
-
-    assert_receive {:agent_event, ^session, {:error, public_message}}, @timeout
-
-    assert_receive {:trace, ^session, :receive,
-                    {:agent_provider_event, _request_id, %MingaAgent.Event.AgentEnd{}}},
-                   @timeout
-
-    assert 1 == :erlang.trace(session, false, [:receive])
-    assert public_message == native_message
-    assert public_message =~ "/new"
-    assert public_message =~ "Retain"
-    refute public_message =~ "provider"
-    refute public_message =~ "/model"
-    assert Session.editor_snapshot(session).error == public_message
-    assert {:system, public_message, :error} in Session.messages(session)
+    await_idle(session)
+    assert Session.editor_snapshot(session).error == nil
+    assert_receive {:transport_request, 2, continued, _options}, @timeout
+    assert Enum.take(continued, length(frozen)) == frozen
     assert Session.session_id(session) == record
 
     assert {:ok, saved} =
@@ -366,7 +355,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     assert retained.continuation == saved.continuation
 
-    refute_receive {:transport_request, 2, _messages, _options}, 0
+    refute_receive {:transport_request, 3, _messages, _options}, 0
   end
 
   test "same-name same-schema replacement does not inherit the earlier approval subject",
@@ -491,6 +480,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert :ok = Session.send_prompt(session, "write once")
     assert_receive {:before_start, worker}, @timeout
     assert {:error, :request_active} = Session.activate_skill(session, "selected")
+    assert {:error, :request_active} = Session.set_model(session, "openai:other-model")
     selection = Session.editor_snapshot(session).model_selection
     assert {:error, :request_active} = Session.set_thinking_level(session, "low")
     assert Session.editor_snapshot(session).model_selection == selection
@@ -532,25 +522,472 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     refute_receive {:transport_request, _count, _messages, _options}, 0
   end
 
-  test "model transitions preserve the effective selection and fresh conversations preserve the old record",
+  test "an unqualified route keeps active tool signatures but projects retained history on the next turn",
+       context do
+    install_write_tool(context)
+
+    resolver_opts =
+      ModelSelectionFixture.resolver_opts(
+        model_id: "gpt-6.1-sol",
+        provider_model_id: "unqualified-native-route"
+      )
+      |> Keyword.delete(:credential_snapshot)
+
+    session =
+      start_session(context, opaque?: true, provider_opts: [model_resolver_opts: resolver_opts])
+
+    assert :ok = Session.send_prompt(session, "first")
+    await_done(session)
+    assert_receive {:transport_request, 1, _messages, _options}, @timeout
+    assert_receive {:transport_request, 2, _messages, _options}, @timeout
+    assert :ok = Session.send_prompt(session, "second")
+    await_idle(session)
+    assert_receive {:transport_request, 3, messages, _options}, @timeout
+    assert Enum.any?(messages, &(&1.role == :tool and &1.tool_call_id == "prefix-call"))
+    assert Enum.all?(messages, &(&1.reasoning_details == nil))
+
+    assert Enum.filter(Session.messages(session), &match?({:user, _}, &1)) == [
+             {:user, "first"},
+             {:user, "second"}
+           ]
+
+    assert File.read!(target(context)) == "written\n"
+  end
+
+  test "a rejected first request can recover by selecting another model without clearing its prompt",
+       context do
+    attempts = :atomics.new(1, [])
+    owner = self()
+
+    client = fn model, messages, _options ->
+      case :atomics.add_get(attempts, 1, 1) do
+        1 ->
+          {:error, :model_not_found}
+
+        _ ->
+          send(owner, {:recovered_request, model, messages})
+
+          stream_response(model, [
+            StreamChunk.text("recovered"),
+            StreamChunk.meta(%{finish_reason: :stop})
+          ])
+      end
+    end
+
+    session = start_session(context, provider_opts: [llm_client: client])
+    assert :ok = Session.send_prompt(session, "first rejected prompt")
+    assert_receive {:agent_event, ^session, {:error, _message}}, @timeout
+    assert_receive {:agent_event, ^session, {:resumable_boundary, _boundary}}, @timeout
+    record = Session.session_id(session)
+    assert :ok = Session.set_model(session, "openai:other-model")
+    assert Session.editor_snapshot(session).model_selection.route.model_id == "other-model"
+    assert :ok = Session.send_prompt(session, "try again")
+    await_idle(session)
+    assert_receive {:recovered_request, model, messages}, @timeout
+    assert model.id == "other-model"
+
+    assert Enum.filter(messages, &(&1.role == :user)) == [
+             ReqLLM.Context.user("first rejected prompt"),
+             ReqLLM.Context.user("try again")
+           ]
+
+    assert Session.session_id(session) == record
+  end
+
+  test "a PDF handoff rejects an image-only transport without saving and preserves bytes on a compatible route",
+       context do
+    credential_opts =
+      Keyword.update!(
+        context.credential_opts,
+        :env,
+        &Map.merge(&1, %{
+          "OPENAI_API_KEY" => "fixture-openai-key",
+          "OPENROUTER_API_KEY" => "fixture-openrouter-key"
+        })
+      )
+
+    template = hd(context.resolver_opts[:models])
+
+    router_model = %{
+      template
+      | id: "openrouter/router-document",
+        provider: :openrouter,
+        provider_model_id: "router-document",
+        execution: %{
+          text: %{
+            supported: true,
+            family: "openai_chat_compatible",
+            wire_protocol: "openai_chat",
+            transport: "http",
+            provider_model_id: "router-document",
+            base_url: "https://openrouter.ai/api/v1",
+            path: "/chat/completions"
+          }
+        }
+    }
+
+    resolver_opts =
+      context.resolver_opts
+      |> Keyword.update!(:models, &(&1 ++ [router_model]))
+      |> Keyword.update!(
+        :providers,
+        &(&1 ++ [%{id: :openrouter, runtime: %{"base_url" => "https://openrouter.ai/api/v1"}}])
+      )
+
+    context = %{context | credential_opts: credential_opts, resolver_opts: resolver_opts}
+
+    candidates =
+      MingaAgent.ModelResolver.candidates(
+        Keyword.put(
+          context.resolver_opts,
+          :credential_snapshot,
+          Credentials.snapshot(credential_opts)
+        )
+      )
+
+    source =
+      Enum.find(
+        candidates,
+        &(&1.selection.route.request_provider == :openai_codex and
+            &1.selection.route.model_id == "gpt-6.1-sol")
+      )
+
+    incompatible = Enum.find(candidates, &(&1.selection.route.request_provider == :openai))
+
+    compatible =
+      Enum.find(
+        candidates,
+        &(&1.selection.route.request_provider == :openai_codex and
+            &1.selection.route.model_id == "other-model")
+      )
+
+    router = Enum.find(candidates, &(&1.selection.route.request_provider == :openrouter))
+    owner = self()
+    attempts = :atomics.new(1, [])
+
+    client = fn model, messages, options ->
+      count = :atomics.add_get(attempts, 1, 1)
+      send(owner, {:transport_request, count, messages, options})
+
+      if model.provider == :openrouter do
+        {:ok, request} =
+          ReqLLM.Providers.OpenRouter.prepare_request(:chat, model, messages, options)
+
+        wire =
+          request
+          |> ReqLLM.Providers.OpenRouter.encode_body()
+          |> Req.Steps.encode_body()
+          |> Map.fetch!(:body)
+          |> IO.iodata_to_binary()
+          |> JSON.decode!()
+
+        send(owner, {:openrouter_request, wire})
+      end
+
+      stream_response(model, response_chunks(false, count, []))
+    end
+
+    session =
+      start_session(context,
+        model: MingaAgent.ModelSelection.id(source.selection),
+        tool_call?: false,
+        provider_opts: [llm_client: client]
+      )
+
+    assert :ok = Session.set_model(session, source.selection)
+    file = ReqLLM.Message.ContentPart.file("%PDF-1.7\nfixture", "notes.pdf", "application/pdf")
+
+    assert :ok =
+             Session.send_prompt(session, [
+               ReqLLM.Message.ContentPart.text("read this document"),
+               file
+             ])
+
+    await_idle(session)
+    assert_receive {:transport_request, 1, _messages, _options}, @timeout
+    record = Session.session_id(session)
+    before_selection = Session.editor_snapshot(session).model_selection
+    before_messages = Session.messages(session)
+
+    assert {:ok, before_record} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert {:error, reason} = Session.set_model(session, incompatible.selection)
+    assert reason =~ "application/pdf"
+    assert Session.editor_snapshot(session).model_selection == before_selection
+    assert Session.messages(session) == before_messages
+
+    assert {:ok, rejected_record} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert rejected_record.model_selection == before_record.model_selection
+    assert rejected_record.continuation == before_record.continuation
+
+    assert :ok = Session.set_model(session, compatible.selection)
+    assert :ok = Session.send_prompt(session, "continue on the compatible model")
+    await_idle(session)
+    assert_receive {:transport_request, 2, messages, _options}, @timeout
+    assert Enum.any?(messages, &(file in &1.content))
+
+    assert {:ok, saved} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert Enum.any?(saved.continuation.messages, &(file in &1.content))
+
+    assert :ok = Session.set_model(session, router.selection)
+
+    for prompt <- ["continue with OpenRouter", "keep the document on the next turn"] do
+      assert :ok = Session.send_prompt(session, prompt)
+      await_idle(session)
+      assert_receive {:openrouter_request, wire}, @timeout
+
+      content =
+        Enum.flat_map(wire["messages"], fn message ->
+          Enum.filter(List.wrap(message["content"]), &is_map/1)
+        end)
+
+      expected_data = "data:application/pdf;base64," <> Base.encode64(file.data)
+
+      assert Enum.any?(
+               content,
+               &match?(
+                 %{
+                   "type" => "file",
+                   "file" => %{"filename" => "notes.pdf", "file_data" => ^expected_data}
+                 },
+                 &1
+               )
+             )
+    end
+  end
+
+  test "a timed-out model preview cannot leave a late reservation blocking future selections",
+       context do
+    session = start_session(context, tool_call?: false)
+    provider = Session.get_provider(session)
+    :ok = :sys.suspend(provider)
+    attempt = Task.async(fn -> Session.set_model(session, "openai:other-model", 10_000) end)
+
+    result =
+      try do
+        Task.await(attempt, 10_000)
+      after
+        :sys.resume(provider)
+      end
+
+    assert {:error, {:provider_unavailable, _reason}} = result
+    assert :ok = Session.set_model(session, "openai:other-model")
+    assert Session.editor_snapshot(session).model_selection.route.model_id == "other-model"
+  end
+
+  test "a historical branch rejects a mismatched model without changing history, then resumes exactly",
+       context do
+    session = start_session(context, tool_call?: false, opaque?: true)
+    assert :ok = Session.send_prompt(session, "first")
+    await_idle(session)
+    assert :ok = Session.send_prompt(session, "second")
+    await_idle(session)
+    assert_receive {:transport_request, 1, _messages, _options}, @timeout
+    assert_receive {:transport_request, 2, _messages, _options}, @timeout
+
+    first_answer =
+      Enum.find_index(Session.messages(session), &match?({:assistant, "finished"}, &1))
+
+    assert {:ok, _message} = Session.branch_at(session, first_answer)
+    assert :ok = Session.set_model(session, "openai:other-model")
+    current = Session.messages(session)
+    assert {:error, message} = Session.switch_branch(session, 0)
+    assert message =~ "another model"
+    assert Session.messages(session) == current
+    assert Session.editor_snapshot(session).model_selection.route.model_id == "other-model"
+    assert :ok = Session.set_model(session, "openai:gpt-6.1-sol")
+    assert :ok = Session.switch_branch(session, 0)
+    assert :ok = Session.send_prompt(session, "third")
+    await_idle(session)
+    assert_receive {:transport_request, 3, messages, _options}, @timeout
+
+    assert Enum.any?(messages, fn message ->
+             Enum.any?(message.reasoning_details || [], &(&1.signature == "fixture-opaque-2"))
+           end)
+  end
+
+  test "a rejected model change during provider backoff preserves the scheduled restart",
+       context do
+    session =
+      start_session(context,
+        tool_call?: false,
+        session_opts: [
+          provider_restart_backoff_base_ms: 30_000,
+          provider_restart_backoff_max_ms: 30_000
+        ]
+      )
+
+    assert :ok = Session.send_prompt(session, "first")
+    await_idle(session)
+    provider = Session.get_provider(session)
+    monitor = Process.monitor(provider)
+    Process.exit(provider, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^provider, :killed}, @timeout
+    assert_receive {:agent_event, ^session, {:error, _message}}, @timeout
+    # This assertion checks the provider lifecycle's owned timer, not editor presentation state.
+    {timer, token} =
+      :sys.get_state(session).provider |> MingaAgent.Session.ProviderLifecycle.retry_timer()
+
+    directory = SessionStore.sessions_dir(context.store_dir)
+    backup = directory <> ".saved"
+    assert :ok = File.rename(directory, backup)
+    File.write!(directory, "blocked fixture directory")
+    assert {:error, _reason} = Session.set_model(session, "openai:other-model")
+    assert is_integer(Process.read_timer(timer))
+    assert Session.editor_snapshot(session).model_selection.route.model_id == "gpt-6.1-sol"
+    assert :ok = File.rm(directory)
+    assert :ok = File.rename(backup, directory)
+    send(session, {:start_provider, token})
+    assert is_pid(Session.get_provider(session))
+    assert :ok = Session.set_model(session, "openai:other-model")
+    assert Session.editor_snapshot(session).model_selection.route.model_id == "other-model"
+  end
+
+  test "switching from Codex to Anthropic sends completed tools but no foreign replay state",
+       context do
+    install_write_tool(context)
+    template = hd(context.resolver_opts[:models])
+
+    anthropic = %{
+      template
+      | id: "anthropic/target-model",
+        provider: :anthropic,
+        provider_model_id: "target-model",
+        execution: %{
+          text: %{
+            supported: true,
+            family: "anthropic_messages",
+            wire_protocol: "anthropic_messages",
+            transport: "http",
+            provider_model_id: "target-model",
+            base_url: "https://api.anthropic.com",
+            path: "/v1/messages"
+          }
+        }
+    }
+
+    resolver_opts =
+      context.resolver_opts
+      |> Keyword.update!(:models, &(&1 ++ [anthropic]))
+      |> Keyword.update!(
+        :providers,
+        &(&1 ++ [%{id: :anthropic, runtime: %{"base_url" => "https://api.anthropic.com"}}])
+      )
+
+    credential_opts =
+      Keyword.update!(
+        context.credential_opts,
+        :env,
+        &Map.put(&1, "ANTHROPIC_API_KEY", "fixture-key")
+      )
+
+    context = %{context | resolver_opts: resolver_opts, credential_opts: credential_opts}
+    owner = self()
+    attempts = :atomics.new(1, [])
+
+    client = fn model, messages, options ->
+      count = :atomics.add_get(attempts, 1, 1)
+
+      if model.provider == :anthropic do
+        {:ok, request} =
+          ReqLLM.Providers.Anthropic.prepare_request(:chat, model, messages, options)
+
+        wire =
+          request
+          |> ReqLLM.Providers.Anthropic.encode_body()
+          |> Req.Steps.encode_body()
+          |> Map.fetch!(:body)
+          |> IO.iodata_to_binary()
+          |> JSON.decode!()
+
+        send(owner, {:anthropic_request, wire})
+      end
+
+      stream_response(model, response_chunks(count == 1, count, opaque?: true))
+    end
+
+    session = start_session(context, provider_opts: [llm_client: client])
+    assert :ok = Session.send_prompt(session, "inspect the project")
+    await_done(session)
+    assert :ok = Session.set_model(session, "anthropic:target-model")
+    assert Session.editor_snapshot(session).model_selection.route.request_provider == :anthropic
+    assert :ok = Session.send_prompt(session, "continue with Anthropic")
+    await_idle(session)
+    assert_receive {:anthropic_request, wire}, @timeout
+    assert wire["model"] == "target-model"
+
+    content =
+      Enum.flat_map(wire["messages"], fn message ->
+        Enum.filter(List.wrap(message["content"]), &is_map/1)
+      end)
+
+    assert Enum.any?(content, &(&1["type"] == "tool_use" and &1["name"] == "prefix_write"))
+
+    assert Enum.any?(
+             content,
+             &(&1["type"] == "tool_result" and &1["tool_use_id"] == "prefix-call")
+           )
+
+    refute JSON.encode!(wire) =~ "fixture-opaque"
+    refute Enum.any?(content, &(&1["type"] == "thinking"))
+    assert File.read!(target(context)) == "written\n"
+  end
+
+  test "model switching preserves completed tools and resumes the same conversation after restart",
        context do
     write_skill(context, "selected")
-    session = start_session(context, tool_call?: false)
+    install_write_tool(context)
+    session = start_session(context, opaque?: true)
     assert :ok = Session.send_prompt(session, "first turn")
-    await_idle(session)
-    original = Session.editor_snapshot(session).model_selection
+    await_done(session)
+    assert_receive {:transport_request, 1, _messages, _options}, @timeout
+    assert_receive {:transport_request, 2, _messages, _options}, @timeout
     record = Session.session_id(session)
 
     assert {:ok, saved} =
              SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
 
-    assert {:error, {:portable_context_transition_required, _}} =
-             Session.set_model(session, "openai:other-model")
+    assert :ok = Session.set_model(session, "openai:other-model")
+    assert Session.editor_snapshot(session).model_selection.route.model_id == "other-model"
+    assert Session.session_id(session) == record
 
-    assert Session.editor_snapshot(session).model_selection == original
+    assert {:ok, switched} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert Enum.any?(
+             switched.continuation.messages,
+             &(&1.role == :tool and &1.tool_call_id == "prefix-call")
+           )
+
+    assert Enum.all?(switched.continuation.messages, &(&1.reasoning_details == nil))
+    assert Enum.any?(saved.continuation.messages, &(&1.reasoning_details not in [nil, []]))
+
+    assert :ok = stop_supervised!({:session, context.suffix})
+    session = start_session(context, model: "openai:other-model", tool_call?: false)
+    assert :ok = Session.load_session(session, record)
+    assert :ok = Session.send_prompt(session, "continue on the selected model")
+    await_idle(session)
+    assert_receive {:transport_request, 1, messages, _options}, @timeout
+
+    assert Enum.take(messages, length(switched.continuation.messages)) ==
+             Enum.map(
+               switched.continuation.messages,
+               &MingaAgent.Providers.Native.ReqLLMAdapter.request_message/1
+             )
+
+    assert List.last(messages) == ReqLLM.Context.user("continue on the selected model")
+    assert File.read!(target(context)) == "written\n"
 
     assert {:error, {:portable_context_transition_required, _}} =
              Session.activate_skill(session, "selected")
+
+    assert {:ok, before_new} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
 
     assert :ok = Session.new_session(session)
     refute Session.session_id(session) == record
@@ -558,7 +995,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert {:ok, preserved} =
              SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
 
-    assert preserved.continuation == saved.continuation
+    assert preserved.continuation == before_new.continuation
     assert {:ok, _skill} = Session.activate_skill(session, "selected")
   end
 
@@ -1022,7 +1459,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     assert_receive :callback_built, @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
     assert File.read!(target(context)) == "written\n"
@@ -1046,7 +1483,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     refute_received {:agent_event, ^session, {:approval_pending, _}}
     refute_received {:agent_event, ^session, {:approval_resolved, _, _}}
     refute_received {:agent_event, ^session, {:tool_started, "prefix_write", _}}
-    refute_received {:agent_event, ^session, {:tool_ended, "prefix_write", _, _}}
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}}
 
     session_id = Session.session_id(session)
     assert :ok = Session.load_session(session, session_id)
@@ -1109,7 +1546,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert_receive {:allowed_started, worker}, @timeout
     assert :ok = Session.respond_to_approval(session, approval_target, :approve)
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
     assert File.read!(target(context)) == "written\n"
@@ -1157,7 +1594,14 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert :ok = Session.send_prompt(session, "write")
     assert_receive {:allowed_started, worker}, @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "prefix_write", result, :error}},
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended,
+                     %Event.ToolEnd{
+                       name: "prefix_write",
+                       result: result,
+                       outcome: :error,
+                       reason: :approval_timeout
+                     }}},
                    @timeout
 
     assert result =~ "approval timed out"
@@ -1176,6 +1620,9 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     assert Session.editor_snapshot(session).pending_approval == nil
 
+    assert {:tool_call, %{status: :error, terminal_reason: :approval_timeout, duration_ms: nil}} =
+             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
     assert {:error, :approval_not_found} =
              Session.respond_to_approval(session, target, :approve_session)
 
@@ -1189,7 +1636,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert saved_tool_result(context, session).metadata.is_error
   end
 
-  test "completion snapshot retry retires an expired approval without reopening its effect",
+  test "Native retries saving expiry without reopening its effect or granting trust",
        context do
     owner = self()
     install_write_tool(context)
@@ -1265,15 +1712,66 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert_receive {:after_timeout, continuation_worker}, @timeout
     target = Target.new(Session.session_id(session), request_id, "prefix-call")
     assert Session.editor_snapshot(session).pending_approval == nil
+    assert result.metadata.tool_outcome == :error
+    assert result.metadata.tool_outcome_reason == :approval_timeout
+
+    output = result.metadata.output
+
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended,
+                     %Event.ToolEnd{
+                       tool_call_id: "prefix-call",
+                       name: "prefix_write",
+                       outcome: :error,
+                       reason: :approval_timeout,
+                       output: ^output,
+                       is_error: true
+                     }}},
+                   @timeout
+
+    refute_received {:agent_event, ^session, {:approval_resolved, ^target, :reject}}
 
     assert {:error, :approval_not_found} =
              Session.respond_to_approval(session, target, :approve_session)
 
     assert Session.list_tool_trust(session) == %{}
     refute File.exists?(target(context))
+    refute_received :callback_built
     send(continuation_worker, :finish)
     await_idle(session)
     assert saved_tool_result(context, session).metadata.is_error
+    assert saved_tool_result(context, session).metadata.tool_outcome == :error
+    assert saved_tool_result(context, session).metadata.tool_outcome_reason == :approval_timeout
+  end
+
+  test "Stop before approval saves the same cancellation outcome without admitting an effect",
+       context do
+    install_write_tool(context)
+    assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :all)
+    session = start_session(context)
+    assert :ok = Session.send_prompt(session, "write")
+
+    assert_receive {:agent_event, ^session, {:approval_pending, %Public{target: target}}},
+                   @timeout
+
+    assert :ok = Session.abort(session)
+    assert_receive {:agent_event, ^session, {:approval_resolved, ^target, :interrupted}}, @timeout
+    assert Session.editor_snapshot(session).pending_approval == nil
+    assert {:error, _stale} = Session.respond_to_approval(session, target, :approve)
+
+    assert {:tool_call, %{status: :cancelled, terminal_reason: nil, duration_ms: nil}} =
+             Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+    result = saved_tool_result(context, session)
+    assert result.metadata.tool_outcome == :cancelled
+    assert result.metadata.is_error
+    assert result.metadata.minga_effect_status == :not_executed
+    assert Map.get(result.metadata, :tool_outcome_reason) == nil
+    refute File.exists?(target(context))
+    refute_received :callback_built
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{}}}
+    assert :ok = Session.abort(session)
+    refute_received {:agent_event, ^session, {:approval_resolved, ^target, _resolution}}
   end
 
   test "an allowed sibling settles while another call awaits approval and can be rejected",
@@ -1302,7 +1800,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
                     {:approval_pending, %Public{target: %Target{} = approval_target}}},
                    @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "allowed_write", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "allowed_write"}}},
                    @timeout
 
     assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
@@ -1368,7 +1866,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert is_pid(store)
     assert :ok = Session.send_prompt(session, "forked\n")
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "read_file", _result, _status}},
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "read_file"}}},
                    @timeout
 
     await_done(session, "write_file")
@@ -1380,12 +1878,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert Native.fork_store(provider) == nil
     assert :ok = Session.send_prompt(session, "direct\n")
 
-    assert_receive {:agent_event, ^session, {:tool_ended, "read_file", failure, _status}},
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended, %Event.ToolEnd{name: "read_file", result: failure}}},
                    @timeout
 
     assert failure =~ "unavailable"
     await_idle(session)
-    refute_received {:agent_event, ^session, {:tool_ended, "write_file", _result, _status}}
+    refute_received {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "write_file"}}}
     assert File.read!(path) == "original\n"
     assert Minga.Buffer.content(buffer) == "original\n"
   end
@@ -1664,6 +2163,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
         |> Keyword.merge(Keyword.get(opts, :provider_opts, []))
     ]
 
+    session_opts = Keyword.merge(session_opts, Keyword.get(opts, :session_opts, []))
     session = start_supervised!({Session, session_opts}, id: {:session, context.suffix})
     assert :ok = Session.subscribe(session)
     assert is_pid(Session.get_provider(session))
@@ -1716,7 +2216,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   end
 
   defp await_done(session, name \\ "prefix_write") do
-    assert_receive {:agent_event, ^session, {:tool_ended, ^name, _result, _status}}, @timeout
+    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: ^name}}}, @timeout
     await_idle(session)
   end
 

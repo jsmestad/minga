@@ -1,7 +1,9 @@
 defmodule Minga.Conformance.RecoveryCorpusTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Protocol.Opcodes
   alias MingaEditor.Frontend.Protocol
+  alias Mix.Tasks.Conformance.RecoveryDriver, as: Driver
   alias Mix.Tasks.Conformance.RecoveryOracle
 
   @corpus Path.join(__DIR__, "corpus")
@@ -34,7 +36,7 @@ defmodule Minga.Conformance.RecoveryCorpusTest do
     [_first, _first_ack, warm, _warm_ack, miss, status, recovery, _ack] =
       load("window_reference_miss")
 
-    assert length(warm["expect"]["pane_rects"]) == 2
+    assert [_, _] = warm["expect"]["pane_rects"]
     assert status["last_applied_frame_seq"] == 21
     assert miss["expect"]["last_committed"] == warm["expect"]["last_committed"]
     assert miss["expect"]["transaction_result"]["kind"] == "window_ref_miss"
@@ -46,6 +48,57 @@ defmodule Minga.Conformance.RecoveryCorpusTest do
     assert recovery["expect"]["content_epochs"]["2"] == warm["expect"]["content_epochs"]["2"]
     assert [%{window_id: 1, full_refresh?: true}] = decode(recovery).windows
     assert recovery["expect"]["resident_rows"] > 0
+  end
+
+  test "a pane reference miss replays a sibling's rejected same-row-count edit and semantics" do
+    Driver.with_driver([], fn driver ->
+      :ok = GenServer.call(driver.editor, {:api_execute_command, :split_vertical})
+      first = Driver.render(driver, 20)
+      Driver.acknowledge(driver, first)
+      warm = Driver.render(driver, 21)
+      Driver.acknowledge(driver, warm)
+
+      previous_rows = warm["expect"]["window_rows"]["2"]
+      assert [%{"text" => "recovery line 0"} | _] = previous_rows
+      assert {_base, warm_revision, _row_revision} = semantic_revisions(decode(warm), 2)
+
+      {:ok, buffer} = GenServer.call(driver.editor, :api_active_buffer)
+      :ok = Minga.Buffer.apply_edit(buffer, 0, 0, 0, 1, "RE")
+      pending = Driver.render(driver, 22)
+      decoded_pending = decode(pending)
+      edited_rows = pending["expect"]["window_rows"]["2"]
+      assert [%{"text" => "REcovery line 0"} | _] = edited_rows
+      assert length(edited_rows) == length(previous_rows)
+      pending_revisions = semantic_revisions(decoded_pending, 2)
+      assert {^warm_revision, _, _} = pending_revisions
+
+      # The shared edit reaches both panes, but only pane 1 has lost its retained base.
+      missing_pane = update_in(warm["expect"], ["content_epochs"], &Map.delete(&1, "1"))
+      rejected = RecoveryOracle.apply_frame(missing_pane, decoded_pending)
+
+      assert rejected["transaction_result"] == %{
+               "kind" => "window_ref_miss",
+               "generation" => 1,
+               "frame_seq" => 22,
+               "last_applied_frame_seq" => 21,
+               "window_id" => 1
+             }
+
+      assert rejected["window_rows"]["2"] == previous_rows
+      Driver.record_delivery(driver, %{"expect" => rejected})
+      Driver.status(driver, {:window_ref_miss, 1, 22, 21, 1})
+
+      recovery = Driver.capture(driver)
+      decoded_recovery = decode(recovery)
+      assert %{generation: 1, base_frame_seq: 21, frame_seq: 23} = decoded_recovery
+      assert [%{window_id: 1, full_refresh?: true}] = decoded_recovery.windows
+      assert recovery["expect"]["window_rows"]["2"] == edited_rows
+      assert recovery["expect"]["content_epochs"]["2"] == warm["expect"]["content_epochs"]["2"]
+      assert semantic_revisions(decoded_recovery, 2) == pending_revisions
+
+      assert %{"event" => "frame_applied", "frame_seq" => 23} =
+               Driver.acknowledge(driver, recovery)
+    end)
   end
 
   test "stale content cannot advance the recovered commit" do
@@ -90,6 +143,19 @@ defmodule Minga.Conformance.RecoveryCorpusTest do
       Base.decode64!(step["payload_base64"]),
       step["command_sizes"]
     )
+  end
+
+  defp semantic_revisions(frame, window_id) do
+    opcode = Opcodes.gui_resident_semantics()
+
+    Enum.find_value(frame.commands, fn
+      <<^opcode, _size::32, _version, _mode, ^window_id::16, _epoch::32, base::32, revision::32,
+        row_revision::32, _::binary>> ->
+        {base, revision, row_revision}
+
+      _ ->
+        nil
+    end)
   end
 
   defp replay([], _state), do: :ok

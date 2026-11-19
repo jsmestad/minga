@@ -63,9 +63,6 @@ func TestAuthoredTextMarginPreservesBoundaryGlyphsAndPointerTargets(t *testing.T
 						t.Fatal("presentation margin became an initial text target")
 					}
 				}
-				if got := model.maxPresentationLeft(model.windows[7]); got != 0 {
-					t.Fatalf("already fitting rows gained horizontal overflow: %d", got)
-				}
 
 				delta := window
 				delta.Rows = make([]protocol.WindowRow, len(rows))

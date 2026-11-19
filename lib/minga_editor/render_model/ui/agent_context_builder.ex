@@ -11,18 +11,18 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   @spec build(Context.t() | term()) :: AgentContext.t()
   def build(%Context{} = ctx) do
     activity = get_activity(ctx)
-    approval_pending = approval_pending?(ctx)
-    status = context_status(agent_status(ctx), approval_pending)
+    status = context_status(agent_status(ctx))
+    action = active_action(activity, pending_approval(ctx))
 
-    if visible?(activity, status, approval_pending) do
+    if visible?(activity, status) do
       %AgentContext{
         visible: true,
-        task: task(activity, status),
+        task: task(activity, status, action),
         dispatch_timestamp: activity.started_at || DateTime.utc_now(),
         status: status,
         can_approve: false,
         todos: todos(activity),
-        progress: progress(activity)
+        progress: progress(activity, action)
       }
     else
       hidden()
@@ -33,23 +33,11 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   @spec visible?(Context.t() | map()) :: boolean()
   def visible?(%Context{} = ctx) do
-    approval_pending = approval_pending?(ctx)
-
-    visible?(
-      get_activity(ctx),
-      context_status(agent_status(ctx), approval_pending),
-      approval_pending
-    )
+    visible?(get_activity(ctx), context_status(agent_status(ctx)))
   end
 
   def visible?(state) when is_map(state) do
-    approval_pending = approval_pending_from_state?(state)
-
-    visible?(
-      get_activity_from_state(state),
-      context_status(agent_status_from_state(state), approval_pending),
-      approval_pending
-    )
+    visible?(get_activity_from_state(state), context_status(agent_status_from_state(state)))
   end
 
   @spec hidden() :: AgentContext.t()
@@ -72,17 +60,13 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp agent_status(%Context{
          intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
        }),
-       do: TraditionalState.agent(shell_state).runtime.status
+       do: MingaEditor.State.Agent.display_status(TraditionalState.agent(shell_state))
 
   defp agent_status(%Context{}), do: :idle
 
   @spec agent_status_from_state(map()) :: atom()
   defp agent_status_from_state(state),
-    do: TraditionalState.agent(shell_state(state)).runtime.status
-
-  @spec approval_pending_from_state?(map()) :: boolean()
-  defp approval_pending_from_state?(state),
-    do: TraditionalState.agent(shell_state(state)).pending_approval != nil
+    do: MingaEditor.State.Agent.display_status(TraditionalState.agent(shell_state(state)))
 
   @spec shell_state(map()) :: TraditionalState.t()
   defp shell_state(%MingaEditor.RenderPipeline.Input{
@@ -92,42 +76,53 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   defp shell_state(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}), do: shell_state
 
-  @spec visible?(Activity.t(), atom(), boolean()) :: boolean()
-  defp visible?(%Activity{}, _status, true), do: true
-  defp visible?(%Activity{}, status, false) when status in [:working, :iterating], do: true
+  @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
+  defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating], do: true
 
-  defp visible?(%Activity{todos: todos} = activity, _status, _approval_pending) do
+  defp visible?(%Activity{todos: todos} = activity, _status) do
     todos != [] or activity.tool_count > 0 or Activity.file_count(activity) > 0
   end
 
-  @spec task(Activity.t(), atom()) :: String.t()
-  defp task(%Activity{active_action: action}, _status) when action not in ["", nil], do: action
-  defp task(%Activity{todos: [%{description: description} | _]}, _status), do: description
-  defp task(_activity, :iterating), do: "Running tools"
-  defp task(_activity, :working), do: "Thinking"
-  defp task(_activity, _status), do: "Agent activity"
+  @spec task(Activity.t(), AgentContext.status(), String.t() | nil) :: String.t()
+  defp task(_activity, _status, action) when action not in ["", nil], do: action
 
-  @spec context_status(atom(), boolean()) :: AgentContext.status()
-  defp context_status(_status, true), do: :needs_you
-  defp context_status(:thinking, false), do: :working
-  defp context_status(:tool_executing, false), do: :iterating
-  defp context_status(:error, false), do: :errored
-  defp context_status(:idle, false), do: :idle
-  defp context_status(:plan, false), do: :idle
-  defp context_status(_status, false), do: :idle
+  defp task(%Activity{todos: [%{description: description} | _]}, _status, _action),
+    do: description
 
-  @spec approval_pending?(Context.t()) :: boolean()
-  defp approval_pending?(%Context{
+  defp task(_activity, :iterating, _action), do: "Running tools"
+  defp task(_activity, :working, _action), do: "Thinking"
+  defp task(_activity, _status, _action), do: "Agent activity"
+
+  @spec context_status(atom()) :: AgentContext.status()
+  defp context_status(:approval_waiting), do: :needs_you
+  defp context_status(:thinking), do: :working
+  defp context_status(:tool_executing), do: :iterating
+  defp context_status(:error), do: :errored
+  defp context_status(:idle), do: :idle
+  defp context_status(:plan), do: :idle
+  defp context_status(nil), do: :idle
+
+  @spec pending_approval(Context.t()) :: MingaAgent.ToolApproval.Public.t() | nil
+  defp pending_approval(%Context{
          intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
        }),
-       do: TraditionalState.agent(shell_state).pending_approval != nil
+       do:
+         MingaEditor.Agent.PendingApproval.public(
+           TraditionalState.agent(shell_state).pending_approval
+         )
 
-  defp approval_pending?(%Context{}), do: false
+  defp pending_approval(%Context{}), do: nil
 
-  @spec progress(Activity.t()) :: Progress.t()
-  defp progress(%Activity{} = activity) do
+  @spec active_action(Activity.t(), MingaAgent.ToolApproval.Public.t() | nil) :: String.t() | nil
+  defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name}),
+    do: "Awaiting approval for #{name}"
+
+  defp active_action(%Activity{active_action: action}, nil), do: action
+
+  @spec progress(Activity.t(), String.t() | nil) :: Progress.t()
+  defp progress(%Activity{} = activity, action) do
     %Progress{
-      active_action: activity.active_action,
+      active_action: action,
       tool_count: activity.tool_count,
       file_count: Activity.file_count(activity),
       review_hint: ""

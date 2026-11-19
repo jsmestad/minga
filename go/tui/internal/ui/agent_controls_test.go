@@ -70,7 +70,7 @@ func newAgentControlModel(t *testing.T, focused bool) (Model, chan []byte) {
 	t.Helper()
 	out := make(chan []byte, 128)
 	model := New(80, 24, out)
-	chat := protocol.AgentChat{Visible: true, Status: 3, ModelName: "anthropic:claude-sonnet-4", ThinkingLevel: "medium", Prompt: "ordinary draft", PromptVisibleRows: 1, InputFocused: focused}
+	chat := protocol.AgentChat{Visible: true, Status: 5, ModelName: "anthropic:claude-sonnet-4", ThinkingLevel: "medium", Prompt: "ordinary draft", PromptVisibleRows: 1, InputFocused: focused}
 	model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows(chat.Prompt), 0, 4, 0, 0, protocol.Selection{}), 900)
 	model = commitAgentControlTranscript(t, model, decodedApprovalControlTranscript(t, approvalControlTarget("A"), 0))
 	drainOutboundPackets(out)
@@ -133,20 +133,23 @@ func TestRenderedAgentNamedControlsUseSemanticSGRAcrossResize(t *testing.T) {
 					model = updated.(Model)
 					for _, control := range []struct {
 						label  string
+						zone   string
 						packet []byte
 					}{
-						{"anthropic / claude", protocol.EncodeGUIExecuteCommand("agent_pick_model")},
-						{"Help", protocol.EncodeGUIExecuteCommand("agent_toggle_help")},
-						{"[y] Approve", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionApprove)},
-						{"[n] Reject", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionReject)},
-						{"[a] Approve session", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionApproveSession)},
-						{"[t] Approve turn", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionApproveTurn)},
+						{"model", zoneIDAgentModel, protocol.EncodeGUIExecuteCommand("agent_pick_model")},
+						{"Help", zoneIDAgentHeaderHelp, protocol.EncodeGUIExecuteCommand("agent_toggle_help")},
+						{"[y] Approve", "", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionApprove)},
+						{"[n] Reject", "", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionReject)},
+						{"[a] Approve session", "", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionApproveSession)},
+						{"[t] Approve turn", "", protocol.EncodeGUIAgentToolApproval(approvalControlTarget("A"), generated.AgentApprovalDecisionApproveTurn)},
 					} {
-						x, y := renderedComposerControl(t, model, control.label)
-						if control.label == "anthropic / claude" {
-							// Click the model itself; the qualified label disambiguates
-							// it from the details rail without pinning frame coordinates.
-							x += lipgloss.Width("anthropic / ")
+						var x, y int
+						if control.zone != "" {
+							_ = model.View()
+							zone := waitForZone(t, model, control.zone)
+							x, y = zone.EndX, zone.StartY
+						} else {
+							x, y = renderedComposerControl(t, model, control.label)
 						}
 						drainOutboundPackets(out)
 						model = driveAgentControlSGR(t, model, x, y, 'M', fragmented)
@@ -365,31 +368,16 @@ func TestNarrowApprovalOnlyOffersFullyVisibleDecisions(t *testing.T) {
 
 func TestAgentHeaderStatusAndThinkingAreNotNamedButtons(t *testing.T) {
 	model, out := newAgentControlModel(t, true)
-	_, headerY := renderedComposerControl(t, model, "anthropic / claude")
-	canvas := lipgloss.NewCanvas(model.width, model.height)
-	canvas.Compose(lipgloss.NewLayer(model.View().Content))
-	for _, label := range []string{"needs you", "medium"} {
-		found := false
-		for x := range max(model.width-len(label)+1, 0) {
-			matches := true
-			for offset, letter := range label {
-				cell := canvas.CellAt(x+offset, headerY)
-				if cell == nil || cell.Content != string(letter) {
-					matches = false
-					break
-				}
-			}
-			if !matches {
-				continue
-			}
-			found = true
-			drainOutboundPackets(out)
-			model = driveAgentControlSGR(t, model, x, headerY, 'M', false)
-			assertNoAgentNamedOperation(t, drainOutboundPackets(out))
-		}
-		if !found {
-			t.Fatalf("no rendered header label %s", label)
-		}
+	_ = model.View()
+	identity := waitForZone(t, model, zoneIDAgentModel)
+	help := waitForZone(t, model, zoneIDAgentHeaderHelp)
+	if identity.EndX+1 >= help.StartX {
+		t.Fatal("fixture must present the static status and thinking area between model and Help")
+	}
+	for x := identity.EndX + 1; x < help.StartX; x++ {
+		drainOutboundPackets(out)
+		model = driveAgentControlSGR(t, model, x, identity.StartY, 'M', false)
+		assertNoAgentNamedOperation(t, drainOutboundPackets(out))
 	}
 }
 

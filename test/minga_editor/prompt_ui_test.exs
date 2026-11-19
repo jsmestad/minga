@@ -362,6 +362,89 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
+  describe "sensitive prompt input" do
+    test "retained render frames and diagnostics exclude private input and callback context" do
+      secret = "synthetic-private-key-3450"
+      private_context = "synthetic-private-context-3450"
+
+      state =
+        PromptUI.open(base_state(), TestHandler,
+          label: "Private key: ",
+          sensitive: true,
+          default: secret,
+          context: %{private: private_context}
+        )
+
+      frame = MingaEditor.RenderPipeline.FrameIntent.from_editor_state(state)
+      encoded = :erlang.term_to_binary(frame)
+      diagnostic = inspect(state.shell_runtime, limit: :infinity)
+
+      for private <- [secret, private_context] do
+        assert :binary.match(encoded, private) == :nomatch
+        refute diagnostic =~ private
+      end
+
+      {:prompt, payload} = frame.shell_state.modal
+
+      assert MingaEditor.State.Prompt.render_data(payload.prompt_ui) ==
+               {"Private key: ", String.duplicate("•", String.length(secret)),
+                String.length(secret)}
+
+      {_state, nil} = PromptUI.handle_key(state, @enter, 0)
+      assert Process.get(:submitted) == secret
+    end
+
+    test "masked presentation preserves editable Unicode and submits the original value" do
+      state =
+        base_state()
+        |> PromptUI.open(TestHandler, sensitive: true, default: "á界")
+
+      assert {"Test prompt: ", "••", 2} = PromptUI.render_data(state)
+      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+      state = PromptUI.insert_text(state, "x")
+      assert {"Test prompt: ", "•••", 2} = PromptUI.render_data(state)
+
+      {state, nil} = PromptUI.handle_key(state, @enter, 0)
+      assert Process.get(:submitted) == "áx界"
+      refute PromptUI.open?(state)
+      refute PromptUI.sensitive_input?(state)
+      assert {"", "", 0} = PromptUI.render_data(state)
+    end
+
+    test "secret keys and the closing key stay out of lossage while ordinary keys remain visible" do
+      for closing_key <- [@enter, @escape] do
+        Process.delete(:submitted)
+        Process.delete(:cancelled)
+
+        state =
+          base_state()
+          |> PromptUI.open(TestHandler, sensitive: true)
+          |> MingaEditor.Input.Router.route_key(?k, 0)
+          |> MingaEditor.Input.Router.route_key(?e, 0)
+          |> MingaEditor.Input.Router.route_key(?y, 0)
+
+        assert {"Test prompt: ", "•••", 3} = PromptUI.render_data(state)
+        state = MingaEditor.Input.Router.route_key(state, closing_key, 0)
+        refute PromptUI.open?(state)
+        assert MingaEditor.KeystrokeHistory.entries(state.interaction.keystroke_history) == []
+
+        case closing_key do
+          @enter ->
+            assert Process.get(:submitted) == "key"
+
+          @escape ->
+            assert Process.get(:cancelled)
+            refute Process.get(:submitted)
+        end
+
+        state = MingaEditor.Input.Router.route_key(state, @escape, 0)
+
+        assert [%{key: {@escape, 0}}] =
+                 MingaEditor.KeystrokeHistory.entries(state.interaction.keystroke_history)
+      end
+    end
+  end
+
   describe "close/1" do
     test "clears prompt state" do
       state =

@@ -45,7 +45,7 @@ func renderedComposerControl(t *testing.T, model Model, label string) (int, int)
 }
 
 func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
-	for _, status := range []byte{0, 2} {
+	for _, status := range []byte{0, 2, 5} {
 		for _, focused := range []bool{false, true} {
 			t.Run(fmt.Sprintf("status%d/focused%t", status, focused), func(t *testing.T) {
 				out := make(chan []byte, 64)
@@ -70,7 +70,7 @@ func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
 				model = updated.(Model)
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 7, 5, 0, 0, protocol.Selection{}), 822)
 				label, command := "Send", "agent_submit_or_newline"
-				if status == 2 {
+				if status == 2 || status == 5 {
 					label, command = "Stop", "agent_abort"
 				}
 				x, y := renderedComposerControl(t, model, label)

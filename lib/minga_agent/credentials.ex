@@ -24,6 +24,7 @@ defmodule MingaAgent.Credentials do
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth}
   alias MingaAgent.Credentials.Binding
+  alias MingaAgent.OAuth, as: OAuthFile
 
   @typedoc "Owner-visible credential readiness."
   @type readiness :: :checking | :configured | :unconfigured
@@ -140,33 +141,33 @@ defmodule MingaAgent.Credentials do
   @doc """
   Stores an API key for a provider in the credentials file.
 
-  Creates the config directory and file if they don't exist. Sets
-  file permissions to 0600 (owner read/write only).
+  Creates the config directory and atomically replaces the existing file with mode 0600, following final symlinks without replacing the links.
+  API-key updates are serialized within this BEAM node, including updates through different paths to the same file.
+  Failures before rename leave the previous credentials intact.
   """
   @spec store(provider(), String.t(), keyword()) :: :ok | {:error, term()}
   def store(provider, key, opts \\ []) when is_binary(provider) and is_binary(key) do
-    path = credentials_path(opts)
-    dir = Path.dirname(path)
+    configured_path = credentials_path(opts)
 
-    with :ok <- ensure_directory(dir),
-         {:ok, existing} <- read_credentials_file(path),
-         updated = Map.put(existing, provider, key),
-         json = :json.format(updated),
-         :ok <- File.write(path, json) do
-      File.chmod(path, 0o600)
+    with :ok <- ensure_directory(Path.dirname(configured_path)) do
+      update_api_keys(configured_path, &Map.put(&1, provider, key))
     end
   end
 
   @doc """
-  Removes a stored API key for a provider.
-
-  Only removes from the credentials file. Environment variables are
-  unaffected (and will still be used if set).
+  Removes a stored API key, or the local OAuth entry for Codex.
+  Environment variables are unaffected.
   """
   @spec revoke(provider(), keyword()) :: :ok | {:error, term()}
-  def revoke(provider, opts \\ []) when is_binary(provider) do
-    revoke_api_key(provider, opts)
-    |> merge_revoke_result(revoke_oauth_entry(provider))
+  def revoke(provider, opts \\ [])
+
+  def revoke("openai_codex", opts) do
+    OAuthFile.revoke_oauth_file(Keyword.get(opts, :oauth_path, oauth_path()))
+  end
+
+  def revoke(provider, opts) when is_binary(provider) do
+    path = credentials_path(opts)
+    update_api_keys(path, &Map.delete(&1, provider))
   end
 
   @doc """
@@ -320,19 +321,18 @@ defmodule MingaAgent.Credentials do
   @doc """
   Pins the exact OpenAI Codex account in Minga's explicit OAuth file.
 
-  ReqLLM owns refresh locking and persistence. Tokens returned while pinning are
-  discarded; only the provider, provider key, account id, and exact path remain.
+  ReqLLM performs refresh within Minga's OAuth file guard. Tokens returned while pinning are discarded; only the provider, provider key, account id, and exact configured path remain.
   """
   @spec pin_oauth(:openai_codex, String.t()) :: {:ok, OAuth.t()} | {:error, term()}
   def pin_oauth(:openai_codex, path) when is_binary(path) do
-    expanded_path = Path.expand(path)
+    configured = Path.absname(path)
 
-    with {:ok, resolved} <- ReqLLM.OAuth.resolve(:openai_codex, oauth_file: expanded_path),
+    with {:ok, resolved} <- OAuthFile.resolve_oauth_file(configured),
          "openai-codex" <- Map.get(resolved, :provider_key),
-         ^expanded_path <- Map.get(resolved, :oauth_file),
+         ^configured <- Map.get(resolved, :oauth_file),
          account_id when is_binary(account_id) and account_id != "" <-
            Map.get(resolved, :account_id) do
-      {:ok, OAuth.new(account_id, expanded_path)}
+      {:ok, OAuth.new(account_id, configured)}
     else
       {:error, _reason} = error -> error
       _mismatch -> {:error, :oauth_identity_mismatch}
@@ -341,16 +341,16 @@ defmodule MingaAgent.Credentials do
 
   @spec local_oauth_identity(String.t()) :: OAuth.t() | nil
   defp local_oauth_identity(path) do
-    expanded_path = Path.expand(path)
+    configured = Path.absname(path)
     provider_key = MingaAgent.OAuth.provider_key()
 
-    with {:ok, content} when content != "" <- File.read(expanded_path),
+    with {:ok, content} when content != "" <- File.read(configured),
          {:ok, data} when is_map(data) <- JSON.decode(content),
          entry when is_map(entry) <- Map.get(data, provider_key),
          account_id when is_binary(account_id) and account_id != "" <-
            Map.get(entry, "accountId") || Map.get(entry, "account_id") ||
              oauth_account_from_entry(entry) do
-      OAuth.new(account_id, expanded_path)
+      OAuth.new(account_id, configured)
     else
       _missing -> nil
     end
@@ -366,10 +366,10 @@ defmodule MingaAgent.Credentials do
   defp resolve_req_llm_oauth(path, opts) do
     case Keyword.get(opts, :oauth_resolver) do
       resolver when is_function(resolver, 2) ->
-        resolver.(:openai_codex, oauth_file: Path.expand(path))
+        resolver.(:openai_codex, oauth_file: Path.absname(path))
 
       nil ->
-        ReqLLM.OAuth.resolve(:openai_codex, oauth_file: Path.expand(path))
+        OAuthFile.resolve_oauth_file(path)
     end
   end
 
@@ -378,7 +378,7 @@ defmodule MingaAgent.Credentials do
     credential.provider == :openai_codex and
       Map.get(resolved, :provider_key) == credential.provider_key and
       Map.get(resolved, :account_id) == credential.account_id and
-      Map.get(resolved, :oauth_file) == Path.expand(path)
+      Map.get(resolved, :oauth_file) == Path.absname(path)
   end
 
   @spec credential_error(ModelSelection.credential_ref()) ::
@@ -399,52 +399,6 @@ defmodule MingaAgent.Credentials do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec revoke_api_key(provider(), keyword()) :: :ok | {:error, term()}
-  defp revoke_api_key(provider, opts) do
-    path = credentials_path(opts)
-
-    case read_credentials_file(path) do
-      {:ok, existing} ->
-        updated = Map.delete(existing, provider)
-        json = :json.format(updated)
-
-        with :ok <- File.write(path, json) do
-          File.chmod(path, 0o600)
-        end
-
-      {:error, :enoent} ->
-        :ok
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  @spec revoke_oauth_entry(provider()) :: :ok | {:error, term()}
-  defp revoke_oauth_entry("openai_codex") do
-    path = oauth_path()
-
-    with {:ok, content} when content != "" <- File.read(path),
-         {:ok, existing} when is_map(existing) <- JSON.decode(content) do
-      updated = Map.delete(existing, MingaAgent.OAuth.provider_key())
-      json = :json.format(updated)
-
-      case File.write(path, json) do
-        :ok -> File.chmod(path, 0o600)
-        error -> error
-      end
-    else
-      {:error, :enoent} -> :ok
-      _ -> :ok
-    end
-  end
-
-  defp revoke_oauth_entry(_provider), do: :ok
-
-  defp merge_revoke_result(:ok, :ok), do: :ok
-  defp merge_revoke_result({:error, _} = err, _), do: err
-  defp merge_revoke_result(_, {:error, _} = err), do: err
 
   @spec resolve_from_env(provider(), keyword()) :: {:ok, String.t()} | :error
   defp resolve_from_env(provider, opts) do
@@ -489,11 +443,109 @@ defmodule MingaAgent.Credentials do
   defp read_credentials_file(path) do
     case File.read(path) do
       {:ok, ""} -> {:ok, %{}}
-      {:ok, content} -> JSON.decode(content)
+      {:ok, content} -> decode_credentials_file(content)
       {:error, :enoent} -> {:ok, %{}}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  @spec decode_credentials_file(String.t()) :: {:ok, map()} | {:error, :invalid_credentials_file}
+  defp decode_credentials_file(content) do
+    case JSON.decode(content) do
+      {:ok, data} when is_map(data) -> {:ok, data}
+      _invalid -> {:error, :invalid_credentials_file}
+    end
+  end
+
+  # Preserve filesystem traversal order, including `..` after symlinked directories.
+  @spec credential_write_target(String.t(), non_neg_integer()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp credential_write_target(_path, 40), do: {:error, :eloop}
+
+  defp credential_write_target(path, depth) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        with {:ok, link} <- File.read_link(path) do
+          credential_write_target(link_target(path, link), depth + 1)
+        end
+
+      {:ok, _metadata} ->
+        {:ok, path}
+
+      {:error, :enoent} ->
+        {:ok, path}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec link_target(String.t(), String.t()) :: String.t()
+  defp link_target(path, link) do
+    if Path.type(link) == :absolute, do: link, else: Path.dirname(path) <> "/" <> link
+  end
+
+  @spec update_api_keys(String.t(), (map() -> map())) :: :ok | {:error, term()}
+  defp update_api_keys(configured_path, update) do
+    :global.trans(
+      {{__MODULE__, :api_key_updates}, self()},
+      fn -> merge_api_keys(configured_path, update) end,
+      [node()],
+      :infinity
+    )
+    |> lock_result()
+  end
+
+  @spec lock_result(:ok | {:error, term()} | :aborted) :: :ok | {:error, term()}
+  defp lock_result(:aborted), do: {:error, :credential_file_lock_aborted}
+  defp lock_result(result), do: result
+
+  @spec merge_api_keys(String.t(), (map() -> map())) :: :ok | {:error, term()}
+  defp merge_api_keys(configured_path, update) do
+    with {:ok, path} <- credential_write_target(configured_path, 0),
+         {:ok, existing} <- read_credentials_file(path) do
+      replace_credentials_file(path, :json.format(update.(existing)))
+    end
+  end
+
+  @spec replace_credentials_file(String.t(), iodata()) :: :ok | {:error, term()}
+  defp replace_credentials_file(path, contents) do
+    temporary = path <> ".#{System.unique_integer([:positive, :monotonic])}.tmp"
+
+    case :file.open(String.to_charlist(temporary), [:write, :binary, :raw, :exclusive]) do
+      {:ok, io} ->
+        result =
+          with :ok <- File.chmod(temporary, 0o600),
+               :ok <- :file.write(io, contents) do
+            :file.sync(io)
+          end
+
+        closed = :file.close(io)
+
+        case publish_credentials_file(result, closed, temporary, path) do
+          :ok ->
+            :ok
+
+          {:error, _reason} = error ->
+            File.rm(temporary)
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec publish_credentials_file(
+          :ok | {:error, term()},
+          :ok | {:error, term()},
+          String.t(),
+          String.t()
+        ) ::
+          :ok | {:error, term()}
+  defp publish_credentials_file(:ok, :ok, temporary, path), do: File.rename(temporary, path)
+  defp publish_credentials_file({:error, _reason} = error, _closed, _temporary, _path), do: error
+  defp publish_credentials_file(:ok, {:error, _reason} = error, _temporary, _path), do: error
 
   @spec ensure_directory(String.t()) :: :ok | {:error, term()}
   defp ensure_directory(dir) do

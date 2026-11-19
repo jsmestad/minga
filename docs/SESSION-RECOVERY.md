@@ -14,13 +14,15 @@ Retained-output references and recovery bookkeeping stay in the durable history.
 
 A branch can resume only from a recorded boundary. Branching from a display entry without a matching model boundary returns an error rather than guessing which provider messages belonged there. Switching branches restores the branch's messages and boundary identities together.
 
+Changing models between turns keeps the same conversation and display history. Session converts only the active model continuation: ordinary text, supported attachments, and completed tool exchanges survive; incompatible reasoning signatures and native replay state do not. The target selection and converted continuation are persisted together before the provider adopts the change. Active branch boundaries are reindexed against the converted messages, while saved branch snapshots keep their original messages and epochs. Switching is refused during an active request or an unsettled tool group, or when substantive history cannot be represented by the target. See [agent model selection](AGENT-MODEL-SELECTION.md#native-replay-identity).
+
 ## Immutable request prefixes
 
 Session's continuation owns an interned prefix store. Instructions and callback-free tool declarations are separate immutable components; an epoch joins their identities with the selected route and authentication evidence. The selected prefix also retains skill names, so a provider or runtime restart restores the selection without parsing historical prompt text or rewriting its immutable instructions. Requests, outcomes, tool checkpoints, boundaries, and branch snapshots reference that epoch. Display events report identity and status, not copies of the schema set.
 
 Continuation codec version 4 stores each reachable component once. Dynamic declaration source owners are captured as durable binary identities before hashing, so an unloaded or removed extension cannot make its saved history undecodable; the changed live registry still requires an explicit transition. Versions 2 and 3 preserve their exact ReqLLM values, but missing historical prefix evidence remains unknown: today's prompt and registry cannot reconstruct it. Corrupt identities, digests, and dangling references are rejected. Branches retain their own references, and compaction keeps the provider's exact native window without prepending stored instructions.
 
-Prefix changes require an idle request boundary with no unsettled tool group. Skill updates are previewed before effective mutation; a rejected transition or failed save leaves the last-good prefix and active skills unchanged. Unchanged turns and identical declarations reuse the same components and epoch. See [native replay identity](AGENT-MODEL-SELECTION.md#native-replay-identity) for restart and fresh-conversation requirements.
+Prefix changes require an idle request boundary with no unsettled tool group. Skill updates are previewed before effective mutation; a rejected transition or failed save leaves the last-good prefix and active skills unchanged. Unchanged turns and identical declarations reuse the same components and epoch. Model changes use the explicit history conversion described above; they do not require `/new`. See [native replay identity](AGENT-MODEL-SELECTION.md#native-replay-identity) for authentication and restart requirements.
 
 Native loop refusals retain their structured context-transition identity through Session presentation. Their public error directs the user to retain the saved record or use `/new`; it is not reported as a provider outage or model-picker failure, and does not expose arbitrary diagnostic text.
 
@@ -42,9 +44,9 @@ An interrupted provider request keeps its exact submitted prompt. The next conti
 
 Before an external tool effect starts, Session saves the assistant tool-call group and a single-attempt admission record. It saves each result before presenting that result as complete. During recovery:
 
-- A call with a saved result remains complete and is not executed again.
+- A call with a saved result keeps its recorded outcome and is not executed again.
 - An admitted call without a saved result is marked indeterminate and is never run again automatically. If its exact delivery-key capture reached terminal storage before the process stopped, recovery attaches that retained `Output`; otherwise the result explicitly has no recovered output.
-- A call without admission is marked not executed.
+- A call without admission is marked not executed. It carries no execution duration, even when interruption is reported as an error.
 - The recovered tool exchange receives a resumable boundary, so later branch operations do not truncate or invent the reconciled result.
 
 A failed checkpoint or result save blocks further model execution. Minga preserves the last durable continuation and reports the persistence failure instead of claiming the newer state can resume safely.
@@ -71,7 +73,9 @@ Shell execution has one timeout owner. A timeout retains the bounded bytes alrea
 
 Image bytes remain in the artifact store. Delivery requires two independent facts on the frozen [exact model selection](AGENT-MODEL-SELECTION.md#capability-policy): image input support and image tool-result transport support. Unsupported routes and formats return an explicit tool limitation before full source capture. Supported images are fetched in bounded pages and hydrated only into the transient SDK request. Saved continuations, exports, hooks, and gateway events carry reference facts, not retained image payload bytes. A corrupt or unauthorized image reference fails visibly; an unsupported restored image becomes a model-visible tool error without fetching its bytes.
 
-The combined snapshot format is version 5. It reads historical model-selection versions 3 and 4 only when they contain no retained output, and reads historical retained-output version 3 only when its generation authority is present and model-route fields are absent. Hybrid version-3 records are rejected. The next save writes the combined format.
+The combined snapshot format is version 6. Completed tool results carry an explicit outcome and a matching error flag; approval expiry also carries a structured reason. Missing or contradictory modern outcome data is rejected instead of becoming a fabricated completion. Supported historical results retain their recorded outcome and error semantics, including the historical completed default when neither outcome nor error evidence exists. Minga never classifies a refusal from result text.
+
+Version 5 snapshots retain their existing artifact-generation validation. Historical model-selection versions 3 and 4 are read only when they contain no retained output; historical retained-output version 3 requires its generation authority and no model-route fields. Hybrid version-3 records are rejected. The next save writes the current combined format.
 
 Run capture and restore in separate BEAM processes to exercise storage, source changes, compaction, and application restart:
 

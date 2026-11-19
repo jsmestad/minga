@@ -80,7 +80,13 @@ defmodule MingaEditor.Commands.InlineEditTest do
       InlineEditEvents.handle_event(
         state,
         fake_session,
-        {:tool_ended, "produce_rewrite", "ONE", :done}
+        {:tool_ended,
+         %MingaAgent.Event.ToolEnd{
+           tool_call_id: "rewrite",
+           name: "produce_rewrite",
+           result: "ONE",
+           outcome: :complete
+         }}
       )
 
     state = InlineEditEvents.handle_event(state, fake_session, {:text_delta, "Done"})

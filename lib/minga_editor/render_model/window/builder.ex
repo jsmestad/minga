@@ -41,7 +41,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderModel.Window.ResidentBuild
   alias MingaEditor.RenderModel.Window.ResidentSemanticState
+  alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.Renderer.TextPresentation
+  alias MingaEditor.Renderer.WrapLayout
   alias MingaEditor.RenderModel.Window.VisualRow
   alias Minga.RenderModel.Window.Annotation
   alias Minga.RenderModel.Window.Cursorline
@@ -87,9 +89,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          }
 
   @typep folded_source_ctx :: %{
-           lines: [String.t()],
-           first_line: non_neg_integer(),
-           line_byte_offsets: %{non_neg_integer() => non_neg_integer()},
+           source: (non_neg_integer() -> {String.t(), non_neg_integer()}),
            highlight_segments_by_line: %{non_neg_integer() => [Highlight.styled_segment()]},
            line_identity: LineIdentity.t() | nil,
            decoration_slots: %{optional(term()) => Row.row_slot()}
@@ -126,7 +126,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       cursor_byte_col: cursor_byte_col,
       cursor_col: cursor_col,
       first_line: first_line,
-      lines: lines,
       snapshot: snapshot,
       window: window,
       win_layout: win_layout,
@@ -151,7 +150,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     retain_ctx =
       retain_ctx(
-        ctx,
+        composition_fingerprint(ctx, wrap_on, snapshot.options),
         Keyword.get(opts, :retained_rows, %{}),
         Keyword.get(opts, :retained_wrap_lines, %{}),
         scroll.line_identity,
@@ -162,103 +161,65 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # are reused from the retained-row cache (no recompose) when their cheap
     # input fingerprint matches; only composed rows count as rasterized (#2287).
     #
-    # Full-document residence (#2658) takes an incremental path: a persistent
-    # ResidentBuild state splices only the rows whose text changed and maintains
-    # the content digest in O(changed rows). A tree-sitter re-highlight still
-    # triggers a full rebuild (the highlight fingerprint changes), but the common
-    # case (in-place text edit) avoids the O(document) compose. Off residence this
-    # is the unchanged windowed build and `resident_result` is nil, so behaviour
-    # is byte identical.
-    {all_visual_entries, resident_result, font_registry} =
-      if scroll.full_residence do
-        materialize_full? =
-          state.intent.frame.force_keyframe? or adapter_full_snapshot_pending?(state, win_id)
+    # Full residence composes only the dirty logical line groups. The treap
+    # retains untouched visual rows and indexes both coordinate systems.
+    {all_visual_entries, resident_result, mixed_builds, font_registry} =
+      build_window_entries(state, scroll, ctx, retain_ctx, opts, font_registry)
 
-        resident_opts = Keyword.put(opts, :keyframe?, materialize_full?)
+    {scroll, viewport, visible_row_start_index} = presentation_anchor(scroll, resident_result)
+    payload_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
 
-        build_resident_entries(
-          scroll,
-          lines,
-          first_line,
-          ctx,
-          snapshot,
-          retain_ctx,
-          resident_opts,
-          font_registry
-        )
-      else
-        {visual_entries, font_registry} =
-          build_visual_entries(
-            lines,
-            first_line,
-            visible_line_map,
-            wrap_on,
-            ctx,
-            snapshot,
-            retain_ctx,
-            font_registry
-          )
-
-        {visual_entries, nil, font_registry}
-      end
-
-    visible_row_start_index = scroll.visible_row_start_index + viewport.visual_row_offset
-    raw_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
-    # Under full residence, visible_row_start_index is the viewport's absolute
-    # document offset, not a small overscan count. Cap the presentation overscan
-    # so retained-row resolution stays viewport-windowed.
-    payload_overscan_before =
-      if scroll.full_residence,
-        do: min(raw_overscan_before, visible_row_count),
-        else: raw_overscan_before
-
-    resident_context_start =
-      if resident_result, do: Map.get(resident_result, :context_start, 0), else: 0
+    resident_context_start = resident_field(resident_result, :context_start, 0)
 
     local_visible_start = max(visible_row_start_index - resident_context_start, 0)
 
     visual_entries =
       trim_visual_entries(all_visual_entries, local_visible_start, visible_row_count)
 
-    presentation_entries =
-      presentation_visual_entries(
+    resident_entries =
+      retained_presentation_entries(
+        resident_result,
         all_visual_entries,
         local_visible_start,
         visible_row_count,
         payload_overscan_before
       )
 
-    # Resident text payloads are partial; store extent and gutter describe the complete document.
-    resident_entries =
-      resident_presentation_entries(
-        scroll,
-        resident_result,
-        all_visual_entries,
-        presentation_entries
-      )
-
     {new_retained, rasterized, content_digest, resident_build_state, resident_rows_spliced} =
       resolve_retained_and_digest(resident_result, resident_entries, retain_ctx)
 
-    new_retained_wrap =
-      retained_wrap_lines(all_visual_entries, wrap_on and visible_line_map == nil)
+    new_retained_wrap = retained_window_wrap_lines(scroll, all_visual_entries)
 
     presentation_rows = Enum.map(resident_entries, & &1.row)
     committed_rows = Enum.map(visual_entries, & &1.row)
-    wrapped_coordinates? = wrap_on and visible_line_map == nil
+    wrapped_coordinates? = wrapped_coordinates?(scroll)
+    row_store_mode = row_store_mode(resident_build_state)
 
-    # Cursor in display coordinates
-    {display_cursor_row, display_cursor_col} =
-      compute_display_cursor(
+    resident_cursor =
+      resident_wrapped_cursor(
+        resident_build_state,
+        wrapped_coordinates?,
         cursor_line,
-        cursor_byte_col,
-        cursor_col,
-        viewport,
-        window.fold_map,
-        ctx.decorations,
-        visual_entries,
-        wrapped_coordinates?
+        cursor_byte_col
       )
+
+    {display_cursor_row, display_cursor_col} =
+      case resident_cursor do
+        {rank, col} ->
+          {max(rank - visible_row_start_index, 0), col}
+
+        nil ->
+          compute_display_cursor(
+            cursor_line,
+            cursor_byte_col,
+            cursor_col,
+            viewport,
+            window.fold_map,
+            ctx.decorations,
+            visual_entries,
+            wrapped_coordinates?
+          )
+      end
 
     cursor_shape = active_cursor_shape(state, is_active)
     cursor_eligible = cursor_eligible?(state, is_active)
@@ -278,20 +239,35 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # `compute_display_cursor/7` and the encoder both pin a negative relative
     # row to 0). Cursor-follow re-anchors on the next cursor-moving key.
     cursor_on_screen? =
-      cursor_on_screen?(
-        cursor_line,
-        viewport,
-        window.fold_map,
-        visual_entries,
-        visible_row_count,
-        wrapped_coordinates?
-      )
+      case resident_cursor do
+        {rank, _} ->
+          rank >= visible_row_start_index and rank < visible_row_start_index + visible_row_count
+
+        nil ->
+          cursor_on_screen?(
+            {cursor_line, cursor_byte_col},
+            viewport,
+            window.fold_map,
+            visual_entries,
+            visible_row_count,
+            wrapped_coordinates?
+          )
+      end
 
     # Hide the editor cursor when the minibuffer has focus (command, search,
     # eval, search_prompt modes). The native SwiftUI minibuffer shows its
     # own cursor; having two cursors visible is confusing. Also hide it when the
     # cursor has scrolled off-viewport (#2684).
-    cursor_visible = cursor_visible?(cursor_eligible, cursor_on_screen?)
+    {cursor_visible, retain_cursor_source?} =
+      cursor_presentation_visibility(
+        cursor_eligible,
+        cursor_on_screen?,
+        display_cursor_col,
+        ctx.content_w,
+        scroll,
+        row_store_mode,
+        content_kind
+      )
 
     raw_selection =
       ContentHelpers.visual_selection_bounds(state, {cursor_line, scroll.cursor_byte_col})
@@ -309,17 +285,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
-    accessibility_selection_ranges =
-      accessibility_selection_ranges(
-        raw_selection,
-        visual_entries,
-        lines,
-        first_line
-      )
+    {absolute_cursor_row, absolute_cursor_col} =
+      resident_cursor ||
+        {cursor_line,
+         Decorations.buf_col_to_display_col(ctx.decorations, cursor_line, cursor_col)}
+
+    accessibility_selection_ranges = accessibility_selection_ranges(raw_selection, visual_entries)
 
     accessibility_cursor =
       accessibility_cursor(
-        cursor_visible,
+        retain_cursor_source?,
         {display_cursor_row, display_cursor_col},
         {cursor_line, scroll.cursor_byte_col},
         Enum.find(visual_entries, &(&1.display_row == display_cursor_row))
@@ -346,7 +321,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         visible_row_count,
         visual_entries,
         wrapped_coordinates?,
-        lines,
+        diagnostic_source(scroll),
         first_line,
         resident_build_state
       )
@@ -371,9 +346,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         wrapped_coordinates?
       )
 
-    geometry = build_geometry(state, scroll, content_kind)
+    geometry = build_geometry(state, scroll, content_kind, row_store_mode)
 
-    row_store_mode = row_store_mode(scroll)
+    horizontal_pan_limit =
+      horizontal_pan_limit(
+        visual_entries,
+        geometry,
+        content_kind,
+        scroll.wrap_on,
+        state.intent.frame.capabilities
+      )
 
     text_rows = text_presentation_rows(resident_build_state, resident_entries)
 
@@ -396,6 +378,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         viewport.visual_row_offset,
         text_store_identity
       }
+
+    text_identity =
+      scroll_text_identity(
+        state,
+        scroll,
+        resident_build_state,
+        new_retained_wrap,
+        mixed_builds,
+        text_identity,
+        window.authoritative_scroll_seq
+      )
 
     {:buffer, buffer} = window.content
 
@@ -424,11 +417,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           keyframe?:
             state.intent.frame.force_keyframe? or adapter_full_snapshot_pending?(state, win_id),
           cursor_eligible: cursor_eligible,
-          cursor_row: cursor_line,
-          cursor_col:
-            Decorations.buf_col_to_display_col(ctx.decorations, cursor_line, cursor_col),
+          cursor_row: absolute_cursor_row,
+          cursor_col: absolute_cursor_col,
           cursorline_bg: ctx.cursorline_bg,
-          selection: ctx.visual_selection,
+          selection: if(wrapped_coordinates?, do: raw_selection, else: ctx.visual_selection),
+          wrapped?: wrapped_coordinates?,
           diagnostics_snapshot: ctx.diagnostics_snapshot,
           annotations_revision: ctx.decorations.annotation_version,
           decorations: ctx.decorations,
@@ -465,13 +458,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       content_epoch: scroll.content_epoch,
       full_refresh: scroll.full_refresh,
       scroll_seq: scroll.scroll_seq,
+      horizontal_pan_ack: window.horizontal_pan_ack,
+      horizontal_pan_limit: horizontal_pan_limit,
       # Non-wrapped, non-folded windows emit consecutive :normal buffer lines, so
       # ScrollPresentation can derive the resident line range arithmetically.
       contiguous_rows: is_nil(visible_line_map) and not wrap_on,
+      wrapped: scroll.wrap_on,
       # Set only on the residence path; the GUI adapter gates the content
       # frame-emit on it instead of hashing the full rows list (#2658).
       content_digest: content_digest,
-      row_delta: if(resident_result, do: resident_result.row_delta, else: nil),
+      row_delta: resident_field(resident_result, :row_delta, nil),
       row_store_mode: row_store_mode,
       resident_semantics: resident_semantics
     }
@@ -488,6 +484,104 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        text_presentation: text_presentation
      }, font_registry}
   end
+
+  defp build_window_entries(
+         state,
+         %{full_residence: true} = scroll,
+         ctx,
+         retain_ctx,
+         opts,
+         registry
+       ) do
+    materialize? =
+      state.intent.frame.force_keyframe? or
+        adapter_full_snapshot_pending?(state, scroll.window.id)
+
+    {entries, result, registry} =
+      build_resident_entries(
+        scroll,
+        scroll.lines,
+        scroll.first_line,
+        ctx,
+        scroll.snapshot,
+        retain_ctx,
+        Keyword.put(opts, :keyframe?, materialize?),
+        registry
+      )
+
+    {entries, result, %{}, registry}
+  end
+
+  defp build_window_entries(
+         _state,
+         %WindowScroll{wrap_on: true, visible_line_map: %DisplayMap{} = page} = scroll,
+         ctx,
+         retain_ctx,
+         _opts,
+         registry
+       ) do
+    {:buffer, buffer} = scroll.window.content
+
+    {_, builds} =
+      TextPresentation.matching_mixed_wrap(
+        RendererWindow.text_presentation(scroll.window),
+        buffer,
+        scroll.snapshot.version,
+        page.wrap_basis
+      )
+
+    source = fn line ->
+      {text, offset, _, _, _} = DisplayMap.source(page, line)
+      {text, offset}
+    end
+
+    builds = Map.take(builds, Map.keys(page.sources))
+
+    {entries, builds, registry} =
+      build_folded_entries(page.entries, source, page, ctx, retain_ctx, registry, builds)
+
+    {entries, nil, builds, registry}
+  end
+
+  defp build_window_entries(_state, scroll, ctx, retain_ctx, _opts, registry) do
+    {entries, registry} =
+      build_visual_entries(
+        scroll.lines,
+        scroll.first_line,
+        scroll.visible_line_map,
+        scroll.wrap_on,
+        ctx,
+        scroll.snapshot,
+        retain_ctx,
+        registry
+      )
+
+    {entries, nil, %{}, registry}
+  end
+
+  defp resident_field(nil, _key, default), do: default
+  defp resident_field(result, key, _default), do: Map.fetch!(result, key)
+
+  defp retained_window_wrap_lines(
+         %WindowScroll{full_residence: false, visible_line_map: nil} = scroll,
+         entries
+       ),
+       do: retained_wrap_lines(entries, wrapped_coordinates?(scroll))
+
+  defp retained_window_wrap_lines(%WindowScroll{}, _entries), do: %{}
+
+  defp retained_presentation_entries(nil, entries, first, count, overscan),
+    do: presentation_visual_entries(entries, first, count, overscan)
+
+  defp retained_presentation_entries(result, _entries, _first, _count, _overscan),
+    do: result.payloads
+
+  defp wrapped_coordinates?(%WindowScroll{wrap_on: true, visible_line_map: nil}), do: true
+
+  defp wrapped_coordinates?(%WindowScroll{wrap_on: true, visible_line_map: %DisplayMap{}}),
+    do: true
+
+  defp wrapped_coordinates?(%WindowScroll{}), do: false
 
   @spec build_resident_semantics(
           ResidentSemanticState.t() | nil,
@@ -526,24 +620,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> MapSet.member?(window_id)
   end
 
-  @spec resident_presentation_entries(
-          WindowScroll.t(),
-          map() | nil,
-          [visual_row_entry()],
-          [visual_row_entry()]
-        ) :: [visual_row_entry()]
-  defp resident_presentation_entries(
-         %{full_residence: true},
-         %{row_delta: %Minga.RenderModel.Window.RowDelta{}, inserted_payloads: payloads},
-         _all,
-         _presentation
-       ),
-       do: payloads
+  defp resident_wrapped_cursor(%ResidentBuild{store: store}, true, line, byte),
+    do: ResidentStore.source_position(store, line, byte, :start)
 
-  defp resident_presentation_entries(%{full_residence: true}, _result, all, _presentation),
-    do: all
-
-  defp resident_presentation_entries(_scroll, _result, _all, presentation), do: presentation
+  defp resident_wrapped_cursor(_resident, _wrapped?, _line, _byte), do: nil
 
   # ── Full-document residence incremental build (#2658) ──────────────────────
 
@@ -555,7 +635,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     window = scroll.window
 
     ResidentBuild.plan(RendererWindow.resident_build(window), %{
-      compose_fp: composition_fingerprint(ctx),
+      compose_fp: composition_fingerprint(ctx, scroll.wrap_on, scroll.snapshot.options),
       highlight_fp: highlight_content_fingerprint(ctx.highlight),
       reset?: scroll.full_refresh,
       hydration_reason: RendererWindow.hydration_reason(window),
@@ -564,10 +644,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     })
   end
 
-  # Runs the persistent ResidentBuild for the residence path, returning the full
-  # resident entry list and the frame's retained/digest result. The full build
-  # and the dirty-line splice both compose through `compose_sequential_entry/6`,
-  # so a spliced entry is byte identical to a freshly built one.
+  # Hydration and splices compose with the same wrapped or sequential line
+  # path. Presentation only reads the resulting viewport-sized context.
   @spec build_resident_entries(
           WindowScroll.t(),
           [String.t()],
@@ -602,13 +680,23 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       build_all: fn registry ->
         # Hydration is the one path where BufferPrefetch explicitly supplied the
         # whole bounded line range. No retained Document is sliced here.
-        build_visual_entries(lines, first_line, nil, false, ctx, snapshot, retain_ctx, registry)
+        build_visual_entries(
+          lines,
+          first_line,
+          nil,
+          scroll.wrap_on,
+          ctx,
+          snapshot,
+          retain_ctx,
+          registry
+        )
       end,
       build_dirty: fn dirty, registry ->
-        build_dirty_sequential_entries(
+        build_dirty_entries(
           dirty,
           lines,
           first_line,
+          scroll.wrap_on,
           ctx,
           snapshot,
           retain_ctx,
@@ -627,26 +715,118 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {state, result, font_registry} =
       ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
 
-    if result.row_delta == nil do
-      {result.payloads, Map.put(result, :state, state), font_registry}
-    else
-      context_before = 8
-      context_start = max(scroll.visible_row_start_index - context_before, 0)
-      context_count = MingaEditor.Viewport.content_rows(scroll.viewport) + context_before * 2
-      context_payloads = ResidentStore.payload_range(state.store, context_start, context_count)
+    {visible_start, anchor} = resident_anchor(state.store, scroll.viewport)
+    context_before = 8
+    context_start = max(visible_start - context_before, 0)
+    context_count = Viewport.content_rows(scroll.viewport) + context_before * 2
+    context_payloads = ResidentStore.payload_range(state.store, context_start, context_count)
 
-      {context_payloads,
-       result
-       |> Map.put(:state, state)
-       |> Map.put(:context_start, context_start), font_registry}
+    {context_payloads,
+     Map.merge(result, %{
+       state: state,
+       context_start: context_start,
+       visible_start: visible_start,
+       anchor: anchor
+     }), font_registry}
+  end
+
+  defp resident_anchor(%ResidentStore{size: 0}, _viewport), do: {0, {0, 0}}
+
+  defp resident_anchor(store, viewport) do
+    line = min(viewport.top, ResidentStore.line_count(store) - 1)
+    {first, count} = ResidentStore.line_extent(store, line)
+    bottom = max(ResidentStore.size(store) - Viewport.content_rows(viewport), 0)
+    rank = min(first + min(viewport.visual_row_offset, count - 1), bottom)
+    {rank, ResidentStore.anchor_at(store, rank)}
+  end
+
+  # DisplayMap already selected the visible rows, including a partial source group at the top.
+  defp presentation_anchor(%WindowScroll{visible_line_map: %DisplayMap{}} = scroll, nil),
+    do: {scroll, scroll.viewport, 0}
+
+  defp presentation_anchor(scroll, nil),
+    do:
+      {scroll, scroll.viewport,
+       scroll.visible_row_start_index + scroll.viewport.visual_row_offset}
+
+  defp presentation_anchor(scroll, %{visible_start: rank, anchor: {line, offset}}) do
+    viewport = Viewport.put_top_visual(scroll.viewport, line, offset, offset + 1)
+
+    {%{scroll | viewport: viewport}, viewport, rank}
+  end
+
+  defp scroll_text_identity(
+         _state,
+         %{wrap_on: true} = scroll,
+         %ResidentBuild{},
+         _groups,
+         _mixed_builds,
+         identity,
+         authoritative_seq
+       ) do
+    basis =
+      WrapLayout.basis(scroll.snapshot, scroll.content_w, scroll.width_oracle, scroll.cursor_line)
+
+    {:wrapped_resident, basis, authoritative_seq, identity}
+  end
+
+  defp scroll_text_identity(
+         _state,
+         %{wrap_on: true, visible_line_map: %DisplayMap{wrap_basis: basis} = page},
+         nil,
+         _groups,
+         builds,
+         identity,
+         _explicit_request
+       )
+       when is_tuple(basis) do
+    TextPresentation.mixed_wrap_identity(page, builds, identity)
+  end
+
+  defp scroll_text_identity(
+         state,
+         %{wrap_on: true, visible_line_map: nil} = scroll,
+         nil,
+         groups,
+         _mixed_builds,
+         identity,
+         _authoritative_seq
+       )
+       when map_size(groups) > 0 do
+    if scroll.is_active and SearchHighlight.substitute_preview?(state) do
+      identity
+    else
+      basis =
+        WrapLayout.basis(
+          scroll.snapshot,
+          scroll.content_w,
+          scroll.width_oracle,
+          scroll.cursor_line
+        )
+
+      counts =
+        Map.new(groups, fn {_row_id, {_hash, [%VisualRow{buf_line: line} | _] = rows}} ->
+          {line, length(rows)}
+        end)
+
+      {:wrapped_windowed, basis, counts, identity}
     end
   end
 
-  @spec row_store_mode(WindowScroll.t()) :: :windowed | {:resident, non_neg_integer()}
-  defp row_store_mode(%WindowScroll{full_residence: true, snapshot: snapshot}),
-    do: {:resident, snapshot.line_count}
+  defp scroll_text_identity(
+         _state,
+         _scroll,
+         _resident,
+         _groups,
+         _builds,
+         identity,
+         _explicit_request
+       ),
+       do: identity
 
-  defp row_store_mode(%WindowScroll{full_residence: false}), do: :windowed
+  @spec row_store_mode(ResidentBuild.t() | nil) :: :windowed | {:resident, non_neg_integer()}
+  defp row_store_mode(%ResidentBuild{store: store}), do: {:resident, ResidentStore.size(store)}
+  defp row_store_mode(nil), do: :windowed
 
   @spec resident_source(non_neg_integer(), [String.t()], non_neg_integer()) ::
           ResidentBuild.source()
@@ -659,21 +839,22 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp resident_source(first, lines, _count), do: {:range, first, lines}
 
-  # Composes entries for exactly the dirty sequential line indices, reusing the
-  # masked highlight batch so only dirty rows produce styled segments (#2658).
-  @spec build_dirty_sequential_entries(
+  # Composes complete visual groups only for dirty logical lines.
+  @spec build_dirty_entries(
           MapSet.t(non_neg_integer()),
           [String.t()],
           non_neg_integer(),
+          boolean(),
           Context.t(),
           map(),
           retain_ctx(),
           FontRegistry.t()
-        ) :: {%{non_neg_integer() => visual_row_entry()}, FontRegistry.t()}
-  defp build_dirty_sequential_entries(
+        ) :: {%{non_neg_integer() => [visual_row_entry()]}, FontRegistry.t()}
+  defp build_dirty_entries(
          dirty,
          lines,
          first_line,
+         wrapped?,
          ctx,
          snapshot,
          retain_ctx,
@@ -683,17 +864,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     local_dirty = MapSet.new(dirty, &(&1 - first_line))
     offsets = dirty_line_offsets(lines, first_byte_off, local_dirty)
     masked = masked_highlight_by_index(ctx.highlight, lines, first_byte_off, local_dirty)
+    wrap_opts = if wrapped?, do: wrap_options(ctx, snapshot.options), else: nil
 
     Enum.reduce(dirty, {%{}, font_registry}, fn absolute_index, {acc, registry} ->
       local_index = absolute_index - first_line
       {line_text, line_byte_offset} = Map.fetch!(offsets, local_index)
 
       {entry, registry} =
-        compose_sequential_entry(
+        compose_dirty_group(
           absolute_index,
           line_text,
           Map.get(masked, local_index),
           line_byte_offset,
+          wrap_opts,
           ctx,
           retain_ctx,
           registry
@@ -701,6 +884,29 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
       {Map.put(acc, absolute_index, entry), registry}
     end)
+  end
+
+  defp compose_dirty_group(line, text, segments, offset, nil, ctx, retain_ctx, registry) do
+    {entry, registry} =
+      compose_sequential_entry(line, text, segments, offset, ctx, retain_ctx, registry)
+
+    {[entry], registry}
+  end
+
+  defp compose_dirty_group(line, text, segments, offset, opts, ctx, retain_ctx, registry) do
+    build_wrapped_logical_line(
+      %{
+        line_text: text,
+        line_byte_offset: offset,
+        hl_segments: segments,
+        buf_line: line,
+        content_width: Keyword.fetch!(opts, :content_width),
+        wrap_opts: opts,
+        ctx: ctx,
+        retain_ctx: retain_ctx
+      },
+      registry
+    )
   end
 
   @spec dirty_line_offsets([String.t()], non_neg_integer(), MapSet.t(non_neg_integer())) ::
@@ -760,27 +966,33 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # input fingerprint AND this frame's compose_fp match, so any context change
   # conservatively forces a full recompose.
   @spec retain_ctx(
-          Context.t(),
+          non_neg_integer(),
           %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
           %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}},
           LineIdentity.t() | nil,
           map()
         ) :: retain_ctx()
-  defp retain_ctx(%Context{} = ctx, prev, prev_wrap, line_identity, decoration_slots)
+  defp retain_ctx(compose_fp, prev, prev_wrap, line_identity, decoration_slots)
        when is_map(prev) and is_map(prev_wrap) and is_map(decoration_slots) do
     %{
       prev: prev,
       prev_wrap: prev_wrap,
-      compose_fp: composition_fingerprint(ctx),
+      compose_fp: compose_fp,
       line_identity: line_identity,
       decoration_slots: decoration_slots
     }
   end
 
-  @spec composition_fingerprint(Context.t()) :: non_neg_integer()
-  defp composition_fingerprint(ctx) do
+  @spec composition_fingerprint(Context.t(), boolean(), map()) :: non_neg_integer()
+  defp composition_fingerprint(ctx, wrapped?, options) do
     conceal_cursor =
       if Decorations.has_conceal_ranges?(ctx.decorations), do: ctx.cursor_line, else: nil
+
+    wrap_geometry =
+      if wrapped? do
+        opts = wrap_options(ctx, options)
+        {Keyword.delete(opts, :oracle), Minga.Core.WidthOracle.fingerprint(ctx.width_oracle)}
+      end
 
     :erlang.phash2({
       ctx.composition_key || Decorations.text_composition_key(ctx.decorations),
@@ -789,6 +1001,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       ctx.whitespace_face,
       ctx.hl_todo_faces,
       ctx.highlight != nil,
+      wrap_geometry,
       conceal_cursor
     })
   end
@@ -1013,6 +1226,26 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> elem(0)
     |> Enum.at(visual_row)
     |> source_position_from_visual_entry(display_col)
+  end
+
+  @doc "Maps a hit in a measured mixed-layout segment back to its source position."
+  @spec mixed_source_position(
+          DisplayMap.source(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t()
+        ) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
+  def mixed_source_position(
+        {text, _offset, composed, _rows, _count} = source,
+        line,
+        index,
+        display_col,
+        ctx
+      ) do
+    rows = DisplayMap.segments(source, index, 1)
+    [entry] = project_wrapped_entries(rows, index, composed, text, [], {line, line}, ctx)
+    source_position_from_visual_entry(entry, display_col)
   end
 
   @spec source_position_from_visual_entry(visual_row_entry() | nil, non_neg_integer()) ::
@@ -1386,8 +1619,49 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         ) :: [visual_row_entry()]
   defp wrap_composed_entries(composed_text, source_text, spans, buf_line, source_id, ctx, opts) do
     [visual_rows] = WrapMap.compute([composed_text], Keyword.fetch!(opts, :content_width), opts)
+
+    project_wrapped_entries(
+      visual_rows,
+      0,
+      composed_text,
+      source_text,
+      spans,
+      {buf_line, source_id},
+      ctx
+    )
+  end
+
+  defp project_wrapped_entries(
+         visual_rows,
+         first_index,
+         composed_text,
+         source_text,
+         spans,
+         {buf_line, source_id},
+         ctx
+       ) do
     decorations = composition_decorations(ctx, buf_line)
 
+    {rows, offsets, width} =
+      measure_wrapped_rows(visual_rows, composed_text, source_text, decorations, buf_line, ctx)
+
+    project_measured_rows(
+      rows,
+      first_index,
+      spans,
+      {buf_line, source_id},
+      {offsets, width, decorations}
+    )
+  end
+
+  defp measure_wrapped_rows(
+         [%{byte_offset: first_byte} | _] = visual_rows,
+         composed_text,
+         source_text,
+         decorations,
+         buf_line,
+         ctx
+       ) do
     source_offset_map =
       SourceOffsetMap.new(source_text, composed_text, decorations, buf_line,
         tab_width: ctx.tab_width
@@ -1395,100 +1669,114 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     source_line_width = Unicode.display_width(source_text)
 
-    visual_rows_with_offsets =
-      Enum.map(visual_rows, fn visual_row ->
-        composed_start_byte = Map.get(visual_row, :byte_offset, 0)
+    prefix = binary_part(composed_text, 0, first_byte)
+    start_utf16 = utf16_offset(prefix, first_byte)
+    start_col = Unicode.display_width(prefix)
 
-        composed_end_byte =
-          composed_start_byte +
-            byte_size(Map.get(visual_row, :source_text, Map.get(visual_row, :text, "")))
-
-        {
-          visual_row,
-          utf16_offset(composed_text, composed_start_byte),
-          utf16_offset(composed_text, composed_end_byte)
-        }
+    {visual_rows_with_offsets, _} =
+      Enum.map_reduce(visual_rows, {start_utf16, start_col}, fn %{source_text: text} = row,
+                                                                {utf16, col} ->
+        next_utf16 = utf16 + utf16_offset(text, byte_size(text))
+        next_col = col + Unicode.display_width(text)
+        {{row, utf16, next_utf16, col, next_col}, {next_utf16, next_col}}
       end)
 
     composed_boundaries =
       visual_rows_with_offsets
-      |> Enum.flat_map(fn {_visual_row, composed_start_utf16, composed_end_utf16} ->
+      |> Enum.flat_map(fn {_row, composed_start_utf16, composed_end_utf16, _start, _end} ->
         [{composed_start_utf16, :start}, {composed_end_utf16, :end}]
       end)
 
     source_bytes =
-      source_offset_map
-      |> SourceOffsetMap.composed_utf16_to_source_bytes(composed_boundaries)
-      |> Enum.chunk_every(2)
+      SourceOffsetMap.composed_utf16_to_source_bytes(source_offset_map, composed_boundaries)
 
-    visual_rows_with_offsets
-    |> Enum.zip(source_bytes)
-    |> Enum.with_index()
-    |> Enum.map(fn {{{visual_row, composed_start_utf16, composed_end_utf16},
-                     [source_start_byte, source_end_byte]}, visual_index} ->
-      text = WrapMap.display_text(visual_row)
-      row_type = if visual_index == 0, do: :normal, else: :wrap_continuation
-      row_spans = spans_for_visual_row(spans, composed_text, visual_row)
-      source_start = visual_row_source_start(composed_text, visual_row)
-      source_end = visual_row_source_end(source_start, visual_row)
+    rows = with_source_bytes(visual_rows_with_offsets, source_bytes, [])
+    {rows, source_offset_map, source_line_width}
+  end
 
-      source_start_col =
-        Decorations.display_col_to_buf_col(
-          decorations,
-          buf_line,
-          source_start,
-          source_line_width
-        )
+  defp with_source_bytes([], [], acc), do: Enum.reverse(acc)
 
-      source_end_col =
-        Decorations.display_col_to_buf_col(
-          decorations,
-          buf_line,
-          source_end,
-          source_line_width
-        )
+  defp with_source_bytes(
+         [{row, utf16_start, utf16_end, col_start, col_end} | rows],
+         [byte_start, byte_end | bytes],
+         acc
+       ) do
+    measured = {row, utf16_start, utf16_end, col_start, col_end, byte_start, byte_end}
+    with_source_bytes(rows, bytes, [measured | acc])
+  end
 
-      source_offset_map =
-        SourceOffsetMap.slice(
-          source_offset_map,
-          source_start_byte,
-          source_end_byte,
-          composed_start_utf16,
-          composed_end_utf16
-        )
+  defp project_measured_rows(
+         rows,
+         first_index,
+         spans,
+         {buf_line, source_id},
+         {source_offset_map, source_line_width, decorations}
+       ) do
+    rows
+    |> Enum.with_index(first_index)
+    |> Enum.map_reduce(spans, fn
+      {{visual_row, composed_start_utf16, composed_end_utf16, source_start, source_end,
+        source_start_byte, source_end_byte}, visual_index},
+      pending_spans ->
+        text = WrapMap.display_text(visual_row)
+        row_type = if visual_index == 0, do: :normal, else: :wrap_continuation
+        indent_width = visual_row.indent_width
 
-      indent_width = Map.get(visual_row, :indent_width, 0)
+        {row_spans, pending_spans} =
+          spans_for_visual_row(pending_spans, source_start, source_end, indent_width, [])
 
-      row = %Row{
-        row_id: Row.stable_id(row_type, source_id, visual_index),
-        row_type: row_type,
-        buf_line: buf_line,
-        visual_index: visual_index,
-        text: text,
-        spans: row_spans,
-        content_hash: Row.compute_hash(text, row_spans)
-      }
+        source_start_col =
+          Decorations.display_col_to_buf_col(
+            decorations,
+            buf_line,
+            source_start,
+            source_line_width
+          )
 
-      VisualRow.new(
-        row,
-        source_offset_map,
-        source_start_col,
-        source_end_col,
-        indent_width
-      )
+        source_end_col =
+          Decorations.display_col_to_buf_col(
+            decorations,
+            buf_line,
+            source_end,
+            source_line_width
+          )
+
+        source_offset_map =
+          SourceOffsetMap.slice(
+            source_offset_map,
+            source_start_byte,
+            source_end_byte,
+            composed_start_utf16,
+            composed_end_utf16
+          )
+
+        row = %Row{
+          row_id: Row.stable_id(row_type, source_id, visual_index),
+          row_type: row_type,
+          buf_line: buf_line,
+          visual_index: visual_index,
+          text: text,
+          spans: row_spans,
+          content_hash: Row.compute_hash(text, row_spans)
+        }
+
+        entry =
+          VisualRow.new(
+            row,
+            source_offset_map,
+            source_start_col,
+            source_end_col,
+            indent_width
+          )
+
+        {entry, pending_spans}
     end)
+    |> elem(0)
   end
 
   @spec wrap_options(Context.t(), map()) :: keyword()
-  defp wrap_options(%Context{} = ctx, options) do
-    [
-      content_width: max(ctx.content_w, 1),
-      breakindent: Map.get(options, :breakindent, true),
-      linebreak: Map.get(options, :linebreak, true),
-      oracle: ctx.width_oracle,
-      tab_width: ctx.tab_width
-    ]
-  end
+  defp wrap_options(%Context{} = ctx, options),
+    do: WrapLayout.options(ctx.content_w, ctx.width_oracle, options)
 
   @spec trim_visual_entries([visual_row_entry()], non_neg_integer(), non_neg_integer()) :: [
           visual_row_entry()
@@ -1541,12 +1829,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     )
   end
 
-  @spec source_text_for_entry(Row.t(), [String.t()], non_neg_integer()) :: String.t()
-  defp source_text_for_entry(%Row{row_type: row_type, buf_line: buf_line}, lines, first_line)
+  @spec source_text_for_entry(Row.t(), (non_neg_integer() -> {String.t(), non_neg_integer()})) ::
+          String.t()
+  defp source_text_for_entry(%Row{row_type: row_type, buf_line: buf_line}, source)
        when row_type in [:normal, :fold_start],
-       do: line_at(lines, buf_line, first_line)
+       do: elem(source.(buf_line), 0)
 
-  defp source_text_for_entry(%Row{text: text}, _lines, _first_line), do: text
+  defp source_text_for_entry(%Row{text: text}, _source), do: text
 
   @spec composition_decorations(Context.t(), non_neg_integer()) :: Decorations.t()
   defp composition_decorations(%Context{} = ctx, buf_line) do
@@ -1555,26 +1844,28 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> Map.fetch!(:decorations)
   end
 
-  @spec spans_for_visual_row([Span.t()], String.t(), WrapMap.visual_row()) :: [Span.t()]
-  defp spans_for_visual_row(spans, composed_text, visual_row) do
-    source_start = visual_row_source_start(composed_text, visual_row)
-    source_end = visual_row_source_end(source_start, visual_row)
-    indent_width = Map.get(visual_row, :indent_width, 0)
+  # Composition emits ordered, disjoint spans. A long span can cross several
+  # rows; details behind the current row can never be needed again.
+  defp spans_for_visual_row([%Span{end_col: last} | rest], first, last_col, indent, acc)
+       when last <= first,
+       do: spans_for_visual_row(rest, first, last_col, indent, acc)
 
-    spans
-    |> Enum.flat_map(&Span.rebase_to_visual_row(&1, source_start, source_end, indent_width))
+  defp spans_for_visual_row(
+         [%Span{start_col: start} = span | rest] = spans,
+         first,
+         last,
+         indent,
+         acc
+       )
+       when start < last do
+    updated = Enum.reverse(Span.rebase_to_visual_row(span, first, last, indent), acc)
+
+    if span.end_col > last,
+      do: {Enum.reverse(updated), spans},
+      else: spans_for_visual_row(rest, first, last, indent, updated)
   end
 
-  @spec visual_row_source_start(String.t(), WrapMap.visual_row()) :: non_neg_integer()
-  defp visual_row_source_start(composed_text, visual_row) do
-    Unicode.display_col(composed_text, Map.get(visual_row, :byte_offset, 0))
-  end
-
-  @spec visual_row_source_end(non_neg_integer(), WrapMap.visual_row()) :: non_neg_integer()
-  defp visual_row_source_end(source_start, visual_row) do
-    source_text = Map.get(visual_row, :source_text, Map.get(visual_row, :text, ""))
-    source_start + Unicode.display_width(source_text)
-  end
+  defp spans_for_visual_row(spans, _first, _last, _indent, acc), do: {Enum.reverse(acc), spans}
 
   # Fold-aware path: walks visible_line_map entries.
   @spec build_visual_entries_folded(
@@ -1598,84 +1889,254 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     line_byte_offsets =
       build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
 
-    highlight_segments_by_line =
-      build_highlight_segments_by_line(
-        lines,
-        first_line,
-        visible_line_map,
-        line_byte_offsets,
-        ctx.highlight
-      )
+    source = fn buf_line ->
+      {line_at(lines, buf_line, first_line), Map.get(line_byte_offsets, buf_line, 0)}
+    end
 
+    {entries, _, registry} =
+      build_folded_entries(visible_line_map, source, nil, ctx, retain_ctx, font_registry, %{})
+
+    {entries, registry}
+  end
+
+  defp build_folded_entries(entries, source, page, ctx, retain_ctx, registry, builds) do
     source_ctx = %{
-      lines: lines,
-      first_line: first_line,
-      line_byte_offsets: line_byte_offsets,
-      highlight_segments_by_line: highlight_segments_by_line,
+      source: source,
+      highlight_segments_by_line:
+        build_highlight_segments_by_line(entries, source, ctx.highlight),
       line_identity: retain_ctx.line_identity,
       decoration_slots: retain_ctx.decoration_slots
     }
 
-    {entries, {_counters, font_registry}} =
-      Enum.map_reduce(visible_line_map, {%{}, font_registry}, fn
-        {buf_line, entry_type}, {counters, registry} ->
-          {visual_identity_index, counters} = next_visual_identity(buf_line, entry_type, counters)
+    style_key = mixed_style_key(page, ctx)
 
-          {row, input_hash, reused?, registry} =
-            build_visual_row_entry_retained(
-              buf_line,
-              entry_type,
-              ctx,
-              source_ctx,
-              visual_identity_index,
-              retain_ctx,
-              registry
-            )
-
-          entry =
-            row
-            |> visual_entry(
-              source_text_for_entry(row, lines, first_line),
-              ctx,
-              0,
-              Unicode.display_width(row.text),
-              0
-            )
-            |> VisualRow.with_retention(input_hash, reused?)
-
-          {entry, {counters, registry}}
-      end)
-
-    {entries, font_registry}
+    build_folded_rows(
+      entries,
+      page,
+      ctx,
+      source_ctx,
+      retain_ctx,
+      {style_key, builds, %{}, registry, []}
+    )
   end
 
+  defp mixed_style_key(%DisplayMap{wrap_basis: basis}, ctx) when is_tuple(basis) do
+    {ctx.whitespace_face, ctx.hl_todo_faces,
+     if(ctx.highlight, do: Highlight.fingerprint(ctx.highlight))}
+  end
+
+  defp mixed_style_key(_page, _ctx), do: nil
+
+  defp build_folded_rows(
+         [],
+         _page,
+         _ctx,
+         _source,
+         _retain,
+         {_key, builds, _counters, registry, acc}
+       ),
+       do: {Enum.reverse(acc), builds, registry}
+
+  defp build_folded_rows(
+         [{line, {:wrapped, first}} | rest],
+         %DisplayMap{} = page,
+         ctx,
+         source_ctx,
+         retain,
+         {style_key, builds, counters, registry, acc}
+       ) do
+    {rest, count} = take_wrap_run(rest, line, 1)
+    address = {line, durable_source_id(retain, line)}
+
+    {entries, builds, registry} =
+      project_mixed_run(page, {first, count}, address, ctx, {style_key, builds, registry})
+
+    acc =
+      Enum.reduce(entries, acc, fn entry, rows ->
+        hash = row_input_hash(retain, {:mixed_wrap, entry.row.row_id, entry.row.content_hash})
+        [VisualRow.with_retention(entry, hash, false) | rows]
+      end)
+
+    build_folded_rows(
+      rest,
+      page,
+      ctx,
+      source_ctx,
+      retain,
+      {style_key, builds, counters, registry, acc}
+    )
+  end
+
+  defp build_folded_rows(
+         [{line, kind} | rest],
+         page,
+         ctx,
+         source_ctx,
+         retain,
+         {style_key, builds, counters, registry, acc}
+       ) do
+    {index, counters} = next_visual_identity(line, kind, counters)
+
+    {row, input_hash, reused?, registry} =
+      build_visual_row_entry_retained(line, kind, ctx, source_ctx, index, retain, registry)
+
+    entry =
+      row
+      |> visual_entry(
+        source_text_for_entry(row, source_ctx.source),
+        ctx,
+        0,
+        Unicode.display_width(row.text),
+        0
+      )
+      |> VisualRow.with_retention(input_hash, reused?)
+
+    build_folded_rows(
+      rest,
+      page,
+      ctx,
+      source_ctx,
+      retain,
+      {style_key, builds, counters, registry, [entry | acc]}
+    )
+  end
+
+  defp project_mixed_run(
+         %DisplayMap{wrap_basis: nil} = page,
+         {first, count},
+         {line, _} = address,
+         ctx,
+         {_style_key, builds, registry}
+       ) do
+    {text, _, composed, _, _} = source = DisplayMap.source(page, line)
+    {spans, registry} = compose_mixed_spans(source, line, ctx, registry)
+    rows = DisplayMap.segments(source, first, count)
+    entries = project_wrapped_entries(rows, first, composed, text, spans, address, ctx)
+    {entries, builds, registry}
+  end
+
+  defp project_mixed_run(page, {first, count}, {line, _} = address, ctx, {key, builds, registry}) do
+    source = DisplayMap.source(page, line)
+    decorations = composition_decorations(ctx, line)
+
+    # Transient blocks receive fresh IDs on every frame. Only source-line
+    # highlights affect these spans, and their decorative IDs are not styling.
+    highlights =
+      decorations
+      |> Decorations.highlights_for_line(line)
+      |> Enum.map(fn range -> {range.start, range.end_, range.style, range.priority} end)
+
+    key = {key, highlights}
+
+    {build, registry} =
+      mixed_line_build(Map.get(builds, line), source, line, key, decorations, ctx, registry)
+
+    {metrics, offsets, width, _, spans} = build
+    last = first + count - 1
+    spans = mixed_run_spans(spans, elem(elem(metrics, first), 3), elem(elem(metrics, last), 4))
+    rows = for index <- first..last, do: elem(metrics, index)
+
+    entries =
+      project_measured_rows(rows, first, spans, address, {offsets, width, decorations})
+
+    {entries, Map.put(builds, line, build), registry}
+  end
+
+  # Keep source geometry and styles indexed per measured line. Only the
+  # visible portion is turned into Rows or placed in the interaction index.
+  defp mixed_line_build(
+         {_, _, _, {style_key, families}, _} = build,
+         _source,
+         _line,
+         style_key,
+         _decorations,
+         _ctx,
+         %FontRegistry{families: families} = registry
+       ),
+       do: {build, registry}
+
+  defp mixed_line_build(previous, source, line, style_key, decorations, ctx, registry) do
+    {text, _, composed, _, count} = source
+
+    {metrics, offsets, width} =
+      case previous do
+        {metrics, offsets, width, _, _} ->
+          {metrics, offsets, width}
+
+        nil ->
+          {rows, offsets, width} =
+            source
+            |> DisplayMap.segments(0, count)
+            |> measure_wrapped_rows(composed, text, decorations, line, ctx)
+
+          {List.to_tuple(rows), offsets, width}
+      end
+
+    {spans, registry} = compose_mixed_spans(source, line, ctx, registry)
+    {{metrics, offsets, width, {style_key, registry.families}, List.to_tuple(spans)}, registry}
+  end
+
+  defp compose_mixed_spans({text, offset, _, _, _}, line, ctx, registry) do
+    hl =
+      if ctx.highlight do
+        [segments] = Highlight.styles_for_visible_lines(ctx.highlight, [{text, offset}])
+        segments
+      end
+
+    {_styled_text, spans, registry} = compose_line(text, hl, ctx, line, offset, registry)
+    {spans, registry}
+  end
+
+  defp mixed_run_spans(spans, first, last) do
+    size = tuple_size(spans)
+    first_index = first_intersecting_span(spans, first, 0, size)
+    take_intersecting_spans(spans, first_index, size, last, [])
+  end
+
+  defp first_intersecting_span(_spans, _column, index, index), do: index
+
+  defp first_intersecting_span(spans, column, low, high) do
+    mid = div(low + high, 2)
+    span = elem(spans, mid)
+
+    if span.end_col <= column do
+      first_intersecting_span(spans, column, mid + 1, high)
+    else
+      first_intersecting_span(spans, column, low, mid)
+    end
+  end
+
+  defp take_intersecting_spans(_spans, size, size, _last, acc), do: Enum.reverse(acc)
+
+  defp take_intersecting_spans(spans, index, size, last, acc) do
+    case elem(spans, index) do
+      %Span{start_col: first} = span when first < last ->
+        take_intersecting_spans(spans, index + 1, size, last, [span | acc])
+
+      _ ->
+        Enum.reverse(acc)
+    end
+  end
+
+  defp take_wrap_run([{line, {:wrapped, _}} | rest], line, count),
+    do: take_wrap_run(rest, line, count + 1)
+
+  defp take_wrap_run(rest, _line, count), do: {rest, count}
+
   @spec build_highlight_segments_by_line(
-          [String.t()],
-          non_neg_integer(),
           [DisplayMap.entry()],
-          %{non_neg_integer() => non_neg_integer()},
+          (non_neg_integer() -> {String.t(), non_neg_integer()}),
           Highlight.t() | nil
         ) :: %{non_neg_integer() => [Highlight.styled_segment()]}
-  defp build_highlight_segments_by_line(_lines, _first_line, _visible_line_map, _offsets, nil),
-    do: %{}
+  defp build_highlight_segments_by_line(_entries, _source, nil), do: %{}
 
-  defp build_highlight_segments_by_line(
-         lines,
-         first_line,
-         visible_line_map,
-         line_byte_offsets,
-         %Highlight{} = hl
-       ) do
+  defp build_highlight_segments_by_line(entries, source, %Highlight{} = hl) do
     source_lines =
-      visible_line_map
+      entries
       |> Enum.map(&source_highlight_line/1)
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
-      |> Enum.map(fn buf_line ->
-        {buf_line,
-         {line_at(lines, buf_line, first_line), Map.get(line_byte_offsets, buf_line, 0)}}
-      end)
-      |> Enum.sort_by(fn {_buf_line, {_line_text, line_byte_offset}} -> line_byte_offset end)
+      |> Enum.map(fn line -> {line, source.(line)} end)
 
     source_lines
     |> Enum.map(fn {_buf_line, line_with_offset} -> line_with_offset end)
@@ -1709,7 +2170,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          retain_ctx,
          font_registry
        ) do
-    line_text = line_at(source_ctx.lines, buf_line, source_ctx.first_line)
+    {line_text, _offset} = source_ctx.source.(buf_line)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
     row_id = Row.stable_id(:normal, durable_source_id(retain_ctx, buf_line))
 
@@ -1723,8 +2184,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           build_visual_row_entry(
             buf_line,
             :normal,
-            source_ctx.lines,
-            source_ctx.first_line,
             ctx,
             source_ctx,
             index,
@@ -1749,8 +2208,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       build_visual_row_entry(
         buf_line,
         entry_type,
-        source_ctx.lines,
-        source_ctx.first_line,
         ctx,
         source_ctx,
         index,
@@ -1781,8 +2238,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec build_visual_row_entry(
           non_neg_integer(),
           term(),
-          [String.t()],
-          non_neg_integer(),
           Context.t(),
           folded_source_ctx(),
           non_neg_integer(),
@@ -1791,15 +2246,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_visual_row_entry(
          buf_line,
          :normal,
-         lines,
-         first_line,
          ctx,
          source_ctx,
          _index,
          font_registry
        ) do
-    line_text = line_at(lines, buf_line, first_line)
-    line_byte_offset = Map.get(source_ctx.line_byte_offsets, buf_line, 0)
+    {line_text, line_byte_offset} = source_ctx.source.(buf_line)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
 
     {composed, spans, font_registry} =
@@ -1818,15 +2270,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_visual_row_entry(
          buf_line,
          {:fold_start, hidden_count},
-         lines,
-         first_line,
          ctx,
          source_ctx,
          _index,
          font_registry
        ) do
-    line_text = line_at(lines, buf_line, first_line)
-    line_byte_offset = Map.get(source_ctx.line_byte_offsets, buf_line, 0)
+    {line_text, line_byte_offset} = source_ctx.source.(buf_line)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
 
     {composed, spans, font_registry} =
@@ -1847,8 +2296,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_visual_row_entry(
          buf_line,
          {:virtual_line, vt},
-         _lines,
-         _first_line,
          _ctx,
          source_ctx,
          visual_identity_index,
@@ -1877,8 +2324,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_visual_row_entry(
          buf_line,
          {:block, block, line_idx},
-         _lines,
-         _first_line,
          ctx,
          source_ctx,
          visual_identity_index,
@@ -1910,8 +2355,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_visual_row_entry(
          buf_line,
          {:decoration_fold, fold},
-         _lines,
-         _first_line,
          _ctx,
          source_ctx,
          _index,
@@ -2142,14 +2585,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {row, col}
   end
 
-  # True when the cursor's line is inside the visible viewport, so the caret and
-  # cursorline should paint. After wheel free-scroll (#2684) the cursor can leave
-  # the viewport without moving; off-screen we hide both rather than clamp them to
-  # an edge row. Non-wrapped: the fold-visible cursor line must sit in
-  # `[top, top + rows)`. Wrapped: a visible visual row must map back to the cursor
-  # line.
+  # A visible continuation of the cursor's source line is not enough: the
+  # continuation that contains the cursor itself must be on-screen.
   @spec cursor_on_screen?(
-          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()},
           Viewport.t(),
           FoldMap.t(),
           [visual_row_entry()],
@@ -2157,21 +2596,18 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           boolean()
         ) :: boolean()
   defp cursor_on_screen?(
-         cursor_line,
+         {cursor_line, cursor_byte},
          _viewport,
          _fold_map,
          visual_entries,
-         visible_row_count,
+         _visible_row_count,
          true
        ) do
-    Enum.any?(visual_entries, fn entry ->
-      entry.buf_line == cursor_line and entry.display_row >= 0 and
-        entry.display_row < visible_row_count
-    end)
+    not is_nil(wrapped_cursor_entry(visual_entries, cursor_line, cursor_byte))
   end
 
   defp cursor_on_screen?(
-         cursor_line,
+         {cursor_line, _cursor_byte},
          viewport,
          fold_map,
          _visual_entries,
@@ -2194,10 +2630,45 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           [visual_row_entry()]
         ) :: {non_neg_integer(), non_neg_integer()}
   defp compute_wrapped_display_cursor(cursor_line, cursor_byte, visual_entries) do
-    entries = Enum.filter(visual_entries, &(&1.buf_line == cursor_line))
-    entry = visual_entry_for_source_byte(entries, cursor_byte) || Enum.at(entries, -1)
-    cursor_position_from_visual_entry(entry, cursor_byte)
+    case wrapped_cursor_entry(visual_entries, cursor_line, cursor_byte) do
+      {entry, offset} -> {entry.display_row, VisualRow.display_col_at_composed(entry, offset)}
+      nil -> {0, 0}
+    end
   end
+
+  defp wrapped_cursor_entry(entries, line, byte) do
+    case Enum.filter(entries, &source_selection_entry?(&1, line, line)) do
+      [] ->
+        nil
+
+      [first | _] = entries ->
+        map = first.source_offset_map
+        offset = cursor_composed_utf16(first, byte)
+        line_end = composed_line_end(map.spans)
+
+        matching =
+          Enum.find(entries, fn entry ->
+            offset >= entry.composed_start_utf16 and
+              (offset < entry.composed_end_utf16 or
+                 (offset == line_end and offset == entry.composed_end_utf16))
+          end)
+
+        if matching, do: {matching, offset}
+    end
+  end
+
+  defp composed_line_end([]), do: 0
+  defp composed_line_end(spans), do: spans |> List.last() |> elem(4)
+
+  defp cursor_composed_utf16(
+         %VisualRow{row: %Row{row_type: :fold_start}, source_text: text, source_offset_map: map},
+         byte
+       )
+       when byte == byte_size(text),
+       do: SourceOffsetMap.source_to_composed_utf16(map, byte, :end)
+
+  defp cursor_composed_utf16(%VisualRow{source_offset_map: map}, byte),
+    do: SourceOffsetMap.source_to_composed_utf16(map, byte, :start)
 
   @spec visual_entry_for_source_byte([visual_row_entry()], non_neg_integer()) ::
           visual_row_entry() | nil
@@ -2207,58 +2678,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     Enum.find(entries, fn entry ->
       cursor_byte >= entry.source_start_byte and cursor_byte < entry.source_end_byte
     end)
-  end
-
-  @spec cursor_position_from_visual_entry(visual_row_entry() | nil, non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp cursor_position_from_visual_entry(nil, cursor_byte), do: {0, cursor_byte}
-
-  defp cursor_position_from_visual_entry(entry, cursor_byte) do
-    row_utf16 = utf16_offset(entry.row.text, byte_size(entry.row.text))
-    indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
-
-    row_local_utf16 =
-      entry.source_offset_map
-      |> SourceOffsetMap.source_to_composed_utf16(cursor_byte, :start)
-      |> Kernel.-(entry.composed_start_utf16)
-      |> Kernel.+(indent_utf16)
-      |> max(0)
-      |> min(row_utf16)
-
-    {entry.display_row, display_col_at_utf16(entry.row.text, row_local_utf16)}
-  end
-
-  @spec display_col_at_utf16(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp display_col_at_utf16(text, target_utf16) do
-    do_display_col_at_utf16(text, target_utf16, 0, 0)
-  end
-
-  @spec do_display_col_at_utf16(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp do_display_col_at_utf16("", _target_utf16, _utf16, display_col), do: display_col
-
-  defp do_display_col_at_utf16(_text, target_utf16, utf16, display_col)
-       when target_utf16 <= utf16,
-       do: display_col
-
-  defp do_display_col_at_utf16(text, target_utf16, utf16, display_col) do
-    {grapheme, rest} = String.next_grapheme(text)
-    next_utf16 = utf16 + utf16_offset(grapheme, byte_size(grapheme))
-
-    if target_utf16 < next_utf16 do
-      display_col
-    else
-      do_display_col_at_utf16(
-        rest,
-        target_utf16,
-        next_utf16,
-        display_col + Unicode.grapheme_width(grapheme)
-      )
-    end
   end
 
   @spec adjust_cursor_col_for_shape(
@@ -2273,7 +2692,36 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp cursor_eligible?(state, true), do: not Editing.minibuffer_mode?(state)
   defp cursor_eligible?(_state, false), do: false
 
-  defp cursor_visible?(eligible, on_screen?), do: eligible and on_screen?
+  @spec cursor_presentation_visibility(
+          boolean(),
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          WindowScroll.t(),
+          :windowed | {:resident, non_neg_integer()},
+          RenderWindow.content_kind()
+        ) :: {boolean(), boolean()}
+  defp cursor_presentation_visibility(true, true, col, width, scroll, store_mode, content_kind) do
+    visible =
+      wrapped_coordinates?(scroll) or Viewport.includes_column?(scroll.viewport, col, width)
+
+    # A local pan can reveal a windowed caret before the BEAM commits its new clip.
+    retain_source =
+      visible or (store_mode == :windowed and content_kind == :buffer and not scroll.wrap_on)
+
+    {visible, retain_source}
+  end
+
+  defp cursor_presentation_visibility(
+         _eligible,
+         _on_screen,
+         _col,
+         _width,
+         _scroll,
+         _store_mode,
+         _content_kind
+       ),
+       do: {false, false}
 
   defp adjust_cursor_col_for_shape(row, col, :block, visual_rows) do
     row_width = visual_rows |> Enum.at(row) |> visual_row_width()
@@ -2342,8 +2790,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp build_gutter(_scroll, _ctx, _content_kind, _visual_entries, _mode), do: nil
 
-  @spec build_geometry(state(), WindowScroll.t(), RenderWindow.content_kind()) :: PaneGeometry.t()
-  defp build_geometry(state, %WindowScroll{} = scroll, content_kind) do
+  @spec build_geometry(state(), WindowScroll.t(), RenderWindow.content_kind(), term()) ::
+          PaneGeometry.t()
+  defp build_geometry(state, %WindowScroll{} = scroll, content_kind, mode) do
     metrics = gutter_metrics(scroll, content_kind)
     gutter_width = GutterMetrics.total_width(metrics)
     content_rect = scroll.win_layout.content
@@ -2361,11 +2810,35 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       text_rect: text_rect,
       gutter_rect: gutter_rect,
       clip_rect: text_rect,
-      viewport: viewport_summary(scroll, text_width),
+      viewport: viewport_summary(scroll, text_width, mode),
       gutter_metrics: metrics,
       hit_regions: hit_regions(state, scroll.window.id, text_rect, gutter_rect, metrics)
     }
   end
+
+  @spec horizontal_pan_limit(
+          [VisualRow.t()],
+          PaneGeometry.t(),
+          RenderWindow.content_kind(),
+          boolean(),
+          term()
+        ) :: non_neg_integer()
+  defp horizontal_pan_limit(rows, %PaneGeometry{} = geometry, :buffer, false, capabilities) do
+    {_row, _col, width, height} = geometry.text_rect
+    width = pan_aperture_width(width, height, geometry.viewport, capabilities)
+    widest = Enum.reduce(rows, 0, fn row, acc -> max(row.row_width, acc) end)
+    min(max(widest - width, 0), 0xFFFF)
+  end
+
+  defp horizontal_pan_limit(_rows, _geometry, _kind, _wrapped, _capabilities), do: 0
+
+  @spec pan_aperture_width(non_neg_integer(), non_neg_integer(), RenderViewport.t(), term()) ::
+          pos_integer()
+  defp pan_aperture_width(width, height, %{total_lines: lines}, %{frontend_type: :tui})
+       when width > 1 and height > 0 and lines > height,
+       do: width - 1
+
+  defp pan_aperture_width(width, _height, _viewport, _capabilities), do: max(width, 1)
 
   @spec gutter_metrics(WindowScroll.t(), RenderWindow.content_kind()) :: GutterMetrics.t()
   defp gutter_metrics(%WindowScroll{} = scroll, content_kind)
@@ -2385,37 +2858,38 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     %GutterMetrics{line_number_width: 0, sign_col_width: 0}
   end
 
-  @spec viewport_summary(WindowScroll.t(), non_neg_integer()) :: RenderViewport.t()
-  defp viewport_summary(%WindowScroll{} = scroll, text_width) do
+  @spec viewport_summary(WindowScroll.t(), non_neg_integer(), term()) :: RenderViewport.t()
+  defp viewport_summary(%WindowScroll{} = scroll, text_width, mode) do
     %RenderViewport{
       top: scroll.viewport.top,
       left: scroll.viewport.left,
       rows: Viewport.content_rows(scroll.viewport),
       cols: text_width,
       total_lines: max(scroll.snapshot.line_count, 0),
-      visual_row_offset: scroll.viewport.visual_row_offset,
-      total_visual_rows: total_visual_rows(scroll)
+      visual_row_offset: presentation_offset(scroll),
+      total_visual_rows: total_visual_rows(scroll, mode)
     }
   end
 
-  @spec total_visual_rows(WindowScroll.t()) :: non_neg_integer()
-  defp total_visual_rows(%WindowScroll{total_visual_rows: total})
-       when is_integer(total) and total > 0,
-       do: total
+  defp presentation_offset(%WindowScroll{visible_line_map: %DisplayMap{}}), do: 0
+  defp presentation_offset(scroll), do: scroll.viewport.visual_row_offset
 
-  defp total_visual_rows(%WindowScroll{wrap_on: false, snapshot: snapshot}),
+  @spec total_visual_rows(WindowScroll.t(), term()) :: non_neg_integer()
+  defp total_visual_rows(_scroll, {:resident, total}), do: total
+
+  defp total_visual_rows(%WindowScroll{total_visual_rows: total}, :windowed)
+       when is_integer(total) and total > 0, do: total
+
+  defp total_visual_rows(
+         %WindowScroll{visible_line_map: %DisplayMap{}, snapshot: snapshot},
+         :windowed
+       ),
+       do: max(snapshot.line_count, 0)
+
+  defp total_visual_rows(%WindowScroll{wrap_on: false, snapshot: snapshot}, :windowed),
     do: max(snapshot.line_count, 0)
 
-  defp total_visual_rows(%WindowScroll{} = scroll) do
-    scroll.lines
-    |> WrapMap.compute(max(scroll.content_w, 1),
-      breakindent: Map.get(scroll.snapshot.options, :breakindent, true),
-      linebreak: Map.get(scroll.snapshot.options, :linebreak, true),
-      oracle: scroll.width_oracle,
-      tab_width: Map.get(scroll.snapshot.options, :tab_width, 2)
-    )
-    |> WrapMap.visual_row_count()
-  end
+  defp total_visual_rows(%WindowScroll{}, :windowed), do: 0
 
   @spec hit_regions(
           state(),
@@ -2549,7 +3023,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           :windowed | {:resident, non_neg_integer()}
         ) :: [GutterEntry.t()] | ResidentRows.t()
 
-  defp build_gutter_entries(scroll, ctx, line_count, _entries, {:resident, line_count}) do
+  defp build_gutter_entries(scroll, ctx, line_count, _entries, {:resident, _visual_count}) do
     fold_ranges = scroll.window.fold_ranges
     fold_start_lines = MapSet.new(fold_ranges, & &1.start_line)
     fold_end_by_start = Map.new(fold_ranges, &{&1.start_line, &1.end_line})
@@ -2794,7 +3268,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp build_indent_guides(%WindowScroll{} = scroll, %Context{} = ctx, :buffer, entries) do
     if indent_guides_enabled?() do
-      lines = Enum.map(entries, &guide_source_line/1)
+      lines = Enum.map(entries, &VisualRow.guide_source_line/1)
 
       {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
       indent_guides_from_guides(scroll.window.id, ctx.tab_width, guides, levels)
@@ -2802,20 +3276,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       IndentGuides.empty(scroll.window.id)
     end
   end
-
-  @spec guide_source_line(visual_row_entry()) :: String.t()
-  defp guide_source_line(%VisualRow{row: %Row{row_type: :wrap_continuation}} = entry) do
-    source =
-      binary_part(
-        entry.source_text,
-        entry.source_start_byte,
-        entry.source_end_byte - entry.source_start_byte
-      )
-
-    String.duplicate(" ", entry.indent_width) <> source
-  end
-
-  defp guide_source_line(%VisualRow{source_text: text}), do: text
 
   @spec indent_guides_enabled?() :: boolean()
   defp indent_guides_enabled? do
@@ -2892,20 +3352,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec accessibility_selection_ranges(
           Selection.visual_selection(),
-          [visual_row_entry()],
-          [String.t()],
-          non_neg_integer()
+          [visual_row_entry()]
         ) :: [{non_neg_integer(), non_neg_integer(), non_neg_integer()}]
-  defp accessibility_selection_ranges(nil, _entries, _lines, _first_line), do: []
+  defp accessibility_selection_ranges(nil, _entries), do: []
 
   defp accessibility_selection_ranges(
          {:char, {start_line, start_byte}, {end_line, end_byte}},
-         entries,
-         lines,
-         first_line
+         entries
        ) do
-    end_source = line_at(lines, end_line, first_line)
-    end_exclusive = Unicode.next_grapheme_byte_offset(end_source, end_byte)
+    # If the endpoint source line is not visible, all selected visible lines
+    # end at their own source boundary.
+    end_exclusive =
+      case Enum.find(entries, &(&1.buf_line == end_line)) do
+        nil -> end_byte
+        entry -> VisualRow.source_character_end(entry, end_byte)
+      end
 
     entries
     |> Enum.filter(&source_selection_entry?(&1, start_line, end_line))
@@ -2914,12 +3375,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end)
   end
 
-  defp accessibility_selection_ranges(
-         {:line, start_line, end_line},
-         entries,
-         _lines,
-         _first_line
-       ) do
+  defp accessibility_selection_ranges({:line, start_line, end_line}, entries) do
     entries
     |> Enum.filter(&source_selection_entry?(&1, start_line, end_line))
     |> Enum.map(fn entry ->
@@ -3037,8 +3493,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
 
     cursor_utf16 =
-      entry.source_offset_map
-      |> SourceOffsetMap.source_to_composed_utf16(cursor_byte, :start)
+      entry
+      |> cursor_composed_utf16(cursor_byte)
       |> Kernel.-(entry.composed_start_utf16)
       |> Kernel.+(indent_utf16)
       |> max(0)
@@ -3053,9 +3509,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp utf16_offset(text, byte_offset) do
     text
     |> binary_part(0, min(byte_offset, byte_size(text)))
-    |> String.to_charlist()
-    |> Enum.reduce(0, fn codepoint, units -> units + if(codepoint > 0xFFFF, do: 2, else: 1) end)
+    |> utf16_units(0)
   end
+
+  defp utf16_units(<<>>, units), do: units
+
+  defp utf16_units(<<cp::utf8, rest::binary>>, units),
+    do: utf16_units(rest, units + if(cp > 0xFFFF, do: 2, else: 1))
 
   @spec build_search_matches(
           [Minga.Editing.Search.Match.t()],
@@ -3105,7 +3565,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           pos_integer(),
           [visual_row_entry()],
           boolean(),
-          [String.t()],
+          [String.t()] | DisplayMap.t(),
           non_neg_integer(),
           ResidentBuild.t() | nil
         ) :: [DiagnosticRange.t()]
@@ -3138,6 +3598,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end
   end
 
+  defp diagnostic_source(%WindowScroll{visible_line_map: %DisplayMap{} = page}), do: page
+  defp diagnostic_source(%WindowScroll{lines: lines}), do: lines
+
   @spec source_backed_diagnostics([Diagnostic.t()], ResidentBuild.t() | nil) :: [Diagnostic.t()]
   defp source_backed_diagnostics(diagnostics, nil), do: diagnostics
 
@@ -3149,7 +3612,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec diagnostic_line_cache(
           [Diagnostic.t()],
-          [String.t()],
+          [String.t()] | DisplayMap.t(),
           non_neg_integer(),
           ResidentBuild.t() | nil
         ) :: %{
@@ -3166,16 +3629,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec diagnostic_source_line(
           non_neg_integer(),
-          [String.t()],
+          [String.t()] | DisplayMap.t(),
           non_neg_integer(),
           ResidentBuild.t() | nil
         ) :: String.t()
   defp diagnostic_source_line(line, _lines, _first_line, %ResidentBuild{store: store}) do
-    case ResidentStore.payload_at(store, line) do
+    case ResidentStore.source_row(store, line) do
       {:ok, %VisualRow{source_text: text}} -> text
       :error -> raise ArgumentError, "diagnostic source line is outside the resident store"
     end
   end
+
+  defp diagnostic_source_line(line, %DisplayMap{} = page, _first_line, nil),
+    do: DisplayMap.source_text(page, line)
 
   defp diagnostic_source_line(line, lines, first_line, nil), do: line_at(lines, line, first_line)
 
@@ -3434,15 +3900,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
             visual_row_entry()
           ]
   defp visual_entries_for_line_range(visual_entries, start_line, end_line) do
-    Enum.filter(visual_entries, fn entry ->
-      entry.buf_line >= start_line and entry.buf_line <= end_line
-    end)
+    Enum.filter(visual_entries, &source_selection_entry?(&1, start_line, end_line))
   end
 
   @spec first_visual_entry_for_line([visual_row_entry()], non_neg_integer()) ::
           visual_row_entry() | nil
   defp first_visual_entry_for_line(visual_entries, line) do
-    Enum.find(visual_entries, &(&1.buf_line == line))
+    Enum.find(visual_entries, &source_selection_entry?(&1, line, line))
   end
 
   @spec project_range(
@@ -3563,18 +4027,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           SourceOffsetMap.affinity()
         ) :: non_neg_integer()
   defp visual_col_for_source_byte(entry, source_byte, affinity) do
-    row_utf16 = utf16_offset(entry.row.text, byte_size(entry.row.text))
-    indent_utf16 = max(row_utf16 - (entry.composed_end_utf16 - entry.composed_start_utf16), 0)
-
-    row_local_utf16 =
-      entry.source_offset_map
-      |> SourceOffsetMap.source_to_composed_utf16(source_byte, affinity)
-      |> Kernel.-(entry.composed_start_utf16)
-      |> Kernel.+(indent_utf16)
-      |> max(0)
-      |> min(row_utf16)
-
-    display_col_at_utf16(entry.row.text, row_local_utf16)
+    VisualRow.display_col(entry, source_byte, affinity)
   end
 
   @spec visual_col_for_source_col(visual_row_entry(), non_neg_integer()) :: non_neg_integer()

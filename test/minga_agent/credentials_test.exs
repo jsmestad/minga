@@ -70,6 +70,21 @@ defmodule MingaAgent.CredentialsTest do
 
       assert {:ok, "new-key", :file} = Credentials.resolve("anthropic", opts)
     end
+
+    test "store and revoke preserve unreadable credential data without exposing it", %{
+      creds_path: path,
+      opts: opts
+    } do
+      for prior <- ["[]", ~s({"openai":"synthetic-prior-private-key")] do
+        File.write!(path, prior)
+
+        assert {:error, :invalid_credentials_file} =
+                 Credentials.store("openai", "synthetic-replacement", opts)
+
+        assert {:error, :invalid_credentials_file} = Credentials.revoke("openai", opts)
+        assert File.read!(path) == prior
+      end
+    end
   end
 
   describe "revoke/2" do

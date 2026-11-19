@@ -11,6 +11,10 @@ defmodule MingaEditor.Test.FakeShellAlt do
   end
 
   @impl true
+  @spec render_snapshot(map()) :: map()
+  def render_snapshot(shell_state), do: shell_state
+
+  @impl true
   @spec compute_layout(map()) :: MingaEditor.Layout.t()
   def compute_layout(%MingaEditor.RenderPipeline.Input{} = input),
     do: compute_layout(%{terminal_viewport: input.intent.frame.terminal_viewport})

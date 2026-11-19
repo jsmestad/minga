@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -50,7 +49,7 @@ func residentTestRowsDelta(t *testing.T, windowID uint16, contentEpoch, baseCoun
 		splices = append(splices, residentTestEncodeRow(row)...)
 	}
 
-	scroll := make([]byte, 0, 39)
+	scroll := make([]byte, 0, 45)
 	scroll = binary.BigEndian.AppendUint16(scroll, windowID)
 	scroll = append(scroll, 0)
 	scroll = binary.BigEndian.AppendUint32(scroll, 0)
@@ -63,6 +62,8 @@ func residentTestRowsDelta(t *testing.T, windowID uint16, contentEpoch, baseCoun
 	scroll = binary.BigEndian.AppendUint32(scroll, contentEpoch)
 	scroll = binary.BigEndian.AppendUint32(scroll, 1)
 	scroll = binary.BigEndian.AppendUint32(scroll, 0)
+	scroll = binary.BigEndian.AppendUint32(scroll, 0)
+	scroll = binary.BigEndian.AppendUint16(scroll, 0) // horizontal_pan_limit
 
 	packet := []byte{generated.OPGuiWindowRowsDelta, 3}
 	packet = append(packet, residentTestSection(0x01, header)...)
@@ -253,7 +254,7 @@ func TestResidentGutterTracksLocalPresentationScroll(t *testing.T) {
 		t.Fatalf("initial resident gutter rows are misaligned: %q", initial)
 	}
 
-	model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	model.previewVerticalScroll(model.windows[7], 1)
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "A  one") || !strings.Contains(scrolled, "B  two") || strings.Contains(scrolled, "zero") {
 		t.Fatalf("locally scrolled resident gutter rows are misaligned: %q", scrolled)
@@ -262,7 +263,7 @@ func TestResidentGutterTracksLocalPresentationScroll(t *testing.T) {
 
 func TestResidentGutterOverridesParticipateInLineCacheIdentity(t *testing.T) {
 	model := New(20, 6, nil)
-	window := protocol.WindowContent{ID: 7, ContentEpoch: 9}
+	key := lineCacheKey{rowID: 1, hash: 1}
 	first := protocol.Gutter{WindowID: 7, Resident: &protocol.ResidentGutterEntries{
 		ContentEpoch: 9,
 		LineCount:    4,
@@ -274,8 +275,16 @@ func TestResidentGutterOverridesParticipateInLineCacheIdentity(t *testing.T) {
 		Overrides:    map[uint32]protocol.GutterEntry{1: {BufferLine: 1, SignType: 2}},
 	}}
 
-	if model.windowContextFingerprint(window, 20, first, true) == model.windowContextFingerprint(window, 20, second, true) {
-		t.Fatal("resident gutter override change did not invalidate line cache identity")
+	before := model.lineCache.beginWindowRender(7, 1, first.Resident)
+	before.store(key, "old sign")
+	before.commit()
+	retain := model.lineCache.beginWindowRender(7, 1, first.Resident)
+	if got, ok := retain.lookup(key); !ok || got != "old sign" {
+		t.Fatal("retained resident gutter did not reuse a cached row")
+	}
+	changed := model.lineCache.beginWindowRender(7, 1, second.Resident)
+	if _, ok := changed.lookup(key); ok {
+		t.Fatal("resident gutter override change reused a stale cached row")
 	}
 }
 
@@ -320,7 +329,7 @@ func TestSequentialResidentA2StructuralEditsKeepShiftedRowsAndGutterAligned(t *t
 	}
 	scrollTo50 := func(model Model) Model {
 		for range 50 {
-			model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+			model.previewVerticalScroll(model.windows[windowID], 1)
 		}
 		return model
 	}
@@ -337,7 +346,7 @@ func TestSequentialResidentA2StructuralEditsKeepShiftedRowsAndGutterAligned(t *t
 	}
 	insertA2 := residentTestRowsDelta(t, windowID, epoch, 300, 303, 50, 0, inserted)
 	model = applyTo(t, model, beginFrame(2, 1), insertA2, gutterCommand(303), commitFrame(2))
-	if model.lastFrameOutcome != frameOutcomeApplied || !model.residentRows[windowID].sequential {
+	if model.lastFrameOutcome != frameOutcomeApplied || model.residentRows[windowID].mode != sequentialRows {
 		t.Fatalf("sequential A2 insert outcome = %v", model.lastFrameOutcome)
 	}
 
@@ -381,7 +390,7 @@ func TestFullSnapshotPromotesSequentialRowsWithinContentEpoch(t *testing.T) {
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowed, commitFrame(1))
 	sequential := residentWindowCommand(7, 10, 3, protocol.CommandWindowContent)
 	model = applyTo(t, model, beginFrame(2, 1), sequential, commitFrame(2))
-	if model.lastFrameOutcome != frameOutcomeApplied || !model.residentRows[7].sequential || model.lastCommittedSeq != 2 {
+	if model.lastFrameOutcome != frameOutcomeApplied || model.residentRows[7].mode != sequentialRows || model.lastCommittedSeq != 2 {
 		t.Fatal("same-epoch full snapshot did not promote the row store")
 	}
 }

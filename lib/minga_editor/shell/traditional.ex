@@ -52,6 +52,10 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @impl true
+  @spec render_snapshot(ShellState.t()) :: ShellState.t()
+  def render_snapshot(%ShellState{} = shell_state), do: ShellState.render_snapshot(shell_state)
+
+  @impl true
   @spec handle_event(ShellState.t(), MingaEditor.Session.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Session.State.t()}
   def handle_event(%ShellState{} = shell_state, workspace, {:git_status_changed, entries}) do
@@ -379,10 +383,30 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   def on_agent_event(
+        %ShellState{tab_bar: %TabBar{} = tab_bar} = shell_state,
+        workspace,
+        session_pid,
+        {:connection_changed,
+         %MingaAgent.Session.ConnectionSnapshot{target: %{session: session_pid}} = connection}
+      ) do
+    tab_bar =
+      case TabBar.find_workspace_by_session(tab_bar, session_pid) do
+        %Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = ui}} = owner ->
+          updated = Workspace.set_agent_ui(owner, UIState.project_connection(ui, connection))
+          TabBar.accept_workspace(tab_bar, updated)
+
+        _unowned ->
+          tab_bar
+      end
+
+    {ShellState.install_tab_bar(shell_state, tab_bar), workspace}
+  end
+
+  def on_agent_event(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
         session_pid,
-        {:status_changed, status}
+        {:display_status_changed, status}
       ) do
     tb =
       case TabBar.find_workspace_by_session(tb, session_pid) do
@@ -390,6 +414,15 @@ defmodule MingaEditor.Shell.Traditional do
         nil -> tb
       end
 
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
+  end
+
+  def on_agent_event(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        session_pid,
+        {:status_changed, status}
+      ) do
     # Set attention flag when agent needs user input
     tb =
       if status in [:idle, :error] do
@@ -502,7 +535,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   @spec restarted_session_status(pid()) :: Tab.agent_status()
   defp restarted_session_status(new_pid) do
-    %{status: status} = MingaAgent.Session.editor_snapshot(new_pid)
+    %{display_status: status} = MingaAgent.Session.editor_snapshot(new_pid)
     status
   catch
     :exit, _reason -> nil

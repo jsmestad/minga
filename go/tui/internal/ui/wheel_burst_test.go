@@ -19,6 +19,7 @@ func TestFilteredWheelBurstCompletesWithoutAnotherInput(t *testing.T) {
 		{name: "direction changes retain every step", buttons: []tea.MouseButton{tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelDown, tea.MouseWheelDown}, rows: -4},
 		{name: "modified wheel keeps its scroll distance", buttons: []tea.MouseButton{tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelUp, tea.MouseWheelUp}, mod: tea.ModCtrl | tea.ModAlt, rows: -4},
 		{name: "horizontal wheel does not become vertical movement", buttons: []tea.MouseButton{tea.MouseWheelRight, tea.MouseWheelRight, tea.MouseWheelRight, tea.MouseWheelRight}, rows: 0},
+		{name: "shift wheel does not move the transcript vertically", buttons: []tea.MouseButton{tea.MouseWheelDown, tea.MouseWheelDown}, mod: tea.ModShift, rows: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			newModel := func() Model {

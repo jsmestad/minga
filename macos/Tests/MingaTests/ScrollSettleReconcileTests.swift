@@ -201,21 +201,21 @@ struct ThumbDragPresentationTests {
     func residentPresentsLocally() {
         // Overscan spans line 0 through totalLines: the whole document is resident.
         let sp = presentation(overscanStart: 0, overscanEnd: 1_000)
-        #expect(EditorNSView.thumbDragCanPresentLocally(scrollPresentation: sp, totalLines: 1_000))
+        #expect(EditorScrollTrack.isUnwrappedResident(sp, totalLines: 1_000))
     }
 
     @Test("a windowed pane (partial band) keeps the round-trip path")
     func windowedStaysRoundTrip() {
         // A viewport-plus-overscan band that does not start at 0 or reach the end.
         let sp = presentation(overscanStart: 400, overscanEnd: 520)
-        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: sp, totalLines: 1_000))
+        #expect(!EditorScrollTrack.isUnwrappedResident(sp, totalLines: 1_000))
     }
 
     @Test("no presentation or empty document never presents locally")
     func degenerateNeverPresents() {
-        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: nil, totalLines: 1_000))
+        #expect(!EditorScrollTrack.isUnwrappedResident(nil, totalLines: 1_000))
         let sp = presentation(overscanStart: 0, overscanEnd: 0)
-        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: sp, totalLines: 0))
+        #expect(!EditorScrollTrack.isUnwrappedResident(sp, totalLines: 0))
     }
 
     @Test("presentation offset places the target line at the viewport top")

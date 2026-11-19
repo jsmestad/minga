@@ -34,6 +34,9 @@ defmodule MingaEditor.Shell do
   @doc "Returns shell-specific data that affects chrome dirty tracking."
   @callback chrome_fingerprint(editor_state :: term()) :: term()
 
+  @doc "Returns render-only shell state without input secrets or private callback context."
+  @callback render_snapshot(shell_state()) :: shell_state()
+
   @doc "Returns true when the shell can render through the asynchronous pipeline path."
   @callback async_render?(editor_state :: term()) :: boolean()
 

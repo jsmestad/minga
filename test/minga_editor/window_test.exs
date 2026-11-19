@@ -61,11 +61,11 @@ defmodule MingaEditor.WindowTest do
     end
 
     test "scrolling and authoritative scroll markers remain editor-owned" do
-      window = make_window() |> Window.scroll_viewport(5, 100) |> Window.mark_scroll_echo(5)
+      window = make_window() |> Window.scroll_viewport(5, 100) |> Window.mark_scroll_echo()
       marked = Window.mark_authoritative_scroll(window)
 
       assert window.viewport.top == 5
-      assert window.scroll_echo_top == 5
+      assert window.scroll_echo_anchor == {5, 0, 0}
       assert Window.authoritative_scroll_seq(marked) == 1
       assert %RenderCache{} = marked.render_cache
     end

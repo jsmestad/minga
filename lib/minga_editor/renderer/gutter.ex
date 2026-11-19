@@ -5,6 +5,8 @@ defmodule MingaEditor.Renderer.Gutter do
   The gutter reserves separate columns for signs, fold controls, and line numbers so cursor math, mouse hit testing, and semantic window models agree on the same terminal-cell geometry. Semantic gutter entries are built by `MingaEditor.RenderModel.Window.Builder` and rendered by the frontends.
   """
 
+  alias MingaEditor.Viewport
+
   @sign_col_width 2
   @fold_col_width 1
 
@@ -17,6 +19,11 @@ defmodule MingaEditor.Renderer.Gutter do
   def total_width(line_number_w) do
     @sign_col_width + @fold_col_width + line_number_w
   end
+
+  @doc "Returns the gutter width for the pane's line-number style and source line count."
+  @spec total_width(atom(), non_neg_integer()) :: non_neg_integer()
+  def total_width(:none, _line_count), do: total_width(0)
+  def total_width(_number_style, line_count), do: total_width(Viewport.gutter_width(line_count))
 
   @doc "Returns the width of the sign column."
   @spec sign_column_width() :: non_neg_integer()

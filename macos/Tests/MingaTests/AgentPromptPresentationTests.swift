@@ -88,7 +88,7 @@ struct AgentPromptPresentationTests {
     private let generation: UInt64 = 0x0102030405060708
 
     /// These are already composed BEAM visual rows, not strings for the frontend to wrap.
-    private func content(_ texts: [String], selection: Bool = false, cursorRow: UInt16 = 0, viewportTop: UInt32 = 0, visualRowOffset: UInt16 = 0, bufferLines: [UInt32]? = nil, sourceRow: UInt16 = 2) throws -> GUIWindowContent {
+    private func content(_ texts: [String], selection: Bool = false, cursorRow: UInt16 = 0, viewportTop: UInt32 = 0, visualRowOffset: UInt32 = 0, bufferLines: [UInt32]? = nil, sourceRow: UInt16 = 2) throws -> GUIWindowContent {
         let rect = GUICellRect(row: sourceRow, col: 3, width: 24, height: UInt16(texts.count))
         let geometry = GUIPaneGeometry(
             windowId: 65534, totalRect: rect, contentRect: rect, textRect: rect,
@@ -672,5 +672,29 @@ struct AgentPromptPresentationTests {
         #expect(idleButton.isDisabled())
         #expect(throws: InspectionError.self) { try idleButton.tap() }
         #expect(actions == [.submit, .abort, .abort])
+    }
+
+    @Test("Awaiting approval retains enabled Stop and draft in every prompt mode",
+          arguments: [PromptMode.insert, .normal, .visual, .visualLine, .operatorPending])
+    func waitingControls(mode: PromptMode) throws {
+        let draft = "unfinished é界\nsecond line"
+        let state = AgentChatState(status: .approvalWaiting, prompt: draft, promptCursorLine: 1, promptCursorCol: 4, promptMode: mode, promptVisibleRows: 2)
+        var actions: [AgentPromptView.Action] = []
+        let control = AgentPromptActionButton(state: state, sendAction: { actions.append($0) })
+            .environment(\.themeColors, ThemeColors())
+        let button = try control.inspect().find(ViewType.Button.self)
+        #expect(!button.isDisabled())
+        #expect(try button.accessibilityLabel().string() == "Stop generating")
+        try button.tap()
+        #expect(actions == [.abort])
+        #expect(state.prompt == draft)
+        #expect(state.promptMode == mode)
+        #expect(state.promptCursorLine == 1 && state.promptCursorCol == 4)
+        #expect(state.statusLabel == "Awaiting approval")
+        #expect(state.hasActiveTurn && !state.isThinking)
+        state.prompt = ""
+        #expect(try !control.inspect().find(ViewType.Button.self).isDisabled())
+        try control.inspect().find(ViewType.Button.self).tap()
+        #expect(actions == [.abort, .abort])
     }
 }

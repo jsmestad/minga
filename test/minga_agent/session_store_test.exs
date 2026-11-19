@@ -68,6 +68,247 @@ defmodule MingaAgent.SessionStoreTest do
 
   # ── Save/Load round-trip ───────────────────────────────────────────────────
 
+  test "v6 persists every terminal outcome and known reason without losing output or identity",
+       %{tmp_dir: dir} do
+    {:ok, range} = Range.new(:full, :bytes, 0, 5, 5)
+    {:ok, output} = Output.new("bytes", :complete, range)
+
+    operations = [
+      &ToolCall.complete(&1, "bytes", output),
+      &ToolCall.error(&1, "bytes", output),
+      &ToolCall.deny(&1, "bytes", output),
+      &ToolCall.cancel(&1, "bytes", output),
+      &ToolCall.expire_approval(&1, "bytes", output)
+    ]
+
+    calls =
+      operations
+      |> Enum.with_index(1)
+      |> Enum.map(fn {operation, index} ->
+        ToolCall.new("call-#{index}", "shell")
+        |> operation.()
+        |> ToolCall.set_collapsed(false)
+      end)
+
+    messages = Enum.map(calls, &{:tool_call, &1})
+
+    data = %{
+      sample_data("outcomes-v6")
+      | messages: messages,
+        message_ids: [1, 2, 3, 4, 5],
+        pinned_ids: MapSet.new([3])
+    }
+
+    assert :ok = SessionStore.save(data, dir)
+    assert {:ok, loaded} = SessionStore.load(data.id, dir)
+    assert loaded.message_ids == data.message_ids
+    assert loaded.pinned_ids == data.pinned_ids
+
+    for {{:tool_call, actual}, expected} <- Enum.zip(loaded.messages, calls) do
+      assert actual.status == expected.status
+      assert actual.terminal_reason == expected.terminal_reason
+      assert actual.result == expected.result
+      assert actual.output == expected.output
+      assert actual.duration_ms == expected.duration_ms
+      refute actual.collapsed
+      assert actual.started_at == nil
+    end
+  end
+
+  test "v5 keeps legacy error truth and retained-output and generation validation",
+       %{tmp_dir: dir} do
+    calls = [
+      ToolCall.new("complete", "shell") |> ToolCall.complete("Tool rejected by user"),
+      ToolCall.new("error", "shell") |> ToolCall.error("Tool approval timed out"),
+      ToolCall.new("running", "shell")
+    ]
+
+    data = %{
+      sample_data("legacy-v5")
+      | messages: Enum.map(calls, &{:tool_call, &1}),
+        message_ids: [1, 2, 3],
+        pinned_ids: MapSet.new([2])
+    }
+
+    assert :ok = SessionStore.save(data, dir)
+    path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+    record =
+      path
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.put("version", 5)
+      |> Map.update!(
+        "messages",
+        &Enum.map(&1, fn message -> Map.delete(message, "terminal_reason") end)
+      )
+
+    File.write!(path, JSON.encode!(record))
+
+    assert {:ok, loaded} = SessionStore.load(data.id, dir)
+
+    assert Enum.map(loaded.messages, fn {:tool_call, tool} ->
+             {tool.status, tool.terminal_reason}
+           end) ==
+             [{:complete, nil}, {:error, nil}, {:running, nil}]
+
+    assert loaded.message_ids == [1, 2, 3]
+    assert loaded.pinned_ids == MapSet.new([2])
+
+    for invalid <- [
+          Map.delete(record, "artifact_generation"),
+          Map.put(record, "artifact_generation", "not-a-digest"),
+          Map.update!(record, "messages", fn [first | rest] ->
+            [Map.delete(first, "output") | rest]
+          end),
+          Map.update!(record, "messages", fn [first | rest] ->
+            [Map.put(first, "output", %{"broken" => true}) | rest]
+          end)
+        ] do
+      File.write!(path, JSON.encode!(invalid))
+      assert {:error, :invalid_session_record} = SessionStore.load(data.id, dir)
+    end
+  end
+
+  test "v6 refuses missing outcomes and invalid reason combinations", %{tmp_dir: dir} do
+    data = sample_data("invalid-outcomes-v6")
+    assert :ok = SessionStore.save(data, dir)
+    path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+    record = path |> File.read!() |> JSON.decode!()
+
+    for update <- [
+          &Map.delete(&1, "terminal_reason"),
+          &Map.put(&1, "status", "unknown"),
+          &Map.put(&1, "terminal_reason", "approval_timeout")
+        ] do
+      invalid =
+        Map.update!(record, "messages", fn messages ->
+          Enum.map(messages, fn
+            %{"type" => "tool_call"} = tool -> update.(tool)
+            other -> other
+          end)
+        end)
+
+      File.write!(path, JSON.encode!(invalid))
+      assert {:error, :invalid_session_record} = SessionStore.load(data.id, dir)
+    end
+  end
+
+  test "v6 rejects current tool results without a canonical matching outcome", %{tmp_dir: dir} do
+    for metadata <- [
+          %{},
+          %{is_error: false},
+          %{tool_outcome: :complete, is_error: true},
+          %{tool_outcome: :denied, is_error: true, tool_outcome_reason: :approval_timeout}
+        ] do
+      result =
+        Context.tool_result_message("shell", "call", "opaque legacy-looking text", metadata)
+
+      assert {:ok, continuation} = Continuation.seed_messages(Continuation.new(), [result], 1)
+      data = %{sample_data("invalid-result") | continuation: continuation}
+      assert {:error, :invalid_tool_outcome} = SessionStore.save(data, dir)
+    end
+  end
+
+  test "v5 result defaults are versioned and preserve terminal transcript truth and opaque metadata",
+       %{tmp_dir: dir} do
+    {:ok, request, continuation} =
+      Continuation.begin_request(Continuation.new(), "legacy-result-request", 1, "inspect")
+
+    assistant =
+      Context.assistant("", tool_calls: [ReqLLM.ToolCall.new("legacy-call", "shell", "{}")])
+
+    {:ok, checkpoint_id, pending} =
+      Continuation.checkpoint_tool_group(
+        continuation,
+        request.request_id,
+        request.messages ++ [assistant],
+        [%{tool_call_id: "legacy-call", name: "shell", arguments: %{}}]
+      )
+
+    current =
+      Context.tool_result_message("shell", "legacy-call", "Tool rejected by user", %{
+        tool_outcome: :complete,
+        is_error: false
+      })
+
+    {:ok, current_continuation} =
+      Continuation.complete_tool_effect(
+        pending,
+        request.request_id,
+        checkpoint_id,
+        "legacy-call",
+        current
+      )
+
+    for {legacy_metadata, transcript_status, expected} <- [
+          {%{}, :running, :complete},
+          {%{}, :complete, :complete},
+          {%{}, :error, :error},
+          {%{is_error: true}, :complete, :error},
+          {%{is_error: false}, :error, :complete},
+          {%{minga_effect_status: :indeterminate}, :running, :error},
+          {%{minga_effect_status: :not_executed}, :running, :error}
+        ] do
+      opaque = %{"provider-owned" => %{"blocks" => [1, "kept"]}}
+      metadata = Map.merge(legacy_metadata, opaque)
+
+      legacy_result =
+        Context.tool_result_message("shell", "legacy-call", "Tool rejected by user", metadata)
+
+      {:ok, legacy_continuation} =
+        Continuation.complete_tool_effect(
+          pending,
+          request.request_id,
+          checkpoint_id,
+          "legacy-call",
+          legacy_result
+        )
+
+      tool =
+        ToolCall.restore(
+          id: "legacy-call",
+          name: "shell",
+          status: transcript_status,
+          is_error: transcript_status == :error,
+          result: "preserved display text"
+        )
+
+      data = %{
+        sample_data("legacy-result-default")
+        | messages: [{:tool_call, tool}],
+          message_ids: [1],
+          pinned_ids: MapSet.new([1]),
+          continuation: current_continuation
+      }
+
+      assert :ok = SessionStore.save(data, dir)
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+
+      legacy_record =
+        path
+        |> File.read!()
+        |> JSON.decode!()
+        |> Map.put("version", 5)
+        |> Map.put("continuation", ContinuationCodec.encode(legacy_continuation))
+        |> Map.update!(
+          "messages",
+          &Enum.map(&1, fn message -> Map.delete(message, "terminal_reason") end)
+        )
+
+      File.write!(path, JSON.encode!(legacy_record))
+
+      assert {:ok, loaded} = SessionStore.load(data.id, dir)
+      [%{status: {:completed, restored_result}}] = loaded.continuation.tool_checkpoint.calls
+      assert restored_result.metadata.tool_outcome == expected
+      assert restored_result.metadata.is_error == (expected != :complete)
+      assert restored_result.metadata["provider-owned"] == opaque["provider-owned"]
+      assert Enum.map_join(restored_result.content, "", & &1.text) == "Tool rejected by user"
+      assert [{:tool_call, %{status: ^transcript_status}}] = loaded.messages
+      assert :ok = SessionStore.save(loaded, dir)
+    end
+  end
+
   describe "save and load round-trip" do
     test "saves and loads a session", %{tmp_dir: dir} do
       data = sample_data()
@@ -87,7 +328,7 @@ defmodule MingaAgent.SessionStoreTest do
       raw = File.read!(path)
       record = JSON.decode!(raw)
 
-      assert record["version"] == 5
+      assert record["version"] == 6
 
       assert record["model_selection"]["credential"] == %{
                "kind" => "api_key",
@@ -291,7 +532,7 @@ defmodule MingaAgent.SessionStoreTest do
         |> File.read!()
         |> JSON.decode!()
 
-      assert encoded["version"] == 5
+      assert encoded["version"] == 6
       assert encoded["artifact_generation"] == Reference.digest("")
     end
 
@@ -301,6 +542,8 @@ defmodule MingaAgent.SessionStoreTest do
 
       frozen_result =
         Context.tool_result_message("read_file", "frozen-call", "image available", %{
+          tool_outcome: :complete,
+          is_error: false,
           output: image_output
         })
 
@@ -353,6 +596,8 @@ defmodule MingaAgent.SessionStoreTest do
 
       current_result =
         Context.tool_result_message("read_file", "current-call", text_output.view, %{
+          tool_outcome: :complete,
+          is_error: false,
           output: text_output
         })
 
@@ -1948,6 +2193,8 @@ defmodule MingaAgent.SessionStoreTest do
   defp continuation_with_outputs(branch_output, checkpoint_output) do
     frozen_result =
       Context.tool_result_message("read_file", "frozen-call", branch_output.view, %{
+        tool_outcome: :complete,
+        is_error: false,
         output: branch_output
       })
 
@@ -2000,6 +2247,8 @@ defmodule MingaAgent.SessionStoreTest do
 
     result =
       Context.tool_result_message("read_file", "current-call", checkpoint_output.view, %{
+        tool_outcome: :complete,
+        is_error: false,
         output: checkpoint_output
       })
 

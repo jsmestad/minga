@@ -13,11 +13,13 @@ defmodule Mix.Tasks.Conformance.RecoveryDriver do
           opts: keyword()
         }
 
-  @doc "Owns an isolated editor and capturing frontend for one transcript."
+  @doc "Owns an isolated event bus, editor, and capturing frontend for one transcript."
   @spec with_driver(keyword(), (t() -> result)) :: result when result: var
   def with_driver(opts, fun) do
     parent = self()
     capture = make_ref()
+    events_registry = :"minga_recovery_events_#{System.unique_integer([:positive])}"
+    {:ok, events} = Registry.start_link(keys: :duplicate, name: events_registry)
 
     {:ok, keymaps} =
       Minga.Keymap.Active.start_link(
@@ -25,7 +27,7 @@ defmodule Mix.Tasks.Conformance.RecoveryDriver do
         scope_modules: Minga.Keymap.Scope.builtin_modules()
       )
 
-    {:ok, options} = Minga.Config.Options.start_link(name: nil)
+    {:ok, options} = Minga.Config.Options.start_link(name: nil, events_registry: events_registry)
 
     {:ok, manager} =
       Manager.start_link(
@@ -62,7 +64,8 @@ defmodule Mix.Tasks.Conformance.RecoveryDriver do
       Minga.Buffer.start_link(
         content: content,
         buffer_name: "Conformance",
-        options_server: options
+        options_server: options,
+        events_registry: events_registry
       )
 
     {:ok, 0} = Minga.Buffer.set_option(buffer, :auto_save_delay_ms, 0)
@@ -77,6 +80,7 @@ defmodule Mix.Tasks.Conformance.RecoveryDriver do
         buffer: buffer,
         options_server: options,
         keymap_server: keymaps,
+        events_registry: events_registry,
         width: cols,
         height: rows,
         project_root: nil,
@@ -130,6 +134,7 @@ defmodule Mix.Tasks.Conformance.RecoveryDriver do
       GenServer.stop(manager)
       GenServer.stop(options)
       GenServer.stop(keymaps)
+      Supervisor.stop(events)
       flush(capture)
     end
   end

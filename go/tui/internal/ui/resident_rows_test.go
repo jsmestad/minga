@@ -14,7 +14,7 @@ func TestResidentRowsRandomizedSplicesMatchSliceModel(t *testing.T) {
 	for i := range model {
 		model[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), Text: "base"}
 	}
-	store, err := newResidentRows(model)
+	store, err := newResidentRows(model, windowedRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestResidentRowsRandomizedSplicesMatchSliceModel(t *testing.T) {
 
 func TestResidentRowsRefMissAndInvalidSplicePreserveValue(t *testing.T) {
 	rows := []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "one"}, {ID: 2, ContentHash: 2, Text: "two"}}
-	store, _ := newResidentRows(rows)
+	store, _ := newResidentRows(rows, windowedRows)
 	cases := []protocol.WindowContent{
 		{BaseRowCount: 2, ResultRowCount: 2, RowSplices: []protocol.WindowRowSplice{{StartIndex: 0, DeleteCount: 1, InsertRows: []protocol.WindowRow{{Ref: true, ID: 99, ContentHash: 99}}}}},
 		{BaseRowCount: 2, ResultRowCount: 2, RowSplices: []protocol.WindowRowSplice{{StartIndex: 3, DeleteCount: 1}}},
@@ -75,7 +75,7 @@ func TestResidentRowsRefMissAndInvalidSplicePreserveValue(t *testing.T) {
 
 func TestResidentRowsRejectsDuplicateInsertionStartsTransactionally(t *testing.T) {
 	rows := []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "one"}, {ID: 2, ContentHash: 2, Text: "two"}}
-	store, err := newResidentRows(rows)
+	store, err := newResidentRows(rows, windowedRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestNewResidentRowsRejectsDecreasingBufferLines(t *testing.T) {
 		{ID: 1, BufferLine: 10, Text: "ten"},
 		{ID: 2, BufferLine: 9, Text: "nine"},
 	}
-	if _, err := newResidentRows(rows); err == nil {
+	if _, err := newResidentRows(rows, windowedRows); err == nil {
 		t.Fatal("decreasing buffer-line order accepted")
 	}
 }
@@ -110,7 +110,7 @@ func TestSequentialResidentRowsProjectBufferLinesAcrossStructuralSplices(t *test
 		{ID: 2, BufferLine: 1, Text: "one"},
 		{ID: 3, BufferLine: 2, Text: "two"},
 	}
-	store, err := newResidentRowsWithMode(rows, true)
+	store, err := newResidentRows(rows, sequentialRows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,5 +140,57 @@ func TestSequentialResidentRowsProjectBufferLinesAcrossStructuralSplices(t *test
 	}
 	if got := store.materialize(); !reflect.DeepEqual(got, rows) {
 		t.Fatalf("sequential deletion did not restore projected rows: %+v", got)
+	}
+}
+
+func TestWrappedRowsRankSelectAndRefsAcrossLeaves(t *testing.T) {
+	firstGroup := residentLeafRows + 2
+	total := firstGroup + 1 + 5_000
+	rows := make([]protocol.WindowRow, total)
+	for i := range rows {
+		// Retained BufferLine is not an input to grouped rank/select.
+		rows[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), BufferLine: uint32(total - i), Kind: protocol.WindowRowWrapContinuation}
+	}
+	for _, rank := range []int{0, firstGroup, firstGroup + 1} {
+		rows[rank].Kind = protocol.WindowRowNormal
+	}
+	store, err := newResidentRows(rows, wrappedRows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta := protocol.WindowContent{
+		BaseRowCount: uint32(total), ResultRowCount: uint32(total + 2),
+		RowSplices: []protocol.WindowRowSplice{
+			{StartIndex: 1, DeleteCount: 1, InsertRows: []protocol.WindowRow{
+				{Ref: true, ID: rows[1].ID, ContentHash: rows[1].ContentHash},
+				{ID: uint64(total + 1), Kind: protocol.WindowRowWrapContinuation},
+			}},
+			{StartIndex: uint32(firstGroup), InsertRows: []protocol.WindowRow{{ID: uint64(total + 2)}}},
+		},
+	}
+	next, miss, err := store.splice(delta, nil)
+	if err != nil || miss {
+		t.Fatalf("grouped multi-splice failed: miss=%v err=%v", miss, err)
+	}
+	starts := []int{0, firstGroup + 1, firstGroup + 2, firstGroup + 3}
+	if store.lineCount() != 3 || next.lineCount() != len(starts) {
+		t.Fatalf("logical extents: old=%d new=%d", store.lineCount(), next.lineCount())
+	}
+	for line, rank := range starts {
+		if got := next.lowerBoundBufferLine(uint32(line)); got != rank {
+			t.Fatalf("logical line %d selected rank %d, want %d", line, got, rank)
+		}
+	}
+	for i, row := range next.rangeRows(firstGroup-1, 6) {
+		want := []uint32{0, 0, 1, 2, 3, 3}[i]
+		if row.BufferLine != want {
+			t.Fatalf("slice row %d projects line %d, want %d", i, row.BufferLine, want)
+		}
+	}
+	anchor, ok := next.wrappedAnchor(protocol.ScrollPresentation{AnchorTop: 3, AnchorVisualRowOffset: 4_999})
+	last, _ := next.get(anchor)
+	originalLast, _ := store.get(total - 1)
+	if !ok || anchor != next.count()-1 || last.ID != originalLast.ID || last.BufferLine != 3 || originalLast.BufferLine != 2 {
+		t.Fatalf("retained continuation moved incorrectly: anchor=%d valid=%v old=%+v new=%+v", anchor, ok, originalLast, last)
 	}
 }

@@ -217,6 +217,23 @@ func TestDecodeWindowContentSequentialRowsFlag(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowContentWrappedResidentRowsFlag(t *testing.T) {
+	header := []byte{0, 7, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11}
+	rows := section32(0x02, []byte{0, 0, 0, 0})
+	command, err := DecodeCommand(windowContentPacket(section32(0x01, header), rows))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !command.Window.WrappedResidentRows || command.Window.SequentialRows || !command.Window.CursorVisible {
+		t.Fatalf("wrapped residence flag decoded incorrectly: %+v", command.Window)
+	}
+
+	header[2] |= 0x04
+	if _, err := DecodeCommand(windowContentPacket(section32(0x01, header), rows)); err == nil {
+		t.Fatal("decoded a full snapshot with both residence modes set")
+	}
+}
+
 func TestDecodeWindowContentRequiresOneHeaderAndRows(t *testing.T) {
 	header := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 0, 0, 0, 0, 11}
 	rows := []byte{0, 0, 0, 0}
@@ -244,7 +261,7 @@ func TestDecodeWindowContentRequiresOneHeaderAndRows(t *testing.T) {
 func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
 	rowsPayload := []byte{0, 0, 0, 0}
-	scrollPayload := []byte{0, 7, 0x01}
+	scrollPayload := []byte{0, 7, 0x07}
 	scrollPayload = append(scrollPayload, u32Bytes(5)...)
 	scrollPayload = append(scrollPayload, 0, 2)
 	scrollPayload = append(scrollPayload, 0, 1)
@@ -254,7 +271,9 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(18)...)
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
-	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
+	scrollPayload = append(scrollPayload, u32Bytes(3)...)          // scroll_seq (#2661)
+	scrollPayload = append(scrollPayload, u32Bytes(0x12345678)...) // horizontal_pan_ack
+	scrollPayload = append(scrollPayload, 0x9A, 0xBC)              // horizontal_pan_limit
 
 	packet := windowContentPacket(
 		section32(0x01, headerPayload),
@@ -273,7 +292,7 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 		t.Fatalf("scroll presentation should be marked present: %+v", command.Window)
 	}
 	scroll := command.Window.Scroll
-	if scroll.WindowID != 7 || !scroll.ResetRequired || scroll.AnchorTop != 5 || scroll.AnchorLeft != 2 || scroll.AnchorVisualRowOffset != 1 {
+	if scroll.WindowID != 7 || !scroll.ResetRequired || !scroll.Wrapped || scroll.AnchorTop != 5 || scroll.AnchorLeft != 2 || scroll.AnchorVisualRowOffset != 1 {
 		t.Fatalf("scroll anchor decoded incorrectly: %+v", scroll)
 	}
 	if scroll.VisibleStartLine != 5 || scroll.VisibleEndLine != 15 || scroll.OverscanStartLine != 4 || scroll.OverscanEndLine != 18 {
@@ -284,6 +303,9 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	}
 	if scroll.ScrollSeq != 3 {
 		t.Fatalf("scroll_seq decoded incorrectly: %+v", scroll)
+	}
+	if !scroll.CanPanHorizontally || scroll.HorizontalPanAck != 0x12345678 || scroll.HorizontalPanLimit != 0x9ABC {
+		t.Fatalf("horizontal pan metadata decoded incorrectly: %+v", scroll)
 	}
 }
 
@@ -301,6 +323,8 @@ func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
 	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
+	scrollPayload = append(scrollPayload, u32Bytes(0)...) // horizontal_pan_ack
+	scrollPayload = append(scrollPayload, 0, 0)           // horizontal_pan_limit
 
 	packet := windowContentPacket(
 		section32(0x01, headerPayload),
@@ -1052,10 +1076,11 @@ func TestDecodeWindowOverlaySections(t *testing.T) {
 	annotationPayload := []byte{0, 1, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33}
 	annotationPayload = append(annotationPayload, string16("note")...)
 	annotations := section32(0x07, annotationPayload)
-	geometryPayload := make([]byte, 67)
+	geometryPayload := make([]byte, 69)
 	geometryPayload[1] = 7
-	geometryPayload[63] = 3
-	geometryPayload[65] = 2
+	binary.BigEndian.PutUint32(geometryPayload[56:60], 100_000)
+	geometryPayload[65] = 3
+	geometryPayload[67] = 2
 	geometry := section32(0x08, geometryPayload)
 	packet := windowContentPacket(header, rows, selection, search, diagnostics, highlights, annotations, geometry)
 
@@ -1067,7 +1092,7 @@ func TestDecodeWindowOverlaySections(t *testing.T) {
 	if window.Selection.Type != 1 || len(window.SearchMatches) != 1 || len(window.Diagnostics) != 1 || len(window.Highlights) != 1 || len(window.Annotations) != 1 || !window.GeometrySet {
 		t.Fatalf("overlay sections decoded incorrectly: %+v", window)
 	}
-	if window.Annotations[0].Text != "note" || window.Geometry.WindowID != 7 || window.Geometry.LineNumberWidth != 3 || window.Geometry.SignColWidth != 2 {
+	if window.Annotations[0].Text != "note" || window.Geometry.WindowID != 7 || window.Geometry.VisualRowOffset != 100_000 || window.Geometry.LineNumberWidth != 3 || window.Geometry.SignColWidth != 2 {
 		t.Fatalf("annotation/geometry decoded incorrectly: %+v", window)
 	}
 }
@@ -1075,11 +1100,11 @@ func TestDecodeWindowOverlaySections(t *testing.T) {
 func TestDecodeWindowOverlayGeometryFailureLeavesGeometryUnset(t *testing.T) {
 	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
 	rows := section32(0x02, []byte{0, 0, 0, 0})
-	geometryPayload := make([]byte, 67)
+	geometryPayload := make([]byte, 69)
 	geometryPayload[1] = 7
-	geometryPayload[63] = 3
-	geometryPayload[65] = 2
-	geometryPayload[66] = 1
+	geometryPayload[65] = 3
+	geometryPayload[67] = 2
+	geometryPayload[68] = 1
 	geometry := section32(0x08, geometryPayload)
 	packet := windowContentPacket(header, rows, geometry)
 

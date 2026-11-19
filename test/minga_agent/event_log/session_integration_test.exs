@@ -130,7 +130,10 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
       )
 
       result_message =
-        ReqLLM.Context.tool_result_message("read_file", "tool-1", "ok", %{is_error: false})
+        ReqLLM.Context.tool_result_message("read_file", "tool-1", "ok", %{
+          is_error: false,
+          tool_outcome: :complete
+        })
 
       :ok =
         GenServer.call(
@@ -144,6 +147,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
         %Event.ToolEnd{
           tool_call_id: "tool-1",
           name: "read_file",
+          outcome: :complete,
           result: "ok",
           is_error: false
         }
@@ -422,13 +426,23 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     parent = self()
 
     late_subscriber =
-      spawn(fn ->
-        Enum.each(1..2, fn _index ->
-          receive do
-            event -> send(parent, {:late_subscriber, event})
-          end
-        end)
-      end)
+      start_supervised!(
+        {Task,
+         fn ->
+           forward = fn forward ->
+             receive do
+               {:agent_event, ^session, %Failure{}} = event ->
+                 send(parent, {:late_subscriber, event})
+
+               {:agent_event, ^session, _payload} = event ->
+                 send(parent, {:late_subscriber, event})
+                 forward.(forward)
+             end
+           end
+
+           forward.(forward)
+         end}
+      )
 
     assert :ok = Session.subscribe(session, late_subscriber, role: :viewer)
 

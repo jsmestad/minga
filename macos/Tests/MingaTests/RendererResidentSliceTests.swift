@@ -27,6 +27,81 @@ struct RendererResidentSliceTests {
         #expect(entries.entry(rowIndex: 99_999)?.signType == Wire.GutterSignType.none)
     }
 
+    @Test("wrapped EOF projects one absolute origin for text, overlays, gutter, and accessibility", arguments: [false, true])
+    func wrappedEOFProjection(earlierSourceLine: Bool) throws {
+        let fixture = earlierSourceLine
+            ? WrappedScrollFixture(groups: [4, 1, 1], fittedRows: 4)
+            : WrappedScrollFixture()
+        let top: UInt32 = earlierSourceLine ? 0 : 2
+        let continuation: UInt16 = earlierSourceLine ? 2 : 1
+        let content = try fixture.content(top: top, continuation: continuation)
+        let geometry = try #require(content.paneGeometry)
+        let anchor = fixture.rows.count - Int(fixture.fittedRows)
+        let rank = UInt32(anchor)
+        let count = UInt32(fixture.rows.count)
+        let update = GUIResidentSemanticsUpdate(
+            version: 1, mode: 0, windowId: 1, contentEpoch: 8, baseRevision: 0, revision: 1, targetRowRevision: 1,
+            rowCount: count, firstRowId: 1, lastRowId: UInt64(count),
+            cursor: GUIResidentCursor(eligible: true, row: rank, col: 0),
+            cursorline: GUIResidentCursorline(row: rank, bg: 0x223344),
+            selection: GUIResidentSelection(type: .char, startRow: rank, startCol: 0, endRow: rank + 1, endCol: 1),
+            tabWidth: 2, activeGuideCol: 0, guideCols: [0], rowSplices: [],
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: count, runs: [
+                GUIResidentGuideRun(start: 0, end: count, level: 2)
+            ])],
+            diagnostics: .replace([GUIResidentDiagnostic(
+                startRow: rank, startCol: 0, endRow: rank, endCol: 1, severity: .error
+            )]),
+            annotations: .replace([GUIResidentAnnotation(
+                row: count - 1, kind: .inlineText, fg: 0, bg: 0, text: "last"
+            )])
+        )
+        let semantics = try ResidentSemanticStore().applying(update, content: content)
+        let entries = try #require(Wire.GutterEntries.resident(
+            contentEpoch: 8, lineCount: 3,
+            overrides: [Wire.GutterEntry(bufLine: 2, displayType: .normal, signType: .diagError)]
+        ))
+        let gutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: fixture.fittedRows,
+            isActive: true, contentWidth: 80, cursorLine: top, lineNumberStyle: .absolute,
+            lineNumberWidth: 1, signColWidth: 0, entries: entries
+        )
+        let surface = PresentedWindowSurface(
+            content: content, residentSemantics: semantics, gutter: .present(gutter),
+            paneGeometry: geometry, indentGuides: nil
+        )
+        let prepared = ResidentRenderPreparation.prepare(
+            content: content, fallbackVisibleRows: Int(fixture.fittedRows), overscanRows: 0
+        )
+        let presented = PreparedPresentedSurface(surface: surface, prepared: prepared)
+        let ax = EditorAccessibilityProjection.build(
+            surface: surface, connectionID: 1, isActivePane: true, localTransform: nil, cellWidth: 8, cellHeight: 20
+        )
+
+        #expect(content.wrappedResidentAnchor == anchor)
+        #expect(surface.visibleRowRange == anchor..<fixture.rows.count)
+        #expect(prepared.range == surface.visibleRowRange)
+        #expect(prepared.commands.map(\.rowIndex) == (anchor..<fixture.rows.count).map { UInt32($0) })
+        #expect(prepared.commands.first?.presentationRow == 0)
+        #expect(prepared.commands.first?.row.rowType == .wrapContinuation)
+        #expect(surface.gutterEntry(atRowIndex: anchor) == nil)
+        if earlierSourceLine {
+            #expect(surface.gutterEntry(atRowIndex: anchor + 3)?.signType == .diagError)
+        }
+        #expect(presented.residentSemanticSlice?.cursor?.row == rank)
+        #expect(presented.residentSemanticSlice?.cursorline?.row == rank)
+        #expect(presented.residentSemanticRows.first?.presentationRow == 0)
+        #expect(presented.residentSemanticRows.first?.guideLevel == 2)
+        #expect(presented.residentSemanticRows.first?.diagnostics.first?.severity == .error)
+        #expect(presented.residentSemanticRows.last?.annotations.map(\.text) == ["last"])
+        #expect(CoreTextMetalRenderer.projectedSelection(
+            semantics.selection, visibleStart: anchor, visibleRows: Int(fixture.fittedRows)
+        )?.startRow == 0)
+        #expect(ax.value == (earlierSourceLine ? "row 3row 4\nrow 5\nrow 6" : "row 6row 7row 8"))
+        #expect(ax.rows.map(\.absoluteRow) == Array(prepared.range))
+        #expect(ax.hasSelection)
+    }
+
     @Test("fixed viewport visits the same rows for 5,000 and 65,536 row documents")
     func boundedVisitedRows() throws {
         let small = try content(rowCount: 5_000, visibleStart: 2_000, visibleRows: 40)
@@ -323,15 +398,44 @@ struct RendererResidentSliceTests {
         #expect(ResidentRenderPreparation.clip(row: wide, scrollLeft: 0, viewportCols: 3).text == "a界")
     }
 
+    @Test("a slice starting inside a wide glyph keeps its original display origin and style")
+    func horizontalSlicePreservesWideGlyphOrigin() throws {
+        let row = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "a界bc",
+            spans: [GUIHighlightSpan(startCol: 1, endCol: 3, fg: 1, bg: 2, attrs: 0, fontWeight: 0, fontId: 0)]
+        )
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )
+        for left in [1, 2] {
+            let command = try #require(ResidentRenderPreparation.prepare(
+                content: content, fallbackVisibleRows: 1, overscanRows: 0, scrollLeft: left, viewportCols: 4
+            ).commands.first)
+            #expect(command.row.text == "界bc")
+            #expect(command.composedStartColumn == 1)
+            #expect(command.composedUTF16Start == 1)
+            #expect(command.row.spans.first?.startCol == 0)
+            #expect(command.row.spans.first?.endCol == 2)
+        }
+    }
+
     @Test("resident selection projects continuation edges into a local slice")
     func residentSelectionProjection() throws {
         let selection = GUIResidentSelection(type: .char, startRow: 2, startCol: 7, endRow: 12, endCol: 3)
-        let projected = try #require(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 5, visibleRows: 4, visibleCols: 80))
+        let projected = try #require(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 5, visibleRows: 4))
         #expect(projected.startRow == 0)
-        #expect(projected.startCol == 0)
+        #expect(projected.startCol == nil)
         #expect(projected.endRow == 3)
-        #expect(projected.endCol == 80)
-        #expect(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 20, visibleRows: 4, visibleCols: 80) == nil)
+        #expect(projected.endCol == nil)
+        #expect(CoreTextMetalRenderer.projectedSelection(selection, visibleStart: 20, visibleRows: 4) == nil)
+
+        let block = GUIResidentSelection(type: .block, startRow: 2, startCol: 3, endRow: 12, endCol: 7)
+        let clippedBlock = try #require(CoreTextMetalRenderer.projectedSelection(block, visibleStart: 5, visibleRows: 4))
+        #expect(clippedBlock.startRow == 0)
+        #expect(clippedBlock.endRow == 3)
+        #expect(clippedBlock.startCol == 3)
+        #expect(clippedBlock.endCol == 7)
     }
 
     @Test("resident semantics feed every prepared surface after local scrolling")
@@ -376,7 +480,7 @@ struct RendererResidentSliceTests {
         #expect(semanticRow.annotations.map(\.text) == ["hint 0", "hint 1", "hint 2", "hint 3", "hint 4"])
         #expect(semanticRow.diagnostics.map(\.severity) == [.error])
         #expect(presented.residentSemanticSlice?.cursorline?.row == 4)
-        #expect(CoreTextMetalRenderer.projectedSelection(semantics.selection, visibleStart: 3, visibleRows: 3, visibleCols: 12)?.startRow == 1)
+        #expect(CoreTextMetalRenderer.projectedSelection(semantics.selection, visibleStart: 3, visibleRows: 3)?.startRow == 1)
         #expect(CoreTextMetalRenderer.resolveCursor(preparedSurfaces: [presented], activeWindowId: 1, cellW: 8, displayCellH: 20, scale: 1, gutterLeftMarginPx: 0, gutterPaddingPx: 0)?.y == 80)
         #expect(CoreTextMetalRenderer.atlasSlotDemand(
             frameState: FrameState(cols: 12, rows: 3), preparedSurfaces: [presented]
@@ -433,6 +537,91 @@ struct RendererResidentSliceTests {
         GUIVisualRow(
             rowType: type, rowId: id, bufLine: line,
             contentHash: UInt32(truncatingIfNeeded: id), text: "row \(id)", spans: []
+        )
+    }
+}
+
+/// Whole-source groups and payload-relative windowed equivalents for wrapped scroll regressions.
+struct WrappedScrollFixture {
+    var groups = [3, 1, 4]
+    var fittedRows: UInt16 = 3
+
+    var rows: [GUIVisualRow] {
+        var result: [GUIVisualRow] = []
+        for (line, groupCount) in groups.enumerated() {
+            for ordinal in 0..<groupCount {
+                let id = result.count + 1
+                result.append(GUIVisualRow(
+                    rowType: ordinal == 0 ? .normal : .wrapContinuation,
+                    rowId: UInt64(id), bufLine: UInt32(line), contentHash: UInt32(id),
+                    text: "row \(id)", spans: []
+                ))
+            }
+        }
+        return result
+    }
+
+    func geometry(top: UInt32, continuation: UInt16, totalVisualRows: UInt32? = nil) -> GUIPaneGeometry {
+        let rect = GUICellRect(row: 0, col: 0, width: 80, height: fittedRows)
+        return GUIPaneGeometry(
+            windowId: 1, totalRect: rect, contentRect: rect, textRect: rect,
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: fittedRows), clipRect: rect,
+            viewport: GUIViewportSummary(
+                top: top, left: 0, rows: fittedRows, cols: 80, totalLines: UInt32(groups.count),
+                visualRowOffset: UInt32(continuation), totalVisualRows: totalVisualRows ?? UInt32(groups.reduce(0, +))
+            ),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0), hitRegions: []
+        )
+    }
+
+    func scroll(top: UInt32, continuation: UInt16, scrollSeq: UInt32 = 0) -> GUIScrollPresentation {
+        GUIScrollPresentation(
+            windowId: 1, resetRequired: false, anchorTop: top, anchorLeft: 0, anchorVisualRowOffset: continuation,
+            visibleStartLine: top, visibleEndLine: UInt32(groups.count), overscanStartLine: 0,
+            overscanEndLine: UInt32(groups.count), contentEpoch: 8, layoutGeneration: 1, scrollSeq: scrollSeq, isWrapped: true
+        )
+    }
+
+    func content(top: UInt32, continuation: UInt16, resident: Bool = true, rowPayload: [GUIVisualRow]? = nil) throws -> GUIWindowContent {
+        let payload = rowPayload ?? rows
+        let start = resident ? 0 : groups.prefix(Int(top)).reduce(Int(continuation), +)
+        return try GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 8,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rowStoreMode: resident ? .sequentialWrapped : .windowed, rows: Array(payload.dropFirst(start)),
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: geometry(top: top, continuation: continuation),
+            scrollPresentation: scroll(top: top, continuation: resident ? continuation : 0)
+        )
+    }
+
+    func delta(
+        top: UInt32, continuation: UInt16, scrollSeq: UInt32 = 0, baseRowCount: UInt32? = nil,
+        rowSplices: [GUIWindowRowSplice] = []
+    ) -> GUIWindowRowsDelta {
+        let count = UInt32(groups.reduce(0, +))
+        return GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: 8, cursorVisible: true, cursorRow: 0, cursorCol: 0,
+            cursorShape: .block, scrollLeft: 0, baseRowCount: baseRowCount ?? count, resultRowCount: count,
+            rowSplices: rowSplices, selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [], paneGeometry: geometry(top: top, continuation: continuation),
+            cursorline: nil, scrollPresentation: scroll(top: top, continuation: continuation, scrollSeq: scrollSeq)
+        )
+    }
+
+    func semantics(rows: [GUIVisualRow], splices: [GUIResidentRowSplice] = []) -> GUIResidentSemanticsUpdate {
+        let seed = splices.isEmpty
+        let count = UInt32(rows.count)
+        return GUIResidentSemanticsUpdate(
+            version: 1, mode: seed ? 0 : 1, windowId: 1, contentEpoch: 8,
+            baseRevision: seed ? 0 : 1, revision: seed ? 1 : 2, targetRowRevision: seed ? 1 : 2,
+            rowCount: count, firstRowId: rows.first?.rowId ?? 0, lastRowId: rows.last?.rowId ?? 0,
+            cursor: GUIResidentCursor(eligible: true, row: 0, col: 0), cursorline: nil, selection: nil,
+            tabWidth: 2, activeGuideCol: 0, guideCols: [], rowSplices: splices,
+            guideReplacements: [GUIResidentGuideReplacement(start: 0, end: count, runs: [
+                GUIResidentGuideRun(start: 0, end: count, level: 0)
+            ])],
+            diagnostics: .replace([]), annotations: .replace([])
         )
     }
 }

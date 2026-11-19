@@ -308,6 +308,7 @@ final class CoreTextMetalRenderer {
     private var startCursorX: Float = 0
     private var startCursorY: Float = 0
     private var targetCursorX: Float = 0
+    private var cursorAnimationScrollX: Float = 0
     private var targetCursorY: Float = 0
     private var targetCursorShape: CursorShape = .block
     private var targetCursorWindowId: UInt16?
@@ -519,7 +520,7 @@ final class CoreTextMetalRenderer {
                 cursorBlinkVisible: Bool = true,
                 isMouseInGutter: Bool = false,
                 gutterHoverWindowId: UInt16? = nil,
-                gutterHoverRow: UInt16? = nil,
+                gutterHoverRowIndex: Int? = nil,
                 drawableProvider: @escaping @MainActor () -> CAMetalDrawable?, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
                 presentationWindowId: UInt16? = nil,
@@ -638,14 +639,18 @@ final class CoreTextMetalRenderer {
                 gutterLeftMarginPx: gutterLeftMarginPx,
                 gutterPaddingPx: gutterPaddingPx
             )
-            let scrollLeftInt = Int(content.scrollLeft)
-            let localScrollInsetCols = scrollLeftInt > 0 ? 1 : 0
+            let localOffset = Self.presentationScrollOffset(
+                scrollLeft: content.scrollLeft,
+                scrollOffsetPx: Self.smoothScrollOffset(for: content.windowId, targetWindowId: scrollTargetWindowId, scrollOffsetPx: smoothScrollOffsetPx)
+            )
+            // Slice around the locally presented left edge, not the lagging committed anchor.
+            let clipLeft = max(Int(content.scrollLeft) + Int(floor(localOffset.x / (cellW * scale))) - 1, 0)
             let prepared = ResidentRenderPreparation.prepare(
                 content: content,
                 fallbackVisibleRows: fallbackRows,
                 overscanRows: RendererSignposts.configuredOverscanRows,
-                localOffsetRows: Double(Self.smoothScrollOffset(for: content.windowId, targetWindowId: scrollTargetWindowId, scrollOffsetPx: smoothScrollOffsetPx).y / (displayCellH * scale)),
-                scrollLeft: max(scrollLeftInt - localScrollInsetCols, 0),
+                localOffsetRows: Double(localOffset.y / (displayCellH * scale)),
+                scrollLeft: clipLeft,
                 viewportCols: contentCols + 2
             )
             let preparedSurface = PreparedPresentedSurface(surface: surface, prepared: prepared)
@@ -757,6 +762,10 @@ final class CoreTextMetalRenderer {
             for preparedSurface in preparedSurfaces {
                 let surface = preparedSurface.surface
                 let content = surface.content
+                // A panning pane retains the caret position even when its committed slice hides it.
+                let panningCaret = surface.windowId == activeSurface?.windowId && surface.residentSemantics == nil
+                    && content.scrollPresentation?.canPanHorizontally == true ? content.accessibilityCursor : nil
+                if panningCaret != nil { resolvedCursor = nil }
                 let gutter = surface.renderGutter
                 let paneGeometry = surface.paneGeometry
                 let windowScrollOffsetPx = CoreTextMetalRenderer.smoothScrollOffset(
@@ -856,33 +865,23 @@ final class CoreTextMetalRenderer {
                 // The gutter stays fixed; only content past the gutter edge scrolls.
                 let scrollLeftInt = Int(content.scrollLeft)
                 let hScrollPx = Float(scrollLeftInt) * cellW * scale
-                let contentCols = CoreTextMetalRenderer.visibleTextCols(
-                    geometry: paneGeometry,
-                    gutter: gutter,
-                    frameCols: frameState.cols,
-                    cellW: cellW,
-                    scale: scale,
-                    gutterLeftMarginPx: gutterLeftMarginPx,
-                    gutterPaddingPx: gutterPaddingPx
-                )
 
                 // Selection overlay quads (drawn before text).
                 let integralLocalRowOffset = Int(floor(presentationScrollOffsetPx.y / (displayCellH * scale)))
                 let residentSelection = preparedSurface.surface.residentSemantics.flatMap {
-                    CoreTextMetalRenderer.projectedSelection($0.selection, visibleStart: visibleSlice.visibleStartIndex + integralLocalRowOffset, visibleRows: committedVisibleRows, visibleCols: contentCols)
+                    CoreTextMetalRenderer.projectedSelection($0.selection, visibleStart: visibleSlice.visibleStartIndex + integralLocalRowOffset, visibleRows: committedVisibleRows)
                 }
-                if let sel = residentSelection ?? content.selection,
-                   preparedSurface.surface.residentSemantics != nil || content.accessibilitySelectionRanges.isEmpty || sel.type == .line {
+                if let selection = residentSelection ?? content.selection.map(SelectionSlice.init),
+                   preparedSurface.surface.residentSemantics != nil || content.accessibilitySelectionRanges.isEmpty || selection.type == .line {
                     let selectionRowOffset = residentSelection == nil ? scrollableWindowRowOffset : windowRowOffset - (presentationScrollOffsetPx.y - Float(integralLocalRowOffset) * displayCellH * scale)
                     appendSelectionQuads(
-                        selection: sel,
+                        selection: selection,
                         rowOffset: selectionRowOffset,
                         colOffset: contentColOffset - scrollableWindowColOffset,
                         scrollLeft: scrollLeftInt,
                         visibleRows: committedVisibleRows,
-                        visibleCols: contentCols,
                         cellW: cellW, cellH: displayCellH, scale: scale,
-                        viewportWidth: contentRightPx,
+                        clipRight: contentRightPx,
                         clipLeft: contentColOffset,
                         clipTop: contentTopPx,
                         clipBottom: contentBottomPx,
@@ -943,12 +942,6 @@ final class CoreTextMetalRenderer {
                     semanticOverlayQuads.append(quad)
                 }
 
-                // Pre-clip visible rows to the viewport window. Drops scrollLeft
-                // columns from the start and limits to viewport width, so each
-                // texture is at most viewport-wide.
-                let localScrollInsetCols = scrollLeftInt > 0 ? 1 : 0
-                let localClipXOffset = Float(localScrollInsetCols) * cellW * scale
-
                 // Reuse the shared Metal-free CoreText commands prepared once
                 // at the start of this frame.
                 let preparedRows = preparedSurface.prepared
@@ -957,7 +950,7 @@ final class CoreTextMetalRenderer {
                     selection: content.selection,
                     color: currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
                 )
-                var visibleRowWidths: [Int: Int] = [:]
+                var visibleRowEnds: [Int: Float] = [:]
                 var textRows: [PresentedTextLayout.Row] = []
                 for command in preparedRows.commands {
                     let displayRow = command.displayRow
@@ -966,6 +959,7 @@ final class CoreTextMetalRenderer {
                     let textYOffset = (displayCellH - cellH) * scale * 0.5
                     let rawLineY = yPos + textYOffset
                     guard CoreTextMetalRenderer.clipVerticalQuad(y: rawLineY, height: Float(wcr.linePixelHeight), top: contentTopPx, bottom: contentBottomPx) != nil else { continue }
+                    let rawLineX = contentColOffset + Float(command.composedStartColumn - scrollLeftInt) * cellW * scale - scrollableWindowColOffset
 
                     let ctLine = wcr.textLayout(row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch)
                     let textRow = PresentedTextLayout.Row(
@@ -974,10 +968,18 @@ final class CoreTextMetalRenderer {
                         composedUTF16Start: command.composedUTF16Start,
                         composedUTF16End: command.composedUTF16End,
                         line: ctLine,
-                        origin: CGPoint(x: CGFloat((contentColOffset - localClipXOffset - scrollableWindowColOffset) / scale), y: CGFloat(yPos / scale)),
+                        origin: CGPoint(x: CGFloat(rawLineX / scale), y: CGFloat(yPos / scale)),
                         rect: CGRect(x: CGFloat(contentColOffset / scale), y: CGFloat(yPos / scale), width: CGFloat((contentRightPx - contentColOffset) / scale), height: CGFloat(displayCellH))
                     )
                     textRows.append(textRow)
+                    if let cursor = panningCaret, Int(cursor.row) == presentationRow,
+                       (command.composedUTF16Start...command.composedUTF16End).contains(Int(cursor.utf16)) {
+                        // Animate in committed coordinates; the draw pass applies the presentation offset and clips.
+                        resolvedCursor = RenderCursor(
+                            x: Float(textRow.x(at: cursor.utf16)) * scale + presentationScrollOffsetPx.x,
+                            y: yPos + presentationScrollOffsetPx.y, shape: content.cursorShape, windowId: content.windowId
+                        )
+                    }
                     accessibilitySelection.appendQuads(
                         for: textRow, y: yPos, height: displayCellH * scale, scale: scale,
                         clipLeft: contentColOffset, clipRight: contentRightPx,
@@ -986,10 +988,9 @@ final class CoreTextMetalRenderer {
                     )
 
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
-                        visibleRowWidths[presentationRow] = entry.pixelWidth
+                        visibleRowEnds[presentationRow] = rawLineX + Float(entry.pixelWidth)
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
-                        let rawLineX = contentColOffset - localClipXOffset - scrollableWindowColOffset
                         let clippedLeftPx = max(contentColOffset - rawLineX, 0)
                         let lineX = max(rawLineX, contentColOffset)
                         let visiblePixelWidth = min(Float(entry.pixelWidth) - clippedLeftPx, contentRightPx - lineX)
@@ -1034,14 +1035,13 @@ final class CoreTextMetalRenderer {
                     }
 
                     for (rowIndex, rowAnnotations) in annotationsByRow {
-                        let linePixelWidth = Float(visibleRowWidths[rowIndex] ?? 0)
+                        let rowEndX = visibleRowEnds[rowIndex] ?? contentColOffset
                         let rowY = CoreTextMetalRenderer.viewportLocalRowY(
                             localRow: Int(rowIndex), origin: scrollableWindowRowOffset,
                             cellHeight: displayCellH, scale: scale
                         )
                         guard let clippedRow = CoreTextMetalRenderer.clipVerticalQuad(y: rowY, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) else { continue }
-                        var cursorX = max(contentColOffset, contentColOffset - scrollableWindowColOffset + linePixelWidth
-                            + Float(wcr.annotationGap) * scale)
+                        var cursorX = max(contentColOffset, rowEndX + Float(wcr.annotationGap) * scale)
 
                         for (annIdx, ann) in rowAnnotations.enumerated() {
                             let annKey = AtlasKey.lineAnnotation(windowId: content.windowId, row: ann.row, subIndex: UInt16(min(annIdx, Int(UInt16.max))))
@@ -1131,7 +1131,7 @@ final class CoreTextMetalRenderer {
                 viewportWidthPx: Float(sourceClipExtentPx.width),
                 isMouseInGutter: isMouseInGutter,
                 gutterHoverWindowId: gutterHoverWindowId,
-                gutterHoverRow: gutterHoverRow,
+                gutterHoverRowIndex: gutterHoverRowIndex,
                 scrollOffsetY: CoreTextMetalRenderer.smoothScrollOffset(
                     for: windowGutter.windowId,
                     targetWindowId: scrollTargetWindowId,
@@ -1477,15 +1477,15 @@ final class CoreTextMetalRenderer {
         // Beam and underline cursors are drawn AFTER text (pass 5).
         let candidateTextLayout = PresentedTextLayout(panes: textPanes, renderedWindowIDs: Set(surfaces.map(\.windowId)))
         if let surface = activeSurface, surface.residentSemantics == nil, let cursor = surface.content.accessibilityCursor,
+           surface.content.scrollPresentation?.canPanHorizontally != true,
            let point = candidateTextLayout.cursor(windowID: surface.windowId, row: cursor.row, utf16: cursor.utf16),
            surface.content.cursorVisible {
+            // The layout returns committed coordinates. The cursor passes subtract local offset after animation.
             resolvedCursor = RenderCursor(x: Float(point.x) * scale, y: Float(point.y) * scale, shape: surface.content.cursorShape, windowId: surface.windowId)
         }
+        let cursorSurface = resolvedCursor?.windowId.flatMap { id in surfaces.first { $0.windowId == id } }
+        rebaseCursorAnimation(scrollX: Float(cursorSurface?.content.scrollLeft ?? 0) * cellW * scale, windowId: resolvedCursor?.windowId)
         let renderCursor = animatedCursor(for: resolvedCursor, teleportLineThresholdPx: displayCellH * scale * 50.0)
-        // The cursor names exactly one window; select its complete surface once.
-        // This is a single-window lookup, not fragmented per-window joining.
-        let cursorSurface: PresentedWindowSurface? = renderCursor?.windowId
-            .flatMap { id in surfaces.first { $0.windowId == id } }
         if let renderCursor, cursorBlinkVisible, renderCursor.shape == .block {
             let cursorScrollLeft = cursorSurface?.content.scrollLeft ?? 0
             let cursorScrollOffsetPx = CoreTextMetalRenderer.presentationScrollOffset(
@@ -1759,15 +1759,14 @@ final class CoreTextMetalRenderer {
         let scrollMetrics = (renderingPrompt ? nil : activeSurface).flatMap {
             EditorScrollTrack.metrics(
                 surface: $0, localTransform: localTransform,
-                cellHeight: CGFloat(displayCellH)
+                rowPitch: CGFloat(displayCellH)
             )
         }
 
         if let scrollMetrics,
            let thumb = EditorScrollTrack.thumb(
-               viewHeight: CGFloat(viewportSize.height),
-               metrics: scrollMetrics,
-               minThumbHeight: CGFloat(20.0 * scale)
+               viewHeight: viewportSize.height / CGFloat(scale),
+               metrics: scrollMetrics
            ),
            scrollIndicatorAlpha > 0 {
             let viewportH = Float(viewportSize.height)
@@ -1775,8 +1774,8 @@ final class CoreTextMetalRenderer {
             let indicatorMargin: Float = 2.0 * scale
             let trackHeight = viewportH
 
-            let thumbHeight = Float(thumb.height)
-            let thumbY = Float(thumb.y)
+            let thumbHeight = Float(thumb.height) * scale
+            let thumbY = Float(thumb.y) * scale
 
             let thumbX = Float(viewportSize.width) - indicatorWidth - indicatorMargin
 
@@ -2097,7 +2096,7 @@ final class CoreTextMetalRenderer {
         viewportWidthPx: Float,
         isMouseInGutter: Bool,
         gutterHoverWindowId: UInt16?,
-        gutterHoverRow: UInt16?,
+        gutterHoverRowIndex: Int?,
         scrollOffsetY: Float,
         slice: RendererRowSlice,
         atlas: LineTextureAtlas,
@@ -2112,12 +2111,10 @@ final class CoreTextMetalRenderer {
         let clipTop = Float(gutter.contentRow) * cellH * scale
         let clipBottom = Float(gutter.contentRow + gutter.contentHeight) * cellH * scale
 
-        for (offset, _) in slice.rows.enumerated() {
+        for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
-            guard let entry = gutter.entries.entry(rowIndex: rowIndex) else { continue }
+            guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }
             let presentationRow = offset - slice.overscanBeforeRows
-            let screenRowInt = Int(baseRow) + presentationRow
-            let screenRow = UInt16(clamping: screenRowInt)
             let atlasRow = UInt16(clamping: offset)
             let rowY = (Float(baseRow) + Float(presentationRow)) * cellH * scale - scrollOffsetY
             guard CoreTextMetalRenderer.clipVerticalQuad(y: rowY, height: cellH * scale, top: clipTop, bottom: clipBottom) != nil else { continue }
@@ -2139,7 +2136,7 @@ final class CoreTextMetalRenderer {
             // Fold indicator (dedicated cell after the diagnostic/git sign column)
             if signColWidth >= 3 {
                 appendFoldRangeHighlight(
-                    entry: entry, presentationRow: presentationRow, screenRow: screenRow, yPos: yPos,
+                    entry: entry, rowIndex: rowIndex, yPos: yPos,
                     gutter: gutter, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
@@ -2147,7 +2144,7 @@ final class CoreTextMetalRenderer {
                     gutterPaddingPx: gutterPaddingPx,
                     viewportWidthPx: viewportWidthPx,
                     gutterHoverWindowId: gutterHoverWindowId,
-                    gutterHoverRow: gutterHoverRow,
+                    gutterHoverRowIndex: gutterHoverRowIndex,
                             clipTop: clipTop, clipBottom: clipBottom,
                     bgQuads: &bgQuads,
                 )
@@ -2270,7 +2267,7 @@ final class CoreTextMetalRenderer {
 
     /// Draws a subtle range highlight while hovering an unfolded fold chevron.
     private func appendFoldRangeHighlight(
-        entry: Wire.GutterEntry, presentationRow: Int, screenRow: UInt16, yPos: Float,
+        entry: Wire.GutterEntry, rowIndex: Int, yPos: Float,
         gutter: Wire.WindowGutter, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
@@ -2278,18 +2275,16 @@ final class CoreTextMetalRenderer {
         gutterPaddingPx: Float,
         viewportWidthPx: Float,
         gutterHoverWindowId: UInt16?,
-        gutterHoverRow: UInt16?,
+        gutterHoverRowIndex: Int?,
         clipTop: Float, clipBottom: Float,
         bgQuads: inout [QuadGPU],
     ) {
         guard gutterHoverWindowId == gutter.windowId else { return }
-        guard gutterHoverRow == screenRow else { return }
+        guard gutterHoverRowIndex == rowIndex else { return }
         guard entry.displayType == .foldOpen else { return }
         guard let foldEndLine = entry.foldEndLine, foldEndLine > entry.bufLine else { return }
 
         let rowsInRange = Int(foldEndLine - entry.bufLine + 1)
-        let visibleRows = max(0, min(rowsInRange, Int(gutter.contentHeight) - presentationRow))
-        guard visibleRows > 0 else { return }
 
         let gutterWidth = Float(gutter.lineNumberWidth) + Float(signColWidth)
         let contentX = xOffset + gutterWidth * cellW * scale + gutterPaddingPx
@@ -2297,7 +2292,7 @@ final class CoreTextMetalRenderer {
         let width = max(0, min(windowRightX, viewportWidthPx) - contentX)
         guard width > 0 else { return }
 
-        appendClippedGutterQuad(x: contentX, y: yPos, width: width, height: Float(visibleRows) * cellH * scale, color: colorFromU24(frameState.gutterColors.foldFg, default: SIMD3<Float>(0.33, 0.33, 0.33)), alpha: 0.10, clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
+        appendClippedGutterQuad(x: contentX, y: yPos, width: width, height: Float(rowsInRange) * cellH * scale, color: colorFromU24(frameState.gutterColors.foldFg, default: SIMD3<Float>(0.33, 0.33, 0.33)), alpha: 0.10, clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
     }
 
     /// Renders the fold indicator for one gutter row as a path-style chevron.
@@ -2669,9 +2664,9 @@ final class CoreTextMetalRenderer {
         slice: RendererRowSlice
     ) -> Int {
         var demand = 0
-        for (offset, _) in slice.rows.enumerated() {
+        for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
-            guard let entry = gutter.entries.entry(rowIndex: rowIndex) else { continue }
+            guard let entry = gutter.entries.entry(visualRow: row, rowIndex: rowIndex) else { continue }
             demand += lineNumberTextureDemand(gutter) + signTextureDemand(entry.signType)
         }
         return demand
@@ -2721,6 +2716,17 @@ final class CoreTextMetalRenderer {
         cursorAnimateEnabled = cursorAnimateConfigEnabled && !cursorAnimationReduceMotionDisabled
         guard !cursorAnimateEnabled else { return }
         snapCursorAnimationToTarget()
+    }
+
+    /// A new committed left edge changes the coordinate origin, not the caret target.
+    private func rebaseCursorAnimation(scrollX: Float, windowId: UInt16?) {
+        if hasCursorAnimationPosition, targetCursorWindowId == windowId {
+            let delta = scrollX - cursorAnimationScrollX
+            currentCursorX -= delta
+            startCursorX -= delta
+            targetCursorX -= delta
+        }
+        cursorAnimationScrollX = scrollX
     }
 
     func animatedCursor(for resolvedCursor: RenderCursor?, teleportLineThresholdPx: Float) -> RenderCursor? {
@@ -2817,14 +2823,7 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func presentationOverscanBeforeRows(_ content: GUIWindowContent) -> Int {
-        guard let presentation = content.scrollPresentation else { return 0 }
-        let anchor = content.rowStore.lowerBound(bufferLine: presentation.anchorTop)
-        let anchoredVisualOrigin = min(
-            anchor + Int(presentation.anchorVisualRowOffset), content.rowStore.count
-        )
-        if anchoredVisualOrigin < content.rowStore.count { return anchoredVisualOrigin }
-        let visible = content.rowStore.lowerBound(bufferLine: presentation.visibleStartLine)
-        return visible < content.rowStore.count ? visible : scrollOverscanBefore(presentation)
+        content.presentationRowOrigin
     }
 
     nonisolated static func presentationPayloadOverscanBeforeRows(rows: [GUIVisualRow], scrollPresentation: GUIScrollPresentation?) -> Int {
@@ -3418,161 +3417,87 @@ final class CoreTextMetalRenderer {
         )
     }
 
-    /// Build selection overlay quads from semantic selection data.
-    ///
-    /// Char selection: one quad per row (partial for first/last rows).
-    /// Line selection: full-width quads for each row in the range.
+    struct SelectionSlice {
+        let type: GUISelectionType
+        let startRow: Int
+        let endRow: Int
+        /// `nil` is a character selection continuing from outside the visible rows.
+        let startCol: UInt16?
+        let endCol: UInt16?
+
+        nonisolated init(type: GUISelectionType, startRow: Int, endRow: Int, startCol: UInt16?, endCol: UInt16?) {
+            self.type = type
+            self.startRow = startRow
+            self.endRow = endRow
+            self.startCol = startCol
+            self.endCol = endCol
+        }
+
+        nonisolated init(_ selection: GUISelectionOverlay) {
+            self.init(type: selection.type, startRow: Int(selection.startRow), endRow: Int(selection.endRow),
+                      startCol: selection.startCol, endCol: selection.endCol)
+        }
+    }
+
     nonisolated static func projectedSelection(
-        _ selection: GUIResidentSelection?,
-        visibleStart: Int,
-        visibleRows: Int,
-        visibleCols: Int
-    ) -> GUISelectionOverlay? {
-        guard let selection, visibleRows > 0, visibleCols > 0 else { return nil }
+        _ selection: GUIResidentSelection?, visibleStart: Int, visibleRows: Int
+    ) -> SelectionSlice? {
+        guard let selection, visibleRows > 0 else { return nil }
         let visibleEnd = visibleStart + visibleRows - 1
         let start = Int(selection.startRow)
         let end = Int(selection.endRow)
         guard start <= visibleEnd, end >= visibleStart else { return nil }
-        let projectedStart = max(start, visibleStart)
-        let projectedEnd = min(end, visibleEnd)
-        return GUISelectionOverlay(
+        return SelectionSlice(
             type: selection.type,
-            startRow: UInt16(clamping: projectedStart - visibleStart),
-            startCol: start < visibleStart ? 0 : selection.startCol,
-            endRow: UInt16(clamping: projectedEnd - visibleStart),
-            endCol: end > visibleEnd ? UInt16(clamping: visibleCols) : selection.endCol
+            startRow: max(start, visibleStart) - visibleStart,
+            endRow: min(end, visibleEnd) - visibleStart,
+            startCol: selection.type == .char && start < visibleStart ? nil : selection.startCol,
+            endCol: selection.type == .char && end > visibleEnd ? nil : selection.endCol
         )
     }
 
     private func appendSelectionQuads(
-        selection sel: GUISelectionOverlay,
+        selection: SelectionSlice,
         rowOffset: Float, colOffset: Float,
         scrollLeft: Int,
         visibleRows: Int,
-        visibleCols: Int,
         cellW: Float, cellH: Float, scale: Float,
-        viewportWidth: Float,
+        clipRight: Float,
         clipLeft: Float,
         clipTop: Float,
         clipBottom: Float,
         quads: inout [QuadGPU]
     ) {
-        guard visibleRows > 0, visibleCols > 0, cellW > 0, cellH > 0, scale > 0 else {
-            assertionFailure("appendSelectionQuads called with invalid dimensions: rows=\(visibleRows) cols=\(visibleCols) cellW=\(cellW) cellH=\(cellH) scale=\(scale)")
-            return
-        }
-
-        let requestedStartRow = Int(sel.startRow)
-        let requestedEndRow = Int(sel.endRow)
-        guard requestedStartRow <= requestedEndRow else {
-            assertionFailure("Selection startRow (\(requestedStartRow)) > endRow (\(requestedEndRow))")
-            return
-        }
-
-        let startRow = max(requestedStartRow, 0)
-        let endRow = min(requestedEndRow, visibleRows - 1)
+        guard visibleRows > 0, clipRight > clipLeft else { return }
+        let startRow = max(selection.startRow, 0)
+        let endRow = min(selection.endRow, visibleRows - 1)
         guard startRow <= endRow else { return }
 
         let selColor = currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
         let lineHeightPx = cellH * scale
         let colWidthPx = cellW * scale
 
-        switch sel.type {
-        case .line:
-            let fullLineWidthPx = max(viewportWidth - clipLeft, 0)
-            guard fullLineWidthPx > 0 else { return }
-            for row in startRow...endRow {
-                let y = rowOffset + Float(row) * lineHeightPx
-                guard let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: lineHeightPx, top: clipTop, bottom: clipBottom) else { continue }
-                var quad = QuadGPU()
-                quad.position = SIMD2<Float>(clipLeft, clipped.y)
-                quad.size = SIMD2<Float>(fullLineWidthPx, clipped.height)
-                quad.color = selColor
-                quad.alpha = 1.0
-                quads.append(quad)
-            }
+        // Translate finite column endpoints into the presented space before clipping. A
+        // continuing character selection (or a line selection) reaches the actual pane edge.
+        for row in startRow...endRow {
+            let startCol = selection.type == .block || (selection.type == .char && row == selection.startRow)
+                ? selection.startCol : nil
+            let endCol = selection.type == .block || (selection.type == .char && row == selection.endRow)
+                ? selection.endCol : nil
+            let rawX = startCol.map { colOffset + Float(Int($0) - scrollLeft) * colWidthPx } ?? clipLeft
+            let rawRight = endCol.map { colOffset + Float(Int($0) - scrollLeft) * colWidthPx } ?? clipRight
+            let x = max(rawX, clipLeft)
+            let right = min(rawRight, clipRight)
+            let y = Self.viewportLocalRowY(localRow: row, origin: rowOffset, cellHeight: cellH, scale: scale)
+            guard right > x, let clipped = Self.clipVerticalQuad(y: y, height: lineHeightPx, top: clipTop, bottom: clipBottom) else { continue }
 
-        case .char:
-            for row in startRow...endRow {
-                let y = Self.viewportLocalRowY(
-                    localRow: row, origin: rowOffset, cellHeight: cellH, scale: scale
-                )
-                let requestedCols = requestedSelectionCols(row: row, sel: sel, scrollLeft: scrollLeft, visibleCols: visibleCols)
-                guard let clampedCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
-
-                let visibleStartCol = Float(clampedCols.start - scrollLeft)
-                let visibleEndCol = Float(clampedCols.end - scrollLeft)
-                let rawX = colOffset + visibleStartCol * colWidthPx
-                let rawRight = colOffset + visibleEndCol * colWidthPx
-                let x = max(rawX, clipLeft)
-                let right = min(rawRight, viewportWidth)
-                guard right > x,
-                      let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: lineHeightPx, top: clipTop, bottom: clipBottom) else { continue }
-
-                var quad = QuadGPU()
-                quad.position = SIMD2<Float>(x, clipped.y)
-                quad.size = SIMD2<Float>(right - x, clipped.height)
-                quad.color = selColor
-                quad.alpha = 1.0
-                quads.append(quad)
-            }
-
-        case .block:
-            for row in startRow...endRow {
-                let y = Self.viewportLocalRowY(
-                    localRow: row, origin: rowOffset, cellHeight: cellH, scale: scale
-                )
-                let requestedCols = (start: Int(sel.startCol), end: Int(sel.endCol))
-                guard let clampedCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
-
-                let visibleStartCol = Float(clampedCols.start - scrollLeft)
-                let visibleEndCol = Float(clampedCols.end - scrollLeft)
-                let rawX = colOffset + visibleStartCol * colWidthPx
-                let rawRight = colOffset + visibleEndCol * colWidthPx
-                let x = max(rawX, clipLeft)
-                let right = min(rawRight, viewportWidth)
-                guard right > x,
-                      let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: lineHeightPx, top: clipTop, bottom: clipBottom) else { continue }
-
-                var quad = QuadGPU()
-                quad.position = SIMD2<Float>(x, clipped.y)
-                quad.size = SIMD2<Float>(right - x, clipped.height)
-                quad.color = selColor
-                quad.alpha = 1.0
-                quads.append(quad)
-            }
+            var quad = QuadGPU()
+            quad.position = SIMD2<Float>(x, clipped.y)
+            quad.size = SIMD2<Float>(right - x, clipped.height)
+            quad.color = selColor
+            quad.alpha = 1.0
+            quads.append(quad)
         }
-    }
-
-    private func requestedSelectionCols(row: Int, sel: GUISelectionOverlay, scrollLeft: Int, visibleCols: Int) -> (start: Int, end: Int) {
-        let fullStart = scrollLeft
-        let fullEnd = scrollLeft + visibleCols
-        let startRow = Int(sel.startRow)
-        let endRow = Int(sel.endRow)
-
-        if row == startRow && row == endRow {
-            return (Int(sel.startCol), Int(sel.endCol))
-        }
-
-        if row == startRow {
-            return (Int(sel.startCol), fullEnd)
-        }
-
-        if row == endRow {
-            return (fullStart, Int(sel.endCol))
-        }
-
-        return (fullStart, fullEnd)
-    }
-
-    private func clampSelectionCols(_ cols: (start: Int, end: Int), scrollLeft: Int, visibleCols: Int) -> (start: Int, end: Int)? {
-        let visibleStart = scrollLeft
-        let visibleEnd = scrollLeft + visibleCols
-        let start = max(cols.start, visibleStart)
-        let end = min(cols.end, visibleEnd)
-
-        guard start < end else { return nil }
-        return (start, end)
     }
 
     /// Calculate the display width (in cell columns) of a string,

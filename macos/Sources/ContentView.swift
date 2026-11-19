@@ -671,6 +671,10 @@ public struct ContentView<EditorSurface: View>: View {
         max(chrome.trafficLightMidY - contentHeight / 2, 0)
     }
 
+    private var unifiedToolbarHeight: CGFloat {
+        contentHeight + toolbarTopPadding + Spacing.xs
+    }
+
     @ViewBuilder
     private func unifiedToolbar(_ input: ShellHostInput) -> some View {
         let theme = input.currentTheme
@@ -731,7 +735,7 @@ public struct ContentView<EditorSurface: View>: View {
                 .fill(theme.tabSeparatorFg.opacity(0.3))
                 .frame(height: 1)
         }
-        .frame(height: toolbarHeight + toolbarTopPadding + 4)
+        .frame(height: unifiedToolbarHeight)
         .background {
             ZStack {
                 theme.tabBg
@@ -1213,6 +1217,7 @@ public struct ContentView<EditorSurface: View>: View {
             state: input.pickerState,
             sendAction: translatedAction(FrontendActionComposition.outbound)
         )
+        .padding(.top, unifiedToolbarHeight)
         .background {
             frameProbeView(
                 .windowOverlay,

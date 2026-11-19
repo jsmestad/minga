@@ -48,7 +48,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 33). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 33 binds approval rows and decisions to their original session, admitted request, and tool call. Version 32 separates Agent Help from Chat and adds source-bound Review controls. See "Protocol Version Negotiation" below and [GUI_PROTOCOL.md](GUI_PROTOCOL.md#gui-action-input-opcode-frontend--beam).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 37). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 37 extends `scroll_batch` to horizontal panning. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
 
 ---
 
@@ -108,11 +108,13 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x1F` | text_presentation_state | 12 | Ordered active/discarded text presentation lifetime |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
+| `0x09` | scroll_batch | 6 | Pane-targeted vertical wheel or trackpad displacement |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
 | `0x0B` | frame_rejected | 15 | Reject a correlated frame with stable reason and disposition |
 | `0x0C` | window_ref_miss | 15 | Reject a missing row/window reference and identify the affected window |
 | `0x0D` | application_quit_request | 5 | Begin or repeat a correlated native application-quit attempt |
 | `0x0E` | application_quit_decision | 6 | Send Save, Discard, or Cancel for the matching application-quit attempt |
+| `0x12` | horizontal_pan | 9 | Pane-targeted horizontal displacement with an intent sequence |
 
 ### Frontend → BEAM (Highlight Responses)
 
@@ -382,7 +384,7 @@ caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" 
 protocol_version: u16           exact wire-contract version the frontend was generated against
 ```
 
-**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value, currently 31. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
+**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending render commands and admits the frontend only when `protocol_version` exactly equals the generated `Minga.Protocol.Opcodes.protocol_version()` value. Short ready packets and extended ready packets without the version tail are decoded only as `protocol_version 0` so the BEAM can send `protocol_error`; they never mark the frontend ready.
 
 ### `0x04` mouse_event
 
@@ -471,6 +473,12 @@ Disposition values are generated from the shared schema: 1 retryable recovery, 2
 `application_quit_decision` is `request_id:u32, decision:u8`, where `0` is Save, `1` is Discard, and `2` is Cancel. The BEAM inventories every registered buffer, including inactive and untitled buffers. It owns saving, discard policy, wait-request cancellation, and orderly shutdown. Native quit does not use the `confirm_quit` option. The frontend owns only the AppKit termination reply and the decision UI.
 
 Cancel and save failure return a matching `application_quit_response`, reject AppKit termination exactly once, and allow a later request. Proceeding is not approval. The native app waits for the matching core process to exit. A stale response, a stale chooser completion, or a response from a replacement connection cannot resolve the current attempt.
+
+### `0x09` scroll_batch and `0x12` horizontal_pan
+
+Vertical scroll batches carry `window_id:u16, delta_rows:i16, direction:u8` after the opcode. Direction is `0` for down and `1` for up.
+
+Horizontal pan carries `window_id:u16, delta_columns:i16, input_seq:u32` after the opcode. Positive deltas move right; negative deltas move left. The pane ID, delta, and sequence must be nonzero. The frontend sends this intent only for a pane that advertises horizontal panning. The BEAM commits the displacement without moving the caret and echoes the input sequence in that pane's next scroll presentation, even when the requested movement was clamped. It may combine multiple accepted intents in one frame. See [ScrollPresentation](GUI_PROTOCOL.md#0x80--gui_window_content-len32-sectioned-format).
 
 ---
 
@@ -842,7 +850,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 33). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 37). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 37 adds horizontal directions to `scroll_batch`. Version 36 binds absolute visual scroll targets to the displayed text presentation. Version 35 adds grouped soft-wrapped resident rows and a u32 pane geometry continuation offset. Version 34 adds approval-wait presentation and distinct tool denial, cancellation, and expiry outcomes. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 

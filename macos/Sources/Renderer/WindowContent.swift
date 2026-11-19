@@ -358,10 +358,11 @@ public struct GUIViewportSummary: Sendable, Equatable {
     public let rows: UInt16
     public let cols: UInt16
     public let totalLines: UInt32
-    public let visualRowOffset: UInt16
+    /// Full continuation ordinal, even when a windowed payload omits its prefix.
+    public let visualRowOffset: UInt32
     public let totalVisualRows: UInt32
 
-    public init(top: UInt32, left: UInt16, rows: UInt16, cols: UInt16, totalLines: UInt32, visualRowOffset: UInt16, totalVisualRows: UInt32) {
+    public init(top: UInt32, left: UInt16, rows: UInt16, cols: UInt16, totalLines: UInt32, visualRowOffset: UInt32, totalVisualRows: UInt32) {
         self.top = top
         self.left = left
         self.rows = rows
@@ -378,6 +379,10 @@ public struct GUIViewportSummary: Sendable, Equatable {
 public struct GUIScrollPresentation: Sendable, Equatable {
     public let windowId: UInt16
     public let resetRequired: Bool
+    /// Whether vertical scroll intents step through visual rows rather than source lines.
+    public let isWrapped: Bool
+    /// Whether the BEAM accepts horizontal pan intent for this pane.
+    public let canPanHorizontally: Bool
     public let anchorTop: UInt32
     public let anchorLeft: UInt16
     public let anchorVisualRowOffset: UInt16
@@ -393,10 +398,20 @@ public struct GUIScrollPresentation: Sendable, Equatable {
     /// being reflected back even when the jump coincidentally lands on the same
     /// `anchorTop`.
     public let scrollSeq: UInt32
+    /// Last horizontal pan input sequence processed for this pane, or zero before any input.
+    public let horizontalPanAck: UInt32
+    /// Rightmost left column allowed by the BEAM for the committed viewport.
+    public let horizontalPanLimit: UInt16
 
-    public init(windowId: UInt16, resetRequired: Bool, anchorTop: UInt32, anchorLeft: UInt16, anchorVisualRowOffset: UInt16, visibleStartLine: UInt32, visibleEndLine: UInt32, overscanStartLine: UInt32, overscanEndLine: UInt32, contentEpoch: UInt32, layoutGeneration: UInt32, scrollSeq: UInt32 = 0) {
+    public init(windowId: UInt16, resetRequired: Bool, anchorTop: UInt32, anchorLeft: UInt16,
+                anchorVisualRowOffset: UInt16, visibleStartLine: UInt32, visibleEndLine: UInt32,
+                overscanStartLine: UInt32, overscanEndLine: UInt32, contentEpoch: UInt32,
+                layoutGeneration: UInt32, scrollSeq: UInt32 = 0, isWrapped: Bool = false,
+                canPanHorizontally: Bool = false, horizontalPanAck: UInt32 = 0, horizontalPanLimit: UInt16 = 0) {
         self.windowId = windowId
         self.resetRequired = resetRequired
+        self.isWrapped = isWrapped
+        self.canPanHorizontally = canPanHorizontally
         self.anchorTop = anchorTop
         self.anchorLeft = anchorLeft
         self.anchorVisualRowOffset = anchorVisualRowOffset
@@ -407,6 +422,8 @@ public struct GUIScrollPresentation: Sendable, Equatable {
         self.contentEpoch = contentEpoch
         self.layoutGeneration = layoutGeneration
         self.scrollSeq = scrollSeq
+        self.horizontalPanAck = horizontalPanAck
+        self.horizontalPanLimit = horizontalPanLimit
     }
 
     public func isSameAnchorKey(as other: GUIScrollPresentation) -> Bool {
@@ -414,6 +431,7 @@ public struct GUIScrollPresentation: Sendable, Equatable {
             && layoutGeneration == other.layoutGeneration
             && anchorTop == other.anchorTop
             && anchorLeft == other.anchorLeft
+            && anchorVisualRowOffset == other.anchorVisualRowOffset
     }
 
     public func belongsTo(windowId: UInt16, contentEpoch: UInt32) -> Bool {
@@ -696,6 +714,31 @@ public final class GUIWindowContent: Sendable {
     public let paneGeometry: GUIPaneGeometry?
     public let cursorline: GUICursorline?
     public let scrollPresentation: GUIScrollPresentation?
+    /// Absolute visual anchor for wrapped residence. Nil for other modes or an invalid anchor.
+    public let wrappedResidentAnchor: Int?
+
+    /// Row-store origin shared by rendering, pointer hits, and accessibility.
+    public var presentationRowOrigin: Int {
+        if rowStore.mode == .sequentialWrapped { return wrappedResidentAnchor ?? 0 }
+        guard let presentation = scrollPresentation else { return 0 }
+        let anchored = rowStore.lowerBound(bufferLine: presentation.anchorTop) + Int(presentation.anchorVisualRowOffset)
+        return anchored < rowStore.count ? anchored : rowStore.lowerBound(bufferLine: presentation.visibleStartLine)
+    }
+
+    /// Last valid top when the complete wrapped document is resident.
+    public var wrappedResidentMaxTop: Int? {
+        guard rowStore.mode == .sequentialWrapped, let viewport = paneGeometry?.viewport else { return nil }
+        return max(Int(viewport.totalVisualRows) - Int(viewport.rows), 0)
+    }
+
+    private static func wrappedAnchor(in store: ResidentRowStore, presentation: GUIScrollPresentation?) -> Int? {
+        guard store.mode == .sequentialWrapped, let presentation, presentation.isWrapped else { return nil }
+        let line = presentation.anchorTop
+        let offset = Int(presentation.anchorVisualRowOffset)
+        if store.isEmpty { return line == 0 && offset == 0 ? 0 : nil }
+        let rank = store.lowerBound(bufferLine: line) + offset
+        return store.row(at: rank)?.bufLine == line ? rank : nil
+    }
     /// User-facing buffer identity for the pane's accessibility text area.
     public let accessibilityLabel: String
     /// BEAM-owned identity for the lifetime of the content presented by this pane ID.
@@ -756,6 +799,7 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.wrappedResidentAnchor = Self.wrappedAnchor(in: store, presentation: scrollPresentation)
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityGeneration = accessibilityGeneration
         self.accessibilityCursor = accessibilityCursor
@@ -794,6 +838,7 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.wrappedResidentAnchor = Self.wrappedAnchor(in: rowStore, presentation: scrollPresentation)
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityGeneration = accessibilityGeneration
         self.accessibilityCursor = accessibilityCursor
@@ -803,7 +848,8 @@ public final class GUIWindowContent: Sendable {
 
     /// Returns the same immutable content while replacing per-frame operation counters.
     public func reportingOperationCounters(_ counters: ResidentRowStoreCounters) -> GUIWindowContent {
-        GUIWindowContent(
+        guard counters != rowStoreOperationCounters else { return self }
+        return GUIWindowContent(
             renderIdentity: renderIdentity,
             windowId: windowId, fullRefresh: fullRefresh, contentEpoch: contentEpoch,
             cursorVisible: cursorVisible, cursorRow: cursorRow, cursorCol: cursorCol,
@@ -877,6 +923,9 @@ public final class GUIWindowContent: Sendable {
             return applyingRowSplices(
                 delta, residentLimit: effectiveResidentLimit, stagingLimit: effectiveStagingLimit
             )
+        }
+        guard rowStore.mode != .sequentialWrapped else {
+            return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
         }
 
         let stagingUsage = FrameResourceUsageBuilder(limit: effectiveStagingLimit)
