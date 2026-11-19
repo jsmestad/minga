@@ -16,6 +16,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias Minga.Project.FileRef, as: ProjectFileRef
   alias Minga.Config
 
+  alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
@@ -73,8 +74,26 @@ defmodule MingaEditor.Commands.BufferManagement do
     case MingaEditor.State.Session.begin_application_quit(state.session, request_id) do
       {:started, session} ->
         state = EditorState.accept_application_quit_transition(state, session)
-        dirty_buffers = dirty_application_quit_buffers(state)
-        begin_application_quit_resolution(state, request_id, dirty_buffers)
+
+        case DraftWorkflow.before_close(state, :all) do
+          {:ok, state} ->
+            begin_application_quit_resolution(
+              state,
+              request_id,
+              dirty_application_quit_buffers(state)
+            )
+
+          {:error, state} ->
+            prepare_application_quit_response(
+              state,
+              request_id,
+              :inventory,
+              :cancelled,
+              0,
+              "",
+              ""
+            )
+        end
 
       {:duplicate, _session} ->
         repeat_application_quit_response(state, request_id)
@@ -286,25 +305,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(%MingaEditor.State{session: %{pending_quit: kind}} = state, :confirm_quit_yes)
       when kind != nil do
-    dirty? = any_buffer_dirty?(state)
     state = %{state | session: MingaEditor.State.Session.clear_quit_request(state.session)}
+    scope = if kind == :quit_all or quit_would_exit_editor?(state), do: :all, else: :active
 
-    case {kind, dirty?} do
-      {:quit, true} ->
-        state
-        |> cancel_active_wait_request("discarded after quit confirmation")
-        |> close_tab_or_quit()
-
-      {:quit, false} ->
-        close_tab_or_quit(state)
-
-      {:quit_all, true} ->
-        :ok = WaitRequests.cancel_all("discarded after quit confirmation")
-        shutdown_editor(state)
-
-      {:quit_all, false} ->
-        shutdown_editor(state)
-    end
+    with_durable_drafts(state, scope, &confirm_quit(&1, kind))
   end
 
   def execute(state, :confirm_quit_no) do
@@ -447,7 +451,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, {:execute_ex_command, {:save_quit_all, []}}) do
     case save_all_buffers(state) do
-      {:ok, state} -> shutdown_editor(state)
+      {:ok, state} -> with_durable_drafts(state, :all, &shutdown_editor/1)
       {:error, state} -> state
     end
   end
@@ -1326,9 +1330,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp kill_active_tab(state, intent) do
     {state, kind} = Workflow.resolve_active_tab_kind(state)
 
-    case kind do
-      :agent -> close_agent_tab(state)
-      _ -> remove_current_buffer(state, intent)
+    case {kind, intent} do
+      {:agent, :ordinary} -> with_durable_drafts(state, :active, &close_agent_tab/1)
+      {:agent, :force} -> close_agent_tab(state)
+      _file -> remove_current_buffer(state, intent)
     end
   end
 
@@ -1373,12 +1378,14 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec close_targeted_agent_tab(state(), TabBar.t(), Tab.agent()) :: state()
-  defp close_targeted_agent_tab(state, tab_bar, %Tab{id: id} = tab) do
-    replacement_id = inactive_replacement_id(tab_bar, id)
+  defp close_targeted_agent_tab(state, tab_bar, %Tab{id: id, group_id: owner} = tab) do
+    with_durable_drafts(state, owner, fn state ->
+      replacement_id = inactive_replacement_id(tab_bar, id)
 
-    state
-    |> EditorState.stage_tab_close(tab)
-    |> close_agent_tab(replacement_id)
+      state
+      |> EditorState.stage_tab_close(tab)
+      |> close_agent_tab(replacement_id)
+    end)
   end
 
   @spec inactive_replacement_id(TabBar.t(), Tab.id()) :: Tab.id() | nil
@@ -2371,7 +2378,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       state = %{state | session: MingaEditor.State.Session.request_quit(state.session, :quit)}
       NoticeWorkflow.publish(state, quit_confirmation_message(dirty?))
     else
-      close_tab_or_quit(state)
+      with_durable_drafts(state, :active, &close_tab_or_quit/1)
     end
   end
 
@@ -2380,7 +2387,31 @@ defmodule MingaEditor.Commands.BufferManagement do
       state = %{state | session: MingaEditor.State.Session.request_quit(state.session, :quit_all)}
       NoticeWorkflow.publish(state, "Modified buffers exist. Really quit? (y/n)")
     else
-      shutdown_editor(state)
+      with_durable_drafts(state, :all, &shutdown_editor/1)
+    end
+  end
+
+  @spec confirm_quit(state(), :quit | :quit_all) :: state()
+  defp confirm_quit(state, :quit) do
+    state =
+      if any_buffer_dirty?(state),
+        do: cancel_active_wait_request(state, "discarded after quit confirmation"),
+        else: state
+
+    close_tab_or_quit(state)
+  end
+
+  defp confirm_quit(state, :quit_all) do
+    if any_buffer_dirty?(state), do: WaitRequests.cancel_all("discarded after quit confirmation")
+    shutdown_editor(state)
+  end
+
+  @spec with_durable_drafts(state(), :active | :all | non_neg_integer(), (state() -> state())) ::
+          state()
+  defp with_durable_drafts(state, scope, close) do
+    case DraftWorkflow.before_close(state, scope) do
+      {:ok, state} -> close.(state)
+      {:error, state} -> state
     end
   end
 

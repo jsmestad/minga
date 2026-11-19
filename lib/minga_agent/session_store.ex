@@ -51,6 +51,9 @@ defmodule MingaAgent.SessionStore do
           continuation_kind: :lossless | :legacy_reconstructed | :legacy_import_required
         }
 
+  @typedoc "A saved conversation or a draft-only record, without any unsent text."
+  @type recovery_entry :: {:conversation, session_meta()} | {:draft_only, String.t(), String.t()}
+
   @typedoc "Full session data for save/load."
   @type session_data :: %{
           required(:id) => String.t(),
@@ -772,27 +775,46 @@ defmodule MingaAgent.SessionStore do
   @spec load(String.t(), String.t() | nil, keyword()) ::
           {:ok, session_data()} | {:error, term()}
   def load(session_id, config_dir, opts) when is_binary(session_id) and is_list(opts) do
+    case load_recoverable(session_id, config_dir, opts) do
+      {:ok, :draft_only} -> {:error, :enoent}
+      result -> result
+    end
+  end
+
+  @doc "Opens a saved record, distinguishing a draft-only record from a missing conversation."
+  @spec load_recoverable(String.t(), String.t() | nil, keyword()) ::
+          {:ok, session_data() | :draft_only} | {:error, term()}
+  def load_recoverable(session_id, config_dir \\ nil, opts \\ [])
+      when is_binary(session_id) and is_list(opts) do
     path = session_record_path(session_id, config_dir)
 
-    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+    with :ok <- validate_presentation_id(session_id),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
       with_record_workflow(path, fn -> load_record(path, session_id, opts) end)
     end
   end
 
-  @spec load_record(String.t(), String.t(), keyword()) :: {:ok, session_data()} | {:error, term()}
+  @spec load_record(String.t(), String.t(), keyword()) ::
+          {:ok, session_data() | :draft_only} | {:error, term()}
   defp load_record(path, id, opts) do
     with {:ok, data} <- read_durable_record(path, opts),
          {:ok, session, generation, references} <- validated_record_authority(data, id),
          {:ok, store} <- artifact_store_for_reconciliation(id, references, opts),
          :ok <- repair_snapshot_ownership(store, generation, references) do
-      case session do
-        :no_conversation -> {:error, :enoent}
-        session -> {:ok, session}
-      end
+      recoverable_record(session, data)
     end
   catch
     :exit, reason -> {:error, {:artifact_store_unavailable, reason}}
   end
+
+  @spec recoverable_record(session_data() | :no_conversation, map()) ::
+          {:ok, session_data() | :draft_only} | {:error, :enoent}
+  defp recoverable_record(:no_conversation, %{"presentation" => %{"draft" => draft}})
+       when is_map(draft),
+       do: {:ok, :draft_only}
+
+  defp recoverable_record(:no_conversation, _data), do: {:error, :enoent}
+  defp recoverable_record(session, _data), do: {:ok, session}
 
   @spec artifact_store_for_reconciliation(String.t(), [Reference.t()], keyword()) ::
           {:ok, GenServer.server() | nil} | {:error, term()}
@@ -1090,6 +1112,22 @@ defmodule MingaAgent.SessionStore do
   """
   @spec list(String.t() | nil) :: [session_meta()]
   def list(config_dir \\ nil) do
+    config_dir
+    |> list_records(fn record, _path -> conversation_meta(record_conversation(record)) end)
+    |> Enum.sort_by(& &1.last_message_at, :desc)
+  end
+
+  @doc "Lists conversations and non-empty draft-only records without exposing unsent input."
+  @spec list_recoverable(String.t() | nil) :: [recovery_entry()]
+  def list_recoverable(config_dir \\ nil) do
+    config_dir
+    |> list_records(&recovery_entry/2)
+    |> Enum.sort_by(&recovery_timestamp/1, :desc)
+  end
+
+  @spec list_records(String.t() | nil, (map(), String.t() -> item | nil)) :: [item]
+        when item: term()
+  defp list_records(config_dir, project) do
     dir = sessions_dir(config_dir)
 
     case File.ls(dir) do
@@ -1097,12 +1135,22 @@ defmodule MingaAgent.SessionStore do
         files
         |> Enum.filter(&String.ends_with?(&1, ".json"))
         |> Enum.reject(&String.ends_with?(&1, ".tmp"))
-        |> Enum.map(fn file -> load_meta(Path.join(dir, file)) end)
+        |> Enum.map(&project_listed_record(Path.join(dir, &1), project))
         |> Enum.reject(&is_nil/1)
-        |> Enum.sort_by(& &1.last_message_at, :desc)
 
       {:error, _} ->
         []
+    end
+  end
+
+  @spec project_listed_record(String.t(), (map(), String.t() -> item | nil)) :: item | nil
+        when item: term()
+  defp project_listed_record(path, project) do
+    with {:ok, json} <- File.read(path),
+         {:ok, record} when is_map(record) <- decode_json(json) do
+      project.(record, path)
+    else
+      _ -> nil
     end
   end
 
@@ -1714,19 +1762,47 @@ defmodule MingaAgent.SessionStore do
 
   # ── Private: metadata extraction ───────────────────────────────────────────
 
-  @spec load_meta(String.t()) :: session_meta() | nil
-  defp load_meta(path) do
-    with {:ok, json} <- File.read(path),
-         {:ok, record} when is_map(record) <- decode_json(json),
-         data when is_map(data) <- record_conversation(record),
-         true <- data["version"] in [nil, 1, 2, 3, 4, 5, @version] do
+  @spec recovery_entry(map(), String.t()) :: recovery_entry() | nil
+  defp recovery_entry(record, path) do
+    case conversation_meta(record_conversation(record)) do
+      nil -> draft_recovery_entry(record, path)
+      meta -> {:conversation, meta}
+    end
+  end
+
+  @spec draft_recovery_entry(map(), String.t()) :: recovery_entry() | nil
+  defp draft_recovery_entry(
+         %{"version" => @envelope_version, "id" => id, "conversation" => nil} = record,
+         path
+       )
+       when is_binary(id) do
+    with :ok <- validate_presentation_id(id),
+         ^id <- Path.basename(path, ".json"),
+         {:ok, {_revision, %DraftSnapshot{}}} <- decode_presentation(record),
+         {:ok, %{mtime: mtime}} <- File.stat(path, time: :posix),
+         {:ok, time} <- DateTime.from_unix(mtime) do
+      {:draft_only, id, DateTime.to_iso8601(time)}
+    else
+      _ -> nil
+    end
+  end
+
+  defp draft_recovery_entry(_record, _path), do: nil
+
+  @spec recovery_timestamp(recovery_entry()) :: String.t()
+  defp recovery_timestamp({:conversation, meta}), do: meta.last_message_at
+  defp recovery_timestamp({:draft_only, _id, timestamp}), do: timestamp
+
+  @spec conversation_meta(term()) :: session_meta() | nil
+  defp conversation_meta(%{"id" => id} = data) when is_binary(id) do
+    if data["version"] in [nil, 1, 2, 3, 4, 5, @version] do
       messages = data["messages"] || []
       preview = first_user_preview(messages)
       timestamp = data["timestamp"] || ""
       last_message_at = data["last_message_at"] || timestamp
 
       %{
-        id: data["id"],
+        id: id,
         timestamp: timestamp,
         last_message_at: last_message_at,
         title: data["title"] || preview,
@@ -1739,10 +1815,10 @@ defmodule MingaAgent.SessionStore do
         cost: total_cost(data, messages),
         continuation_kind: continuation_kind(data)
       }
-    else
-      _ -> nil
     end
   end
+
+  defp conversation_meta(_conversation), do: nil
 
   @spec record_conversation(map()) :: map() | nil
   defp record_conversation(%{"version" => @envelope_version} = record), do: record["conversation"]

@@ -34,6 +34,7 @@ defmodule MingaEditor.Commands.Agent do
 
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.ModalOverlay
@@ -171,12 +172,16 @@ defmodule MingaEditor.Commands.Agent do
          origin,
          return_target
        ) do
-    case load_persisted_session(session_pid, session_id) do
-      :ok ->
-        state
-        |> sync_restored_model_selection(session_pid)
-        |> arm_provenance_jump(session_pid, tool_call_id, origin)
-        |> activate_agent_view(return_target)
+    with :ok <- DraftWorkflow.before_reopen(state, session_id),
+         :ok <- load_persisted_session(session_pid, session_id) do
+      state
+      |> DraftWorkflow.after_reopen(session_pid, session_id)
+      |> sync_restored_model_selection(session_pid)
+      |> arm_provenance_jump(session_pid, tool_call_id, origin)
+      |> activate_agent_view(return_target)
+    else
+      {:error, %EditorState{} = preserved} ->
+        preserved
 
       {:error, :legacy_import_required} ->
         NoticeWorkflow.publish(

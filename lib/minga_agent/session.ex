@@ -26,6 +26,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.Credentials.Secret
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.EventLog.Failure
@@ -324,6 +325,23 @@ defmodule MingaAgent.Session do
   @spec editor_snapshot(GenServer.server()) :: editor_snapshot()
   def editor_snapshot(session) do
     GenServer.call(session, :editor_snapshot)
+  end
+
+  @type composer_draft_operation ::
+          :read | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+
+  @type composer_draft_correlation :: reference() | {non_neg_integer(), reference()}
+
+  @doc "Requests a record-bound draft read or commit and reports the outcome to the caller."
+  @spec request_composer_draft(
+          GenServer.server(),
+          String.t(),
+          composer_draft_correlation(),
+          composer_draft_operation()
+        ) :: :ok
+  def request_composer_draft(session, record_id, correlation, operation)
+      when is_binary(record_id) do
+    GenServer.cast(session, {:composer_draft, self(), record_id, correlation, operation})
   end
 
   @doc """
@@ -1185,7 +1203,12 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:load_session, session_id}, from, state) do
-    case SessionStore.load(session_id, state.session_store_dir, artifact_store_opts(state)) do
+    case SessionStore.load_recoverable(
+           session_id,
+           state.session_store_dir,
+           artifact_store_opts(state)
+         ) do
+      {:ok, :draft_only} -> restore_draft_only_session(state, session_id)
       {:ok, data} -> begin_loaded_session_restore(state, data, from)
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -2618,6 +2641,16 @@ defmodule MingaAgent.Session do
       register_connection_worker_workflow(state, target, ref, worker, caller)
 
     send(worker, {:connection_worker_binding, ref, result})
+    {:noreply, state}
+  end
+
+  def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state) do
+    result =
+      with :ok <- validate_composer_record(state, record_id) do
+        composer_draft(state, record_id, operation)
+      end
+
+    send(caller, {:composer_draft_result, self(), record_id, correlation, result})
     {:noreply, state}
   end
 
@@ -4564,6 +4597,7 @@ defmodule MingaAgent.Session do
       Connection.activity(state.connection),
       Connection.problem(state.connection)
     )
+    |> ConnectionSnapshot.project_draft_persistence(Persistence.enabled?(state.persistence))
   end
 
   @spec validate_connection_target(state(), ConnectionTarget.t()) :: :ok | {:error, :stale_target}
@@ -7128,12 +7162,67 @@ defmodule MingaAgent.Session do
   defp artifact_store_opts(%{artifact_runtime: %ArtifactRuntime{} = runtime}),
     do: [artifact_runtime: runtime]
 
+  @spec validate_composer_record(state(), String.t()) ::
+          :ok | {:error, :not_persistent | :stale_target}
+  defp validate_composer_record(%{session_id: record_id} = state, record_id) do
+    if Persistence.enabled?(state.persistence), do: :ok, else: {:error, :not_persistent}
+  end
+
+  defp validate_composer_record(_state, _record_id), do: {:error, :stale_target}
+
   @spec schedule_save_retry(state()) :: state()
   defp schedule_save_retry(state) do
     {persistence, delay_ms} = Persistence.failed(state.persistence)
     token = make_ref()
     timer_ref = Process.send_after(self(), {:save_session, token}, delay_ms)
     %{state | persistence: Persistence.scheduled(persistence, token, timer_ref)}
+  end
+
+  @spec composer_draft(state(), String.t(), composer_draft_operation()) ::
+          {:ok, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:ok, SessionStore.draft_revision()}
+          | {:error, term()}
+  defp composer_draft(state, record_id, :read) do
+    SessionStore.read_presentation(record_id, state.session_store_dir, artifact_store_opts(state))
+  end
+
+  defp composer_draft(state, record_id, {:save, expected, draft}) do
+    SessionStore.save_presentation(
+      record_id,
+      expected,
+      draft,
+      state.session_store_dir,
+      artifact_store_opts(state)
+    )
+  end
+
+  @spec restore_draft_only_session(state(), String.t()) :: {:reply, term(), state()}
+  defp restore_draft_only_session(state, record_id) do
+    with true <- Persistence.enabled?(state.persistence) || {:error, :not_persistent},
+         :ok <- persist_current_before_replacement(state, record_id),
+         {:ok, reservation} <- reserve_session_identity(state, record_id) do
+      case commit_session_identity(state, reservation) do
+        :ok ->
+          now = DateTime.utc_now()
+          execution = TurnExecution.restore(state.turn_execution)
+
+          staged = %{
+            state
+            | session_id: record_id,
+              transcript: state.transcript |> Transcript.reset([]) |> Transcript.touch(now),
+              continuation: Continuation.reset(state.continuation)
+          }
+
+          {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
+          {:reply, :ok, restored}
+
+        {:error, reason} ->
+          abort_session_identity(state, reservation)
+          {:reply, {:error, {:session_identity_commit_failed, reason}}, state}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   @spec begin_loaded_session_restore(

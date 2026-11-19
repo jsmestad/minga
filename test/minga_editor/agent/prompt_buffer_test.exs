@@ -8,6 +8,8 @@ defmodule MingaEditor.Agent.PromptBufferTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaAgent.DraftSnapshot
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
 
@@ -126,6 +128,55 @@ defmodule MingaEditor.Agent.PromptBufferTest do
       panel = MingaEditor.Agent.PromptBuffer.history_prev(panel)
       panel = MingaEditor.Agent.PromptBuffer.history_next(panel)
       assert BufferProcess.content(panel.panel.prompt_buffer) == "b"
+    end
+  end
+
+  describe "draft capture" do
+    test "keeps Unicode cursor bytes, leading whitespace, and live pasted content" do
+      draft = focused_panel("  café界\n")
+      BufferProcess.move_to(draft.panel.prompt_buffer, {1, 0})
+      draft = PromptBuffer.insert_paste(draft, "one\ntwo\nthree\nfour")
+      BufferProcess.move_to(draft.panel.prompt_buffer, {0, 7})
+
+      assert {:ok,
+              %DraftSnapshot{
+                text: "  café界\n\0PASTE:0",
+                cursor: {0, 7},
+                paste_blocks: [{"one\ntwo\nthree\nfour", false}]
+              }} = PromptBuffer.draft_snapshot(draft, [])
+    end
+
+    test "does not retain deleted paste payloads or credential drafts" do
+      draft = PromptBuffer.insert_paste(focused_panel(), "discard\nthis\nprivate\npaste")
+      BufferProcess.replace_content(draft.panel.prompt_buffer, "current")
+
+      assert {:ok, %DraftSnapshot{text: "current", paste_blocks: [{"", false}]}} =
+               PromptBuffer.draft_snapshot(draft, [])
+
+      for private <- ["/auth openai synthetic-key", " \t/login --complete synthetic-callback"] do
+        assert {:error, :private_input} = PromptBuffer.draft_snapshot(focused_panel(private), [])
+      end
+
+      collapsed =
+        PromptBuffer.insert_paste(focused_panel(), "/auth openai synthetic-key\nx\ny\nz")
+
+      assert {:error, :private_input} = PromptBuffer.draft_snapshot(collapsed, [])
+    end
+
+    test "restores the saved prompt into a new composer without replacing an attached draft" do
+      original =
+        focused_panel()
+        |> PromptBuffer.insert_paste("one\ntwo\nthree\nfour")
+
+      assert {:ok, saved} = PromptBuffer.draft_snapshot(original, [])
+      live = focused_panel("newer input")
+      assert {:error, :composer_attached} = PromptBuffer.restore_draft(live, saved)
+      assert PromptBuffer.input_text(live) == "newer input"
+
+      assert {:ok, restored} = PromptBuffer.restore_draft(UIState.new(), saved)
+      assert PromptBuffer.input_cursor(restored) == saved.cursor
+      expanded = PromptBuffer.toggle_paste_expand(restored)
+      assert PromptBuffer.input_text(expanded) == "one\ntwo\nthree\nfour"
     end
   end
 

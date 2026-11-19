@@ -1427,6 +1427,15 @@ defmodule MingaEditor do
     apply_current_scheduler_result(state, scheduler, outcome)
   end
 
+  def handle_info({:composer_draft_due, owner, token}, state) do
+    {:noreply, MingaEditor.Agent.DraftWorkflow.due(state, owner, token)}
+  end
+
+  def handle_info({:composer_draft_result, session, id, {owner, ref}, result}, state) do
+    {:noreply,
+     MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, result)}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end

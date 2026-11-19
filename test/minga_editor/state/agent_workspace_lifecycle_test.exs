@@ -675,6 +675,102 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace_payload(workspace).agent_ui == nil
   end
 
+  @tag :tmp_dir
+  test "a deferred composer edit saves to its original workspace after switching", %{tmp_dir: dir} do
+    {state, session, owner, id, buffer} = saved_composer(dir)
+    BufferProcess.replace_content(buffer, "last edit in the outgoing workspace")
+
+    state = MingaEditor.TabWorkflow.switch(state, 2)
+    refute TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == owner
+    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
+
+    assert_receive {:composer_draft_due, ^owner, token}, 1_000
+    state = MingaEditor.Agent.DraftWorkflow.due(state, owner, token)
+    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 2}}, 1_000
+
+    state =
+      MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 2})
+
+    assert prompt_text(state.workspace.agent_ui) == ""
+
+    assert {:ok, 2, %{text: "last edit in the outgoing workspace"}} =
+             MingaAgent.SessionStore.read_presentation(id, dir)
+  end
+
+  @tag :tmp_dir
+  test "a new edit retries a refused draft write without replacing a newer saved revision", %{
+    tmp_dir: dir
+  } do
+    {state, session, owner, id, buffer} = saved_composer(dir)
+    sessions = MingaAgent.SessionStore.sessions_dir(dir)
+    displaced = sessions <> ".before-refusal"
+    File.rename!(sessions, displaced)
+    File.write!(sessions, "not a directory")
+
+    state =
+      try do
+        BufferProcess.replace_content(buffer, "not written")
+        {state, {:error, _reason}} = save_composer_edit(state, session, owner, id, buffer)
+        assert prompt_text(state.workspace.agent_ui) == "not written"
+        state
+      after
+        File.rm!(sessions)
+        File.rename!(displaced, sessions)
+      end
+
+    assert {:ok, 1, %{text: "restart draft"}} = MingaAgent.SessionStore.read_presentation(id, dir)
+    BufferProcess.replace_content(buffer, "saved after refusal")
+    {state, {:ok, 2}} = save_composer_edit(state, session, owner, id, buffer)
+    assert {:ok, 2, saved} = MingaAgent.SessionStore.read_presentation(id, dir)
+    assert saved.text == "saved after refusal"
+
+    newer = %{saved | text: "newer durable draft", cursor: {0, 0}}
+    assert {:ok, 3} = MingaAgent.SessionStore.save_presentation(id, 2, newer, dir)
+    BufferProcess.replace_content(buffer, "live edit conflicting with newer storage")
+
+    {state, {:error, {:stale_draft_revision, 3}}} =
+      save_composer_edit(state, session, owner, id, buffer)
+
+    BufferProcess.replace_content(buffer, "still kept live")
+    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
+    assert prompt_text(state.workspace.agent_ui) == "still kept live"
+    assert {:ok, 3, ^newer} = MingaAgent.SessionStore.read_presentation(id, dir)
+    refute_receive {:composer_draft_due, ^owner, _token}, 450
+  end
+
+  defp saved_composer(dir) do
+    session =
+      Minga.Test.SessionCase.start_test_session(
+        provider: Minga.Test.SessionMockProvider,
+        persist?: true,
+        session_store_dir: dir
+      )
+
+    id = Session.session_id(session)
+    {state, owner, _file_ref} = state_with_active_agent_workspace(session)
+    buffer = state.workspace.agent_ui.panel.prompt_buffer
+    state = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, session)
+    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 0, nil}}, 1_000
+
+    state =
+      MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 0, nil})
+
+    {state, {:ok, 1}} = save_composer_edit(state, session, owner, id, buffer)
+    assert_receive {:composer_draft_due, ^owner, token}, 1_000
+    state = MingaEditor.Agent.DraftWorkflow.due(state, owner, token)
+    {state, session, owner, id, buffer}
+  end
+
+  defp save_composer_edit(state, session, owner, id, buffer) do
+    state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
+    assert_receive {:composer_draft_due, ^owner, token}, 1_000
+    state = MingaEditor.Agent.DraftWorkflow.due(state, owner, token)
+    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, result}, 1_000
+
+    {MingaEditor.Agent.DraftWorkflow.handle_result(state, session, id, owner, ref, result),
+     result}
+  end
+
   defp state_with_agent_workspace_tabs do
     state = state_with_tabs()
     {tab_bar, workspace} = TabBar.add_workspace(state.shell_runtime.state.tab_bar, "Agent")

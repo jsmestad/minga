@@ -8,6 +8,9 @@ defmodule MingaEditor.Agent.PromptBuffer do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
+  alias MingaAgent.DraftSnapshot
+  alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
 
@@ -34,6 +37,89 @@ defmodule MingaEditor.Agent.PromptBuffer do
   end
 
   def prompt_text(%Panel{}), do: ""
+
+  @doc "Captures the current composer for storage without retaining credential input or deleted pastes."
+  @spec draft_snapshot(UIState.t(), [DraftSnapshot.attachment()]) ::
+          {:ok, DraftSnapshot.t() | nil} | {:error, :composer_unavailable | :private_input}
+  def draft_snapshot(
+        %UIState{panel: %Panel{prompt_buffer: pid, pasted_blocks: blocks}},
+        attachments
+      )
+      when is_pid(pid) do
+    document = Buffer.snapshot(pid)
+    snapshot_draft(Document.content(document), Document.cursor(document), blocks, attachments)
+  catch
+    :exit, _reason -> {:error, :composer_unavailable}
+  end
+
+  def draft_snapshot(%UIState{}, _attachments), do: {:error, :composer_unavailable}
+
+  @doc "Starts an unattached composer from saved text, caret and paste blocks without adding undo history."
+  @spec restore_draft(UIState.t(), DraftSnapshot.t()) ::
+          {:ok, UIState.t()} | {:error, :composer_attached}
+  def restore_draft(%UIState{panel: %Panel{prompt_buffer: nil}} = state, %DraftSnapshot{} = draft) do
+    state = start(state, draft.text)
+    Buffer.move_to(state.panel.prompt_buffer, draft.cursor)
+    {:ok, UIState.restore_prompt_pastes(state, draft.paste_blocks)}
+  end
+
+  def restore_draft(%UIState{}, %DraftSnapshot{}), do: {:error, :composer_attached}
+
+  @spec snapshot_draft(String.t(), DraftSnapshot.position(), [Panel.paste_block()], [
+          DraftSnapshot.attachment()
+        ]) :: {:ok, DraftSnapshot.t() | nil} | {:error, :private_input}
+  defp snapshot_draft("", _cursor, _blocks, []), do: {:ok, nil}
+
+  defp snapshot_draft(text, cursor, blocks, attachments) do
+    visible = if blocks == [], do: text, else: substitute_placeholders(text, blocks)
+
+    if SlashCommand.sensitive_command?(visible) or
+         SlashCommand.indented_credential_command?(visible) do
+      {:error, :private_input}
+    else
+      {:ok,
+       %DraftSnapshot{
+         text: text,
+         cursor: cursor,
+         paste_blocks: retained_draft_pastes(text, blocks),
+         attachments: attachments
+       }}
+    end
+  end
+
+  @spec retained_draft_pastes(String.t(), [Panel.paste_block()]) :: [DraftSnapshot.paste_block()]
+  defp retained_draft_pastes(_text, []), do: []
+
+  defp retained_draft_pastes(text, blocks) do
+    lines = String.split(text, "\n")
+
+    placeholders =
+      Enum.reduce(lines, MapSet.new(), fn line, indices ->
+        case parse_placeholder(line) do
+          {:ok, index} -> MapSet.put(indices, index)
+          :not_placeholder -> indices
+        end
+      end)
+
+    blocks
+    |> Enum.with_index()
+    |> Enum.map(fn {%{text: paste, expanded: expanded?}, index} ->
+      condense_draft_paste(paste, expanded?, MapSet.member?(placeholders, index), lines)
+    end)
+  end
+
+  @spec condense_draft_paste(String.t(), boolean(), boolean(), [String.t()]) ::
+          DraftSnapshot.paste_block()
+  defp condense_draft_paste(paste, expanded?, true, _lines), do: {paste, expanded?}
+
+  defp condense_draft_paste(paste, true, false, lines) do
+    case find_expanded_block_start(lines, String.split(paste, "\n")) do
+      nil -> {"", false}
+      _first_line -> {paste, true}
+    end
+  end
+
+  defp condense_draft_paste(_paste, false, false, _lines), do: {"", false}
 
   @doc "Returns raw prompt-buffer text without paste substitution."
   @spec input_text(UIState.t() | Panel.t()) :: String.t()
