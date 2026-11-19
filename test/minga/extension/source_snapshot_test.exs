@@ -2,8 +2,8 @@ defmodule Minga.Extension.SourceSnapshotTest do
   # Creates a real FIFO with mkfifo to exercise descriptor-safe source admission.
   use ExUnit.Case, async: false
 
-  alias Minga.Extension.SecureFile
   alias Minga.Extension.SourceSnapshot
+  alias Minga.SecureFile
 
   setup do
     root =

@@ -1,8 +1,9 @@
-defmodule Minga.Extension.SecureFile do
-  @moduledoc false
+defmodule Minga.SecureFile do
+  @moduledoc "Reads bounded regular files and verifies that the opened file matches the selected path."
 
   @open_timeout 1_000
 
+  @typedoc "Why a bounded file read did not return complete bytes."
   @type read_error ::
           {:non_regular_file, String.t(), atom()}
           | {:file_too_large, String.t(), non_neg_integer(), pos_integer()}

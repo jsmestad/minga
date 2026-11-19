@@ -8,7 +8,7 @@ defmodule Minga.Extension.JsonLoader do
   """
 
   alias Minga.Extension.ArtifactAdmission
-  alias Minga.Extension.SecureFile
+  alias Minga.SecureFile
 
   @placeholder "${MINGA_PLUGIN_ROOT}"
   @max_manifest_bytes 1_048_576

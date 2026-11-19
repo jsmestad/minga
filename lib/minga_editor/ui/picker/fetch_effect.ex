@@ -134,6 +134,9 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
        ),
        do: identity
 
+  defp fetch_identity(MingaEditor.UI.Picker.FileAttachmentSource, %Context{} = context),
+    do: MingaEditor.UI.Picker.FileAttachmentSource.fetch_identity(context)
+
   defp fetch_identity(FileSource, %Context{} = context), do: FileSource.fetch_identity(context)
 
   defp fetch_identity(_source, %Context{}), do: nil

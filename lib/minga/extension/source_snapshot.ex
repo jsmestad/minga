@@ -7,7 +7,7 @@ defmodule Minga.Extension.SourceSnapshot do
   snapshot, so cache selection and compilation cannot observe different bytes.
   """
 
-  alias Minga.Extension.SecureFile
+  alias Minga.SecureFile
 
   @default_max_files 128
   @default_max_file_bytes 2 * 1024 * 1024

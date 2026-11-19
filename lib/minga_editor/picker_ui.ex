@@ -287,8 +287,9 @@ defmodule MingaEditor.PickerUI do
 
   @spec current_source_fetch?(state(), PickerState.t(), term() | nil, Source.fetch_meta() | nil) ::
           boolean()
-  defp current_source_fetch?(_state, %{source: FileSource}, fetch_identity, meta),
-    do: FileSource.current_fetch?(fetch_identity, meta)
+  defp current_source_fetch?(_state, %{source: source}, fetch_identity, meta)
+       when source in [FileSource, MingaEditor.UI.Picker.FileAttachmentSource],
+       do: FileSource.current_fetch?(fetch_identity, meta)
 
   defp current_source_fetch?(
          state,
@@ -1644,6 +1645,9 @@ defmodule MingaEditor.PickerUI do
          %Context{picker_ui: %{context: %FilesystemContext{query: query}}}
        ),
        do: query.identity
+
+  defp fetch_identity(MingaEditor.UI.Picker.FileAttachmentSource, %Context{} = context),
+    do: MingaEditor.UI.Picker.FileAttachmentSource.fetch_identity(context)
 
   defp fetch_identity(FileSource, %Context{} = context), do: FileSource.fetch_identity(context)
 

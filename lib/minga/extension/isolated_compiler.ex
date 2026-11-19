@@ -10,7 +10,7 @@ defmodule Minga.Extension.IsolatedCompiler do
 
   alias Minga.Extension.DisposableBeam
   alias Minga.Extension.IsolatedCompilerTracer
-  alias Minga.Extension.SecureFile
+  alias Minga.SecureFile
 
   @default_timeout 60_000
   @spawn_flush_timeout 5_000

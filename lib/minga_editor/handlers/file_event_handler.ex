@@ -221,12 +221,12 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     state =
       state
       |> FileTreeFreshness.update_project_root(root)
-      |> maybe_refresh_file_picker()
+      |> maybe_refresh_file_picker(root)
 
     {state, [{:render, 16}]}
   end
 
-  @spec maybe_refresh_file_picker(EditorState.t()) :: EditorState.t()
+  @spec maybe_refresh_file_picker(EditorState.t(), String.t()) :: EditorState.t()
   defp maybe_refresh_file_picker(
          %{
            shell_runtime: %{
@@ -234,10 +234,33 @@ defmodule MingaEditor.Handlers.FileEventHandler do
                modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.FileSource}}}
              }
            }
-         } = state
+         } = state,
+         _root
        ) do
     PickerUI.refresh_items(state)
   end
 
-  defp maybe_refresh_file_picker(state), do: state
+  defp maybe_refresh_file_picker(
+         %{
+           shell_runtime: %{
+             state: %{
+               modal:
+                 {:picker,
+                  %{
+                    picker_ui: %{
+                      source: MingaEditor.UI.Picker.FileAttachmentSource,
+                      context: context
+                    }
+                  }}
+             }
+           }
+         } = state,
+         root
+       ) do
+    if MingaEditor.UI.Picker.FileAttachmentSource.refresh_inventory?(context, root),
+      do: PickerUI.refresh_items(state),
+      else: state
+  end
+
+  defp maybe_refresh_file_picker(state, _root), do: state
 end

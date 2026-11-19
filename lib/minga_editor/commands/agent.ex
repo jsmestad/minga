@@ -2476,6 +2476,12 @@ defmodule MingaEditor.Commands.Agent do
         execute: &MingaEditor.UI.Picker.SelectionAttachmentTargetSource.open_buffer/1
       },
       %Minga.Command{
+        name: :agent_attach_file,
+        description: "Attach a project file to an Agent draft",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.FileAttachmentSource.open/1
+      },
+      %Minga.Command{
         name: :agent_draft_attachments,
         description: "Inspect Agent draft attachments",
         requires_buffer: false,

@@ -20,6 +20,11 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.EffectScheduler
   alias MingaEditor.PickerUI
+  alias MingaEditor.Handlers.FileEventHandler
+  alias MingaEditor.UI.Picker.FileAttachmentSource
+  alias MingaEditor.UI.Picker.FindFileSession
+  alias MingaEditor.UI.Picker.ProjectFileCandidate
+  alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
@@ -266,6 +271,110 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     # The same candidates flow straight through; the picker keeps the pre-built set.
     assert payload.picker_ui.picker.candidates == candidates
     assert payload.picker_ui.load_status == :ready
+  end
+
+  test "named file results and destination choices do not publish after a project switch",
+       %{project_root: root_path, reroot: reroot_path} do
+    ctx = start_editor("scratch", project_root: root_path)
+    state = :sys.get_state(ctx.editor, @sync_timeout)
+    %{root: root, activation_id: id} = workspace = Project.snapshot()
+    session = FindFileSession.new(root_path, root_path, workspace)
+    list_context = Map.put(FindFileSession.project_context(session), :origin, nil)
+    {:ok, candidate} = ProjectFileCandidate.new(root, "notes.txt", id)
+    File.write!(Path.join(root_path, "notes.txt"), "Original saved bytes\n")
+
+    {destination, revision} =
+      PickerUI.open_loading(state, FileAttachmentSource, %{
+        file: candidate,
+        origin: {1, {self(), "local-draft"}}
+      })
+
+    request =
+      FetchEffect.request(
+        FileAttachmentSource,
+        nil,
+        Context.from_editor_state(destination),
+        revision
+      )
+
+    assert {:ok, result} = FetchEffect.run(request.effect)
+    outcome = Outcome.completed(request, result)
+    assert {ready, ^outcome} = FetchEffect.apply(destination, outcome)
+    {:picker, payload} = ready.shell_runtime.state.modal
+
+    assert [%Item{label: "This Agent draft", description: "File snapshot · notes.txt"}] =
+             payload.picker_ui.picker.items
+
+    pickers =
+      for context <- [list_context, %{file: candidate, origin: nil}] do
+        PickerUI.open_loading(state, FileAttachmentSource, context)
+      end
+
+    {:ok, reroot} = Root.directory(reroot_path)
+    assert {:ok, _workspace} = Project.activate(reroot)
+
+    assert {^destination, %Outcome{value: {:stale, :picker_closed_or_replaced}}} =
+             FetchEffect.apply(destination, outcome)
+
+    items = [item("Stale file result")]
+    result = {:ok, items, Candidate.from_items(items), %{}}
+
+    for {picker, revision} <- pickers do
+      assert :stale =
+               PickerUI.apply_fetch_result(
+                 picker,
+                 FileAttachmentSource,
+                 revision,
+                 {:project_activation, id},
+                 result
+               )
+    end
+  end
+
+  test "only the matching project rebuild refreshes a named-file inventory",
+       %{project_root: root_path, reroot: reroot_path} do
+    ctx = start_editor("scratch", project_root: root_path)
+    state = :sys.get_state(ctx.editor, @sync_timeout)
+    %{root: root, activation_id: id} = workspace = Project.snapshot()
+    session = FindFileSession.new(root_path, root_path, workspace)
+    list_context = Map.put(FindFileSession.project_context(session), :origin, nil)
+    {:ok, candidate} = ProjectFileCandidate.new(root, "notes.txt", id)
+
+    {inventory, inventory_revision} =
+      PickerUI.open_loading(state, FileAttachmentSource, list_context)
+
+    {destination, destination_revision} =
+      PickerUI.open_loading(state, FileAttachmentSource, %{file: candidate, origin: nil})
+
+    for {picker, revision, event_root, refreshed?} <- [
+          {inventory, inventory_revision, reroot_path, false},
+          {destination, destination_revision, root.path, false},
+          {inventory, inventory_revision, root.path, true}
+        ] do
+      event = %Minga.Events.ProjectRebuiltEvent{root: event_root}
+      {next, _effects} = FileEventHandler.handle(picker, {:minga_event, :project_rebuilt, event})
+      {:picker, payload} = next.shell_runtime.state.modal
+      still_current? = payload.picker_ui.fetch_revision == revision
+      assert still_current? != refreshed?
+    end
+  end
+
+  test "named file results expose the parent directory for duplicate filenames" do
+    %{root: root, activation_id: id} = Project.snapshot()
+
+    items =
+      for directory <- ["docs", "notes"] do
+        {:ok, candidate} = ProjectFileCandidate.new(root, "#{directory}/readme.txt", id)
+        %Item{id: candidate, label: "readme.txt"}
+      end
+
+    assert [
+             %Item{description: "docs", label: first},
+             %Item{description: "notes", label: second}
+           ] = FileAttachmentSource.enrich(items)
+
+    assert String.ends_with?(first, "readme.txt")
+    assert String.ends_with?(second, "readme.txt")
   end
 
   @spec activate_project!(Root.t()) :: :ok
