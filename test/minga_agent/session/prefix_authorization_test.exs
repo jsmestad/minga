@@ -1012,6 +1012,8 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert_receive {:transport_request, 1, messages, options}, @timeout
     names = Enum.map(options[:tools], & &1.name)
     assert names == Enum.sort(names)
+    assert "todo_read" in names
+    assert "todo_write" in names
 
     refute Enum.any?(
              names,
@@ -1020,7 +1022,9 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
                  "memory_read",
                  "describe_runtime",
                  "describe_tools",
-                 "cycle_model"
+                 "cycle_model",
+                 "notebook_read",
+                 "notebook_write"
                ])
            )
 
