@@ -136,7 +136,6 @@ defmodule MingaEditor.Frontend.NativeMenuUndoRedoTest do
       end
 
       send_key_sync(ctx, ?a)
-      send_key_sync(ctx, ?b)
       install_completion(ctx, "obsolete")
 
       assert %Completion{} = ModalWorkflow.completion(editor_state(ctx))

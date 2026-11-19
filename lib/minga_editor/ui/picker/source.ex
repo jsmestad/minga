@@ -157,7 +157,10 @@ defmodule MingaEditor.UI.Picker.Source do
   editor once results land (e.g. a "results truncated" status line). Sources that
   don't need it omit `async_fetch/1` and the editor uses an empty map.
   """
-  @type fetch_meta :: %{optional(:status) => String.t()}
+  @type fetch_meta :: %{
+          optional(:status) => String.t(),
+          optional(:model_discovery) => {pid(), :atomics.atomics_ref()}
+        }
 
   @doc """
   Async candidate fetch with optional reporting metadata.
