@@ -2,7 +2,7 @@ defmodule Minga.CLI do
   @moduledoc """
   Command-line interface for Minga.
 
-  Serves as the entry point for both `mix minga <filename>` and the standalone Burrito binary (`./minga <filename>`). In Burrito mode, arguments are fetched via `Burrito.Util.Args.argv/0` which works whether running standalone or under Mix.
+  Serves as the entry point for both `mix minga <filename>` and the installed TUI launcher.
 
   ## Startup view
 
@@ -15,7 +15,6 @@ defmodule Minga.CLI do
   - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway
   """
 
-  alias Burrito.Util.Args
   alias Minga.Distribution.Cookie
   alias Minga.Remote.ControlEndpoint
   alias Minga.Remote.CLI
@@ -136,16 +135,16 @@ defmodule Minga.CLI do
     :ok
   end
 
-  @doc "Returns CLI arguments from the app-local release transport or Burrito."
+  @doc "Returns CLI arguments from the release launcher or the current VM."
   @spec argv() :: [String.t()]
   def argv do
     case System.get_env("MINGA_CLI_ARGS_B64") do
-      nil -> Args.argv()
+      nil -> System.argv()
       encoded -> decode_transported_args(encoded)
     end
   end
 
-  @doc "Entry point used by the OTP application in release/Burrito mode."
+  @doc "Entry point used by the OTP application in standalone releases."
   @spec start_from_cli() :: :ok
   def start_from_cli do
     main(argv())
@@ -217,7 +216,7 @@ defmodule Minga.CLI do
     end)
     |> case do
       {:ok, args} -> Enum.reverse(args)
-      :error -> Args.argv()
+      :error -> System.argv()
     end
   end
 

@@ -46,18 +46,7 @@ defmodule Minga.SafeMode do
 
   @spec startup_argv_safe?() :: boolean()
   defp startup_argv_safe? do
-    safe_args?(System.argv()) or burrito_safe_args?()
-  rescue
-    _ -> false
-  end
-
-  @spec burrito_safe_args?() :: boolean()
-  defp burrito_safe_args? do
-    if Burrito.Util.running_standalone?() do
-      safe_args?(Burrito.Util.Args.argv())
-    else
-      false
-    end
+    safe_args?(Minga.CLI.argv())
   rescue
     _ -> false
   end

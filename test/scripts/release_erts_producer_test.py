@@ -53,7 +53,7 @@ class ProducerTest(unittest.TestCase):
         (self.output / "erts.tar.gz").write_bytes(b"stale archive")
         with mock.patch.object(PRODUCER, "native_build", side_effect=callback):
             with self.assertRaises(PRODUCER.BuildError) as failure:
-                PRODUCER.produce(HOST_OS, HOST_ARCH, self.output, worker=HOST_OS == "linux")
+                PRODUCER.produce(HOST_OS, HOST_ARCH, self.output)
         self.assertFalse((self.output / "receipt.json").exists())
         self.assertFalse((self.output / ".producer.lock").exists())
         return str(failure.exception)
@@ -243,6 +243,95 @@ class ProducerTest(unittest.TestCase):
         with self.assertRaises(PRODUCER.BuildError):
             PRODUCER.produce(HOST_OS, HOST_ARCH, self.output)
         self.assertEqual((self.output / "receipt.json").read_text(), "current owner")
+
+    def test_linux_producer_rejects_nonbaseline_distro_before_source_acquisition(self):
+        for release in ({"ID": "alpine", "VERSION_ID": "24.04"}, {"ID": "ubuntu", "VERSION_ID": "22.04"}):
+            with self.subTest(release=release):
+                work = Path(tempfile.mkdtemp(dir=self.root))
+                with (mock.patch.object(PRODUCER.platform, "freedesktop_os_release", return_value=release),
+                      mock.patch.object(PRODUCER, "source_build") as build):
+                    with self.assertRaisesRegex(PRODUCER.BuildError, "requires native Ubuntu 24.04"):
+                        PRODUCER.native_build(self.output, MANIFEST, "linux", "aarch64", work)
+                build.assert_not_called()
+                self.assertFalse((self.output / "receipt.json").exists())
+
+    def test_linux_producer_rejects_nonbaseline_glibc_before_source_acquisition(self):
+        work = Path(tempfile.mkdtemp(dir=self.root))
+        release = {"ID": "ubuntu", "VERSION_ID": "24.04"}
+        with (mock.patch.object(PRODUCER.platform, "freedesktop_os_release", return_value=release),
+              mock.patch.object(PRODUCER.Commands, "run", return_value="glibc 2.35") as run,
+              mock.patch.object(PRODUCER, "source_build") as build):
+            with self.assertRaisesRegex(PRODUCER.BuildError, "wrong Linux glibc baseline"):
+                PRODUCER.native_build(self.output, MANIFEST, "linux", "aarch64", work)
+        run.assert_called_once_with(["getconf", "GNU_LIBC_VERSION"], seconds=30)
+        build.assert_not_called()
+        self.assertFalse((self.output / "receipt.json").exists())
+
+    def test_linux_closure_uses_each_host_loader_without_rewriting_executables(self):
+        baseline = MANIFEST["linux_build_environment"]
+        beam = self.root / "erts/bin/beam.smp"
+        for arch, interpreter in baseline["interpreters"].items():
+            with self.subTest(arch=arch):
+                elf = (f"[Requesting program interpreter: {interpreter}]\n"
+                       " (NEEDED) Shared library: [libc.so.6]\n")
+                trace = ("linux-vdso.so.1 (0x7000)\n"
+                         f"libc.so.6 => /lib/{arch}-linux-gnu/libc.so.6 (0x8000)\n"
+                         f"{interpreter} (0x9000)\n")
+                commands = mock.Mock()
+                commands.run.side_effect = [elf, trace]
+
+                def realpath(path, *, strict):
+                    self.assertTrue(strict)
+                    return Path("/usr/lib", arch + "-linux-gnu", path.name)
+
+                with mock.patch.object(Path, "resolve", autospec=True, side_effect=realpath):
+                    inventory = PRODUCER.linux_closure(commands, self.root, [beam], baseline, arch)
+                self.assertEqual(inventory, [{"file": "erts/bin/beam.smp", "libraries": ["libc.so.6"]}])
+                self.assertEqual(commands.run.call_args_list, [
+                    mock.call(["readelf", "-W", "-l", "-d", beam], seconds=30),
+                    mock.call([interpreter, "--inhibit-cache", "--list", beam], seconds=30),
+                ])
+
+    def test_linux_closure_rejects_unqualified_interpreters_and_direct_libraries(self):
+        baseline = MANIFEST["linux_build_environment"]
+        interpreter = baseline["interpreters"]["x86_64"]
+        interp = f"[Requesting program interpreter: {interpreter}]\n"
+        libc = " (NEEDED) Shared library: [libc.so.6]\n"
+        beam = self.root / "beam.smp"
+        for elf, error in (
+            (libc, "glibc system loader"),
+            (interp.replace(interpreter, "/tmp/custom-loader.so") + libc, "glibc system loader"),
+            (interp, "lacks a glibc dependency"),
+            (interp + libc + " (NEEDED) Shared library: [libcrypto.so.3]\n", "unqualified ELF dependency"),
+            (interp + libc + " (NEEDED) Shared library: [libssl.so.3]\n", "unqualified ELF dependency"),
+            (interp + libc + " (RUNPATH) Library runpath: [/usr/local/lib]\n", "library search path"),
+            (interp + libc + " (RPATH) Library rpath: [/usr/local/lib]\n", "library search path"),
+        ):
+            with self.subTest(elf=elf):
+                commands = mock.Mock()
+                commands.run.return_value = elf
+                with self.assertRaisesRegex(PRODUCER.BuildError, error):
+                    PRODUCER.linux_closure(commands, self.root, [beam], baseline, "x86_64")
+                commands.run.assert_called_once()
+
+    def test_linux_closure_checks_transitive_loader_results_for_shared_objects(self):
+        baseline = MANIFEST["linux_build_environment"]
+        nif = self.root / "crypto.so"
+        elf = " (NEEDED) Shared library: [libc.so.6]\n"
+        libc = "libc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x1000)\n"
+        for trace, error in (
+            ("libc.so.6 => not found\n", "resolved an unqualified library"),
+            ("libc.so.6 => /opt/toolchain/libc.so.6 (0x1000)\n", "resolved an unqualified library"),
+            (libc + "libcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x2000)\n",
+             "resolved an unqualified library"),
+            ("linux-vdso.so.1 (0x3000)\n", "did not resolve all direct libraries"),
+        ):
+            with self.subTest(trace=trace):
+                commands = mock.Mock()
+                commands.run.side_effect = [elf, trace]
+                with mock.patch.object(Path, "resolve", autospec=True, side_effect=lambda path, **_: path):
+                    with self.assertRaisesRegex(PRODUCER.BuildError, error):
+                        PRODUCER.linux_closure(commands, self.root, [nif], baseline, "x86_64")
 
     def test_unavailable_pinned_xcode_never_emits_a_receipt(self):
         manifest = json.loads(json.dumps(MANIFEST))

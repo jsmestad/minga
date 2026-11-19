@@ -1,7 +1,7 @@
 defmodule Minga.ApplicationConfigTest do
   @moduledoc """
   Tests that the application is configured correctly for runtime
-  extension loading via Mix.install/2 inside Burrito releases.
+  extension loading via Mix.install/2 inside standalone releases.
 
   These tests verify the mix.exs settings that make dynamic code
   loading work: Mix availability, required OTP applications, and

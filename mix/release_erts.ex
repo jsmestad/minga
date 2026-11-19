@@ -1,6 +1,6 @@
 defmodule Minga.ReleaseERTS do
   @moduledoc """
-  Build-only bridge from a qualified native source-build receipt to Burrito.
+  Build-only bridge from a qualified native source-build receipt to Mix.
 
   The explicit `MINGA_RELEASE_ERTS_RECEIPT` input is checked against this checkout's source manifest and producer recipe.
   It is not installed-runtime qualification.
@@ -9,131 +9,75 @@ defmodule Minga.ReleaseERTS do
 
   import Bitwise, only: [band: 2]
 
-  alias Burrito.Builder.Context
-  alias Burrito.Builder.Target
-
-  @behaviour Burrito.Util.ERTSResolver
-  @behaviour Burrito.Builder.Step
   @repo Path.expand("..", __DIR__)
-  @state {__MODULE__, :staging}
   @otp "29.1.2"
   @erts "17.1.1"
   @openssl "3.5.9"
-  @musl "1.2.5"
   @minimum_macos "15.0"
   @checks ~w(otp-version erts-version native-architecture crypto-result native-library-closure)
 
-  @doc "Wraps synchronously with a scoped resolver and cleans its private runtime copies."
-  @spec wrap(Mix.Release.t()) :: Mix.Release.t()
-  def wrap(%Mix.Release{} = release) do
-    previous = Application.fetch_env(:burrito, :erts_resolver)
-    previous_staging = Process.get(@state)
-    Process.put(@state, [])
+  @doc """
+  Supplies a private, verified `erts-<version>` path for synchronous Mix assembly.
 
-    try do
-      Burrito.register_erts_resolver(__MODULE__)
-      Burrito.wrap(add_fetch_assertion(release))
-    after
-      try do
-        for path <- Process.get(@state, []), do: File.rm_rf!(path)
-      after
-        restore_staging(previous_staging)
-        restore_resolver(previous)
-      end
-    end
-  end
-
-  @doc "Resolves the exact native OTP request to a fresh verified archive extraction."
-  @impl true
-  @spec do_resolve(Target.t()) :: Target.t()
-  def do_resolve(%Target{erts_source: {:precompiled, options}} = target) do
-    ensure!(options == [version: @otp], "requested OTP must be #{@otp}")
-    ensure_native!(target)
-    {receipt, archive} = qualified_receipt!(target)
+  The path and its sibling OTP libraries exist only for the duration of the callback.
+  """
+  @spec with_verified_runtime((Path.t() -> result)) :: result when result: var
+  def with_verified_runtime(fun) when is_function(fun, 1) do
+    {receipt, archive} = qualified_receipt!()
     parent = fresh_parent!()
 
     try do
-      # Copy first, then hash and consume the same private bytes.
-      # A separately mutable producer extraction or archive is never passed to Burrito.
-      snapshot = Path.join(parent, "erts.tar.gz")
-      stat = File.lstat!(archive)
-
-      ensure!(
-        stat.type == :regular and stat.size == receipt["archive"]["bytes"],
-        "archive byte size differs"
-      )
-
-      File.cp!(archive, snapshot)
-      verify_archive!(snapshot, receipt["archive"])
-      extract!(snapshot, parent, receipt["archive"]["root"])
-      File.rm!(snapshot)
-      verify_layout!(parent, receipt["archive"]["root"])
-      Process.put(@state, [parent | Process.get(@state, [])])
-      %{target | erts_source: {:local_unpacked, path: parent}}
-    rescue
-      error ->
-        File.rm_rf!(parent)
-        fail!(Exception.message(error))
+      fun.(stage_runtime!(receipt, archive, parent))
+    after
+      File.rm_rf!(parent)
     end
+  end
+
+  defp stage_runtime!(receipt, archive, parent) do
+    File.chmod!(parent, 0o700)
+    stat = File.lstat!(parent)
+
+    ensure!(
+      stat.type == :directory and band(stat.mode, 0o777) == 0o700,
+      "runtime staging is not private"
+    )
+
+    # Copy first, then hash and consume the same private bytes.
+    # A separately mutable producer extraction or archive is never passed to Mix.
+    snapshot = Path.join(parent, "erts.tar.gz")
+    stat = File.lstat!(archive)
+
+    ensure!(
+      stat.type == :regular and stat.size == receipt["archive"]["bytes"],
+      "archive byte size differs"
+    )
+
+    File.cp!(archive, snapshot)
+    verify_archive!(snapshot, receipt["archive"])
+    extract!(snapshot, parent, receipt["archive"]["root"])
+    File.rm!(snapshot)
+    verify_layout!(parent, receipt["archive"]["root"])
+    Path.join([parent, receipt["archive"]["root"], "erts-#{@erts}"])
   rescue
     error in Mix.Error -> reraise error, __STACKTRACE__
     error -> fail!(Exception.message(error))
   end
 
-  def do_resolve(%Target{}) do
-    fail!("only the pinned precompiled version request may enter the local source resolver")
-  end
-
-  @doc "Asserts the fetched helper and interpreter binding without changing the context."
-  @impl true
-  @spec execute(Context.t()) :: Context.t()
-  def execute(%Context{target: %Target{erts_source: {:local_unpacked, _}}} = context) do
-    {receipt, _archive} = qualified_receipt!(context.target)
-
-    verify_helper!(context, receipt)
-    context
-  rescue
-    error in Mix.Error -> reraise error, __STACKTRACE__
-    error -> fail!(Exception.message(error))
-  end
-
-  def execute(%Context{}), do: fail!("post-fetch runtime is unresolved")
-
-  defp add_fetch_assertion(release) do
-    options = release.options[:burrito] || []
-    extra = options[:extra_steps] || []
-    fetch = extra[:fetch] || []
-    post = fetch[:post] || []
-    ensure!(__MODULE__ not in post, "post-fetch assertion is already registered")
-    fetch = Keyword.put(fetch, :post, post ++ [__MODULE__])
-    options = Keyword.put(options, :extra_steps, Keyword.put(extra, :fetch, fetch))
-    %{release | options: Keyword.put(release.options, :burrito, options)}
-  end
-
-  defp restore_resolver({:ok, resolver}),
-    do: Application.put_env(:burrito, :erts_resolver, resolver)
-
-  defp restore_resolver(:error), do: Application.delete_env(:burrito, :erts_resolver)
-  defp restore_staging(nil), do: Process.delete(@state)
-  defp restore_staging(staging), do: Process.put(@state, staging)
-
-  defp ensure_native!(target) do
+  defp native_target! do
     os =
       case :os.type() do
-        {:unix, :darwin} -> :darwin
-        {:unix, :linux} -> :linux
+        {:unix, :darwin} -> "macos"
+        {:unix, :linux} -> "linux"
         _ -> fail!("unsupported native host")
       end
 
-    cpu = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
-
-    ensure!(
-      target.os == os and to_string(target.cpu) == cpu,
-      "target must match the native host CPU and OS"
-    )
+    arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
+    ensure!(arch in ~w(aarch64 x86_64), "unsupported native host CPU")
+    {os, arch}
   end
 
-  defp qualified_receipt!(target) do
+  defp qualified_receipt! do
+    {os, arch} = native_target!()
     path = System.get_env("MINGA_RELEASE_ERTS_RECEIPT")
 
     ensure!(
@@ -144,13 +88,11 @@ defmodule Minga.ReleaseERTS do
     receipt = read_json!(path)
     manifest = read_json!(Path.join(@repo, "scripts/release_erts_sources.json"))
     recipe = Path.join(@repo, "scripts/build-release-erts.py")
-    os = receipt_os(target.os)
-    arch = to_string(target.cpu)
 
     verify_manifest_pins!(manifest)
 
     ensure!(
-      receipt["version"] == 1 and receipt["kind"] == "local-source-build",
+      receipt["version"] == 2 and receipt["kind"] == "local-source-build",
       "unsupported source-build receipt"
     )
 
@@ -164,10 +106,8 @@ defmodule Minga.ReleaseERTS do
 
     ensure!(receipt["recipe_sha256"] == hash_file!(recipe), "producer recipe SHA256 differs")
 
-    source_keys = if os == "linux", do: ~w(otp openssl musl), else: ~w(otp openssl)
-
     expected_sources =
-      Map.new(source_keys, fn key ->
+      Map.new(~w(otp openssl), fn key ->
         source = manifest[key]
 
         ensure!(
@@ -187,16 +127,18 @@ defmodule Minga.ReleaseERTS do
     verify_archive_identity!(archive, os, arch)
 
     {receipt, Path.join(Path.dirname(path), "erts.tar.gz")}
+  rescue
+    error in Mix.Error -> reraise error, __STACKTRACE__
+    error -> fail!(Exception.message(error))
   end
 
   defp verify_manifest_pins!(manifest) do
-    ensure!(manifest["version"] == 1, "unsupported trusted source manifest")
+    ensure!(manifest["version"] == 2, "unsupported trusted source manifest")
 
     ensure!(
       get_in(manifest, ["otp", "version"]) == @otp and
         get_in(manifest, ["otp", "erts_version"]) == @erts and
         get_in(manifest, ["openssl", "version"]) == @openssl and
-        get_in(manifest, ["musl", "version"]) == @musl and
         manifest["minimum_macos"] == @minimum_macos,
       "trusted manifest pins differ"
     )
@@ -211,10 +153,6 @@ defmodule Minga.ReleaseERTS do
       "invalid or oversized archive identity"
     )
   end
-
-  defp receipt_os(:darwin), do: "macos"
-  defp receipt_os(:linux), do: "linux"
-  defp receipt_os(_), do: fail!("unsupported target OS")
 
   defp verify_build_environment!(environment, manifest, "macos", arch) do
     expected = manifest["macos_build_environment"]
@@ -236,17 +174,17 @@ defmodule Minga.ReleaseERTS do
   end
 
   defp verify_build_environment!(environment, manifest, "linux", arch) do
-    image = manifest["linux_build_image"]
+    baseline = manifest["linux_build_environment"]
 
     ensure!(
-      is_map(environment) and is_map(image) and environment["kind"] == "native-alpine" and
-        environment["host_arch"] == arch and environment["image"] == image["image"] and
-        environment["musl_version"] == @musl and image["musl_version"] == @musl and
-        arch in image["architectures"],
+      is_map(environment) and is_map(baseline) and environment["kind"] == "native-ubuntu" and
+        environment["host_arch"] == arch and environment["os_id"] == baseline["os_id"] and
+        environment["os_version"] == baseline["os_version"] and
+        environment["glibc_version"] == baseline["glibc_version"],
       "native Linux build environment differs"
     )
 
-    verify_facts!(environment, ~w(cc_version container_os_version))
+    verify_facts!(environment, ~w(os_id os_version glibc_version cc_version))
   end
 
   defp verify_facts!(environment, keys) do
@@ -265,28 +203,26 @@ defmodule Minga.ReleaseERTS do
   defp bounded_fact?(_value), do: false
 
   defp verify_abi_receipt!(receipt, manifest, "linux", arch) do
-    helper = get_in(manifest, ["musl", "helpers", "linux_#{arch}"])
-    ensure!(is_map(helper) and valid_hash?(helper["sha256"]), "missing trusted musl helper")
+    baseline = manifest["linux_build_environment"]
+    interpreter = get_in(baseline, ["interpreters", arch])
     abi = receipt["abi"]
 
     ensure!(
-      is_map(abi) and receipt["musl_version"] == @musl and receipt["minimum_macos"] == nil and
-        abi["musl_sha256"] == helper["sha256"] and
-        abi["interpreter"] == "/tmp/libc-musl-#{helper["sha256"]}.so" and
-        abi["minimum_macos"] == nil,
-      "Linux musl ABI evidence differs"
+      is_map(abi) and is_binary(interpreter) and receipt["minimum_macos"] == nil and
+        abi["interpreter"] == interpreter and abi["minimum_macos"] == nil,
+      "Linux glibc ABI evidence differs"
     )
 
-    verify_checks!(receipt, @checks ++ ~w(musl-interpreter musl-helper))
+    verify_checks!(receipt, @checks ++ ~w(host-interpreter))
+    verify_linux_dependencies!(abi["external_dependencies"], baseline["libraries"], interpreter)
   end
 
   defp verify_abi_receipt!(receipt, _manifest, "macos", _arch) do
     abi = receipt["abi"]
 
     ensure!(
-      is_map(abi) and receipt["musl_version"] == nil and
-        receipt["minimum_macos"] == @minimum_macos and
-        abi["interpreter"] == nil and abi["musl_sha256"] == nil and
+      is_map(abi) and receipt["minimum_macos"] == @minimum_macos and
+        abi["interpreter"] == nil and
         abi["minimum_macos"] == @minimum_macos,
       "macOS minimum-version ABI evidence differs"
     )
@@ -306,42 +242,45 @@ defmodule Minga.ReleaseERTS do
     ensure!(is_list(dependencies), "missing inspected native dependency inventory")
   end
 
-  defp verify_helper!(%Context{target: %Target{os: :darwin}}, %{"os" => "macos"}), do: :ok
-
-  defp verify_helper!(
-         %Context{target: %Target{os: :linux}} = context,
-         %{"os" => "linux"} = receipt
-       ) do
-    abi = receipt["abi"]
-    helper = Path.join([context.self_dir, "src", "musl-runtime.so"])
-
-    bindings =
-      Enum.filter(context.extra_build_env, fn {key, _} -> key == "__BURRITO_MUSL_RUNTIME_PATH" end)
+  defp verify_linux_dependencies!(dependencies, libraries, interpreter) do
+    allowed = MapSet.new([Path.basename(interpreter) | libraries])
 
     ensure!(
-      bindings == [{"__BURRITO_MUSL_RUNTIME_PATH", abi["interpreter"]}],
-      "musl interpreter binding differs"
+      Enum.count_until(dependencies, 513) <= 512,
+      "native dependency inventory exceeds bound"
     )
 
-    ensure!(hash_file!(helper) == abi["musl_sha256"], "fetched musl helper SHA256 differs")
-  end
+    entries =
+      Map.new(dependencies, fn
+        %{"file" => file, "libraries" => names} when is_binary(file) and is_list(names) ->
+          ensure!(
+            Enum.all?(String.split(file, "/"), &(&1 not in ["", ".", ".."])) and
+              Enum.all?(names, &MapSet.member?(allowed, &1)),
+            "unqualified native dependency inventory entry"
+          )
 
-  defp verify_helper!(_context, _receipt),
-    do: fail!("post-fetch target differs from qualified runtime")
+          {file, names}
+
+        _ ->
+          fail!("invalid native dependency inventory entry")
+      end)
+
+    ensure!(
+      map_size(entries) == length(dependencies) and
+        Enum.all?(~w(beam.smp erlexec), fn name ->
+          "libc.so.6" in Map.get(entries, "erts-#{@erts}/bin/#{name}", [])
+        end),
+      "native dependency inventory lacks an unambiguous glibc VM/launcher"
+    )
+  end
 
   defp fresh_parent! do
     suffix = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
-    path = Path.join(System.tmp_dir!(), "minga-release-erts-#{suffix}")
+    path = Path.expand("minga-release-erts-#{suffix}", System.tmp_dir!())
     File.mkdir!(path)
-    File.chmod!(path, 0o700)
-    stat = File.lstat!(path)
-
-    ensure!(
-      stat.type == :directory and band(stat.mode, 0o777) == 0o700,
-      "runtime staging is not private"
-    )
-
     path
+  rescue
+    error -> fail!(Exception.message(error))
   end
 
   defp verify_archive!(path, archive) do

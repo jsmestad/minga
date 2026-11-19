@@ -647,6 +647,7 @@ final class EditorNSView: MTKView {
         cancelPendingCapacityRedraw()
         self.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
         inputEnabled = false
+        readySent = false
         inputConnectionGeneration &+= 1
         horizontalPanSequence = 0
         pendingHorizontalPans.removeAll()
@@ -1030,9 +1031,16 @@ final class EditorNSView: MTKView {
         drawableSize = CGSize(width: pixelWidth, height: pixelHeight)
     }
 
+    /// Sends ready once when a replacement connects after the window already has dimensions.
+    func announceReadyIfLaidOut() {
+        guard !readySent else { return }
+        sendCurrentGridSize(reason: "Window ready")
+    }
+
     /// Sends the current grid dimensions to the BEAM after an external display change.
     private func sendCurrentGridSize(reason: String) {
         guard frame.width > 0, frame.height > 0 else { return }
+        guard inputEnabled else { return }
 
         let grid = currentGridDimensions()
         dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
@@ -1217,7 +1225,7 @@ final class EditorNSView: MTKView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
 
-        guard newSize.width > 0, newSize.height > 0 else { return }
+        guard inputEnabled, newSize.width > 0, newSize.height > 0 else { return }
 
         let grid = gridDimensions(width: newSize.width, height: newSize.height)
 

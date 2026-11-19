@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "build_python_version": "3.14.10",
   "otp": {
     "version": "29.1.2",
@@ -12,25 +12,15 @@
     "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
     "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
   },
-  "musl": {
-    "version": "1.2.5",
-    "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
-    "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4",
-    "helpers": {
-      "linux_x86_64": {
-        "url": "https://beam-machine-universal.b-cdn.net/musl/libc-musl-71c35316aff45bbfd243d8eb9bfc4a58b6eb97cee09514cd2030e145b68107fb.so?please-respect-my-bandwidth-costs=thank-you",
-        "sha256": "71c35316aff45bbfd243d8eb9bfc4a58b6eb97cee09514cd2030e145b68107fb"
-      },
-      "linux_aarch64": {
-        "url": "https://beam-machine-universal.b-cdn.net/musl/libc-musl-6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e.so?please-respect-my-bandwidth-costs=thank-you",
-        "sha256": "6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e"
-      }
-    }
-  },
-  "linux_build_image": {
-    "image": "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
-    "musl_version": "1.2.5",
-    "architectures": ["aarch64", "x86_64"]
+  "linux_build_environment": {
+    "os_id": "ubuntu",
+    "os_version": "24.04",
+    "glibc_version": "2.39",
+    "interpreters": {
+      "aarch64": "/lib/ld-linux-aarch64.so.1",
+      "x86_64": "/lib64/ld-linux-x86-64.so.2"
+    },
+    "libraries": ["libc.so.6", "libdl.so.2", "libm.so.6", "libpthread.so.0", "libresolv.so.2", "librt.so.1", "libutil.so.1"]
   },
   "minimum_macos": "15.0",
   "macos_build_environment": {

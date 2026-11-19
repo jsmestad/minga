@@ -1641,11 +1641,11 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 |-----------|------|----------|
 | Opcode schema | `docs/protocol_schema.toml` | TOML |
 | Opcode generator | `mix/protocol_generator.ex` and `mix/tasks/protocol.gen.ex` | Elixir |
-| Generated Elixir opcodes | `.generated/protocol/elixir/lib/minga/protocol/opcodes.ex` | Elixir |
+| Generated Elixir opcodes | `generated/elixir/opcodes.ex` | Elixir |
 | Generated Swift opcodes | `macos/.generated/protocol/ProtocolOpcodes.generated.swift` | Swift |
 | Generated Zig opcodes | `zig/src/generated/protocol_opcodes.zig` | Zig |
 
-`docs/protocol_schema.toml` is the source of truth. Run `mix protocol.gen` to write ignored build artifacts, refresh the generated public opcode export block in `zig/src/protocol.zig`, and run `mix protocol.gen --check` to verify those outputs are present and reproducible. Local Mix, Swift harness, and Xcode build paths run generation before compiling their protocol consumers. Direct `cd zig && zig build test` expects `zig/src/generated/protocol_opcodes.zig` and `zig/src/generated/protocol_schema_test.zig` to already exist, so run `mix protocol.gen` first or use `mix zig.lint` / `mix compile`. Generated opcode files are build artifacts, not maintained source, so normal PR review should review the schema, generator, tests, and consumer code rather than line-reviewing generated constants. The Zig public export block is maintained by the generator, so adding an opcode to the schema and regenerating makes `protocol.zig` expose the matching `OP_*` or `GUI_ACTION_*` constant without a manual re-export edit.
+`docs/protocol_schema.toml` is the source of truth. After editing it, run `mix codegen` and commit the refreshed Elixir and Go sources and any changes to the Zig export block. Swift and Zig build inputs are ignored. `mix compile` uses the committed Elixir files; direct `cd zig && zig build test` requires generated Zig inputs, so run `mix codegen` first. Review the schema, generator, tests, and consumer code instead of editing generated files by hand. The generator also updates Zig's public `OP_*` and `GUI_ACTION_*` exports.
 
 ### BEAM GUI protocol implementation
 

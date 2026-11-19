@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Render a Homebrew Formula from the exact archives for a versioned GitHub Release."""
+
+import argparse
+import hashlib
+import re
+import stat
+from pathlib import Path
+
+REPOSITORY = "https://github.com/jsmestad/minga"
+ARM64_ASSET = "minga_macos_aarch64.tar.gz"
+INTEL_ASSET = "minga_macos_x86_64.tar.gz"
+
+
+def archive_digest(path, asset):
+    if path.name != asset:
+        raise ValueError(f"expected {asset}, got {path}")
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or not info.st_size:
+        raise ValueError(f"not a nonempty archive file: {path}")
+
+    digest = hashlib.sha256()
+    with path.open("rb") as archive:
+        for block in iter(lambda: archive.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def render(version, arm64_sha, intel_sha):
+    release = f"{REPOSITORY}/releases/download/v{version}"
+    return f'''# frozen_string_literal: true
+
+class Minga < Formula
+  desc "BEAM-powered modal text editor for the terminal"
+  homepage "{REPOSITORY}"
+  version "{version}"
+  license "MIT"
+
+  depends_on macos: :sequoia
+
+  on_arm do
+    url "{release}/{ARM64_ASSET}"
+    sha256 "{arm64_sha}"
+  end
+
+  on_intel do
+    url "{release}/{INTEL_ASSET}"
+    sha256 "{intel_sha}"
+  end
+
+  def install
+    # Homebrew stages inside the archive's single minga/ directory.
+    libexec.install Dir.children(".")
+    bin.install_symlink libexec/"launchers/minga"
+  end
+
+  test do
+    assert_equal "minga #{{version}}", shell_output("#{{bin}}/minga --version").strip
+  end
+end
+'''
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Supply the verified final archives for the same immutable release. "
+        "Writes Formula Ruby to stdout; does not contact GitHub or publish anything.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--version", required=True, help="release version without the v prefix (e.g. 0.1.0)")
+    parser.add_argument("--arm64", required=True, type=Path, metavar="ARCHIVE", help=ARM64_ASSET)
+    parser.add_argument("--x86-64", required=True, type=Path, metavar="ARCHIVE", help=INTEL_ASSET)
+    args = parser.parse_args()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", args.version):
+        parser.error("--version must be an explicit release version (e.g. 0.1.0)")
+
+    try:
+        arm64_sha = archive_digest(args.arm64, ARM64_ASSET)
+        intel_sha = archive_digest(args.x86_64, INTEL_ASSET)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+
+    print(render(args.version, arm64_sha, intel_sha), end="")
+
+
+if __name__ == "__main__":
+    main()

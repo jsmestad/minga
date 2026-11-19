@@ -1,3 +1,6 @@
+Code.require_file("mix/tasks/dialyzer.incremental.runner.ex")
+Code.require_file("mix/tasks/dialyzer.incremental.ex")
+
 defmodule Mix.Tasks.Dialyzer.IncrementalTest do
   use ExUnit.Case, async: true
 

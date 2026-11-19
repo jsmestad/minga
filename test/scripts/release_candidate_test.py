@@ -53,10 +53,15 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.builds = {}
         for filename, target in candidate.PAYLOADS.items():
             tools = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": go_version, "native_zig": "0.16.0"}
-            tools["xcode" if filename == "Minga.dmg" else "wrapper_zig"] = "26.3" if filename == "Minga.dmg" else "0.16.0"
             ids = ["package-contents", "native-architecture", "package-boot"]
             if filename == "Minga.dmg":
                 ids += ["signature", "notarization", "stapling"]
+                tools["xcode"] = "26.3"
+            else:
+                ids.append("package-runtime-abi")
+                tools.update(python="3.14.10", erts="17.1.1", host_erts_arch=target["arch"] + "-fixture",
+                             erts_source={"version": 2, "kind": "local-source-build", **target,
+                                          "otp_version": tools["otp"], "erts_version": "17.1.1"})
             build = {
                 "schema_version": 1, "context": dict(self.context),
                 "filename": filename, "target": target, "toolchains": tools,
@@ -67,10 +72,13 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.call("checksums", "--output", str(self.root / "SHA256SUMS.txt"), success=True)
         self.add_artifact("checksums", [("SHA256SUMS.txt", (self.root / "SHA256SUMS.txt").read_bytes())])
         self.call("create", "--output", str(self.root / "manifest.json"), success=True)
-        self.manifest = json.loads((self.root / "manifest.json").read_text())
-        self.add_artifact("manifest", [("manifest.json", (self.root / "manifest.json").read_bytes())])
+        self.install_manifest((self.root / "manifest.json").read_bytes())
+
+    def install_manifest(self, data):
+        self.manifest = json.loads(data)
+        self.add_artifact("manifest", [("manifest.json", data)])
         self.handle_id = self.metadata[-1]["id"]
-        self.handle_sha = hashlib.sha256((self.root / "manifest.json").read_bytes()).hexdigest()
+        self.handle_sha = hashlib.sha256(data).hexdigest()
 
     def add_artifact(self, label, entries):
         artifact = {
@@ -138,6 +146,11 @@ class ReleaseCandidateTest(unittest.TestCase):
         receipt = json.loads((self.root / "receipt.json").read_text())
         self.assertEqual(receipt["handle"], {"manifest_artifact_id": self.handle_id, "manifest_sha256": self.handle_sha})
         self.assertEqual(len(receipt["payloads"]), 5)
+        self.assertEqual(self.manifest["schema_version"], 2)
+        self.assertEqual([item["filename"] for item in receipt["payloads"]], [
+            "Minga.dmg", "minga_macos_aarch64.tar.gz", "minga_macos_x86_64.tar.gz",
+            "minga_linux_x86_64.tar.gz", "minga_linux_aarch64.tar.gz",
+        ])
         for payload in receipt["payloads"]:
             actual = self.entries[payload["filename"]][0][1]
             self.assertEqual(payload["size"], len(actual))
@@ -163,13 +176,79 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.source_tool_versions.write_text(original + "golang 1.26.4\n")
         self.reject("invalid or duplicate source toolchain pin")
 
+    def test_verifies_historical_wrapper_manifest_without_creating_one(self):
+        # Reproduce the previous on-wire manifest and checksum order independently
+        # of today's creator or its supported-inventory map.
+        self.metadata.clear()
+        descriptors = []
+        for filename in ("Minga.dmg", "minga_macos_aarch64", "minga_macos_x86_64",
+                         "minga_linux_x86_64", "minga_linux_aarch64"):
+            native_name = filename if filename == "Minga.dmg" else filename + ".tar.gz"
+            build = dict(self.builds[native_name], filename=filename)
+            build["toolchains"] = {"elixir": "1.20.5-otp-29", "otp": "29.1.2",
+                                   "go": "1.26.4", "native_zig": "0.16.0"}
+            if native_name == filename:
+                build["toolchains"]["xcode"] = "26.3"
+            else:
+                build["toolchains"]["wrapper_zig"] = "0.16.0"
+                build["evidence"] = build["evidence"][:-1]
+            payload = filename.encode()
+            facts = json.dumps(build).encode()
+            build_name = filename + ".build.json"
+            self.add_artifact(filename, [(filename, payload), (build_name, facts)])
+            descriptors.append({
+                "filename": filename, "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
+                "target": build["target"], "artifact": candidate.artifact_ref(self.metadata[-1]),
+                "build": {"filename": build_name, "size": len(facts), "sha256": hashlib.sha256(facts).hexdigest(),
+                          "toolchains": build["toolchains"], "evidence": build["evidence"]},
+            })
+        checksums = "".join(f'{row["sha256"]}  {row["filename"]}\n' for row in descriptors).encode()
+        self.add_artifact("checksums", [("SHA256SUMS.txt", checksums)])
+        result = self.call("create", "--output", str(self.root / "legacy.json"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("artifact inventory", result.stderr)
+        manifest = {
+            "schema_version": 1, "context": self.context, "payloads": descriptors,
+            "checksums": {"filename": "SHA256SUMS.txt", "size": len(checksums),
+                          "sha256": hashlib.sha256(checksums).hexdigest(),
+                          "artifact": candidate.artifact_ref(self.metadata[-1])},
+        }
+        self.install_manifest(json.dumps(manifest).encode())
+        self.verify(success=True)
+        receipt = json.loads((self.root / "receipt.json").read_text())
+        self.assertEqual([row["filename"] for row in receipt["payloads"]], [row["filename"] for row in descriptors])
+        self.manifest["schema_version"] = 2
+        self.replace_manifest()
+        self.reject("manifest inventory")
+
+    def test_mixed_package_generations_fail_before_reading_payloads(self):
+        artifact = self.artifact("minga_linux_x86_64.tar.gz")
+        artifact["name"] = artifact["name"].removesuffix(".tar.gz")
+        self.reject("artifact inventory")
+
+    def test_native_build_must_prove_source_runtime_and_package_abi(self):
+        label = "minga_linux_x86_64.tar.gz"
+        build = self.builds[label]
+        tools = build["toolchains"]
+        receipt = tools.pop("erts_source")
+        self.replace_build(label)
+        self.reject("source-runtime receipt")
+        tools["erts_source"] = receipt
+        tools["wrapper_zig"] = "0.16.0"
+        self.replace_build(label)
+        self.reject("unexpected wrapper toolchain")
+        del tools["wrapper_zig"]
+        build["evidence"].pop()
+        self.replace_build(label)
+        self.reject("missing required validation evidence")
+
     def test_hashes_actual_raw_transport_not_api_digest_echo(self):
         path = self.downloads / f'{self.metadata[0]["id"]}.zip'
         path.write_bytes(path.read_bytes() + b"changed transport")
         self.reject("transport digest mismatch")
 
     def test_changed_payload_even_with_valid_new_transport_fails(self):
-        label = "minga_linux_aarch64"
+        label = "minga_linux_aarch64.tar.gz"
         self.entries[label][0] = (label, b"different final bytes")
         self.rezip(label)
         self.reject("payload hash mismatch")
@@ -259,7 +338,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.reject("checksum inventory")
 
     def test_missing_native_architecture_evidence_fails(self):
-        label = "minga_linux_x86_64"
+        label = "minga_linux_x86_64.tar.gz"
         self.builds[label]["evidence"] = [{"id": "package-contents", "result": "passed"}]
         self.replace_build(label)
         self.reject("missing required validation evidence")
@@ -275,7 +354,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.reject("duplicate or failed")
 
     def test_toolchain_and_target_facts_are_required(self):
-        label = "minga_linux_x86_64"
+        label = "minga_linux_x86_64.tar.gz"
         self.builds[label]["toolchains"]["go"] = "1.25.0"
         self.replace_build(label)
         self.reject("wrong pinned toolchain")
@@ -285,7 +364,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.reject("wrong build target")
 
     def test_archive_inventory_rejects_missing_duplicate_and_unexpected_members(self):
-        label = "minga_linux_aarch64"
+        label = "minga_linux_aarch64.tar.gz"
         original = list(self.entries[label])
         cases = [original[:1], [original[0], original[0]], original + [("secret", b"not allowed")]]
         for entries in cases:
@@ -295,7 +374,7 @@ class ReleaseCandidateTest(unittest.TestCase):
                 self.reject("ZIP entr")
 
     def test_archive_traversal_absolute_and_backslash_paths_never_write(self):
-        label = "minga_linux_x86_64"
+        label = "minga_linux_x86_64.tar.gz"
         for name in ("../escape", "/tmp/escape", "dir/../" + label, "dir\\" + label):
             with self.subTest(name=name):
                 self.entries[label][0] = (name, b"must never be written")
@@ -304,7 +383,7 @@ class ReleaseCandidateTest(unittest.TestCase):
                 self.assertFalse((self.root / "escape").exists())
 
     def test_symlink_and_special_file_are_rejected_before_content_read(self):
-        label = "minga_linux_x86_64"
+        label = "minga_linux_x86_64.tar.gz"
         for mode in (stat.S_IFLNK | 0o777, stat.S_IFIFO | 0o600, stat.S_IFDIR | 0o755):
             with self.subTest(mode=mode):
                 entry = zipfile.ZipInfo(label)
@@ -338,7 +417,7 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.reject("manifest inventory")
 
     def test_build_from_a_different_attempt_cannot_be_combined(self):
-        label = "minga_linux_aarch64"
+        label = "minga_linux_aarch64.tar.gz"
         self.builds[label]["context"]["run_attempt"] = 1
         self.replace_build(label)
         self.reject("build provenance/generation")

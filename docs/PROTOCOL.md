@@ -25,7 +25,7 @@ skip = { go = "Terminal controls font selection" }
 framing = "custom"
 ```
 
-Run `mix protocol.gen` after editing the schema. It writes `macos/.generated/protocol/ProtocolConsumers.generated.swift` and `go/tui/internal/generated/consumers.go`. Swift dispatches through the generated `SwiftRequiredOpcode` enum with an exhaustive switch, so a missing arm fails compilation. The Go guardrail probes every opcode and compares its result with `GoRequiredOpcodes` and `GoSkippedOpcodes`, so a missing arm or a decoded skip fails `go test ./...`.
+Run `mix codegen` after editing the schema and commit the refreshed checked-in sources. It also writes `macos/.generated/protocol/ProtocolConsumers.generated.swift` for local Swift builds. Swift dispatches through `SwiftRequiredOpcode` with an exhaustive switch, so a missing arm fails compilation. The Go guardrail probes every opcode and compares its result with `GoRequiredOpcodes` and `GoSkippedOpcodes`, so a missing arm or a decoded skip fails `go test ./...`.
 
 Only declared skips may use a sizing-only path. Unknown opcodes fail decoding instead of silently disappearing. Consumer declarations describe decoder obligations, not runtime capability negotiation. See [Add a render command](recipes/new-render-command.md) for the change workflow.
 

@@ -36,7 +36,6 @@ erl_crash.dump
 /priv/minga-shell-output-reader
 /priv/minga-test-harness
 /priv/extensions
-/burrito_out/
 
 # Editor / OS
 *.swp

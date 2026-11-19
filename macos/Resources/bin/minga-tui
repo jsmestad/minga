@@ -18,6 +18,14 @@ resolve_script_dir() {
 script_dir=$(resolve_script_dir)
 
 resolve_release_bin() {
+  if [ "${script_dir##*/}" = launchers ]; then
+    [ -f "$script_dir/../releases/start_erl.data" ] || return 1
+    candidate="$script_dir/../bin/minga"
+    [ -x "$candidate" ] || return 1
+    printf '%s\n' "$candidate"
+    return
+  fi
+
   if [ -n "${MINGA_RELEASE_BIN:-}" ]; then
     [ -x "$MINGA_RELEASE_BIN" ] || return 1
     printf '%s\n' "$MINGA_RELEASE_BIN"
@@ -46,7 +54,7 @@ resolve_release_bin() {
 }
 
 release_bin=$(resolve_release_bin) || {
-  echo "error: Minga standalone runtime is missing or damaged. Reinstall Minga.app or set MINGA_RELEASE_BIN." >&2
+  echo "error: Minga runtime is missing or damaged. Reinstall the package." >&2
   exit 1
 }
 

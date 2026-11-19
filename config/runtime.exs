@@ -31,10 +31,7 @@ config :minga, port_mode: port_mode
 # invocations are intentionally excluded so they keep stdout/stderr logging.
 standalone_release? = System.get_env("MINGA_STANDALONE_TUI") == "1"
 
-standalone_tui? =
-  (System.get_env("__BURRITO") != nil and
-     "--headless" not in Enum.map(:init.get_plain_arguments(), &to_string/1)) or
-    (standalone_release? and System.get_env("MINGA_STANDALONE_EDITOR") == "1")
+standalone_tui? = standalone_release? and System.get_env("MINGA_STANDALONE_EDITOR") == "1"
 
 if port_mode == :connected or standalone_tui? do
   log_dir = Path.expand("~/.local/share/minga")

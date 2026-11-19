@@ -122,21 +122,108 @@ struct StartupOwnershipTests {
     @Test("failed process launch releases its resources and can be aborted")
     func failedLaunch() {
         let manager = BEAMProcessManager()
-        var crashed = false
-        manager.onCrash = { crashed = true }
+        var failure: BEAMProcessManager.StartupFailure?
         var configuration = catConfiguration()
         configuration = BEAMLaunchConfiguration(
             executableURL: URL(fileURLWithPath: "/nonexistent/minga-test-child"),
             arguments: [], environment: configuration.environment,
             workingDirectoryURL: configuration.workingDirectoryURL
         )
-        manager.start(configuration: configuration)
-        #expect(crashed)
+        manager.start(configuration: configuration) { failure = $0 }
+        guard case .launch = failure else {
+            Issue.record("Expected a startup launch failure, got \(String(describing: failure))")
+            return
+        }
         #expect(!manager.hasLiveProcess)
         #expect(manager.readHandle == nil)
         #expect(manager.writeHandle == nil)
         manager.abortStartup()
         #expect(manager.exitIntent == .appShutdown)
+    }
+
+    @Test("startup retry waits for the owned core to exit before reporting a replacement launch failure")
+    func retryWaitsForExit() async throws {
+        try #require(!BEAMProcessManager.isBundleMode)
+        let manager = BEAMProcessManager()
+        defer { manager.abortStartup() }
+        let (failures, report) = AsyncStream<BEAMProcessManager.StartupFailure>.makeStream()
+        manager.start(configuration: catConfiguration())
+        #expect(manager.hasLiveProcess)
+
+        manager.retryStartup { report.yield($0) }
+        var results = failures.makeAsyncIterator()
+        #expect(await results.next() == .missingRelease)
+        #expect(!manager.hasLiveProcess)
+    }
+
+    @Test("failure to connect closes the launch pipes and stops the owned child")
+    func stopsUnconnectedStartup() async throws {
+        let manager = BEAMProcessManager()
+        defer { manager.abortStartup() }
+        let (exits, exit) = AsyncStream<Int32>.makeStream()
+        manager.onTermination = { status in exit.yield(status); return false }
+        manager.start(configuration: catConfiguration())
+        let input = try #require(manager.writeHandle)
+        let output = try #require(manager.readHandle)
+        let inputFD = input.fileDescriptor
+        let outputFD = output.fileDescriptor
+
+        manager.stopUnconnectedStartup()
+
+        #expect(fcntl(inputFD, F_GETFD) == -1)
+        #expect(fcntl(outputFD, F_GETFD) == -1)
+        var observedExits = exits.makeAsyncIterator()
+        #expect(await observedExits.next() != nil)
+        #expect(!manager.hasLiveProcess)
+        #expect(manager.exitIntent == .startupFailed)
+    }
+
+    @Test("startup retry times out without replacing a core that ignores termination")
+    func retryTimeoutDoesNotReplaceCore() async throws {
+        let manager = BEAMProcessManager()
+        defer { manager.abortStartup() }
+        let (failures, report) = AsyncStream<BEAMProcessManager.StartupFailure>.makeStream()
+        let (exits, exit) = AsyncStream<Int32>.makeStream()
+        manager.onTermination = { status in exit.yield(status); return false }
+        manager.start(configuration: BEAMLaunchConfiguration(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; printf x; IFS= read -r line"],
+            environment: [:],
+            workingDirectoryURL: FileManager.default.temporaryDirectory
+        ))
+        let input = try #require(manager.writeHandle)
+        let output = try #require(manager.readHandle)
+        try #require(output.read(upToCount: 1) == Data([120]))
+
+        manager.retryStartup(stopTimeout: 0.05) { report.yield($0) }
+        var results = failures.makeAsyncIterator()
+        #expect(await results.next() == .previousCoreStopTimedOut)
+        #expect(manager.hasLiveProcess)
+        #expect(manager.writeHandle === input)
+
+        try input.write(contentsOf: Data("\n".utf8))
+        var observedExits = exits.makeAsyncIterator()
+        #expect(await observedExits.next() == 0)
+        #expect(!manager.hasLiveProcess)
+        #expect(manager.exitIntent == .startupFailed)
+    }
+
+    @Test("an exit handled after the startup stop deadline cannot start a replacement")
+    func lateExitDoesNotReplaceCore() throws {
+        let manager = BEAMProcessManager()
+        defer { manager.abortStartup() }
+        manager.start(configuration: catConfiguration())
+        let output = try #require(manager.readHandle)
+        var failure: BEAMProcessManager.StartupFailure?
+
+        // Keep the main run loop from processing the queued deadline until the termination path has run.
+        manager.retryStartup(stopTimeout: 0) { failure = $0 }
+        let data = try output.read(upToCount: 1)
+        #expect(data == nil || data?.isEmpty == true)
+        manager.handleTermination(status: SIGTERM, reason: .uncaughtSignal)
+
+        #expect(failure == .previousCoreStopTimedOut)
+        #expect(!manager.hasLiveProcess)
     }
 
     private func makeConnection(

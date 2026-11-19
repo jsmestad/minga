@@ -421,69 +421,6 @@ private final class TitleBarDragNSView: NSView {
     }
 }
 
-/// Loading overlay shown while the BEAM boots and renders its first frame.
-/// Covers the empty Metal framebuffer with the app icon, a spinner, and a
-/// random quip so the user sees a friendly loading state instead of a blank
-/// dark screen. Fades out when the first commit_frame arrives.
-///
-/// Adapts to the macOS system appearance (light/dark) before the BEAM sends
-/// guiTheme. The overlay is a loading surface, not a theme fallback; the BEAM
-/// still owns the editor theme.
-struct StartupOverlay: View {
-    @Environment(\.colorScheme) private var systemScheme
-
-    private static let quips = [
-        "Reticulating splines…",
-        "Warming up the BEAM…",
-        "Spawning processes…",
-        "Consulting the oracle…",
-        "Aligning the gap buffer…",
-        "Negotiating with tree-sitter…",
-        "Calibrating modal flux…",
-        "Herding supervisors…",
-        "Entering god mode…",
-        "The cake is a lie…",
-        "It's dangerous to go alone…",
-        "Kept you waiting, huh?",
-        "Calibrating…",
-        "Preparing emotional states…",
-        "Escaping to normal mode…",
-        "M-x start-editor",
-    ]
-
-    /// Picked once per overlay lifetime so it doesn't change mid-fade.
-    @State private var quip = quips.randomElement()!
-
-    private var backgroundColor: Color {
-        if systemScheme == .dark {
-            Color(red: 0.12, green: 0.12, blue: 0.14)
-        } else {
-            Color(red: 0.95, green: 0.95, blue: 0.96)
-        }
-    }
-
-    var body: some View {
-        ZStack {
-            backgroundColor
-
-            VStack(spacing: 16) {
-                Image("MingaLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 96, height: 96)
-
-                ProgressView()
-                    .controlSize(.small)
-
-                Text(quip)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .ignoresSafeArea()
-    }
-}
-
 /// ContentView observes AppState and switches from a placeholder to the
 /// editor surface once the AppDelegate finishes initialization.
 ///
@@ -1252,11 +1189,6 @@ public struct ContentView<EditorSurface: View>: View {
                 encoder?.send(.requestKeyframe(lastGoodFrameSequence: lastGoodFrameSeq, generation: generation))
             }
         )
-
-        if !chrome.hasReceivedFirstFrame {
-            StartupOverlay()
-                .transition(.opacity)
-        }
 
         if input.protocolErrorState.isPresented {
             ProtocolErrorOverlay(state: input.protocolErrorState)
