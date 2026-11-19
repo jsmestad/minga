@@ -36,7 +36,7 @@ The final gate reads versioned policy before Registry resolution and validates t
 
 Automatic memory injection, the built-in memory-write tool, default introspection tools, model-cycling commands, and backend choice in the default child-agent tool have been removed. Legacy `pi_rpc` configuration is rejected rather than resolved to an executable provider. Project/global instructions, selected skills, existing memory files, saved history, registered providers, and Runtime/Gateway introspection remain owned by their existing sources.
 
-After the runtime starts, opt in to read-only memory discovery with `MingaAgent.ToolPacks.Memory.register()` or introspection with `MingaAgent.ToolPacks.Introspection.register()`. These packs are not registered automatically. Notebook and todo tools/state remain available; only notebook-specific prompt instructions were removed here.
+After the runtime starts, opt in to read-only memory discovery with `MingaAgent.ToolPacks.Memory.register()` or introspection with `MingaAgent.ToolPacks.Introspection.register()`. These packs are not registered automatically. The existing todo tools still manage the running provider's checklist. New requests do not offer the hidden notebook tools. Existing notebook tool results remain readable in saved conversations.
 
 ## Interrupted requests and tools
 
