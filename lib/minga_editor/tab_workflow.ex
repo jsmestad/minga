@@ -118,8 +118,13 @@ defmodule MingaEditor.TabWorkflow do
         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}} = state
       ) do
     case TraditionalState.tab_bar(shell_state) do
-      %TabBar{} = tab_bar -> sync_from_tab_bar(state, tab_bar)
-      nil -> state
+      %TabBar{} = tab_bar ->
+        state
+        |> sync_from_tab_bar(tab_bar)
+        |> MingaEditor.UI.Picker.AgentRetainedOutputSource.dismiss_if_stale()
+
+      nil ->
+        state
     end
   end
 

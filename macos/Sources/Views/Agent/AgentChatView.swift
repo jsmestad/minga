@@ -22,6 +22,7 @@ public struct AgentChatView: View {
         case toolApproval(AgentApprovalCard.Action)
         case executeCommand(name: String)
         case agentToolToggle(messageID: UInt32)
+        case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
         case chatScrolledAwayFromBottom
         case chatReturnedToBottom
     }
@@ -201,12 +202,12 @@ public struct AgentChatView: View {
             assistantMessage { assistantMarkdownBlock(blocks) }
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
+        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines, let offer):
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
-        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
+        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines, let offer):
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
                 AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
             })
         case .approvalToolCall(_, let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines):
@@ -556,6 +557,7 @@ public struct AgentChatView: View {
         childAction { action in
             switch action {
             case .toggle(let messageID): .agentToolToggle(messageID: messageID)
+            case .readRetainedOutput(let messageID, let offer): .agentReadRetainedOutput(messageID: messageID, offer: offer)
             }
         }
     }

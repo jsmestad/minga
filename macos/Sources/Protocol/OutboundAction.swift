@@ -103,6 +103,7 @@ public enum OutboundAction: Equatable, Sendable {
     /// Resolves only the immutable approval displayed by the originating control.
     case agentToolApproval(sessionId: String, requestId: String, toolCallId: String, decision: AgentApprovalDecision)
     case agentToolToggle(messageID: UInt32)
+    case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
     case executeCommand(name: String)
     case openFile(path: String)
     case gitStageFile(path: String)

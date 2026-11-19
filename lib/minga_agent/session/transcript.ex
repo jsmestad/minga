@@ -24,6 +24,9 @@ defmodule MingaAgent.Session.Transcript do
   alias MingaAgent.Session.Transcript.Cursor
   alias MingaAgent.Session.Transcript.Entry
   alias MingaAgent.Session.Transcript.Snapshot
+  alias MingaAgent.Session.Transcript.Entry
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Reference
 
   @typedoc "The streaming message kind that may replace the active tail."
   @type stream_kind :: :assistant | :thinking
@@ -353,6 +356,30 @@ defmodule MingaAgent.Session.Transcript do
         {:thinking, text, !collapsed}
     end)
   end
+
+  @doc "Checks that one exact current tool message still owns the displayed retained output."
+  @spec retained_output(t(), pos_integer(), Reference.t()) ::
+          {:ok, Reference.t()} | {:error, :output_unavailable | :output_changed}
+  def retained_output(%__MODULE__{} = transcript, id, %Reference{} = expected)
+      when is_integer(id) and id > 0 do
+    case Active.id_ordinals(transcript.active, id) do
+      [ordinal] -> retained_output_at(Active.at(transcript.active, ordinal), expected)
+      _missing_or_ambiguous -> {:error, :output_unavailable}
+    end
+  end
+
+  @spec retained_output_at(Entry.t() | nil, Reference.t()) ::
+          {:ok, Reference.t()} | {:error, :output_unavailable | :output_changed}
+  defp retained_output_at(
+         %Entry{
+           message: {:tool_call, %ToolCall{output: %Output{reference: %Reference{} = reference}}}
+         },
+         expected
+       ) do
+    if reference == expected, do: {:ok, reference}, else: {:error, :output_changed}
+  end
+
+  defp retained_output_at(_entry, _expected), do: {:error, :output_unavailable}
 
   @doc "Fetches the current/latest tool occurrence without traversing retained history."
   @spec current_tool_call(t(), String.t()) :: ToolCall.t() | nil

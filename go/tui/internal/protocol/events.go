@@ -260,6 +260,17 @@ func EncodeGUIAgentToolToggle(messageID uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
 }
 
+// EncodeGUIAgentReadRetainedOutput echoes the exact immutable offer on the tool card.
+func EncodeGUIAgentReadRetainedOutput(messageID uint32, offer [16]byte) []byte {
+	if messageID == 0 || offer == [16]byte{} {
+		return nil
+	}
+	packet := [22]byte{generated.OPGuiAction, generated.GUIActionAgentReadRetainedOutput,
+		byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
+	copy(packet[6:], offer[:])
+	return packet[:]
+}
+
 // EncodeGUIAgentToolApproval echoes the displayed approval's immutable identity.
 // Invalid decisions or identities cannot become approvals or truncated targets.
 func EncodeGUIAgentToolApproval(target AgentApprovalTarget, decision generated.AgentApprovalDecision) []byte {

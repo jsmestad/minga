@@ -27,6 +27,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.BufferLifecycle
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.DirectorySource
   alias MingaEditor.UI.Picker.FetchEffect
@@ -117,17 +118,22 @@ defmodule MingaEditor.PickerUI do
   @spec open_async(state(), module(), map() | nil) :: state()
   defp open_async(state, source_module, context) do
     {new_state, revision} = open_loading(state, source_module, context)
-    picker_state = picker_state(new_state)
+    schedule_current_fetch(new_state, source_module, revision)
+  end
+
+  @spec schedule_current_fetch(state(), module(), reference()) :: state()
+  defp schedule_current_fetch(state, source_module, revision) do
+    picker_state = picker_state(state)
 
     request =
       FetchEffect.request(
         source_module,
         picker_state.callback_source,
-        Context.from_editor_state(new_state),
+        Context.from_editor_state(state),
         revision
       )
 
-    schedule_fetch(new_state, request, source_module, revision)
+    schedule_fetch(state, request, source_module, revision)
   end
 
   @doc "Opens an async picker in its loading state without starting a fetch."
@@ -260,18 +266,27 @@ defmodule MingaEditor.PickerUI do
           {:ok, PickerPayload.t()} | :stale
   defp live_fetch(state, source_module, revision, fetch_identity, meta) do
     with {:ok, payload} <- live_picker(state, source_module, revision, fetch_identity),
-         true <- current_source_fetch?(source_module, fetch_identity, meta) do
+         true <- current_source_fetch?(state, payload.picker_ui, fetch_identity, meta) do
       {:ok, payload}
     else
       _closed_replaced_or_changed -> :stale
     end
   end
 
-  @spec current_source_fetch?(module(), term() | nil, Source.fetch_meta() | nil) :: boolean()
-  defp current_source_fetch?(FileSource, fetch_identity, meta),
+  @spec current_source_fetch?(state(), PickerState.t(), term() | nil, Source.fetch_meta() | nil) ::
+          boolean()
+  defp current_source_fetch?(_state, %{source: FileSource}, fetch_identity, meta),
     do: FileSource.current_fetch?(fetch_identity, meta)
 
-  defp current_source_fetch?(_source, _fetch_identity, _meta), do: true
+  defp current_source_fetch?(
+         state,
+         %{source: AgentRetainedOutputSource, context: context},
+         _identity,
+         _meta
+       ),
+       do: AgentRetainedOutputSource.current_fetch?(state, context)
+
+  defp current_source_fetch?(_state, _picker, _fetch_identity, _meta), do: true
 
   @spec live_picker(state(), module(), reference(), term() | nil) ::
           {:ok, PickerPayload.t()} | :stale
@@ -1203,11 +1218,32 @@ defmodule MingaEditor.PickerUI do
     )
   end
 
+  defp stay_open_selection(state, AgentRetainedOutputSource, %Item{} = item),
+    do: AgentRetainedOutputSource.on_select(item, state)
+
   defp stay_open_selection(state, _source, _context) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
       "Picker source cannot keep this selection open"
     )
+  end
+
+  @doc "Reads another retained range without replacing the committed page until it succeeds."
+  @spec reload_retained_output(state(), map()) :: state()
+  def reload_retained_output(state, context) do
+    state = cancel_current_fetch(state)
+    picker_state = picker_state(state)
+    picker = picker_state.picker |> Picker.filter("") |> Picker.select_index(0)
+
+    {loading, revision} =
+      picker_state
+      |> PickerState.update_picker(picker)
+      |> PickerState.put_context(context)
+      |> PickerState.begin_fetch()
+
+    state
+    |> update_picker(fn _current -> loading end)
+    |> schedule_current_fetch(AgentRetainedOutputSource, revision)
   end
 
   @spec run_select_and_close(

@@ -425,6 +425,7 @@ const (
 	transcriptSummaryUsage
 	transcriptSummaryTool
 	transcriptSummaryThinking
+	transcriptSummaryRetainedOutput
 	transcriptSummaryKinds
 )
 
@@ -494,6 +495,7 @@ func transcriptSummaryMembership(message protocol.AgentChatMessage) [transcriptS
 		message.Kind == agentKindUsage,
 		message.ID > 0 && (message.Kind == agentKindTool || message.Kind == agentKindStyledTool),
 		message.ID > 0 && message.Kind == agentKindThinking,
+		(message.Kind == agentKindTool || message.Kind == agentKindStyledTool) && agentToolOffersRetainedOutput(message),
 	}
 }
 

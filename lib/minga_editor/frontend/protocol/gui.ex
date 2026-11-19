@@ -142,6 +142,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_collapse_all Opcodes.gui_action_file_tree_collapse_all()
   @gui_action_file_tree_refresh Opcodes.gui_action_file_tree_refresh()
   @gui_action_agent_tool_toggle Opcodes.gui_action_agent_tool_toggle()
+  @gui_action_agent_read_retained_output Opcodes.gui_action_agent_read_retained_output()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
@@ -262,6 +263,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :file_tree_collapse_all
           | :file_tree_refresh
           | {:agent_tool_toggle, message_id :: non_neg_integer()}
+          | {:agent_read_retained_output, MingaEditor.Agent.RetainedOutputTarget.t()}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, path :: String.t()}
@@ -745,6 +747,16 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_tool_toggle, <<message_id::32>>),
     do: {:ok, {:agent_tool_toggle, message_id}}
+
+  def decode_gui_action(
+        @gui_action_agent_read_retained_output,
+        <<message_id::32, offer::binary-size(16)>>
+      )
+      when message_id > 0,
+      do:
+        {:ok,
+         {:agent_read_retained_output,
+          MingaEditor.Agent.RetainedOutputTarget.new(offer, message_id)}}
 
   def decode_gui_action(
         @gui_action_execute_command,

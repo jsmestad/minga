@@ -3,8 +3,8 @@ defmodule Minga.Clipboard do
   Platform clipboard integration.
 
   Delegates to the configured clipboard backend. In production this is
-  `Minga.Clipboard.System` (which shells out to `pbcopy`/`pbpaste`,
-  `xclip`, etc.). In tests it can be swapped to a mock via:
+  `Minga.Clipboard.System` (native plain-text pasteboard on macOS, Wayland or
+  X11 clipboard tools on Linux). In tests it can be swapped to a mock via:
 
       Application.put_env(:minga, :clipboard_module, Minga.Clipboard.Mock)
 

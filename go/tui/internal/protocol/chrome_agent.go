@@ -243,6 +243,17 @@ func decodeAgentMessageBody(id uint32, body []byte) (AgentChatMessage, bool) {
 		msg.Text = plainStyledLines(lines)
 	case 0x08:
 		return decodeToolCallMessage(msg, body, offset, true)
+	case 0x0B, 0x0C:
+		if id == 0 || len(body) < offset+len(msg.RetainedOutputOffer) {
+			return msg, false
+		}
+		styled := msg.Kind == 0x0C
+		msg.Kind = 0x04
+		if styled {
+			msg.Kind = 0x08
+		}
+		copy(msg.RetainedOutputOffer[:], body[offset:])
+		return decodeToolCallMessage(msg, body, offset+len(msg.RetainedOutputOffer), styled)
 	case 0x09:
 		return decodeApprovalMessage(msg, body, offset)
 	case 0x0A:

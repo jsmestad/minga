@@ -471,6 +471,7 @@ func agentMessageRowCount(message protocol.AgentChatMessage) int {
 		return 1 + compactTextLineCount(text, agentThinkingBodyLines(message.Collapsed))
 	case agentKindTool, agentKindStyledTool:
 		count := 2 + cappedRows(len(message.PreviewLines), 8)
+		count += boolInt(agentToolOffersRetainedOutput(message))
 		if agentToolIsError(message) && hasAgentToolResult(message) {
 			if len(message.StyledLines) > 0 {
 				return count + cappedRows(len(message.StyledLines), agentToolExpandedLines)

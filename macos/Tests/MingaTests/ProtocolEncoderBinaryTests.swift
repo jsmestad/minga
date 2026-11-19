@@ -812,6 +812,18 @@ struct EncoderGUIActionTests {
         #expect(readU32(payload, 2) == 0x01020304)
     }
 
+    @Test("retained output read echoes the committed offer and tool message")
+    func agentReadRetainedOutputLayout() {
+        let payload = captureFrame {
+            $0.send(.agentReadRetainedOutput(
+                messageID: 0x01020304,
+                offer: .init(high: 0x05060708090A0B0C, low: 0x0D0E0F1011121314)
+            ))
+        }
+        let expected: [UInt8] = [OP_GUI_ACTION, GUI_ACTION_AGENT_READ_RETAINED_OUTPUT] + Array(1...20)
+        #expect(payload == Data(expected))
+    }
+
     @Test("execute_command encodes command name with length prefix")
     func executeCommandLayout() {
         let payload = captureFrame { $0.send(.executeCommand(name: "buffer_prev")) }

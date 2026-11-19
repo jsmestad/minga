@@ -4006,8 +4006,20 @@ private func readRequiredString16(data: Data, pos: inout Int, end: Int) throws -
 private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodyStart: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
     guard bodyStart + 1 <= end else { throw ProtocolDecodeError.malformed }
 
-    let msgType = data[bodyStart]
-    let pos = bodyStart
+    let encodedKind = data[bodyStart]
+    let msgType: UInt8
+    let pos: Int
+    let retainedOffer: Wire.RetainedOutputOffer?
+    if encodedKind == 0x0B || encodedKind == 0x0C {
+        guard beamId != 0, end >= bodyStart + 17 else { throw ProtocolDecodeError.malformed }
+        msgType = encodedKind == 0x0B ? 0x04 : 0x08
+        pos = bodyStart + 16
+        retainedOffer = Wire.RetainedOutputOffer(high: try readU64(data, bodyStart + 1), low: try readU64(data, bodyStart + 9))
+    } else {
+        msgType = encodedKind
+        pos = bodyStart
+        retainedOffer = nil
+    }
 
     switch msgType {
     case 0x01: // user
@@ -4051,20 +4063,20 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         if end > baseOffset {
             let autoApprovedScope = data[baseOffset]
             if autoApprovedScope <= 2 {
-                let messageWithAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: 0, previewLines: []))
+                let messageWithAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 candidates.append(DecodedChatMessageCandidate(message: messageWithAuto, nextOffset: baseOffset + 1))
                 if end > baseOffset + 1,
                    let preview = try? FrameDecodeAccounting.withCheckpoint({
                        try decodeToolPreview(data: data, start: baseOffset + 1, end: end)
                    }) {
-                    let messageWithPreview = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: preview.kind, previewLines: preview.lines))
+                    let messageWithPreview = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: preview.kind, previewLines: preview.lines), retainedOutputOffer: retainedOffer)
                     try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     candidates.append(DecodedChatMessageCandidate(message: messageWithPreview, nextOffset: preview.nextOffset))
                 }
             }
         }
-        let messageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: 0, durationMs: duration, result: result, previewKind: 0, previewLines: []))
+        let messageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: 0, durationMs: duration, result: result, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
         try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         candidates.append(DecodedChatMessageCandidate(message: messageWithoutAuto, nextOffset: baseOffset))
         return candidates
@@ -4202,20 +4214,20 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         if end > stcBaseOffset {
             let stcAutoApprovedScope = data[stcBaseOffset]
             if stcAutoApprovedScope <= 2 {
-                let stcMessageWithAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []))
+                let stcMessageWithAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithAuto, nextOffset: stcBaseOffset + 1))
                 if end > stcBaseOffset + 1,
                    let stcPreview = try? FrameDecodeAccounting.withCheckpoint({
                        try decodeToolPreview(data: data, start: stcBaseOffset + 1, end: end)
                    }) {
-                    let stcMessageWithPreview = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: stcPreview.kind, previewLines: stcPreview.lines))
+                    let stcMessageWithPreview = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: stcPreview.kind, previewLines: stcPreview.lines), retainedOutputOffer: retainedOffer)
                     try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithPreview, nextOffset: stcPreview.nextOffset))
                 }
             }
         }
-        let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []))
+        let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []), retainedOutputOffer: retainedOffer)
         try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithoutAuto, nextOffset: stcBaseOffset))
         return stcCandidates

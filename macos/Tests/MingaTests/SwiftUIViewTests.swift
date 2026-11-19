@@ -1823,7 +1823,7 @@ struct MinibufferViewAccessibilityTests {
 
 @Suite("PickerOverlay semantic activation")
 struct PickerOverlayActivationTests {
-    @Test("Picker choice container reports loading and error state")
+    @Test("Picker reports status and leaves the last readable choice available after an error")
     @MainActor func pickerContainerStatus() throws {
         let state = PickerState()
         state.update(
@@ -1834,23 +1834,30 @@ struct PickerOverlayActivationTests {
         let loadingBody = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
             .inspect()
-        let loadingContainer = try #require(loadingBody.findAll(ViewType.Group.self).first {
+        let loadingContainer = try #require(loadingBody.findAll(ViewType.VStack.self).first {
             (try? $0.accessibilityLabel().string()) == "Find File choices"
         })
         #expect(try loadingContainer.accessibilityValue().string() == "Loading")
 
         state.update(
-            visible: true, selectedIndex: 0, filteredCount: 0, totalCount: 0,
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
             markedCount: 0, title: "Find File", query: "", hasPreview: false,
-            rawItems: [], actionMenu: nil, loadStatus: .error("permission denied")
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0, label: "Last readable page", description: "", annotation: "", matchPositions: [], activationID: 41),
+            ],
+            actionMenu: nil, loadStatus: .error("permission denied"), activationGeneration: 99
         )
         let errorBody = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
             .inspect()
-        let errorContainer = try #require(errorBody.findAll(ViewType.Group.self).first {
+        let errorContainer = try #require(errorBody.findAll(ViewType.VStack.self).first {
             (try? $0.accessibilityLabel().string()) == "Find File choices"
         })
         #expect(try errorContainer.accessibilityValue().string() == "Error: permission denied")
+        let choice = try #require(errorBody.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Last readable page"
+        })
+        #expect(!choice.isDisabled())
     }
 
     @Test("Picker choices expose selected marked and unavailable state")

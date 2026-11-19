@@ -197,33 +197,33 @@ public struct PickerOverlay: View {
 
     @ViewBuilder
     private func resultsList(maxListHeight: CGFloat) -> some View {
-        Group {
+        VStack(spacing: 0) {
             if case .loading = state.loadStatus {
                 HStack(spacing: Spacing.sm) {
                     ProgressView()
                         .controlSize(.small)
                     Text(state.title.isEmpty ? "Loading..." : "\(state.title)...")
                         .font(Typography.font(.emphasis))
-                        .foregroundStyle(theme.popupFg.opacity(0.35))
+                        .foregroundStyle(theme.popupFg.opacity(0.8))
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
-                .frame(maxHeight: maxListHeight)
                 .frame(minHeight: 48)
             } else if case .error(let message) = state.loadStatus {
                 Text(message)
                     .font(Typography.font(.emphasis))
-                    .foregroundStyle(theme.popupFg.opacity(0.35))
+                    .foregroundStyle(theme.popupFg)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .frame(maxHeight: maxListHeight)
                     .frame(minHeight: 48)
-            } else if state.items.isEmpty && !state.query.isEmpty {
+            }
+
+            if case .ready = state.loadStatus, state.items.isEmpty && !state.query.isEmpty {
                 Text("No matches")
                     .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .frame(maxHeight: maxListHeight)
                     .frame(minHeight: 48)
-            } else {
+            } else if !state.items.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
