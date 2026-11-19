@@ -802,8 +802,21 @@ defmodule MingaAgent.Providers.NativeTest do
         {:error, :unexpected_request}
       end
 
+      tool =
+        ReqLLM.Tool.new!(
+          name: "inspect_project",
+          description: "Read project information",
+          parameter_schema: [],
+          callback: fn _args -> {:ok, "project information"} end
+        )
+
       {:ok, pid} =
-        start_provider(tmp_dir: dir, model_selection: selection, llm_client: client)
+        start_provider(
+          tmp_dir: dir,
+          model_selection: selection,
+          llm_client: client,
+          tools: [tool]
+        )
 
       assert {:error, message} = send_prompt(pid, "Inspect the project")
       assert message =~ "does not explicitly support tools"
