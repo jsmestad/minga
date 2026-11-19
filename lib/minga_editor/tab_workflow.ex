@@ -26,6 +26,7 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.UI.Picker.AgentHistorySource
   alias MingaEditor.WorkspaceWorkflow
 
   @opaque staged_switch ::

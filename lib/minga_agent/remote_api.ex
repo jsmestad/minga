@@ -12,6 +12,7 @@ defmodule MingaAgent.RemoteAPI do
   alias MingaAgent.RemoteAPI.AttachResult
   alias MingaAgent.RemoteAPI.SessionInfo
   alias MingaAgent.Session
+  alias MingaAgent.Session.{ConnectionTarget, Transcript}
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
@@ -84,6 +85,30 @@ defmodule MingaAgent.RemoteAPI do
     with :ok <- authorize(session_id, token),
          {:ok, pid} <- SessionManager.get_session(session_id) do
       Session.unsubscribe(pid, client_pid)
+    end
+  end
+
+  @doc "Reads a bounded retained transcript page for a token-authorized session."
+  @spec transcript_history_before(
+          ConnectionTarget.t(),
+          String.t(),
+          ConnectionTarget.t() | Transcript.Cursor.t(),
+          pos_integer() | :tail,
+          1..64
+        ) :: Transcript.history_result() | {:error, term()}
+  def transcript_history_before(
+        %ConnectionTarget{session_id: id, session: pid},
+        token,
+        source,
+        anchor,
+        limit
+      ) do
+    with :ok <- authorize(id, token),
+         {:ok, ^pid} <- SessionManager.get_session(id) do
+      Session.transcript_history_before(pid, source, anchor, limit)
+    else
+      {:ok, _other_pid} -> {:error, :stale_target}
+      {:error, _reason} = error -> error
     end
   end
 

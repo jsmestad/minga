@@ -90,6 +90,14 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
              {50, {:assistant, "reply"}}
            ]
 
+    assert {:reset, :reset_generation} =
+             Session.transcript_history_before(session, initial.cursor, 50, 1)
+
+    assert {:ok, current, [%{id: 40, message: {:user, "loaded"}}], false} =
+             Session.transcript_history_before(session, loaded.cursor, 50, 1)
+
+    assert current == loaded.cursor
+
     assert loaded.pinned_ids == MapSet.new([50])
     assert loaded.next_id == 51
     assert {:unchanged, _} = Session.transcript_since(session, loaded.cursor)

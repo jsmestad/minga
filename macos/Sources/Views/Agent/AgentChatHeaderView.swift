@@ -46,6 +46,17 @@ public struct AgentChatHeaderView: View {
                 .foregroundStyle(theme.agentMutedFg)
 
             Button {
+                sendAction?(.executeCommand(name: "agent_retained_history"))
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(theme.agentMutedFg)
+                    .padding(Spacing.xs)
+            }
+            .buttonStyle(.plain)
+            .help("Read retained messages (SPC a H)")
+            .accessibilityLabel("Retained Agent history")
+
+            Button {
                 sendAction?(.executeCommand(name: "agent_toggle_help"))
             } label: {
                 Image(systemName: "questionmark.circle")

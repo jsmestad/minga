@@ -155,17 +155,20 @@ public struct AgentChatView: View {
 
     // MARK: - Messages
     private var olderMessagesOmittedIndicator: some View {
-        Text("Older messages omitted")
-            .font(Typography.font(.small, weight: .medium))
-            .foregroundStyle(theme.agentMutedFg)
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.xs)
-            .background(Capsule().fill(theme.agentCodeBg.opacity(0.75)))
-            .overlay(Capsule().strokeBorder(theme.agentCodeBorder.opacity(0.25), lineWidth: 1))
-            .frame(maxWidth: .infinity, alignment: .center)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Older messages omitted")
-            .accessibilityHint("Earlier session messages are outside the locally retained transcript.")
+        Button {
+            sendAction?(.executeCommand(name: "agent_retained_history"))
+        } label: {
+            Text("Browse earlier messages")
+                .font(Typography.font(.small, weight: .medium))
+                .foregroundStyle(theme.agentMutedFg)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.xs)
+                .background(Capsule().fill(theme.agentCodeBg.opacity(0.75)))
+                .overlay(Capsule().strokeBorder(theme.agentCodeBorder.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityHint("Earlier session messages are outside the current display.")
     }
 
 
