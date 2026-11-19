@@ -24,6 +24,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.State.Windows
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
+  alias MingaEditor.UI.Picker.{AgentSessionSource, Context}
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
@@ -514,6 +515,65 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert Enum.count(tab_bar.workspaces, &(&1.kind == :agent)) == 1
   end
 
+  test "Sessions rejects stale live rows after a same-process reset or a process replacement" do
+    {:ok, _, outgoing} = SessionManager.start_session([])
+    {:ok, first_id, first} = SessionManager.start_session([])
+    {:ok, replacement_id, replacement} = SessionManager.start_session([])
+    on_exit(fn -> Enum.each([outgoing, first, replacement], &stop_session/1) end)
+
+    {state, _, _} = state_with_active_agent_workspace(outgoing)
+    {state, _target, workspace} = add_inactive_picker_tab(state, first)
+    originally_displayed = live_picker_choice(state, first_id)
+
+    assert :ok = Session.new_session(first)
+    reset_id = Session.session_id(first)
+    refute reset_id == first_id
+
+    rejected = AgentSessionSource.on_select(originally_displayed, state)
+    assert Runtime.active_session(rejected.shell_runtime) == outgoing
+    assert prompt_text(rejected.workspace.agent_ui) == "restart draft"
+
+    reset_choice = live_picker_choice(rejected, reset_id)
+    selected = AgentSessionSource.on_select(reset_choice, rejected)
+    assert Runtime.active_session(selected.shell_runtime) == first
+
+    state =
+      install_picker_tab_bar(
+        state,
+        TabBar.set_workspace_session(state.shell_runtime.state.tab_bar, workspace.id, replacement)
+      )
+
+    rejected = AgentSessionSource.on_select(reset_choice, state)
+    assert Runtime.active_session(rejected.shell_runtime) == outgoing
+    assert prompt_text(rejected.workspace.agent_ui) == "restart draft"
+
+    fresh = live_picker_choice(rejected, replacement_id)
+    selected = AgentSessionSource.on_select(fresh, rejected)
+    assert Runtime.active_session(selected.shell_runtime) == replacement
+  end
+
+  test "Sessions selects a sessionless tab only while it has no Session" do
+    {:ok, _, outgoing} = SessionManager.start_session([])
+    {:ok, _, replacement} = SessionManager.start_session([])
+    on_exit(fn -> Enum.each([outgoing, replacement], &stop_session/1) end)
+
+    {state, _, _} = state_with_active_agent_workspace(outgoing)
+    {state, target, workspace} = add_inactive_picker_tab(state, nil)
+    empty_choice = live_picker_choice(state, target.id)
+
+    selected = AgentSessionSource.on_select(empty_choice, state)
+    assert TabBar.active(selected.shell_runtime.state.tab_bar).id == target.id
+    assert Runtime.active_session(selected.shell_runtime) == nil
+
+    tab_bar =
+      TabBar.set_workspace_session(state.shell_runtime.state.tab_bar, workspace.id, replacement)
+
+    updated = install_picker_tab_bar(state, tab_bar)
+    rejected = AgentSessionSource.on_select(empty_choice, updated)
+    assert Runtime.active_session(rejected.shell_runtime) == outgoing
+    assert prompt_text(rejected.workspace.agent_ui) == "restart draft"
+  end
+
   test "GUI workspace close stops the owned session and refreshes the active session UI" do
     {:ok, _session_id, session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(session) end)
@@ -811,6 +871,34 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
           %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
         )
     }
+  end
+
+  defp add_inactive_picker_tab(state, session) do
+    outgoing_tab = TabBar.active(state.shell_runtime.state.tab_bar)
+    {tab_bar, target} = TabBar.add(state.shell_runtime.state.tab_bar, :agent, "Target")
+    {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Target", session)
+
+    tab_bar =
+      tab_bar
+      |> TabBar.move_tab_to_workspace(target.id, workspace.id)
+      |> TabBar.set_workspace_session(workspace.id, session)
+      |> TabBar.switch_to(outgoing_tab.id)
+
+    {install_picker_tab_bar(state, tab_bar), target, workspace}
+  end
+
+  defp install_picker_tab_bar(state, tab_bar) do
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(state.shell_runtime.state, tab_bar)
+
+    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
+  end
+
+  defp live_picker_choice(state, id) do
+    state
+    |> Context.from_editor_state()
+    |> AgentSessionSource.candidates()
+    |> Enum.find(fn item -> elem(item.id, 0) == id end)
   end
 
   defp workspace_payload(%Workspace{payload: %WorkspaceAgent{} = payload}), do: payload
