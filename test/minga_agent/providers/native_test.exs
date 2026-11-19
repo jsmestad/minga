@@ -179,7 +179,7 @@ defmodule MingaAgent.Providers.NativeTest do
           Keyword.put(merged, :model_selection, selection)
       end
 
-    case Native.start_link(merged) do
+    case start_supervised({Native, merged}, id: make_ref(), restart: :temporary) do
       {:ok, pid} ->
         Process.put({__MODULE__, pid, :subscriber}, merged[:subscriber])
         {:ok, pid}
@@ -1785,6 +1785,98 @@ defmodule MingaAgent.Providers.NativeTest do
                _event ->
                  false
              end)
+    end
+
+    test "invalid declared arguments never build callbacks and corrected Native calls still execute",
+         %{
+           tmp_dir: dir
+         } do
+      schema = %{
+        "type" => "object",
+        "properties" => %{"limit" => %{"type" => "integer", "minimum" => 1, "maximum" => 4}},
+        "required" => ["limit"],
+        "additionalProperties" => false
+      }
+
+      for sdk? <- [false, true] do
+        name = if sdk?, do: "admission_sdk", else: "admission_generic"
+        effects = :atomics.new(2, [])
+        requests = :atomics.new(1, [])
+
+        metadata =
+          if sdk? do
+            %{
+              sdk_input:
+                ReqLLM.Tool.new!(
+                  name: name,
+                  description: "Inspect bounded entries",
+                  parameter_schema: schema,
+                  callback: fn _args -> raise "SDK validation must not execute its callback" end
+                )
+            }
+          else
+            %{}
+          end
+
+        spec =
+          Spec.new!(
+            name: name,
+            description: "Inspect bounded entries",
+            parameter_schema: schema,
+            metadata: metadata,
+            context_requirements: [:tool_context],
+            build: fn _context ->
+              :atomics.add(effects, 1, 1)
+
+              fn %{"limit" => limit} ->
+                :atomics.add(effects, 2, 1)
+                {:ok, "inspected #{limit}"}
+              end
+            end
+          )
+
+        client = fn _model, _messages, _opts ->
+          chunks =
+            case :atomics.add_get(requests, 1, 1) do
+              1 ->
+                [%{}, %{"limit" => "2"}, %{"limit" => 0}, %{"limit" => 5}, %{"limit" => 2}]
+                |> Enum.with_index()
+                |> Enum.map(fn {args, index} ->
+                  ReqLLM.StreamChunk.tool_call(name, args, %{
+                    id: "admission_#{index}",
+                    index: index
+                  })
+                end)
+                |> List.insert_at(-1, ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use}))
+
+              _continuation ->
+                [
+                  ReqLLM.StreamChunk.text("done"),
+                  ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+                ]
+            end
+
+          build_stream_response(chunks)
+        end
+
+        {:ok, pid} =
+          start_provider(
+            tmp_dir: dir,
+            llm_client: client,
+            tools: [spec],
+            config: agent_config(tool_approval: :none)
+          )
+
+        assert :ok = send_prompt(pid, "Inspect bounded entries")
+        events = collect_run_events()
+        results = for %Event.ToolEnd{name: ^name} = result <- events, do: result
+
+        assert Enum.count(results, & &1.is_error) == 4
+        assert Enum.any?(results, &(&1.is_error == false and &1.result == "inspected 2"))
+        assert :atomics.get(effects, 1) == 1
+        assert :atomics.get(effects, 2) == 1
+        assert Enum.any?(events, &match?(%Event.TextDelta{delta: "done"}, &1))
+      end
     end
 
     test "view refresh cannot discard a mutation already admitted to the owned view", %{
