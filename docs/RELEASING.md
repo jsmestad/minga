@@ -111,6 +111,33 @@ Before any later promotion, qualify the exact unchanged candidate from clean use
 
 Any later release approval must name the exact source, candidate handle, run/attempt, asset hashes and immutable qualification evidence. Expired assets require a new prepared generation and new qualification/approval, not an implicit rebuild. This preparation path contains no publication-capable job; Homebrew channel selection and any external publication need separate explicit authorization. Tags do not start a replacement build/publication path.
 
+## Prepare package-manager installs
+
+Use the verified standalone tarballs as inputs, not a separately rebuilt release. Ubuntu packages install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
+
+From the source checkout, use the release workflow's pinned Python and set `assets` to the directory containing the verified tarballs. Install `dpkg-deb` (provided by `dpkg` on Ubuntu) to build the Debian packages. Use the candidate's version in each command:
+
+```bash
+assets=/absolute/path/to/verified/assets
+scripts/build-tui-deb "$assets/minga_linux_x86_64.tar.gz" --version 0.1.0 --arch amd64 --output "$assets"
+scripts/build-tui-deb "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 --arch arm64 --output "$assets"
+scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" --x86-64 "$assets/minga_macos_x86_64.tar.gz" > "$assets/minga.rb"
+```
+
+Install a local Ubuntu package with `sudo apt install "$assets/minga_0.1.0_amd64.deb"`. After publication, macOS users can install from the tap with `brew install jsmestad/minga/minga`.
+
+Before release approval, install and remove the `.deb` on clean Ubuntu 24.04 hosts of both supported architectures and run `minga --version` from `PATH`. Test the generated formula on both macOS architectures against the exact assets it names. Do not update the tap until those assets are available and their SHA-256 hashes match the formula.
+
+For Arch Linux and Omarchy on x86-64, build a local pacman package on an Arch host with `base-devel` installed. In an empty build directory, place `packaging/arch/PKGBUILD`, the checkout's `LICENSE`, and the verified `minga_linux_x86_64.tar.gz` and `SHA256SUMS.txt`. Set `pkgver` to the candidate version. Then run:
+
+```bash
+makepkg --cleanbuild
+sudo pacman -U ./minga-0.1.0-1-x86_64.pkg.tar.zst
+minga --version
+```
+
+Use `sudo pacman -R minga` to remove it. Qualify the installed package on Arch or Omarchy before offering it for download. This recipe does not publish to the AUR.
+
 ## Running the standalone TUI
 
 Extract an archive into an empty directory and run its launcher. Keep the release directory intact when adding the launcher to `PATH`.

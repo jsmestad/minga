@@ -522,7 +522,8 @@ jobs:
               scripts/check-release-contents scripts/release_candidate.py \
               mix/release_erts.ex mix/tasks/release.tui.ex mix.exs mix.lock rel macos/Resources/bin/minga-tui \
               test/scripts/release_erts_producer_test.py test/scripts/release_contents_test.py \
-              test/scripts/release_candidate_test.py; then
+              test/scripts/release_candidate_test.py scripts/render-tui-formula test/scripts/render_tui_formula_test.py \
+              scripts/build-tui-deb test/scripts/build_tui_deb_test.py; then
               changed=false
             fi
           fi
@@ -554,6 +555,10 @@ jobs:
           python3 test/scripts/release_erts_producer_test.py
           python3 test/scripts/release_contents_test.py
           python3 test/scripts/release_candidate_test.py
+          python3 -B test/scripts/render_tui_formula_test.py
+      - name: Verify Debian package assembly
+        if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
+        run: python3 -B test/scripts/build_tui_deb_test.py
 
   ci-gate:
     name: CI gate
