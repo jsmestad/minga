@@ -81,7 +81,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec, as: ToolSpec
   alias MingaAgent.Tools
-  alias MingaAgent.Tools.Notebook
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Todo
   alias Minga.Config
@@ -3238,8 +3237,7 @@ defmodule MingaAgent.Providers.Native do
     |> registry_tools(config, hook_runner)
   end
 
-  # Builds tools that interact with the provider's internal state (todo, notebook).
-  # These are created in init with a closure over the provider PID.
+  # Builds the provider-owned checklist tools.
   #
   # NOTE: Tool callbacks close over `provider_pid` and make GenServer.call back
   # to the provider. This works because tools run in a spawned Task, not in the
@@ -3285,31 +3283,6 @@ defmodule MingaAgent.Providers.Native do
         description: "Read the current task checklist to see what's done and what remains.",
         parameter_schema: %{"type" => "object", "properties" => %{}},
         callback: fn _args -> Todo.read(provider_pid) end
-      ),
-      Tool.new!(
-        name: "notebook_write",
-        description: """
-        Write planning notes, intermediate reasoning, or working state to a
-        scratchpad. Content is not shown to the user. Use this for complex
-        multi-step reasoning or to track state across tool calls.
-        """,
-        parameter_schema: %{
-          "type" => "object",
-          "properties" => %{
-            "content" => %{
-              "type" => "string",
-              "description" => "The content to write to the notebook (replaces previous content)"
-            }
-          },
-          "required" => ["content"]
-        },
-        callback: fn args -> Notebook.write(provider_pid, args["content"] || "") end
-      ),
-      Tool.new!(
-        name: "notebook_read",
-        description: "Read the current scratchpad notes.",
-        parameter_schema: %{"type" => "object", "properties" => %{}},
-        callback: fn _args -> Notebook.read(provider_pid) end
       )
     ]
   end
