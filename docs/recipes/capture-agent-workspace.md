@@ -4,6 +4,8 @@ Use fixture stills to inspect layout, and a real native session to prove input a
 
 Both channels gate acceptance of macOS agent-workspace UI work, not the start of focused repairs. The [Go renderer capture track](https://github.com/jsmestad/minga/issues/3445) proves terminal output separately; it does not replace either native channel.
 
+To exercise setup, live work, recovery, and review in one disposable project on both frontends, use the [Agent working-day scenario](agent-working-day.md).
+
 ## Repeatable production-view stills
 
 From a development checkout with the pinned editor tools and normal macOS build prerequisites installed, run:
