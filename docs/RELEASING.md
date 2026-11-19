@@ -4,7 +4,23 @@ Prepare installable builds before deciding whether to release them. Candidate pr
 
 These are ordinary public build artifacts. They are not GitHub Releases. Neither workflow creates a tag, publishes a release, updates the Homebrew tap or edits the changelog. Version and release-note changes go through reviewed pull requests.
 
-## Prepare a candidate
+## Prepare and test rolling Homebrew builds
+
+Each push to protected `main` prepares the two macOS TUI archives and the signed, notarized Apple Silicon DMG. The workflow builds the pushed commit, assigns the version `0.1.0-dev.N` (where `N` is the workflow run number) and uploads an immutable candidate handle and a separate `homebrew-recipes` artifact. A rerun has a distinct attempt but retains the same version. It must never replace an already published set of bytes.
+
+`minga --version` reports `0.1.0-dev.N`. Homebrew recipes use `0.1.0betaN` so Homebrew orders successive builds correctly and upgrades to the first `0.1.0` stable release. The formula installs `minga`; the cask installs `Minga.app` without adding a second shell command. Recipes point to versioned release filenames, such as `minga_0.1.0-dev.123_macos_aarch64.tar.gz` and `Minga_0.1.0-dev.123.dmg`. Candidate files keep the unversioned names in their manifest; rename only the files that an approved publisher uploads, not the tested contents.
+
+To rehearse an upgrade without publishing, independently verify two completed candidates using the exact run/attempt and manifest handles. On a clean Mac with Homebrew 7 or newer and `jq`, put each candidate's verified payloads (under their manifest names), generated recipes and the independent verifier's `receipt.json` (named `verification-receipt.json`) in a separate directory.
+
+```bash
+scripts/qualify-homebrew-upgrade /path/to/previous /path/to/next
+```
+
+The script checks the payloads against the independent receipts and regenerates recipes to confirm they match before installing. It copies the unchanged recipes into a disposable local tap and seeds an isolated Homebrew download cache at the paths for their release URLs. Run it on both macOS architectures for the formula and on Apple Silicon for the cask. It checks the installed runtime version and cask signature without bypassing Gatekeeper. Record native GUI launch and interaction evidence separately. Before the first stable cut, also run the rehearsal with the last rolling build and the first stable candidate, generating stable recipes with `--dmg` and `--output`.
+
+Nothing here creates GitHub Release tags, uploads public release assets or mutates the real tap. Those actions still require separate authorization.
+
+## Prepare a stable candidate
 
 The preparation workflow builds a full reviewed source SHA from protected-main history. The source version must match `mix.exs`, and the GUI version must match its embedded release. The producing workflow revision is recorded separately from the selected source SHA.
 
@@ -73,7 +89,7 @@ A configured secret name does not prove the credential works. The actual build m
 
 A candidate handle is the manifest Actions artifact ID plus the SHA256 of `manifest.json`, not the ZIP checksum. The manifest does not contain its own final artifact ID or hash.
 
-The versioned manifest binds the repository, full source SHA, source/app version, producing workflow path/revision, run ID and attempt. It includes all five final payload names, targets, sizes, SHA256 values, immutable artifact IDs and ZIP transport digests, plus actual toolchain and declared validation evidence. `SHA256SUMS.txt` covers exactly the five final payloads; its identity is also recorded.
+The versioned manifest binds the repository, full source SHA, source/app version, producing workflow path/revision, run ID and attempt. It records the names, targets, sizes, SHA256 values, immutable artifact IDs and ZIP transport digests for all three rolling macOS payloads or all five stable payloads, plus actual toolchains and declared validation evidence. `SHA256SUMS.txt` covers exactly that inventory.
 
 Payload archives contain only the named payload and its build-facts JSON. Checksums and the manifest have separate immutable archives. The verifier hashes the actual downloaded ZIP bytes and each final payload. It checks the entire archive inventory without extracting or executing downloaded files.
 
@@ -83,13 +99,13 @@ A failed build can retain sanitized `diagnostic-only-*` artifacts. They are not 
 
 ## Verify the exact uploaded bytes
 
-Use the values recorded for the successful preparation, not values inferred from the manifest itself. Set `MANIFEST_ID`, `MANIFEST_SHA`, `SOURCE_SHA`, `WORKFLOW_SHA`, `PREPARATION_RUN` and `PREPARATION_ATTEMPT` to that recorded candidate, then start the independent rehearsal:
+Use the values recorded for the successful preparation, not values inferred from the manifest itself. Set `MANIFEST_ID`, `MANIFEST_SHA`, `SOURCE_SHA`, `VERSION`, `WORKFLOW_SHA`, `PREPARATION_RUN` and `PREPARATION_ATTEMPT` to that recorded candidate, then start the independent rehearsal:
 
 ```bash
-gh workflow run verify-release-candidate.yml --repo jsmestad/minga --ref main -f manifest_artifact_id="$MANIFEST_ID" -f manifest_sha256="$MANIFEST_SHA" -f source_sha="$SOURCE_SHA" -f version=0.1.0 -f workflow_sha="$WORKFLOW_SHA" -f run_id="$PREPARATION_RUN" -f run_attempt="$PREPARATION_ATTEMPT"
+gh workflow run verify-release-candidate.yml --repo jsmestad/minga --ref main -f manifest_artifact_id="$MANIFEST_ID" -f manifest_sha256="$MANIFEST_SHA" -f source_sha="$SOURCE_SHA" -f version="$VERSION" -f workflow_sha="$WORKFLOW_SHA" -f run_id="$PREPARATION_RUN" -f run_attempt="$PREPARATION_ATTEMPT"
 ```
 
-The rehearsal uses trusted protected-main verifier code and read-only API access. It checks the producing workflow/run/attempt through GitHub, downloads by immutable artifact ID, and validates the expected context, raw ZIP digests, safe inventory, final-byte hashes and checksum file. It does not build, sign, repackage or execute the candidate. A successful run retains a `candidate-verification-<run>-<attempt>` receipt containing the exact handle, context, five hashes and checks performed.
+The rehearsal uses trusted protected-main verifier code and read-only API access. It checks the producing workflow/run/attempt through GitHub, downloads by immutable artifact ID, and validates the expected context, raw ZIP digests, safe inventory, final-byte hashes and checksum file. It does not build, sign, repackage or execute the candidate. A successful run retains a `candidate-verification-<run>-<attempt>` receipt containing the exact handle, context, payload hashes and checks performed.
 
 For a local download, take `PAYLOAD_ID`, `PAYLOAD_NAME`, `ZIP_DIGEST` and `PAYLOAD_SHA` from that verified manifest. Work in a fresh directory and verify the received archive before unpacking:
 

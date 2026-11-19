@@ -1,6 +1,8 @@
 name: Prepare Release Candidate
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       source_sha:
@@ -33,6 +35,7 @@ jobs:
       version: ${{ steps.source.outputs.version }}
       context: ${{ steps.source.outputs.context }}
       python_version: ${{ steps.source.outputs.python_version }}
+      matrix: ${{ steps.source.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,7 +46,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           SOURCE_VERSION: ${{ inputs.version }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         shell: bash
@@ -63,19 +66,34 @@ jobs:
           fi
           python_version=$(jq -er '.build_python_version | select(type == "string")' "$RUNNER_TEMP/source-erts-inputs.json")
           [[ "$python_version" =~ ^3\.[0-9]+\.[0-9]+$ ]]
-          python3 - <<'PY'
+          SOURCE_VERSION=$(python3 - <<'PY'
           import os, pathlib, re
           source = pathlib.Path(os.environ['RUNNER_TEMP'], 'source-mix.exs').read_text()
           versions = re.findall(r'^\s*@version "([^"]+)"', source, re.M)
-          assert versions == [os.environ['SOURCE_VERSION']], 'Source/app version mismatch'
+          assert len(versions) == 1, 'Missing unique source version'
+          if os.environ["GITHUB_EVENT_NAME"] == "push":
+              assert re.fullmatch(r"\d+\.\d+\.\d+", versions[0]), "Rolling builds require a numeric source version"
+              print(versions[0] + "-dev." + os.environ["GITHUB_RUN_NUMBER"])
+          else:
+              assert versions == [os.environ["SOURCE_VERSION"]], "Source/app version mismatch"
+              print(versions[0])
           pins = dict(line.split() for line in pathlib.Path(os.environ['RUNNER_TEMP'], 'source-tool-versions').read_text().splitlines() if line.strip())
           assert pins == {'elixir': os.environ['ELIXIR_VERSION'], 'erlang': os.environ['OTP_VERSION'], 'zig': os.environ['NATIVE_ZIG_VERSION'], 'golang': os.environ['GO_VERSION']}, 'Source tool pins differ from trusted preparation pins'
           PY
+          )
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/run.json"
-          jq -e --arg sha "$WORKFLOW_SHA" --argjson attempt "$GITHUB_RUN_ATTEMPT" '.head_sha == $sha and .run_attempt == $attempt and .event == "workflow_dispatch" and .path == ".github/workflows/release.yml"' "$RUNNER_TEMP/run.json"
+          jq -e --arg sha "$WORKFLOW_SHA" --arg event "$GITHUB_EVENT_NAME" --argjson attempt "$GITHUB_RUN_ATTEMPT" --argjson number "$GITHUB_RUN_NUMBER" '.head_sha == $sha and .run_attempt == $attempt and .run_number == $number and .event == $event and .path == ".github/workflows/release.yml"' "$RUNNER_TEMP/run.json"
           context=$(jq -cn --arg repository "$GITHUB_REPOSITORY" --arg source_sha "$SOURCE_SHA" --arg version "$SOURCE_VERSION" --arg workflow_sha "$WORKFLOW_SHA" --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" --arg started "$(jq -r .run_started_at "$RUNNER_TEMP/run.json")" '{repository:$repository,source_sha:$source_sha,version:$version,workflow_path:".github/workflows/release.yml",workflow_sha:$workflow_sha,run_id:$run_id,run_attempt:$run_attempt,run_started_at:$started}')
-          printf 'source_sha=%s\nversion=%s\ncontext=%s\n' "$SOURCE_SHA" "$SOURCE_VERSION" "$context" >> "$GITHUB_OUTPUT"
-          printf 'python_version=%s\n' "$python_version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            test "$SOURCE_SHA" = "$WORKFLOW_SHA"
+            context=$(jq -c '. + {channel:"homebrew"}' <<< "$context")
+          fi
+          matrix=$(jq -c --arg event "$GITHUB_EVENT_NAME" '{include: (if $event == "push" then map(select(.os == "macos")) else . end)}' .github/release-targets.json)
+          {
+            printf 'matrix=%s\n' "$matrix"
+            printf 'source_sha=%s\nversion=%s\ncontext=%s\n' "$SOURCE_SHA" "$SOURCE_VERSION" "$context"
+            printf 'python_version=%s\n' "$python_version"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Prepare ${{ matrix.filename }}
@@ -84,43 +102,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            os: linux
-            arch: x86_64
-            uname: x86_64
-            goarch: amd64
-            filename: minga_linux_x86_64.tar.gz
-            gui: false
-          - runner: ubuntu-24.04-arm
-            os: linux
-            arch: aarch64
-            uname: aarch64
-            goarch: arm64
-            filename: minga_linux_aarch64.tar.gz
-            gui: false
-          - runner: macos-15
-            os: macos
-            arch: aarch64
-            uname: arm64
-            goarch: arm64
-            filename: minga_macos_aarch64.tar.gz
-            gui: false
-          - runner: macos-15-intel
-            os: macos
-            arch: x86_64
-            uname: x86_64
-            goarch: amd64
-            filename: minga_macos_x86_64.tar.gz
-            gui: false
-          - runner: macos-15
-            os: macos
-            arch: aarch64
-            uname: arm64
-            goarch: arm64
-            filename: Minga.dmg
-            gui: true
+      matrix: ${{ fromJSON(needs.validate.outputs.matrix) }}
     defaults:
       run:
         shell: bash
@@ -148,6 +130,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(jq -r .source_sha <<< "$CANDIDATE_CONTEXT")"
+          if [ "$(jq -r '.channel // ""' <<< "$CANDIDATE_CONTEXT")" = homebrew ]; then
+            printf 'MINGA_ROLLING_VERSION=%s\n' "$(jq -r .version <<< "$CANDIDATE_CONTEXT")" >> "$GITHUB_ENV"
+          fi
           test "$(uname -m)" = '${{ matrix.uname }}'
           if [ "$TARGET_OS" = macos ]; then test "$(uname -s)" = Darwin; else test "$(uname -s)" = Linux; fi
           root="$RUNNER_TEMP/candidate-$PAYLOAD"
@@ -281,7 +266,12 @@ jobs:
           mix app.assemble --output-path-file "$CANDIDATE_ROOT/app-path"
           IFS= read -r app < "$CANDIDATE_ROOT/app-path"
           [[ "$app" = /*/Minga.app ]]
-          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" --target macos_aarch64 --app "$app"
+          if [ -n "${MINGA_ROLLING_VERSION:-}" ]; then
+            "$GITHUB_WORKSPACE/trusted/scripts/stamp-rolling-app" "$app" "$MINGA_ROLLING_VERSION"
+          fi
+          version_args=(--target macos_aarch64 --app "$app")
+          if [ -n "${MINGA_ROLLING_VERSION:-}" ]; then version_args+=(--rolling-version "$MINGA_ROLLING_VERSION"); fi
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" "${version_args[@]}"
           xcodebuild -version > "$CANDIDATE_ROOT/xcode.txt"
           jq --arg xcode "$(cat "$CANDIDATE_ROOT/xcode.txt")" '. + {xcode:$xcode}' "$CANDIDATE_ROOT/toolchains.json" > "$CANDIDATE_ROOT/toolchains.next.json"
           mv "$CANDIDATE_ROOT/toolchains.next.json" "$CANDIDATE_ROOT/toolchains.json"
@@ -354,7 +344,9 @@ jobs:
           app="$mount/Minga.app"
           codesign --verify --deep --strict "$app"
           codesign -dv --verbose=4 "$app" 2>&1 | grep -F 'Authority=Developer ID Application'
-          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" --target macos_aarch64 --app "$app"
+          version_args=(--target macos_aarch64 --app "$app")
+          if [ -n "${MINGA_ROLLING_VERSION:-}" ]; then version_args+=(--rolling-version "$MINGA_ROLLING_VERSION"); fi
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" "${version_args[@]}"
           helper="$app/Contents/Resources/bin/minga-ipc"
           codesign --verify --strict "$helper"
           "$helper" nonce | grep -E '^[0-9a-f-]{36}$'
@@ -366,6 +358,8 @@ jobs:
           test "$probe_status" = 3
           MINGA_APP_PATH="$app" RELEASE_TMP="$CANDIDATE_ROOT/release-smoke" "$app/Contents/Resources/bin/minga-tui" --version > "$CANDIDATE_ROOT/version.txt"
           grep -Fx "minga $(jq -r .version "$CANDIDATE_ROOT/context.json")" "$CANDIDATE_ROOT/version.txt"
+          MINGA_APP_PATH="$app" "$app/Contents/Resources/bin/minga" --version > "$CANDIDATE_ROOT/gui-version.txt"
+          cmp "$CANDIDATE_ROOT/version.txt" "$CANDIDATE_ROOT/gui-version.txt"
           "$app/Contents/Resources/release/bin/minga_macos" eval 'erts = to_string(:erlang.system_info(:version)); arch = to_string(:erlang.system_info(:system_architecture)); if erts != System.fetch_env!("EXPECTED_ERTS") or not String.starts_with?(arch, "aarch64-"), do: raise("Packaged ERTS version/architecture mismatch"); {:ok, _} = Application.ensure_all_started(:crypto); if :crypto.hash(:sha256, "minga-package-probe") != <<0x1b45baf6461706ab791b75f5a031660a827efc4f51980372da69e5217d1d5257::256>>, do: raise("Packaged crypto NIF result mismatch"); {:ok, db} = Exqlite.Sqlite3.open(":memory:"); :ok = Exqlite.Sqlite3.close(db); IO.puts("packaged ERTS, crypto and SQLite NIFs " <> erts <> " " <> arch)'
       - name: Record actual successful package evidence
         run: |
@@ -475,6 +469,7 @@ jobs:
             echo '### Complete immutable preparation (not installed/UI/X0 qualification)'
             printf 'Manifest artifact ID: %s\n\nManifest-file SHA256: %s\n\n' "$MANIFEST_ID" "$manifest_sha"
             printf 'Source: %s; workflow revision: %s; run/attempt: %s/%s\n\n' "$(jq -r .source_sha context.json)" "$(jq -r .workflow_sha context.json)" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'Version: %s\n\n' "$(jq -r .version context.json)"
             echo '```'
             cat SHA256SUMS.txt
             echo '```'
@@ -485,6 +480,31 @@ jobs:
         with:
           name: preparation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: preparation-receipt.json
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+          overwrite: false
+      - name: Render unpublished Homebrew recipes from verified payloads
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir homebrew-input
+          jq -r '.payloads[] | [.artifact.id, .filename] | @tsv' manifest.json > payload-locations.tsv
+          while IFS=$'\t' read -r id name; do
+            unzip -p "downloads/$id.zip" "$name" > "homebrew-input/$name"
+          done < payload-locations.tsv
+          (cd homebrew-input && sha256sum --check ../SHA256SUMS.txt)
+          scripts/render-tui-formula --version "$(jq -er .version context.json)" \
+            --arm64 homebrew-input/minga_macos_aarch64.tar.gz \
+            --x86-64 homebrew-input/minga_macos_x86_64.tar.gz \
+            --dmg homebrew-input/Minga.dmg --output homebrew-recipes
+          cp preparation-receipt.json homebrew-recipes/
+      - name: Retain unpublished Homebrew recipes and candidate receipt
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-recipes-${{ github.run_id }}-${{ github.run_attempt }}
+          path: homebrew-recipes/
           if-no-files-found: error
           retention-days: ${{ env.RETENTION_DAYS }}
           overwrite: false

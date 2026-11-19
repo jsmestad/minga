@@ -22,6 +22,7 @@ defmodule Minga.MixProject do
   use Mix.Project
 
   @version "0.1.0"
+  @rolling_version_pattern ~r/\A#{Regex.escape(@version)}-dev\.[1-9][0-9]*\z/
   @generated_language_aliases_path ".generated/language_aliases/elixir/lib"
   @generated_elixir_path ".generated/protocol/elixir/lib"
   @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
@@ -30,7 +31,7 @@ defmodule Minga.MixProject do
   def project do
     [
       app: :minga,
-      version: @version,
+      version: project_version(Mix.env()),
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       test_paths: test_paths(Mix.env()),
@@ -204,6 +205,23 @@ defmodule Minga.MixProject do
       ]
     ]
   end
+
+  @spec project_version(atom()) :: String.t()
+  defp project_version(:prod) do
+    case System.get_env("MINGA_ROLLING_VERSION") do
+      nil ->
+        @version
+
+      version ->
+        if Regex.match?(@rolling_version_pattern, version) do
+          version
+        else
+          Mix.raise("MINGA_ROLLING_VERSION must be #{@version}-dev.N with a positive decimal N")
+        end
+    end
+  end
+
+  defp project_version(_env), do: @version
 
   defp elixirc_paths(:test),
     do: [

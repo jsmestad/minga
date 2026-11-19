@@ -33,6 +33,10 @@ LEGACY_PAYLOADS = {
     "minga_linux_aarch64": {"os": "linux", "arch": "aarch64"},
 }
 MANIFEST_PAYLOADS = {1: LEGACY_PAYLOADS, MANIFEST_VERSION: PAYLOADS}
+HOMEBREW_MANIFEST_VERSION = 3
+MANIFEST_PAYLOADS[HOMEBREW_MANIFEST_VERSION] = {
+    name: target for name, target in PAYLOADS.items() if target["os"] == "macos"
+}
 LEGACY_PINS = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": "1.26.4", "native_zig": "0.16.0"}
 PINS = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": "1.26.4", "native_zig": "0.16.0"}
 CONTEXT_KEYS = {"repository", "source_sha", "version", "workflow_path", "workflow_sha", "run_id", "run_attempt", "run_started_at"}
@@ -84,12 +88,21 @@ def positive_int(value):
 
 
 def validate_context(context):
-    require(isinstance(context, dict) and set(context) == CONTEXT_KEYS, "invalid context inventory")
+    require(isinstance(context, dict), "invalid context inventory")
+    if "channel" in context:
+        require(set(context) == CONTEXT_KEYS | {"channel"} and context["channel"] == "homebrew",
+                "invalid Homebrew context inventory")
+    else:
+        require(set(context) == CONTEXT_KEYS, "invalid context inventory")
     require(isinstance(context["repository"], str) and len(context["repository"]) <= 200 and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", context["repository"]) is not None, "invalid repository")
     for field in ("source_sha", "workflow_sha"):
         require(isinstance(context[field], str) and SHA.fullmatch(context[field]), f"invalid full {field}")
     require(context["workflow_path"] == ".github/workflows/release.yml", "wrong producing workflow")
     require(isinstance(context["version"], str) and len(context["version"]) <= 128 and re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", context["version"]), "invalid version")
+    if "channel" in context:
+        require(context["source_sha"] == context["workflow_sha"]
+                and re.fullmatch(r"\d+\.\d+\.\d+-dev\.[1-9][0-9]*", context["version"]),
+                "invalid rolling Homebrew source or version")
     require(positive_int(context["run_id"]) and positive_int(context["run_attempt"]), "invalid run generation")
     timestamp(context["run_started_at"])
     return context
@@ -144,10 +157,12 @@ def validate_artifacts(artifacts, context, labels):
 
 def verification_artifacts(artifacts, context):
     """Select one complete supported generation inventory, never mixed formats."""
-    require(isinstance(artifacts, list) and any(len(artifacts) == len(payloads) + 2 for payloads in MANIFEST_PAYLOADS.values()),
+    schemas = (HOMEBREW_MANIFEST_VERSION,) if "channel" in context else (1, MANIFEST_VERSION)
+    require(isinstance(artifacts, list) and any(len(artifacts) == len(MANIFEST_PAYLOADS[schema]) + 2 for schema in schemas),
             "missing, duplicate or unexpected artifacts")
     by_name = artifact_inventory(artifacts, context)
-    for schema, payloads in MANIFEST_PAYLOADS.items():
+    for schema in schemas:
+        payloads = MANIFEST_PAYLOADS[schema]
         labels = [*payloads, "checksums", "manifest"]
         if set(by_name) == {artifact_name(context, label) for label in labels}:
             return schema, {label: by_name[artifact_name(context, label)] for label in labels}
@@ -330,12 +345,13 @@ def main(argv=None):
             write_json(args.receipt, receipt)
             print(json.dumps(receipt, sort_keys=True))
         else:
-            labels = list(PAYLOADS) + (["checksums"] if args.command == "create" else [])
+            schema = HOMEBREW_MANIFEST_VERSION if "channel" in context else MANIFEST_VERSION
+            labels = list(MANIFEST_PAYLOADS[schema]) + (["checksums"] if args.command == "create" else [])
             artifacts = validate_artifacts(metadata, context, labels)
             if args.command == "create":
-                write_json(args.output, candidate_manifest(context, artifacts, args.downloads, MANIFEST_VERSION))
+                write_json(args.output, candidate_manifest(context, artifacts, args.downloads, schema))
             else:
-                args.output.write_bytes(checksum_bytes(payload_descriptors(context, artifacts, args.downloads, MANIFEST_VERSION)))
+                args.output.write_bytes(checksum_bytes(payload_descriptors(context, artifacts, args.downloads, schema)))
     except (CandidateError, OSError, ValueError, TypeError, KeyError, AttributeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
         print(f"candidate unavailable: {error}", file=sys.stderr)
         return 1
