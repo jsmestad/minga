@@ -6,6 +6,7 @@ defmodule MingaAgent.ModelResolver do
   Restore validates the persisted exact route against its current source-owned declaration and never substitutes another route.
   """
 
+  alias MingaAgent.CodexModels
   alias MingaAgent.Config
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot
@@ -372,10 +373,17 @@ defmodule MingaAgent.ModelResolver do
       |> Keyword.put(:backend_spec, context.spec)
       |> Keyword.put(:config, context.config)
       |> Keyword.put(:credential_snapshot, context.snapshot)
+      |> Keyword.put_new(:codex_models, {:error, :not_loaded})
 
     case candidates(candidate_opts) do
-      [%ModelCandidate{selection: selection} | _rest] -> {:ok, selection}
-      [] -> {:error, :no_available_model}
+      [%ModelCandidate{selection: selection} | _rest] ->
+        {:ok, selection}
+
+      [] when is_struct(context.snapshot.oauth_ref, OAuth) ->
+        route_error("Choose a model offered by your Codex account in /model.")
+
+      [] ->
+        {:error, :no_available_model}
     end
   end
 
@@ -742,6 +750,7 @@ defmodule MingaAgent.ModelResolver do
   @spec build_candidates(map()) :: [ModelCandidate.t()]
   defp build_candidates(context) do
     catalog = models(context.opts)
+    inventory = Keyword.get(context.opts, :codex_models, :unchecked)
 
     opts =
       context.opts
@@ -760,12 +769,11 @@ defmodule MingaAgent.ModelResolver do
 
     intents
     |> Enum.reduce([], fn intent, selections ->
-      case resolve_raw_intent(intent, resolution_context) do
-        {:ok, selection} ->
-          [selection | selections]
-
-        {:error, _reason} ->
-          selections
+      with {:ok, selection} <- resolve_raw_intent(intent, resolution_context),
+           true <- candidate_available?(selection, inventory) do
+        [selection | selections]
+      else
+        _unavailable -> selections
       end
     end)
     |> Enum.uniq_by(&ModelSelection.id/1)
@@ -1236,4 +1244,18 @@ defmodule MingaAgent.ModelResolver do
 
   @spec correction(String.t()) :: {:error, resolution_error()}
   defp correction(message), do: {:error, {:selection_correction_required, message}}
+
+  @spec candidate_available?(ModelSelection.t(), CodexModels.result() | :unchecked) :: boolean()
+  defp candidate_available?(selection, {:ok, inventory}) do
+    case selection.credential do
+      %OAuth{} = credential ->
+        CodexModels.permits?(inventory, credential, selection.route.execution.provider_model_id)
+
+      %ApiKey{} ->
+        true
+    end
+  end
+
+  defp candidate_available?(%ModelSelection{credential: %OAuth{}}, {:error, _reason}), do: false
+  defp candidate_available?(_selection, _inventory), do: true
 end

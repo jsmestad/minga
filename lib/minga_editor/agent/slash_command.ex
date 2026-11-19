@@ -407,6 +407,21 @@ defmodule MingaEditor.Agent.SlashCommand do
   def slash_command?("/" <> _), do: true
   def slash_command?(_), do: false
 
+  @doc "Detects indented credential commands that must never be sent as ordinary prompts."
+  @spec indented_credential_command?(String.t()) :: boolean()
+  def indented_credential_command?("/" <> _), do: false
+
+  def indented_credential_command?(text) do
+    case String.trim_leading(text) do
+      "/" <> rest ->
+        {command, _args} = parse_command(rest)
+        command in ["auth", "login"]
+
+      _ ->
+        false
+    end
+  end
+
   @doc "Returns true when a slash command may contain secrets and must not enter prompt history."
   @spec sensitive_command?(String.t()) :: boolean()
   def sensitive_command?("/" <> rest) do
@@ -418,7 +433,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec sensitive_parsed_command?(String.t(), String.t()) :: boolean()
   defp sensitive_parsed_command?("login", args) do
-    String.contains?(String.downcase(args), "--complete")
+    login_args(args) not in [[], ["openai"], ["--manual"], ["openai", "--manual"]]
   end
 
   defp sensitive_parsed_command?("auth", args) do
@@ -429,13 +444,12 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec sensitive_auth_args?(String.t()) :: boolean()
   defp sensitive_auth_args?(args) do
-    case String.split(String.trim(args), " ", parts: 3, trim: true) do
+    case auth_args(args) do
+      [""] -> false
       ["revoke"] -> false
-      ["revoke", _provider] -> false
-      ["revoke", _provider, _extra] -> true
-      [_provider] -> false
-      [_provider, _key | _rest] -> true
-      [] -> false
+      ["revoke", provider] -> String.downcase(provider) not in revoke_providers()
+      [provider] -> is_nil(Credentials.env_var_for(String.downcase(provider)))
+      _inline_or_extra_args -> true
     end
   end
 
@@ -533,7 +547,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_model(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp do_model(state, "") do
-    {:ok, PickerUI.open(state, MingaEditor.UI.Picker.AgentModelSource)}
+    {:ok, MingaEditor.UI.Picker.AgentModelSource.open(state)}
   end
 
   defp do_model(state, model) do
@@ -780,9 +794,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp do_auth(state, ""), do: auth_status(state)
 
   defp do_auth(state, args) do
-    parts = String.split(String.trim(args), " ", parts: 3)
-
-    case parts do
+    case auth_args(args) do
       ["revoke", provider] ->
         do_auth_revoke(state, String.downcase(provider))
 
@@ -802,6 +814,12 @@ defmodule MingaEditor.Agent.SlashCommand do
         )
     end
   end
+
+  @spec auth_args(String.t()) :: [String.t()]
+  defp auth_args(args), do: args |> String.trim() |> String.split(" ", parts: 3)
+
+  @spec revoke_providers() :: [String.t()]
+  defp revoke_providers, do: ["openai_codex" | Credentials.known_providers()]
 
   @spec do_auth_revoke(state(), String.t()) :: state()
   defp do_auth_revoke(state, "openai_codex") do
@@ -832,7 +850,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     else
       emit_system_message(
         state,
-        "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}, openai_codex"
+        "Choose a supported provider to revoke: #{Enum.join(revoke_providers(), ", ")}."
       )
     end
   end
@@ -939,7 +957,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     client_pid = self()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      case complete_manual_oauth_for_session(session, client_pid, ref, pasted) do
+      case SessionClient.complete_oauth(session, ref, pasted, client_pid) do
         {:ok, :openai} ->
           deliver_oauth_system_message(
             session,
@@ -948,8 +966,13 @@ defmodule MingaEditor.Agent.SlashCommand do
             :info
           )
 
-        {:error, reason} ->
-          deliver_oauth_system_message(session, client_pid, "Login failed: #{reason}", :error)
+        {:error, _reason} ->
+          deliver_oauth_system_message(
+            session,
+            client_pid,
+            "Login failed. Start a new login and paste the callback URL from that attempt.",
+            :error
+          )
       end
     end)
 
@@ -962,16 +985,6 @@ defmodule MingaEditor.Agent.SlashCommand do
        when is_pid(session) and node(session) != node() do
     case SessionClient.begin_oauth(session, client_pid) do
       {:error, reason} -> {:error, "Remote OAuth flow failed to start: #{inspect(reason)}"}
-      result -> result
-    end
-  end
-
-  @spec complete_manual_oauth_for_session(pid() | nil, pid(), String.t(), String.t()) ::
-          {:ok, :openai} | {:error, term()}
-  defp complete_manual_oauth_for_session(session, client_pid, ref, pasted)
-       when is_pid(session) and node(session) != node() do
-    case SessionClient.complete_oauth(session, ref, pasted, client_pid) do
-      {:error, reason} -> {:error, "Remote OAuth flow failed to complete: #{inspect(reason)}"}
       result -> result
     end
   end
@@ -1439,7 +1452,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp parse_command(text) do
     text = String.trim(text)
 
-    case String.split(text, " ", parts: 2) do
+    case String.split(text, ~r/\s/u, parts: 2) do
       [cmd] -> {String.downcase(cmd), ""}
       [cmd, args] -> {String.downcase(cmd), args}
     end

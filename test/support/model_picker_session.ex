@@ -12,8 +12,14 @@ defmodule MingaAgent.Test.ModelPickerSession do
   def init(candidates), do: {:ok, candidates}
 
   @impl true
-  @spec handle_call(:get_available_models, GenServer.from(), candidates()) ::
-          {:reply, {:ok, candidates()}, candidates()}
+  @spec handle_call(
+          :begin_model_discovery | :get_available_models,
+          GenServer.from(),
+          candidates()
+        ) ::
+          {:reply, :local | {:ok, candidates()}, candidates()}
+  def handle_call(:begin_model_discovery, _from, candidates), do: {:reply, :local, candidates}
+
   def handle_call(:get_available_models, _from, candidates),
     do: {:reply, {:ok, candidates}, candidates}
 end
