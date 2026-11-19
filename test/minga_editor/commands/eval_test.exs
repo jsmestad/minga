@@ -2,7 +2,8 @@ defmodule MingaEditor.Commands.EvalTest do
   @moduledoc false
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Events
+  alias Minga.Events.LogMessageEvent
   alias MingaEditor.Commands.Eval
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -14,14 +15,18 @@ defmodule MingaEditor.Commands.EvalTest do
     }
   end
 
-  defp singleton_content do
-    Logger.flush()
-    Process.sleep(10)
+  defp assert_eval_message(message) do
+    direct = "[editor/info] " <> message
+    logger = "[info] " <> message
+    direct_size = byte_size(direct)
+    logger_size = byte_size(logger)
 
-    case Minga.Log.MessagesBuffer.pid() do
-      nil -> ""
-      pid -> BufferProcess.content(pid)
-    end
+    assert_receive {:minga_event, :log_message, %LogMessageEvent{text: text, level: :info}}
+                   when binary_part(text, 0, logger_size) == logger or
+                          binary_part(text, 0, direct_size) == direct,
+                   1_000
+
+    text
   end
 
   describe "simple expression evaluation" do
@@ -90,22 +95,18 @@ defmodule MingaEditor.Commands.EvalTest do
   end
 
   describe "messages buffer logging" do
-    test "result is logged to messages buffer" do
-      state = build_state()
-      Eval.execute(state, {:eval_expression, "42"})
+    test "publishes the evaluated expression and result to Messages" do
+      :ok = Events.subscribe(:log_message)
+      Eval.execute(build_state(), {:eval_expression, "40 + 2"})
 
-      content = singleton_content()
-      assert content =~ "Eval: 42"
-      assert content =~ "=> 42"
+      assert_eval_message("Eval: 40 + 2\n  => 42")
     end
 
-    test "error is logged to messages buffer" do
-      state = build_state()
-      Eval.execute(state, {:eval_expression, "1 / 0"})
+    test "publishes the evaluated expression and error to Messages" do
+      :ok = Events.subscribe(:log_message)
+      Eval.execute(build_state(), {:eval_expression, "7 / 0"})
 
-      content = singleton_content()
-      assert content =~ "Eval error: 1 / 0"
-      assert content =~ "ArithmeticError"
+      assert assert_eval_message("Eval error: 7 / 0\n") =~ "ArithmeticError"
     end
 
     test "works without messages buffer singleton" do
