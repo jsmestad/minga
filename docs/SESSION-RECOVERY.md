@@ -2,6 +2,12 @@
 
 A saved session must resume from the model conversation that actually completed, not from a reconstruction of the visible transcript. Minga stores the lossless provider continuation beside the editable display history and restores both as one session snapshot.
 
+## Draft storage
+
+The Session store can keep a bounded composer draft without creating a model conversation. The version 7 record keeps the conversation and draft in separate members and commits them together. A conversation save preserves the last committed draft. A draft write names its expected revision, preserves the exact conversation payload, and rejects a stale write unless it is an exact retry. Clearing a draft advances its revision.
+
+An older readable conversation without a draft starts at revision zero. A draft-only record has no conversation and does not appear in conversation history. Artifact pins cover both members. Automatic pruning skips a record with an unsent draft, and clearing conversation history leaves draft-only records intact. Explicit deletion removes the entire record. This storage contract is not composer autosave and does not authorize writing credential input.
+
 ## Completed turns
 
 `MingaAgent.Session` owns two related records. The display transcript contains stable entry IDs, user-visible tool calls, thinking, usage, branches, and pins. The provider continuation contains the exact ReqLLM messages used for the next model request, including inline attachment bytes, grouped tool calls and results, reasoning details, and provider-native content.
