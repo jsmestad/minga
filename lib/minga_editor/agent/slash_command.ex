@@ -874,41 +874,31 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec start_oauth_flow(state()) :: state()
   defp start_oauth_flow(state) do
-    state = emit_system_message(state, "Opening browser for ChatGPT sign-in...")
-
-    session = Runtime.active_session(state.shell_runtime)
-
-    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      result = MingaAgent.OAuth.Flow.run()
-
-      case result do
-        {:ok, :openai} ->
-          Session.refresh_credentials(session)
-          Session.add_system_message(session, "ChatGPT subscription connected.")
-
-        {:manual_required, url, ref} ->
-          Session.add_system_message(
-            session,
-            manual_login_message(url, ref)
-          )
-
-        {:error, reason} ->
-          Session.add_system_message(session, "Login failed: #{reason}", :error)
-      end
-    end)
-
-    state
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) and node(session) != node() -> start_manual_oauth_flow(state)
+      _local -> ConnectionSetup.start_current(state, :oauth_browser)
+    end
   end
 
   @spec start_manual_oauth_flow(state()) :: state()
   defp start_manual_oauth_flow(state) do
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) and node(session) != node() ->
+        start_remote_manual_oauth(state, session)
+
+      _local ->
+        ConnectionSetup.start_current(state, :oauth_manual)
+    end
+  end
+
+  @spec start_remote_manual_oauth(state(), pid()) :: state()
+  defp start_remote_manual_oauth(state, session) do
     state =
       NoticeWorkflow.publish(
         state,
         "Starting manual ChatGPT sign-in..."
       )
 
-    session = Runtime.active_session(state.shell_runtime)
     client_pid = self()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
@@ -926,13 +916,26 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec complete_manual_oauth_flow(state(), String.t(), String.t()) :: state()
   defp complete_manual_oauth_flow(state, ref, pasted) do
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) and node(session) != node() ->
+        complete_remote_manual_oauth(state, session, ref, pasted)
+
+      _local ->
+        NoticeWorkflow.publish(
+          state,
+          "Use the masked OpenAI authorization prompt in Models and connections."
+        )
+    end
+  end
+
+  @spec complete_remote_manual_oauth(state(), pid(), String.t(), String.t()) :: state()
+  defp complete_remote_manual_oauth(state, session, ref, pasted) do
     state =
       NoticeWorkflow.publish(
         state,
         "Completing manual ChatGPT sign-in..."
       )
 
-    session = Runtime.active_session(state.shell_runtime)
     client_pid = self()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
@@ -963,9 +966,6 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   end
 
-  defp begin_manual_oauth_for_session(_session, _client_pid),
-    do: MingaAgent.OAuth.Flow.begin_manual()
-
   @spec complete_manual_oauth_for_session(pid() | nil, pid(), String.t(), String.t()) ::
           {:ok, :openai} | {:error, term()}
   defp complete_manual_oauth_for_session(session, client_pid, ref, pasted)
@@ -976,35 +976,11 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
   end
 
-  defp complete_manual_oauth_for_session(session, _client_pid, ref, pasted) do
-    case MingaAgent.OAuth.Flow.complete_manual(ref, pasted) do
-      {:ok, :openai} ->
-        refresh_local_session_credentials(session)
-        {:ok, :openai}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  @spec deliver_oauth_system_message(pid() | nil, pid(), String.t(), :info | :error) :: :ok
-  defp deliver_oauth_system_message(session, client_pid, message, level)
-       when is_pid(session) and node(session) != node() do
+  @spec deliver_oauth_system_message(pid(), pid(), String.t(), :info | :error) :: :ok
+  defp deliver_oauth_system_message(session, client_pid, message, level) do
     _ = SessionClient.add_system_message(session, message, level, client_pid)
     :ok
   end
-
-  defp deliver_oauth_system_message(session, _client_pid, message, level) when is_pid(session) do
-    Session.add_system_message(session, message, level)
-  end
-
-  defp deliver_oauth_system_message(_session, _client_pid, _message, _level), do: :ok
-
-  @spec refresh_local_session_credentials(pid() | nil) :: :ok
-  defp refresh_local_session_credentials(session) when is_pid(session),
-    do: Session.refresh_credentials(session)
-
-  defp refresh_local_session_credentials(_session), do: :ok
 
   @spec manual_login_message(String.t(), String.t()) :: String.t()
   defp manual_login_message(url, ref) do

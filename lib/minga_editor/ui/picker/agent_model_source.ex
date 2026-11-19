@@ -98,6 +98,12 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       ),
       do: ConnectionSetup.start(state, id, target, method)
 
+  def on_select(
+        %Item{meta: %{intent: {:authorization_url, action, %ConnectionPrompt{} = prompt}}},
+        state
+      ),
+      do: ConnectionSetup.authorization_url(state, prompt, action)
+
   def on_select(%Item{meta: %{intent: {:resume, %ConnectionPrompt{} = prompt}}}, state),
     do: ConnectionSetup.resume(state, prompt)
 
@@ -132,8 +138,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       end
 
     resume = resume_action(origin.connection_prompt, origin.connection)
+    authorization = authorization_actions(origin.connection_prompt, origin.connection)
 
-    Enum.map(setup ++ retry ++ cancel ++ resume, fn {label, intent, description} ->
+    Enum.map(setup ++ retry ++ cancel ++ authorization ++ resume, fn {label, intent, description} ->
       with_origin(
         %Item{
           id: {:connection, intent},
@@ -149,14 +156,36 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp connection_actions(_remote), do: []
 
+  @spec authorization_actions(ConnectionPrompt.t() | nil, ConnectionSnapshot.t()) ::
+          [{String.t(), term(), String.t()}]
+  defp authorization_actions(%ConnectionPrompt{authorization_url: url} = prompt, connection)
+       when is_binary(url) do
+    if ConnectionPrompt.current?(prompt, connection) do
+      [
+        {"Open authorization link", {:authorization_url, :open, prompt},
+         "Open OpenAI in your browser."},
+        {"Copy authorization link", {:authorization_url, :copy, prompt},
+         "Use another browser or device."}
+      ]
+    else
+      []
+    end
+  end
+
+  defp authorization_actions(_prompt, _connection), do: []
+
   @spec resume_action(ConnectionPrompt.t() | nil, ConnectionSnapshot.t()) :: [
           {String.t(), term(), String.t()}
         ]
   defp resume_action(%ConnectionPrompt{} = prompt, connection) do
     if ConnectionPrompt.current?(prompt, connection) do
+      label =
+        if is_binary(prompt.authorization_url),
+          do: "Resume OpenAI sign-in",
+          else: "Resume API key entry"
+
       [
-        {"Resume API key entry", {:resume, prompt},
-         "Open a blank masked prompt for this operation."}
+        {label, {:resume, prompt}, "Open a blank masked prompt for this operation."}
       ]
     else
       []
@@ -167,12 +196,22 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   @spec setup_actions() :: [{String.t(), term(), String.t()}]
   defp setup_actions do
-    Credentials.known_providers()
-    |> Enum.filter(&(Credentials.env_var_for(&1) != nil))
-    |> Enum.map(fn provider ->
-      {"Connect #{provider} with API key", {:connect, {:api_key, provider}},
-       "Masked input keeps your draft."}
-    end)
+    oauth = [
+      {"Sign in with ChatGPT", {:connect, :oauth_browser},
+       "Open browser authorization without sending your draft."},
+      {"Sign in with ChatGPT manually", {:connect, :oauth_manual},
+       "Paste the redirect into masked input."}
+    ]
+
+    api_keys =
+      Credentials.known_providers()
+      |> Enum.filter(&(Credentials.env_var_for(&1) != nil))
+      |> Enum.map(fn provider ->
+        {"Connect #{provider} with API key", {:connect, {:api_key, provider}},
+         "Masked input keeps your draft."}
+      end)
+
+    oauth ++ api_keys
   end
 
   @spec with_origin(Item.t(), map(), term()) :: Item.t()

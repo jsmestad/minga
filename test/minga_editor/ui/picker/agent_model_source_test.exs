@@ -7,7 +7,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.RuntimeState
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaEditor.Agent.ConnectionSetup
   alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.{Policy, Request}
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
@@ -136,6 +138,38 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     assert {:noreply, ignored} = MingaEditor.handle_info(saved, replaced)
     refute ignored.shell_runtime.state.notice.message
+  end
+
+  test "a delayed authorization link failure cannot notify a replacement sign-in" do
+    session = start_supervised!({ModelPickerSession, []})
+    original = connection(session)
+    first = make_ref()
+    next = make_ref()
+    {state, id} = editor_state(%{original | operation: {:connecting, first}}, "Active Model", nil)
+    url = "https://auth.openai.com/oauth/authorize?fixture=1"
+    ready = MingaAgent.OAuth.ManualReady.new(original.target, first, self(), "first", url)
+    state = ConnectionSetup.offer_oauth(state, id, ready)
+    prompt = state.workspace.agent_ui.connection_prompt
+
+    effect = %ConnectionSetup{
+      workspace_id: id,
+      target: original.target,
+      intent: {:authorization_url, :open, prompt}
+    }
+
+    request = Request.new(effect, {:connection_authorization, session}, Policy.fifo(0))
+    failed = Outcome.failed(request, :authorization_link_unavailable)
+    {notified, _} = ConnectionSetup.apply(state, failed)
+    assert notified.shell_runtime.state.notice.message =~ "Could not open or copy"
+
+    {replacement, ^id} =
+      editor_state(%{original | operation: {:connecting, next}}, "Active Model", nil)
+
+    ready = MingaAgent.OAuth.ManualReady.new(original.target, next, self(), "next", url)
+    replacement = ConnectionSetup.offer_oauth(replacement, id, ready)
+    {ignored, _} = ConnectionSetup.apply(replacement, failed)
+    assert ignored.shell_runtime.state.notice == replacement.shell_runtime.state.notice
+    assert ignored.workspace.agent_ui.connection_prompt.operation_ref == next
   end
 
   defp editor_state(
