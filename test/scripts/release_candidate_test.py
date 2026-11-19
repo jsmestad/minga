@@ -150,7 +150,7 @@ class ReleaseCandidateTest(unittest.TestCase):
     def test_rolling_homebrew_round_trip_cannot_substitute_a_stable_inventory(self):
         self.context.update(channel="homebrew", version="0.1.0-dev.10", source_sha=self.context["workflow_sha"])
         self.metadata.clear()
-        names = ("Minga.dmg", "minga_macos_aarch64.tar.gz", "minga_macos_x86_64.tar.gz")
+        names = ("Minga.dmg", "minga_macos_aarch64.tar.gz")
         for name in names:
             self.builds[name]["context"] = dict(self.context)
             self.add_artifact(name, [self.entries[name][0], (name + ".build.json", json.dumps(self.builds[name]).encode())])

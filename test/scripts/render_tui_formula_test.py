@@ -106,11 +106,11 @@ class RenderTuiFormulaTest(unittest.TestCase):
             f'    assert_equal "minga {display_version}", shell_output("#{{bin}}/minga --version").strip\n',
             formula,
         )
-        for arch, suffix, archive in (("arm", "aarch64", self.arm64), ("intel", "x86_64", self.intel)):
-            with self.subTest(arch=arch):
-                sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
-                url = f"{RELEASE_URL}/v{display_version}/minga_{display_version}_macos_{suffix}.tar.gz"
-                self.assertIn(f'  on_{arch} do\n    url "{url}"\n    sha256 "{sha256}"\n  end\n', formula)
+        sha256 = hashlib.sha256(self.arm64.read_bytes()).hexdigest()
+        self.assertIn("depends_on ArchRequirement => :arm64", formula)
+        self.assertNotIn("x86_64", formula)
+        self.assertIn(f'  url "{RELEASE_URL}/v{display_version}/minga_{display_version}_macos_aarch64.tar.gz"', formula)
+        self.assertIn(f'  sha256 "{sha256}"', formula)
         self.assert_cask(cask, display_version, package_version, f"Minga_{display_version}.dmg")
 
     def test_formula_upgrades_to_stable_and_homebrew_loads_the_cask(self):

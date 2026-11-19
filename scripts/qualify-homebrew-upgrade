@@ -32,11 +32,8 @@ if grep -Eq '^minga( |$)' <<< "$installed_formulae" ||
   exit 1
 fi
 
-case $(uname -m) in
-  arm64) archive=minga_macos_aarch64.tar.gz ;;
-  x86_64) archive=minga_macos_x86_64.tar.gz ;;
-  *) echo 'Unsupported Mac architecture' >&2; exit 1 ;;
-esac
+[[ $(uname -m) == arm64 ]] || { echo 'Apple Silicon is required.' >&2; exit 1; }
+archive=minga_macos_aarch64.tar.gz
 
 sandbox=$(mktemp -d)
 export HOMEBREW_CACHE="$sandbox/cache" XDG_CONFIG_HOME="$sandbox/config"
@@ -69,7 +66,7 @@ stage_verified_inputs() {
   version=$(jq -er 'select(.result == "verified") | .context.version' "$receipt")
   jq -e '.handle | (.manifest_artifact_id | type == "number" and . > 0) and
          (.manifest_sha256 | test("^[a-f0-9]{64}$"))' "$receipt" >/dev/null
-  for name in minga_macos_aarch64.tar.gz minga_macos_x86_64.tar.gz Minga.dmg; do
+  for name in "$archive" Minga.dmg; do
     cp "$source/$name" "$candidate/$name"
     expected=$(jq -er --arg name "$name" '[.payloads[] | select(.filename == $name)] |
       select(length == 1) | .[0] | [.sha256, .size] | @tsv' "$receipt")
@@ -82,7 +79,7 @@ stage_verified_inputs() {
   done
   generated=$(mktemp -d "$sandbox/recipes.XXXXXX")
   "$script_dir/render-tui-formula" --version "$version" \
-    --arm64 "$candidate/minga_macos_aarch64.tar.gz" --x86-64 "$candidate/minga_macos_x86_64.tar.gz" \
+    --arm64 "$candidate/$archive" \
     --dmg "$candidate/Minga.dmg" --output "$generated"
   cmp "$generated/minga.rb" "$source/minga.rb"
   cmp "$generated/minga-mac.rb" "$source/minga-mac.rb"
@@ -110,13 +107,11 @@ stage() {
   [[ $formula_cache == "$HOMEBREW_CACHE"/* ]]
   mkdir -p "$(dirname "$formula_cache")"
   cp "$candidate/$archive" "$formula_cache"
-  if [[ $archive == minga_macos_aarch64.tar.gz ]]; then
-    cp "$candidate/minga-mac.rb" "$tap_path/Casks/minga-mac.rb"
-    cask_cache=$(brew --cache --cask "$cask")
-    [[ $cask_cache == "$HOMEBREW_CACHE"/* ]]
-    mkdir -p "$(dirname "$cask_cache")"
-    cp "$candidate/Minga.dmg" "$cask_cache"
-  fi
+  cp "$candidate/minga-mac.rb" "$tap_path/Casks/minga-mac.rb"
+  cask_cache=$(brew --cache --cask "$cask")
+  [[ $cask_cache == "$HOMEBREW_CACHE"/* ]]
+  mkdir -p "$(dirname "$cask_cache")"
+  cp "$candidate/Minga.dmg" "$cask_cache"
 }
 
 check_installed() {
@@ -125,27 +120,21 @@ check_installed() {
   actual=$("$(brew --prefix)/bin/minga" --version)
   [[ $actual == "minga $version" ]]
   brew test "$formula"
-  if [[ $archive == minga_macos_aarch64.tar.gz ]]; then
-    app="$sandbox/apps/Minga.app"
-    codesign --verify --deep --strict "$app"
-    spctl --assess --type execute "$app"
-    actual=$(MINGA_APP_PATH="$app" "$app/Contents/Resources/bin/minga-tui" --version)
-    [[ $actual == "minga $version" ]]
-  fi
+  app="$sandbox/apps/Minga.app"
+  codesign --verify --deep --strict "$app"
+  spctl --assess --type execute "$app"
+  actual=$(MINGA_APP_PATH="$app" "$app/Contents/Resources/bin/minga-tui" --version)
+  [[ $actual == "minga $version" ]]
 }
 
 stage "$previous"
 brew install --formula "$formula"
-if [[ $archive == minga_macos_aarch64.tar.gz ]]; then
-  brew install --cask --appdir="$sandbox/apps" "$cask"
-fi
+brew install --cask --appdir="$sandbox/apps" "$cask"
 check_installed "$previous"
 
 stage "$next"
 brew upgrade --formula "$formula"
-if [[ $archive == minga_macos_aarch64.tar.gz ]]; then
-  brew upgrade --cask --appdir="$sandbox/apps" "$cask"
-fi
+brew upgrade --cask --appdir="$sandbox/apps" "$cask"
 check_installed "$next"
 
 cleanup 0

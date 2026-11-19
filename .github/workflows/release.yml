@@ -88,7 +88,7 @@ jobs:
             test "$SOURCE_SHA" = "$WORKFLOW_SHA"
             context=$(jq -c '. + {channel:"homebrew"}' <<< "$context")
           fi
-          matrix=$(jq -c --arg event "$GITHUB_EVENT_NAME" '{include: (if $event == "push" then map(select(.os == "macos")) else . end)}' .github/release-targets.json)
+          matrix=$(jq -c --arg event "$GITHUB_EVENT_NAME" '{include: (if $event == "push" then map(select(.os == "macos" and .arch == "aarch64")) else . end)}' .github/release-targets.json)
           {
             printf 'matrix=%s\n' "$matrix"
             printf 'source_sha=%s\nversion=%s\ncontext=%s\n' "$SOURCE_SHA" "$SOURCE_VERSION" "$context"
@@ -496,7 +496,6 @@ jobs:
           (cd homebrew-input && sha256sum --check ../SHA256SUMS.txt)
           scripts/render-tui-formula --version "$(jq -er .version context.json)" \
             --arm64 homebrew-input/minga_macos_aarch64.tar.gz \
-            --x86-64 homebrew-input/minga_macos_x86_64.tar.gz \
             --dmg homebrew-input/Minga.dmg --output homebrew-recipes
           cp preparation-receipt.json homebrew-recipes/
       - name: Retain unpublished Homebrew recipes and candidate receipt

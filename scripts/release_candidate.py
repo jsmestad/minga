@@ -35,7 +35,7 @@ LEGACY_PAYLOADS = {
 MANIFEST_PAYLOADS = {1: LEGACY_PAYLOADS, MANIFEST_VERSION: PAYLOADS}
 HOMEBREW_MANIFEST_VERSION = 3
 MANIFEST_PAYLOADS[HOMEBREW_MANIFEST_VERSION] = {
-    name: target for name, target in PAYLOADS.items() if target["os"] == "macos"
+    name: target for name, target in PAYLOADS.items() if target == {"os": "macos", "arch": "aarch64"}
 }
 LEGACY_PINS = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": "1.26.4", "native_zig": "0.16.0"}
 PINS = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": "1.26.4", "native_zig": "0.16.0"}
