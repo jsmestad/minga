@@ -117,6 +117,37 @@ defmodule MingaAgent.Session.Transcript.Active do
   @spec id_ordinals(t(), pos_integer()) :: [non_neg_integer()]
   def id_ordinals(%__MODULE__{} = active, id), do: occurrences(active.ids, id)
 
+  @doc "Reads up to `limit` active entries immediately before a unique message identity."
+  @spec before(t(), pos_integer() | :tail, pos_integer()) ::
+          {:ok, [Entry.t()], boolean()} | {:error, :anchor_unavailable}
+  def before(%__MODULE__{} = active, :tail, limit),
+    do: read_before(active.entries, size(active), limit)
+
+  def before(%__MODULE__{entries: entries, ids: ids}, id, limit) do
+    with {:ok, ordinals} <- Map.fetch(ids, id),
+         1 <- :gb_sets.size(ordinals) do
+      read_before(entries, :gb_sets.smallest(ordinals), limit)
+    else
+      _missing_or_ambiguous -> {:error, :anchor_unavailable}
+    end
+  end
+
+  @spec read_before(:array.array(Entry.t()), non_neg_integer(), pos_integer()) ::
+          {:ok, [Entry.t()], boolean()}
+  defp read_before(entries, exclusive_end, limit) do
+    start = max(exclusive_end - limit, 0)
+    {:ok, collect_before(entries, start, exclusive_end, []), start > 0}
+  end
+
+  @spec collect_before(:array.array(Entry.t()), non_neg_integer(), non_neg_integer(), [Entry.t()]) ::
+          [Entry.t()]
+  defp collect_before(_entries, start, start, acc), do: acc
+
+  defp collect_before(entries, start, exclusive_end, acc) do
+    ordinal = exclusive_end - 1
+    collect_before(entries, start, ordinal, [:array.get(ordinal, entries) | acc])
+  end
+
   @doc "Materializes messages directly at the provider/persistence list boundary."
   @spec messages(t()) :: [message()]
   def messages(%__MODULE__{entries: entries}) do

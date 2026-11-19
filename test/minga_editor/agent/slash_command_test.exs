@@ -85,7 +85,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     event_log =
       start_supervised!(
         Supervisor.child_spec(
-          {MingaAgent.EventLog, name: nil, db_dir: dir},
+          {MingaAgent.EventLog,
+           name: nil, db_dir: dir, retention_sweep?: false, health_check: :none},
           id: {MingaAgent.EventLog, make_ref()}
         )
       )
@@ -144,6 +145,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       refute SlashCommand.sensitive_command?("/auth revoke")
       refute SlashCommand.sensitive_command?("/auth revoke openai")
       assert SlashCommand.sensitive_command?("/auth revoke openai extra-secret")
+      assert SlashCommand.sensitive_command?("/auth openai\tpasted-value")
+      assert SlashCommand.sensitive_command?("/login --complet ref pasted-value")
+      refute SlashCommand.sensitive_command?("/auth openai")
       refute SlashCommand.sensitive_command?("/login --manual")
       refute SlashCommand.sensitive_command?("/help")
     end
