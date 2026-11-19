@@ -533,7 +533,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_model(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp do_model(state, "") do
-    {:ok, PickerUI.open(state, MingaEditor.UI.Picker.AgentModelSource)}
+    {:ok, MingaEditor.UI.Picker.AgentModelSource.open(state)}
   end
 
   defp do_model(state, model) do

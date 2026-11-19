@@ -602,7 +602,8 @@ defmodule MingaAgent.Session do
 
   @doc "Refreshes the Codex account catalog in the calling worker and lists available routes."
   @spec discover_available_models(GenServer.server()) ::
-          {:ok, term(), String.t() | nil, :atomics.atomics_ref() | nil} | {:error, term()}
+          {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
+          | {:error, term()}
   def discover_available_models(session) do
     case GenServer.call(session, :begin_model_discovery) do
       {:codex, ref, credential, opts} ->
@@ -4760,7 +4761,9 @@ defmodule MingaAgent.Session do
     {:committed, connection} = Connection.committed(state.connection)
 
     {state, _readiness_result} =
-      refresh_credentials_state_result(%{state | connection: connection})
+      %{state | connection: connection}
+      |> invalidate_model_discovery()
+      |> refresh_credentials_state_result()
 
     state = publish_connection(state)
     snapshot = connection_snapshot(state)
@@ -4843,7 +4846,9 @@ defmodule MingaAgent.Session do
     connection = Connection.provider_recovered(state.connection)
 
     {state, result} =
-      refresh_credentials_state_result(%{state | provider: lifecycle, connection: connection})
+      %{state | provider: lifecycle, connection: connection}
+      |> invalidate_model_discovery()
+      |> refresh_credentials_state_result()
 
     state = publish_connection(state)
 
@@ -6019,10 +6024,10 @@ defmodule MingaAgent.Session do
   end
 
   @spec local_model_discovery(state(), CredentialSnapshot.t()) ::
-          {:ok, [ModelCandidate.t()], nil, nil}
+          {:ok, [ModelCandidate.t()], :superseded, nil}
   defp local_model_discovery(state, snapshot) do
     candidates = discovered_model_candidates(%{state | codex_discovery: nil}, snapshot)
-    {:ok, candidates, nil, nil}
+    {:ok, candidates, :superseded, nil}
   end
 
   @spec discovered_model_candidates(state(), CredentialSnapshot.t()) :: [ModelCandidate.t()]

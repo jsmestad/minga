@@ -341,10 +341,20 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert state.shell_runtime.state.notice.message == "No agent session"
     end
 
-    test "/model without name opens the model picker" do
-      {:ok, state} = SlashCommand.execute(mock_state(session: start_session()), "/model")
-      assert {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
-      assert picker_ui.source == MingaEditor.UI.Picker.AgentModelSource
+    test "/model without a name loads choices from the owning connection" do
+      session = start_session()
+      connection = Session.editor_snapshot(session).connection
+      state = mock_state(session: session)
+      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+
+      assert {:ok, opened} = SlashCommand.execute(state, "/model")
+      context = MingaEditor.UI.Picker.Context.from_editor_state(opened)
+      assert {:ok, items, _meta} = MingaEditor.UI.Picker.AgentModelSource.async_fetch(context)
+
+      assert Enum.any?(items, fn item ->
+               match?({:model, %{route: %{model_id: "gpt-4o"}}}, item.meta.intent)
+             end)
     end
 
     test "/model with a name preserves the UI when no session can validate it" do

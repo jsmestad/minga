@@ -20,8 +20,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Source
   @impl true
   @spec title() :: String.t()
   def title, do: "Models and connections"
@@ -68,18 +70,19 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   end
 
   @impl true
-  @spec async_fetch(Context.t()) :: {:ok, [Item.t()], map()} | {:error, String.t()}
+  @spec async_fetch(Context.t()) :: {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
   def async_fetch(%Context{
         picker_ui: %{context: %{target: %ConnectionTarget{} = target} = origin}
       }) do
     actions = connection_actions(origin)
 
     case fetch_models(target.session) do
-      {:ok, models} ->
+      {:ok, models, notice, validity} when is_list(models) ->
         items =
           Enum.map(models, &with_origin(format_candidate(&1), origin, {:model, &1.selection}))
 
-        {:ok, items ++ actions, %{status: connection_label(origin.connection)}}
+        {:ok, items ++ actions,
+         discovery_meta(target.session, notice, validity, origin.connection)}
 
       {:error, _reason} ->
         {:ok, actions,
@@ -89,6 +92,25 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   def async_fetch(_context),
     do: {:error, "The original connection is unavailable. Reopen the agent workspace."}
+
+  @doc "Drops superseded Codex rows and their notice without removing connection actions."
+  @spec for_publication(
+          {:ok, [Item.t()], [Candidate.t()], Source.fetch_meta()},
+          pid() | nil
+        ) :: {:ok, [Item.t()], [Candidate.t()], Source.fetch_meta()}
+  def for_publication(
+        {:ok, items, candidates, %{model_discovery: {owner, validity}}} = result,
+        session
+      ) do
+    if owner == session and Session.model_discovery_current?(owner, validity) do
+      result
+    else
+      {:ok, Enum.reject(items, &codex_item?/1), Enum.reject(candidates, &codex_item?(&1.item)),
+       %{}}
+    end
+  end
+
+  def for_publication(result, _session), do: result
 
   @impl true
   @spec on_select(Item.t(), EditorState.t()) :: EditorState.t()
@@ -110,23 +132,39 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   def on_select(%Item{meta: %{workspace_id: id, target: target, intent: intent}}, state),
     do: ConnectionAction.schedule(state, id, target, intent)
 
-  @spec discovery_meta(pid(), String.t() | nil, :atomics.atomics_ref() | nil) ::
-          MingaEditor.UI.Picker.Source.fetch_meta()
-  defp discovery_meta(_session, nil, nil), do: %{}
-  defp discovery_meta(session, nil, validity), do: %{model_discovery: {session, validity}}
+  @spec discovery_meta(
+          pid(),
+          String.t() | :superseded | nil,
+          :atomics.atomics_ref() | nil,
+          ConnectionSnapshot.t()
+        ) ::
+          Source.fetch_meta()
+  defp discovery_meta(_session, :superseded, nil, _connection), do: %{}
 
-  defp discovery_meta(session, notice, validity),
-    do: %{model_discovery: {session, validity}, status: notice}
+  defp discovery_meta(_session, nil, nil, connection), do: %{status: connection_label(connection)}
+
+  defp discovery_meta(session, notice, validity, connection),
+    do: %{status: notice || connection_label(connection), model_discovery: {session, validity}}
 
   @spec codex_item?(Item.t()) :: boolean()
-  defp codex_item?(%Item{meta: %{selection: %{route: %{request_provider: :openai_codex}}}}),
-    do: true
+  defp codex_item?(%Item{
+         meta: %{intent: {:model, %ModelSelection{route: %{request_provider: :openai_codex}}}}
+       }),
+       do: true
 
   defp codex_item?(%Item{}), do: false
 
-  @spec fetch_models(pid()) :: {:ok, [ModelCandidate.t()]} | {:error, term()}
+  @spec fetch_models(pid()) ::
+          {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
+          | {:error, term()}
+  defp fetch_models(session) when node(session) == node() do
+    Session.discover_available_models(session)
+  catch
+    :exit, _reason -> {:error, :session_unavailable}
+  end
+
   defp fetch_models(session) do
-    Session.get_available_models(session)
+    with {:ok, models} <- Session.get_available_models(session), do: {:ok, models, nil, nil}
   catch
     :exit, _reason -> {:error, :session_unavailable}
   end
