@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Elixir builds use checked-in protocol and language-alias sources. Run `mix codegen` to refresh them after schema changes; CI rejects drift.
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.
 - Models and connections opens a separate masked API key prompt from the Agent workspace. Saving or canceling does not send or replace the draft. `/auth <provider>` opens the same prompt and no longer accepts a key on the command line.
 - Local ChatGPT sign-in is available from Models and connections and `/login`. Cancel stops the current authorization attempt without changing credentials or the draft. The manual fallback uses masked input.

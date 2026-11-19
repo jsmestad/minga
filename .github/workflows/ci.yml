@@ -79,13 +79,17 @@ jobs:
 
       - run: mix deps.get
       - run: mix deps.compile
-      - run: mix protocol.gen
-      - name: Check generated Zig protocol exports are committed
-        run: git diff --exit-code -- zig/src/protocol.zig
+      - name: Reject stale or uncommitted generated sources
+        run: |
+          mix codegen
+          changes=$(git status --porcelain --untracked-files=all -- generated/elixir go/tui/internal/generated zig/src/protocol.zig)
+          if [ -n "$changes" ]; then
+            printf 'Run mix codegen and commit the generated source changes:\n%s\n' "$changes"
+            exit 1
+          fi
       - name: Check generated protocol artifacts stay out of source
         if: github.event_name == 'pull_request'
         run: scripts/check_protocol_generated_edits "${{ github.event.pull_request.base.sha }}"
-      - run: mix protocol.gen --check
       - name: Check generated production conformance corpus
         run: |
           mix conformance.gen

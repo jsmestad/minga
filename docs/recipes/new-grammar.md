@@ -11,8 +11,7 @@ Compile a grammar into the parser so every frontend gets the same syntax analysi
 From the repository root, generate the parser's shared inputs, compile every shipped query against its grammar, and verify filetype detection:
 
 ```bash
-mix protocol.gen
-mix language_aliases.gen
+mix codegen
 (cd zig && zig build query-check)
 mix test.debug test/minga/language/filetype_test.exs
 mix zig.lint

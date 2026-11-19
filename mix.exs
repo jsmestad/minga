@@ -1,20 +1,5 @@
 Code.require_file("mix/compiler_manifest.ex", __DIR__)
-Code.require_file("mix/protocol_generator.ex", __DIR__)
-Code.require_file("mix/language_alias_generator.ex", __DIR__)
-Code.require_file("mix/compilers/language_aliases_gen.ex", __DIR__)
-Code.require_file("mix/compilers/protocol_gen.ex", __DIR__)
 Code.require_file("mix/compilers/minga_bundled_extensions.ex", __DIR__)
-Code.require_file("mix/compilers/minga_zig.ex", __DIR__)
-Code.require_file("mix/compilers/minga_go_tui.ex", __DIR__)
-Code.require_file("mix/tasks/language_aliases.gen.ex", __DIR__)
-Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
-Code.require_file("mix/tasks/dialyzer.incremental.runner.ex", __DIR__)
-Code.require_file("mix/tasks/dialyzer.incremental.ex", __DIR__)
-Code.require_file("mix/tasks/dialyzer.incremental.clean.ex", __DIR__)
-Code.require_file("mix/tasks/native_build/result.ex", __DIR__)
-Code.require_file("mix/tasks/native_build_support.ex", __DIR__)
-Code.require_file("mix/tasks/native_build_tui.ex", __DIR__)
-Code.require_file("mix/tasks/native_build_go_tui.ex", __DIR__)
 
 # Burrito hard-codes musl libc for Linux binaries. Tell cc_precompiler to
 # fetch the precompiled musl NIF for exqlite instead of source-compiling
@@ -30,8 +15,7 @@ defmodule Minga.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @generated_language_aliases_path ".generated/language_aliases/elixir/lib"
-  @generated_elixir_path ".generated/protocol/elixir/lib"
+  @generated_elixir_path "generated/elixir"
   @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
   @release_priv_entries @native_release_artifacts ++ ~w(extensions queries tree_sitter tutor.txt)
 
@@ -45,8 +29,7 @@ defmodule Minga.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      compilers:
-        [:language_aliases_gen, :protocol_gen, :minga_bundled_extensions] ++ Mix.compilers(),
+      compilers: [:minga_bundled_extensions] ++ Mix.compilers(),
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
@@ -215,14 +198,13 @@ defmodule Minga.MixProject do
 
   defp elixirc_paths(:test),
     do: [
-      @generated_language_aliases_path,
       @generated_elixir_path,
       "lib",
       "test/support",
       "test/perf"
     ]
 
-  defp elixirc_paths(_), do: [@generated_language_aliases_path, @generated_elixir_path, "lib"]
+  defp elixirc_paths(_), do: [@generated_elixir_path, "lib"]
 
   defp test_paths(_), do: ["test"]
 
@@ -418,6 +400,65 @@ defmodule Minga.MixProject do
         "ex_dna --max-clones 0",
         "reach.check --arch --smells"
       ]
+    ] ++ build_aliases()
+  end
+
+  # These tools must work before Minga is compiled, but only load when invoked.
+  defp build_aliases do
+    protocol = ~w(mix/protocol_generator.ex)
+    language = ~w(mix/language_alias_generator.ex)
+    zig = ~w(mix/compilers/minga_zig.ex)
+    go = ~w(mix/compilers/minga_go_tui.ex)
+    native = ~w(mix/tasks/native_build/result.ex)
+    dialyzer = ~w(mix/tasks/dialyzer.incremental.runner.ex mix/tasks/dialyzer.incremental.ex)
+
+    [
+      codegen: [
+        "deps.loadpaths",
+        build_task(Mix.Tasks.Codegen, protocol ++ language ++ ~w(mix/tasks/codegen.ex))
+      ],
+      "protocol.gen": [
+        "deps.loadpaths",
+        build_task(Mix.Tasks.Protocol.Gen, protocol ++ ~w(mix/tasks/protocol.gen.ex))
+      ],
+      "language_aliases.gen":
+        build_task(
+          Mix.Tasks.LanguageAliases.Gen,
+          language ++ ~w(mix/tasks/language_aliases.gen.ex)
+        ),
+      "compile.minga_zig": build_task(Mix.Tasks.Compile.MingaZig, zig),
+      "compile.minga_go_tui": build_task(Mix.Tasks.Compile.MingaGoTui, go),
+      "native.build.support":
+        build_task(
+          Mix.Tasks.Native.Build.Support,
+          native ++ zig ++ ~w(mix/tasks/native_build_support.ex)
+        ),
+      "native.build.go_tui":
+        build_task(
+          Mix.Tasks.Native.Build.GoTui,
+          native ++ go ++ ~w(mix/tasks/native_build_go_tui.ex)
+        ),
+      "native.build.tui":
+        build_task(
+          Mix.Tasks.Native.Build.Tui,
+          native ++ zig ++ go ++ ~w(mix/tasks/native_build_tui.ex)
+        ),
+      "dialyzer.incremental": [
+        "deps.loadpaths",
+        build_task(Mix.Tasks.Dialyzer.Incremental, dialyzer)
+      ],
+      "dialyzer.incremental.clean":
+        build_task(
+          Mix.Tasks.Dialyzer.Incremental.Clean,
+          dialyzer ++ ~w(mix/tasks/dialyzer.incremental.clean.ex)
+        )
     ]
+  end
+
+  defp build_task(module, paths) do
+    fn args ->
+      Enum.each(paths, &Code.require_file(&1, __DIR__))
+      module.run(args)
+    end
   end
 end
