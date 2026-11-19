@@ -1,6 +1,7 @@
 defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   @moduledoc false
 
+  alias MingaAgent.Session.Transcript.Cursor
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.UI.Theme
 
@@ -12,7 +13,9 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
           styled_fingerprint: non_neg_integer() | nil,
           display_start: non_neg_integer(),
           provenance_jump: MingaEditor.Agent.ProvenanceJump.t() | nil,
-          version: non_neg_integer()
+          version: non_neg_integer(),
+          source_cursor: Cursor.t() | nil,
+          first_run: first_run() | nil
         }
 
   @type rendered_message :: %{
@@ -21,6 +24,7 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
         }
 
   @type styled_cache :: [rendered_message() | nil] | nil
+  @type first_run :: {[term()], keyword(), Transcript.empty_state()}
 
   defstruct line_index: [],
             messages: [],
@@ -29,7 +33,9 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
             styled_fingerprint: nil,
             display_start: 0,
             provenance_jump: nil,
-            version: 0
+            version: 0,
+            source_cursor: nil,
+            first_run: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}
@@ -44,7 +50,9 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
         styled: styled,
         styled_fingerprint: Keyword.get(opts, :styled_fingerprint),
         display_start: Keyword.get(opts, :display_start, projection.display_start),
-        provenance_jump: Keyword.get(opts, :provenance_jump, projection.provenance_jump)
+        provenance_jump: Keyword.get(opts, :provenance_jump, projection.provenance_jump),
+        source_cursor: Keyword.get(opts, :source_cursor),
+        first_run: Keyword.get(opts, :first_run)
     }
   end
 
@@ -52,6 +60,11 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   def clear(%__MODULE__{version: version}) do
     %__MODULE__{version: version}
   end
+
+  @doc "Records a source revision that did not change the displayed entries or pins."
+  @spec advance_source_cursor(t(), Cursor.t()) :: t()
+  def advance_source_cursor(%__MODULE__{} = projection, cursor),
+    do: %{projection | source_cursor: cursor}
 
   @spec cache_styled(t(), styled_cache(), non_neg_integer() | nil) :: t()
   def cache_styled(%__MODULE__{} = projection, styled, styled_fingerprint) do
@@ -65,12 +78,12 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   @spec set_display_start(t(), non_neg_integer()) :: t()
   def set_display_start(%__MODULE__{} = projection, display_start)
       when is_integer(display_start) and display_start >= 0 do
-    %{projection | display_start: display_start}
+    %{projection | display_start: display_start, source_cursor: nil}
   end
 
   @spec set_provenance_jump(t(), MingaEditor.Agent.ProvenanceJump.t() | nil) :: t()
   def set_provenance_jump(%__MODULE__{} = projection, jump),
-    do: %{projection | provenance_jump: jump}
+    do: %{projection | provenance_jump: jump, source_cursor: nil}
 
   @spec clear_provenance_jump(t()) :: t()
   def clear_provenance_jump(%__MODULE__{} = projection), do: %{projection | provenance_jump: nil}

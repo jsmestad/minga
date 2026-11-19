@@ -14,6 +14,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ModelSelection
   alias MingaAgent.Credentials
+  alias MingaAgent.Session.Transcript.Cursor
   alias MingaEditor.Agent.Transcript
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -190,6 +191,12 @@ defmodule MingaEditor.Agent.UIState.Panel do
       panel
       | transcript: TranscriptProjection.cache_display(projection, display, styled_messages, opts)
     }
+  end
+
+  @doc "Advances the source revision without replacing the retained transcript display."
+  @spec advance_transcript_cursor(t(), Cursor.t()) :: t()
+  def advance_transcript_cursor(%__MODULE__{transcript: projection} = panel, cursor) do
+    %{panel | transcript: TranscriptProjection.advance_source_cursor(projection, cursor)}
   end
 
   @spec clear_transcript_cache(t()) :: t()
