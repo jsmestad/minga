@@ -147,6 +147,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a m), :agent_pick_model, "Pick agent model"},
     {~k(a c), :workspace_copy_file, "Copy file to workspace…"},
     {~k(a h), :agent_session_history, "Resume session"},
+    {~k(a R), :agent_session_rename, "Rename Agent session"},
     {~k(a H), :agent_retained_history, "Read retained Agent messages"},
     {~k(a k), :agent_checklist, "Inspect Agent checklist"},
     {~k(a j), :agent_draft_attachments, "Inspect draft attachments"},

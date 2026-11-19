@@ -129,6 +129,10 @@ A completed session snapshot is durable across a full application restart. The m
 
 An application restart does not make an admitted effect safe to replay. If the snapshot contains an unfinished admitted effect, recovery records its unknown outcome and requires reconciliation. Use the visible tool result and the external system's state to decide what to do next.
 
+### Name a saved session
+
+Open the local saved conversation, then press `SPC a R` or choose **Rename Agent session** from the command palette. Give it a short name that helps you find it in **Sessions**, such as `Release checklist`. Renaming does not send or discard your current draft.
+
 ### Recover unsent input
 
 In a locally saved Agent session, Minga autosaves your composer text, caret, and pasted blocks after edits. The draft is private presentation data, not part of the transcript or the next provider request until you send it.

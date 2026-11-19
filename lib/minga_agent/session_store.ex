@@ -69,6 +69,7 @@ defmodule MingaAgent.SessionStore do
           optional(:selection_intent) => map(),
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
+          optional(:custom_title) => String.t() | nil,
           optional(:provider_name) => String.t(),
           optional(:branches) => [MingaAgent.Branch.t()],
           optional(:message_ids) => [pos_integer()],
@@ -83,6 +84,7 @@ defmodule MingaAgent.SessionStore do
            required(:timestamp) => String.t(),
            required(:last_message_at) => String.t(),
            required(:title) => String.t(),
+           optional(:custom_title) => String.t() | nil,
            required(:model_name) => String.t(),
            required(:provider_name) => String.t(),
            optional(:model_selection) => ModelSelection.Stored.t() | nil,
@@ -135,6 +137,72 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
+  @doc "Renames an existing saved conversation without changing its draft or transcript."
+  @spec rename_conversation(String.t(), String.t(), String.t() | nil, keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def rename_conversation(id, title, config_dir, opts) when is_binary(id) and is_binary(title) do
+    with :ok <- validate_presentation_id(id),
+         {:ok, title} <- normalize_title(title),
+         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      path = session_record_path(id, config_dir)
+
+      with_record_workflow(path, fn -> rename_record(path, id, title, opts) end)
+    end
+  end
+
+  @spec normalize_title(String.t()) :: {:ok, String.t()} | {:error, :invalid_session_title}
+  defp normalize_title(title) do
+    if byte_size(title) <= 256 and String.valid?(title) and
+         not String.match?(title, ~r/[\p{Cc}\p{Zl}\p{Zp}]/u) do
+      case String.trim(title) do
+        "" -> {:error, :invalid_session_title}
+        title -> {:ok, title}
+      end
+    else
+      {:error, :invalid_session_title}
+    end
+  end
+
+  @spec rename_record(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp rename_record(path, id, title, opts) do
+    with {:ok, previous, _generation} <- read_record_for_write(path, id, opts),
+         %{"version" => version} = conversation when version in [2, 3, 4, 5, @version] <-
+           record_conversation(previous),
+         renamed = Map.put(conversation, "custom_title", title),
+         candidate = replace_record_conversation(previous, renamed),
+         :ok <- write_renamed_record(path, candidate, opts) do
+      {:ok, title}
+    else
+      {:error, _reason} = error -> error
+      _unsupported -> {:error, :no_saved_conversation}
+    end
+  end
+
+  @spec replace_record_conversation(map(), map()) :: map()
+  defp replace_record_conversation(%{"version" => @envelope_version} = record, conversation),
+    do: Map.put(record, "conversation", conversation)
+
+  defp replace_record_conversation(_record, conversation), do: conversation
+
+  # Only the title changes, so the validated artifact generation and pins stay the same.
+  @spec write_renamed_record(String.t(), map(), keyword()) :: :ok | {:error, term()}
+  defp write_renamed_record(path, record, opts) do
+    case atomic_write_private_result(path, JSON.encode!(record), fault_injector(opts)) do
+      {:ok, :durable} -> :ok
+      {:error, reason, :before_rename} -> {:error, reason}
+      {:error, reason, :after_rename} -> confirm_rename_commit(Path.dirname(path), reason)
+    end
+  end
+
+  @spec confirm_rename_commit(String.t(), term()) :: :ok | {:error, term()}
+  defp confirm_rename_commit(directory, reason) do
+    case sync_directory(directory) do
+      :ok -> :ok
+      {:error, sync_reason} -> {:error, {:session_rename_uncertain, reason, sync_reason}}
+    end
+  end
+
   @doc "Commits the admitted request and consumes the exact draft revision in the same record."
   @spec save_submitted_draft(session_data(), draft_revision(), String.t() | nil, keyword()) ::
           :ok | {:error, term()}
@@ -161,7 +229,7 @@ defmodule MingaAgent.SessionStore do
     with {:ok, previous, previous_generation} <- read_record_for_write(path, id, opts),
          {:ok, {^expected, %DraftSnapshot{attachments: [_ | _]}}} <- decode_presentation(previous),
          presentation = %{"revision" => expected + 1, "draft" => nil},
-         {:ok, encoded} <- encode_snapshot(data, presentation) do
+         {:ok, encoded} <- encode_snapshot(data, presentation, previous) do
       save_record(path, id, encoded, previous_generation, opts, :admit_draft)
     else
       {:ok, {revision, _draft}} -> {:error, {:stale_draft_revision, revision}}
@@ -173,7 +241,7 @@ defmodule MingaAgent.SessionStore do
           :ok | {:error, term()}
   defp commit_conversation(path, id, data, opts) do
     with {:ok, previous, previous_generation} <- read_record_for_write(path, id, opts),
-         {:ok, encoded} <- encode_snapshot(data, Map.get(previous, "presentation")) do
+         {:ok, encoded} <- encode_snapshot(data, Map.get(previous, "presentation"), previous) do
       save_record(path, id, encoded, previous_generation, opts)
     end
   end
@@ -590,10 +658,10 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec encode_snapshot(session_data(), map() | nil) ::
+  @spec encode_snapshot(session_data(), map() | nil, map()) ::
           {:ok, {String.t(), [Reference.t()], String.t()}} | {:error, term()}
-  defp encode_snapshot(data, presentation) do
-    conversation = serialize(data)
+  defp encode_snapshot(data, presentation, previous) do
+    conversation = carry_custom_title(serialize(data), record_conversation(previous))
 
     record =
       case presentation do
@@ -610,6 +678,22 @@ defmodule MingaAgent.SessionStore do
   rescue
     error -> {:error, {:snapshot_encode_failed, Exception.message(error)}}
   end
+
+  @spec carry_custom_title(map(), map() | nil) :: map()
+  defp carry_custom_title(conversation, %{"custom_title" => title}) when is_binary(title),
+    do: Map.put(conversation, "custom_title", title)
+
+  defp carry_custom_title(conversation, _previous), do: conversation
+
+  @spec stored_custom_title(map()) :: String.t() | nil
+  defp stored_custom_title(%{"custom_title" => title}) when is_binary(title) do
+    case normalize_title(title) do
+      {:ok, normalized} -> normalized
+      {:error, :invalid_session_title} -> nil
+    end
+  end
+
+  defp stored_custom_title(_record), do: nil
 
   @spec encode_record(map(), String.t()) ::
           {:ok, {String.t(), [Reference.t()], String.t()}} | {:error, term()}
@@ -1873,12 +1957,14 @@ defmodule MingaAgent.SessionStore do
           deserialized_transcript_session()
   defp deserialize_session(data, timestamp, transcript) do
     messages = Transcript.messages(transcript)
+    custom_title = stored_custom_title(data)
 
     %{
       id: string_or_default(data["id"], "unknown"),
       timestamp: timestamp,
       last_message_at: string_or_default(data["last_message_at"], timestamp),
-      title: string_or_default(data["title"], title_from_messages(messages)),
+      title: string_or_default(custom_title || data["title"], title_from_messages(messages)),
+      custom_title: custom_title,
       model_name: string_or_default(data["model_name"], "unknown"),
       provider_name: string_or_default(data["provider_name"], "unknown"),
       messages: messages,
@@ -2111,7 +2197,7 @@ defmodule MingaAgent.SessionStore do
         id: id,
         timestamp: timestamp,
         last_message_at: last_message_at,
-        title: data["title"] || preview,
+        title: stored_custom_title(data) || data["title"] || preview,
         model_name: data["model_name"] || "unknown",
         provider_name: data["provider_name"] || "unknown",
         preview: preview,
