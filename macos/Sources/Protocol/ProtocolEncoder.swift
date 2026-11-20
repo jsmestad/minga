@@ -212,6 +212,12 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return offer == 0 ? .invalidPayload("Agent submit requires a displayed composer offer") : nil
         case .agentOpenQuestion(let offer):
             return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
+        case .agentStopTurn(let target):
+            guard !target.sessionID.isEmpty, !target.requestID.isEmpty else {
+                return .invalidPayload("Agent Stop requires session and request identity")
+            }
+            return oversizedString(target.sessionID, limit: Int(UInt16.max))
+                ?? oversizedString(target.requestID, limit: Int(UInt16.max))
         case .agentToolApproval(let sessionId, let requestId, let toolCallId, _):
             guard !sessionId.isEmpty, !requestId.isEmpty, !toolCallId.isEmpty else {
                 return .invalidPayload("Tool approval requires session, request, and tool call identity")
@@ -391,6 +397,11 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             buf[0] = OP_GUI_ACTION
             buf[1] = GUI_ACTION_AGENT_OPEN_QUESTION
             writeU64(&buf, 2, offer)
+            writeFrame(buf)
+        case .agentStopTurn(let target):
+            var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_STOP_TURN])
+            appendString16(&buf, target.sessionID)
+            appendString16(&buf, target.requestID)
             writeFrame(buf)
         case .executeCommand(let name): encodeExecuteCommand(name: name)
         case .openFile(let path): encodeOpenFile(path: path)

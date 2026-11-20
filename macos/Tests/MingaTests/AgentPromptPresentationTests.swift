@@ -655,6 +655,7 @@ struct AgentPromptPresentationTests {
     @Test("Send and Stop use explicit intents in insert, normal, visual and operator modes",
           arguments: [PromptMode.insert, .normal, .visual, .visualLine, .operatorPending])
     func completeControls(mode: PromptMode) throws {
+        let target = AgentStopTarget(sessionID: "displayed-session", requestID: "displayed-request")
         let state = AgentChatState(prompt: "a multiline\nprompt", promptMode: mode, promptVisibleRows: 2)
         var actions: [AgentPromptView.Action] = []
         let control = AgentPromptActionButton(state: state, sendAction: { actions.append($0) })
@@ -662,16 +663,18 @@ struct AgentPromptPresentationTests {
         try control.inspect().find(ViewType.Button.self).tap()
         #expect(actions == [.submit])
         state.status = .thinking
+        #expect(try control.inspect().find(ViewType.Button.self).isDisabled())
+        publishStopTarget(target, to: state)
         try control.inspect().find(ViewType.Button.self).tap()
-        #expect(actions == [.submit, .abort])
+        #expect(actions == [.submit, .abort(target)])
         state.prompt = ""
         try control.inspect().find(ViewType.Button.self).tap()
-        #expect(actions == [.submit, .abort, .abort])
-        state.status = .idle
+        #expect(actions == [.submit, .abort(target), .abort(target)])
+        publishStopTarget(nil, to: state, status: .idle)
         let idleButton = try control.inspect().find(ViewType.Button.self)
         #expect(idleButton.isDisabled())
         #expect(throws: InspectionError.self) { try idleButton.tap() }
-        #expect(actions == [.submit, .abort, .abort])
+        #expect(actions == [.submit, .abort(target), .abort(target)])
     }
 
     @Test("Awaiting approval retains enabled Stop and draft in every prompt mode",
@@ -679,6 +682,8 @@ struct AgentPromptPresentationTests {
     func waitingControls(mode: PromptMode) throws {
         let draft = "unfinished é界\nsecond line"
         let state = AgentChatState(status: .approvalWaiting, prompt: draft, promptCursorLine: 1, promptCursorCol: 4, promptMode: mode, promptVisibleRows: 2)
+        let target = AgentStopTarget(sessionID: "waiting-session", requestID: "waiting-request")
+        publishStopTarget(target, to: state, status: .approvalWaiting)
         var actions: [AgentPromptView.Action] = []
         let control = AgentPromptActionButton(state: state, sendAction: { actions.append($0) })
             .environment(\.themeColors, ThemeColors())
@@ -686,7 +691,7 @@ struct AgentPromptPresentationTests {
         #expect(!button.isDisabled())
         #expect(try button.accessibilityLabel().string() == "Stop generating")
         try button.tap()
-        #expect(actions == [.abort])
+        #expect(actions == [.abort(target)])
         #expect(state.prompt == draft)
         #expect(state.promptMode == mode)
         #expect(state.promptCursorLine == 1 && state.promptCursorCol == 4)
@@ -695,6 +700,10 @@ struct AgentPromptPresentationTests {
         state.prompt = ""
         #expect(try !control.inspect().find(ViewType.Button.self).isDisabled())
         try control.inspect().find(ViewType.Button.self).tap()
-        #expect(actions == [.abort, .abort])
+        #expect(actions == [.abort(target), .abort(target)])
+    }
+
+    private func publishStopTarget(_ target: AgentStopTarget?, to state: AgentChatState, status: AgentStatus = .thinking) {
+        state.update(visible: true, status: status, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: state.promptLineCount, promptCursorLine: state.promptCursorLine, promptCursorCol: state.promptCursorCol, promptMode: state.promptMode, promptVisibleRows: state.promptVisibleRows, promptCompletion: nil, stopTarget: target)
     }
 }

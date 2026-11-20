@@ -222,4 +222,5 @@ const (
 	GUIActionAgentReadRetainedOutput    byte = 0x6A
 	GUIActionAgentComposerSubmit        byte = 0x6B
 	GUIActionAgentOpenQuestion          byte = 0x6C
+	GUIActionAgentStopTurn              byte = 0x6D
 )

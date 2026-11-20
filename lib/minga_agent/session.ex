@@ -261,6 +261,11 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:abort_for_id, expected_session_id})
   end
 
+  @doc "Stops the matching turn; volatile inputs return to the caller, saved inputs stay recoverable."
+  @spec stop_turn(GenServer.server(), {String.t(), String.t()}) ::
+          {:ok, [TurnExecution.content()] | :queue_kept} | {:error, :stale_turn}
+  def stop_turn(session, target), do: GenServer.call(session, {:stop_turn, target})
+
   @doc "Aborts the current agent operation."
   @spec abort(GenServer.server()) :: :ok
   def abort(session) do
@@ -346,6 +351,7 @@ defmodule MingaAgent.Session do
   @type editor_snapshot :: %{
           status: status(),
           display_status: TurnExecution.display_status(),
+          stop_target: {String.t(), String.t()} | nil,
           pending_approval: PublicApproval.t() | nil,
           pending_question: {QuestionTarget.t(), Question.t()} | nil,
           queue_target: queue_target() | nil,
@@ -386,7 +392,8 @@ defmodule MingaAgent.Session do
   @type composer_draft_operation ::
           :read
           | {:save, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
-          | {:recall, SessionStore.draft_revision(), DraftSnapshot.t() | nil}
+          | {:recall, SessionStore.draft_revision(), DraftSnapshot.t() | nil,
+             :keep_running | {:stop, {String.t(), String.t()}}}
           | {:queue, queue_target(), TurnExecution.prompt_kind(), queue_draft(),
              TurnExecution.content()}
           | {:reconcile_queue, pos_integer(), String.t(), SessionStore.draft_revision()}
@@ -1419,6 +1426,16 @@ defmodule MingaAgent.Session do
     {:reply, :ok, abort_turn(state)}
   end
 
+  def handle_call({:stop_turn, {_, _} = target}, _from, state) do
+    case active_turn_target(state) do
+      ^target -> stop_active_turn(state)
+      _ -> {:reply, {:error, :stale_turn}, state}
+    end
+  end
+
+  def handle_call({:stop_turn, _target}, _from, state),
+    do: {:reply, {:error, :stale_turn}, state}
+
   def handle_call({:send_follow_up, content}, _from, state) do
     handle_prompt(content, :follow_up, state)
   end
@@ -1622,6 +1639,7 @@ defmodule MingaAgent.Session do
     snapshot = %{
       status: TurnExecution.status(state.turn_execution),
       display_status: TurnExecution.display_status(state.turn_execution),
+      stop_target: active_turn_target(state),
       pending_approval:
         public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
       pending_question: public_question(state.turn_execution),
@@ -3356,18 +3374,18 @@ defmodule MingaAgent.Session do
       do: {:noreply, state}
 
   def handle_cast(
-        {:composer_draft, caller, record_id, correlation, {:recall, revision, draft}},
+        {:composer_draft, caller, record_id, correlation, {:recall, revision, draft, action}},
         state
       )
       when is_pid(caller) and node(caller) == node() and is_binary(record_id) and
              is_integer(revision) and revision >= 0 and
              (is_struct(draft, DraftSnapshot) or is_nil(draft)) do
-    {result, next} = recall_composer_draft(state, record_id, revision, draft)
+    {result, next} = recall_composer_draft(state, record_id, revision, draft, action)
     send(caller, {:composer_draft_result, self(), record_id, correlation, result})
     {:noreply, next}
   end
 
-  def handle_cast({:composer_draft, caller, record_id, correlation, {:recall, _, _}}, state)
+  def handle_cast({:composer_draft, caller, record_id, correlation, {:recall, _, _, _}}, state)
       when is_pid(caller) and node(caller) == node() do
     send(
       caller,
@@ -3377,8 +3395,11 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_cast({:composer_draft, _caller, _record_id, _correlation, {:recall, _, _}}, state),
-    do: {:noreply, state}
+  def handle_cast(
+        {:composer_draft, _caller, _record_id, _correlation, {:recall, _, _, _}},
+        state
+      ),
+      do: {:noreply, state}
 
   def handle_cast({:composer_draft, caller, record_id, correlation, operation}, state)
       when is_pid(caller) and node(caller) == node() do
@@ -3683,6 +3704,34 @@ defmodule MingaAgent.Session do
   end
 
   defp finish_continue(state, _proposed_execution, _result), do: state
+
+  @spec active_turn_target(state()) :: {String.t(), String.t()} | nil
+  defp active_turn_target(%{provider: provider}) when ProviderLifecycle.is_detached(provider),
+    do: nil
+
+  defp active_turn_target(%{
+         session_id: session_id,
+         continuation: %Continuation{active_request: %Request{request_id: request_id}},
+         turn_execution: execution
+       }) do
+    if TurnExecution.active?(execution), do: {session_id, request_id}
+  end
+
+  defp active_turn_target(_state), do: nil
+
+  @spec stop_active_turn(state()) ::
+          {:reply, {:ok, [TurnExecution.content()] | :queue_kept}, state()}
+  defp stop_active_turn(state) do
+    if Persistence.enabled?(state.persistence) do
+      result =
+        if TurnExecution.queues(state.turn_execution) == {[], []}, do: [], else: :queue_kept
+
+      {:reply, {:ok, result}, abort_turn(state)}
+    else
+      {{steering, follow_up}, execution} = TurnExecution.recall_queues(state.turn_execution)
+      {:reply, {:ok, steering ++ follow_up}, abort_turn(%{state | turn_execution: execution})}
+    end
+  end
 
   @spec abort_turn(state()) :: state()
   defp abort_turn(state) do
@@ -4266,7 +4315,10 @@ defmodule MingaAgent.Session do
   defp announce_display_status(state, execution) do
     previous = TurnExecution.display_status(state.turn_execution)
     next = TurnExecution.display_status(execution)
-    announce_display_status_change(state, previous, next)
+
+    state
+    |> announce_display_status_change(previous, next)
+    |> broadcast({:stop_target_changed, active_turn_target(%{state | turn_execution: execution})})
   end
 
   @spec announce_display_status_change(
@@ -4916,6 +4968,30 @@ defmodule MingaAgent.Session do
 
   defp change_queued_input_reply(state, _record_id, _id, _revision, _operation),
     do: {:reply, {:error, :invalid_queue_edit}, state}
+
+  @spec recall_composer_draft(
+          state(),
+          String.t(),
+          non_neg_integer(),
+          DraftSnapshot.t() | nil,
+          :keep_running | {:stop, {String.t(), String.t()}}
+        ) :: {{:ok, non_neg_integer(), DraftSnapshot.t()} | {:error, term()}, state()}
+  defp recall_composer_draft(state, record_id, revision, draft, :keep_running),
+    do: recall_composer_draft(state, record_id, revision, draft)
+
+  defp recall_composer_draft(state, record_id, revision, draft, {:stop, {_, _} = target}) do
+    case active_turn_target(state) do
+      ^target ->
+        {result, next} = recall_composer_draft(state, record_id, revision, draft)
+        {result, abort_turn(next)}
+
+      _stale ->
+        {{:error, :stale_turn}, state}
+    end
+  end
+
+  defp recall_composer_draft(state, _record, _revision, _draft, _action),
+    do: {{:error, :invalid_draft_snapshot}, state}
 
   @spec recall_composer_draft(state(), String.t(), non_neg_integer(), DraftSnapshot.t() | nil) ::
           {{:ok, non_neg_integer(), DraftSnapshot.t()} | {:error, term()}, state()}
@@ -9381,7 +9457,7 @@ defmodule MingaAgent.Session do
       %{message: {:confirm_queue_receipt, _, _, _}} ->
         status |> Map.replace(:message, :confirm_queue_receipt) |> Map.replace(:reason, :redacted)
 
-      %{message: {:composer_draft, _, _, _, {:recall, _, _}}} ->
+      %{message: {:composer_draft, _, _, _, {:recall, _, _, _}}} ->
         status |> Map.replace(:message, :recall_queued_draft) |> Map.replace(:reason, :redacted)
 
       %{message: {:change_queued_input, _, _, _}} ->

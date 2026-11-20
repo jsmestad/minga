@@ -486,6 +486,25 @@ defmodule MingaAgent.SessionLifecycleTest do
     end
   end
 
+  test "Stop recalls only the displayed turn's pending prompts and cannot stop its replacement" do
+    session = start_subscribed_session(Minga.Test.SessionSlowMockProvider)
+    assert :ok = Session.send_prompt(session, "First turn")
+    assert %{stop_target: {_, _} = first} = Session.editor_snapshot(session)
+    assert {:queued, :follow_up} = Session.queue_follow_up(session, "First pending prompt")
+    assert {:ok, ["First pending prompt"]} = Session.stop_turn(session, first)
+    assert %{stop_target: nil} = Session.editor_snapshot(session)
+
+    assert :ok = Session.send_prompt(session, "Replacement turn")
+    assert %{stop_target: {_, _} = replacement} = Session.editor_snapshot(session)
+    refute replacement == first
+    assert {:queued, :follow_up} = Session.queue_follow_up(session, "Replacement pending prompt")
+
+    assert {:error, :stale_turn} = Session.stop_turn(session, first)
+    assert %{stop_target: ^replacement} = Session.editor_snapshot(session)
+    assert {:ok, ["Replacement pending prompt"]} = Session.stop_turn(session, replacement)
+    assert {:error, :stale_turn} = Session.stop_turn(session, replacement)
+  end
+
   describe "abort/1" do
     test "preserves partial response and adds system message" do
       session = start_subscribed_session()

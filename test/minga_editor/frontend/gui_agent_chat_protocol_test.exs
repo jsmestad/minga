@@ -46,6 +46,22 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
     assert :error == ProtocolGUI.decode_gui_action(0x6A, <<42::32>>)
   end
 
+  test "Stop carries both exact IDs and rejects empty, truncated, and trailing data" do
+    target = <<1::16, "s", 2::16, "r2">>
+
+    assert {:ok, {:gui_action, {:agent_stop_turn, {"s", "r2"}}}} =
+             Protocol.decode_event(<<Minga.Protocol.Opcodes.gui_action(), 0x6D, target::binary>>)
+
+    for payload <- [
+          <<0::16, 1::16, "r">>,
+          <<1::16, "s", 0::16>>,
+          <<1::16, "s", 2::16, "r">>,
+          <<target::binary, 0>>
+        ] do
+      assert :error = ProtocolGUI.decode_gui_action(0x6D, payload)
+    end
+  end
+
   describe "resident approval card to request-bound GUI action" do
     test "each approval decision preserves the exact displayed target" do
       target = Target.new("s", "r", "t")

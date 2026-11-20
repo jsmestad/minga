@@ -1466,6 +1466,11 @@ value = 0x6B
 name = "agent_open_question"
 value = 0x6C
 
+# session_id(string16) + request_id(string16) from the committed Stop control.
+[[gui_actions]]
+name = "agent_stop_turn"
+value = 0x6D
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven

@@ -353,6 +353,71 @@ defmodule MingaAgent.SessionQueueTest do
     end
 
     @tag :tmp_dir
+    test "saved Stop recalls only the requested turn and preserves the current draft", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: SessionSlowMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      assert :ok = Session.send_prompt(session, "Original")
+      id = Session.session_id(session)
+      assert %{stop_target: original} = Session.editor_snapshot(session)
+      assert {:ok, []} = Session.stop_turn(session, original)
+      assert :ok = Session.send_prompt(session, "Replacement")
+      assert %{stop_target: replacement} = Session.editor_snapshot(session)
+      assert original != replacement
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "Still queued")
+
+      draft = %DraftSnapshot{
+        text: "Keep draft",
+        cursor: {0, 0},
+        attachments: [],
+        paste_blocks: []
+      }
+
+      assert {:ok, 1} = SessionStore.save_presentation(id, 0, draft, dir)
+
+      stale = make_ref()
+
+      assert :ok =
+               Session.request_composer_draft(
+                 session,
+                 id,
+                 stale,
+                 {:recall, 1, draft, {:stop, original}}
+               )
+
+      assert_receive {:composer_draft_result, ^session, ^id, ^stale, {:error, :stale_turn}},
+                     @event_timeout
+
+      assert %{stop_target: ^replacement} = Session.editor_snapshot(session)
+      assert Session.get_queued_messages(session) == {[], ["Still queued"]}
+      assert {:ok, 1, ^draft} = SessionStore.read_presentation(id, dir)
+
+      current = make_ref()
+
+      assert :ok =
+               Session.request_composer_draft(
+                 session,
+                 id,
+                 current,
+                 {:recall, 1, draft, {:stop, replacement}}
+               )
+
+      assert_receive {:composer_draft_result, ^session, ^id, ^current, {:ok, 2, recalled}},
+                     @event_timeout
+
+      assert %{stop_target: nil} = Session.editor_snapshot(session)
+      assert recalled.text == "Still queued\n\nKeep draft"
+      assert {:ok, 2, ^recalled} = SessionStore.read_presentation(id, dir)
+      assert Session.get_queued_messages(session) == {[], []}
+    end
+
+    @tag :tmp_dir
     test "a resolved image mention and an ordinary entry both recall after restart", %{
       tmp_dir: dir
     } do
@@ -394,7 +459,7 @@ defmodule MingaAgent.SessionQueueTest do
       assert Session.get_queued_messages(recovered) == {[], [content, "Then check the title"]}
 
       ref = make_ref()
-      :ok = Session.request_composer_draft(recovered, id, ref, {:recall, 1, nil})
+      :ok = Session.request_composer_draft(recovered, id, ref, {:recall, 1, nil, :keep_running})
 
       assert_receive {:composer_draft_result, ^recovered, ^id, ^ref, {:ok, 2, recalled}},
                      @event_timeout

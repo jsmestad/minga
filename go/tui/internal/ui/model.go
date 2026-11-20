@@ -29,13 +29,14 @@ const (
 )
 
 type Model struct {
-	width    int
-	height   int
-	out      chan<- []byte
-	done     <-chan struct{}
-	viewport viewport.Model
-	zones    *zoneManager
-	windows  map[uint16]protocol.WindowContent
+	width     int
+	height    int
+	out       chan<- []byte
+	done      <-chan struct{}
+	viewport  viewport.Model
+	zones     *zoneManager
+	stopClick *presentedStopClick
+	windows   map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
 	residentRows      map[uint16]residentRows
@@ -188,6 +189,7 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		done:                           done,
 		viewport:                       vp,
 		zones:                          newZoneManager(),
+		stopClick:                      &presentedStopClick{},
 		windows:                        map[uint16]protocol.WindowContent{},
 		residentRows:                   map[uint16]residentRows{},
 		residentSemantics:              map[uint16]*residentSemanticStore{},
@@ -326,6 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
+		stopTarget, stopClaimed, publicationChanged := m.stopClick.take()
 		if m.textDrag != nil && isEditorTextDragContinuation(msg) {
 			updated, packet, handled := m.handleEditorTextMouse(msg)
 			m = updated
@@ -345,6 +348,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft {
+			if publicationChanged {
+				break // The press could belong to either side of the terminal write.
+			}
+			if stopClaimed {
+				if packet := protocol.EncodeGUIAgentStopTurn(stopTarget); packet != nil {
+					m.send(packet)
+				}
+				break
+			}
 			if packet, handled := m.pickerPointerPacket(click); handled {
 				if packet != nil {
 					m.send(packet)
@@ -615,6 +627,9 @@ func (m Model) View() tea.View {
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
+	if m.protocolError == "" {
+		view.OnMouse = m.presentedStopHandler()
+	}
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		view.Cursor = m.agentPromptCursor()
 	} else {

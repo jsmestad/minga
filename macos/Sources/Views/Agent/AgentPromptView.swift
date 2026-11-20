@@ -33,7 +33,7 @@ struct AgentPromptApertureKey: PreferenceKey {
 public struct AgentPromptView: View {
     public enum Action: Equatable, Sendable {
         case submit
-        case abort
+        case abort(AgentStopTarget)
         case attachments
     }
 
@@ -245,18 +245,15 @@ struct AgentPromptActionButton: View {
 
     /// The action button's foreground color based on state.
     private var actionButtonColor: Color {
-        if hasActiveTurn { return .red }
+        if hasActiveTurn { return state.stopTarget == nil ? theme.agentTextFg.opacity(0.2) : .red }
         if canSend { return theme.agentInputBorder }
         return theme.agentTextFg.opacity(0.2)
     }
 
     var body: some View {
+        let action: AgentPromptView.Action? = hasActiveTurn ? state.stopTarget.map(AgentPromptView.Action.abort) : canSend ? .submit : nil
         Button {
-            if hasActiveTurn {
-                sendAction?(.abort)
-            } else if canSend {
-                sendAction?(.submit)
-            }
+            if let action { sendAction?(action) }
         } label: {
             Image(systemName: actionButtonIcon)
                 .font(Typography.font(.action))
@@ -264,7 +261,7 @@ struct AgentPromptActionButton: View {
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
-        .disabled(!canSend && !hasActiveTurn)
+        .disabled(action == nil)
         .frame(width: Typography.Step.action.rawValue)
         .accessibilityLabel(hasActiveTurn ? "Stop generating" : "Send message")
         .accessibilityHint(hasActiveTurn ? "Aborts the current response" : "Sends the current prompt")

@@ -145,6 +145,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_read_retained_output Opcodes.gui_action_agent_read_retained_output()
   @gui_action_agent_composer_submit Opcodes.gui_action_agent_composer_submit()
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
+  @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
@@ -268,6 +269,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:agent_read_retained_output, MingaEditor.Agent.RetainedOutputTarget.t()}
           | {:agent_composer_submit, pos_integer()}
           | {:agent_open_question, pos_integer()}
+          | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, path :: String.t()}
@@ -757,6 +759,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_open_question, <<offer::64>>) when offer > 0,
     do: {:ok, {:agent_open_question, offer}}
+
+  def decode_gui_action(
+        @gui_action_agent_stop_turn,
+        <<session_length::16, session_id::binary-size(session_length), request_length::16,
+          request_id::binary-size(request_length)>>
+      )
+      when session_length > 0 and request_length > 0,
+      do: {:ok, {:agent_stop_turn, {session_id, request_id}}}
 
   def decode_gui_action(
         @gui_action_agent_read_retained_output,

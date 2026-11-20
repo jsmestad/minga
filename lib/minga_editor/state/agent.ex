@@ -44,7 +44,8 @@ defmodule MingaEditor.State.Agent do
           spinner_timer: {:ok, :timer.tref()} | nil,
           pending_approval: approval() | nil,
           pending_question: PendingQuestion.t() | nil,
-          queue_target: {pid(), MingaAgent.Session.queue_target()} | nil
+          queue_target: {pid(), MingaAgent.Session.queue_target()} | nil,
+          stop_target: {pid(), {String.t(), String.t()}} | nil
         }
 
   defstruct runtime: %RuntimeState{},
@@ -52,7 +53,8 @@ defmodule MingaEditor.State.Agent do
             spinner_timer: nil,
             pending_approval: nil,
             pending_question: nil,
-            queue_target: nil
+            queue_target: nil,
+            stop_target: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -137,7 +139,8 @@ defmodule MingaEditor.State.Agent do
         error: nil,
         pending_approval: nil,
         pending_question: nil,
-        queue_target: nil
+        queue_target: nil,
+        stop_target: nil
     }
   end
 
@@ -162,6 +165,13 @@ defmodule MingaEditor.State.Agent do
 
   def project_queue_target(%__MODULE__{} = agent, session, {_, _, _} = target),
     do: %{agent | queue_target: {session, target}}
+
+  @doc "Projects the active turn identity from its attached Session."
+  @spec project_stop_target(t(), pid(), {String.t(), String.t()} | nil) :: t()
+  def project_stop_target(%__MODULE__{} = agent, _session, nil), do: %{agent | stop_target: nil}
+
+  def project_stop_target(%__MODULE__{} = agent, session, {_, _} = target),
+    do: %{agent | stop_target: {session, target}}
 
   @doc "Replaces the question projection for the attached Session."
   @spec project_question(t(), pid(), {QuestionTarget.t(), Question.t()} | nil) :: t()
