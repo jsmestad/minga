@@ -2139,17 +2139,15 @@ defmodule MingaAgent.Providers.Native do
     with {:ok, checkpoint_id} <-
            checkpoint_tool_group(lctx, updated_context.messages, tool_calls),
          :ok <- emit_tool_starts(lctx, tool_calls),
-         {:ok, context} <-
-           execute_tools(lctx, updated_context, checkpoint_id, tool_calls) do
-      context = inject_steering_messages(lctx, context)
-
+         {:ok, context} <- execute_tools(lctx, updated_context, checkpoint_id, tool_calls),
+         {:ok, messages} <- steering_dispatch_source(lctx, checkpoint_id) do
       lctx = %{
         lctx
         | turn_count: lctx.turn_count + 1,
           session_cost: lctx.session_cost + turn_cost
       }
 
-      run_agent_loop(lctx, context)
+      run_agent_loop(lctx, %{context | messages: messages})
     else
       {:error, reason} ->
         reported_error(lctx, "Durable tool execution failed: #{inspect(reason)}", reason)
@@ -2193,29 +2191,12 @@ defmodule MingaAgent.Providers.Native do
   defp checkpoint_tool_group(_lctx, _messages, _tool_calls),
     do: {:error, :missing_session_checkpoint_owner}
 
-  # Dequeues any steering messages from the Session and appends them to the
-  # LLM context so the model sees them on its next turn. Returns the context
-  # unchanged when there are no pending steering messages or no session_pid.
-  @spec inject_steering_messages(loop_ctx(), Context.t()) :: Context.t()
-  defp inject_steering_messages(lctx, context) do
-    # Use a short timeout: Session.dequeue_steering is a simple queue pop and
-    # should respond in microseconds. 200ms guards against a slow/dead session
-    # without blocking the agent loop meaningfully.
-    steering =
-      try do
-        GenServer.call(lctx.session_pid, :dequeue_steering, 200)
-      catch
-        # Session may die between loop iterations. Targeted catch per
-        # AGENTS.md rule 4.
-        :exit, _ -> []
-      end
-
-    if steering == [] do
-      context
-    else
-      combined = Session.combine_queue_entries_to_text(steering)
-      Context.append(context, Context.user(combined))
-    end
+  @spec steering_dispatch_source(loop_ctx(), String.t()) ::
+          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
+  defp steering_dispatch_source(lctx, checkpoint_id) do
+    Session.steering_dispatch_source(lctx.session_pid, lctx.request.request_id, checkpoint_id)
+  catch
+    :exit, _reason -> {:error, :steering_admission_unconfirmed}
   end
 
   @spec execute_tools(

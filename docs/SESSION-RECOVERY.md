@@ -81,7 +81,19 @@ To attach the diagnostics already published for the current file, press `SPC a D
 
 In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a j` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
 
-An unsent snapshot stays with its original local conversation after restart. Sending an attached prompt saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale, the route cannot accept it, or an active turn prevents sending, Minga keeps the draft and explains what to do before retrying.
+An unsent snapshot stays with its original local conversation after restart. Sending an attached prompt from an idle conversation saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale or the route cannot accept it, Minga keeps the draft.
+
+## Keep follow-up input across a restart
+
+In a local Agent conversation that saves drafts, type the next instruction while a turn is running. Press `Ctrl+Enter`, or use `SPC a f` in Normal mode, to queue it for the next turn. Pressing `Enter` while editing steers the running turn instead. Minga clears the submitted draft only after the queue accepts it, including the snapshots shown in the composer. Typing after submission does not change what was queued.
+
+If the Session process restarts before the composer receives the result, the replacement checks the original submission. It confirms the saved queue entry or reports that the queue did not accept the draft. This check does not submit the prompt again. Newer edits stay in the composer in either case.
+
+Use `SPC a q` in Normal mode to recall pending input before the Agent consumes it. Minga puts the recalled text ahead of your current draft and keeps its captured snapshots. Image mentions return as editable `@path` text. If you send them again, Minga resolves them again.
+
+If the draft changes while recall is finishing, Minga keeps your visible edits and saves the recalled copy separately in the original conversation. Copy the visible text somewhere safe, clear the composer, then select the same conversation in Sessions (`SPC a h`) to reload the recalled draft.
+
+Reopening a saved conversation does not automatically start a queued turn. A prompt that already crossed into the saved continuation does not appear in the pending queue again. A session configured not to save its state has no restart guarantee for queued input.
 
 ## Retained tool output
 

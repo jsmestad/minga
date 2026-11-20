@@ -6,6 +6,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   """
 
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.DraftWorkflow
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
@@ -170,15 +171,30 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   defp restore_queued_prompts_after_error(state) do
     case Runtime.active_session(state.shell_runtime) do
       session when is_pid(session) ->
-        {steering, follow_up} = safe_recall_queues(session)
-        restore_queued_to_prompt(state, steering ++ follow_up)
+        case DraftWorkflow.recall(state, session) do
+          {:saved, updated} ->
+            updated
+
+          :volatile ->
+            restore_volatile_queue(state, safe_recall_queues(session))
+        end
 
       _session ->
         state
     end
   end
 
-  @spec safe_recall_queues(pid()) :: {[queued_prompt()], [queued_prompt()]}
+  @spec restore_volatile_queue(
+          EditorState.t(),
+          {[queued_prompt()], [queued_prompt()]} | {:error, :saved_draft_required}
+        ) :: EditorState.t()
+  defp restore_volatile_queue(state, {:error, :saved_draft_required}), do: state
+
+  defp restore_volatile_queue(state, {steering, follow_up}),
+    do: restore_queued_to_prompt(state, steering ++ follow_up)
+
+  @spec safe_recall_queues(pid()) ::
+          {[queued_prompt()], [queued_prompt()]} | {:error, :saved_draft_required}
   defp safe_recall_queues(session) do
     Session.recall_queues(session)
   catch

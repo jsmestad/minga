@@ -38,12 +38,13 @@ defmodule MingaAgent.Session.Continuation do
 
   @typedoc "Exact provider continuation captured before any tool effect is admitted."
   @type tool_checkpoint :: %{
-          version: pos_integer(),
-          checkpoint_id: String.t(),
-          request_id: String.t(),
-          messages: [Message.t()],
-          calls: [checkpoint_call()],
-          epoch_id: PrefixStore.epoch_ref()
+          required(:version) => pos_integer(),
+          required(:checkpoint_id) => String.t(),
+          required(:request_id) => String.t(),
+          required(:messages) => [Message.t()],
+          required(:calls) => [checkpoint_call()],
+          required(:epoch_id) => PrefixStore.epoch_ref(),
+          optional(:steering) => [Message.t()]
         }
 
   @typedoc "Completed model boundary correlated to the last display entry it produced."
@@ -911,6 +912,58 @@ defmodule MingaAgent.Session.Continuation do
   def checkpoint_tool_group(%__MODULE__{}, _request_id, _messages, _calls),
     do: {:error, :stale_request}
 
+  @doc "Freezes steering for a completed checkpoint once and returns its canonical dispatch source."
+  @spec freeze_dispatch_source(t(), String.t(), [Message.t()]) ::
+          {:ok, [Message.t()], t()} | {:error, term()}
+  def freeze_dispatch_source(
+        %__MODULE__{
+          active_request: %Request{request_id: request_id},
+          tool_checkpoint: %{checkpoint_id: checkpoint_id, request_id: request_id} = checkpoint
+        } = continuation,
+        checkpoint_id,
+        steering
+      ) do
+    with {:ok, results} <- checkpoint_result_messages(checkpoint.calls),
+         {:ok, frozen} <- freeze_checkpoint_steering(checkpoint, steering) do
+      {:ok, frozen.messages ++ results ++ frozen.steering,
+       %{continuation | tool_checkpoint: frozen}}
+    end
+  end
+
+  def freeze_dispatch_source(%__MODULE__{}, _checkpoint_id, _steering),
+    do: {:error, :stale_request}
+
+  @spec freeze_checkpoint_steering(tool_checkpoint(), [Message.t()]) ::
+          {:ok, tool_checkpoint()} | {:error, :invalid_steering}
+  defp freeze_checkpoint_steering(%{steering: _} = checkpoint, []), do: {:ok, checkpoint}
+  defp freeze_checkpoint_steering(%{steering: _}, _steering), do: {:error, :invalid_steering}
+
+  defp freeze_checkpoint_steering(checkpoint, steering) do
+    if valid_steering?(steering),
+      do: {:ok, Map.merge(checkpoint, %{version: 2, steering: steering})},
+      else: {:error, :invalid_steering}
+  end
+
+  @spec valid_steering?(term()) :: boolean()
+  defp valid_steering?(steering) when is_list(steering),
+    do:
+      Enum.all?(steering, &match?(%Message{role: :user}, &1)) and
+        validate_messages(steering) == :ok
+
+  defp valid_steering?(_steering), do: false
+
+  @spec checkpoint_result_messages([checkpoint_call()]) ::
+          {:ok, [Message.t()]} | {:error, :unresolved_tool_checkpoint}
+  defp checkpoint_result_messages(calls) do
+    case Enum.reduce_while(calls, [], fn
+           %{status: {:completed, message}}, results -> {:cont, [message | results]}
+           _call, _results -> {:halt, :unresolved}
+         end) do
+      :unresolved -> {:error, :unresolved_tool_checkpoint}
+      results -> {:ok, Enum.reverse(results)}
+    end
+  end
+
   @doc "Durably grants the only executable token for one checkpointed tool call."
   @spec admit_tool_effect(t(), String.t(), String.t(), String.t(), String.t(), map()) ::
           {:ok, t()} | {:error, term()}
@@ -1134,17 +1187,18 @@ defmodule MingaAgent.Session.Continuation do
 
     reconciliation = Enum.reverse(reversed_reconciliation)
     revision = continuation.revision + 1
+    steering = Map.get(checkpoint, :steering, [])
 
     boundary = %{
       transcript_id: transcript_id,
-      message_count: length(checkpoint.messages) + length(result_messages),
+      message_count: length(checkpoint.messages) + length(result_messages) + length(steering),
       revision: revision,
       epoch_id: Map.get(checkpoint, :epoch_id, :unknown)
     }
 
     reconciled = %{
       continuation
-      | messages: checkpoint.messages ++ result_messages,
+      | messages: checkpoint.messages ++ result_messages ++ steering,
         revision: revision,
         active_request: nil,
         tool_checkpoint: nil,
@@ -1295,22 +1349,41 @@ defmodule MingaAgent.Session.Continuation do
   @spec validate_tool_checkpoint(tool_checkpoint() | nil) :: :ok | {:error, term()}
   defp validate_tool_checkpoint(nil), do: :ok
 
-  defp validate_tool_checkpoint(%{
-         version: 1,
-         checkpoint_id: checkpoint_id,
-         request_id: request_id,
-         messages: messages,
-         calls: calls
-       })
-       when is_binary(checkpoint_id) and checkpoint_id != "" and is_binary(request_id) and
-              request_id != "" and is_list(messages) and is_list(calls) and calls != [] do
-    case validate_messages(messages) do
-      :ok -> validate_restored_checkpoint_calls(calls)
-      {:error, _reason} = error -> error
+  defp validate_tool_checkpoint(
+         %{
+           version: version,
+           checkpoint_id: checkpoint_id,
+           request_id: request_id,
+           messages: messages,
+           calls: calls
+         } = checkpoint
+       )
+       when version in [1, 2] and is_binary(checkpoint_id) and checkpoint_id != "" and
+              is_binary(request_id) and request_id != "" and is_list(messages) and is_list(calls) and
+              calls != [] do
+    with :ok <- validate_messages(messages),
+         :ok <- validate_restored_checkpoint_calls(calls) do
+      validate_restored_steering(checkpoint)
     end
   end
 
   defp validate_tool_checkpoint(_checkpoint), do: {:error, :invalid_tool_checkpoint}
+
+  @spec validate_restored_steering(tool_checkpoint()) :: :ok | {:error, :invalid_steering}
+  defp validate_restored_steering(%{version: 1} = checkpoint)
+       when not is_map_key(checkpoint, :steering),
+       do: :ok
+
+  defp validate_restored_steering(%{version: 2, steering: steering, calls: calls}) do
+    with {:ok, _results} <- checkpoint_result_messages(calls),
+         true <- valid_steering?(steering) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_steering}
+    end
+  end
+
+  defp validate_restored_steering(_checkpoint), do: {:error, :invalid_steering}
 
   @spec validate_checkpoint_calls([map()]) :: {:ok, tool_call_ids()} | {:error, term()}
   defp validate_checkpoint_calls(calls) do
@@ -1379,7 +1452,10 @@ defmodule MingaAgent.Session.Continuation do
     else
       with {:ok, remaining} <-
              consume_checkpoint_prefix(checkpoint.messages, messages, request_messages, call_ids) do
-        validate_message_prefix(remaining, completed_results)
+        validate_message_prefix(
+          remaining,
+          completed_results ++ Map.get(checkpoint, :steering, [])
+        )
       end
     end
   end
@@ -1407,10 +1483,9 @@ defmodule MingaAgent.Session.Continuation do
          [],
          call_ids
        ) do
-    case reuses_tool_call_id?(message, call_ids) do
-      true -> {:error, :reused_tool_call_id}
-      false -> consume_checkpoint_prefix(checkpoint_tail, messages_tail, [], call_ids)
-    end
+    if reuses_tool_call_id?(message, call_ids),
+      do: {:error, :reused_tool_call_id},
+      else: consume_checkpoint_prefix(checkpoint_tail, messages_tail, [], call_ids)
   end
 
   defp consume_checkpoint_prefix([], messages, [], _call_ids), do: {:ok, messages}
@@ -1453,7 +1528,11 @@ defmodule MingaAgent.Session.Continuation do
 
     if Enum.any?(results, &is_nil/1),
       do: {:error, :unresolved_tool_checkpoint},
-      else: validate_message_prefix(messages, checkpoint.messages ++ results)
+      else:
+        validate_message_prefix(
+          messages,
+          checkpoint.messages ++ results ++ Map.get(checkpoint, :steering, [])
+        )
   end
 
   @spec checkpoint_id(String.t(), [Message.t()], [map()]) :: String.t()

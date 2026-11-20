@@ -5,11 +5,13 @@ defmodule MingaAgent.Session.TurnExecution do
   Transitions are pure. They return the next owned value or a domain outcome; `MingaAgent.Session` remains responsible for provider calls, notifications, broadcasts, transcript updates, and persistence.
   """
 
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.EditBoundary
   alias MingaAgent.Event
   alias MingaAgent.Question
   alias MingaAgent.Question.Pending, as: PendingQuestion
   alias MingaAgent.Question.Target, as: QuestionTarget
+  alias MingaAgent.Tool.Output.Reference
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
 
@@ -26,7 +28,19 @@ defmodule MingaAgent.Session.TurnExecution do
   @type prompt_kind :: :steering | :follow_up
 
   @typedoc "Whether a prompt starts a turn now or joins one of the active turn's queues."
-  @type prompt_admission :: {:send_now, t()} | {:queued, t()}
+  @type prompt_admission :: {:send_now, t()} | {:queued, t()} | {:error, :prompt_queue_full}
+
+  @type queued_input ::
+          {id :: pos_integer(), revision :: pos_integer(), content(),
+           [DraftSnapshot.attachment()], String.t() | nil}
+  @type queue_receipt ::
+          {id :: pos_integer(), submission_id :: String.t(), prompt_kind(),
+           committed_revision :: pos_integer()}
+  @type pending_inputs ::
+          {next_id :: pos_integer(), [queued_input()], [queued_input()], [queue_receipt()]}
+  @max_pending_inputs 32
+  @max_pending_bytes 16 * 1024 * 1024
+  @max_queue_receipts 64
 
   @typedoc "An active provider tool identified by its stable call ID."
   @type active_tool :: {tool_call_id :: String.t(), name :: String.t()}
@@ -56,8 +70,10 @@ defmodule MingaAgent.Session.TurnExecution do
           phase: phase(),
           trust_levels: %{String.t() => trust_scope()},
           pending_auto_approvals: %{String.t() => trust_scope()},
-          steering_queue: [content()],
-          follow_up_queue: [content()],
+          next_prompt_id: pos_integer(),
+          steering_queue: [queued_input()],
+          follow_up_queue: [queued_input()],
+          queue_receipts: [queue_receipt()],
           boundaries: %{String.t() => EditBoundary.t()}
         }
 
@@ -65,8 +81,10 @@ defmodule MingaAgent.Session.TurnExecution do
             phase: :idle,
             trust_levels: %{},
             pending_auto_approvals: %{},
+            next_prompt_id: 1,
             steering_queue: [],
             follow_up_queue: [],
+            queue_receipts: [],
             boundaries: %{}
 
   @doc "Builds an idle execution state."
@@ -375,10 +393,204 @@ defmodule MingaAgent.Session.TurnExecution do
     {:send_now, next}
   end
 
+  @doc "Recognizes an original admission before checking the current queue fence or turn."
+  @spec queued_submission(t(), pos_integer(), String.t()) ::
+          {:queued, queue_receipt()} | :new | {:error, :queue_submission_stale}
+  def queued_submission(%__MODULE__{} = execution, expected, submission_id) do
+    case List.keyfind(execution.queue_receipts, submission_id, 1) do
+      {^expected, ^submission_id, _kind, _revision} = receipt -> {:queued, receipt}
+      nil when expected == execution.next_prompt_id -> :new
+      _old -> {:error, :queue_submission_stale}
+    end
+  end
+
+  @doc "Queues one exact active-turn submission and retains its original receipt."
+  @spec admit_queued_submission(
+          t(),
+          prompt_kind(),
+          content(),
+          pos_integer(),
+          {String.t(), pos_integer()},
+          [DraftSnapshot.attachment()],
+          String.t() | nil
+        ) ::
+          {:ok, queue_receipt(), t()}
+          | {:queued, queue_receipt()}
+          | {:error,
+             :queue_submission_stale
+             | :queue_receipts_full
+             | :prompt_queue_full
+             | :turn_not_active}
+  def admit_queued_submission(
+        %__MODULE__{} = execution,
+        kind,
+        content,
+        expected,
+        {submission_id, committed_revision},
+        attachments \\ [],
+        source \\ nil
+      ) do
+    with :new <- queued_submission(execution, expected, submission_id),
+         true <- active?(execution) || {:error, :turn_not_active},
+         :ok <- available_receipt_slot(execution.queue_receipts),
+         {:queued, queued} <- queue_prompt(execution, kind, content, attachments, source) do
+      receipt = {expected, submission_id, kind, committed_revision}
+      {:ok, receipt, %{queued | queue_receipts: [receipt | queued.queue_receipts]}}
+    end
+  end
+
+  @spec available_receipt_slot([queue_receipt()]) :: :ok | {:error, :queue_receipts_full}
+  defp available_receipt_slot(receipts) do
+    if Enum.count_until(receipts, @max_queue_receipts) == @max_queue_receipts,
+      do: {:error, :queue_receipts_full},
+      else: :ok
+  end
+
+  @doc "Retires only a receipt the original caller confirmed it received."
+  @spec confirm_queue_receipt(t(), queue_receipt()) :: {:ok, t()} | :unchanged
+  def confirm_queue_receipt(%__MODULE__{} = execution, {id, _, _, _} = receipt) do
+    case List.keytake(execution.queue_receipts, id, 0) do
+      {^receipt, remaining} -> {:ok, %{execution | queue_receipts: remaining}}
+      _other -> :unchanged
+    end
+  end
+
+  @type queued_edit :: :remove | {:replace_text, String.t()}
+  @type queued_edit_error ::
+          :already_consumed
+          | :queued_input_not_found
+          | :stale_queue_revision
+          | :prompt_queue_full
+          | :invalid_queue_text
+
+  @doc "Changes a single pending entry at the displayed revision without moving other inputs."
+  @spec change_queued_input(t(), pos_integer(), pos_integer(), queued_edit()) ::
+          {:ok, t()} | {:error, queued_edit_error()}
+  def change_queued_input(%__MODULE__{} = execution, id, revision, operation) do
+    with {:ok, field, queue, entry} <- find_pending_entry(execution, id),
+         {:ok, updated} <- change_queue_entry(queue, entry, revision, operation),
+         next = %{execution | field => updated},
+         true <- pending_size_allowed?(next) || {:error, :prompt_queue_full} do
+      {:ok, next}
+    end
+  end
+
+  @spec find_pending_entry(t(), pos_integer()) ::
+          {:ok, :steering_queue | :follow_up_queue, [queued_input()], queued_input()}
+          | {:error, :already_consumed | :queued_input_not_found}
+  defp find_pending_entry(execution, id) do
+    case List.keyfind(execution.steering_queue, id, 0) do
+      nil -> find_follow_up_entry(execution, id)
+      entry -> {:ok, :steering_queue, execution.steering_queue, entry}
+    end
+  end
+
+  @spec find_follow_up_entry(t(), pos_integer()) ::
+          {:ok, :follow_up_queue, [queued_input()], queued_input()}
+          | {:error, :already_consumed | :queued_input_not_found}
+  defp find_follow_up_entry(execution, id) do
+    case List.keyfind(execution.follow_up_queue, id, 0) do
+      nil when id < execution.next_prompt_id -> {:error, :already_consumed}
+      nil -> {:error, :queued_input_not_found}
+      entry -> {:ok, :follow_up_queue, execution.follow_up_queue, entry}
+    end
+  end
+
+  @spec change_queue_entry([queued_input()], queued_input(), pos_integer(), queued_edit()) ::
+          {:ok, [queued_input()]} | {:error, :stale_queue_revision | :invalid_queue_text}
+  defp change_queue_entry(queue, {id, revision, _, _, _}, revision, :remove),
+    do: {:ok, List.keydelete(queue, id, 0)}
+
+  defp change_queue_entry(
+         queue,
+         {id, revision, content, refs, source},
+         revision,
+         {:replace_text, text}
+       ) do
+    if byte_size(text) <= @max_pending_bytes and String.valid?(text) do
+      editable = if is_binary(source), do: text, else: nil
+      entry = {id, revision + 1, replace_queued_text(content, text), refs, editable}
+      {:ok, List.keyreplace(queue, id, 0, entry)}
+    else
+      {:error, :invalid_queue_text}
+    end
+  end
+
+  defp change_queue_entry(_queue, _entry, _revision, _operation),
+    do: {:error, :stale_queue_revision}
+
+  @spec replace_queued_text(content(), String.t()) :: content()
+  defp replace_queued_text(content, text) when is_binary(content), do: text
+
+  defp replace_queued_text([%ReqLLM.Message.ContentPart{type: :text} = head | rest], text),
+    do: [%{head | text: text} | rest]
+
+  defp replace_queued_text(parts, text), do: [ReqLLM.Message.ContentPart.text(text) | parts]
+
+  @doc "Transfers pending inputs to a candidate draft without dropping captured attachments or non-text input."
+  @spec recall_draft(t(), DraftSnapshot.t() | nil) ::
+          {:ok, DraftSnapshot.t(), t()} | {:error, term()}
+  def recall_draft(%__MODULE__{steering_queue: [], follow_up_queue: []}, _draft),
+    do: {:error, :no_pending_inputs}
+
+  def recall_draft(%__MODULE__{} = execution, draft) do
+    with {:ok, text, attachments} <-
+           recall_inputs(execution.steering_queue ++ execution.follow_up_queue, [], []),
+         {:ok, restored} <- DraftSnapshot.prepend_recalled(draft, text, attachments) do
+      {:ok, restored, clear_queue_values(execution)}
+    end
+  end
+
+  @spec recall_inputs([queued_input()], [iodata()], [[DraftSnapshot.attachment()]]) ::
+          {:ok, iodata(), [DraftSnapshot.attachment()]} | {:error, :queue_content_not_recallable}
+  defp recall_inputs([], text, attachments),
+    do:
+      {:ok, text |> Enum.reverse() |> Enum.intersperse("\n\n"),
+       Enum.concat(Enum.reverse(attachments))}
+
+  defp recall_inputs([{_id, _revision, content, attachments, source} | rest], text, retained) do
+    with {:ok, editable} <- recall_editable_text(source, content, attachments) do
+      text = if IO.iodata_length(editable) == 0, do: text, else: [editable | text]
+      recall_inputs(rest, text, [attachments | retained])
+    end
+  end
+
+  @spec recall_editable_text(String.t() | nil, content(), [DraftSnapshot.attachment()]) ::
+          {:ok, iodata()} | {:error, :queue_content_not_recallable}
+  defp recall_editable_text(source, _content, _attachments) when is_binary(source),
+    do: {:ok, source}
+
+  defp recall_editable_text(nil, content, attachments),
+    do: recall_editable_text(content, attachments)
+
+  @spec recall_editable_text(content(), [DraftSnapshot.attachment()]) ::
+          {:ok, iodata()} | {:error, :queue_content_not_recallable}
+  defp recall_editable_text(text, []) when is_binary(text), do: {:ok, text}
+
+  defp recall_editable_text(parts, attachments) when is_list(parts) do
+    editable = if attachments == [], do: parts, else: Enum.drop(parts, -length(attachments))
+
+    Enum.reduce_while(editable, {:ok, []}, fn
+      %ReqLLM.Message.ContentPart{type: :text, text: text}, {:ok, acc} when is_binary(text) ->
+        {:cont, {:ok, [text | acc]}}
+
+      _part, _acc ->
+        {:halt, {:error, :queue_content_not_recallable}}
+    end)
+    |> recalled_text()
+  end
+
+  defp recall_editable_text(_content, _attachments), do: {:error, :queue_content_not_recallable}
+
+  @spec recalled_text({:ok, [binary()]} | {:error, :queue_content_not_recallable}) ::
+          {:ok, iodata()} | {:error, :queue_content_not_recallable}
+  defp recalled_text({:ok, reversed}), do: {:ok, Enum.reverse(reversed)}
+  defp recalled_text({:error, _reason} = error), do: error
+
   @doc "Dequeues steering prompts without changing follow-up admission."
   @spec dequeue_steering(t()) :: {[content()], t()}
   def dequeue_steering(%__MODULE__{} = execution) do
-    {execution.steering_queue, %{execution | steering_queue: []}}
+    {prompt_contents(execution.steering_queue), %{execution | steering_queue: []}}
   end
 
   @doc "Returns and clears both prompt queues."
@@ -393,7 +605,101 @@ defmodule MingaAgent.Session.TurnExecution do
   @doc "Returns steering and follow-up queues in FIFO order."
   @spec queues(t()) :: {[content()], [content()]}
   def queues(%__MODULE__{} = execution),
-    do: {execution.steering_queue, execution.follow_up_queue}
+    do: {prompt_contents(execution.steering_queue), prompt_contents(execution.follow_up_queue)}
+
+  @doc "Captures the durable input queues without session trust or runtime phase."
+  @spec pending_inputs(t()) :: pending_inputs()
+  def pending_inputs(%__MODULE__{} = execution),
+    do: {
+      execution.next_prompt_id,
+      execution.steering_queue,
+      execution.follow_up_queue,
+      execution.queue_receipts
+    }
+
+  @doc "Restores admitted inputs in an idle session without starting a provider request."
+  @spec restore_pending_inputs(pending_inputs()) :: t()
+  def restore_pending_inputs({next_id, steering, follow_up, receipts}),
+    do: %__MODULE__{
+      next_prompt_id: next_id,
+      steering_queue: steering,
+      follow_up_queue: follow_up,
+      queue_receipts: receipts
+    }
+
+  @doc "Validates a restored queue's bounded entries and non-reusable IDs."
+  @spec valid_pending_inputs?(term()) :: boolean()
+  def valid_pending_inputs?({next, steering, follow_up, receipts})
+      when is_integer(next) and next > 0 and is_list(steering) and is_list(follow_up) and
+             is_list(receipts) do
+    with true <- length(steering) + length(follow_up) <= @max_pending_inputs,
+         true <- :erlang.external_size({steering, follow_up}) <= @max_pending_bytes,
+         {:ok, seen} <- validate_entries(steering, 0, next, %{}),
+         {:ok, _seen} <- validate_entries(follow_up, 0, next, seen),
+         true <- length(receipts) <= @max_queue_receipts + @max_pending_inputs,
+         true <- valid_queue_receipts?(receipts, next, %{}) do
+      true
+    else
+      _invalid -> false
+    end
+  end
+
+  def valid_pending_inputs?(_invalid), do: false
+
+  @spec valid_queue_receipts?(list(), pos_integer(), %{optional(String.t()) => true}) :: boolean()
+  defp valid_queue_receipts?([], _next, _seen), do: true
+
+  defp valid_queue_receipts?([{id, submission_id, kind, revision} | rest], next, seen)
+       when is_integer(id) and id > 0 and id < next and is_binary(submission_id) and
+              byte_size(submission_id) == 24 and kind in [:steering, :follow_up] and
+              is_integer(revision) and revision > 0 do
+    not is_map_key(seen, submission_id) and
+      valid_queue_receipts?(rest, id, Map.put(seen, submission_id, true))
+  end
+
+  defp valid_queue_receipts?(_invalid, _next, _seen), do: false
+
+  @spec validate_entries(list(), non_neg_integer(), pos_integer(), %{
+          optional(pos_integer()) => true
+        }) ::
+          {:ok, %{optional(pos_integer()) => true}} | :invalid
+  defp validate_entries([], _previous, _next, seen), do: {:ok, seen}
+
+  defp validate_entries(
+         [{id, revision, content, attachments, source} | rest],
+         previous,
+         next,
+         seen
+       )
+       when is_integer(id) and id > previous and id < next and is_integer(revision) and
+              revision > 0 and is_list(attachments) do
+    if valid_queue_content?(content) and valid_queue_attachments?(attachments) and
+         (is_nil(source) or (is_binary(source) and String.valid?(source))) and
+         not is_map_key(seen, id) do
+      validate_entries(rest, id, next, Map.put(seen, id, true))
+    else
+      :invalid
+    end
+  end
+
+  defp validate_entries(_invalid, _previous, _next, _seen), do: :invalid
+
+  @spec valid_queue_attachments?([term()]) :: boolean()
+  defp valid_queue_attachments?(attachments) do
+    Enum.all?(attachments, &match?({_, _, _, _, {:snapshot, %Reference{}}}, &1))
+  end
+
+  @spec valid_queue_content?(term()) :: boolean()
+  defp valid_queue_content?(text) when is_binary(text), do: String.valid?(text)
+
+  defp valid_queue_content?(parts) when is_list(parts),
+    do: Enum.all?(parts, &is_struct(&1, ReqLLM.Message.ContentPart))
+
+  defp valid_queue_content?(_invalid), do: false
+
+  @spec prompt_contents([queued_input()]) :: [content()]
+  defp prompt_contents(entries),
+    do: Enum.map(entries, fn {_id, _revision, content, _references, _source} -> content end)
 
   @doc "Switches to plan mode while preserving the runtime phase."
   @spec enter_plan(t()) :: t()
@@ -474,7 +780,8 @@ defmodule MingaAgent.Session.TurnExecution do
           | {:send_next, [content(), ...], t()}
           | {:error, :invalid_phase}
   def finish_completion(%__MODULE__{phase: {:active, :completion, nil, _error}} = execution) do
-    pending = execution.steering_queue ++ execution.follow_up_queue
+    {steering, follow_up} = queues(execution)
+    pending = steering ++ follow_up
 
     next = %{
       execution
@@ -622,20 +929,38 @@ defmodule MingaAgent.Session.TurnExecution do
 
   defp maybe_put_decision_trust(execution, _approval, _decision), do: execution
 
-  @spec queue_prompt(t(), prompt_kind(), content()) :: prompt_admission()
-  defp queue_prompt(%__MODULE__{} = execution, :steering, content) do
-    # Queues are bounded by human interaction and consumed in insertion order.
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    next = %{execution | steering_queue: execution.steering_queue ++ [content]}
-    {:queued, next}
+  @spec queue_prompt(
+          t(),
+          prompt_kind(),
+          content(),
+          [DraftSnapshot.attachment()],
+          String.t() | nil
+        ) ::
+          prompt_admission()
+  defp queue_prompt(%__MODULE__{} = execution, kind, content, attachments \\ [], source \\ nil) do
+    source = if source == content, do: nil, else: source
+    entry = {execution.next_prompt_id, 1, content, attachments, source}
+    candidate = put_queued_input(execution, kind, entry)
+
+    if pending_size_allowed?(candidate) do
+      {:queued, %{candidate | next_prompt_id: execution.next_prompt_id + 1}}
+    else
+      {:error, :prompt_queue_full}
+    end
   end
 
-  defp queue_prompt(%__MODULE__{} = execution, :follow_up, content) do
-    # Queues are bounded by human interaction and consumed in insertion order.
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    next = %{execution | follow_up_queue: execution.follow_up_queue ++ [content]}
-    {:queued, next}
+  @spec pending_size_allowed?(t()) :: boolean()
+  defp pending_size_allowed?(%__MODULE__{steering_queue: steering, follow_up_queue: follow_up}) do
+    length(steering) + length(follow_up) <= @max_pending_inputs and
+      :erlang.external_size({steering, follow_up}) <= @max_pending_bytes
   end
+
+  @spec put_queued_input(t(), prompt_kind(), queued_input()) :: t()
+  defp put_queued_input(execution, :steering, entry),
+    do: %{execution | steering_queue: List.insert_at(execution.steering_queue, -1, entry)}
+
+  defp put_queued_input(execution, :follow_up, entry),
+    do: %{execution | follow_up_queue: List.insert_at(execution.follow_up_queue, -1, entry)}
 
   @spec clear_approval(t()) :: t()
   defp clear_approval(

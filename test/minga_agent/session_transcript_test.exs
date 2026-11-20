@@ -455,22 +455,8 @@ defmodule MingaAgent.SessionTranscriptTest do
       assert length(Session.messages_with_ids(session)) == length(Session.messages(session))
     end
 
-    test "dequeue_steering and system messages assign later IDs" do
+    test "system messages assign later IDs" do
       session = start_subscribed_session()
-      slow_session = start_slow_turn()
-      assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 1")
-      assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 2")
-
-      _steering = Session.dequeue_steering(slow_session)
-      pairs = Session.messages_with_ids(slow_session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-      assert ids == Enum.sort(ids)
-      assert ids == Enum.uniq(ids)
-      assert length(pairs) == length(Session.messages(slow_session))
-
-      Session.clear_queues(slow_session)
-      finish_slow_turn(slow_session)
-
       pairs_before = Session.messages_with_ids(session)
       max_id_before = pairs_before |> Enum.map(&elem(&1, 0)) |> Enum.max()
 
