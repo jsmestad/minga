@@ -1,16 +1,27 @@
 import Config
 
-# Keep tests hermetic by preventing application startup from loading the developer's real ~/.config/minga/config.exs.
-# VM-local counters repeat across Mix invocations, so exclusively allocate a fresh root instead of adopting old namespaces whose quota ledger may be absent.
-test_config_home =
+# Keep Minga state private without changing HOME, which Mix and tools such as asdf need.
+# Allocate a fresh root rather than adopting an older test namespace or inherited XDG state.
+test_profile =
   Path.join(
     System.tmp_dir!(),
-    "minga-test-config-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+    "minga-test-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
   )
 
-File.mkdir!(test_config_home)
-File.mkdir!(Path.join(test_config_home, "minga"))
-System.put_env("XDG_CONFIG_HOME", test_config_home)
+File.mkdir!(test_profile)
+
+for {env, subdir} <- [
+      {"XDG_CONFIG_HOME", "config"},
+      {"XDG_DATA_HOME", "data"},
+      {"XDG_CACHE_HOME", "cache"},
+      {"XDG_STATE_HOME", "state"}
+    ] do
+  path = Path.join(test_profile, subdir)
+  File.mkdir!(path)
+  System.put_env(env, path)
+end
+
+File.mkdir!(Path.join([test_profile, "config", "minga"]))
 
 # Only show warnings and errors during test runs. Info-level messages
 # from app startup (extension loading, grammar registration) would
@@ -43,12 +54,6 @@ config :minga, infer_startup_project_root: false
 # and resolves API keys. The stub starts instantly and satisfies the
 # Session GenServer lifecycle.
 config :minga, test_provider_module: Minga.Test.StubProvider
-
-# Isolate the extension compile cache so tests never read from or write to the
-# developer's real cache dir under ~/.local/share/minga.
-config :minga,
-  extension_compile_cache_dir:
-    Path.join(System.tmp_dir!(), "minga-test-ext-cache-#{System.unique_integer([:positive])}")
 
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.

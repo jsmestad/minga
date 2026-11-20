@@ -5,6 +5,7 @@
 /// data. Every update() should correctly convert from protocol types
 /// to view model types.
 
+import AppKit
 import Testing
 @testable import MingaUI
 import Foundation
@@ -831,6 +832,61 @@ struct BottomPanelStateLifecycleTests {
         #expect(state.visible == false)
         #expect(state.messagesState.entries.count == 1) // preserved
     }
+
+#if DEBUG
+    @Test("source panel height and window frame restore only in their own worktree and reset together")
+    @MainActor func nativeProfileStateIsolation() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = root.appendingPathComponent("first", isDirectory: true)
+        let second = root.appendingPathComponent("second", isDirectory: true)
+        for directory in [first, second] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        func profile(in directory: URL) -> AppState {
+            AppState(applicationEnvironment: [
+                "MINGA_DEV_PROFILE": directory.path,
+                "XDG_STATE_HOME": directory.path
+            ])
+        }
+        func window(size: NSSize) -> NSWindow {
+            let origin = NSScreen.main?.visibleFrame.origin ?? .zero
+            return NSWindow(
+                contentRect: NSRect(origin: origin, size: size),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false
+            )
+        }
+
+        let firstProfile = profile(in: first)
+        let resized = firstProfile.gui.bottomPanelState
+        #expect(resized.userHeight == 200)
+        resized.userHeight = 380
+        resized.persistUserHeight()
+        let resizedWindow = window(size: NSSize(width: 600, height: 400))
+        let firstWindowFrame = try #require(firstProfile.editorWindowFrame)
+        firstWindowFrame.save(resizedWindow)
+
+        let relaunched = profile(in: first)
+        let other = profile(in: second)
+        #expect(relaunched.gui.bottomPanelState.userHeight == 380)
+        #expect(other.gui.bottomPanelState.userHeight == 200)
+        let restoredWindow = window(size: NSSize(width: 400, height: 300))
+        let defaultFrame = restoredWindow.frame
+        try #require(other.editorWindowFrame).restore(restoredWindow)
+        #expect(restoredWindow.frame == defaultFrame)
+        try #require(relaunched.editorWindowFrame).restore(restoredWindow)
+        #expect(restoredWindow.frame.size == resizedWindow.frame.size)
+
+        try FileManager.default.removeItem(at: first)
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: false)
+        let reset = profile(in: first)
+        #expect(reset.gui.bottomPanelState.userHeight == 200)
+        restoredWindow.setFrame(defaultFrame, display: false)
+        try #require(reset.editorWindowFrame).restore(restoredWindow)
+        #expect(restoredWindow.frame == defaultFrame)
+    }
+#endif
 }
 
 // MARK: - MessagesContentState

@@ -7,6 +7,7 @@ defmodule Minga.ProjectTest do
   alias Minga.Project
   alias Minga.Project.Root
   alias Minga.Project.WorkspaceSnapshot
+  alias Minga.Test.ElixirSubprocess
 
   @moduletag :tmp_dir
   @moduletag timeout: 30_000
@@ -416,48 +417,69 @@ defmodule Minga.ProjectTest do
       refute project in Project.known_projects(name)
     end
 
-    test "loads and updates only the XDG project history when it is set", %{tmp_dir: tmp} do
+    test "loads and updates only XDG project and file history", %{tmp_dir: tmp} do
       home = Path.join(tmp, "home")
       config_home = Path.join(tmp, "xdg")
-      home_history = Path.join(home, ".config/minga/known-projects")
-      xdg_history = Path.join(config_home, "minga/known-projects")
+      home_minga = Path.join(home, ".config/minga")
+      xdg_minga = Path.join(config_home, "minga")
 
       [home_project, xdg_project, added] =
         Enum.map(~w(home-project xdg-project added), &Path.join(tmp, &1))
 
       Enum.each([home_project, xdg_project, added], &File.mkdir_p!/1)
-      File.mkdir_p!(Path.dirname(home_history))
-      File.mkdir_p!(Path.dirname(xdg_history))
+      {:ok, added} = Root.canonical_path(added)
+      File.mkdir_p!(home_minga)
+      File.mkdir_p!(xdg_minga)
+      File.write!(Path.join(added, "opened.txt"), "")
+      File.write!(Path.join(added, "reopened.txt"), "")
 
-      File.write!(home_history, home_project <> "\n")
-      File.write!(xdg_history, xdg_project <> "\n")
+      home_recent = "#{added}\thome.txt\n"
+      home_frecency = "#{added}\thome.txt\t1\n"
+      File.write!(Path.join(home_minga, "known-projects"), home_project <> "\n")
+      File.write!(Path.join(home_minga, "recent-files"), home_recent)
+      File.write!(Path.join(home_minga, "frecency"), home_frecency)
+      File.write!(Path.join(xdg_minga, "known-projects"), xdg_project <> "\n")
+      File.write!(Path.join(xdg_minga, "recent-files"), "#{added}\txdg.txt\n")
+      File.write!(Path.join(xdg_minga, "frecency"), "#{added}\txdg.txt\t1\n")
 
       code = """
       [home, xdg_project, added] = System.argv()
-      System.put_env("HOME", home)
+      ^home = System.user_home!()
       {:ok, _} = Minga.Config.Options.start_link()
+      {:ok, root} = Minga.Project.Root.directory(added)
       opts = [subscribe: false, command_frecency: %{}]
       {:ok, server} = Minga.Project.start_link(opts)
       [^xdg_project] = Minga.Project.known_projects(server)
       Minga.Project.add(server, added)
       Minga.Project.remove(server, xdg_project)
+      Minga.Project.record_file_for_root(server, root, "opened.txt")
       [^added] = Minga.Project.known_projects(server)
       GenServer.stop(server)
       {:ok, restarted} = Minga.Project.start_link(opts)
+      Minga.Project.record_file_for_root(restarted, root, "reopened.txt")
       [^added] = Minga.Project.known_projects(restarted)
       """
 
-      ebin = :code.which(Project) |> List.to_string() |> Path.dirname()
-
       {output, status} =
-        System.cmd("elixir", ["-pa", ebin, "-e", code, "--", home, xdg_project, added],
-          env: [{"XDG_CONFIG_HOME", config_home}],
+        ElixirSubprocess.eval(code, [home, xdg_project, added],
+          env: [{"HOME", home}, {"XDG_CONFIG_HOME", config_home}],
           stderr_to_stdout: true
         )
 
       assert status == 0, output
-      assert File.read!(home_history) == home_project <> "\n"
-      assert File.read!(xdg_history) == added <> "\n"
+      assert File.read!(Path.join(home_minga, "known-projects")) == home_project <> "\n"
+      assert File.read!(Path.join(home_minga, "recent-files")) == home_recent
+      assert File.read!(Path.join(home_minga, "frecency")) == home_frecency
+      assert File.read!(Path.join(xdg_minga, "known-projects")) == added <> "\n"
+
+      assert File.read!(Path.join(xdg_minga, "recent-files")) ==
+               "#{added}\treopened.txt\n#{added}\topened.txt\n#{added}\txdg.txt\n"
+
+      frecency = File.read!(Path.join(xdg_minga, "frecency"))
+      assert frecency =~ "#{added}\txdg.txt\t1\n"
+      assert frecency =~ "#{added}\topened.txt\t"
+      assert frecency =~ "#{added}\treopened.txt\t"
+      refute frecency =~ "home.txt"
     end
 
     test "add ignores non-existent directories", %{tmp_dir: tmp} do

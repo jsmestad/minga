@@ -722,16 +722,13 @@ defmodule Minga.Project do
 
   # ── Persistence ─────────────────────────────────────────────────────────────
 
+  @spec project_state_path(String.t()) :: String.t()
+  defp project_state_path(filename), do: Path.join(Minga.UserPaths.config_dir!(), filename)
+
   @spec known_projects_path() :: String.t()
   defp known_projects_path do
-    config_home =
-      case System.get_env("XDG_CONFIG_HOME") do
-        dir when dir in [nil, ""] -> Path.expand("~/.config")
-        dir -> dir
-      end
-
     filename = Application.get_env(:minga, :known_projects_filename, @known_projects_file)
-    Path.join([config_home, "minga", filename])
+    project_state_path(filename)
   end
 
   @spec load_known_projects() :: [String.t()]
@@ -814,10 +811,7 @@ defmodule Minga.Project do
   # Most recent entries first. Loaded into a map keyed by root.
 
   @spec recent_files_path() :: String.t()
-  defp recent_files_path do
-    config_dir = Path.expand("~/.config/minga")
-    Path.join(config_dir, @recent_files_file)
-  end
+  defp recent_files_path, do: project_state_path(@recent_files_file)
 
   @spec load_recent_files() :: recent_files_map()
   defp load_recent_files do
@@ -869,10 +863,7 @@ defmodule Minga.Project do
   end
 
   @spec frecency_path() :: String.t()
-  defp frecency_path do
-    config_dir = Path.expand("~/.config/minga")
-    Path.join(config_dir, @frecency_file)
-  end
+  defp frecency_path, do: project_state_path(@frecency_file)
 
   @spec load_frecency_events() :: frecency_events_map()
   defp load_frecency_events do
@@ -961,10 +952,7 @@ defmodule Minga.Project do
   # ── Command frecency persistence ───────────────────────────────────────────
 
   @spec command_frecency_path() :: String.t()
-  defp command_frecency_path do
-    config_dir = System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config")
-    Path.join([config_dir, "minga", @command_frecency_file])
-  end
+  defp command_frecency_path, do: project_state_path(@command_frecency_file)
 
   @spec load_command_frecency() :: command_frecency_map()
   defp load_command_frecency do

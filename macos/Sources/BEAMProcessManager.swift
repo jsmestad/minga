@@ -99,6 +99,7 @@ final class BEAMProcessManager {
 
     enum StartupFailure: Equatable {
         case missingRelease
+        case missingDevelopmentProfile
         case launch(String)
         case previousCoreStopTimedOut
     }
@@ -106,9 +107,15 @@ final class BEAMProcessManager {
     /// Acquires current bundle inputs and spawns the owned BEAM child.
     func start(onStartupFailure: ((StartupFailure) -> Void)? = nil) {
         guard exitIntent != .appShutdown, process == nil else { return }
-        guard let configuration = launchConfiguration() else {
+        let environment = ProcessInfo.processInfo.environment
+        guard let configuration = launchConfiguration(environment: environment) else {
             NSLog("BEAMProcessManager: no embedded BEAM release found")
             onStartupFailure?(.missingRelease)
+            return
+        }
+        guard EmbeddedCoreProfile.permitsLaunch(environment) else {
+            NSLog("BEAMProcessManager: Debug embedded core requires a private development profile")
+            onStartupFailure?(.missingDevelopmentProfile)
             return
         }
         start(configuration: configuration, onStartupFailure: onStartupFailure)
@@ -365,10 +372,11 @@ final class BEAMProcessManager {
     // MARK: - Private
 
     /// Acquires current inputs for one start or restart, then applies launch policy in one pure build.
-    private func launchConfiguration() -> BEAMLaunchConfiguration? {
+    private func launchConfiguration(environment: [String: String]) -> BEAMLaunchConfiguration? {
         guard let inputs = BEAMLaunchInputAcquirer.current(
             appInstanceID: appInstanceID,
-            launchNonce: launchNonce
+            launchNonce: launchNonce,
+            environment: environment
         ) else { return nil }
 
         return BEAMLaunchConfiguration.build(from: inputs)

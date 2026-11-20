@@ -17,6 +17,7 @@ defmodule MingaEditor.NativeIPC.Server do
   alias MingaEditor.NativeIPC.Server.State
 
   @runtime_directory_name "com.minga.editor"
+  @development_runtime_directory_name "com.minga.dev"
   @maximum_waiters 64
   @operation_sweep_interval_ms 1_000
 
@@ -25,6 +26,7 @@ defmodule MingaEditor.NativeIPC.Server do
           {:name, GenServer.name() | nil}
           | {:task_supervisor, atom()}
           | {:runtime_parent, String.t()}
+          | {:development, boolean()}
           | {:runtime_dir, String.t()}
           | {:app_instance_id, String.t()}
           | {:app_pid, pos_integer()}
@@ -434,7 +436,12 @@ defmodule MingaEditor.NativeIPC.Server do
 
   @spec runtime_dir(keyword(), String.t()) :: {:ok, String.t()} | {:error, term()}
   defp runtime_dir(opts, parent) do
-    expected = Path.join(parent, @runtime_directory_name)
+    development? = Keyword.get(opts, :development, System.get_env("MINGA_IPC_DEVELOPMENT") == "1")
+
+    directory_name =
+      if development?, do: @development_runtime_directory_name, else: @runtime_directory_name
+
+    expected = Path.join(parent, directory_name)
     configured = opts |> Keyword.get(:runtime_dir, expected) |> Path.expand()
 
     if configured == expected do

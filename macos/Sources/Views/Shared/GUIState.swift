@@ -26,7 +26,11 @@ public final class GUIState {
 
     public let presentationMetrics = GUIFramePresentationMetrics()
 
-    public init(windowContents: [UInt16: GUIWindowContent] = [:]) {
+    public init(
+        windowContents: [UInt16: GUIWindowContent] = [:],
+        bottomPanelState: BottomPanelState = BottomPanelState()
+    ) {
+        self.bottomPanelState = bottomPanelState
         windowContentBacking = GUIWindowContentBacking(windowContents)
         localPresentationStore = LocalPresentationStore()
         fileTreeState = FileTreeState(localPresentationStore: localPresentationStore)
@@ -170,7 +174,7 @@ public final class GUIState {
     public let agentHelpState = AgentHelpState()
 
     /// Bottom panel container state.
-    public let bottomPanelState = BottomPanelState()
+    public let bottomPanelState: BottomPanelState
 
 
     /// Native minibuffer state (0x7F).
