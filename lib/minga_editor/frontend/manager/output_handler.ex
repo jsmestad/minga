@@ -82,8 +82,10 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
 
   @doc "Clears retained output when the frontend transport disconnects."
   @spec disconnect(State.t()) :: State.t()
-  def disconnect(state),
-    do: %{state | port: nil, ready: false, output_pressure: OutputPressure.new()}
+  def disconnect(state) do
+    state = MingaEditor.Frontend.Manager.AgentNotifications.disconnect(state)
+    %{state | port: nil, ready: false, output_pressure: OutputPressure.new()}
+  end
 
   @doc "Attempts and, if needed, retains one out-of-band control write."
   @spec write_control(State.t(), binary()) :: output_result()

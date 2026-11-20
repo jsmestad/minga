@@ -104,6 +104,57 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
+  test "approval withdrawals, including owner death, survive pressure without retaining required controls" do
+    name = unique_name()
+    parent = self()
+    writable = start_supervised!({Agent, fn -> true end}, id: make_ref())
+    second_owner = start_supervised!({Agent, fn -> nil end}, id: make_ref(), restart: :temporary)
+
+    commander = fn _port, batch, [:nosuspend] ->
+      admitted? = Agent.get(writable, & &1)
+      send(parent, {:desktop_output, admitted?, batch})
+      admitted?
+    end
+
+    {pid, fake_port} = start_connected(name, port_commander: commander, output_failure_ms: 0)
+
+    desktop = fn kind, id, owner ->
+      send(pid, {
+        :minga_event,
+        :agent_desktop_notification,
+        %{kind: kind, id: id, owner: owner, debounce_ms: 0}
+      })
+
+      Protocol.encode_agent_desktop_notification(kind, id, 0)
+    end
+
+    before_ready = desktop.(:approval, <<0::128>>, self())
+    mark_ready(name, pid, fake_port)
+    refute_received {:desktop_output, _, ^before_ready}
+
+    for {id, owner} <- [{<<1::128>>, self()}, {<<2::128>>, second_owner}] do
+      posted = desktop.(:approval, id, owner)
+      assert_receive {:desktop_output, true, ^posted}
+    end
+
+    Agent.update(writable, fn _ -> false end)
+    first_clear = desktop.(:approval_cleared, <<1::128>>, self())
+    second_clear = Protocol.encode_agent_desktop_notification(:approval_cleared, <<2::128>>, 0)
+    Process.exit(second_owner, :kill)
+    assert_receive {:desktop_output, false, ^second_clear}
+    dropped_post = desktop.(:approval, <<3::128>>, self())
+    assert_receive {:desktop_output, false, ^dropped_post}
+    dropped_clear = desktop.(:approval_cleared, <<3::128>>, self())
+    assert Manager.output_pressure(name).control_batches == 0
+    assert Manager.ready?(name)
+
+    Agent.update(writable, fn _ -> true end)
+    assert_receive {:desktop_output, true, ^first_clear}, 1_000
+    assert_receive {:desktop_output, true, ^second_clear}, 1_000
+    refute_received {:desktop_output, true, ^dropped_post}
+    refute_received {:desktop_output, _, ^dropped_clear}
+  end
+
   describe "subscription behavior" do
     test "subscribers receive decoded events" do
       name = unique_name()

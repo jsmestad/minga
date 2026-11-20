@@ -69,6 +69,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x18` | protocol_error | 3 + msg_len | Version-mismatch error; frontend shows it and stops decoding |
 | `0x1A` | application_quit_response | variable | Return the correlated BEAM quit-policy outcome |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
+| `0x61` | agent_desktop_notification | 22 | Post a native agent alert or withdraw a resolved approval |
 
 ### BEAM → Frontend (Config Commands)
 
@@ -234,6 +235,19 @@ detail:          [detail_len]u8 UTF-8 failure detail
 ```
 
 Outcome values are `0` needs decision, `1` proceeding, `2` cancelled, and `3` save failed. `needs_decision` carries the authoritative dirty-buffer count. `save_failed` identifies the buffer and failure. Each UTF-8 string is truncated at a valid byte boundary to at most 32,000 bytes, which keeps the complete payload within `u16`. The native frontend must not approve AppKit termination on `proceeding`; it approves only after the matching core process exits.
+
+### `0x61` agent_desktop_notification
+
+The BEAM sends one native notification instruction outside a render transaction. The Go frontend sizes and skips it. The packet contains no conversation text, tool arguments, paths, or provider errors.
+
+```
+opcode:      u8 = 0x61
+kind:        u8
+identity:    [16]u8
+debounce_ms: u32
+```
+
+Kind `1` posts an approval alert and `4` withdraws the alert with the same opaque approval identity. Kind `2` reports completion and `3` reports an agent error. These use an opaque session identity and a debounce interval in milliseconds. The native app decides when to deliver from app activity and the user's notification settings. The BEAM remains the authority for whether an approval is actionable.
 
 ---
 
@@ -853,7 +867,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 37). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 37 adds horizontal directions to `scroll_batch`. Version 36 binds absolute visual scroll targets to the displayed text presentation. Version 35 adds grouped soft-wrapped resident rows and a u32 pane geometry continuation offset. Version 34 adds approval-wait presentation and distinct tool denial, cancellation, and expiry outcomes. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 38). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 38 adds native agent desktop alerts. Version 37 adds horizontal directions to `scroll_batch`. Version 36 binds absolute visual scroll targets to the displayed text presentation. Version 35 adds grouped soft-wrapped resident rows and a u32 pane geometry continuation offset. Version 34 adds approval-wait presentation and distinct tool denial, cancellation, and expiry outcomes. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 
