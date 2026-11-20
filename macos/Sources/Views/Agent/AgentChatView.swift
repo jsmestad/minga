@@ -23,7 +23,7 @@ public struct AgentChatView: View {
         case executeCommand(name: String)
         case agentToolToggle(messageID: UInt32)
         case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
-        case composerSubmit(offer: UInt64)
+        case composerSubmit(generation: UInt64, offer: UInt64)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
         case chatScrolledAwayFromBottom
@@ -150,9 +150,9 @@ public struct AgentChatView: View {
             }
 
             // Prompt (completion popup + input capsule)
-            AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { [offer = state.draftAttachmentOffer] action in
+            AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { [generation = state.promptPresentation, offer = state.draftAttachmentOffer] action in
                 switch action {
-                case .submit: offer == 0 ? .executeCommand(name: "agent_submit_or_newline") : .composerSubmit(offer: offer)
+                case .submit: .composerSubmit(generation: generation, offer: offer)
                 case .abort(let target): .stopTurn(target)
                 case .attachments: .executeCommand(name: "agent_draft_attachments")
                 }

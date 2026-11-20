@@ -250,29 +250,29 @@ func (m *Model) sendAgentPromptScroll(msg tea.MouseMsg, delta int) bool {
 	return true
 }
 
-type presentedStopClick struct {
-	target        protocol.AgentStopTarget
+type presentedComposerClick struct {
+	packet        []byte
 	claimed       bool
 	epoch         *atomic.Uint64
 	observedEpoch uint64
 }
 
-func (c *presentedStopClick) take() (protocol.AgentStopTarget, bool, bool) {
+func (c *presentedComposerClick) take() ([]byte, bool, bool) {
 	if c == nil {
-		return protocol.AgentStopTarget{}, false, false
+		return nil, false, false
 	}
 	hit := *c
-	*c = presentedStopClick{}
+	*c = presentedComposerClick{}
 	changed := hit.epoch != nil && hit.epoch.Load() != hit.observedEpoch
-	return hit.target, hit.claimed, changed
+	return hit.packet, hit.claimed, changed
 }
 
 // Bubble Tea invokes OnMouse from the last flushed View, synchronously before
 // Update receives that input. Capture only the displayed hit cells and target.
-func (m Model) presentedStopHandler() func(tea.MouseMsg) tea.Cmd {
+func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
 	chat, _ := m.agentChat()
 	p, ok := m.agentPromptPlacement()
-	if !ok || m.stopClick == nil || !agentHasActiveTurn(chat.Status) {
+	if !ok || m.composerClick == nil {
 		return nil
 	}
 	start, y := m.layout.body.X+p.col-p.prefix, m.layout.body.Y+p.controlsRow
@@ -287,14 +287,19 @@ func (m Model) presentedStopHandler() func(tea.MouseMsg) tea.Cmd {
 	if cells == 0 {
 		return nil
 	}
-	target := chat.StopTarget
-	claim := m.stopClick
+	stop, target := agentHasActiveTurn(chat.Status), chat.StopTarget
+	generation, offer := chat.PromptPresentation, chat.DraftAttachmentOffer
+	claim := m.composerClick
 	return func(msg tea.MouseMsg) tea.Cmd {
 		click, ok := msg.(tea.MouseClickMsg)
 		if ok && click.Button == tea.MouseLeft && click.Y == y {
 			cell := click.X - start
 			if cell >= 0 && cell < width && cells&(1<<cell) != 0 {
-				claim.target = target
+				if stop {
+					claim.packet = protocol.EncodeGUIAgentStopTurn(target)
+				} else if generation != 0 {
+					claim.packet = protocol.EncodeGUIAgentComposerSubmit(generation, offer)
+				}
 				claim.claimed = true
 			}
 		}
@@ -329,13 +334,7 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 	if x >= start+controlWidth {
 		return nil, false
 	}
-	if agentHasActiveTurn(chat.Status) {
-		return nil, true // Stop uses the last flushed View, never this model's newer target.
-	}
-	if chat.DraftAttachmentOffer != 0 {
-		return protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer), true
-	}
-	return protocol.EncodeGUIExecuteCommand("agent_submit_or_newline"), true
+	return nil, true // Send and Stop use the last flushed View, never the newer model.
 }
 
 func (m Model) agentPromptTextTargetAt(screenX, screenY int, captured bool) (editorTextTarget, bool) {

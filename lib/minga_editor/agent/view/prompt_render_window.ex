@@ -119,7 +119,9 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
         |> Enum.map(fn {entry, index} -> VisualRow.with_display_row(entry, index) end)
         |> List.to_tuple()
 
-      identity = {projection.columns, projection.scroll, entries}
+      identity =
+        {:prompt, Keyword.get(opts, :submission_owner), projection.columns, projection.scroll,
+         entries}
 
       id =
         Keyword.get_lazy(opts, :presentation_id, fn ->

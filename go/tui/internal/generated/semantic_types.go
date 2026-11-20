@@ -612,6 +612,10 @@ type GuiAgentChatDraftAttachments struct {
 	Offer uint64
 }
 
+type GuiAgentChatPromptPresentation struct {
+	Generation uint64
+}
+
 type GuiPickerPreviewHeader struct {
 	Visible uint8
 	Kind    uint8

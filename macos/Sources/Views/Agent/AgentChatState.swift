@@ -500,6 +500,7 @@ public final class AgentChatState {
     public private(set) var draftAttachmentOffer: UInt64 = 0
     public private(set) var question: AgentQuestionOffer?
     public private(set) var stopTarget: AgentStopTarget?
+    public private(set) var promptPresentation: UInt64 = 0
     /// Production font pitch projected only at accepted editor-frame publication.
     public private(set) var promptRowPitch: CGFloat = 0
 
@@ -558,7 +559,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -574,6 +575,7 @@ public final class AgentChatState {
         self.draftAttachmentOffer = draftAttachmentOffer
         self.question = question
         self.stopTarget = stopTarget
+        self.promptPresentation = promptPresentation
         self.promptVersion += 1
     }
 
@@ -743,6 +745,7 @@ public final class AgentChatState {
         draftAttachmentOffer = 0
         question = nil
         stopTarget = nil
+        promptPresentation = 0
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: [],

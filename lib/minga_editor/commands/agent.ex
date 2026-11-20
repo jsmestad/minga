@@ -875,14 +875,11 @@ defmodule MingaEditor.Commands.Agent do
         NoticeWorkflow.publish(state, message)
 
       submission ->
-        case DraftWorkflow.queue(state, kind, resolved) do
-          {:saved, updated} -> updated
-          :ordinary -> deliver_unqueued_composer(state, kind, resolved, submission)
-        end
+        deliver_composer_input(state, kind, resolved, submission)
     end
   end
 
-  @spec deliver_unqueued_composer(
+  @spec deliver_composer_input(
           state(),
           :steering | :follow_up,
           String.t() | [ReqLLM.Message.ContentPart.t()],
@@ -890,6 +887,49 @@ defmodule MingaEditor.Commands.Agent do
           | {:remote, DraftSave.target()}
           | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
         ) :: state()
+  defp deliver_composer_input(
+         %{frontend: %{composer_send_now?: true}} = state,
+         _kind,
+         content,
+         submission
+       ),
+       do: deliver_unqueued_composer(state, :send_now, content, submission)
+
+  defp deliver_composer_input(state, kind, content, submission) do
+    case DraftWorkflow.queue(state, kind, content) do
+      {:saved, updated} -> updated
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+    end
+  end
+
+  @spec deliver_unqueued_composer(
+          state(),
+          :send_now | :steering | :follow_up,
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :ordinary
+          | {:remote, DraftSave.target()}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
+        ) :: state()
+  defp deliver_unqueued_composer(
+         %{
+           workspace: %{
+             agent_ui: %UIState{connection: %{target: %{session: session, session_id: record}}}
+           }
+         } = state,
+         :send_now,
+         content,
+         :ordinary
+       )
+       when node(session) == node(),
+       do: show_prompt_delivery(state, Session.send_idle_composer(session, record, content))
+
+  defp deliver_unqueued_composer(state, :send_now, _content, :ordinary),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "This Agent daemon does not support exact Send. Use Enter or reconnect to an updated daemon."
+      )
+
   defp deliver_unqueued_composer(
          %{
            workspace: %{

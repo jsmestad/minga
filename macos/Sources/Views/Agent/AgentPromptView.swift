@@ -236,7 +236,7 @@ struct AgentPromptActionButton: View {
     private var hasActiveTurn: Bool { state.status.hasActiveTurn }
 
     /// A nonempty draft can be submitted independently of Vim mode or native key focus.
-    private var canSend: Bool { !state.prompt.isEmpty && !hasActiveTurn }
+    private var canSend: Bool { state.promptPresentation != 0 && !state.prompt.isEmpty && !hasActiveTurn }
 
     /// The SF Symbol name for the action button, morphing between send and stop.
     private var actionButtonIcon: String {

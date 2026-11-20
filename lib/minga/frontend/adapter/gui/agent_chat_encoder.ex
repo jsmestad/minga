@@ -119,6 +119,20 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       |> add_question_section(model.pending_question)
       |> add_stop_target_section(model.stop_target)
 
+    sections =
+      case model.prompt_presentation do
+        nil ->
+          sections
+
+        generation ->
+          payload =
+            Writer.new(@command)
+            |> Writer.uint64(:prompt_presentation, generation)
+            |> Writer.finish()
+
+          [encode_section(0x0D, payload) | sections]
+      end
+
     Writer.new(@command)
     |> Writer.uint8(:opcode, @op_gui_agent_chat)
     |> Writer.uint8(:section_count, Enum.count(sections))

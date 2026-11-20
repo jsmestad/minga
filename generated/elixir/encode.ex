@@ -1056,6 +1056,16 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_gui_agent_chat_prompt_presentation(map()) :: iodata()
+  def encode_gui_agent_chat_prompt_presentation(model), do: encode_gui_agent_chat_prompt_presentation(model, :gui_agent_chat, [:prompt_presentation])
+
+  @spec encode_gui_agent_chat_prompt_presentation(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_agent_chat_prompt_presentation(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:generation | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :generation)),
+    ]
+  end
+
   @spec encode_gui_picker_preview_header(map()) :: iodata()
   def encode_gui_picker_preview_header(model), do: encode_gui_picker_preview_header(model, :gui_picker_preview, [:header])
 

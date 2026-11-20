@@ -8,6 +8,7 @@ defmodule Minga.Protocol.GoldenFields do
   @units %{
     "GuiAgentChatDraftAttachments" => [{"count", "Count", :scalar}, {"offer", "Offer", :scalar}],
     "GuiAgentChatHeader" => [{"visible", "Visible", :scalar}, {"status", "Status", :scalar}],
+    "GuiAgentChatPromptPresentation" => [{"generation", "Generation", :scalar}],
     "GuiAgentContextFields" => [{"payload_len", "PayloadLen", :scalar}, {"visible", "Visible", :scalar}, {"task", "Task", :string}, {"dispatch_timestamp", "DispatchTimestamp", :scalar}, {"status", "Status", :scalar}, {"can_approve", "CanApprove", :scalar}, {"active_action", "ActiveAction", :string}, {"tool_count", "ToolCount", :scalar}, {"file_count", "FileCount", :scalar}, {"review_hint", "ReviewHint", :string}, {"todos", "Todos", {:array, {:struct, [{"status", "Status", :scalar}, {"description", "Description", :string}]}}}],
     "GuiBottomPanelFields" => [{"visible", "Visible", :scalar}],
     "GuiBreadcrumbFields" => [{"segments", "Segments", {:array, :string}}],
