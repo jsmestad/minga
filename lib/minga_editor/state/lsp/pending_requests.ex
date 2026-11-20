@@ -22,9 +22,7 @@ defmodule MingaEditor.State.LSP.PendingRequests do
            non_neg_integer(), MingaEditor.State.Tab.id() | nil, position() | nil}
           | {:inlay_hint, pid(), pid(), non_neg_integer(), MingaEditor.State.Tab.id() | nil,
              non_neg_integer(), pos_integer()}
-          | {:completion_result, MingaEditor.CompletionTrigger.response_role(),
-             Minga.Editing.Completion.Item.provider_id(), pid(), reference(), pid(),
-             non_neg_integer(), reference(), non_neg_integer(), position()}
+          | {:completion_result, MingaEditor.CompletionTrigger.tracking_fact()}
           | {:completion_resolve, pid(), reference(), pid(), non_neg_integer(), reference(),
              non_neg_integer(), Minga.Editing.Completion.Item.provider_id(),
              Minga.Editing.Completion.Item.id(), map()}
@@ -64,16 +62,12 @@ defmodule MingaEditor.State.LSP.PendingRequests do
           {:ok, t()} | {:error, :duplicate_ref}
   def track_completion_result(
         %__MODULE__{} = pending,
-        {ref, role, provider_id, client, buffer, version, session_id, gen, pos}
+        {ref, role, _provider_id, client, buffer, version, session_id, gen, pos} = fact
       )
       when is_reference(ref) and role in [:primary, :secondary] and is_pid(client) and
              is_pid(buffer) and is_integer(version) and version >= 0 and is_integer(gen) and
              is_reference(session_id) and gen >= 0 and valid_cursor_guard(pos) do
-    track_request(
-      pending,
-      ref,
-      {:completion_result, role, provider_id, client, ref, buffer, version, session_id, gen, pos}
-    )
+    track_request(pending, ref, {:completion_result, fact})
   end
 
   @doc "Tracks a legacy completion request that predates stable session ownership."
@@ -375,9 +369,7 @@ defmodule MingaEditor.State.LSP.PendingRequests do
   def drop_completion_requests(%__MODULE__{} = pending) do
     by_ref =
       Map.reject(pending.by_ref, fn
-        {_map_ref,
-         {:completion_result, _role, _provider, _client, _request_ref, _buffer, _version,
-          _session, _gen, _pos}} ->
+        {_ref, {:completion_result, _fact}} ->
           true
 
         {_map_ref,

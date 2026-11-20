@@ -21,45 +21,60 @@ defmodule MingaEditor.CompletionTriggerTest do
   end
 
   describe "maybe_trigger/4" do
-    test "trigger character sends completion requests and returns typed tracking facts", %{
+    test "tracks distinct providers in order and sends requests before superseding", %{
       tmp_dir: tmp_dir
     } do
       path = Path.join(tmp_dir, "test_replace_trigger.ex")
-      File.write!(path, "ab")
+      File.write!(path, "λ.")
       {:ok, buf} = BufferProcess.start_link(file_path: path)
 
-      me = self()
-      BufferProcess.move_to(buf, {0, 2})
-      Minga.LSP.SyncServer.put_clients(buf, [self(), self()])
+      primary = start_client(:utf8)
+      secondary = start_client(:utf16)
+      BufferProcess.move_to(buf, {0, 3})
+      context = Minga.Buffer.cursor_context(buf)
+      old_ref = make_ref()
+
+      old_session =
+        Session.new(make_ref(), 1, buf, context.version, {0, 0})
+        |> Session.register_requests([{{:lsp_client, primary}, primary, old_ref}])
+
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1, session: old_session}
+      Minga.LSP.SyncServer.put_clients(buf, [primary, secondary])
 
       try do
         assert {%CompletionTrigger{
-                  phase: {:pending, {0, 2}},
-                  gen: 1,
-                  session: %Session{id: session_id}
+                  phase: {:pending, {0, 3}},
+                  gen: 2,
+                  session: %Session{id: session_id} = session
                 },
                 [
-                  {primary_ref, :primary, {:lsp_client, ^me}, ^me, ^buf, version, session_id, 1,
-                   {0, 2}},
-                  {secondary_ref, :secondary, {:lsp_client, ^me}, ^me, ^buf, version, session_id,
-                   1, {0, 2}}
-                ]} =
-                 CompletionTrigger.maybe_trigger(
-                   CompletionTrigger.new(),
-                   ".",
-                   buf,
-                   Minga.Buffer.cursor_context(buf)
-                 )
+                  {primary_ref, :primary, {:lsp_client, ^primary}, ^primary, ^buf, version,
+                   session_id, 2, {0, 3}},
+                  {secondary_ref, :secondary, {:lsp_client, ^secondary}, ^secondary, ^buf,
+                   version, session_id, 2, {0, 3}}
+                ]} = CompletionTrigger.maybe_trigger(trigger, ".", buf, context)
 
-        assert_receive {:"$gen_cast",
-                        {:async_request, "textDocument/completion", first_params, _caller,
-                         ^primary_ref}}
+        assert session_id != old_session.id
+        assert version == context.version
+        assert session.provider_order == [{:lsp_client, primary}, {:lsp_client, secondary}]
 
-        assert_receive {:"$gen_cast",
+        assert session.provider_requests == %{
+                 {:lsp_client, primary} => {primary, primary_ref},
+                 {:lsp_client, secondary} => {secondary, secondary_ref}
+               }
+
+        assert_receive {^primary, first_message}
+
+        assert {:async_request, "textDocument/completion", first_params, _caller, ^primary_ref} =
+                 first_message
+
+        assert_receive {^primary, {:cancel_request, ^old_ref}}
+
+        assert_receive {^secondary,
                         {:async_request, "textDocument/completion", second_params, _caller,
                          ^secondary_ref}}
 
-        assert first_params["position"] == %{"line" => 0, "character" => 2}
+        assert first_params["position"] == %{"line" => 0, "character" => 3}
         assert second_params["position"] == %{"line" => 0, "character" => 2}
       after
         Minga.LSP.SyncServer.remove_buffer(buf)
@@ -332,5 +347,54 @@ defmodule MingaEditor.CompletionTriggerTest do
       assert params["context"] == %{"triggerKind" => 3}
       GenServer.stop(buf)
     end
+
+    test "cancels an in-flight provider request before sending its replacement", %{
+      tmp_dir: tmp_dir
+    } do
+      path = Path.join(tmp_dir, "test_pending_retrigger.ex")
+      {:ok, buf} = BufferProcess.start_link(file_path: path, content: "hello")
+      context = Minga.Buffer.cursor_context(buf)
+      client = self()
+      old_ref = make_ref()
+
+      session =
+        Session.new(make_ref(), 1, buf, context.version, {0, 0})
+        |> Session.register_requests([{:provider, client, old_ref}])
+
+      trigger = %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1, session: session}
+
+      assert {%CompletionTrigger{gen: 2},
+              [{ref, :primary, :provider, ^client, ^buf, _version, _session_id, 2, {0, 0}}]} =
+               CompletionTrigger.retrigger_incomplete(trigger, context)
+
+      assert_receive {:"$gen_cast", first_message}
+      assert first_message == {:cancel_request, old_ref}
+
+      assert_receive {:"$gen_cast",
+                      {:async_request, "textDocument/completion", params, _caller, ^ref}}
+
+      assert params["context"] == %{"triggerKind" => 3}
+      GenServer.stop(buf)
+    end
+  end
+
+  defp start_client(encoding) do
+    parent = self()
+    start_supervised!({Task, fn -> client_loop(parent, encoding) end}, id: make_ref())
+  end
+
+  defp client_loop(parent, encoding) do
+    receive do
+      {:"$gen_call", from, :capabilities} ->
+        GenServer.reply(from, %{"completionProvider" => %{"triggerCharacters" => ["."]}})
+
+      {:"$gen_call", from, :encoding} ->
+        GenServer.reply(from, encoding)
+
+      {:"$gen_cast", message} ->
+        send(parent, {self(), message})
+    end
+
+    client_loop(parent, encoding)
   end
 end

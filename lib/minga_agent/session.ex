@@ -1778,11 +1778,12 @@ defmodule MingaAgent.Session do
     do: {:reply, {:error, :unsupported_session}, state}
 
   def handle_call(:metadata, _from, state) do
-    first_prompt = first_user_prompt(Transcript.messages(state.transcript))
+    messages = Transcript.messages(state.transcript)
+    first_prompt = first_user_prompt(messages)
 
     title =
       state.custom_title ||
-        readable_title(first_assistant_text(Transcript.messages(state.transcript))) ||
+        readable_title(first_assistant_text(messages)) ||
         readable_title(first_prompt)
 
     meta = %SessionMetadata{
@@ -1793,8 +1794,8 @@ defmodule MingaAgent.Session do
       provider_name: state.provider.provider_name,
       created_at: state.created_at,
       last_message_at: Transcript.last_changed_at(state.transcript),
-      message_count: Enum.count(Transcript.messages(state.transcript)),
-      turn_count: count_user_turns(Transcript.messages(state.transcript)),
+      message_count: length(messages),
+      turn_count: count_user_turns(messages),
       first_prompt: first_prompt,
       cost: Transcript.usage(state.transcript).cost,
       status: TurnExecution.status(state.turn_execution),
@@ -8642,23 +8643,21 @@ defmodule MingaAgent.Session do
     if Persistence.enabled?(state.persistence) do
       now = DateTime.to_iso8601(DateTime.utc_now())
       last_message_at = DateTime.to_iso8601(Transcript.last_changed_at(state.transcript))
+      {messages, message_ids} = Transcript.messages_and_ids(state.transcript)
 
       data = %{
         id: state.session_id,
         timestamp: now,
         last_message_at: last_message_at,
         title:
-          readable_title(first_assistant_text(Transcript.messages(state.transcript))) ||
-            readable_title(first_user_prompt(Transcript.messages(state.transcript))),
+          readable_title(first_assistant_text(messages)) ||
+            readable_title(first_user_prompt(messages)),
         model_name: state.provider.model_name,
         provider_name: state.provider.provider_name,
         model_selection: state.model_selection,
         selection_intent: %{"model" => state.provider.model_name},
-        messages: Transcript.messages(state.transcript),
-        message_ids:
-          state.transcript
-          |> Transcript.messages_with_ids()
-          |> Enum.map(&elem(&1, 0)),
+        messages: messages,
+        message_ids: message_ids,
         pinned_ids: Transcript.pinned_ids(state.transcript),
         usage: Transcript.usage(state.transcript),
         branches: Transcript.branches(state.transcript),

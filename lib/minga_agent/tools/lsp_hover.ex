@@ -10,6 +10,7 @@ defmodule MingaAgent.Tools.LspHover do
   Part of epic #1241. See #1243.
   """
 
+  alias Minga.LSP.HoverContent
   alias MingaAgent.Tools.LspBridge
 
   @hover_timeout 10_000
@@ -64,7 +65,7 @@ defmodule MingaAgent.Tools.LspHover do
         ) ::
           {:ok, String.t()}
   defp format_hover_contents(contents, path, line, col, not_found) do
-    case LspBridge.extract_hover_markdown(contents) do
+    case HoverContent.markdown(contents) do
       "" -> {:ok, not_found}
       text -> {:ok, "Hover info for #{Path.basename(path)}:#{line + 1}:#{col}\n\n#{text}"}
     end
