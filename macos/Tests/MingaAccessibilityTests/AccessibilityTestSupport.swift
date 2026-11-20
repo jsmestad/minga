@@ -21,6 +21,8 @@ struct AccessibilityTestInputs {
     let xdgConfigHome: URL
     let xdgDataHome: URL
     let xdgCacheHome: URL
+    let xdgStateHome: URL
+    let temporaryDirectory: URL
     let runtimeParent: URL
     let config: URL
     let debugLog: URL
@@ -32,6 +34,8 @@ struct AccessibilityTestInputs {
             xdgConfigHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_CONFIG_HOME", isDirectory: true),
             xdgDataHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_DATA_HOME", isDirectory: true),
             xdgCacheHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_CACHE_HOME", isDirectory: true),
+            xdgStateHome: try requiredAbsoluteURL(environment, key: "MINGA_AX_XDG_STATE_HOME", isDirectory: true),
+            temporaryDirectory: try requiredAbsoluteURL(environment, key: "MINGA_AX_TMPDIR", isDirectory: true),
             runtimeParent: try requiredAbsoluteURL(environment, key: "MINGA_AX_RUNTIME_PARENT", isDirectory: true),
             config: try requiredAbsoluteURL(environment, key: "MINGA_AX_CONFIG"),
             debugLog: try requiredAbsoluteURL(environment, key: "MINGA_AX_DEBUG_LOG"),

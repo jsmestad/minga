@@ -189,6 +189,15 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
+  def handle_call({:stage_fork_resolution, relative_path, ancestor, selected}, _from, state) do
+    with {:ok, path} <- normalize_path(state, relative_path),
+         :ok <- require_publication_baseline(state, path) do
+      stage_fork_resolution(state, path, ancestor, selected)
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:publish_deletion, relative_path}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
          true <- Map.has_key?(state.originals, path) do
@@ -577,6 +586,101 @@ defmodule MingaAgent.Changeset.Server do
   @spec mutation_generation(state(), FileMutation.identity()) :: non_neg_integer() | nil
   defp mutation_generation(_state, {:project_view, _}), do: nil
   defp mutation_generation(state, _identity), do: state.revision
+
+  @spec stage_fork_resolution(state(), String.t(), String.t(), String.t()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp stage_fork_resolution(state, path, content, content) do
+    {:reply, reconcile_fork_overlay(state, path), state}
+  end
+
+  defp stage_fork_resolution(state, path, ancestor, selected) do
+    with {:ok, baseline} <- fork_staging_baseline(state, path),
+         {:ok, content} <- resolve_fork_staging(ancestor, selected, baseline) do
+      case content do
+        ^baseline ->
+          {:reply, reconcile_fork_overlay(state, path), state}
+
+        content ->
+          case Overlay.commit_file(state.overlay, path, content) do
+            :ok ->
+              state =
+                state |> push_history(path) |> install_mutation(path, content) |> bump_revision()
+
+              {:reply, :ok, state}
+
+            {:error, reason} ->
+              {:reply, {:error, reason}, state}
+          end
+      end
+    else
+      {:conflict, _} -> {:reply, {:error, :publication_baseline_conflict}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec require_publication_baseline(state(), String.t()) :: :ok | {:error, atom()}
+  defp require_publication_baseline(state, path) do
+    if Map.has_key?(state.originals, path),
+      do: :ok,
+      else: {:error, :publication_baseline_unavailable}
+  end
+
+  @spec fork_staging_baseline(state(), String.t()) ::
+          {:ok, binary() | :missing} | {:error, :deleted}
+  defp fork_staging_baseline(state, path) do
+    case current_change(state, path) do
+      :deleted -> {:error, :deleted}
+      :unmodified -> {:ok, Map.fetch!(state.originals, path) || :missing}
+      content -> {:ok, content}
+    end
+  end
+
+  @spec resolve_fork_staging(binary(), binary(), binary() | :missing) ::
+          {:ok, binary() | :missing} | {:conflict, term()}
+  defp resolve_fork_staging(ancestor, selected, :missing) do
+    # A final newline must not attribute an unchanged human line to the fork.
+    additions =
+      for {:ins, lines} <- List.myers_difference(staging_lines(ancestor), staging_lines(selected)),
+          line <- lines,
+          do: line
+
+    case additions do
+      [] ->
+        {:ok, :missing}
+
+      lines ->
+        ending = if String.ends_with?(selected, "\n"), do: "\n", else: ""
+        {:ok, Enum.join(lines, "\n") <> ending}
+    end
+  end
+
+  defp resolve_fork_staging(ancestor, selected, baseline) do
+    with {:ok, lines} <-
+           Minga.Core.Diff.merge3(
+             String.split(ancestor, "\n"),
+             String.split(selected, "\n"),
+             String.split(baseline, "\n")
+           ) do
+      {:ok, Enum.join(lines, "\n")}
+    end
+  end
+
+  @spec staging_lines(binary()) :: [binary()]
+  defp staging_lines(""), do: []
+
+  defp staging_lines(content) do
+    size = byte_size(content)
+    size = if :binary.last(content) == ?\n, do: size - 1, else: size
+    :binary.split(binary_part(content, 0, size), "\n", [:global])
+  end
+
+  @spec reconcile_fork_overlay(state(), String.t()) :: :ok | {:error, term()}
+  defp reconcile_fork_overlay(state, path) do
+    case current_change(state, path) do
+      :unmodified -> restore_original(state, path)
+      change -> Overlay.commit_file(state.overlay, path, change)
+    end
+  end
 
   @spec mutation_source(state(), String.t()) :: FileMutation.source()
   defp mutation_source(state, path) do

@@ -143,6 +143,25 @@ defmodule Minga.Buffer.Fork do
     GenServer.call(server, {:publish, staging}, :infinity)
   end
 
+  @typedoc "Identifies the exact fork and parent revisions used for a conflict review."
+  @type review_revision :: {pid(), non_neg_integer(), non_neg_integer()}
+
+  @doc "Reads review regions and their exact source revisions through the fork owner."
+  @spec conflict_snapshot(GenServer.server()) ::
+          {:ok, review_revision(), [Diff.merge_region()]} | {:error, term()}
+  def conflict_snapshot(server), do: GenServer.call(server, :conflict_snapshot, :infinity)
+
+  @doc "Publishes only the decisions made against the reviewed fork and parent revisions."
+  @spec publish_resolution(
+          GenServer.server(),
+          review_revision(),
+          [:accepted | :rejected],
+          (String.t(), String.t() -> :ok | {:conflict, term()} | {:error, term()})
+        ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
+  def publish_resolution(server, revision, decisions, staging) do
+    GenServer.call(server, {:publish_resolution, revision, decisions, staging}, :infinity)
+  end
+
   @doc "Publishes a tombstone under fork and parent ownership; the caller discards it only on success."
   @spec publish_deletion(
           GenServer.server(),
@@ -237,6 +256,7 @@ defmodule Minga.Buffer.Fork do
                :replace_content,
                :find_and_replace,
                :publish,
+               :publish_resolution,
                :publish_deletion
              ] do
     {:reply, {:error, :published}, state}
@@ -425,6 +445,51 @@ defmodule Minga.Buffer.Fork do
       {:reply, {:error, :parent_dead}, %{state | parent_alive: false}}
   end
 
+  def handle_call(:conflict_snapshot, _from, %{phase: :published} = state),
+    do: {:reply, {:error, :published}, state}
+
+  def handle_call(:conflict_snapshot, _from, %{deleted: true} = state),
+    do: {:reply, {:error, :deleted}, state}
+
+  def handle_call(:conflict_snapshot, _from, state) do
+    {_ancestor, _parent, revisions, regions} = review_sources(state)
+    {:reply, {:ok, revisions, regions}, state}
+  catch
+    :exit, _ -> {:reply, {:error, :parent_dead}, %{state | parent_alive: false}}
+  end
+
+  def handle_call(
+        {:publish_resolution, {pid, version, parent_version}, decisions, staging},
+        _from,
+        %{version: version, deleted: false} = state
+      )
+      when pid == self() do
+    {ancestor, _parent, revisions, regions} = review_sources(state)
+
+    with {^pid, ^version, ^parent_version} <- revisions,
+         {:ok, merged, selected} <-
+           Diff.resolve_merge(String.split(ancestor, "\n"), regions, decisions),
+         {:ok, _} = result <-
+           BufferProcess.install_fork_resolution(
+             state.parent,
+             parent_version,
+             Enum.join(merged, "\n"),
+             Enum.join(selected, "\n"),
+             fn selected_content -> staging.(ancestor, selected_content) end
+           ) do
+      {:reply, result, %{state | phase: :published}}
+    else
+      {:error, _} = error -> {:reply, error, state}
+      {:conflict, _} = conflict -> {:reply, conflict, state}
+      _ -> {:reply, {:error, :stale_parent}, state}
+    end
+  catch
+    :exit, _ -> {:reply, {:error, :parent_dead}, %{state | parent_alive: false}}
+  end
+
+  def handle_call({:publish_resolution, _, _, _}, _from, state),
+    do: {:reply, {:error, :stale_fork}, state}
+
   def handle_call(:merge, _from, %{parent_alive: false} = state) do
     {:reply, {:error, :parent_dead}, state}
   end
@@ -455,6 +520,22 @@ defmodule Minga.Buffer.Fork do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec review_sources(state()) ::
+          {String.t(), String.t(), review_revision(), [Diff.merge_region()]}
+  defp review_sources(state) do
+    ancestor = Document.content(state.ancestor)
+    {parent, parent_version} = BufferProcess.content_with_version(state.parent)
+
+    regions =
+      Diff.merge_regions(
+        String.split(ancestor, "\n"),
+        String.split(Document.content(state.document), "\n"),
+        String.split(parent, "\n")
+      )
+
+    {ancestor, parent, {self(), state.version, parent_version}, regions}
+  end
 
   @spec file_source(state()) :: FileMutation.source()
   defp file_source(%{deleted: true}), do: {:error, :enoent}

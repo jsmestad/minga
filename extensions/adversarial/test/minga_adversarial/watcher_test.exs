@@ -2,8 +2,10 @@ defmodule MingaAdversarial.WatcherTest do
   # Drives the real global Minga.Diagnostics + Events registries, so not async.
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Diagnostics
   alias Minga.Events
+  alias Minga.Events.BufferChangedEvent
   alias Minga.Events.BufferClosedEvent
   alias Minga.Extension.Diagnostics, as: ExtDiagnostics
   alias Minga.LSP.SyncServer
@@ -31,6 +33,31 @@ defmodule MingaAdversarial.WatcherTest do
   end
 
   defp one_finding, do: ~s([{"line": 2, "concern": "hd/1 assumes list is non-empty"}])
+
+  defp start_capturing_watcher(id, skepticism \\ :manual) do
+    test_pid = self()
+
+    start_watcher(id,
+      skepticism: skepticism,
+      dispatch: fn thunk -> send(test_pid, {:dispatch, thunk}) end,
+      ai_fun: fn _messages, _max ->
+        assert_receive {:model_result, result}
+        result
+      end
+    )
+  end
+
+  defp capture_analysis(server, path) do
+    assert :ok = Watcher.analyze(server, path)
+    assert_receive {:dispatch, thunk}
+    thunk
+  end
+
+  defp deliver_reply(server, thunk, result \\ {:ok, one_finding()}) do
+    send(self(), {:model_result, result})
+    thunk.()
+    flush(server)
+  end
 
   defp flush(server), do: :sys.get_state(server)
 
@@ -77,20 +104,20 @@ defmodule MingaAdversarial.WatcherTest do
   end
 
   test "dial off makes analyze a no-op", %{path: path, uri: uri} do
-    server =
-      start_watcher(:off,
-        skepticism: :off,
-        ai_fun: fn _messages, _max -> {:ok, one_finding()} end
-      )
+    server = start_capturing_watcher(:off, :off)
 
     assert :off = Watcher.analyze(server, path)
-    flush(server)
+    refute_received {:dispatch, _thunk}
     assert Diagnostics.for_uri(uri) == []
   end
 
   test "manual dial does not analyze on save; on_save does", %{path: path} do
     test_pid = self()
-    ai = fn _messages, _max -> send(test_pid, :ai_called) && {:error, :stub} end
+
+    ai = fn _messages, _max ->
+      send(test_pid, :ai_called)
+      {:error, :stub}
+    end
 
     manual = start_watcher(:save_manual, skepticism: :manual, ai_fun: ai)
     send(manual, {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: self(), path: path}})
@@ -102,70 +129,112 @@ defmodule MingaAdversarial.WatcherTest do
     assert_receive :ai_called, 2_000
   end
 
-  test "stale replies from an older generation are dropped", %{path: path, uri: uri} do
-    # No-op dispatch: the watcher never runs the model itself, so the test
-    # fully controls which generation's reply arrives.
-    server =
-      start_watcher(:stale,
-        skepticism: :manual,
-        dispatch: fn _thunk -> :ok end,
-        ai_fun: fn _messages, _max -> {:ok, one_finding()} end
-      )
+  test "an older reply does not publish or displace the newer request", %{path: path, uri: uri} do
+    server = start_capturing_watcher(:stale)
+    older = capture_analysis(server, path)
+    newer = capture_analysis(server, path)
 
-    # Generation 1, delivered for gen 1 → published.
-    assert :ok = Watcher.analyze(server, path)
-    send(server, {:ai_result, path, 1, {:ok, one_finding()}})
-    flush(server)
-    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
+    deliver_reply(server, older)
+    assert Diagnostics.for_uri(uri) == []
 
-    # Generation 2 requested; the late gen-1 reply must be ignored.
-    assert :ok = Watcher.analyze(server, path)
-    send(server, {:ai_result, path, 1, {:ok, ~s([{"line": 1, "concern": "STALE"}])}})
-    flush(server)
-    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
+    deliver_reply(server, newer, {:ok, ~s([{"line": 1, "concern": "fresh"}])})
+    assert [%{message: "fresh"}] = Diagnostics.for_uri(uri)
 
-    # The current gen-2 reply wins.
-    send(server, {:ai_result, path, 2, {:ok, ~s([{"line": 1, "concern": "fresh"}])}})
-    flush(server)
+    deliver_reply(server, newer, {:ok, "[]"})
     assert [%{message: "fresh"}] = Diagnostics.for_uri(uri)
   end
 
-  test "closing a buffer clears its findings", %{path: path, uri: uri} do
-    server =
-      start_watcher(:close,
-        skepticism: :manual,
-        dispatch: fn _thunk -> :ok end
-      )
-
-    Watcher.analyze(server, path)
-    send(server, {:ai_result, path, 1, {:ok, one_finding()}})
-    flush(server)
-    assert Diagnostics.for_uri(uri) != []
-
-    send(server, {:minga_event, :buffer_closed, %BufferClosedEvent{buffer: self(), path: path}})
-    flush(server)
-    assert Diagnostics.for_uri(uri) == []
-  end
-
-  test "closing a buffer drops an in-flight reply instead of republishing", %{
+  test "failed source reads and oversized requests leave the admitted analysis pending", %{
     path: path,
     uri: uri
   } do
-    server =
-      start_watcher(:close_stale,
-        skepticism: :manual,
-        dispatch: fn _thunk -> :ok end
-      )
+    server = start_capturing_watcher(:rejected)
+    pending = capture_analysis(server, path)
 
-    # analyze starts generation 1; the buffer closes before the reply lands.
-    Watcher.analyze(server, path)
-    send(server, {:minga_event, :buffer_closed, %BufferClosedEvent{buffer: self(), path: path}})
-    flush(server)
+    File.rm!(path)
+    assert :ok = Watcher.analyze(server, path)
+    assert :ok = Watcher.analyze(server, path, String.duplicate("x", 100_001))
+    refute_received {:dispatch, _thunk}
 
-    # The late gen-1 reply must be dropped, not published onto the closed buffer.
-    send(server, {:ai_result, path, 1, {:ok, one_finding()}})
+    deliver_reply(server, pending)
+    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
+  end
+
+  test "a model error retains findings but consumes its request; an empty success clears", %{
+    path: path,
+    uri: uri
+  } do
+    server = start_capturing_watcher(:terminal)
+    deliver_reply(server, capture_analysis(server, path))
+    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
+
+    failed = capture_analysis(server, path)
+    deliver_reply(server, failed, {:error, :unavailable})
+    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
+
+    deliver_reply(server, failed, {:ok, "[]"})
+    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
+
+    deliver_reply(server, capture_analysis(server, path), {:ok, "[]"})
+    assert Diagnostics.for_uri(uri) == []
+  end
+
+  test "explicit clear drops findings and any pending reply", %{path: path, uri: uri} do
+    server = start_capturing_watcher(:clear)
+    deliver_reply(server, capture_analysis(server, path))
+    assert [_] = Diagnostics.for_uri(uri)
+    pending = capture_analysis(server, path)
+
+    assert :ok = Watcher.clear(server, path)
     flush(server)
     assert Diagnostics.for_uri(uri) == []
+
+    deliver_reply(server, pending)
+    assert Diagnostics.for_uri(uri) == []
+  end
+
+  test "a user edit drops findings and any pending reply", %{path: path, uri: uri} do
+    buffer = start_supervised!({BufferProcess, file_path: path})
+    server = start_capturing_watcher(:edit)
+    deliver_reply(server, capture_analysis(server, path))
+    assert [_] = Diagnostics.for_uri(uri)
+    pending = capture_analysis(server, path)
+
+    event = %BufferChangedEvent{buffer: buffer, source: :user, sequence: 1}
+    send(server, {:minga_event, :buffer_changed, event})
+
+    flush(server)
+    assert Diagnostics.for_uri(uri) == []
+
+    deliver_reply(server, pending)
+    assert Diagnostics.for_uri(uri) == []
+  end
+
+  test "close drops findings and pending replies, even after reopening the same path", %{
+    path: path,
+    uri: uri
+  } do
+    buffer = start_supervised!({BufferProcess, file_path: path})
+    server = start_capturing_watcher(:reopen)
+    deliver_reply(server, capture_analysis(server, path))
+    assert [_] = Diagnostics.for_uri(uri)
+    before_close = capture_analysis(server, path)
+
+    send(server, {:minga_event, :buffer_closed, %BufferClosedEvent{buffer: buffer, path: path}})
+    stop_supervised!(BufferProcess)
+    flush(server)
+    assert Diagnostics.for_uri(uri) == []
+
+    deliver_reply(server, before_close)
+    assert Diagnostics.for_uri(uri) == []
+
+    start_supervised!({BufferProcess, file_path: path})
+    after_reopen = capture_analysis(server, path)
+    deliver_reply(server, before_close)
+    assert Diagnostics.for_uri(uri) == []
+
+    deliver_reply(server, after_reopen)
+    assert [%{message: "hd/1 assumes list is non-empty"}] = Diagnostics.for_uri(uri)
   end
 
   test "cycle_skepticism advances through the dial", _ctx do

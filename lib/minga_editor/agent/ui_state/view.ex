@@ -283,7 +283,13 @@ defmodule MingaEditor.Agent.UIState.View do
   end
 
   @type diff_resolution_action :: :accept_current | :reject_current | :accept_all | :reject_all
-  @type diff_resolution_write :: :no_write | {:write_file, String.t(), String.t()}
+  @type diff_resolution_write ::
+          :no_write
+          | {:write_file, String.t(), String.t()}
+          | {:resolve_fork, String.t(), Minga.Buffer.Fork.review_revision(),
+             [
+               DiffReview.resolution()
+             ]}
   @type diff_resolution_result :: {:ok, t(), diff_resolution_write()} | :no_diff | :no_hunk
 
   @doc "Applies a diff-review resolution and reprojects the edit timeline authority atomically."
@@ -292,46 +298,68 @@ defmodule MingaEditor.Agent.UIState.View do
       when action in [:accept_current, :reject_current, :accept_all, :reject_all] do
     with %DiffReview{} = review <- Preview.diff_review(view.preview),
          {:ok, resolved_review} <- resolve_review_action(review, action) do
-      original_lines = DiffReview.original_lines(review)
-      materialized_lines = DiffReview.materialized_lines(resolved_review)
-
-      timeline =
-        EditTimeline.reproject(
-          view.edit_timeline,
-          resolved_review.path,
-          original_lines,
-          materialized_lines
-        )
-
-      updated_review =
-        resolved_review
-        |> DiffReview.update_after_lines(
-          materialized_lines,
-          EditTimeline.cumulative_hunks(timeline, resolved_review.path)
-        )
-        |> unresolved_review()
-
-      {preview, presentation} =
-        case updated_review do
-          nil ->
-            {Preview.clear(view.preview), Presentation.focus(view.presentation, :chat)}
-
-          %DiffReview{} = review ->
-            {Preview.replace_diff(view.preview, review), view.presentation}
-        end
-
-      updated_view = %{
-        view
-        | edit_timeline: timeline,
-          preview: preview,
-          presentation: presentation
-      }
-
-      {:ok, updated_view, write_request(action, resolved_review.path, materialized_lines)}
+      resolve_review(view, action, review, resolved_review)
     else
       nil -> :no_diff
       :no_hunk -> :no_hunk
     end
+  end
+
+  @spec resolve_review(t(), diff_resolution_action(), DiffReview.t(), DiffReview.t()) ::
+          diff_resolution_result()
+  defp resolve_review(
+         view,
+         _action,
+         %DiffReview{fork_revision: {_, _, _} = revision},
+         resolved_review
+       ) do
+    case DiffReview.fork_decisions(resolved_review) do
+      :pending ->
+        {:ok, replace_preview(view, Preview.replace_diff(view.preview, resolved_review)),
+         :no_write}
+
+      {:ok, decisions} ->
+        {:ok, view, {:resolve_fork, resolved_review.path, revision, decisions}}
+    end
+  end
+
+  defp resolve_review(view, action, review, resolved_review) do
+    original_lines = DiffReview.original_lines(review)
+    materialized_lines = DiffReview.materialized_lines(resolved_review)
+
+    timeline =
+      EditTimeline.reproject(
+        view.edit_timeline,
+        resolved_review.path,
+        original_lines,
+        materialized_lines
+      )
+
+    updated_review =
+      resolved_review
+      |> DiffReview.update_after_lines(
+        materialized_lines,
+        EditTimeline.cumulative_hunks(timeline, resolved_review.path)
+      )
+      |> unresolved_review()
+
+    {preview, presentation} =
+      case updated_review do
+        nil ->
+          {Preview.clear(view.preview), Presentation.focus(view.presentation, :chat)}
+
+        %DiffReview{} = review ->
+          {Preview.replace_diff(view.preview, review), view.presentation}
+      end
+
+    updated_view = %{
+      view
+      | edit_timeline: timeline,
+        preview: preview,
+        presentation: presentation
+    }
+
+    {:ok, updated_view, write_request(action, resolved_review.path, materialized_lines)}
   end
 
   # ── Search ──────────────────────────────────────────────────────────────────

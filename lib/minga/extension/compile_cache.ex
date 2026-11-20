@@ -87,7 +87,7 @@ defmodule Minga.Extension.CompileCache do
   @spec load_cached_or_compile(String.t(), [String.t()], String.t(), term(), keyword()) ::
           result()
   defp load_cached_or_compile(root, files, key, source, opts) do
-    cache_root = Keyword.get(opts, :cache_dir, default_cache_dir())
+    cache_root = Keyword.get_lazy(opts, :cache_dir, &default_cache_dir/0)
     ext_dir = Path.join(cache_root, ext_id(root))
     dir = Path.join(ext_dir, key)
 
@@ -550,11 +550,5 @@ defmodule Minga.Extension.CompileCache do
   defp enabled?, do: Application.get_env(:minga, :extension_compile_cache, true)
 
   @spec default_cache_dir() :: String.t()
-  defp default_cache_dir do
-    Application.get_env(
-      :minga,
-      :extension_compile_cache_dir,
-      Path.join(Path.expand("~/.local/share/minga"), "extension_cache")
-    )
-  end
+  defp default_cache_dir, do: Path.join(Minga.UserPaths.data_dir(), "extension_cache")
 end

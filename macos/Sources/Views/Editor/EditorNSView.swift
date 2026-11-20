@@ -268,6 +268,8 @@ final class EditorNSView: MTKView {
     /// Task observing system scroller style changes.
     private var scrollerStyleTask: Task<Void, Never>?
 
+    var savesFrameInApplicationPreferences = true
+
     init(encoder: OutboundActionEncoding, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager,
          reduceMotionEnabled: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
@@ -975,7 +977,9 @@ final class EditorNSView: MTKView {
         // Restore window position and size from previous session.
         // This fires before the window is made key/visible, so the
         // saved frame is applied without a visible position jump.
-        window.setFrameAutosaveName("MingaEditorWindow")
+        if savesFrameInApplicationPreferences {
+            window.setFrameAutosaveName("MingaEditorWindow")
+        }
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.styleMask.insert(.fullSizeContentView)

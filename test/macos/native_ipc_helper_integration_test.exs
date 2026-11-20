@@ -2,13 +2,14 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
   @moduledoc """
   Runs the packaged Swift helper against the real Elixir AF_UNIX server.
 
-  This suite is opt-in because it requires macOS and an Xcode-built Minga.app.
+  This suite is opt-in because it requires macOS and an Xcode-built Debug Minga.app.
   """
 
-  # Not async: the production endpoint has one fixed Darwin runtime directory.
+  # Not async: the tests supervise child processes and IPC connections.
   use ExUnit.Case, async: false
 
   @moduletag :macos_ipc_helper
+  @moduletag timeout: 30_000
 
   @helper_timeout 10_000
 
@@ -22,23 +23,10 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     helper = System.fetch_env!("MINGA_IPC_HELPER")
     assert File.exists?(helper)
 
-    {runtime_parent, 0} = System.cmd("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"])
-    runtime_parent = runtime_parent |> String.trim() |> Path.expand()
+    {runtime_parent, 0} = System.cmd("/usr/bin/mktemp", ["-d", "/private/tmp/mip.XXXXXX"])
+    runtime_parent = String.trim(runtime_parent)
+    on_exit(fn -> File.rm_rf!(runtime_parent) end)
     runtime_dir = Path.join(runtime_parent, "com.minga.editor")
-
-    case File.ls(runtime_dir) do
-      {:error, :enoent} ->
-        :ok
-
-      {:ok, []} ->
-        :ok
-
-      {:ok, entries} ->
-        flunk("refusing to replace an active native IPC directory: #{inspect(entries)}")
-
-      {:error, reason} ->
-        flunk("cannot inspect native IPC directory: #{inspect(reason)}")
-    end
 
     suffix = System.unique_integer([:positive, :monotonic])
     registry = Module.concat(__MODULE__, "Events#{suffix}")
@@ -140,8 +128,6 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
       rescue
         ArgumentError -> :ok
       end
-
-      File.rm_rf!(runtime_dir)
     end)
 
     descriptor = runtime_dir |> Path.join("current.json") |> File.read!() |> JSON.decode!()
@@ -156,8 +142,8 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     }
   end
 
-  test "packaged helper probes the exact confstr-backed endpoint", ctx do
-    assert {_, 0} = run_helper(ctx.helper, ["probe"])
+  test "packaged helper probes only the explicitly scoped endpoint", ctx do
+    assert {_, 0} = run_helper(ctx, ["probe"])
 
     descriptor =
       ctx.runtime_parent
@@ -169,12 +155,39 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
              Path.join(ctx.runtime_parent, "com.minga.editor")
   end
 
+  test "packaged helper finds no endpoint in an empty private parent", ctx do
+    empty = Path.join(ctx.runtime_parent, "empty")
+    File.mkdir!(empty)
+    File.chmod!(empty, 0o700)
+
+    assert {_, 3} = run_helper(%{ctx | runtime_parent: empty}, ["probe"])
+  end
+
+  test "packaged helper rejects invalid private parent overrides without falling back", ctx do
+    insecure = Path.join(ctx.runtime_parent, "public")
+    missing = Path.join(ctx.runtime_parent, "missing")
+    symlink = Path.join(ctx.runtime_parent, "symlink")
+    File.mkdir!(insecure)
+    File.chmod!(insecure, 0o755)
+    File.ln_s!(ctx.runtime_parent, symlink)
+
+    for runtime_parent <- ["", "relative", insecure, missing, symlink] do
+      assert {message, 4} = run_helper(%{ctx | runtime_parent: runtime_parent}, ["probe"])
+      assert message =~ "--runtime-parent"
+    end
+
+    assert {message, 1} =
+             System.cmd(ctx.helper, ["probe", "--runtime-parent"], stderr_to_stdout: true)
+
+    assert message =~ "--runtime-parent requires a directory"
+  end
+
   test "packaged helper fails closed or reconnects explicitly on nonce conflict", ctx do
     assert {_, 1} =
-             run_helper(ctx.helper, ["probe", "--expected-launch-nonce", "different-nonce"])
+             run_helper(ctx, ["probe", "--expected-launch-nonce", "different-nonce"])
 
     assert {_, 0} =
-             run_helper(ctx.helper, [
+             run_helper(ctx, [
                "probe",
                "--expected-launch-nonce",
                "different-nonce",
@@ -183,14 +196,14 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
   end
 
   test "packaged helper exposes finite capabilities and bounded inspection", ctx do
-    assert {capabilities_output, 0} = run_helper(ctx.helper, ["capabilities"])
+    assert {capabilities_output, 0} = run_helper(ctx, ["capabilities"])
     capabilities = JSON.decode!(capabilities_output)
     assert capabilities["type"] == "capabilities"
     assert "goto_location" in capabilities["commands"]
     assert capabilities["limits"]["maximum_frame_bytes"] == 65_536
 
     assert {inspection_output, 0} =
-             run_helper(ctx.helper, ["inspect", "--continuation=page-token", "--choice-limit=9"])
+             run_helper(ctx, ["inspect", "--continuation=page-token", "--choice-limit=9"])
 
     inspection = JSON.decode!(inspection_output)
     assert inspection["type"] == "inspection"
@@ -209,7 +222,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
       "--deadline-ms=1000"
     ]
 
-    assert {output, 0} = run_helper(ctx.helper, args)
+    assert {output, 0} = run_helper(ctx, args)
     result = JSON.decode!(output)
     assert result["type"] == "completed"
     assert result["receipt"]["kind"] == "select_tab"
@@ -226,7 +239,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
   test "packaged wait observes acceptance, completion, and acknowledgement", ctx do
     target = Path.join(ctx.runtime_parent, "minga-ipc-helper-completion.txt")
-    task = Task.async(fn -> run_helper(ctx.helper, ["wait", target]) end)
+    task = Task.async(fn -> run_helper(ctx, ["wait", target]) end)
 
     assert_receive {:opened, ^target, false, request_id, _handler}, 2_000
     assert is_binary(request_id)
@@ -237,7 +250,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
   test "packaged wait fails when the BEAM endpoint disconnects", ctx do
     target = Path.join(ctx.runtime_parent, "minga-ipc-helper-disconnect.txt")
-    task = Task.async(fn -> run_helper(ctx.helper, ["wait", target]) end)
+    task = Task.async(fn -> run_helper(ctx, ["wait", target]) end)
 
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
@@ -248,7 +261,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
   test "packaged wait returns retryable status when endpoint dies before acceptance", ctx do
     target = Path.join(ctx.runtime_parent, "endpoint-before-acceptance.txt")
-    task = Task.async(fn -> run_helper(ctx.helper, ["wait", target]) end)
+    task = Task.async(fn -> run_helper(ctx, ["wait", target]) end)
 
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
@@ -259,7 +272,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
   test "packaged wait returns retryable status when app dies before acceptance", ctx do
     target = Path.join(ctx.runtime_parent, "before-acceptance.txt")
-    task = Task.async(fn -> run_helper(ctx.helper, ["wait", target]) end)
+    task = Task.async(fn -> run_helper(ctx, ["wait", target]) end)
 
     assert_receive {:opened, ^target, false, request_id, handler}, 2_000
     assert Task.yield(task, 100) == nil
@@ -271,7 +284,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
 
   test "packaged wait reports terminal app death after acceptance", ctx do
     target = Path.join(ctx.runtime_parent, "minga-ipc-helper-app-death.txt")
-    task = Task.async(fn -> run_helper(ctx.helper, ["wait", target]) end)
+    task = Task.async(fn -> run_helper(ctx, ["wait", target]) end)
 
     assert_receive {:opened, ^target, false, _request_id, _handler}, 2_000
     assert Task.yield(task, 100) == nil
@@ -284,7 +297,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     target = Path.join(ctx.runtime_parent, "minga-ipc-helper-ready.txt")
 
     task =
-      Task.async(fn -> run_helper(ctx.helper, ["open-ready", "--deadline-ms=1000", target]) end)
+      Task.async(fn -> run_helper(ctx, ["open-ready", "--deadline-ms=1000", target]) end)
 
     assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
     assert {:ok, applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
@@ -310,7 +323,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     target = Path.join(ctx.runtime_parent, "minga-ipc-helper-receipt-disconnect.txt")
 
     task =
-      Task.async(fn -> run_helper(ctx.helper, ["open-ready", "--deadline-ms=1000", target]) end)
+      Task.async(fn -> run_helper(ctx, ["open-ready", "--deadline-ms=1000", target]) end)
 
     assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
     assert {:ok, _applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
@@ -331,7 +344,7 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     target = Path.join(ctx.runtime_parent, "minga-ipc-helper-timeout.txt")
 
     task =
-      Task.async(fn -> run_helper(ctx.helper, ["open-ready", "--deadline-ms=100", target]) end)
+      Task.async(fn -> run_helper(ctx, ["open-ready", "--deadline-ms=100", target]) end)
 
     assert_receive {:receipt_opened, ^target, false, receipt, server}, 2_000
     assert {:ok, _applied} = Server.operation_applied(server, receipt.operation_id, 3, 7)
@@ -376,7 +389,9 @@ defmodule Minga.MacOSNativeIPCHelperIntegrationTest do
     }
   end
 
-  defp run_helper(helper, args) do
-    System.cmd(helper, args, stderr_to_stdout: true)
+  defp run_helper(ctx, [command | args]) do
+    System.cmd(ctx.helper, [command, "--runtime-parent", ctx.runtime_parent | args],
+      stderr_to_stdout: true
+    )
   end
 end

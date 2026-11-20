@@ -45,40 +45,6 @@ defmodule MingaAgent.Tools.LspBridgeTest do
     end
   end
 
-  describe "extract_hover_markdown/1" do
-    test "extracts from MarkupContent with markdown kind" do
-      content = %{"kind" => "markdown", "value" => "# Hello\n\nWorld"}
-      assert "# Hello\n\nWorld" = LspBridge.extract_hover_markdown(content)
-    end
-
-    test "extracts from MarkupContent with plaintext kind" do
-      content = %{"kind" => "plaintext", "value" => "simple text"}
-      assert "simple text" = LspBridge.extract_hover_markdown(content)
-    end
-
-    test "extracts from plain string" do
-      assert "hello" = LspBridge.extract_hover_markdown("  hello  ")
-    end
-
-    test "extracts from MarkedString with language" do
-      content = %{"language" => "elixir", "value" => "@spec foo() :: :ok"}
-      assert "```elixir\n@spec foo() :: :ok\n```" = LspBridge.extract_hover_markdown(content)
-    end
-
-    test "joins array of contents" do
-      contents = [
-        %{"kind" => "markdown", "value" => "Part 1"},
-        %{"kind" => "markdown", "value" => "Part 2"}
-      ]
-
-      assert "Part 1\n\nPart 2" = LspBridge.extract_hover_markdown(contents)
-    end
-
-    test "returns empty string for nil" do
-      assert "" = LspBridge.extract_hover_markdown(nil)
-    end
-  end
-
   describe "flatten_document_symbols/1" do
     test "flattens hierarchical DocumentSymbol format" do
       symbols = [

@@ -37,7 +37,8 @@ defmodule Minga.Log do
 
   require Logger
 
-  @type subsystem :: :render | :lsp | :agent | :editor | :config | :port | :distribution | :ext
+  @type subsystem ::
+          :render | :lsp | :agent | :editor | :config | :port | :gui | :distribution | :ext
 
   @type level :: :debug | :info | :warning | :error
 
@@ -63,6 +64,7 @@ defmodule Minga.Log do
     editor: :log_level_editor,
     config: :log_level_config,
     port: :log_level_port,
+    gui: :log_level_port,
     distribution: :log_level_distribution,
     ext: :log_level_ext
   }
@@ -131,12 +133,13 @@ defmodule Minga.Log do
       # For levels that pass the OTP filter, Minga.LoggerHandler already
       # routes to *Messages* so we stay out of the way to avoid duplicates.
       maybe_route_to_messages(level, subsystem, message)
+      metadata = if subsystem == :gui, do: [minga_gui: true], else: []
 
       case level do
-        :debug -> Logger.debug(message)
-        :info -> Logger.info(message)
-        :warning -> Logger.warning(message)
-        :error -> Logger.error(message)
+        :debug -> Logger.debug(message, metadata)
+        :info -> Logger.info(message, metadata)
+        :warning -> Logger.warning(message, metadata)
+        :error -> Logger.error(message, metadata)
       end
     end
 
@@ -150,19 +153,16 @@ defmodule Minga.Log do
     msg_priority = Map.fetch!(@level_priority, level)
 
     if otp_priority > msg_priority do
+      prefix = if subsystem == :gui, do: "GUI", else: subsystem
+
       Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
-        text: "[#{subsystem}/#{level}] " <> message,
-        level: event_level(level)
+        text: "[#{prefix}/#{level}] " <> message,
+        level: level
       })
     end
 
     :ok
   end
-
-  @spec event_level(level()) :: Minga.Events.LogMessageEvent.level()
-  defp event_level(:error), do: :error
-  defp event_level(:warning), do: :warning
-  defp event_level(_level), do: :info
 
   @spec safe_get_option(Minga.Config.option_name()) :: atom()
   defp safe_get_option(name) do

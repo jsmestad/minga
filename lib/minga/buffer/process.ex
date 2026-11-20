@@ -279,6 +279,22 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:merge_fork, ancestor, fork_content, staging}, :infinity)
   end
 
+  @doc "Installs a resolved fork only at the reviewed parent revision, after staging succeeds."
+  @spec install_fork_resolution(
+          GenServer.server(),
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          (String.t() -> :ok | {:conflict, term()} | {:error, term()})
+        ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
+  def install_fork_resolution(server, version, merged, fork_content, staging) do
+    GenServer.call(
+      server,
+      {:install_fork_resolution, version, merged, fork_content, staging},
+      :infinity
+    )
+  end
+
   @doc "Publishes deletion under parent ownership without discarding the open buffer's bytes."
   @spec publish_fork_deletion(
           GenServer.server(),
@@ -1427,6 +1443,25 @@ defmodule Minga.Buffer.Process do
 
       {:conflict, _} = conflict ->
         {:reply, conflict, state}
+    end
+  end
+
+  def handle_call({:install_fork_resolution, _, _, _, _}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call(
+        {:install_fork_resolution, version, merged, fork_content, staging},
+        _from,
+        state
+      ) do
+    with ^version <- BufState.version(state),
+         :ok <- stage_fork_content(staging, fork_content) do
+      {:reply, {:ok, merged}, replace_content_preserving_cursor_state(state, merged, :agent)}
+    else
+      {:error, _} = error -> {:reply, error, state}
+      {:conflict, _} = conflict -> {:reply, conflict, state}
+      _version -> {:reply, {:error, :stale_parent}, state}
     end
   end
 

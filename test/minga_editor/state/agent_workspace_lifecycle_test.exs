@@ -1200,7 +1200,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = DraftWorkflow.edited(state, buffer)
     assert_receive {:composer_draft_due, ^owner, token}, 1_000
     state = DraftWorkflow.due(state, owner, token)
-    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, result}, 1_000
+    :sys.get_state(session)
+    assert_received {:composer_draft_result, ^session, ^id, {^owner, ref}, result}
 
     {DraftWorkflow.handle_result(state, session, id, owner, ref, result), result}
   end

@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Swift.Build do
   @moduledoc """
-  Builds the macOS Swift frontend with `xcodebuild`.
+  Builds the development macOS Swift frontend with `xcodebuild` (Debug by default).
 
   ## Usage
 
@@ -36,7 +36,17 @@ defmodule Mix.Tasks.Swift.Build do
   end
 
   @spec xcodebuild_args([String.t()]) :: [String.t()]
-  defp xcodebuild_args([]), do: ["-project", "macos/Minga.xcodeproj", "-scheme", "Minga", "build"]
+  defp xcodebuild_args([]),
+    do: [
+      "-project",
+      "macos/Minga.xcodeproj",
+      "-scheme",
+      "Minga",
+      "-configuration",
+      "Debug",
+      "build"
+    ]
+
   defp xcodebuild_args(["--" | args]), do: args
   defp xcodebuild_args(args), do: args
 

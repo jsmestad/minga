@@ -2,6 +2,9 @@ import AppKit
 import Combine
 import MingaProtocol
 @_spi(FocusPolicy) import MingaUI
+import os
+
+private let focusLogger = Logger(subsystem: PortLogger.subsystem, category: "Focus")
 
 /// Owns AppKit focus reclamation and overlay key-routing lifetime for one editor view.
 @MainActor
@@ -537,7 +540,7 @@ private final class EditorFocusDiagnosticLog {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(records).write(to: outputURL, options: .atomic)
         } catch {
-            NSLog("Accessibility focus diagnostic write failed: %@", String(describing: error))
+            PortLogger.report(.error, "Accessibility focus diagnostic write failed", to: focusLogger, privateDetail: error.localizedDescription)
         }
     }
 

@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Window source maps for unchanged, undecorated lines without expanded tabs now skip the composition pipeline and count UTF-16 once. Decorated lines measure source display width at most once and query conceals and inline virtual text once.
 - Diagnostic decoration updates group consecutive endpoint-line reads, convert positions outside the buffer process, and share severity styles. Highlight ranges, ordering, unrelated decoration groups, and the existing read/install behavior are preserved.
 - LSP change flushes share the first successful full-content snapshot across full-sync clients instead of flattening the document once per client. UTF-8 incremental clients with available deltas keep their range-only path, and failed reads still retry for later clients.
+- Input dispatch no longer reads the active buffer revision before each action. Agent session metadata and saves reuse one ordered transcript read per operation, and the modeline reads only the cached Git degradation flag.
 - macOS editor command preparation reuses unscrolled rows that fit the viewport instead of rebuilding their text and highlight spans. Clipped, scrolled, and out-of-range-span rows keep the existing normalization.
 - macOS selection overlays index accessibility ranges once per pane and frame instead of rescanning every range for each visible row. Selection quad geometry, ordering, clipping and colors are unchanged.
 - Full-content undo commits now find the changed byte range with native binary prefix and suffix comparison over bounded 4 KiB chunks instead of a per-byte Elixir scan, without copying either whole document. Patch contents, apply/invert behavior, and cursor restoration are unchanged.
@@ -87,7 +88,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Adversarial diagnostics ignore replies from superseded or invalidated analyses, so an old reply cannot restore findings after an edit, close, or clear.
 - Repeated config reloads keep using the config home selected at startup.
+- Source launchers keep Minga configuration and runtime data, including project switcher history, separate from the installed editor. Run `make clean` after quitting the source editor to reset the current worktree's profile without deleting build artifacts.
 - macOS TUI release builds pass the optimization flags required by Erlang/OTP. The macOS app preserves the bundled icon font directory, and macOS and Linux packages no longer ship the Windows-only file watcher.
 - macOS release signing uses the runner’s native keychain settings and explicitly selects the temporary Developer ID keychain. Builds and package smoke tests still use an isolated home directory.
 - macOS release CI grants `codesign` access to the imported Developer ID key. It checks key access before signing the package and logs which file it is signing if the step stalls.

@@ -140,6 +140,8 @@ defmodule MingaEditor.UI.Panel.MessageStore do
   defp cond_parse("[ZIG/debug] " <> rest), do: {:debug, :zig, rest}
   defp cond_parse("[GUI/err] " <> rest), do: {:error, :gui, rest}
   defp cond_parse("[GUI/warn] " <> rest), do: {:warning, :gui, rest}
+  defp cond_parse("[GUI/error] " <> rest), do: {:error, :gui, rest}
+  defp cond_parse("[GUI/warning] " <> rest), do: {:warning, :gui, rest}
   defp cond_parse("[GUI/info] " <> rest), do: {:info, :gui, rest}
   defp cond_parse("[GUI/debug] " <> rest), do: {:debug, :gui, rest}
   defp cond_parse("[PARSER/err] " <> rest), do: {:error, :parser, rest}

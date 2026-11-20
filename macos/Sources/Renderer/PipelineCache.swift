@@ -5,23 +5,41 @@
 /// The cache is invalidated automatically when the Metal shader library changes
 /// (detected via SHA-256 hash of the metallib binary).
 ///
-/// Cache location: `~/Library/Caches/com.minga.editor/pipelines-<hash>.metalarchive`
+/// The cache is namespaced by the app bundle ID; Debug builds also honor XDG_CACHE_HOME.
 
 import Metal
 import CryptoKit
 import os.log
 import Foundation
+import MingaUI
 
-private let pipelineLog = OSLog(subsystem: "com.minga.editor", category: "PipelineCache")
+private let pipelineLog = Logger(subsystem: PortLogger.subsystem, category: "PipelineCache")
 
 /// Manages loading and saving of Metal binary archives for pipeline state caching.
 struct PipelineCache {
 
     /// Directory where pipeline caches are stored.
     /// Tests can override by passing a custom directory to load/save/clean methods.
-    static var cacheDirectory: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        return caches.appendingPathComponent("com.minga.editor", isDirectory: true)
+    static let cacheDirectory: URL = {
+        let bundle = Bundle.main
+        let bundleIdentifier = (bundle.bundleURL.pathExtension == "app" ? bundle.bundleIdentifier : nil)
+            ?? "com.minga.editor.dev"
+#if DEBUG
+        let xdgCacheHome = ProcessInfo.processInfo.environment["XDG_CACHE_HOME"]
+#else
+        let xdgCacheHome: String? = nil
+#endif
+        return cacheDirectory(base: .cachesDirectory, bundleIdentifier: bundleIdentifier, xdgCacheHome: xdgCacheHome)
+    }()
+
+    static func cacheDirectory(base: @autoclosure () -> URL, bundleIdentifier: String, xdgCacheHome: String?) -> URL {
+        let root: URL
+        if let xdgCacheHome, xdgCacheHome.hasPrefix("/") {
+            root = URL(fileURLWithPath: xdgCacheHome, isDirectory: true)
+        } else {
+            root = base()
+        }
+        return root.appendingPathComponent(bundleIdentifier, isDirectory: true)
     }
 
     /// Computes a SHA-256 hash of the Metal library's function names and device name
@@ -76,7 +94,7 @@ struct PipelineCache {
         let url = cacheURL(hash: hash, in: directory)
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            os_log(.info, log: pipelineLog, "No pipeline cache found, will compile from shaders")
+            PortLogger.report(.info, "No pipeline cache found, will compile from shaders", to: pipelineLog)
             return nil
         }
 
@@ -93,11 +111,10 @@ struct PipelineCache {
             let bgPipeline = try device.makeRenderPipelineState(descriptor: bgDescriptor)
             let linePipeline = try device.makeRenderPipelineState(descriptor: lineDescriptor)
 
-            os_log(.info, log: pipelineLog, "Loaded pipeline states from cache")
+            PortLogger.report(.info, "Loaded pipeline states from cache", to: pipelineLog)
             return (bgPipeline, linePipeline)
         } catch {
-            os_log(.error, log: pipelineLog, "Failed to load pipeline cache (will recompile): %{public}@",
-                   error.localizedDescription)
+            PortLogger.report(.warning, "Failed to load pipeline cache (will recompile)", to: pipelineLog, privateDetail: error.localizedDescription)
             // Clear stale archive references so the caller's descriptors are
             // clean for runtime compilation fallback.
             bgDescriptor.binaryArchives = nil
@@ -140,10 +157,9 @@ struct PipelineCache {
             try archive.addRenderPipelineFunctions(descriptor: lineDescriptor)
             try archive.serialize(to: url)
 
-            os_log(.info, log: pipelineLog, "Saved pipeline cache to %{public}@", url.lastPathComponent)
+            PortLogger.report(.info, "Saved pipeline cache to \(url.lastPathComponent)", to: pipelineLog)
         } catch {
-            os_log(.error, log: pipelineLog, "Failed to save pipeline cache: %{public}@",
-                   error.localizedDescription)
+            PortLogger.report(.error, "Failed to save pipeline cache", to: pipelineLog, privateDetail: error.localizedDescription)
         }
     }
 
@@ -162,7 +178,7 @@ struct PipelineCache {
             && file.lastPathComponent.hasSuffix(".metalarchive")
             && file.lastPathComponent != currentFilename {
             try? FileManager.default.removeItem(at: file)
-            os_log(.info, log: pipelineLog, "Cleaned stale cache: %{public}@", file.lastPathComponent)
+            PortLogger.report(.info, "Cleaned stale pipeline cache", to: pipelineLog, privateDetail: file.lastPathComponent)
         }
     }
 }

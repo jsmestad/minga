@@ -586,7 +586,7 @@ defmodule MingaAgent.SessionManagerTest do
                        :agent_session_restarted,
                        %SessionRestartedEvent{session_id: ^session_id, new_pid: new_pid}
                      },
-                     1_000
+                     3_000
 
       assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
     end

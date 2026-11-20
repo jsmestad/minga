@@ -42,7 +42,6 @@ defmodule MingaAgent.Skills do
           source: :global | :project | :extension
         }
 
-  @global_skills_dir "~/.config/minga/skills"
   @project_skills_dir ".minga/skills"
 
   # ── Discovery ───────────────────────────────────────────────────────────────
@@ -54,7 +53,7 @@ defmodule MingaAgent.Skills do
   """
   @spec discover(String.t() | nil) :: [skill()]
   def discover(project_root \\ nil) do
-    global = discover_in(expand_global_dir(), :global)
+    global = discover_in(global_skills_dir(), :global)
     extension = discover_extension_skills()
 
     project =
@@ -122,7 +121,7 @@ defmodule MingaAgent.Skills do
     skills = discover(project_root)
 
     if skills == [] do
-      "No skills found. Create skills in ~/.config/minga/skills/ or .minga/skills/."
+      "No skills found. Create skills in #{global_skills_dir()}/ or #{@project_skills_dir}/."
     else
       header = "Available skills (#{Enum.count(skills)}):\n"
       lines = Enum.map_join(skills, "\n", &format_skill_line/1)
@@ -269,10 +268,8 @@ defmodule MingaAgent.Skills do
   defp parse_list(list) when is_list(list), do: list
   defp parse_list(str) when is_binary(str), do: String.split(str, ~r/[,\s]+/, trim: true)
 
-  @spec expand_global_dir() :: String.t()
-  defp expand_global_dir do
-    Path.expand(@global_skills_dir)
-  end
+  @spec global_skills_dir() :: String.t()
+  defp global_skills_dir, do: Path.join(Minga.UserPaths.config_dir!(), "skills")
 
   # Resolve relative file references in skill instructions.
   # Lines like `@include path/to/file.md` are replaced with the file contents.

@@ -186,17 +186,8 @@ defmodule MingaEditor.Handlers.LspEventHandler do
       else: state
   end
 
-  defp dispatch_pending_response(
-         {:completion_result, role, provider_id, client, request_ref, buffer, version, session_id,
-          gen, trigger_pos},
-         state,
-         result
-       ) do
-    CompletionHandling.handle_completion_result(
-      state,
-      {request_ref, role, provider_id, client, buffer, version, session_id, gen, trigger_pos},
-      result
-    )
+  defp dispatch_pending_response({:completion_result, fact}, state, result) do
+    CompletionHandling.handle_completion_result(state, fact, result)
   end
 
   defp dispatch_pending_response(

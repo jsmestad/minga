@@ -205,6 +205,27 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     refute function_exported?(PendingRequests, :track_response, 3)
   end
 
+  test "takes the admitted stable completion fact unchanged and only once" do
+    ref = make_ref()
+    client = spawn_process()
+    buffer = spawn_process()
+    fact = {ref, :primary, {:lsp_client, client}, client, buffer, 1, make_ref(), 2, {3, 4}}
+
+    pending = PendingRequests.new()
+
+    assert_raise FunctionClauseError, fn ->
+      PendingRequests.track_completion_result(pending, put_elem(fact, 8, {-1, 4}))
+    end
+
+    assert {:ok, pending} = PendingRequests.track_completion_result(pending, fact)
+
+    assert PendingRequests.track_completion_result(pending, put_elem(fact, 1, :secondary)) ==
+             {:error, :duplicate_ref}
+
+    assert {:ok, {:completion_result, ^fact}, pending} = PendingRequests.take(pending, ref)
+    assert PendingRequests.fetch(pending, ref) == :error
+  end
+
   test "drop_completion_requests removes completion variants and preserves unrelated indexes" do
     client = spawn_process()
     buffer = spawn_process()

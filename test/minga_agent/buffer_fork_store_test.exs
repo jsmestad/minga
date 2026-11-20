@@ -18,6 +18,79 @@ defmodule MingaAgent.BufferForkStoreTest do
     %{parent: parent, store: store}
   end
 
+  test "discard queued during reviewed publication cannot invalidate its handoff", ctx do
+    %{store: store, parent: parent} = ctx
+    caller = self()
+    path = "/claimed/review"
+    assert {:ok, {:fork, fork}} = BufferForkStore.claim_owner(store, path, parent, caller)
+    GenServer.call(fork, {:replace_content, "fork\n", :agent})
+    Minga.Buffer.Process.replace_content(parent, "parent\n")
+    assert {:ok, revision, _} = Fork.conflict_snapshot(fork)
+
+    publication =
+      Task.async(fn ->
+        BufferForkStore.publish_reviewed_fork(store, path, fork, caller, fn ->
+          send(caller, :publication_admitted)
+
+          receive do
+            :continue_publication ->
+              Fork.publish_resolution(fork, revision, [:accepted], fn _, _ -> :ok end)
+          end
+        end)
+      end)
+
+    assert_receive :publication_admitted
+    discarded = :gen_server.send_request(store, {:discard, path})
+    send(store, :continue_publication)
+
+    assert Task.await(publication) == :ok
+    assert :gen_server.wait_response(discarded, 1_000) == {:reply, :ok}
+    assert Minga.Buffer.Process.content(parent) == "fork\n"
+    assert BufferForkStore.get(store, path) == nil
+  end
+
+  test "publication of an exited fork leaves a sibling draft available", %{
+    store: store,
+    parent: parent
+  } do
+    path = "/claimed/exited"
+    assert {:ok, {:fork, fork}} = BufferForkStore.claim_owner(store, path, parent, self())
+    assert {:ok, sibling} = BufferForkStore.get_or_create(store, "/claimed/sibling", parent)
+    assert {:ok, revision, _} = Fork.conflict_snapshot(fork)
+    GenServer.stop(fork)
+
+    assert {:error, :fork_unavailable} =
+             BufferForkStore.publish_reviewed_fork(store, path, fork, self(), fn ->
+               Fork.publish_resolution(fork, revision, [], fn _, _ -> :ok end)
+             end)
+
+    assert BufferForkStore.get(store, "/claimed/sibling") == sibling
+    assert Fork.content(sibling) == Minga.Buffer.Process.content(parent)
+  end
+
+  test "retired fork cannot be materialized by an earlier command preparation", %{
+    store: store,
+    parent: parent
+  } do
+    path = "/claimed/materialized"
+    owner = self()
+    assert {:ok, {:fork, fork}} = BufferForkStore.claim_owner(store, path, parent, owner)
+    assert %{^path => ^fork} = BufferForkStore.all(store)
+    GenServer.call(fork, {:replace_content, "fork\n", :agent})
+    Minga.Buffer.Process.replace_content(parent, "parent\n")
+    assert {:ok, revision, _} = Fork.conflict_snapshot(fork)
+
+    assert :ok =
+             BufferForkStore.publish_reviewed_fork(store, path, fork, owner, fn ->
+               Fork.publish_resolution(fork, revision, [:rejected], fn _, _ -> :ok end)
+             end)
+
+    assert :ok =
+             BufferForkStore.materialize_owned_fork(store, path, fn _ ->
+               flunk("command preparation must not materialize the retired fork")
+             end)
+  end
+
   describe "get_or_create/3" do
     test "creates a fork on first call", %{store: store, parent: parent} do
       assert {:ok, fork_pid} = BufferForkStore.get_or_create(store, "/test/foo.ex", parent)

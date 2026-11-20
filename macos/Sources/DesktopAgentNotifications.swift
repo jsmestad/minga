@@ -86,7 +86,7 @@ final class DesktopAgentNotifications: NSObject, UNUserNotificationCenterDelegat
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             return true
         } catch {
-            PortLogger.warn("Could not deliver an agent notification: \(error.localizedDescription)")
+            PortLogger.warn("Could not deliver an agent notification", privateDetail: error.localizedDescription)
             return false
         }
     }

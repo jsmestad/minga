@@ -29,7 +29,7 @@ public final class GUIFramePresentationMetrics {
         var submitted: Bool
     }
 
-    private let log = OSLog(subsystem: "com.minga.editor", category: "GUIFramePresentation")
+    private let log = OSLog(subsystem: PortLogger.subsystem, category: "GUIFramePresentation")
     private var pending: [GUIFrameImpact: Pending] = [:]
     #if DEBUG
     private var samples: [Sample] = []

@@ -14,6 +14,7 @@ struct BEAMLaunchInputs: Sendable {
     let bundleURL: URL?
     let validHomeDirectoryURL: URL?
     let ipcRuntimeParentURL: URL
+    let usesDevelopmentIPC: Bool
     let appPID: Int32
     let appEUID: UInt32
     let appInstanceID: String
@@ -37,14 +38,13 @@ enum BEAMLaunchInputAcquirer {
     }
 
     /// Reads all volatile inputs for one start or restart and generates a fresh cookie.
-    static func current(appInstanceID: String, launchNonce: String?) -> BEAMLaunchInputs? {
+    static func current(
+        appInstanceID: String, launchNonce: String?, environment: [String: String]
+    ) -> BEAMLaunchInputs? {
         guard let executableURL = embeddedExecutableURL() else { return nil }
 
         let processInfo = ProcessInfo.processInfo
-        let environment = processInfo.environment
-        let runtimeParentURL = BEAMLaunchConfiguration.ipcRuntimeParentURL(
-            from: processInfo.arguments
-        ) ?? ipcRuntimeParentURL()
+        let explicitRuntimeParentURL = BEAMLaunchConfiguration.ipcRuntimeParentURL(from: processInfo.arguments)
         return BEAMLaunchInputs(
             executableURL: executableURL,
             appArguments: processInfo.arguments,
@@ -52,7 +52,8 @@ enum BEAMLaunchInputAcquirer {
             currentDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
             bundleURL: Bundle.main.bundleURL,
             validHomeDirectoryURL: validHomeDirectoryURL(environment: environment),
-            ipcRuntimeParentURL: runtimeParentURL,
+            ipcRuntimeParentURL: explicitRuntimeParentURL ?? ipcRuntimeParentURL(),
+            usesDevelopmentIPC: BEAMLaunchConfiguration.usesDevelopmentIPC(explicitParent: explicitRuntimeParentURL),
             appPID: getpid(),
             appEUID: geteuid(),
             appInstanceID: appInstanceID,
@@ -99,6 +100,39 @@ enum BEAMLaunchInputAcquirer {
     }
 }
 
+/// The embedded Debug core may start only with a complete, private source or test profile.
+enum EmbeddedCoreProfile {
+    static var isRequired: Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
+    }
+
+    static func permitsLaunch(_ environment: [String: String], required: Bool = isRequired) -> Bool {
+        guard required else { return true }
+        guard environment["MINGA_DEV_PROFILE"]?.hasPrefix("/") == true else { return false }
+
+        let keys = ["HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "TMPDIR"]
+        let roots = keys.compactMap { key -> URL? in
+            guard let path = environment[key], path.hasPrefix("/") else { return nil }
+            return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        }
+        guard roots.count == keys.count, Set(roots.map(\.path)).count == roots.count,
+              let parent = roots.first?.deletingLastPathComponent(), isPrivateDirectory(parent) else { return false }
+        return roots.allSatisfy {
+            $0.deletingLastPathComponent().path == parent.path && isPrivateDirectory($0)
+        }
+    }
+
+    private static func isPrivateDirectory(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+            && info.st_uid == geteuid() && (info.st_mode & 0o077) == 0
+    }
+}
+
 /// The complete immutable configuration applied to one embedded BEAM process.
 struct BEAMLaunchConfiguration: Equatable, Sendable {
     let executableURL: URL
@@ -121,6 +155,7 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
         environment["MINGA_APP_PID"] = String(inputs.appPID)
         environment["MINGA_APP_EUID"] = String(inputs.appEUID)
         environment["MINGA_IPC_RUNTIME_PARENT"] = inputs.ipcRuntimeParentURL.path
+        environment["MINGA_IPC_DEVELOPMENT"] = inputs.usesDevelopmentIPC ? "1" : nil
         environment["PWD"] = workingDirectoryURL.path
         environment["RELEASE_COOKIE"] = inputs.releaseCookie
         environment["MINGA_RANDOM_RELEASE_COOKIE"] = "1"
@@ -152,6 +187,15 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
 
         let value = arguments[index + 1]
         return value.isEmpty ? nil : value
+    }
+
+    /// Uses the Debug endpoint unless a test explicitly provides an isolated parent.
+    static func usesDevelopmentIPC(explicitParent: URL?) -> Bool {
+#if DEBUG
+        return explicitParent == nil
+#else
+        return false
+#endif
     }
 
     /// Extracts an isolated native IPC parent supplied by a test launcher.

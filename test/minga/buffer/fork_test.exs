@@ -8,6 +8,24 @@ defmodule Minga.Buffer.ForkTest do
     start_supervised!({BufferProcess, content: content}, id: make_ref())
   end
 
+  test "conflict publication refuses stale parent and fork snapshots without staging" do
+    parent = start_parent!("base")
+    {:ok, fork} = Fork.create(parent)
+    GenServer.call(fork, {:replace_content, "fork", :agent})
+    BufferProcess.replace_content(parent, "human")
+    assert {:ok, revision, [_conflict]} = Fork.conflict_snapshot(fork)
+    staging = fn _, _ -> flunk("stale review reached staging") end
+
+    BufferProcess.replace_content(parent, "new human")
+    assert {:error, :stale_parent} = Fork.publish_resolution(fork, revision, [:accepted], staging)
+
+    assert {:ok, revision, [_conflict]} = Fork.conflict_snapshot(fork)
+    GenServer.call(fork, {:replace_content, "new fork", :agent})
+    assert {:error, :stale_fork} = Fork.publish_resolution(fork, revision, [:accepted], staging)
+    assert BufferProcess.content(parent) == "new human"
+    refute Fork.published?(fork)
+  end
+
   describe "create/1 and content/1" do
     test "fork content matches parent at creation" do
       parent = start_parent!("hello\nworld")
