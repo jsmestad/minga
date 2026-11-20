@@ -6,6 +6,8 @@ defmodule MingaAgent.Tools.RetainedSearchIgnoredRootTest do
   alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactSupervisor
   alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.Tool.Output.Reference
   alias MingaAgent.Tools.Find
   alias MingaAgent.Tools.Grep
 
@@ -29,7 +31,10 @@ defmodule MingaAgent.Tools.RetainedSearchIgnoredRootTest do
 
       assert output.capture == :complete
       assert output.reference.items == 0
-      assert output.selection.total == 0
+      assert output.view == "No matches found."
+      assert %Range{kind: :full, unit: :items, start: 0, count: 0, total: 0} = output.selection
+      assert output.revision.scope == output.selection
+      assert output.revision.sha256 == Reference.digest("")
       assert {:ok, %{bytes: ""}} = ArtifactStore.fetch(store, output.reference, output.selection)
     end
   end
@@ -63,6 +68,44 @@ defmodule MingaAgent.Tools.RetainedSearchIgnoredRootTest do
       refute bytes =~ "hidden.txt"
       if tool == Grep, do: assert(bytes =~ ":1:needle")
     end
+  end
+
+  test "a storage-shortened search binds its revision to the retained item prefix", %{
+    tmp_dir: dir
+  } do
+    store = start_store(dir)
+    project = Path.join(dir, "project")
+    File.mkdir_p!(project)
+    assert {_output, 0} = System.cmd("git", ["init", "-q", project])
+    long_match = "needle " <> String.duplicate("x", 64 * 1_024)
+    File.write!(Path.join(project, "match.txt"), "needle public\n" <> long_match <> "\n")
+
+    opts = %{"glob" => "*.txt", "_max_output_bytes" => 10}
+
+    assert {:error, %Output{} = output} =
+             Grep.capture("needle", project, opts,
+               artifact_store: store,
+               capture_key: {:delivery, "short-search", "grep"}
+             )
+
+    assert output.capture == {:incomplete, :capture_byte_limit}
+
+    assert %Range{kind: :captured_prefix, unit: :items, start: 0, count: 1, total: :unknown} =
+             output.selection
+
+    assert output.reference.items == 1
+    assert output.view in ["match.txt:1:needle public", "./match.txt:1:needle public"]
+    assert {:ok, %{bytes: bytes}} = ArtifactStore.fetch(store, output.reference, output.selection)
+    assert bytes == output.view <> "\n"
+
+    assert output.revision.source_kind == :query_snapshot
+
+    assert output.revision.source_id ==
+             JSON.encode!(["grep", "needle", project, %{"glob" => "*.txt"}])
+
+    assert output.revision.scope == output.selection
+    assert output.revision.sha256 == Reference.digest(bytes)
+    assert output.revision.sha256 == output.reference.sha256
   end
 
   defp start_store(dir) do

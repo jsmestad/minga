@@ -5,17 +5,11 @@ defmodule MingaAgent.Tools.Grep do
   """
 
   alias MingaAgent.Tool.Output
-  alias MingaAgent.Tool.Output.Range
-  alias MingaAgent.Tool.Output.Reference
-  alias MingaAgent.Tool.Output.Revision
   alias MingaAgent.Tools.DirectoryListing
-  alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.OutputLimit
   alias MingaAgent.Tools.OutputLimit.Result
   alias MingaAgent.Tools.PathIgnore
   alias MingaAgent.Tools.SearchRoot
-
-  @capture_bytes 16 * 1_024 * 1_024
 
   @type exec_opts :: [
           filter_root: String.t(),
@@ -43,12 +37,12 @@ defmodule MingaAgent.Tools.Grep do
   @spec capture(String.t(), String.t(), map(), exec_opts()) :: SearchRoot.capture_result()
   def capture(pattern, path, %{} = opts, exec_opts) when is_list(exec_opts) do
     SearchRoot.capture(
+      "grep",
       pattern,
       path,
       public_opts(opts),
       exec_opts,
-      &collect/4,
-      &retain_records/5
+      &collect/4
     )
   end
 
@@ -73,43 +67,13 @@ defmodule MingaAgent.Tools.Grep do
     end
   end
 
-  @spec retain_records(
-          String.t(),
-          String.t(),
-          map(),
-          exec_opts(),
-          {[String.t()], Output.capture_status()}
-        ) :: SearchRoot.capture_result()
-  defp retain_records(pattern, path, opts, exec_opts, {records, capture}) do
-    with {:ok, selection} <- item_range(records, capture),
-         {:ok, revision} <- query_revision(pattern, path, opts, records, selection) do
-      output_opts = [
-        visible_items: records,
-        capture_status: capture,
-        selection: selection,
-        revision: revision
-      ]
-
-      output_opts =
-        if records == [], do: [{:view, "No matches found."} | output_opts], else: output_opts
-
-      OutputCapture.items(
-        Keyword.get(exec_opts, :artifact_store),
-        Keyword.get(exec_opts, :capture_key),
-        records,
-        output_opts
-      )
-    end
-  end
-
-  @spec collect(String.t(), String.t(), map(), exec_opts()) ::
-          {:ok, [String.t()], Output.capture_status()} | {:error, String.t()}
+  @spec collect(String.t(), String.t(), map(), exec_opts()) :: SearchRoot.collect_result()
   defp collect(pattern, path, opts, exec_opts) do
     glob = Map.get(opts, "glob")
     case_sensitive = Map.get(opts, "case_sensitive", true)
     context_lines = Map.get(opts, "context_lines", 0)
     filter_root = Keyword.get(exec_opts, :filter_root, path)
-    max_bytes = Keyword.get(exec_opts, :max_output_bytes, @capture_bytes)
+    max_bytes = Keyword.fetch!(exec_opts, :max_output_bytes)
     timeout_ms = Keyword.get(exec_opts, :timeout_ms, OutputLimit.default_timeout_ms())
     {cmd, args} = build_command(pattern, glob, case_sensitive, context_lines)
 
@@ -201,28 +165,6 @@ defmodule MingaAgent.Tools.Grep do
       [_whole, _path, _separator] -> true
       _ -> false
     end
-  end
-
-  @spec item_range([String.t()], Output.capture_status()) ::
-          {:ok, Range.t()} | {:error, :invalid_range}
-  defp item_range(records, :complete),
-    do: Range.new(:full, :items, 0, length(records), length(records))
-
-  defp item_range(records, {:incomplete, _reason}),
-    do: Range.new(:captured_prefix, :items, 0, length(records), :unknown)
-
-  @spec query_revision(String.t(), String.t(), map(), [String.t()], Range.t()) ::
-          {:ok, Revision.t()} | {:error, :invalid_revision}
-  defp query_revision(pattern, path, opts, records, range) do
-    identity = JSON.encode!(["grep", pattern, path, opts])
-    bytes = Enum.map_join(records, "", &(&1 <> "\n"))
-
-    Revision.new(
-      source_kind: :query_snapshot,
-      source_id: identity,
-      scope: range,
-      sha256: Reference.digest(bytes)
-    )
   end
 
   @spec incomplete_message(Output.incomplete_reason(), [String.t()]) :: String.t()

@@ -13,6 +13,13 @@ defmodule Minga.Extension.JsonLoader do
   @placeholder "${MINGA_PLUGIN_ROOT}"
   @max_manifest_bytes 1_048_576
 
+  @typep module_spec :: %{
+           module_name: module(),
+           contents: Macro.t(),
+           source: {:extension, atom()},
+           fingerprint: binary()
+         }
+
   @doc """
   Loads a plugin bundle from the given directory.
 
@@ -34,17 +41,9 @@ defmodule Minga.Extension.JsonLoader do
     with {:ok, raw} <- read_file(json_path),
          {:ok, parsed} <- decode_json(raw),
          manifest = substitute_root(parsed, plugin_dir),
-         {:ok, module_name} <- build_module_name(manifest, plugin_dir, extension_name),
-         {:ok, _module} <-
-           create_module(
-             module_name,
-             manifest,
-             plugin_dir,
-             extension_name,
-             artifact_admission,
-             module_creator
-           ) do
-      {:ok, module_name}
+         {:ok, spec} <- prepare_module_spec(manifest, plugin_dir, extension_name),
+         {:ok, claim} <- claim_module(spec, artifact_admission) do
+      activate_module(spec, claim, artifact_admission, module_creator)
     end
   end
 
@@ -103,23 +102,11 @@ defmodule Minga.Extension.JsonLoader do
 
   defp substitute_root(value, _plugin_dir), do: value
 
-  @spec create_module(
-          module(),
-          map(),
-          String.t(),
-          atom() | nil,
-          GenServer.server(),
-          function()
-        ) :: {:ok, module()} | {:error, String.t()}
-  defp create_module(
-         module_name,
-         manifest,
-         plugin_dir,
-         extension_name,
-         artifact_admission,
-         module_creator
-       ) do
-    with {:ok, hooks} <- build_hook_declarations(manifest),
+  @spec prepare_module_spec(map(), String.t(), atom() | nil) ::
+          {:ok, module_spec()} | {:error, String.t()}
+  defp prepare_module_spec(manifest, plugin_dir, extension_name) do
+    with {:ok, module_name} <- build_module_name(manifest, plugin_dir, extension_name),
+         {:ok, hooks} <- build_hook_declarations(manifest),
          {:ok, skills} <- build_skill_declarations(manifest),
          {:ok, mcp_servers} <- build_mcp_server_declarations(manifest),
          {:ok, slash_commands} <- build_slash_command_declarations(manifest) do
@@ -149,24 +136,30 @@ defmodule Minga.Extension.JsonLoader do
           def init(_config), do: {:ok, %{}}
         end
 
-      source = {:extension, extension_name || module_name}
-      fingerprint = generated_fingerprint(module_name, manifest, plugin_dir)
+      {:ok,
+       %{
+         module_name: module_name,
+         contents: contents,
+         source: {:extension, name},
+         fingerprint: generated_fingerprint(module_name, manifest, plugin_dir)
+       }}
+    end
+  end
 
-      case ArtifactAdmission.claim_source_modules(source, [module_name], fingerprint,
-             server: artifact_admission
-           ) do
-        {:ok, claim} ->
-          create_claimed_module(
-            module_name,
-            contents,
-            claim,
-            artifact_admission,
-            module_creator
-          )
+  @spec claim_module(module_spec(), GenServer.server()) ::
+          {:ok, ArtifactAdmission.claim()} | {:error, String.t()}
+  defp claim_module(spec, artifact_admission) do
+    case ArtifactAdmission.claim_source_modules(
+           spec.source,
+           [spec.module_name],
+           spec.fingerprint,
+           server: artifact_admission
+         ) do
+      {:ok, _claim} = success ->
+        success
 
-        {:error, reason} ->
-          {:error, "plugin module provenance rejected: #{inspect(reason)}"}
-      end
+      {:error, reason} ->
+        {:error, "plugin module provenance rejected: #{inspect(reason)}"}
     end
   end
 
@@ -181,16 +174,14 @@ defmodule Minga.Extension.JsonLoader do
     :crypto.hash(:sha256, payload)
   end
 
-  @spec create_claimed_module(
-          module(),
-          Macro.t(),
+  @spec activate_module(
+          module_spec(),
           ArtifactAdmission.claim(),
           GenServer.server(),
           function()
         ) :: {:ok, module()} | {:error, String.t()}
-  defp create_claimed_module(
-         module_name,
-         _contents,
+  defp activate_module(
+         %{module_name: module_name},
          %{acquired?: false} = claim,
          artifact_admission,
          _module_creator
@@ -207,22 +198,10 @@ defmodule Minga.Extension.JsonLoader do
     end
   end
 
-  defp create_claimed_module(
-         module_name,
-         contents,
-         claim,
-         artifact_admission,
-         module_creator
-       ) do
+  defp activate_module(spec, claim, artifact_admission, module_creator) do
     case ArtifactAdmission.mark_loading(claim, server: artifact_admission) do
       :ok ->
-        create_and_commit_module(
-          module_name,
-          contents,
-          claim,
-          artifact_admission,
-          module_creator
-        )
+        create_and_commit_module(spec, claim, artifact_admission, module_creator)
 
       {:error, reason} ->
         ArtifactAdmission.abort_attempt(claim, server: artifact_admission)
@@ -231,15 +210,13 @@ defmodule Minga.Extension.JsonLoader do
   end
 
   @spec create_and_commit_module(
-          module(),
-          Macro.t(),
+          module_spec(),
           ArtifactAdmission.claim(),
           GenServer.server(),
           function()
         ) :: {:ok, module()} | {:error, String.t()}
   defp create_and_commit_module(
-         module_name,
-         contents,
+         %{module_name: module_name, contents: contents},
          claim,
          artifact_admission,
          module_creator

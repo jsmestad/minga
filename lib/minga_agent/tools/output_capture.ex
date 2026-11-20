@@ -20,12 +20,13 @@ defmodule MingaAgent.Tools.OutputCapture do
   @visible_bytes 51_200
   @visible_items 100
 
-  @typedoc "Options common to byte and item captures."
+  @typedoc "Options for byte and item captures."
   @type capture_opts :: [
           media_type: String.t(),
           expected_bytes: non_neg_integer(),
           selection: Range.t(),
           revision: Revision.t(),
+          query_identity: String.t(),
           view: String.t(),
           visible_items: [String.t()],
           capture_status: Output.capture_status(),
@@ -142,7 +143,11 @@ defmodule MingaAgent.Tools.OutputCapture do
     end
   end
 
-  @doc "Captures filtered canonical records once, preserving item boundaries for later pages."
+  @doc """
+  Captures filtered canonical records once, preserving item boundaries for later pages.
+
+  With `:query_identity`, the revision binds the query to the final stored items and selection.
+  """
   @spec items(GenServer.server() | nil, term() | nil, [String.t()], capture_opts()) ::
           {:ok, Output.t()} | {:error, Output.t() | term()}
   def items(nil, _delivery_key, _items, _opts), do: {:error, :retention_unavailable}
@@ -352,12 +357,11 @@ defmodule MingaAgent.Tools.OutputCapture do
   defp build_items_output(stored, accepted_items, opts) do
     reference = stored.reference
     capture = stored.capture
+    item_count = reference.items || accepted_items
     all_items = Keyword.get(opts, :visible_items, [])
-    captured_items = Enum.take(all_items, reference.items || accepted_items)
-    visible_items = Enum.take(captured_items, @visible_items)
-    captured_bytes = Enum.map_join(captured_items, "", &(&1 <> "\n"))
+    visible_items = Enum.take(all_items, min(item_count, @visible_items))
     view = Keyword.get(opts, :view, Enum.join(visible_items, "\n"))
-    selection = selection(opts, capture, reference.bytes, reference.items || accepted_items)
+    selection = selection(opts, capture, reference.bytes, item_count)
 
     presentation =
       if reference.items != nil and reference.items > length(visible_items) do
@@ -366,8 +370,7 @@ defmodule MingaAgent.Tools.OutputCapture do
         :complete
       end
 
-    with {:ok, revision} <-
-           captured_revision(Keyword.get(opts, :revision), captured_bytes, selection),
+    with {:ok, revision} <- items_revision(opts, reference, all_items, item_count, selection),
          {:ok, output} <-
            Output.new(view, capture, selection,
              reference: reference,
@@ -375,6 +378,30 @@ defmodule MingaAgent.Tools.OutputCapture do
              presentation: presentation
            ) do
       Output.result(output)
+    end
+  end
+
+  @spec items_revision(capture_opts(), Reference.t(), [String.t()], non_neg_integer(), Range.t()) ::
+          {:ok, Revision.t() | nil} | {:error, :invalid_revision}
+  defp items_revision(opts, reference, all_items, item_count, selection) do
+    case Keyword.fetch(opts, :query_identity) do
+      {:ok, identity} ->
+        Revision.new(
+          source_kind: :query_snapshot,
+          source_id: identity,
+          scope: selection,
+          sha256: reference.sha256
+        )
+
+      :error ->
+        case Keyword.get(opts, :revision) do
+          nil ->
+            {:ok, nil}
+
+          %Revision{} = revision ->
+            bytes = all_items |> Enum.take(item_count) |> Enum.map_join("", &(&1 <> "\n"))
+            captured_revision(revision, bytes, selection)
+        end
     end
   end
 

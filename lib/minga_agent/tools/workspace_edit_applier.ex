@@ -6,6 +6,7 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   """
 
   alias Minga.Buffer
+  alias Minga.LSP.BufferEdit
   alias Minga.LSP.Client
   alias Minga.LSP.TextEdit
   alias Minga.LSP.WorkspaceEdit
@@ -74,12 +75,10 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   defp apply_edits_to_file(document, client, encoding) do
     case Buffer.pid_for_path(document.path) do
       {:ok, pid} ->
-        {content, revision} = Buffer.content_with_version(pid)
+        {_content, revision} = snapshot = Buffer.content_with_version(pid)
 
         with :ok <- validate_version(document, client, pid, revision),
-             {:ok, new_content} <- TextEdit.apply(content, document.edits, encoding),
-             {:ok, _revision} <-
-               Buffer.replace_content_if_version(pid, revision, new_content, :agent) do
+             {:ok, _revision} <- BufferEdit.apply(pid, snapshot, document.edits, encoding, :agent) do
           :ok
         else
           {:error, :read_only} -> {:error, "buffer is read-only"}

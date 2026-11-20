@@ -41,7 +41,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @spec candidates(Context.t() | nil) :: [Item.t()]
   def candidates(ctx) do
     case candidate_result(ctx) do
-      {:ok, items, _activation_id} -> items
+      {:ok, {items, _activation_id}} -> items
       {:error, _message} -> []
     end
   end
@@ -54,7 +54,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   def async_fetch(ctx) do
     case candidate_result(ctx) do
-      {:ok, items, activation_id} ->
+      {:ok, {items, activation_id}} ->
         {:ok, items, %{project_activation_id: activation_id}}
 
       {:error, message} ->
@@ -99,45 +99,57 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def current_candidate?(%ProjectFileCandidate{activation_id: activation_id}),
     do: current_activation?(activation_id)
 
-  @spec candidate_result(Context.t() | nil) ::
-          {:ok, [Item.t()], WorkspaceSnapshot.activation_id()} | {:error, String.t()}
+  @typep inventory :: {Root.t(), WorkspaceSnapshot.activation_id(), [String.t()]}
+  @typep candidate_result ::
+           {:ok, {[Item.t()], WorkspaceSnapshot.activation_id()}} | {:error, String.t()}
+
+  @spec candidate_result(Context.t() | nil) :: candidate_result()
   defp candidate_result(ctx) do
+    ctx
+    |> accepted_inventory()
+    |> ranked_candidates()
+  end
+
+  @spec accepted_inventory(Context.t() | nil) :: {:ok, inventory()} | {:error, String.t()}
+  defp accepted_inventory(ctx) do
     with {:ok, workspace} <- active_workspace(),
-         {:ok, root, activation_id} <- project_identity(ctx, workspace),
-         {:ok, paths} <- resolve_paths(root, activation_id, workspace) do
-      frecency_map = build_frecency_map()
-      git_status_map = build_git_status_map(root.path)
-      score_map = build_score_map(frecency_map, git_status_map)
-
-      items =
-        paths
-        |> Enum.flat_map(&lean_candidate(&1, git_status_map, root, activation_id))
-        |> sort_by_score(score_map)
-
-      {:ok, items, activation_id}
+         {:ok, root, activation_id} <- project_identity(ctx, workspace) do
+      admit_inventory(root, activation_id, workspace)
     end
   end
+
+  @spec ranked_candidates({:ok, inventory()} | {:error, String.t()}) :: candidate_result()
+  defp ranked_candidates({:ok, {root, activation_id, paths}}) do
+    frecency_map = build_frecency_map()
+    git_status_map = build_git_status_map(root.path)
+    score_map = build_score_map(frecency_map, git_status_map)
+
+    items =
+      paths
+      |> Enum.flat_map(&lean_candidate(&1, git_status_map, root, activation_id))
+      |> sort_by_score(score_map)
+
+    {:ok, {items, activation_id}}
+  end
+
+  defp ranked_candidates({:error, _message} = error), do: error
 
   # The picker reads only the Project-owned cache.
   # A managed `:project_rebuilt` event refreshes an open picker after an empty cache fills.
   # Picker tasks never start recursive inventory.
-  @spec resolve_paths(
-          Root.t(),
-          WorkspaceSnapshot.activation_id(),
-          WorkspaceSnapshot.t() | nil
-        ) ::
-          {:ok, [String.t()]} | {:error, String.t()}
-  defp resolve_paths(%Root{}, _activation_id, nil),
+  @spec admit_inventory(Root.t(), WorkspaceSnapshot.activation_id(), WorkspaceSnapshot.t() | nil) ::
+          {:ok, inventory()} | {:error, String.t()}
+  defp admit_inventory(%Root{}, _activation_id, nil),
     do: {:error, "Directory workspace is no longer active"}
 
-  defp resolve_paths(
+  defp admit_inventory(
          %Root{},
          _activation_id,
          %WorkspaceSnapshot{rebuilding?: true, files: []}
        ),
        do: {:error, "Project file inventory is loading"}
 
-  defp resolve_paths(
+  defp admit_inventory(
          %Root{},
          _activation_id,
          %WorkspaceSnapshot{inventory_error: message}
@@ -145,7 +157,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
        when is_binary(message),
        do: {:error, "Project file inventory failed: #{message}"}
 
-  defp resolve_paths(
+  defp admit_inventory(
          %Root{} = root,
          activation_id,
          %WorkspaceSnapshot{
@@ -154,19 +166,13 @@ defmodule MingaEditor.UI.Picker.FileSource do
            files: files
          }
        ) do
-    matching? =
-      Path.expand(root.path) == Path.expand(active_root.path) and
-        identity_matches?(activation_id, active_activation_id)
-
-    resolve_matching_paths(files, matching?)
+    if Path.expand(root.path) == Path.expand(active_root.path) and
+         identity_matches?(activation_id, active_activation_id) do
+      {:ok, {root, activation_id, files}}
+    else
+      {:error, "Directory workspace is no longer active"}
+    end
   end
-
-  @spec resolve_matching_paths([String.t()], boolean()) ::
-          {:ok, [String.t()]} | {:error, String.t()}
-  defp resolve_matching_paths(files, true), do: {:ok, files}
-
-  defp resolve_matching_paths(_files, false),
-    do: {:error, "Directory workspace is no longer active"}
 
   # Lean candidate: just enough to match (filename label, full-path search text)
   # and to enrich later (git status stashed in `meta`). Icon, color, two-line
