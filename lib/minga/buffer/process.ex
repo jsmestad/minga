@@ -602,6 +602,11 @@ defmodule Minga.Buffer.Process do
   @spec version(GenServer.server()) :: non_neg_integer()
   def version(server), do: GenServer.call(server, :version)
 
+  @doc "Marks the matching scratch revision saved without replacing text or undo history."
+  @spec confirm_scratch_save(GenServer.server(), non_neg_integer()) :: :ok | :stale
+  def confirm_scratch_save(server, version),
+    do: GenServer.call(server, {:confirm_scratch_save, version})
+
   @doc "Returns a non-mutating sequence-qualified change query."
   @spec changes_since(GenServer.server(), Minga.Buffer.ChangeLog.sequence()) ::
           Minga.Buffer.ChangeLog.sequence_changes()
@@ -1852,6 +1857,21 @@ defmodule Minga.Buffer.Process do
   def handle_call(:dirty?, _from, state) do
     {:reply, BufState.dirty?(state), state}
   end
+
+  def handle_call(
+        {:confirm_scratch_save, version},
+        _from,
+        %{file_path: nil, buffer_type: :nofile} = state
+      ) do
+    if BufState.version(state) == version do
+      content = Document.content(state.document)
+      {:reply, :ok, BufState.mark_saved(state, {nil, nil}, content)}
+    else
+      {:reply, :stale, state}
+    end
+  end
+
+  def handle_call({:confirm_scratch_save, _version}, _from, state), do: {:reply, :stale, state}
 
   def handle_call(:consume_edit_deltas, _from, state) do
     {edits, change_log} = ChangeLog.drain_pending_changes(state.change_log)

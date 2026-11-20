@@ -455,13 +455,15 @@ defmodule MingaAgent.Session.TurnExecution do
     end
   end
 
-  @type queued_edit :: :remove | {:replace_text, String.t()}
+  @type queued_edit ::
+          :remove | {:replace_text, String.t()} | {:replace_prompt, String.t(), content()}
   @type queued_edit_error ::
           :already_consumed
           | :queued_input_not_found
           | :stale_queue_revision
           | :prompt_queue_full
           | :invalid_queue_text
+          | :queue_content_not_recallable
 
   @doc "Changes a single pending entry at the displayed revision without moving other inputs."
   @spec change_queued_input(t(), pos_integer(), pos_integer(), queued_edit()) ::
@@ -472,6 +474,23 @@ defmodule MingaAgent.Session.TurnExecution do
          next = %{execution | field => updated},
          true <- pending_size_allowed?(next) || {:error, :prompt_queue_full} do
       {:ok, next}
+    end
+  end
+
+  @doc "Reads editable source only at the displayed pending revision."
+  @spec queued_editable_text(t(), pos_integer(), pos_integer()) ::
+          {:ok, String.t()} | {:error, term()}
+  def queued_editable_text(%__MODULE__{} = execution, id, revision) do
+    case find_pending_entry(execution, id) do
+      {:ok, _field, _queue, {^id, ^revision, content, attachments, source}} ->
+        with {:ok, text} <- recall_editable_text(source, content, attachments),
+             do: {:ok, IO.iodata_to_binary(text)}
+
+      {:ok, _field, _queue, _changed} ->
+        {:error, :stale_queue_revision}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -516,6 +535,21 @@ defmodule MingaAgent.Session.TurnExecution do
     end
   end
 
+  defp change_queue_entry(
+         queue,
+         {id, revision, content, refs, _source},
+         revision,
+         {:replace_prompt, text, resolved}
+       ) do
+    with true <-
+           (byte_size(text) <= @max_pending_bytes and String.valid?(text)) ||
+             {:error, :invalid_queue_text},
+         {:ok, replacement} <- replace_prompt_content(content, refs, resolved) do
+      entry = {id, revision + 1, replacement, refs, text}
+      {:ok, List.keyreplace(queue, id, 0, entry)}
+    end
+  end
+
   defp change_queue_entry(_queue, _entry, _revision, _operation),
     do: {:error, :stale_queue_revision}
 
@@ -526,6 +560,28 @@ defmodule MingaAgent.Session.TurnExecution do
     do: [%{head | text: text} | rest]
 
   defp replace_queued_text(parts, text), do: [ReqLLM.Message.ContentPart.text(text) | parts]
+
+  @spec replace_prompt_content(content(), [DraftSnapshot.attachment()], content()) ::
+          {:ok, content()} | {:error, :queue_content_not_recallable}
+  defp replace_prompt_content(_old, [], resolved), do: {:ok, resolved}
+
+  defp replace_prompt_content(old, attachments, resolved) when is_list(old) do
+    count = length(attachments)
+
+    if length(old) >= count do
+      suffix = Enum.take(old, -count)
+
+      parts =
+        if is_binary(resolved), do: [ReqLLM.Message.ContentPart.text(resolved)], else: resolved
+
+      {:ok, parts ++ suffix}
+    else
+      {:error, :queue_content_not_recallable}
+    end
+  end
+
+  defp replace_prompt_content(_old, _attachments, _resolved),
+    do: {:error, :queue_content_not_recallable}
 
   @doc "Transfers pending inputs to a candidate draft without dropping captured attachments or non-text input."
   @spec recall_draft(t(), DraftSnapshot.t() | nil) ::

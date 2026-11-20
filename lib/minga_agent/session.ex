@@ -411,6 +411,8 @@ defmodule MingaAgent.Session do
           | {:confirm_queue_receipt, TurnExecution.queue_receipt()}
           | :read_queue
           | {:withdraw_queued_input, QueuedInputSummary.identity()}
+          | {:read_queued_input_text, QueuedInputSummary.identity()}
+          | {:edit_queued_input, QueuedInputSummary.identity(), String.t()}
 
   @type composer_result ::
           {:ok, SessionStore.draft_revision(),
@@ -419,6 +421,7 @@ defmodule MingaAgent.Session do
           | {:ok, DraftSnapshot.attachment(), String.t()}
           | {:ok, TurnExecution.queue_receipt()}
           | {:ok, [QueuedInputSummary.t()]}
+          | {:ok, String.t()}
           | :ok
           | {:accepted, SessionStore.draft_revision(), term()}
           | {:admitted, SessionStore.draft_revision()}
@@ -1022,6 +1025,13 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:queued_input_summaries, record_id})
   end
 
+  @doc "Reads the editable text of one exact pending revision in the local saved Session."
+  @spec queued_input_text(GenServer.server(), String.t(), QueuedInputSummary.identity()) ::
+          {:ok, String.t()} | {:error, term()}
+  def queued_input_text(session, record_id, identity) do
+    GenServer.call(session, {:queued_input_text, record_id, identity})
+  end
+
   @doc "Edits or removes only the displayed pending entry in the original saved Session."
   @spec change_queued_input(
           GenServer.server(),
@@ -1424,6 +1434,14 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:queued_input_summaries, _record_id}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call({:queued_input_text, record_id, identity}, {caller, _tag}, state)
+      when node(caller) == node() and is_binary(record_id) do
+    {:reply, queued_input_text_result(state, record_id, identity), state}
+  end
+
+  def handle_call({:queued_input_text, _record_id, _identity}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
 
   def handle_call(
@@ -5032,12 +5050,25 @@ defmodule MingaAgent.Session do
       Enum.map(follow_up, &QueuedInputSummary.new(&1, :follow_up))
   end
 
+  @spec queued_input_text_result(state(), String.t(), term()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp queued_input_text_result(state, record, {id, revision})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0 do
+    with :ok <- validate_composer_record(state, record),
+         do: TurnExecution.queued_editable_text(state.turn_execution, id, revision)
+  end
+
+  defp queued_input_text_result(_state, _record, _identity), do: {:error, :invalid_queue_edit}
+
   @spec change_queued_input_reply(state(), String.t(), pos_integer(), pos_integer(), term()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp change_queued_input_reply(state, record_id, id, revision, operation)
        when operation == :remove or
               (is_tuple(operation) and tuple_size(operation) == 2 and
-                 elem(operation, 0) == :replace_text and is_binary(elem(operation, 1))) do
+                 elem(operation, 0) == :replace_text and is_binary(elem(operation, 1))) or
+              (is_tuple(operation) and tuple_size(operation) == 3 and
+                 elem(operation, 0) == :replace_prompt and is_binary(elem(operation, 1)) and
+                 (is_binary(elem(operation, 2)) or is_list(elem(operation, 2)))) do
     with :ok <- validate_composer_record(state, record_id),
          {:ok, execution} <-
            TurnExecution.change_queued_input(state.turn_execution, id, revision, operation),
@@ -8755,6 +8786,15 @@ defmodule MingaAgent.Session do
   defp handle_remote_composer(state, record_id, {:withdraw_queued_input, {id, revision}})
        when is_integer(id) and id > 0 and is_integer(revision) and revision > 0,
        do: change_queued_input_reply(state, record_id, id, revision, :remove)
+
+  defp handle_remote_composer(state, record_id, {:read_queued_input_text, identity}),
+    do: {:reply, queued_input_text_result(state, record_id, identity), state}
+
+  defp handle_remote_composer(state, record_id, {:edit_queued_input, {id, revision}, text})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0 and
+              is_binary(text),
+       do:
+         change_queued_input_reply(state, record_id, id, revision, {:replace_prompt, text, text})
 
   defp handle_remote_composer(state, record_id, operation),
     do: {:reply, composer_draft(state, record_id, operation), state}

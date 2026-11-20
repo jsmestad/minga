@@ -20,6 +20,7 @@ defmodule MingaEditor.Commands.TargetedTabCloseTest do
   alias MingaEditor.State.Launchpad
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.OperationFeedback
+  alias MingaEditor.State.Interaction
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.TabWorkflow
@@ -123,6 +124,31 @@ defmodule MingaEditor.Commands.TargetedTabCloseTest do
     assert wait_pending?(target, request_id)
     refute_received %WaitRequestCompletion{request_id: ^request_id}
     refute_received {:DOWN, ^target_monitor, :process, ^target, _reason}
+  end
+
+  test "pointer close leaves an inactive queued edit recoverable while dirty or saving", ctx do
+    {state, [{target, target_id}, {active, active_id}]} =
+      state_with_files(ctx, ["target", "active"])
+
+    origin = {1, self(), "conversation"}
+    request = fn _, _ -> :ok end
+    :ok = Buffer.insert_text(target, "unsaved queue text")
+    content = Buffer.content(target)
+    monitor = Process.monitor(target)
+
+    for edit <- [
+          {:open, target, origin, {1, 1}, request},
+          {:saving, make_ref(), target, origin, {1, 1}, request}
+        ] do
+      state = %{state | interaction: Interaction.put_queued_input_edit(state.interaction, edit)}
+      refused = GuiActionHandler.dispatch(state, {:close_tab, target_id})
+
+      assert TabBar.get(tab_bar(refused), target_id)
+      assert tab_bar(refused).active_id == active_id
+      assert refused.workspace.buffers.active == active
+      assert Buffer.content(target) == content
+      refute_received {:DOWN, ^monitor, :process, ^target, _reason}
+    end
   end
 
   test "closing an inactive file tab preserves active tab operations", ctx do
