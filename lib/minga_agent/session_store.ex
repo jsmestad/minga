@@ -266,9 +266,94 @@ defmodule MingaAgent.SessionStore do
   defp uncertain_metadata_change(:rename), do: :session_rename_uncertain
   defp uncertain_metadata_change(:archive), do: :session_archive_uncertain
 
+  @type draft_admission :: draft_revision() | {draft_revision(), String.t()}
+
+  @doc "Reconciles an exact composer submission. A refusal advances the draft revision to fence late delivery."
+  @spec composer_admission(String.t(), draft_revision(), String.t(), String.t() | nil, keyword()) ::
+          {:admitted, draft_revision()} | {:not_admitted, draft_revision()} | {:error, term()}
+  def composer_admission(id, expected, submission_id, config_dir, opts) do
+    path = session_record_path(id, config_dir)
+
+    with :ok <- validate_presentation_id(id) do
+      with_record_workflow(path, fn ->
+        reconcile_composer_admission(path, id, expected, submission_id, opts)
+      end)
+    end
+  end
+
+  @spec reconcile_composer_admission(
+          String.t(),
+          String.t(),
+          draft_revision(),
+          String.t(),
+          keyword()
+        ) ::
+          {:admitted, draft_revision()} | {:not_admitted, draft_revision()} | {:error, term()}
+  defp reconcile_composer_admission(path, id, expected, submission_id, opts) do
+    with {:ok, record, %{artifacts: artifacts} = facts} <- read_record_for_write(path, id, opts),
+         :ok <- reconcile_presentation_record(id, artifacts, opts) do
+      settle_composer_admission(path, id, record, facts, expected, submission_id, opts)
+    end
+  end
+
+  @spec settle_composer_admission(
+          String.t(),
+          String.t(),
+          map(),
+          writable_record_facts(),
+          draft_revision(),
+          String.t(),
+          keyword()
+        ) ::
+          {:admitted, draft_revision()} | {:not_admitted, draft_revision()} | {:error, term()}
+  defp settle_composer_admission(
+         path,
+         session_id,
+         record,
+         %{presentation: {revision, draft}, artifacts: {generation, _refs}},
+         expected,
+         submission_id,
+         opts
+       ) do
+    presentation = Map.get(record, "presentation") || %{}
+
+    case Map.get(presentation, "admission") do
+      %{"id" => ^submission_id, "revision" => committed, "outcome" => "admitted"}
+      when committed == expected + 1 ->
+        {:admitted, committed}
+
+      %{"id" => ^submission_id, "revision" => committed, "outcome" => "not_admitted"}
+      when committed == expected + 1 ->
+        {:not_admitted, committed}
+
+      _other when revision == expected ->
+        next = revision + 1
+
+        data = %{
+          "revision" => next,
+          "draft" => Map.get(presentation, "draft"),
+          "admission" => %{"id" => submission_id, "revision" => next, "outcome" => "not_admitted"}
+        }
+
+        with {:ok, editable} <- editable_presentation_record(record, session_id),
+             candidate = Map.put(editable, "presentation", data),
+             refs = conversation_references(record_conversation(candidate)),
+             {:ok, encoded} <- encode_record(candidate, session_id, {next, draft}, refs),
+             :ok <- save_record(path, session_id, encoded, generation, opts, :admit_draft) do
+          {:not_admitted, next}
+        end
+
+      _other ->
+        {:error, :admission_unconfirmed}
+    end
+  end
+
   @doc "Commits the admitted request and consumes the exact draft revision in the same record."
-  @spec save_submitted_draft(session_data(), draft_revision(), String.t() | nil, keyword()) ::
+  @spec save_submitted_draft(session_data(), draft_admission(), String.t() | nil, keyword()) ::
           :ok | {:error, term()}
+  def save_submitted_draft(data, {expected, submission_id}, config_dir, opts),
+    do: save_changed_draft(data, expected, config_dir, opts, {:admit_draft, submission_id})
+
   def save_submitted_draft(data, expected, config_dir, opts),
     do: save_changed_draft(data, expected, config_dir, opts, :admit_draft)
 
@@ -292,7 +377,11 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @typep draft_change :: :admit_draft | :queue_transition | {:recall, draft_encoding()}
+  @typep draft_change ::
+           :admit_draft
+           | {:admit_draft, String.t()}
+           | :queue_transition
+           | {:recall, draft_encoding()}
 
   @spec save_changed_draft(
           session_data(),
@@ -327,8 +416,8 @@ defmodule MingaAgent.SessionStore do
          {^expected, draft} <- current,
          {:ok, {encoded_draft, next_draft}, mode} <- changed_draft(draft, change),
          revision = expected + 1,
-         presentation =
-           {%{"revision" => revision, "draft" => encoded_draft}, {revision, next_draft}},
+         encoded_presentation = changed_presentation(previous, revision, encoded_draft, change),
+         presentation = {encoded_presentation, {revision, next_draft}},
          {:ok, encoded} <- encode_snapshot(data, presentation, previous) do
       save_record(path, id, encoded, previous_generation, opts, mode)
     else
@@ -337,10 +426,36 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
+  @spec changed_presentation(map(), draft_revision(), map() | nil, draft_change()) :: map()
+  defp changed_presentation(previous, revision, draft, {:admit_draft, submission_id}) do
+    previous
+    |> presentation_revision(revision, draft)
+    |> Map.put("admission", %{
+      "id" => submission_id,
+      "revision" => revision,
+      "outcome" => "admitted"
+    })
+  end
+
+  defp changed_presentation(previous, revision, draft, _change),
+    do: presentation_revision(previous, revision, draft)
+
+  @spec presentation_revision(map(), draft_revision(), map() | nil) :: map()
+  defp presentation_revision(previous, revision, draft) do
+    case previous do
+      %{"presentation" => %{"admission" => admission}} ->
+        %{"revision" => revision, "draft" => draft, "admission" => admission}
+
+      _previous ->
+        %{"revision" => revision, "draft" => draft}
+    end
+  end
+
   @spec changed_draft(DraftSnapshot.t() | nil, draft_change()) ::
           {:ok, draft_encoding(), :admit_draft | :queue_transition} | {:error, term()}
   defp changed_draft(_draft, {:recall, encoded}), do: {:ok, encoded, :queue_transition}
   defp changed_draft(_draft, :queue_transition), do: {:ok, {nil, nil}, :queue_transition}
+  defp changed_draft(_draft, {:admit_draft, _submission_id}), do: {:ok, {nil, nil}, :admit_draft}
 
   defp changed_draft(%DraftSnapshot{attachments: [_ | _]}, :admit_draft),
     do: {:ok, {nil, nil}, :admit_draft}
@@ -619,7 +734,7 @@ defmodule MingaAgent.SessionStore do
     revision = expected + 1
 
     with {:ok, record} <- editable_presentation_record(record, id),
-         encoded_presentation = %{"revision" => revision, "draft" => encoded_draft},
+         encoded_presentation = presentation_revision(record, revision, encoded_draft),
          record = Map.put(record, "presentation", encoded_presentation),
          refs = conversation_references(record_conversation(record)),
          {:ok, encoded} <- encode_record(record, id, {revision, draft}, refs),

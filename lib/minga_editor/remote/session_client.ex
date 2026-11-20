@@ -73,6 +73,24 @@ defmodule MingaEditor.Remote.SessionClient do
     end
   end
 
+  @doc "Runs an exact saved-composer operation through the authenticated original remote Session."
+  @spec composer({pid(), String.t()}, {pid(), binary()}, Session.remote_composer_operation()) ::
+          Session.composer_result()
+  def composer({session, id}, {driver, receipt} = authority, operation)
+      when is_pid(session) and is_binary(id) and is_pid(driver) and is_binary(receipt) do
+    remote_node = node(session)
+
+    with {:ok, token} <- session_token(remote_node, id) do
+      erpc(remote_node, :composer, [id, token, session, authority, operation], 10_000)
+    end
+  catch
+    :error, {:exception, _reason, _stack} ->
+      {:error, {:remote_unavailable, :composer_exception}}
+
+    :throw, _reason ->
+      {:error, {:remote_unavailable, :composer_exception}}
+  end
+
   @doc "Responds to a remote tool approval as the attached driver."
   @spec approve(pid(), Session.approval_target(), Session.approval_decision(), pid()) ::
           :ok | {:error, term()}

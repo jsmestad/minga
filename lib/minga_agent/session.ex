@@ -401,6 +401,35 @@ defmodule MingaAgent.Session do
           | {:attach_text, SessionStore.draft_revision(), DraftSnapshot.t(),
              DraftAttachment.text_snapshot()}
 
+  @type remote_composer_operation ::
+          composer_draft_operation()
+          | {:inspect_attachment, DraftAttachment.identity()}
+          | {:submit, SessionStore.draft_revision(), String.t(), [DraftAttachment.identity()],
+             String.t() | [ReqLLM.Message.ContentPart.t()]}
+          | {:reconcile_submission, SessionStore.draft_revision(), String.t()}
+          | {:confirm_queue_receipt, TurnExecution.queue_receipt()}
+
+  @type composer_result ::
+          {:ok, SessionStore.draft_revision(),
+           DraftSnapshot.t() | DraftSnapshot.attachment() | nil}
+          | {:ok, SessionStore.draft_revision()}
+          | {:ok, DraftSnapshot.attachment(), String.t()}
+          | {:ok, TurnExecution.queue_receipt()}
+          | :ok
+          | {:accepted, SessionStore.draft_revision(), term()}
+          | {:admitted, SessionStore.draft_revision()}
+          | {:not_admitted, SessionStore.draft_revision()}
+          | {:error, term()}
+
+  @doc "Executes a saved-composer operation after checking the exact current attachment receipt."
+  @spec remote_composer(pid(), String.t(), {pid(), binary()}, remote_composer_operation()) ::
+          composer_result()
+  def remote_composer(session, record_id, {driver, receipt} = authority, operation)
+      when is_pid(session) and node(session) == node() and is_binary(record_id) and
+             is_pid(driver) and is_binary(receipt) do
+    GenServer.call(session, {:remote_composer, record_id, authority, operation})
+  end
+
   @type composer_draft_correlation :: reference() | {non_neg_integer(), reference()}
 
   @doc "Requests a record-bound draft read or commit and reports the outcome to the caller."
@@ -1388,21 +1417,33 @@ defmodule MingaAgent.Session do
 
   def handle_call({:read_draft_attachment, record_id, identity}, {caller, _tag}, state)
       when node(caller) == node() do
-    result =
-      with :ok <- validate_composer_record(state, record_id) do
-        SessionStore.read_draft_attachment(
-          record_id,
-          identity,
-          state.session_store_dir,
-          artifact_store_opts(state)
-        )
-      end
-
-    {:reply, result, state}
+    {:reply, inspect_composer_attachment(state, record_id, identity), state}
   end
 
   def handle_call({:read_draft_attachment, _record_id, _identity}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call(
+        {:remote_composer, record_id, {_driver, _receipt} = authority, operation},
+        {caller, _tag},
+        state
+      )
+      when node(caller) == node() do
+    with true <- SubscriberLifecycle.question_driver?(state.subscriber_lifecycle, authority),
+         :ok <- validate_composer_record(state, record_id) do
+      handle_remote_composer(state, record_id, operation)
+    else
+      false -> {:reply, {:error, :not_driver}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  catch
+    class, _private_reason ->
+      reason = {:remote_composer_failed, class}
+      {:stop, reason, {:error, {:remote_unavailable, reason}}, state}
+  end
+
+  def handle_call({:remote_composer, _record_id, _authority, _operation}, _from, state),
+    do: {:reply, {:error, :not_driver}, state}
 
   def handle_call(
         {:abort_for_id, expected_session_id},
@@ -3417,22 +3458,20 @@ defmodule MingaAgent.Session do
 
   def handle_cast({:confirm_queue_receipt, caller, record_id, {_, _, _, _} = receipt}, state)
       when is_pid(caller) and node(caller) == node() do
-    with :ok <- validate_composer_record(state, record_id),
-         {:ok, next} <- TurnExecution.confirm_queue_receipt(state.turn_execution, receipt),
-         {:ok, committed} <- commit_effect_snapshot(state, %{state | turn_execution: next}) do
-      {:noreply, committed}
-    else
+    {:reply, result, next} = acknowledge_queue_receipt(state, record_id, receipt)
+
+    case result do
       {:error, reason} ->
         Minga.Log.warning(
           :agent,
           "Queue acknowledgement could not be recorded: #{inspect(reason)}"
         )
 
-        {:noreply, state}
-
-      :unchanged ->
-        {:noreply, state}
+      :ok ->
+        :ok
     end
+
+    {:noreply, next}
   end
 
   def handle_cast({:confirm_queue_receipt, _caller, _record_id, _receipt}, state),
@@ -4120,7 +4159,8 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec persist_boundary_candidate(state(), state(), :preserve | non_neg_integer()) ::
+  @typep draft_admission :: :preserve | SessionStore.draft_admission()
+  @spec persist_boundary_candidate(state(), state(), draft_admission()) ::
           {state(), :ok | {:error, term()}}
   defp persist_boundary_candidate(state, candidate, draft_revision \\ :preserve) do
     draft_revision = snapshot_write_mode(state, candidate, draft_revision)
@@ -4730,19 +4770,29 @@ defmodule MingaAgent.Session do
            ),
          {:ok, prompt} <-
            DraftAttachment.append_to_prompt(content, retained, state.model_selection) do
-      case handle_prompt(prompt, :steering, state, revision) do
-        {:reply,
-         {:error,
-          {:conversation_persistence_failed, {:draft_commit_uncertain, :admit_draft, _, _}} =
-              reason}, failed} ->
-          {:stop, reason, {:error, reason}, failed}
-
-        reply ->
-          reply
-      end
+      handle_draft_prompt(state, prompt, revision)
     else
       true -> {:reply, {:error, :attachment_send_busy}, state}
       {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  @spec handle_draft_prompt(
+          state(),
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          SessionStore.draft_admission()
+        ) ::
+          {:reply, term(), state()} | {:stop, term(), term(), state()}
+  defp handle_draft_prompt(state, prompt, admission) do
+    case handle_prompt(prompt, :steering, state, admission) do
+      {:reply,
+       {:error,
+        {:conversation_persistence_failed, {:draft_commit_uncertain, :admit_draft, _, _}} = reason},
+       failed} ->
+        {:stop, reason, {:error, reason}, failed}
+
+      reply ->
+        reply
     end
   end
 
@@ -4750,7 +4800,7 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           TurnExecution.prompt_kind(),
           state(),
-          :preserve | non_neg_integer()
+          draft_admission()
         ) :: {:reply, term(), state()}
   defp handle_prompt(content, kind, state, draft_revision \\ :preserve)
 
@@ -4786,7 +4836,7 @@ defmodule MingaAgent.Session do
 
   defp handle_prompt(content, kind, state, draft_revision) do
     case TurnExecution.admit_prompt(state.turn_execution, kind, content) do
-      {:queued, _execution} when is_integer(draft_revision) ->
+      {:queued, _execution} when draft_revision != :preserve ->
         {:reply, {:error, :attachment_send_busy}, state}
 
       {:queued, execution} ->
@@ -5029,7 +5079,7 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
           TurnExecution.t(),
-          :preserve | non_neg_integer()
+          draft_admission()
         ) :: {:reply, term(), state()}
   defp send_new_turn(content, state, execution, draft_revision) do
     case dispatch_user_prompt_submit(state, content) do
@@ -5042,7 +5092,7 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
           TurnExecution.t(),
-          :preserve | non_neg_integer()
+          draft_admission()
         ) :: {:reply, term(), state()}
   defp begin_new_turn(content, state, execution, draft_revision) do
     case prepare_provider_request(state) do
@@ -5058,7 +5108,7 @@ defmodule MingaAgent.Session do
           String.t() | [ReqLLM.Message.ContentPart.t()],
           state(),
           TurnExecution.t(),
-          :preserve | non_neg_integer()
+          draft_admission()
         ) :: {:reply, term(), state()}
   defp admit_new_turn(content, state, execution, draft_revision) do
     {user_message, send_content} = build_user_message(content)
@@ -5079,9 +5129,12 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec acknowledge_consumed_draft({:reply, term(), state()}, :preserve | non_neg_integer()) ::
+  @spec acknowledge_consumed_draft({:reply, term(), state()}, draft_admission()) ::
           {:reply, term(), state()}
   defp acknowledge_consumed_draft(reply, :preserve), do: reply
+
+  defp acknowledge_consumed_draft(reply, {revision, _submission_id}),
+    do: acknowledge_consumed_draft(reply, revision)
 
   defp acknowledge_consumed_draft({:reply, :ok, state}, revision),
     do: {:reply, {:ok, revision + 1}, state}
@@ -6730,7 +6783,7 @@ defmodule MingaAgent.Session do
           state(),
           state(),
           String.t() | [ReqLLM.Message.ContentPart.t()],
-          :preserve | non_neg_integer()
+          draft_admission()
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
   defp admit_provider_request(previous, candidate, content, draft_revision \\ :preserve) do
     with {:ok, turn_id} <- request_turn_id(candidate),
@@ -8459,9 +8512,8 @@ defmodule MingaAgent.Session do
   end
 
   @typep snapshot_write_mode ::
-           :preserve
+           draft_admission()
            | :queue_transition
-           | non_neg_integer()
            | {:queued_draft, non_neg_integer()}
            | {:recalled_draft, non_neg_integer(), DraftSnapshot.t()}
 
@@ -8599,6 +8651,114 @@ defmodule MingaAgent.Session do
 
   defp validate_composer_record(_state, _record_id), do: {:error, :stale_target}
 
+  @spec inspect_composer_attachment(state(), String.t(), DraftAttachment.identity()) ::
+          {:ok, DraftSnapshot.attachment(), String.t()} | {:error, term()}
+  defp inspect_composer_attachment(state, record_id, identity) do
+    with :ok <- validate_composer_record(state, record_id) do
+      SessionStore.read_draft_attachment(
+        record_id,
+        identity,
+        state.session_store_dir,
+        artifact_store_opts(state)
+      )
+    end
+  end
+
+  @spec handle_remote_composer(state(), String.t(), remote_composer_operation()) ::
+          {:reply, composer_result(), state()} | {:stop, term(), composer_result(), state()}
+  defp handle_remote_composer(
+         state,
+         record_id,
+         {:submit, revision, submission_id, shown, content}
+       )
+       when is_integer(revision) and revision >= 0 and is_binary(submission_id) and
+              byte_size(submission_id) == 24 and is_list(shown) and
+              (is_binary(content) or is_list(content)) do
+    case remote_draft_prompt(state, record_id, shown, content) do
+      {:ok, ^revision, prompt} -> handle_draft_prompt(state, prompt, {revision, submission_id})
+      {:ok, current, _prompt} -> {:reply, {:error, {:stale_draft_revision, current}}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  defp handle_remote_composer(
+         state,
+         record_id,
+         {:queue, {record_id, _, _} = target, kind, draft, content}
+       ),
+       do: handle_queued_draft(state, target, kind, draft, content)
+
+  defp handle_remote_composer(state, _record_id, {:queue, _, _, _, _}),
+    do: {:reply, {:error, :stale_target}, state}
+
+  defp handle_remote_composer(state, record_id, {:confirm_queue_receipt, {_, _, _, _} = receipt}),
+    do: acknowledge_queue_receipt(state, record_id, receipt)
+
+  defp handle_remote_composer(state, record_id, {:reconcile_submission, revision, submission_id})
+       when is_integer(revision) and revision >= 0 and is_binary(submission_id) and
+              byte_size(submission_id) == 24 do
+    result =
+      SessionStore.composer_admission(
+        record_id,
+        revision,
+        submission_id,
+        state.session_store_dir,
+        artifact_store_opts(state)
+      )
+
+    {:reply, result, state}
+  end
+
+  defp handle_remote_composer(
+         state,
+         record_id,
+         {:inspect_attachment, {token, revision} = identity}
+       )
+       when is_binary(token) and is_binary(revision),
+       do: {:reply, inspect_composer_attachment(state, record_id, identity), state}
+
+  defp handle_remote_composer(state, record_id, operation),
+    do: {:reply, composer_draft(state, record_id, operation), state}
+
+  @spec acknowledge_queue_receipt(state(), String.t(), TurnExecution.queue_receipt()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp acknowledge_queue_receipt(state, record_id, receipt) do
+    with :ok <- validate_composer_record(state, record_id),
+         {:ok, execution} <- TurnExecution.confirm_queue_receipt(state.turn_execution, receipt),
+         {:ok, committed} <- commit_effect_snapshot(state, %{state | turn_execution: execution}) do
+      {:reply, :ok, committed}
+    else
+      :unchanged -> {:reply, :ok, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  @spec remote_draft_prompt(state(), String.t(), [DraftAttachment.identity()], content) ::
+          {:ok, SessionStore.draft_revision(), content} | {:error, term()}
+        when content: String.t() | [ReqLLM.Message.ContentPart.t()]
+  defp remote_draft_prompt(state, record_id, [], content) do
+    case composer_draft(state, record_id, :read) do
+      {:ok, revision, nil} -> {:ok, revision, content}
+      {:ok, revision, %DraftSnapshot{attachments: []}} -> {:ok, revision, content}
+      {:ok, _revision, _draft} -> {:error, :draft_attachments_changed}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp remote_draft_prompt(state, record_id, shown, content) do
+    with {:ok, revision, retained} <-
+           SessionStore.resolve_draft_attachments(
+             record_id,
+             shown,
+             state.session_store_dir,
+             artifact_store_opts(state)
+           ),
+         {:ok, prompt} <-
+           DraftAttachment.append_to_prompt(content, retained, state.model_selection) do
+      {:ok, revision, prompt}
+    end
+  end
+
   @spec schedule_save_retry(state()) :: state()
   defp schedule_save_retry(state) do
     {persistence, delay_ms} = Persistence.failed(state.persistence)
@@ -8624,7 +8784,8 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp composer_draft(state, record_id, {:save, expected, draft}) do
+  defp composer_draft(state, record_id, {:save, expected, draft})
+       when is_integer(expected) and expected >= 0 do
     SessionStore.save_presentation(
       record_id,
       expected,
@@ -8634,7 +8795,8 @@ defmodule MingaAgent.Session do
     )
   end
 
-  defp composer_draft(state, record_id, {:remove_attachment, expected, draft}) do
+  defp composer_draft(state, record_id, {:remove_attachment, expected, draft})
+       when is_integer(expected) and expected >= 0 do
     SessionStore.save_attachment_removal(
       record_id,
       expected,
@@ -8644,7 +8806,9 @@ defmodule MingaAgent.Session do
     )
   end
 
-  defp composer_draft(state, record_id, {:attach_text, expected, draft, snapshot}) do
+  defp composer_draft(state, record_id, {:attach_text, expected, draft, snapshot})
+       when is_integer(expected) and expected >= 0 and is_struct(draft, DraftSnapshot) and
+              is_list(draft.attachments) do
     SessionStore.attach_text(
       record_id,
       expected,
@@ -8654,6 +8818,8 @@ defmodule MingaAgent.Session do
       artifact_store_opts(state)
     )
   end
+
+  defp composer_draft(_state, _record_id, _operation), do: {:error, :invalid_draft_operation}
 
   @spec missing_queue_receipt(state(), String.t(), SessionStore.draft_revision()) ::
           {:error, :queue_receipt_missing | :queue_receipt_unconfirmed}
@@ -9462,6 +9628,9 @@ defmodule MingaAgent.Session do
 
       %{message: {:change_queued_input, _, _, _}} ->
         status |> Map.replace(:message, :change_queued_input) |> Map.replace(:reason, :redacted)
+
+      %{message: {:remote_composer, _, _, _}} ->
+        status |> Map.replace(:message, :remote_composer) |> Map.replace(:reason, :redacted)
 
       _other ->
         status

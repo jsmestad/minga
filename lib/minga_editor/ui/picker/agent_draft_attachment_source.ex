@@ -6,8 +6,9 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
   alias Minga.Core.Unicode
   alias MingaAgent.{DraftAttachment, DraftSnapshot, Session}
   alias MingaAgent.Tool.Output.Reference
-  alias MingaEditor.Agent.{DraftSave, DraftWorkflow}
+  alias MingaEditor.Agent.{DraftSave, DraftWorkflow, QuestionResponse}
   alias MingaEditor.PickerUI
+  alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State
@@ -23,13 +24,32 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
 
   @doc "Opens the attachment inspector without changing prompt editing state."
   @spec open(State.t()) :: State.t()
+  def open(
+        %State{
+          workspace: %{
+            agent_ui: %{
+              connection: %{target: %{session: session, session_id: record}},
+              draft_save: %DraftSave{
+                target: {previous, record},
+                request: request
+              }
+            }
+          }
+        } = state
+      )
+      when node(session) != node() and
+             node(session) == node(previous) and
+             ((session == previous and request == :attachment_review_required) or
+                (is_tuple(request) and elem(request, 0) == :submission_unconfirmed)),
+      do: DraftWorkflow.after_reopen(state, session, record)
+
   def open(state) do
     case current_origin(state) do
       {origin, attachments} ->
         PickerUI.open(state, __MODULE__, %{origin: origin, attachments: attachments})
 
       nil ->
-        NoticeWorkflow.publish(state, "Open a local Agent composer to inspect draft attachments.")
+        NoticeWorkflow.publish(state, "Open a saved Agent composer to inspect draft attachments.")
     end
   end
 
@@ -85,18 +105,21 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
       end
 
     add_file = %Item{id: {:add_file, origin}, label: "Attach project file…"}
-    {:ok, items ++ [add_file], %{status: "Add a project file or choose a snapshot."}}
+
+    {:ok, List.insert_at(items, -1, add_file),
+     %{status: "Add a project file or choose a snapshot."}}
   end
 
   def async_fetch(%Context{
         picker_ui: %{
           context: %{
-            origin: {_owner, {session, record}} = origin,
-            page: {identity, offset, previous}
+            origin: origin,
+            page: {identity, offset, previous},
+            fetch: fetch
           }
         }
       }) do
-    case Session.read_draft_attachment(session, record, identity) do
+    case fetch.() do
       {:ok, {kind, _source, label, _revision, _capture}, text} when offset <= byte_size(text) ->
         tail = binary_part(text, offset, byte_size(text) - offset)
         {row, remaining} = take_row(tail, @row_cells, [])
@@ -115,6 +138,9 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
           )
 
         {:ok, items, %{status: "#{description} · bytes #{offset}–#{next} of #{byte_size(text)}"}}
+
+      {:error, {:remote_unavailable, _reason}} ->
+        {:error, "The original Agent conversation disconnected."}
 
       _unavailable ->
         {:error, "The snapshot is no longer available in this draft."}
@@ -154,10 +180,13 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
     )
   end
 
-  def on_select(%Item{id: {:page, origin, {identity, _, _} = page}}, state) do
-    if current_snapshot?(state, origin, identity),
-      do: PickerUI.open(state, __MODULE__, %{origin: origin, page: page}),
-      else: stale(state)
+  def on_select(%Item{id: {:page, {_owner, target} = origin, {identity, _, _} = page}}, state) do
+    with true <- current_snapshot?(state, origin, identity),
+         {:ok, fetch} <- attachment_fetch(state, target, identity) do
+      PickerUI.open(state, __MODULE__, %{origin: origin, page: page, fetch: fetch})
+    else
+      _unavailable -> stale(state)
+    end
   end
 
   def on_select(%Item{id: {:confirm_remove, origin, identity}}, state) do
@@ -183,6 +212,22 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
 
   def on_select(%Item{id: :list}, state), do: open(state)
   def on_select(_item, state), do: state
+
+  @spec attachment_fetch(State.t(), DraftSave.target(), DraftAttachment.identity()) ::
+          {:ok, (-> Session.composer_result())} | :unavailable
+  defp attachment_fetch(_state, {session, record}, identity) when node(session) == node(),
+    do: {:ok, fn -> Session.read_draft_attachment(session, record, identity) end}
+
+  defp attachment_fetch(state, {session, _record} = target, identity) do
+    case QuestionResponse.remote_authority(state, session, self()) do
+      {_driver, _receipt} = authority ->
+        {:ok,
+         fn -> SessionClient.composer(target, authority, {:inspect_attachment, identity}) end}
+
+      _without_receipt ->
+        :unavailable
+    end
+  end
 
   @spec current_origin(State.t()) :: {origin(), [DraftSnapshot.attachment()]} | nil
   defp current_origin(%State{
