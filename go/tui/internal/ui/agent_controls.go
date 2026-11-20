@@ -16,6 +16,7 @@ import (
 
 const (
 	zoneIDAgentModel              = "agent:pick-model"
+	zoneIDAgentQueue              = "agent:queue"
 	zonePrefixAgentApproval       = "agent:approval:"
 	zonePrefixAgentRetainedOutput = "agent:retained-output:"
 )
@@ -78,6 +79,7 @@ func (m Model) agentDisplayedControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		{zoneIDAgentHeaderHelp, "agent_toggle_help"},
 		{zoneIDAgentHistory, "agent_retained_history"},
 		{zoneIDAgentChecklist, "agent_checklist"},
+		{zoneIDAgentQueue, "agent_queued_inputs"},
 	} {
 		if zone := m.zones.Get(control.zone); zone != nil && zone.InBounds(msg) {
 			return protocol.EncodeGUIExecuteCommand(control.command), true

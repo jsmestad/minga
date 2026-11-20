@@ -487,12 +487,24 @@ defmodule MingaAgent.SessionQueueTest do
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "remove this")
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "keep this order")
 
+      assert {:ok,
+              [
+                %{identity: {1, 1}, kind: :steering, preview: "initial instruction"},
+                %{identity: {2, 1}, kind: :follow_up, preview: "remove this"},
+                %{identity: {3, 1}, kind: :follow_up, preview: "keep this order"}
+              ]} = Session.queued_input_summaries(session, id)
+
+      assert {:error, :stale_target} = Session.queued_input_summaries(session, "wrong-record")
+
       assert :ok = Session.change_queued_input(session, id, {1, 1}, {:replace_text, "revised"})
 
       assert {:error, :stale_queue_revision} =
                Session.change_queued_input(session, id, {1, 1}, :remove)
 
       assert :ok = Session.change_queued_input(session, id, {2, 1}, :remove)
+
+      assert {:ok, [%{identity: {1, 2}, preview: "revised"}, %{identity: {3, 1}}]} =
+               Session.queued_input_summaries(session, id)
 
       SessionSlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout

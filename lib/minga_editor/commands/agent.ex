@@ -87,7 +87,7 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @doc false
+  @doc "Identifies the current Agent tab and conversation before the model catalog loads."
   @spec catalog_destination(state()) :: CatalogStartup.destination()
   def catalog_destination(state) do
     case find_agent_tab(state) do
@@ -99,7 +99,7 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @doc false
+  @doc "Runs an Agent workspace action after catalog startup validates its destination."
   @spec resume_catalog_action(state(), CatalogStartup.workspace_action()) :: state()
   def resume_catalog_action(state, {:toggle, _destination}) do
     state = ensure_agent_state(state)
@@ -2729,6 +2729,12 @@ defmodule MingaEditor.Commands.Agent do
         description: "Inspect Agent draft attachments",
         requires_buffer: false,
         execute: &MingaEditor.UI.Picker.AgentDraftAttachmentSource.open/1
+      },
+      %Minga.Command{
+        name: :agent_queued_inputs,
+        description: "Inspect queued Agent inputs",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentQueuedInputSource.open/1
       },
       %Minga.Command{
         name: :agent_answer_question,

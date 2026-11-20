@@ -69,6 +69,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.SubscriberAttachment
   alias MingaAgent.Session.SubscriberLifecycle
   alias MingaAgent.Session.Transcript
+  alias MingaAgent.Session.QueuedInputSummary
   alias MingaAgent.Session.TurnExecution
   require ProviderLifecycle
   alias MingaAgent.SessionManager
@@ -408,6 +409,8 @@ defmodule MingaAgent.Session do
              String.t() | [ReqLLM.Message.ContentPart.t()]}
           | {:reconcile_submission, SessionStore.draft_revision(), String.t()}
           | {:confirm_queue_receipt, TurnExecution.queue_receipt()}
+          | :read_queue
+          | {:withdraw_queued_input, QueuedInputSummary.identity()}
 
   @type composer_result ::
           {:ok, SessionStore.draft_revision(),
@@ -415,6 +418,7 @@ defmodule MingaAgent.Session do
           | {:ok, SessionStore.draft_revision()}
           | {:ok, DraftSnapshot.attachment(), String.t()}
           | {:ok, TurnExecution.queue_receipt()}
+          | {:ok, [QueuedInputSummary.t()]}
           | :ok
           | {:accepted, SessionStore.draft_revision(), term()}
           | {:admitted, SessionStore.draft_revision()}
@@ -1011,6 +1015,13 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:submit_queued_draft, target, kind, draft, content}, 30_000)
   end
 
+  @doc "Returns bounded previews of pending input for the original local saved conversation."
+  @spec queued_input_summaries(GenServer.server(), String.t()) ::
+          {:ok, [QueuedInputSummary.t()]} | {:error, term()}
+  def queued_input_summaries(session, record_id) do
+    GenServer.call(session, {:queued_input_summaries, record_id})
+  end
+
   @doc "Edits or removes only the displayed pending entry in the original saved Session."
   @spec change_queued_input(
           GenServer.server(),
@@ -1402,6 +1413,17 @@ defmodule MingaAgent.Session do
     do: {:reply, queue_target_for_record(state, record_id), state}
 
   def handle_call({:queue_target, _record_id}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call({:queued_input_summaries, record_id}, {caller, _tag}, state)
+      when node(caller) == node() and is_binary(record_id) do
+    case validate_composer_record(state, record_id) do
+      :ok -> {:reply, {:ok, pending_input_summaries(state.turn_execution)}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:queued_input_summaries, _record_id}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
 
   def handle_call(
@@ -5001,6 +5023,14 @@ defmodule MingaAgent.Session do
 
   defp queued_draft_content(content, retained, selection),
     do: DraftAttachment.append_to_prompt(content, retained, selection)
+
+  @spec pending_input_summaries(TurnExecution.t()) :: [QueuedInputSummary.t()]
+  defp pending_input_summaries(execution) do
+    {_next, steering, follow_up, _receipts} = TurnExecution.pending_inputs(execution)
+
+    Enum.map(steering, &QueuedInputSummary.new(&1, :steering)) ++
+      Enum.map(follow_up, &QueuedInputSummary.new(&1, :follow_up))
+  end
 
   @spec change_queued_input_reply(state(), String.t(), pos_integer(), pos_integer(), term()) ::
           {:reply, :ok | {:error, term()}, state()}
@@ -8718,6 +8748,13 @@ defmodule MingaAgent.Session do
        )
        when is_binary(token) and is_binary(revision),
        do: {:reply, inspect_composer_attachment(state, record_id, identity), state}
+
+  defp handle_remote_composer(state, _record_id, :read_queue),
+    do: {:reply, {:ok, pending_input_summaries(state.turn_execution)}, state}
+
+  defp handle_remote_composer(state, record_id, {:withdraw_queued_input, {id, revision}})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0,
+       do: change_queued_input_reply(state, record_id, id, revision, :remove)
 
   defp handle_remote_composer(state, record_id, operation),
     do: {:reply, composer_draft(state, record_id, operation), state}
