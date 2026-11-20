@@ -135,6 +135,14 @@ An application restart does not make an admitted effect safe to replay. If the s
 
 Open the local saved conversation, then press `SPC a R` or choose **Rename Agent session** from the command palette. Give it a short name that helps you find it in **Sessions**, such as `Release checklist`. Renaming does not send or discard your current draft.
 
+### Archive a saved session
+
+When a local saved conversation no longer belongs in your recent list, open the conversation, then open **Sessions** and choose **Archive Agent session**. Archiving does not close an open tab, stop a turn, answer a pending decision, or discard a draft.
+
+To return to it after closing the tab or restarting Minga, open **Sessions** and select **Browse archived sessions**. Open the conversation to continue working. To return it to the recent list, reopen **Sessions** and choose **Unarchive Agent session**.
+
+Archived conversations follow the same retention policy as other saved sessions.
+
 ### Recover unsent input
 
 In a locally saved Agent session, Minga autosaves your composer text, caret, and pasted blocks after edits. The draft is private presentation data, not part of the transcript or the next provider request until you send it.
