@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaAgent.Test.ModelSelectionFixture
   alias Minga.Editing.Scroll
+  alias MingaEditor.Agent.CatalogStartup
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -48,6 +49,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.WindowTree
   alias Minga.Test.SessionSlowMockProvider
   alias Minga.Test.StubServer
+
+  setup_all do
+    _providers = LLMDB.providers()
+    :ok
+  end
 
   defmodule RestartStubSession do
     use GenServer
@@ -1387,6 +1393,84 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert View.active?(active_b.workspace.agent_ui.view)
       assert {:assistant, "Draft answer"} in active_b.workspace.agent_ui.panel.transcript.messages
       refute {:assistant, "Focus answer"} in active_b.workspace.agent_ui.panel.transcript.messages
+    end
+
+    defp with_catalog_scheduler(state) do
+      tasks = start_supervised!(Task.Supervisor)
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: tasks})
+      :ok = EffectScheduler.attach(scheduler, self())
+      %{state | effect_scheduler: scheduler}
+    end
+
+    test "a completed cold action does not activate Agent after switching away" do
+      state = with_catalog_scheduler(source_workspace_state())
+      pending = CatalogStartup.defer(state, :new)
+
+      assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
+                     2_000
+
+      other = AgentCommands.new_agent_session(pending)
+      session = Runtime.active_session(other.shell_runtime)
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+
+      {finished, %Outcome{value: {:stale, :agent_origin_changed}} = stale} =
+        CatalogStartup.apply(other, outcome)
+
+      EffectScheduler.finalize(scheduler, stale)
+      assert is_pid(session)
+      assert Runtime.active_session(finished.shell_runtime) == session
+    end
+
+    test "a pending file-to-Agent toggle keeps the file editable and can retry after failure" do
+      state = with_catalog_scheduler(source_workspace_state())
+      file = state.workspace.buffers.active
+      action = {:toggle, AgentCommands.catalog_destination(state)}
+      pending = CatalogStartup.defer(state, action)
+      assert Runtime.active_tab_kind(pending.shell_runtime) == :file
+      assert AgentCommands.catalog_destination(pending) == :absent
+      :ok = BufferProcess.insert_text(file, "edit while loading")
+
+      assert_receive {:effect_result, scheduler, %Outcome{request: request} = outcome}, 2_000
+      assert request.effect.action == action
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+      failed = Outcome.failed(request, :model_catalog_unavailable)
+      {state, ^failed} = CatalogStartup.apply(pending, failed)
+      EffectScheduler.finalize(scheduler, failed)
+      assert Runtime.active_tab_kind(state.shell_runtime) == :file
+      assert BufferProcess.content(file) =~ "edit while loading"
+
+      state = CatalogStartup.defer(state, action)
+
+      assert_receive {:effect_result, ^scheduler, %Outcome{value: {:completed, :ready}} = retry},
+                     2_000
+
+      assert :ok = EffectScheduler.claim(scheduler, retry)
+      {opened, ^retry} = CatalogStartup.apply(state, retry)
+      EffectScheduler.finalize(scheduler, retry)
+      assert Runtime.active_tab_kind(opened.shell_runtime) == :agent
+    end
+
+    test "a cold restore does not replace an Agent destination created after admission" do
+      state = with_catalog_scheduler(source_workspace_state())
+      source_id = state.shell_runtime.state.tab_bar.active_id
+      pending = CatalogStartup.defer(state, {:restore, :absent, "original-saved-id", nil, nil})
+
+      assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
+                     2_000
+
+      opened = AgentCommands.new_agent_session(pending)
+      session = Runtime.active_session(opened.shell_runtime)
+      assert is_pid(session)
+      returned = MingaEditor.TabWorkflow.switch(opened, source_id)
+
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+
+      {finished, %Outcome{value: {:stale, :agent_origin_changed}} = stale} =
+        CatalogStartup.apply(returned, outcome)
+
+      EffectScheduler.finalize(scheduler, stale)
+      assert Runtime.active_tab_kind(finished.shell_runtime) == :file
+      assert {_tab, _owner, ^session} = AgentCommands.catalog_destination(finished)
     end
 
     test "new_agent_session from empty tab bar activates first real tab through workflow" do

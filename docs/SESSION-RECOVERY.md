@@ -127,6 +127,8 @@ The importer rebuilds only portable user and assistant text. It does not invent 
 
 A completed session snapshot is durable across a full application restart. The manager does not recreate volatile sessions automatically; opening a saved session starts its registration and loads the saved ID and continuation before the next prompt is sent. The next provider request begins with the saved messages followed by the new user prompt.
 
+The first Agent open in a fresh editor can show **Loading Agent model catalog**. You can keep editing while Minga reads the catalog. When loading finishes, the Agent opens if you are still on the tab that requested it. If you switch tabs, open Agent again from the tab where you want to work.
+
 An application restart does not make an admitted effect safe to replay. If the snapshot contains an unfinished admitted effect, recovery records its unknown outcome and requires reconciliation. Use the visible tool result and the external system's state to decide what to do next.
 
 ### Name a saved session

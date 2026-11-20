@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Session
   alias Minga.Buffer
+  alias MingaEditor.Agent.CatalogStartup
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.AgentLifecycle
@@ -107,8 +108,21 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_agent_session(state()) :: state()
   @spec start_agent_session(state(), keyword()) :: state()
   def start_agent_session(state, opts \\ []) do
+    CatalogStartup.continue(
+      state,
+      {:start, Keyword.get(opts, :session_start_hook_enabled?, true),
+       Keyword.get(opts, :recover_interrupted_work?, true)}
+    )
+  end
+
+  @doc false
+  @spec start_catalog_ready(state(), boolean(), boolean()) :: state()
+  def start_catalog_ready(state, hooks?, recover?) do
     Minga.Telemetry.span([:minga, :agent, :start_agent_session], %{}, fn ->
-      do_start_agent_session(state, opts)
+      do_start_agent_session(state,
+        session_start_hook_enabled?: hooks?,
+        recover_interrupted_work?: recover?
+      )
     end)
   end
 
