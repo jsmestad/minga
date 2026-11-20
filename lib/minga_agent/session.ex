@@ -4979,9 +4979,9 @@ defmodule MingaAgent.Session do
   defp recall_composer_draft(state, record_id, revision, draft, :keep_running),
     do: recall_composer_draft(state, record_id, revision, draft)
 
-  defp recall_composer_draft(state, record_id, revision, draft, {:stop, target}) do
+  defp recall_composer_draft(state, record_id, revision, draft, {:stop, {_, _} = target}) do
     case active_turn_target(state) do
-      ^target when not is_nil(target) ->
+      ^target ->
         {result, next} = recall_composer_draft(state, record_id, revision, draft)
         {result, abort_turn(next)}
 
