@@ -271,9 +271,10 @@ func EncodeGUIExecuteCommand(command string) []byte {
 	return append(out, payload...)
 }
 
-func EncodeGUIAgentComposerSubmit(offer uint64) []byte {
-	packet := [10]byte{generated.OPGuiAction, generated.GUIActionAgentComposerSubmit}
-	binary.BigEndian.PutUint64(packet[2:], offer)
+func EncodeGUIAgentComposerSubmit(generation, offer uint64) []byte {
+	packet := [18]byte{generated.OPGuiAction, generated.GUIActionAgentComposerSubmit}
+	binary.BigEndian.PutUint64(packet[2:], generation)
+	binary.BigEndian.PutUint64(packet[10:], offer)
 	return packet[:]
 }
 

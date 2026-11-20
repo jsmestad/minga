@@ -1456,7 +1456,7 @@ value = 0x69
 name = "agent_read_retained_output"
 value = 0x6A
 
-# Opaque u64 offer from the committed Agent composer, including its empty attachment set.
+# Committed prompt presentation ID (u64) + displayed attachment offer (u64, 0 if absent).
 [[gui_actions]]
 name = "agent_composer_submit"
 value = 0x6B
@@ -2487,6 +2487,12 @@ opcode = "gui_agent_chat"
 id = 0x0A
 name = "draft_attachments"
 fields = [{ name = "count", type = "u8" }, { name = "offer", type = "u64" }]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x0D
+name = "prompt_presentation"
+fields = [{ name = "generation", type = "u64" }]
 
 # gui_picker_preview (0x7D) sections
 

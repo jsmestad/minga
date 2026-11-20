@@ -208,8 +208,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(name, limit: Int(UInt16.max))
         case .agentReadRetainedOutput(let messageID, let offer):
             return messageID == 0 || (offer.high == 0 && offer.low == 0) ? .invalidPayload("Retained output requires a tool message identity and displayed offer") : nil
-        case .agentComposerSubmit(let offer):
-            return offer == 0 ? .invalidPayload("Agent submit requires a displayed composer offer") : nil
+        case .agentComposerSubmit(let generation, _):
+            return generation == 0 ? .invalidPayload("Agent submit requires a displayed prompt presentation") : nil
         case .agentOpenQuestion(let offer):
             return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
         case .agentStopTurn(let target):
@@ -386,11 +386,12 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             writeU64(&buf, 6, offer.high)
             writeU64(&buf, 14, offer.low)
             writeFrame(buf)
-        case .agentComposerSubmit(let offer):
-            var buf = Data(count: 10)
+        case .agentComposerSubmit(let generation, let offer):
+            var buf = Data(count: 18)
             buf[0] = OP_GUI_ACTION
             buf[1] = GUI_ACTION_AGENT_COMPOSER_SUBMIT
-            writeU64(&buf, 2, offer)
+            writeU64(&buf, 2, generation)
+            writeU64(&buf, 10, offer)
             writeFrame(buf)
         case .agentOpenQuestion(let offer):
             var buf = Data(count: 10)

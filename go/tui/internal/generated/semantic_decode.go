@@ -887,6 +887,18 @@ func DecodeGuiAgentChatDraftAttachments(data []byte, offset int, windowEnd int) 
 	}, pos, nil
 }
 
+func DecodeGuiAgentChatPromptPresentation(data []byte, offset int, windowEnd int) (GuiAgentChatPromptPresentation, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+8, "generation"); err != nil {
+		return GuiAgentChatPromptPresentation{}, offset, err
+	}
+	generation := decodeU64(data, pos)
+	pos += 8
+	return GuiAgentChatPromptPresentation{
+		Generation: generation,
+	}, pos, nil
+}
+
 // Section decoders for gui_gutter
 
 func DecodeGuiGutterWindow(data []byte, offset int, windowEnd int) (GuiGutterWindow, int, error) {

@@ -1348,15 +1348,17 @@ defmodule MingaAgent.Session do
     handle_prompt(content, :steering, state)
   end
 
-  def handle_call({:send_idle_composer, record_id, content}, {caller, _tag}, state)
+  def handle_call(
+        {:send_idle_composer, record_id, content},
+        {caller, _tag},
+        %{session_id: record_id} = state
+      )
       when node(caller) == node() and is_binary(record_id) and
              (is_binary(content) or is_list(content)) do
-    with :ok <- validate_composer_record(state, record_id),
-         false <- TurnExecution.active?(state.turn_execution) do
-      handle_prompt(content, :steering, state)
+    if TurnExecution.active?(state.turn_execution) do
+      {:reply, {:error, :queue_target_unavailable}, state}
     else
-      true -> {:reply, {:error, :queue_target_unavailable}, state}
-      {:error, _reason} = error -> {:reply, error, state}
+      handle_prompt(content, :steering, state)
     end
   end
 

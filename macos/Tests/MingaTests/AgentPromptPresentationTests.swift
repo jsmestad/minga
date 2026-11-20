@@ -660,6 +660,8 @@ struct AgentPromptPresentationTests {
         var actions: [AgentPromptView.Action] = []
         let control = AgentPromptActionButton(state: state, sendAction: { actions.append($0) })
             .environment(\.themeColors, ThemeColors())
+        #expect(try control.inspect().find(ViewType.Button.self).isDisabled())
+        state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: state.promptLineCount, promptCursorLine: state.promptCursorLine, promptCursorCol: state.promptCursorCol, promptMode: mode, promptVisibleRows: 2, promptCompletion: nil, promptPresentation: 42)
         try control.inspect().find(ViewType.Button.self).tap()
         #expect(actions == [.submit])
         state.status = .thinking

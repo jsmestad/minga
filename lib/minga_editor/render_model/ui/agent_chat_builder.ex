@@ -88,8 +88,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_cursor_col: cursor_col,
       prompt_vim_mode: ctx.workspace.editing.mode,
       prompt_visible_rows: visible_rows,
+      prompt_presentation: submission_generation(ctx.prompt),
       draft_attachment_count: attachment_count(agent_ui.draft_save),
-      draft_attachment_offer: attachment_offer(agent_ui.draft_save),
+      draft_attachment_offer: DraftSave.attachment_offer(agent_ui.draft_save),
       pending_question: pending_question(shell_agent.pending_question, session),
       stop_target: stop_target(shell_agent.stop_target, session),
       prompt_completion: build_prompt_completion(panel),
@@ -102,13 +103,20 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     }
   end
 
+  @spec submission_generation(PromptFrame.t()) :: pos_integer() | nil
+  defp submission_generation(%PromptFrame{
+         presentation: %{
+           identity: {:prompt, {_, _, _}, _, _, _},
+           presentation_id: generation
+         }
+       }),
+       do: generation
+
+  defp submission_generation(%PromptFrame{}), do: nil
+
   @spec attachment_count(DraftSave.t() | nil) :: non_neg_integer()
   defp attachment_count(%DraftSave{attachments: attachments}), do: length(attachments)
   defp attachment_count(nil), do: 0
-
-  @spec attachment_offer(DraftSave.t() | nil) :: pos_integer() | nil
-  defp attachment_offer(%DraftSave{offer: offer}), do: offer
-  defp attachment_offer(nil), do: nil
 
   @spec pending_question(PendingQuestion.t() | nil, pid()) ::
           {pos_integer(), String.t()} | nil

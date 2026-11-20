@@ -267,7 +267,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :file_tree_refresh
           | {:agent_tool_toggle, message_id :: non_neg_integer()}
           | {:agent_read_retained_output, MingaEditor.Agent.RetainedOutputTarget.t()}
-          | {:agent_composer_submit, pos_integer()}
+          | {:agent_composer_submit, generation :: pos_integer(), offer :: pos_integer() | nil}
           | {:agent_open_question, pos_integer()}
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
@@ -754,8 +754,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_agent_tool_toggle, <<message_id::32>>),
     do: {:ok, {:agent_tool_toggle, message_id}}
 
-  def decode_gui_action(@gui_action_agent_composer_submit, <<offer::64>>) when offer > 0,
-    do: {:ok, {:agent_composer_submit, offer}}
+  def decode_gui_action(@gui_action_agent_composer_submit, <<generation::64, offer::64>>)
+      when generation > 0,
+      do: {:ok, {:agent_composer_submit, generation, if(offer == 0, do: nil, else: offer)}}
 
   def decode_gui_action(@gui_action_agent_open_question, <<offer::64>>) when offer > 0,
     do: {:ok, {:agent_open_question, offer}}

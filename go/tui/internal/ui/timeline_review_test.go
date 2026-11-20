@@ -327,7 +327,7 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 				click := func(x, y int, want []byte) {
 					t.Helper()
 					drainOutboundPackets(out)
-					updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
+					updated, _ := updateFromPublishedView(model, model.View(), tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
 					model = updated.(Model)
 					packets := drainOutboundPackets(out)
 					if want == nil {
@@ -418,7 +418,7 @@ func TestTimelineCommittedChromeKeepsComposedPromptAndReviewStationary(t *testin
 						if !ok || target.windowID != protocol.AgentPromptWindowID || target.presentationID != 800 || target.utf16Offset != 2 {
 							t.Fatalf("drawn prompt text no longer matches its pointer target: %+v", target)
 						}
-						click(x-p.prefix, model.layout.body.Y+p.controlsRow, protocol.EncodeGUIExecuteCommand("agent_submit_or_newline"))
+						click(x-p.prefix, model.layout.body.Y+p.controlsRow, protocol.EncodeGUIAgentComposerSubmit(800, 0))
 					} else {
 						if !strings.Contains(strings.Join(lines[:band.Y], "\n"), "Review body retained") {
 							t.Fatal("timeline clipped the Review body")

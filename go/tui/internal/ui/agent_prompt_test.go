@@ -103,6 +103,7 @@ func decodedPromptCommand(t *testing.T, rows []protocol.WindowRow, cursorRow, cu
 
 func commitPrompt(t *testing.T, model Model, chat protocol.AgentChat, command protocol.Command, presentation uint64) Model {
 	t.Helper()
+	chat.PromptPresentation = presentation
 	seq := model.lastCommittedSeq + 1
 	decode := func(packet []byte) protocol.Command {
 		command, err := protocol.DecodeCommand(packet)
@@ -356,6 +357,30 @@ func TestStopUsesLastPublishedViewWhileReplacementIsPending(t *testing.T) {
 	assertPacketCount(t, packets, stopB, 1)
 }
 
+func TestPublishedSendCannotBecomeStopAfterTurnStarts(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(80, 24, out)
+	chat := protocol.AgentChat{Visible: true, Prompt: "draft", PromptVisibleRows: 1, DraftAttachmentOffer: 62}
+	prompt := decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{})
+	model = commitPrompt(t, model, chat, prompt, 800)
+	shown := model.View()
+	x, y := renderedComposerControl(t, model, "Send")
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y})
+
+	chat.Status = 1
+	chat.StopTarget = composerTestStopTarget()
+	model = commitPrompt(t, model, chat, prompt, 801)
+	drainOutboundPackets(out)
+	next, _ := updateFromPublishedView(model, shown, click)
+	packets := drainOutboundPackets(out)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentComposerSubmit(800, 62), 1)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentStopTurn(chat.StopTarget), 0)
+
+	model = next.(Model)
+	_, _ = updateFromPublishedView(model, model.View(), click)
+	assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIAgentStopTurn(chat.StopTarget), 1)
+}
+
 type heldTerminalWrite struct {
 	started chan struct{}
 	release chan struct{}
@@ -429,7 +454,7 @@ func TestPromptControlsUseCommandsAndNewlineRemainsKeyInput(t *testing.T) {
 		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: model.layout.body.X + p.col - p.prefix, Y: model.layout.body.Y + p.controlsRow})
 		afterClick, _ := updateFromPublishedView(model, model.View(), click)
 		model = afterClick.(Model)
-		want := protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
+		want := protocol.EncodeGUIAgentComposerSubmit(700, 0)
 		if status != 0 {
 			want = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 		}
@@ -594,7 +619,7 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 818)
 				p, _ := model.agentPromptPlacement()
 				label := "Send"
-				wantAction := protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer)
+				wantAction := protocol.EncodeGUIAgentComposerSubmit(818, chat.DraftAttachmentOffer)
 				if status == 1 || status == 2 || status == 5 {
 					label = "Stop"
 					wantAction = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
@@ -699,7 +724,7 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 					drainOutboundPackets(out)
 					updated, _ = updateFromPublishedView(model, view, tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
 					model = updated.(Model)
-					want := protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
+					want := protocol.EncodeGUIAgentComposerSubmit(819, 0)
 					if status == 1 || status == 2 {
 						want = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 					}

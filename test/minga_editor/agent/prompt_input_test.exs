@@ -7,6 +7,7 @@ defmodule MingaEditor.Agent.PromptInputTest do
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaEditor.Agent.DraftSave
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.PromptInput
   alias MingaEditor.Agent.UIState
@@ -87,6 +88,106 @@ defmodule MingaEditor.Agent.PromptInputTest do
     assert String.contains?(PromptBuffer.input_text(state.workspace.agent_ui), "X")
     assert Buffer.content(regular) == "regular source"
     assert Buffer.cursor(regular) == {0, 0}
+  end
+
+  test "Send refuses an older displayed conversation even when it reuses the same draft process" do
+    {state, _regular} = prompt_state("draft to send")
+    {state, runtime, connection, ui} = with_send_owner(state)
+
+    {state, _output, _model, _lease, _registry} = present(state, 20, 201)
+
+    submit = fn accepted ->
+      Buffer.insert_text(accepted.workspace.agent_ui.panel.prompt_buffer, "!")
+      accepted
+    end
+
+    replaced = %{
+      connection
+      | target: ConnectionTarget.new(self(), "replacement", nil, make_ref())
+    }
+
+    replaced_ui = UIState.project_connection(ui, replaced)
+    replaced_state = %{state | workspace: SessionState.set_agent_ui(state.workspace, replaced_ui)}
+
+    rejected = PromptInput.submit_displayed(replaced_state, 201, nil, submit)
+    assert PromptBuffer.input_text(rejected.workspace.agent_ui) == "draft to send"
+
+    running_agent =
+      runtime.state
+      |> MingaEditor.Shell.Traditional.State.agent()
+      |> MingaEditor.State.Agent.set_status(:thinking)
+
+    running_shell =
+      MingaEditor.Shell.Traditional.State.replace_agent(runtime.state, running_agent)
+
+    running_runtime = MingaEditor.Shell.Runtime.install_traditional_state(runtime, running_shell)
+
+    running =
+      PromptInput.submit_displayed(%{state | shell_runtime: running_runtime}, 201, nil, submit)
+
+    assert PromptBuffer.input_text(running.workspace.agent_ui) == "draft to send"
+
+    accepted = PromptInput.submit_displayed(state, 201, nil, submit)
+    assert PromptBuffer.input_text(accepted.workspace.agent_ui) =~ "!"
+
+    rejected_again = PromptInput.submit_displayed(state, 201, nil, submit)
+
+    assert length(
+             :binary.matches(PromptBuffer.input_text(rejected_again.workspace.agent_ui), "!")
+           ) == 1
+  end
+
+  test "Send refuses absent or obsolete attachment offers before running a slash command" do
+    {state, _regular} = prompt_state("/help")
+    {state, _runtime, connection, ui} = with_send_owner(state)
+    {state, _output, _model, _lease, _registry} = present(state, 20, 201)
+    buffer = ui.panel.prompt_buffer
+    marker = Buffer.inspection_marker(buffer)
+
+    loading =
+      DraftSave.loading({self(), connection.target.session_id}, buffer, make_ref(), marker)
+
+    ready = DraftSave.loaded(loading, 1, marker, nil)
+    updated = UIState.project_draft_save(ui, ready)
+    state = %{state | workspace: SessionState.set_agent_ui(state.workspace, updated)}
+    offer = DraftSave.attachment_offer(ready)
+
+    for stale_offer <- [nil, offer + 1] do
+      rejected = GuiActionHandler.dispatch(state, {:agent_composer_submit, 201, stale_offer})
+      assert PromptBuffer.input_text(rejected.workspace.agent_ui) == "/help"
+      assert Buffer.inspection_marker(buffer) == marker
+    end
+
+    accepted = GuiActionHandler.dispatch(state, {:agent_composer_submit, 201, offer})
+    assert PromptBuffer.input_text(accepted.workspace.agent_ui) == ""
+  end
+
+  defp with_send_owner(state) do
+    {tabs, workspace} =
+      Tab.new_agent(1, "Agent") |> TabBar.new() |> TabBar.add_workspace("Agent", self())
+
+    tabs = TabBar.move_tab_to_workspace(tabs, 1, workspace.id)
+    shell = MingaEditor.Shell.Traditional.State.install_tab_bar(state.shell_runtime.state, tabs)
+    runtime = MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell)
+
+    connection = %ConnectionSnapshot{
+      target: ConnectionTarget.new(self(), "original", nil, make_ref()),
+      credential_readiness: :configured,
+      model_selection: nil,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
+
+    ui = UIState.project_connection(state.workspace.agent_ui, connection)
+
+    state = %{
+      state
+      | shell_runtime: runtime,
+        workspace: SessionState.set_agent_ui(state.workspace, ui)
+    }
+
+    {state, runtime, connection, ui}
   end
 
   test "both prompt focus paths reclaim agent keybindings without replacing the draft" do
@@ -519,10 +620,12 @@ defmodule MingaEditor.Agent.PromptInputTest do
 
   defp present(state, columns, generation) do
     projection = PromptProjection.build(state.workspace.agent_ui.panel, columns)
+    scope = MingaEditor.Shell.Runtime.review_scope(state.shell_runtime)
 
     {model, lease} =
       PromptRenderWindow.build_presented(ViewContext.from_editor_state(state), columns, nil,
         projection: projection,
+        submission_owner: PromptInput.submission_owner(scope, state.workspace.agent_ui),
         presentation_id: generation,
         project_files: [],
         project_root: nil
