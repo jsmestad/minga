@@ -177,7 +177,7 @@ defmodule Minga.Buffer.Fork do
           FileMutation.expectation(),
           FileMutation.operation(),
           FileMutation.identity()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(server, expected, operation, identity) do
     GenServer.call(server, {:conditional_mutate, expected, operation, identity}, :infinity)
   end
@@ -369,13 +369,17 @@ defmodule Minga.Buffer.Fork do
   def handle_call({:conditional_mutate, expected, operation, identity}, _from, state) do
     generation = mutation_generation(identity, state)
 
-    case FileMutation.prepare(file_source(state), generation, identity, expected, operation) do
+    source = file_source(state)
+
+    case FileMutation.prepare(source, generation, identity, expected, operation) do
       {:ok, new_content} when is_binary(new_content) ->
         new_doc = Document.new(new_content)
-        {:reply, :ok, commit_fork(state, new_doc, false)}
+        receipt = FileMutation.Receipt.committed(source, new_content)
+        {:reply, {:ok, receipt}, commit_fork(state, new_doc, false)}
 
       {:ok, :deleted} ->
-        {:reply, :ok, commit_fork(state, state.document, true)}
+        receipt = FileMutation.Receipt.committed(source, :deleted)
+        {:reply, {:ok, receipt}, commit_fork(state, state.document, true)}
 
       {:error, _} = error ->
         {:reply, error, state}

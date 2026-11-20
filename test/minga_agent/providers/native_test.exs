@@ -1986,7 +1986,7 @@ defmodule MingaAgent.Providers.NativeTest do
                          :absent,
                          {:create, "kept\n"}
                        ) do
-                    :ok -> {:ok, "draft kept"}
+                    {:ok, _receipt} -> {:ok, "draft kept"}
                     {:error, reason} -> {:error, inspect(reason)}
                   end
               end

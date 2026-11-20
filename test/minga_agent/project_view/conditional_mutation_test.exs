@@ -18,7 +18,7 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
       {:ok, view} = create.(dir)
       token = revision(view, "file.txt", "original\n")
 
-      assert :ok =
+      assert {:ok, %Minga.Buffer.FileMutation.Receipt{before: "original\n", after: "draft\n"}} =
                ProjectView.conditional_mutate(
                  view,
                  "file.txt",
@@ -32,13 +32,17 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
       assert {:error, :stale_revision} =
                ProjectView.conditional_mutate(view, "file.txt", token, :delete)
 
-      assert :ok = ProjectView.conditional_mutate(view, "new.txt", :absent, {:create, "new"})
+      assert {:ok, %Minga.Buffer.FileMutation.Receipt{before: :absent, after: "new"}} =
+               ProjectView.conditional_mutate(view, "new.txt", :absent, {:create, "new"})
 
       assert {:error, :already_exists} =
                ProjectView.conditional_mutate(view, "new.txt", :absent, {:create, "other"})
 
       token = revision(view, "file.txt", "draft\n")
-      assert :ok = ProjectView.conditional_mutate(view, "file.txt", token, :delete)
+
+      assert {:ok, %Minga.Buffer.FileMutation.Receipt{before: "draft\n", after: :absent}} =
+               ProjectView.conditional_mutate(view, "file.txt", token, :delete)
+
       assert {:error, _} = ProjectView.read_file(view, "file.txt")
       assert {:ok, entries} = ProjectView.diff(view)
       assert Enum.any?(entries, &(&1.path == "file.txt" and &1.kind == :deleted))
@@ -67,7 +71,7 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
       assert {:ok, %{owner: {:fork, fork}}} = ProjectView.resolve_source(view, "open.txt")
       token = revision(view, "open.txt", "unsaved\n")
 
-      assert :ok =
+      assert {:ok, %{before: "unsaved\n", after: "agent\n"}} =
                ProjectView.conditional_mutate(
                  view,
                  "open.txt",
@@ -102,7 +106,10 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     parent = start_supervised!({Minga.Buffer.Process, content: "original\n", file_path: path})
     {:ok, view} = ProjectView.overlay(root)
     token = revision(view, "open.txt", "original\n")
-    assert :ok = ProjectView.conditional_mutate(view, "open.txt", token, :delete)
+
+    assert {:ok, %{after: :absent}} =
+             ProjectView.conditional_mutate(view, "open.txt", token, :delete)
+
     assert {:error, :enoent} = ProjectView.read_file(view, "open.txt")
     assert File.read!(path) == "original\n"
     assert Minga.Buffer.content(parent) == "original\n"
@@ -124,7 +131,10 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     {:ok, view} = ProjectView.overlay(root)
     token = revision(view, "open.txt", "original\n")
     File.write!(path, "human\n")
-    assert :ok = ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "agent\n"})
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "agent\n"})
+
     assert {:conflict, _} = ProjectView.promote(view, :project_root)
     assert File.read!(path) == "human\n"
     close_drafts(view)
@@ -136,7 +146,7 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     start_supervised!({Minga.Buffer.Process, content: "original\n", file_path: path})
     {:ok, view} = ProjectView.overlay(root)
     token = revision(view, "open.txt", "original\n")
-    assert :ok = ProjectView.conditional_mutate(view, "open.txt", token, :delete)
+    assert {:ok, _receipt} = ProjectView.conditional_mutate(view, "open.txt", token, :delete)
     File.write!(path, "human\n")
     assert {:conflict, _} = ProjectView.promote(view, :project_root)
     assert File.read!(path) == "human\n"
@@ -181,7 +191,10 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     parent = start_supervised!({Minga.Buffer.Process, content: "original\n", file_path: path})
     {:ok, view} = ProjectView.overlay(root)
     token = revision(view, "open.txt", "original\n")
-    assert :ok = ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "agent\n"})
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "agent\n"})
+
     File.mkdir!(Path.join(ProjectView.working_dir(view), "open.txt.__changeset_deleted__"))
     before = :sys.get_state(view.ref.changeset)
     assert {:conflict, _} = ProjectView.promote(view, :project_root)
@@ -199,7 +212,7 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     {:ok, view} = ProjectView.overlay(root)
     token = revision(view, "open.txt", "one\ntwo\n")
 
-    assert :ok =
+    assert {:ok, _receipt} =
              ProjectView.conditional_mutate(view, "open.txt", token, {:edit, [{"one", "ONE"}]})
 
     assert :ok = Minga.Buffer.replace_content(parent, "one\nTWO\n", :user)
@@ -213,7 +226,10 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     tmp_dir: root
   } do
     {:ok, view} = ProjectView.overlay(root)
-    assert :ok = ProjectView.conditional_mutate(view, "new.txt", :absent, {:create, "agent"})
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(view, "new.txt", :absent, {:create, "agent"})
+
     File.write!(Path.join(root, "new.txt"), "human")
     assert {:conflict, _} = ProjectView.promote(view, :project_root)
     assert File.read!(Path.join(root, "new.txt")) == "human"
@@ -239,7 +255,7 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
       {:ok, %{owner: {:changeset, cs, "file.txt"}}} =
         ProjectView.resolve_source(view, "file.txt")
 
-      assert :ok = ProjectView.conditional_mutate(view, "file.txt", token, operation)
+      assert {:ok, _receipt} = ProjectView.conditional_mutate(view, "file.txt", token, operation)
 
       parent =
         start_supervised!({Minga.Buffer.Process, file_path: path}, id: {backend, kind})
@@ -277,7 +293,10 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
     {:ok, view} = ProjectView.overlay(root)
     token = revision(view, "open.txt", "original")
     {:ok, %{owner: {:fork, fork}}} = ProjectView.resolve_source(view, "open.txt")
-    assert :ok = ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "draft"})
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "draft"})
+
     File.write!(path, "human")
     assert {:conflict, _} = ProjectView.promote(view, :project_root)
     refute Process.alive?(fork)
@@ -287,7 +306,10 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
 
     assert {:ok, "draft"} = ProjectView.read_file(view, "open.txt")
     token = revision(view, "open.txt", "draft")
-    assert :ok = ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "resolved"})
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(view, "open.txt", token, {:replace, "resolved"})
+
     assert {:ok, "resolved"} = ProjectView.read_file(view, "open.txt")
     assert File.read!(path) == "human"
     close_drafts(view)
@@ -312,8 +334,11 @@ defmodule MingaAgent.ProjectView.ConditionalMutationTest do
 
     token_a = revision(view, "a.txt", "original a")
     token_b = revision(view, "b.txt", "original b")
-    assert :ok = ProjectView.conditional_mutate(view, "a.txt", token_a, :delete)
-    assert :ok = ProjectView.conditional_mutate(view, "b.txt", token_b, {:replace, "draft b"})
+    assert {:ok, _receipt} = ProjectView.conditional_mutate(view, "a.txt", token_a, :delete)
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(view, "b.txt", token_b, {:replace, "draft b"})
+
     assert {:conflict, details} = ProjectView.promote(view, :project_root)
     assert {:ok, "a.txt", :deleted} in details.results
     assert {:error, "b.txt", {:injected, :flush}} in details.results

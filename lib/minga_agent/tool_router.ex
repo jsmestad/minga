@@ -114,7 +114,7 @@ defmodule MingaAgent.ToolRouter do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(%Context{project_view: %ProjectView{} = view}, path, expected, operation) do
     project_view_result(fn ->
       ProjectView.conditional_mutate(
@@ -153,7 +153,7 @@ defmodule MingaAgent.ToolRouter do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   defp conditional_mutate_without_fork(%Context{changeset: changeset}, path, expected, operation)
        when is_pid(changeset) do
     conditional_mutate_changeset(changeset, path, expected, operation)
@@ -176,7 +176,7 @@ defmodule MingaAgent.ToolRouter do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   defp conditional_mutate_changeset(changeset, path, expected, operation) do
     with {:ok, relative} <- normalize_changeset_path(changeset, path, false) do
       Changeset.conditional_mutate(changeset, relative, expected, operation, {:changeset, path})

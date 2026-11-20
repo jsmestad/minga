@@ -27,7 +27,10 @@ defmodule MingaAgent.Changeset.ExecutableMutationTest do
     identity = {:changeset, path}
     {:ok, ^original, version} = Changeset.read_file_with_version(cs, "run.sh")
     expected = FileMutation.revision(original, version, identity)
-    assert :ok = Changeset.conditional_mutate(cs, "run.sh", expected, {:replace, draft}, identity)
+
+    assert {:ok, _receipt} =
+             Changeset.conditional_mutate(cs, "run.sh", expected, {:replace, draft}, identity)
+
     target = Path.join(Changeset.overlay_path(cs), "run.sh")
     assert Bitwise.band(File.stat!(target).mode, 0o7777) == 0o755
     assert System.cmd(target, []) == {"agent", 0}
@@ -37,7 +40,10 @@ defmodule MingaAgent.Changeset.ExecutableMutationTest do
     {:ok, ^draft, next} = Changeset.read_file_with_version(cs, "run.sh")
     expected = FileMutation.revision(draft, next, identity)
     final = "#!/bin/sh\nprintf final"
-    assert :ok = Changeset.conditional_mutate(cs, "run.sh", expected, {:replace, final}, identity)
+
+    assert {:ok, _receipt} =
+             Changeset.conditional_mutate(cs, "run.sh", expected, {:replace, final}, identity)
+
     assert Bitwise.band(File.stat!(target).mode, 0o7777) == 0o700
     assert System.cmd(target, []) == {"final", 0}
     assert :ok = Changeset.merge(cs)

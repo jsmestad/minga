@@ -30,7 +30,7 @@ defmodule MingaAgent.ProjectView.Backend do
               String.t(),
               Minga.Buffer.FileMutation.expectation(),
               Minga.Buffer.FileMutation.operation()
-            ) :: :ok | {:error, term()}
+            ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   @callback write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   @callback edit_file(ProjectView.t(), String.t(), String.t(), String.t()) ::
               :ok | {:error, term()}

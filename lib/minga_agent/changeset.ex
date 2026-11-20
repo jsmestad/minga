@@ -82,7 +82,7 @@ defmodule MingaAgent.Changeset do
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation(),
           Minga.Buffer.FileMutation.identity()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(cs, relative_path, expected, operation, identity)
       when is_binary(relative_path) do
     GenServer.call(

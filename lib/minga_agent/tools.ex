@@ -449,7 +449,7 @@ defmodule MingaAgent.Tools do
       if args["expected_revision"] == "absent", do: :absent, else: args["expected_revision"]
 
     case ToolRouter.conditional_mutate(context.router_context, path, expected, operation) do
-      :ok ->
+      {:ok, %Minga.Buffer.FileMutation.Receipt{}} ->
         {:ok,
          maybe_append_diagnostics(
            path,

@@ -139,7 +139,7 @@ defmodule MingaAgent.Tool.Context do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(%__MODULE__{} = context, path, expected, operation) do
     ToolRouter.conditional_mutate(context.router_context, path, expected, operation)
   end

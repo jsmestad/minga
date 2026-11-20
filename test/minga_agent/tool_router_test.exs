@@ -118,7 +118,9 @@ defmodule MingaAgent.ToolRouterTest do
       assert is_pid(fork)
       original = Minga.Buffer.content(parent)
 
-      assert :ok = ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "new content\n"})
+      assert {:ok, %{after: "new content\n"}} =
+               ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "new content\n"})
+
       assert Fork.content(fork) == "new content\n"
       assert Minga.Buffer.content(parent) == original
       assert File.read!(path) == original
@@ -149,7 +151,7 @@ defmodule MingaAgent.ToolRouterTest do
       assert Fork.content(fork) == original
       assert Fork.version(fork) == version
 
-      assert :ok =
+      assert {:ok, _receipt} =
                ToolRouter.conditional_mutate(
                  ctx,
                  path,
@@ -169,7 +171,9 @@ defmodule MingaAgent.ToolRouterTest do
     test "stale and missing revisions cannot modify a fork", %{store: store, path: path} do
       ctx = ToolRouter.context(store, nil)
       expected = revision(ctx, path)
-      assert :ok = ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "newer"})
+
+      assert {:ok, %{after: "newer"}} =
+               ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "newer"})
 
       assert {:error, :stale_revision} =
                ToolRouter.conditional_mutate(ctx, path, expected, {:replace, "stale"})
@@ -204,7 +208,9 @@ defmodule MingaAgent.ToolRouterTest do
         target = Path.join(root, "opened-later-#{index}.txt")
         File.write!(target, "original")
         expected = revision(context, target)
-        assert :ok = ToolRouter.conditional_mutate(context, target, expected, operation)
+
+        assert {:ok, _receipt} =
+                 ToolRouter.conditional_mutate(context, target, expected, operation)
 
         buffer =
           start_supervised!(
@@ -308,7 +314,7 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(nil, nil, changeset)
       overlay_dir = MingaAgent.Changeset.overlay_path(changeset)
 
-      assert :ok =
+      assert {:ok, _receipt} =
                ToolRouter.conditional_mutate(
                  ctx,
                  path,
@@ -322,7 +328,9 @@ defmodule MingaAgent.ToolRouterTest do
       assert resolved == Path.join(overlay_dir, "lib/foo.ex")
       assert File.read!(resolved) == "draft\n"
 
-      assert :ok = ToolRouter.conditional_mutate(ctx, path, revision(ctx, path), :delete)
+      assert {:ok, _receipt} =
+               ToolRouter.conditional_mutate(ctx, path, revision(ctx, path), :delete)
+
       assert {:ok, deleted_resolved} = ToolRouter.filesystem_path_result(ctx, path)
       assert deleted_resolved == Path.join(overlay_dir, "lib/foo.ex")
       refute File.exists?(deleted_resolved)
@@ -336,7 +344,7 @@ defmodule MingaAgent.ToolRouterTest do
 
       ctx = ToolRouter.context(nil, nil, changeset)
 
-      assert :ok =
+      assert {:ok, _receipt} =
                ToolRouter.conditional_mutate(
                  ctx,
                  Path.join(project_root, "lib/new.txt"),
@@ -344,7 +352,8 @@ defmodule MingaAgent.ToolRouterTest do
                  {:create, "new\n"}
                )
 
-      assert :ok = ToolRouter.conditional_mutate(ctx, path, revision(ctx, path), :delete)
+      assert {:ok, _receipt} =
+               ToolRouter.conditional_mutate(ctx, path, revision(ctx, path), :delete)
 
       assert {:ok, entries} = ToolRouter.list_directory(ctx, Path.join(project_root, "lib"))
       assert %{name: "new.txt", type: :file} in entries
@@ -402,7 +411,7 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(store, changeset)
       original = File.read!(path)
 
-      assert :ok =
+      assert {:ok, _receipt} =
                ToolRouter.conditional_mutate(
                  ctx,
                  path,
@@ -530,7 +539,7 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(store, changeset)
       original = File.read!(path)
 
-      assert :ok =
+      assert {:ok, _receipt} =
                ToolRouter.conditional_mutate(
                  ctx,
                  path,

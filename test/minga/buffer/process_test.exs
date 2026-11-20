@@ -936,7 +936,9 @@ defmodule Minga.Buffer.ProcessTest do
     test "conditional batch redo reapplies unicode replacements" do
       pid = start_supervised!({BufferProcess, content: "hello café world"})
 
-      assert :ok = conditional_batch(pid, [{"café", "茶"}])
+      assert {:ok, %{before: "hello café world", after: "hello 茶 world"}} =
+               conditional_batch(pid, [{"café", "茶"}])
+
       assert BufferProcess.content(pid) == "hello 茶 world"
 
       BufferProcess.undo(pid)
