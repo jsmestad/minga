@@ -3,14 +3,20 @@ defmodule MingaEditor.Agent.DraftSave do
 
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.DraftAttachment
+  alias MingaAgent.Session.TurnExecution
 
   @type target :: {pid(), String.t()}
   @type marker :: {non_neg_integer(), DraftSnapshot.position()}
   @type revision :: non_neg_integer()
+  @type queue_admission :: {pos_integer(), String.t(), TurnExecution.prompt_kind()}
   @type request ::
           {:loading, reference(), marker()}
           | {:ready, revision(), marker() | nil}
           | {:saving, reference(), revision(), marker() | nil, marker()}
+          | {:recalling, reference(), revision(), marker() | nil, marker()}
+          | {:queueing, reference(), revision(), marker() | nil, marker(), queue_admission()}
+          | :recall_conflicted
+          | {:reloading_recall, reference(), marker()}
           | {:attaching, reference(), revision(), marker() | nil, marker()}
           | {:removing, reference(), revision(), marker() | nil, marker(),
              [DraftSnapshot.attachment()]}
@@ -36,7 +42,8 @@ defmodule MingaEditor.Agent.DraftSave do
 
   @doc "Accepts a record revision and its restored attachment references."
   @spec loaded(t(), revision(), marker() | nil, DraftSnapshot.t() | nil) :: t()
-  def loaded(%__MODULE__{request: {:loading, _, _}} = save, revision, marker, draft) do
+  def loaded(%__MODULE__{request: {phase, _, _}} = save, revision, marker, draft)
+      when phase in [:loading, :reloading_recall] do
     attachments = if draft, do: draft.attachments, else: []
     %{save | request: {:ready, revision, marker}, attachments: attachments, offer: next_offer()}
   end
@@ -50,6 +57,11 @@ defmodule MingaEditor.Agent.DraftSave do
   @spec review_attachments(t(), reference()) :: t()
   def review_attachments(%__MODULE__{request: :attachment_review_required} = save, ref),
     do: %{save | request: {:reviewing_attachments, ref}}
+
+  @doc "Reads the recalled draft again after the user has emptied the conflicting live input."
+  @spec reload_recall(t(), reference(), marker()) :: t()
+  def reload_recall(%__MODULE__{request: :recall_conflicted} = save, ref, marker),
+    do: %{save | request: {:reloading_recall, ref, marker}}
 
   @doc "Installs the reloaded attachment set and leaves live text dirty for autosave."
   @spec attachments_reviewed(t(), revision(), DraftSnapshot.t() | nil) :: t()
@@ -86,6 +98,85 @@ defmodule MingaEditor.Agent.DraftSave do
     do: {:ok, revision, %{save | request: {:saving, ref, revision, previous, marker}}}
 
   def begin_save(%__MODULE__{}, _ref, _marker), do: :pending
+
+  @doc "Freezes the captured live marker and owns the recall until its reply arrives."
+  @spec begin_recall(t(), reference(), marker()) :: {:ok, revision(), t()} | :pending
+  def begin_recall(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker),
+    do:
+      {:ok, revision,
+       %{save | request: {:recalling, ref, revision, previous, marker}, timer: nil}}
+
+  def begin_recall(%__MODULE__{}, _ref, _marker), do: :pending
+
+  @doc "Binds a queue submission identity to the original live composer marker and revision."
+  @spec begin_queue(t(), reference(), marker(), queue_admission()) ::
+          {:ok, revision(), t()} | :pending
+  def begin_queue(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker, attempt) do
+    {:ok, revision,
+     %{save | request: {:queueing, ref, revision, previous, marker, attempt}, timer: nil}}
+  end
+
+  def begin_queue(%__MODULE__{}, _ref, _marker, _attempt), do: :pending
+
+  @doc "Moves only a pending queue acknowledgement to the replacement owner of the same record."
+  @spec rebind_queue(t(), target(), pid()) ::
+          {:ok, reference(), revision(), queue_admission(), t()} | :stale
+  def rebind_queue(
+        %__MODULE__{
+          target: {_, record} = origin,
+          request: {:queueing, ref, revision, _, _, attempt}
+        } = save,
+        origin,
+        replacement
+      ),
+      do: {:ok, ref, revision, attempt, %{save | target: {replacement, record}}}
+
+  def rebind_queue(%__MODULE__{}, _origin, _replacement), do: :stale
+
+  @doc "Clears only the attachment identities admitted by this acknowledged queue operation."
+  @spec queue_saved(t(), reference(), revision(), marker() | nil) :: t()
+  def queue_saved(
+        %__MODULE__{request: {:queueing, ref, _, _, _, _}} = save,
+        ref,
+        revision,
+        marker
+      ),
+      do: %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}
+
+  @doc "Retires a refused submission without erasing the original live draft."
+  @spec queue_refused(t(), reference(), :retryable | :blocked) :: t()
+  def queue_refused(
+        %__MODULE__{request: {:queueing, ref, revision, previous, _, _}} = save,
+        ref,
+        :retryable
+      ),
+      do: %{save | request: {:ready, revision, previous}}
+
+  def queue_refused(%__MODULE__{request: {:queueing, ref, _, _, _, _}} = save, ref, :blocked),
+    do: %{save | request: :blocked}
+
+  @doc "Installs a confirmed recall or prevents autosave from overwriting a conflicting saved draft."
+  @spec recall_result(
+          t(),
+          reference(),
+          {:installed, revision(), marker(), DraftSnapshot.t()} | :conflict
+        ) ::
+          t()
+  def recall_result(
+        %__MODULE__{request: {:recalling, ref, _, _, _}} = save,
+        ref,
+        {:installed, revision, marker, draft}
+      ) do
+    %{
+      save
+      | request: {:ready, revision, marker},
+        attachments: draft.attachments,
+        offer: next_offer()
+    }
+  end
+
+  def recall_result(%__MODULE__{request: {:recalling, ref, _, _, _}} = save, ref, :conflict),
+    do: %{save | request: :recall_conflicted, offer: next_offer()}
 
   @doc "Admits a draft mutation even when the text and caret have not changed."
   @spec begin_attachment(t(), reference(), marker()) :: {:ok, revision(), t()} | :pending
@@ -182,6 +273,19 @@ defmodule MingaEditor.Agent.DraftSave do
   def submission(%__MODULE__{request: {:loading, _, _}}),
     do: {:error, "Wait for the saved composer draft to load."}
 
+  def submission(%__MODULE__{request: {:queueing, _, _, _, _, _}}),
+    do: {:error, "Wait for the saved queue submission to finish."}
+
+  def submission(%__MODULE__{request: {:recalling, _, _, _, _}}),
+    do: {:error, "Wait for the queued input to be recalled."}
+
+  def submission(%__MODULE__{request: :recall_conflicted}),
+    do:
+      {:error, "The recalled input was saved separately. Reopen the saved draft before sending."}
+
+  def submission(%__MODULE__{request: {:reloading_recall, _, _}}),
+    do: {:error, "Wait for the recalled draft to reload."}
+
   def submission(%__MODULE__{request: {:attaching, _, _, _, _}}),
     do: {:error, "Wait for the selection snapshot to finish saving."}
 
@@ -215,14 +319,15 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Blocks a stale target or makes a refused write retryable on a later edit."
   @spec failed(t(), reference(), :retryable | :blocked) :: {:ok, t()} | :stale
   def failed(%__MODULE__{request: {phase, ref, revision, previous, _}} = save, ref, :retryable)
-      when phase in [:saving, :attaching],
+      when phase in [:saving, :attaching, :recalling],
       do: {:ok, %{save | request: {:ready, revision, previous}, timer: nil}}
 
   def failed(%__MODULE__{request: {:attaching, ref, _, _, _}} = save, ref, :blocked),
     do: {:ok, %{save | request: :attachment_review_required, timer: nil}}
 
-  def failed(%__MODULE__{request: {:saving, ref, _, _, _}} = save, ref, :blocked),
-    do: {:ok, %{save | request: :blocked, timer: nil}}
+  def failed(%__MODULE__{request: {phase, ref, _, _, _}} = save, ref, :blocked)
+      when phase in [:saving, :recalling],
+      do: {:ok, %{save | request: :blocked, timer: nil}}
 
   def failed(
         %__MODULE__{request: {:removing, ref, revision, previous, _, _}} = save,
@@ -236,6 +341,9 @@ defmodule MingaEditor.Agent.DraftSave do
 
   def failed(%__MODULE__{request: {:loading, ref, _}} = save, ref, _reason),
     do: {:ok, %{save | request: :blocked, timer: nil}}
+
+  def failed(%__MODULE__{request: {:reloading_recall, ref, _}} = save, ref, _reason),
+    do: {:ok, %{save | request: :recall_conflicted}}
 
   def failed(%__MODULE__{request: {:reviewing_attachments, ref}} = save, ref, _reason),
     do: {:ok, %{save | request: :attachment_review_required, timer: nil}}

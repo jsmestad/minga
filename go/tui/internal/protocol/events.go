@@ -284,6 +284,18 @@ func EncodeGUIAgentOpenQuestion(offer uint64) []byte {
 	return packet[:]
 }
 
+// EncodeGUIAgentStopTurn stops only the identified active turn.
+func EncodeGUIAgentStopTurn(target AgentStopTarget) []byte {
+	if len(target.SessionID) == 0 || len(target.SessionID) > 65535 ||
+		len(target.RequestID) == 0 || len(target.RequestID) > 65535 {
+		return nil
+	}
+	packet := make([]byte, 2, 6+len(target.SessionID)+len(target.RequestID))
+	packet[0], packet[1] = generated.OPGuiAction, generated.GUIActionAgentStopTurn
+	packet = appendString16(packet, target.SessionID)
+	return appendString16(packet, target.RequestID)
+}
+
 func EncodeGUIAgentToolToggle(messageID uint32) []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionAgentToolToggle, byte(messageID >> 24), byte(messageID >> 16), byte(messageID >> 8), byte(messageID)}
 }

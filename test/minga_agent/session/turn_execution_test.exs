@@ -335,6 +335,75 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     end
   end
 
+  test "a restored receipt admits identical text only under a new submission identity" do
+    source = state(:exec, :thinking)
+    first = "same-text-submission-001"
+    second = "same-text-submission-002"
+
+    assert {:ok, {1, ^first, :steering, 2}, queued} =
+             TurnExecution.admit_queued_submission(source, :steering, "same", 1, {first, 2})
+
+    assert {:ok, {2, ^second, :follow_up, 4}, queued} =
+             TurnExecution.admit_queued_submission(queued, :follow_up, "same", 2, {second, 4})
+
+    assert {["same"], consumed} = TurnExecution.dequeue_steering(queued)
+
+    restored =
+      consumed |> TurnExecution.pending_inputs() |> TurnExecution.restore_pending_inputs()
+
+    assert {:queued, {1, ^first, :steering, 2}} =
+             TurnExecution.admit_queued_submission(restored, :follow_up, "changed", 1, {first, 8})
+
+    assert {:error, :queue_submission_stale} =
+             TurnExecution.admit_queued_submission(restored, :steering, "same", 3, {first, 8})
+
+    assert {:error, :turn_not_active} =
+             TurnExecution.admit_queued_submission(restored, :steering, "new", 3, {"new", 8})
+
+    assert TurnExecution.queues(restored) == {[], ["same"]}
+  end
+
+  test "an unconfirmed consumed admission remains replayable at capacity and after restore" do
+    token = fn id -> id |> Integer.to_string() |> String.pad_leading(24, "0") end
+
+    full =
+      Enum.reduce(1..64, state(:exec, :thinking), fn id, current ->
+        assert {:ok, _, next} =
+                 TurnExecution.admit_queued_submission(
+                   current,
+                   :steering,
+                   "consumed",
+                   id,
+                   {token.(id), id}
+                 )
+
+        assert {["consumed"], consumed} = TurnExecution.dequeue_steering(next)
+        consumed
+      end)
+
+    assert {:error, :queue_receipts_full} =
+             TurnExecution.admit_queued_submission(full, :steering, "new", 65, {token.(65), 65})
+
+    restored = full |> TurnExecution.pending_inputs() |> TurnExecution.restore_pending_inputs()
+    first = token.(1)
+
+    assert {:queued, {1, ^first, :steering, 1} = receipt} =
+             TurnExecution.queued_submission(restored, 1, first)
+
+    assert :unchanged = TurnExecution.confirm_queue_receipt(restored, {1, first, :follow_up, 1})
+    assert {:ok, confirmed} = TurnExecution.confirm_queue_receipt(restored, receipt)
+
+    assert {:error, :queue_submission_stale} =
+             TurnExecution.queued_submission(confirmed, 1, first)
+
+    assert {:ok, active} = TurnExecution.begin_turn(confirmed)
+
+    assert {:ok, {65, _, :steering, 65}, admitted} =
+             TurnExecution.admit_queued_submission(active, :steering, "new", 65, {token.(65), 65})
+
+    assert TurnExecution.queues(admitted) == {["new"], []}
+  end
+
   test "queue dequeue, recall, and clear preserve FIFO" do
     source = state(:exec, :thinking)
 

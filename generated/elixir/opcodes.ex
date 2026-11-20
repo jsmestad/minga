@@ -427,5 +427,7 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_agent_composer_submit, do: 0x6B
   @spec gui_action_agent_open_question() :: non_neg_integer()
   def gui_action_agent_open_question, do: 0x6C
+  @spec gui_action_agent_stop_turn() :: non_neg_integer()
+  def gui_action_agent_stop_turn, do: 0x6D
 
 end

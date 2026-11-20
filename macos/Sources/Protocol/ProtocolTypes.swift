@@ -26,6 +26,17 @@ public struct AgentQuestionOffer: Sendable, Equatable {
     }
 }
 
+/// An active Agent turn identified by the committed Stop control.
+public struct AgentStopTarget: Sendable, Equatable {
+    public let sessionID: String
+    public let requestID: String
+
+    public init(sessionID: String, requestID: String) {
+        self.sessionID = sessionID
+        self.requestID = requestID
+    }
+}
+
 /// Config setting value encoded in GUI config actions and state pushes.
 public enum SettingValue: Sendable, Equatable {
     case bool(Bool)

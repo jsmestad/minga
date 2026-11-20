@@ -144,6 +144,39 @@ defmodule MingaAgent.SessionStoreTest do
              SessionStore.rename_conversation("valid-id", "", dir, duplicates)
   end
 
+  test "queue save refuses before rename and confirms the exact queue after rename", %{
+    tmp_dir: dir
+  } do
+    data = sample_data()
+    draft = draft_snapshot("Unsubmitted input")
+    assert :ok = SessionStore.save(data, dir)
+    assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+
+    inputs =
+      {3, [{1, 1, "Steer", [], nil}], [{2, 1, "Queue next", [], nil}],
+       [{2, "queue-submission-token01", :follow_up, 2}]}
+
+    candidate = Map.put(data, :pending_inputs, inputs)
+
+    refused = [
+      confirm_queue_commit: true,
+      fault_injector: %{before_session_snapshot_rename: {:error, :disk_full}}
+    ]
+
+    assert {:error, :disk_full} = SessionStore.save(candidate, dir, refused)
+    assert {:ok, previous} = SessionStore.load(data.id, dir)
+    refute Map.get(previous, :pending_inputs)
+
+    interrupted = [
+      confirm_queue_commit: true,
+      fault_injector: %{after_session_snapshot_rename: {:error, :interrupted}}
+    ]
+
+    assert :ok = SessionStore.save(candidate, dir, interrupted)
+    assert {:ok, %{pending_inputs: ^inputs}} = SessionStore.load(data.id, dir)
+    assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+  end
+
   describe "draft snapshots" do
     test "selection capture rejects stale writes and keeps exact bytes after interrupted publication",
          %{tmp_dir: dir} do
@@ -231,6 +264,49 @@ defmodule MingaAgent.SessionStoreTest do
 
       assert {:error, {:stale_draft_revision, 2}} =
                SessionStore.save_submitted_draft(admission, 1, dir, opts)
+    end
+
+    test "queue admission transfers the captured artifact from the exact consumed draft", %{
+      tmp_dir: dir
+    } do
+      id = "queue-attachment-admission"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      prior = draft_snapshot("Explain this")
+      selected_text = "original captured text"
+
+      assert {:ok, 1, {:selection, _, _, _, {:snapshot, _ref}} = attachment} =
+               SessionStore.attach_text(
+                 id,
+                 0,
+                 prior,
+                 {:selection, "note.ex", "note.ex", selected_text},
+                 dir,
+                 opts
+               )
+
+      content = [ReqLLM.Message.ContentPart.text(selected_text)]
+
+      inputs =
+        {2, [{1, 1, content, [attachment], prior.text}], [],
+         [{1, "queue-submission-token01", :steering, 2}]}
+
+      candidate = Map.put(sample_data(id), :pending_inputs, inputs)
+
+      refused = [
+        {:fault_injector, %{before_session_snapshot_rename: {:error, :disk_full}}} | opts
+      ]
+
+      assert {:error, :disk_full} = SessionStore.save_queued_draft(candidate, 1, dir, refused)
+
+      assert {:ok, 1, %DraftSnapshot{attachments: [^attachment]}} =
+               SessionStore.read_presentation(id, dir, opts)
+
+      assert :ok = SessionStore.save_queued_draft(candidate, 1, dir, opts)
+      assert {:ok, 2, nil} = SessionStore.read_presentation(id, dir, opts)
+      assert {:ok, %{pending_inputs: ^inputs}} = SessionStore.load(id, dir, opts)
+      assert {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      assert {:ok, ^selected_text} = DraftAttachment.read_text(store, attachment)
     end
 
     test "draft-only records do not impersonate a conversation and survive its first save", %{

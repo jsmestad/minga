@@ -24,6 +24,7 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Transcript
+  alias MingaAgent.Session.TurnExecution
   alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
@@ -89,7 +90,8 @@ defmodule MingaAgent.SessionStore do
           optional(:pinned_ids) => MapSet.t(pos_integer()),
           optional(:memory) => String.t() | nil,
           optional(:checklist) => Checklist.t(),
-          optional(:checklist_archive) => ChecklistArchive.t()
+          optional(:checklist_archive) => ChecklistArchive.t(),
+          optional(:pending_inputs) => TurnExecution.pending_inputs()
         }
 
   @typep deserialized_transcript_session :: %{
@@ -137,7 +139,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     result =
-      with :ok <- validate_artifact_opts(opts) do
+      with :ok <- validate_artifact_opts(opts, [:confirm_queue_commit]) do
         with_record_workflow(path, fn -> commit_conversation(path, id, data, opts) end)
       end
 
@@ -267,38 +269,83 @@ defmodule MingaAgent.SessionStore do
   @doc "Commits the admitted request and consumes the exact draft revision in the same record."
   @spec save_submitted_draft(session_data(), draft_revision(), String.t() | nil, keyword()) ::
           :ok | {:error, term()}
-  def save_submitted_draft(%{id: id} = data, expected, config_dir, opts) do
+  def save_submitted_draft(data, expected, config_dir, opts),
+    do: save_changed_draft(data, expected, config_dir, opts, :admit_draft)
+
+  @doc "Commits exact queue input and its receipt while consuming the same saved draft."
+  @spec save_queued_draft(session_data(), draft_revision(), String.t() | nil, keyword()) ::
+          :ok | {:error, term()}
+  def save_queued_draft(data, expected, config_dir, opts),
+    do: save_changed_draft(data, expected, config_dir, opts, :queue_transition)
+
+  @doc "Saves recalled input as the new draft in the same record that removes it from the queue."
+  @spec save_recalled_draft(
+          session_data(),
+          draft_revision(),
+          DraftSnapshot.t(),
+          String.t() | nil,
+          keyword()
+        ) :: :ok | {:error, term()}
+  def save_recalled_draft(data, expected, draft, config_dir, opts) do
+    with {:ok, encoded} <- encode_draft(draft) do
+      save_changed_draft(data, expected, config_dir, opts, {:recall, encoded})
+    end
+  end
+
+  @typep draft_change :: :admit_draft | :queue_transition | {:recall, draft_encoding()}
+
+  @spec save_changed_draft(
+          session_data(),
+          draft_revision(),
+          String.t() | nil,
+          keyword(),
+          draft_change()
+        ) :: :ok | {:error, term()}
+  defp save_changed_draft(%{id: id} = data, expected, config_dir, opts, change) do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
          :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn ->
-        commit_submitted_draft(path, id, data, expected, opts)
+        commit_changed_draft(path, id, data, expected, opts, change)
       end)
     end
   end
 
-  @spec commit_submitted_draft(
+  @spec commit_changed_draft(
           String.t(),
           String.t(),
           session_data(),
           draft_revision(),
-          keyword()
+          keyword(),
+          draft_change()
         ) ::
           :ok | {:error, term()}
-  defp commit_submitted_draft(path, id, data, expected, opts) do
+  defp commit_changed_draft(path, id, data, expected, opts, change) do
     with {:ok, previous, %{presentation: current, artifacts: {previous_generation, _refs}}} <-
            read_record_for_write(path, id, opts),
-         {^expected, %DraftSnapshot{attachments: [_ | _]}} <- current,
+         {^expected, draft} <- current,
+         {:ok, {encoded_draft, next_draft}, mode} <- changed_draft(draft, change),
          revision = expected + 1,
-         presentation = {%{"revision" => revision, "draft" => nil}, {revision, nil}},
+         presentation =
+           {%{"revision" => revision, "draft" => encoded_draft}, {revision, next_draft}},
          {:ok, encoded} <- encode_snapshot(data, presentation, previous) do
-      save_record(path, id, encoded, previous_generation, opts, :admit_draft)
+      save_record(path, id, encoded, previous_generation, opts, mode)
     else
       {:error, _reason} = error -> error
       {revision, _draft} -> {:error, {:stale_draft_revision, revision}}
     end
   end
+
+  @spec changed_draft(DraftSnapshot.t() | nil, draft_change()) ::
+          {:ok, draft_encoding(), :admit_draft | :queue_transition} | {:error, term()}
+  defp changed_draft(_draft, {:recall, encoded}), do: {:ok, encoded, :queue_transition}
+  defp changed_draft(_draft, :queue_transition), do: {:ok, {nil, nil}, :queue_transition}
+
+  defp changed_draft(%DraftSnapshot{attachments: [_ | _]}, :admit_draft),
+    do: {:ok, {nil, nil}, :admit_draft}
+
+  defp changed_draft(_draft, _change), do: {:error, :draft_unavailable}
 
   @spec commit_conversation(String.t(), String.t(), session_data(), keyword()) ::
           :ok | {:error, term()}
@@ -307,7 +354,10 @@ defmodule MingaAgent.SessionStore do
            read_record_for_write(path, id, opts),
          presentation = {Map.get(previous, "presentation"), current},
          {:ok, encoded} <- encode_snapshot(data, presentation, previous) do
-      save_record(path, id, encoded, previous_generation, opts)
+      mode =
+        if Keyword.get(opts, :confirm_queue_commit, false), do: :queue_transition, else: :ordinary
+
+      save_record(path, id, encoded, previous_generation, opts, mode)
     end
   end
 
@@ -369,7 +419,7 @@ defmodule MingaAgent.SessionStore do
           keyword()
         ) ::
           {:ok, draft_revision(), [{DraftSnapshot.attachment(), String.t()}]} | {:error, term()}
-  def resolve_draft_attachments(id, [_ | _] = shown, config_dir, opts) do
+  def resolve_draft_attachments(id, shown, config_dir, opts) when is_list(shown) do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
@@ -381,15 +431,28 @@ defmodule MingaAgent.SessionStore do
   @spec resolve_shown_attachments(String.t(), String.t(), [DraftAttachment.identity()], keyword()) ::
           {:ok, draft_revision(), [{DraftSnapshot.attachment(), String.t()}]} | {:error, term()}
   defp resolve_shown_attachments(path, id, shown, opts) do
-    with {:ok, revision, %DraftSnapshot{attachments: attachments}} <-
-           read_committed_presentation(path, id, opts),
+    with {:ok, revision, draft} <- read_committed_presentation(path, id, opts),
+         attachments = presentation_attachments(draft),
          ^shown <- Enum.map(attachments, &DraftAttachment.identity/1),
-         {:ok, store} <- ensure_artifact_store(id, opts),
-         {:ok, resolved} <- resolve_attachment_text(store, attachments, [], 0) do
+         {:ok, resolved} <- resolve_retained_attachments(id, attachments, opts) do
       {:ok, revision, resolved}
     else
       {:error, _reason} = error -> error
       _changed -> {:error, :draft_attachments_changed}
+    end
+  end
+
+  @spec presentation_attachments(DraftSnapshot.t() | nil) :: [DraftSnapshot.attachment()]
+  defp presentation_attachments(%DraftSnapshot{attachments: attachments}), do: attachments
+  defp presentation_attachments(nil), do: []
+
+  @spec resolve_retained_attachments(String.t(), [DraftSnapshot.attachment()], keyword()) ::
+          {:ok, [{DraftSnapshot.attachment(), String.t()}]} | {:error, term()}
+  defp resolve_retained_attachments(_id, [], _opts), do: {:ok, []}
+
+  defp resolve_retained_attachments(id, [_ | _] = attachments, opts) do
+    with {:ok, store} <- ensure_artifact_store(id, opts) do
+      resolve_attachment_text(store, attachments, [], 0)
     end
   end
 
@@ -670,7 +733,7 @@ defmodule MingaAgent.SessionStore do
           {String.t(), [Reference.t()], String.t()},
           String.t() | nil,
           keyword(),
-          :ordinary | :attach_draft | :admit_draft
+          :ordinary | :attach_draft | :admit_draft | :queue_transition
         ) ::
           :ok | {:error, term()}
   defp save_record(
@@ -679,7 +742,7 @@ defmodule MingaAgent.SessionStore do
          {json, references, generation},
          previous_generation,
          opts,
-         mode \\ :ordinary
+         mode
        ) do
     with :ok <- ensure_private_dir(Path.dirname(path)),
          {:ok, store} <- pin_candidate(id, generation, references, opts) do
@@ -691,8 +754,8 @@ defmodule MingaAgent.SessionStore do
           release_failed_candidate(id, store, previous_generation, generation)
           {:error, reason}
 
-        {:error, reason, :after_rename} when mode in [:admit_draft, :attach_draft] ->
-          confirm_draft_commit(
+        {:error, reason, :after_rename} when mode != :ordinary ->
+          confirm_record_commit(
             Path.dirname(path),
             {id, store, generation, references},
             mode,
@@ -705,16 +768,22 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec confirm_draft_commit(
+  @spec confirm_record_commit(
           String.t(),
           {String.t(), GenServer.server() | nil, String.t(), [Reference.t()]},
-          :attach_draft | :admit_draft,
+          :attach_draft | :admit_draft | :queue_transition,
           term()
         ) :: :ok | {:error, term()}
-  defp confirm_draft_commit(directory, {id, store, generation, references}, mode, reason) do
+  defp confirm_record_commit(directory, {id, store, generation, references}, mode, reason) do
     case sync_directory(directory) do
-      :ok -> finish_committed_snapshot(id, store, generation, references)
-      {:error, sync_reason} -> {:error, {:draft_commit_uncertain, mode, reason, sync_reason}}
+      :ok ->
+        finish_committed_snapshot(id, store, generation, references)
+
+      {:error, sync_reason} when mode == :queue_transition ->
+        {:error, {:queue_commit_uncertain, reason, sync_reason}}
+
+      {:error, sync_reason} ->
+        {:error, {:draft_commit_uncertain, mode, reason, sync_reason}}
     end
   end
 
@@ -845,6 +914,7 @@ defmodule MingaAgent.SessionStore do
 
     transcript_references ++
       ContinuationCodec.references(candidate["continuation"]) ++
+      ContinuationCodec.pending_input_references(candidate["pending_inputs"]) ++
       checklist_references(candidate["checklist"]) ++
       checklist_archive_references(candidate["checklist_archive"])
   end
@@ -956,9 +1026,12 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec validate_artifact_opts(term()) :: :ok | {:error, :invalid_artifact_options}
-  defp validate_artifact_opts(opts) do
-    if Keyword.keyword?(opts) and Keyword.keys(opts) -- [:artifact_runtime, :fault_injector] == [] do
+  @spec validate_artifact_opts(term(), [atom()]) :: :ok | {:error, :invalid_artifact_options}
+  defp validate_artifact_opts(opts, extra_keys \\ []) do
+    allowed = [:artifact_runtime, :fault_injector | extra_keys]
+
+    if Keyword.keyword?(opts) and Keyword.keys(opts) -- allowed == [] and
+         is_boolean(Keyword.get(opts, :confirm_queue_commit, false)) do
       :ok
     else
       {:error, :invalid_artifact_options}
@@ -1852,7 +1925,15 @@ defmodule MingaAgent.SessionStore do
     }
     |> put_checklist(Map.get(data, :checklist))
     |> put_checklist_archive(Map.get(data, :checklist_archive))
+    |> put_pending_inputs(Map.get(data, :pending_inputs))
   end
+
+  @spec put_pending_inputs(map(), TurnExecution.pending_inputs() | nil) :: map()
+  defp put_pending_inputs(data, nil), do: data
+  defp put_pending_inputs(data, {1, [], [], []}), do: data
+
+  defp put_pending_inputs(data, pending),
+    do: Map.put(data, "pending_inputs", ContinuationCodec.encode_pending_inputs(pending))
 
   @spec put_checklist(map(), Checklist.t() | nil) :: map()
   defp put_checklist(data, nil), do: data
@@ -1946,10 +2027,20 @@ defmodule MingaAgent.SessionStore do
          {:ok, continuation} <-
            Continuation.restore_tool_outcomes(continuation, data["version"], transcript),
          session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation),
-         {:ok, session} <- restore_checklist(session, data) do
-      restore_checklist_archive(session, data)
+         {:ok, session} <- restore_checklist(session, data),
+         {:ok, session} <- restore_checklist_archive(session, data) do
+      restore_pending_inputs(session, data)
     end
   end
+
+  @spec restore_pending_inputs(session_data(), map()) :: {:ok, session_data()} | {:error, term()}
+  defp restore_pending_inputs(session, %{"pending_inputs" => encoded}) do
+    with {:ok, pending} <- ContinuationCodec.decode_pending_inputs(encoded) do
+      {:ok, Map.put(session, :pending_inputs, pending)}
+    end
+  end
+
+  defp restore_pending_inputs(session, _older_record), do: {:ok, session}
 
   @spec restore_checklist(session_data(), map()) ::
           {:ok, session_data()} | {:error, :invalid_checklist}

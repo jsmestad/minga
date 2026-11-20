@@ -7,9 +7,11 @@ defmodule MingaAgent.Session.ContinuationCodec do
   It never reconstructs a missing field from the display transcript.
   """
 
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.PrefixStore
+  alias MingaAgent.Session.TurnExecution
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Reference
@@ -66,6 +68,91 @@ defmodule MingaAgent.Session.ContinuationCodec do
                   ],
                   &{Atom.to_string(&1), &1}
                 )
+
+  @doc "Encodes the Session input queue with the same content fidelity as the provider continuation."
+  @spec encode_pending_inputs(TurnExecution.pending_inputs()) :: map()
+  def encode_pending_inputs({next, steering, follow_up, receipts}) do
+    %{
+      "next" => next,
+      "steering" => Enum.map(steering, &encode_queue_input/1),
+      "follow_up" => Enum.map(follow_up, &encode_queue_input/1),
+      "receipts" =>
+        Enum.map(receipts, fn {id, submission_id, kind, revision} ->
+          [id, submission_id, Atom.to_string(kind), revision]
+        end)
+    }
+  end
+
+  @doc "Decodes admitted input without allowing malformed queue identities or payloads."
+  @spec decode_pending_inputs(term()) :: {:ok, TurnExecution.pending_inputs()} | {:error, term()}
+  def decode_pending_inputs(
+        %{"next" => next, "steering" => steering, "follow_up" => follow_up} = data
+      )
+      when is_integer(next) and next > 0 and is_list(steering) and is_list(follow_up) do
+    with {:ok, steering} <- decode_list(steering, &decode_queue_input/1),
+         {:ok, follow_up} <- decode_list(follow_up, &decode_queue_input/1),
+         {:ok, receipts} <- decode_queue_receipts(Map.get(data, "receipts", []), []),
+         inputs = {next, steering, follow_up, receipts},
+         true <- TurnExecution.valid_pending_inputs?(inputs) do
+      {:ok, inputs}
+    else
+      _invalid -> {:error, :invalid_pending_inputs}
+    end
+  end
+
+  def decode_pending_inputs(_invalid), do: {:error, :invalid_pending_inputs}
+
+  @doc "Returns the saved attachments still owned by queued input, without decoding prompt content."
+  @spec pending_input_references(term()) :: [Reference.t()]
+  def pending_input_references(%{"steering" => steering, "follow_up" => follow_up})
+      when is_list(steering) and is_list(follow_up) do
+    for queue <- [steering, follow_up],
+        [_id, _revision, _content, attachments | _source] <- queue,
+        {:ok, decoded} <- [DraftSnapshot.decode_attachments(attachments)],
+        {_, _, _, _, {:snapshot, %Reference{} = reference}} <- decoded,
+        do: reference
+  end
+
+  def pending_input_references(_invalid), do: []
+
+  @spec encode_queue_input(TurnExecution.queued_input()) :: list()
+  defp encode_queue_input({id, revision, content, attachments, nil}),
+    do: [id, revision, encode_term(content), DraftSnapshot.encode_attachments(attachments)]
+
+  defp encode_queue_input({id, revision, content, attachments, source}),
+    do: [
+      id,
+      revision,
+      encode_term(content),
+      DraftSnapshot.encode_attachments(attachments),
+      source
+    ]
+
+  @spec decode_queue_input(term()) :: {:ok, TurnExecution.queued_input()} | {:error, term()}
+  defp decode_queue_input([id, revision, content, attachments]),
+    do: decode_queue_input([id, revision, content, attachments, nil])
+
+  defp decode_queue_input([id, revision, content, attachments, source]) do
+    with {:ok, decoded_content} <- decode_term(content),
+         {:ok, decoded_attachments} <- DraftSnapshot.decode_attachments(attachments) do
+      {:ok, {id, revision, decoded_content, decoded_attachments, source}}
+    end
+  end
+
+  defp decode_queue_input(_invalid), do: {:error, :invalid_pending_inputs}
+
+  @spec decode_queue_receipts(term(), [TurnExecution.queue_receipt()]) ::
+          {:ok, [TurnExecution.queue_receipt()]} | :invalid
+  defp decode_queue_receipts([], acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_queue_receipts([[id, submission_id, kind, revision] | rest], acc)
+       when is_integer(id) and is_binary(submission_id) and kind in ["steering", "follow_up"] and
+              is_integer(revision) and revision > 0 do
+    kind = if kind == "steering", do: :steering, else: :follow_up
+    decode_queue_receipts(rest, [{id, submission_id, kind, revision} | acc])
+  end
+
+  defp decode_queue_receipts(_invalid, _acc), do: :invalid
 
   @doc "Encodes a continuation boundary and any in-flight effect checkpoint into JSON-safe values."
   @spec encode(Continuation.t()) :: map()
@@ -269,7 +356,7 @@ defmodule MingaAgent.Session.ContinuationCodec do
   defp encode_checkpoint(nil), do: nil
 
   defp encode_checkpoint(checkpoint) do
-    %{
+    fields = %{
       "version" => checkpoint.version,
       "checkpoint_id" => checkpoint.checkpoint_id,
       "request_id" => checkpoint.request_id,
@@ -277,6 +364,11 @@ defmodule MingaAgent.Session.ContinuationCodec do
       "calls" => Enum.map(checkpoint.calls, &encode_checkpoint_call/1),
       "epoch_id" => encode_term(Map.get(checkpoint, :epoch_id, :unknown))
     }
+
+    case checkpoint do
+      %{version: 2, steering: steering} -> Map.put(fields, "steering", encode_term(steering))
+      %{version: 1} -> fields
+    end
   end
 
   @spec encode_checkpoint_call(Continuation.checkpoint_call()) :: map()
@@ -302,26 +394,28 @@ defmodule MingaAgent.Session.ContinuationCodec do
 
   defp decode_checkpoint(
          %{
-           "version" => 1,
+           "version" => version,
            "checkpoint_id" => checkpoint_id,
            "request_id" => request_id,
            "messages" => encoded_messages,
            "calls" => encoded_calls
          } = encoded
        )
-       when is_binary(checkpoint_id) and is_binary(request_id) and is_list(encoded_calls) do
+       when version in [1, 2] and is_binary(checkpoint_id) and is_binary(request_id) and
+              is_list(encoded_calls) do
     with {:ok, messages} <- decode_terms(encoded_messages),
          {:ok, calls} <- decode_list(encoded_calls, &decode_checkpoint_call/1),
          {:ok, epoch_id} <- decode_epoch(encoded) do
-      {:ok,
-       %{
-         version: 1,
-         checkpoint_id: checkpoint_id,
-         request_id: request_id,
-         messages: messages,
-         calls: calls,
-         epoch_id: epoch_id
-       }}
+      checkpoint = %{
+        version: version,
+        checkpoint_id: checkpoint_id,
+        request_id: request_id,
+        messages: messages,
+        calls: calls,
+        epoch_id: epoch_id
+      }
+
+      decode_checkpoint_steering(checkpoint, encoded)
     end
   end
 
@@ -329,6 +423,21 @@ defmodule MingaAgent.Session.ContinuationCodec do
     do: {:error, {:unknown_tool_checkpoint_version, version}}
 
   defp decode_checkpoint(_checkpoint), do: {:error, :invalid_tool_checkpoint}
+
+  @spec decode_checkpoint_steering(Continuation.tool_checkpoint(), map()) ::
+          {:ok, Continuation.tool_checkpoint()} | {:error, :invalid_steering}
+  defp decode_checkpoint_steering(%{version: 1} = checkpoint, encoded)
+       when not is_map_key(encoded, "steering"),
+       do: {:ok, checkpoint}
+
+  defp decode_checkpoint_steering(%{version: 2} = checkpoint, %{"steering" => encoded}) do
+    case decode_terms(encoded) do
+      {:ok, steering} -> {:ok, Map.put(checkpoint, :steering, steering)}
+      {:error, _reason} -> {:error, :invalid_steering}
+    end
+  end
+
+  defp decode_checkpoint_steering(_checkpoint, _encoded), do: {:error, :invalid_steering}
 
   @spec decode_checkpoint_call(term()) ::
           {:ok, Continuation.checkpoint_call()} | {:error, term()}

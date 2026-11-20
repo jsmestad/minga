@@ -50,7 +50,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
       text = ProviderRequest.text(request)
       ProviderRequest.emit(state.subscriber, request, %Event.AgentStart{})
       ProviderRequest.emit(state.subscriber, request, %Event.TextDelta{delta: text})
-      notify_prompt_observer(state.prompt_observer, text)
+      notify_prompt_observer(state.prompt_observer, text, request)
       {:reply, :ok, state}
     end
 
@@ -58,8 +58,10 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     def handle_cast(:abort, state), do: {:noreply, state}
     def handle_cast(:new_session, state), do: {:noreply, state}
 
-    defp notify_prompt_observer(nil, _text), do: :ok
-    defp notify_prompt_observer(pid, text), do: send(pid, {:steering_provider_prompt, text})
+    defp notify_prompt_observer(nil, _text, _request), do: :ok
+
+    defp notify_prompt_observer(pid, text, request),
+      do: send(pid, {:steering_provider_prompt, text, request})
   end
 
   defmodule ReplayProvider do
@@ -501,7 +503,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :ok = Store.close(db)
   end
 
-  test "dequeued steering prompts are recorded with content", %{tmp_dir: tmp_dir} do
+  test "steering carried into a follow-up turn is recorded with content", %{tmp_dir: tmp_dir} do
     log_name = unique_name("steering-log")
 
     log_pid =
@@ -522,10 +524,11 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     :sys.get_state(session)
     assert :ok = Session.send_prompt(session, "first")
-    assert_receive {:steering_provider_prompt, "first"}
+    assert_receive {:steering_provider_prompt, "first", request}
     wait_for_status(session, :thinking)
     assert {:queued, :steering} = Session.send_prompt(session, "while busy")
-    assert ["while busy"] = Session.dequeue_steering(session)
+    Minga.Test.ProviderRequest.complete(session, request, "first response")
+    assert_receive {:steering_provider_prompt, "while busy", _request}
     db = open_read_connection!(tmp_dir, log_pid)
     user_texts = wait_for_user_texts(db, "steering-session", session, log_pid)
 

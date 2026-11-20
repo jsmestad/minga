@@ -1604,7 +1604,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @doc "Refreshes editor state after SessionManager restarts a managed session."
   @spec handle_agent_session_restarted(state(), String.t(), pid(), pid(), term()) :: state()
-  def handle_agent_session_restarted(state, _session_id, old_pid, new_pid, reason) do
+  def handle_agent_session_restarted(state, session_id, old_pid, new_pid, reason) do
     state = Workflow.ensure_available(state)
 
     {runtime, _handled?, persistence_changes} =
@@ -1619,7 +1619,10 @@ defmodule MingaEditor.Commands.BufferManagement do
     runtime = persist_shell_changes(runtime, persistence_changes)
 
     state = %{state | shell_runtime: runtime}
-    maybe_rebuild_active_agent_after_restart(state, new_pid)
+
+    state
+    |> maybe_rebuild_active_agent_after_restart(new_pid)
+    |> MingaEditor.Agent.DraftWorkflow.reconcile_restarted_queue(session_id, old_pid, new_pid)
   end
 
   @spec update_active_shell_session_down(state(), pid(), term()) :: {state(), boolean()}

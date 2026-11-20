@@ -24,6 +24,12 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, session_pid, {:display_status_changed, status}),
     do: StatusEventWorkflow.display_status_changed(state, session_pid, status)
 
+  def dispatch(%EditorState{} = state, session_pid, {:queue_target_changed, target}),
+    do: StatusEventWorkflow.queue_target_changed(state, session_pid, target)
+
+  def dispatch(%EditorState{} = state, session_pid, {:stop_target_changed, target}),
+    do: StatusEventWorkflow.stop_target_changed(state, session_pid, target)
+
   def dispatch(%EditorState{} = state, _session_pid, {:text_delta, _delta} = event),
     do: StreamEventWorkflow.delta(state, event)
 

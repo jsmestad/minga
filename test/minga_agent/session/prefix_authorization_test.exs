@@ -526,6 +526,126 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     {instructions, tools}
   end
 
+  test "reopening at Native's tool handoff restores steering once and leaves Queue Next pending",
+       context do
+    install_write_tool(context)
+
+    assert {:ok, _} =
+             Options.set(context.options_name, :agent_tool_permissions, %{"prefix_write" => :ask})
+
+    session = start_session(context, hold_transport: 2)
+    assert :ok = Session.send_prompt(session, "write once")
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: %Target{} = approval_target}}},
+                   @timeout
+
+    assert {:queued, :steering} = Session.send_prompt(session, "steer now")
+    record = Session.session_id(session)
+    opts = [artifact_runtime: context.runtime]
+
+    draft = %DraftSnapshot{
+      text: "after this turn",
+      cursor: {0, 0},
+      paste_blocks: [],
+      attachments: []
+    }
+
+    assert {:ok, 1, attachment} =
+             SessionStore.attach_text(
+               record,
+               0,
+               draft,
+               {:selection, "note.ex", "note.ex", "original bytes"},
+               context.store_dir,
+               opts
+             )
+
+    assert {:ok, target} = Session.queue_target(session, record)
+    token = "queue-submission-token01"
+    shown = [DraftAttachment.identity(attachment)]
+
+    assert {:ok, {2, ^token, :follow_up, 2}} =
+             Session.submit_queued_draft(
+               session,
+               target,
+               :follow_up,
+               {1, token, shown, draft.text},
+               draft.text
+             )
+
+    assert {:ok, 2, nil} = SessionStore.read_presentation(record, context.store_dir, opts)
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
+
+    assert_receive {:transport_request, 2, messages, _options}, @timeout
+
+    assert %ReqLLM.Message{role: :user, content: [%{text: "steer now"}]} = List.last(messages)
+
+    refute Enum.any?(messages, fn message ->
+             Enum.any?(message.content || [], &match?(%{text: "after this turn"}, &1))
+           end)
+
+    assert :ok = stop_supervised!({:session, context.suffix})
+    restored = start_session(context, tool_call?: false)
+    assert :ok = Session.load_session(restored, record)
+
+    assert {[], [[%{text: "after this turn"}, %{text: retained}]]} =
+             Session.get_queued_messages(restored)
+
+    assert retained =~ "original bytes"
+
+    assert {:ok, saved} =
+             SessionStore.load(record, context.store_dir, artifact_runtime: context.runtime)
+
+    assert saved.continuation.tool_checkpoint == nil
+
+    assert Enum.count(saved.continuation.messages, fn
+             %ReqLLM.Message{role: :user, content: [%{text: "steer now"}]} -> true
+             _ -> false
+           end) == 1
+
+    refute_receive {:transport_request, 3, _, _}, 0
+
+    newer = %DraftSnapshot{draft | text: "new composer text", cursor: {0, 4}}
+    assert {:ok, 3} = SessionStore.save_presentation(record, 2, newer, context.store_dir, opts)
+    stale_recall = make_ref()
+
+    assert :ok =
+             Session.request_composer_draft(
+               restored,
+               record,
+               stale_recall,
+               {:recall, 2, newer, :keep_running}
+             )
+
+    assert_receive {:composer_draft_result, ^restored, ^record, ^stale_recall,
+                    {:error, {:stale_draft_revision, 3}}},
+                   @timeout
+
+    current = %DraftSnapshot{newer | text: "not yet autosaved"}
+    recall = make_ref()
+
+    assert :ok =
+             Session.request_composer_draft(
+               restored,
+               record,
+               recall,
+               {:recall, 3, current, :keep_running}
+             )
+
+    assert_receive {:composer_draft_result, ^restored, ^record, ^recall, {:ok, 4, recalled}},
+                   @timeout
+
+    assert recalled.text == "after this turn\n\nnot yet autosaved"
+    assert recalled.cursor == {2, 4}
+    assert recalled.attachments == [attachment]
+    assert Session.get_queued_messages(restored) == {[], []}
+    assert {:ok, 4, ^recalled} = SessionStore.read_presentation(record, context.store_dir, opts)
+
+    assert {:ok, ^attachment, "original bytes"} =
+             SessionStore.read_draft_attachment(record, hd(shown), context.store_dir, opts)
+  end
+
   test "revocation during approval is an ordinary durable refusal, not a storage failure",
        context do
     install_write_tool(context)
@@ -2787,6 +2907,14 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     client = fn model, messages, options ->
       count = :atomics.add_get(calls, 1, 1)
       send(owner, {:transport_request, count, messages, options})
+
+      if Keyword.get(opts, :hold_transport) == count do
+        receive do
+          :release_transport -> :ok
+        after
+          @timeout -> raise "test did not release Native transport"
+        end
+      end
 
       if Keyword.get(opts, :wire?, false) do
         {:ok, request} =

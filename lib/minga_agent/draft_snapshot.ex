@@ -87,6 +87,50 @@ defmodule MingaAgent.DraftSnapshot do
     for {_kind, _source, _label, _revision, {:snapshot, reference}} <- attachments, do: reference
   end
 
+  @doc "Encodes the canonical captured attachment fields for another owner in the same saved record."
+  @spec encode_attachments([attachment()]) :: [map()]
+  def encode_attachments(attachments), do: Enum.map(attachments, &encode_attachment/1)
+
+  @doc "Restores a bounded list of attachment identities and captured references."
+  @spec decode_attachments(term()) :: {:ok, [attachment()]} | {:error, term()}
+  def decode_attachments(attachments) when is_list(attachments) do
+    with :ok <- validate_sizes("", [], attachments) do
+      decode_list(attachments, &decode_attachment/1)
+    end
+  end
+
+  def decode_attachments(_invalid), do: {:error, :invalid_draft_snapshot}
+
+  @doc "Recalls text and exact captured attachments ahead of the saved composer without moving the caret within its prior text."
+  @spec prepend_recalled(t() | nil, iodata(), [attachment()]) ::
+          {:ok, t()} | {:error, :draft_too_large}
+  def prepend_recalled(nil, prefix, attachments) do
+    empty = %__MODULE__{text: "", cursor: {0, 0}, paste_blocks: [], attachments: []}
+    prepend_recalled(empty, prefix, attachments)
+  end
+
+  def prepend_recalled(%__MODULE__{} = draft, prefix, attachments) do
+    prefix_size = IO.iodata_length(prefix)
+    separator = if draft.text == "" or prefix_size == 0, do: "", else: "\n\n"
+    added_bytes = prefix_size + byte_size(separator)
+
+    if added_bytes + byte_size(draft.text) <= @max_inline_bytes do
+      text = IO.iodata_to_binary([prefix, separator, draft.text])
+      {line, column} = draft.cursor
+      offset = length(:binary.matches(text, "\n", scope: {0, added_bytes}))
+
+      {:ok,
+       %{
+         draft
+         | text: text,
+           cursor: {line + offset, column},
+           attachments: attachments ++ draft.attachments
+       }}
+    else
+      {:error, :draft_too_large}
+    end
+  end
+
   @spec checked_encoding(map()) ::
           {:ok, map()} | {:error, :invalid_draft_snapshot | :draft_too_large}
   defp checked_encoding(encoded) do

@@ -120,6 +120,8 @@ While a tool waits for a decision, the workspace shows **Awaiting approval**, no
 
 Stopping a tool already admitted for execution may leave its outcome indeterminate. Minga retains captured output and does not claim that Stop rolled back its effects.
 
+The Stop button applies only to the turn shown in the workspace. If that turn has already ended, Minga leaves a newer turn and its pending prompts alone.
+
 The header's Help and model controls work without typing commands into your draft, including when the file tree has focus. While Help is open, `Esc` or `?` closes Help before changing the composer's mode or focus. Typing, Enter, and paste cannot edit or submit the covered draft.
 
 In the terminal, use Up/Down, Page Up/Page Down, Home, or End to navigate long Help. The mouse wheel also scrolls Help from the details rail; the composer keeps its own scrolling. Native transcript controls behind Help do not accept pointer or accessibility activation.

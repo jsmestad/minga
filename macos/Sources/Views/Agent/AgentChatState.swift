@@ -499,6 +499,7 @@ public final class AgentChatState {
     public private(set) var draftAttachmentCount: UInt8 = 0
     public private(set) var draftAttachmentOffer: UInt64 = 0
     public private(set) var question: AgentQuestionOffer?
+    public private(set) var stopTarget: AgentStopTarget?
     /// Production font pitch projected only at accepted editor-frame publication.
     public private(set) var promptRowPitch: CGFloat = 0
 
@@ -557,7 +558,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -572,6 +573,7 @@ public final class AgentChatState {
         self.draftAttachmentCount = draftAttachmentCount
         self.draftAttachmentOffer = draftAttachmentOffer
         self.question = question
+        self.stopTarget = stopTarget
         self.promptVersion += 1
     }
 
@@ -740,6 +742,7 @@ public final class AgentChatState {
         draftAttachmentCount = 0
         draftAttachmentOffer = 0
         question = nil
+        stopTarget = nil
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: [],
