@@ -123,7 +123,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     result =
-      with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with :ok <- validate_artifact_opts(opts) do
         with_record_workflow(path, fn -> commit_conversation(path, id, data, opts) end)
       end
 
@@ -143,7 +143,7 @@ defmodule MingaAgent.SessionStore do
   def rename_conversation(id, title, config_dir, opts) when is_binary(id) and is_binary(title) do
     with :ok <- validate_presentation_id(id),
          {:ok, title} <- normalize_title(title),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       path = session_record_path(id, config_dir)
 
       with_record_workflow(path, fn -> rename_record(path, id, title, opts) end)
@@ -210,7 +210,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn ->
         commit_submitted_draft(path, id, data, expected, opts)
       end)
@@ -253,7 +253,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn -> read_committed_presentation(path, id, opts) end)
     end
   end
@@ -275,7 +275,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn -> fetch_draft_attachment(path, id, identity, opts) end)
     end
   end
@@ -308,7 +308,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn -> resolve_shown_attachments(path, id, shown, opts) end)
     end
   end
@@ -388,7 +388,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options},
+         :ok <- validate_artifact_opts(opts),
          {:ok, encoded_draft} <- encode_draft(draft) do
       with_record_workflow(path, fn ->
         commit_presentation(path, id, expected, encoded_draft, opts, mode)
@@ -409,7 +409,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(id, config_dir)
 
     with :ok <- validate_presentation_id(id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn ->
         attach_text_at_revision(path, id, expected, draft, snapshot, opts)
       end)
@@ -886,10 +886,13 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec valid_artifact_opts?(term()) :: boolean()
-  defp valid_artifact_opts?(opts) do
-    Keyword.keyword?(opts) and
-      Keyword.keys(opts) -- [:artifact_runtime, :fault_injector] == []
+  @spec validate_artifact_opts(term()) :: :ok | {:error, :invalid_artifact_options}
+  defp validate_artifact_opts(opts) do
+    if Keyword.keyword?(opts) and Keyword.keys(opts) -- [:artifact_runtime, :fault_injector] == [] do
+      :ok
+    else
+      {:error, :invalid_artifact_options}
+    end
   end
 
   @spec fault_injector(keyword()) :: FaultInjector.t()
@@ -1144,7 +1147,7 @@ defmodule MingaAgent.SessionStore do
     path = session_record_path(session_id, config_dir)
 
     with :ok <- validate_presentation_id(session_id),
-         true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+         :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn -> load_record(path, session_id, opts) end)
     end
   end
@@ -1599,7 +1602,7 @@ defmodule MingaAgent.SessionStore do
       when is_binary(session_id) and is_list(opts) do
     path = session_record_path(session_id, config_dir)
 
-    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+    with :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn -> delete_record(path, session_id, opts) end)
     end
   end
@@ -1658,7 +1661,7 @@ defmodule MingaAgent.SessionStore do
     id = String.trim_trailing(file, ".json")
 
     result =
-      with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+      with :ok <- validate_artifact_opts(opts) do
         with_record_workflow(path, fn -> clear_history_record(path, id, opts) end)
       end
 
@@ -1701,7 +1704,7 @@ defmodule MingaAgent.SessionStore do
   defp prune_one(id, config_dir, cutoff, opts) do
     path = session_record_path(id, config_dir)
 
-    with true <- valid_artifact_opts?(opts) || {:error, :invalid_artifact_options} do
+    with :ok <- validate_artifact_opts(opts) do
       with_record_workflow(path, fn -> prune_record(path, id, cutoff, opts) end)
     end
   end

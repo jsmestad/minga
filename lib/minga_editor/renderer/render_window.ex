@@ -361,25 +361,21 @@ defmodule MingaEditor.Renderer.RenderWindow do
   @spec resident_build(t()) :: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
   def resident_build(%__MODULE__{render_cache: cache}), do: RenderCache.resident_build(cache)
 
-  @doc "Stores the current frame's residence build state for incremental reuse next frame (#2658)."
-  @spec put_resident_build(t(), MingaEditor.RenderModel.Window.ResidentBuild.t() | nil) :: t()
-  def put_resident_build(%__MODULE__{render_cache: cache} = window, state) do
-    %{window | render_cache: RenderCache.put_resident_build(cache, state)}
-  end
-
   @doc "Returns the persistent resident semantic state."
   @spec resident_semantic_state(t()) ::
           MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
   def resident_semantic_state(%__MODULE__{render_cache: cache}),
     do: RenderCache.resident_semantic_state(cache)
 
-  @doc "Stores the current resident semantic state."
-  @spec put_resident_semantic_state(
+  @doc "Records the completed resident build and consumes its pending inputs."
+  @spec complete_resident_build(
           t(),
-          MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
+          MingaEditor.RenderModel.Window.ResidentBuild.t(),
+          MingaEditor.RenderModel.Window.ResidentSemanticState.t()
         ) :: t()
-  def put_resident_semantic_state(%__MODULE__{render_cache: cache} = window, state) do
-    %{window | render_cache: RenderCache.put_resident_semantic_state(cache, state)}
+  @spec complete_resident_build(t(), nil, nil) :: t()
+  def complete_resident_build(%__MODULE__{render_cache: cache} = window, build, semantics) do
+    %{window | render_cache: RenderCache.complete_resident_build(cache, build, semantics)}
   end
 
   @doc "Returns the renderer-owned immutable text presentation for this window."

@@ -182,6 +182,15 @@ defmodule Minga.Core.DiffViewTest do
     end
   end
 
+  test "tracks inclusive hunk endpoints across folded context in both layouts" do
+    unchanged = Enum.map_join(1..8, "\n", &"unchanged #{&1}")
+    base = "old first\n#{unchanged}\nold last"
+    current = "new first\n#{unchanged}\nnew last"
+
+    assert DiffView.build(base, current).hunk_lines == [1, 10]
+    assert DiffView.build_side_by_side(base, current).hunk_lines == [0, 8]
+  end
+
   describe "word_changes in metadata" do
     test "modified lines carry word_changes in metadata" do
       base = "line1\nhello world\nline3\n"

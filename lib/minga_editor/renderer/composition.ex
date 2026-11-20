@@ -60,28 +60,6 @@ defmodule MingaEditor.Renderer.Composition do
   end
 
   @doc """
-  Splits text at a display column position (not byte or grapheme index).
-  Handles wide characters (CJK) correctly.
-  """
-  @spec split_text_at_display_col(String.t(), non_neg_integer()) :: {String.t(), String.t()}
-  def split_text_at_display_col(text, display_col) do
-    graphemes = String.graphemes(text)
-
-    {before_acc, after_acc, _} =
-      Enum.reduce(graphemes, {[], [], 0}, fn g, {bef, aft, col} ->
-        w = Unicode.grapheme_width(g)
-
-        if col < display_col do
-          {[g | bef], aft, col + w}
-        else
-          {bef, [g | aft], col + w}
-        end
-      end)
-
-    {before_acc |> Enum.reverse() |> Enum.join(), after_acc |> Enum.reverse() |> Enum.join()}
-  end
-
-  @doc """
   Runs the full composition pipeline on styled segments:
   merge_highlights → apply_conceals → inject_inline_virtual_text.
 
@@ -353,7 +331,7 @@ defmodule MingaEditor.Renderer.Composition do
        )
        when anchor_col < seg_end do
     split_at = anchor_col - col
-    {before_text, after_text} = split_text_at_display_col(seg_text, split_at)
+    {before_text, after_text} = Unicode.split_at_display_col(seg_text, split_at)
     after_part = if after_text != "", do: [{after_text, seg_style}], else: []
     new_acc = after_part ++ Enum.concat(vt.segments, [{before_text, seg_style} | acc])
     do_inject_inline(rest_segs, rest_vts, seg_end, new_acc)
@@ -467,7 +445,7 @@ defmodule MingaEditor.Renderer.Composition do
     else
       replacement_acc = maybe_emit_replacement(ctx.acc, conceal, ctx.col, ctx.line, seg_style)
       drop_cols = conceal_end - ctx.col
-      {_before, after_text} = split_text_at_display_col(seg_text, drop_cols)
+      {_before, after_text} = Unicode.split_at_display_col(seg_text, drop_cols)
 
       if after_text != "" do
         do_apply_conceals(
@@ -504,7 +482,7 @@ defmodule MingaEditor.Renderer.Composition do
          ctx
        ) do
     split_at = conceal_start - ctx.col
-    {before_text, after_text} = split_text_at_display_col(seg_text, split_at)
+    {before_text, after_text} = Unicode.split_at_display_col(seg_text, split_at)
 
     before_acc = if before_text != "", do: [{before_text, seg_style} | ctx.acc], else: ctx.acc
 

@@ -15,6 +15,7 @@ defmodule MingaEditor.Agent.EditTimeline do
   """
 
   alias MingaEditor.Agent.DiffSnapshot
+  alias MingaEditor.Agent.FileChange
   alias Minga.Git
 
   defmodule Entry do
@@ -64,15 +65,14 @@ defmodule MingaEditor.Agent.EditTimeline do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @spec record_edit(t(), String.t(), String.t(), String.t(), String.t(), String.t()) :: t()
-  def record_edit(
-        %__MODULE__{} = timeline,
-        path,
-        tool_call_id,
-        tool_name,
-        before_content,
-        after_content
-      ) do
+  @spec record_edit(t(), FileChange.t()) :: t()
+  def record_edit(%__MODULE__{} = timeline, %FileChange{
+        path: path,
+        before_content: before_content,
+        after_content: after_content,
+        tool_call_id: tool_call_id,
+        tool_name: tool_name
+      }) do
     before_lines = String.split(before_content, "\n")
     after_lines = String.split(after_content, "\n")
 

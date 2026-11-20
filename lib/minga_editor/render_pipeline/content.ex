@@ -268,8 +268,10 @@ defmodule MingaEditor.RenderPipeline.Content do
       window
       |> Window.put_retained_rows(build_result.retained_rows)
       |> Window.put_retained_wrap_lines(build_result.retained_wrap_lines)
-      |> Window.put_resident_build(build_result.resident_build)
-      |> Window.put_resident_semantic_state(build_result.resident_semantic_state)
+      |> Window.complete_resident_build(
+        build_result.resident_build,
+        build_result.resident_semantic_state
+      )
       |> Window.put_text_presentation(presentation)
       |> Window.put_row_slot_allocator(build_result.row_slot_allocator)
 

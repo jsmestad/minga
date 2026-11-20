@@ -2,7 +2,6 @@ defmodule MingaEditor.Agent.ReviewTargetTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.DiffReview
-  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.ReviewTarget
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -28,14 +27,8 @@ defmodule MingaEditor.Agent.ReviewTargetTest do
     for updated <- [
           state,
           update_preview(state, Preview.scroll_down(preview, 5)),
-          update_preview(
-            state,
-            Preview.refresh_after_write(preview, "other.ex", "other", EditTimeline.new())
-          ),
-          update_preview(
-            state,
-            Preview.refresh_after_write(preview, "selected.ex", "newer", EditTimeline.new())
-          )
+          update_preview(state, Preview.refresh_after_write(preview, "other.ex")),
+          update_preview(state, Preview.refresh_after_write(preview, "selected.ex"))
         ] do
       assert {:ok, {:review, %ReviewTarget{path: "selected.ex"}}} =
                Target.resolve(updated, target)
@@ -43,11 +36,7 @@ defmodule MingaEditor.Agent.ReviewTargetTest do
 
     assert {:error, :target_mismatch} = Target.resolve(state, activation(offer, :review_file))
 
-    stale =
-      update_preview(
-        state,
-        Preview.refresh_after_write(preview, "selected.ex", "newer", EditTimeline.new())
-      )
+    stale = update_preview(state, Preview.refresh_after_write(preview, "selected.ex"))
 
     assert {:ok, {:review, %ReviewTarget{path: "selected.ex", freshness: :stale}}} =
              Target.resolve(stale, activation(offer, :review_file))

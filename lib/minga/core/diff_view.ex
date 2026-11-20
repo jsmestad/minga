@@ -32,6 +32,17 @@ defmodule Minga.Core.DiffView do
           hunk_lines: [non_neg_integer()]
         }
 
+  @typep display_acc :: %{
+           reversed_text: [String.t()],
+           reversed_metadata: [line_meta()],
+           next_row: non_neg_integer(),
+           reversed_hunk_ends: [integer()]
+         }
+
+  @typep unified_hunk_row ::
+           {String.t(), :added | :removed | :context, non_neg_integer() | nil,
+            [Diff.char_range()] | nil}
+
   @typep modified_line_pair ::
            {:paired, String.t(), String.t(), non_neg_integer(), non_neg_integer()}
            | {:unpaired_old, String.t()}
@@ -48,6 +59,8 @@ defmodule Minga.Core.DiffView do
            left_word_changes: [Diff.char_range()] | nil,
            right_word_changes: [Diff.char_range()] | nil
          }
+
+  @empty_display %{reversed_text: [], reversed_metadata: [], next_row: 0, reversed_hunk_ends: []}
 
   @context_lines 3
   @fold_threshold 6
@@ -87,23 +100,15 @@ defmodule Minga.Core.DiffView do
     # Build regions: alternating context and hunk sections
     regions = build_regions(base_lines, current_lines, hunks)
 
-    {display_lines, metadata, hunk_indices} =
-      Enum.reduce(regions, {[], [], []}, fn
-        {:context, ctx_lines, start_orig}, {lines_acc, meta_acc, hunk_acc} ->
-          add_context_with_folding(lines_acc, meta_acc, hunk_acc, ctx_lines, start_orig)
+    regions
+    |> Enum.reduce(@empty_display, fn
+      {:context, ctx_lines, start_orig}, acc ->
+        add_context_with_folding(acc, ctx_lines, start_orig)
 
-        {:hunk, hunk_lines_list}, {lines_acc, meta_acc, hunk_acc} ->
-          display_line_idx = Enum.count(lines_acc)
-          add_hunk_lines(lines_acc, meta_acc, hunk_acc, hunk_lines_list, display_line_idx)
-      end)
-
-    text = Enum.join(display_lines, "\n")
-
-    %{
-      text: text,
-      line_metadata: metadata,
-      hunk_lines: Enum.reverse(hunk_indices)
-    }
+      {:hunk, hunk_rows}, acc ->
+        add_hunk_lines(acc, hunk_rows)
+    end)
+    |> finish_display()
   end
 
   @doc """
@@ -142,124 +147,103 @@ defmodule Minga.Core.DiffView do
   def build_side_by_side_from_hunks(base_lines, current_lines, hunks, pane_width) do
     regions = build_side_by_side_regions(base_lines, current_lines, hunks)
 
-    {display_lines, metadata, hunk_indices} =
-      Enum.reduce(regions, {[], [], []}, fn
-        {:context, ctx_lines, start_orig}, {lines_acc, meta_acc, hunk_acc} ->
-          add_context_side_by_side(
-            lines_acc,
-            meta_acc,
-            hunk_acc,
-            ctx_lines,
-            start_orig,
-            pane_width
-          )
+    regions
+    |> Enum.reduce(@empty_display, fn
+      {:context, ctx_lines, start_orig}, acc ->
+        add_context_side_by_side(acc, ctx_lines, start_orig, pane_width)
 
-        {:hunk, hunk}, {lines_acc, meta_acc, hunk_acc} ->
-          display_line_idx = Enum.count(lines_acc)
-
-          add_hunk_side_by_side(
-            lines_acc,
-            meta_acc,
-            hunk_acc,
-            hunk,
-            current_lines,
-            display_line_idx,
-            pane_width
-          )
-      end)
-
-    %{
-      text: Enum.join(display_lines, "\n"),
-      line_metadata: metadata,
-      hunk_lines: Enum.reverse(hunk_indices)
-    }
+      {:hunk, hunk}, acc ->
+        add_hunk_side_by_side(acc, hunk, current_lines, pane_width)
+    end)
+    |> finish_display()
   end
 
   # ── Private ────────────────────────────────────────────────────────────
 
-  @spec add_hunk_side_by_side(
-          [String.t()],
-          [line_meta()],
-          [non_neg_integer()],
-          Diff.hunk(),
-          [String.t()],
-          non_neg_integer(),
-          pos_integer()
-        ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
-  defp add_hunk_side_by_side(
-         lines_acc,
-         meta_acc,
-         hunk_acc,
-         hunk,
-         current_lines,
-         display_line_idx,
-         pane_width
-       ) do
-    side_lines = build_hunk_side_by_side(hunk, current_lines)
-    hunk_acc = [display_line_idx + Enum.count(side_lines) - 1 | hunk_acc]
-    {hunk_text, hunk_meta} = encode_side_by_side_lines(side_lines, pane_width)
-    {lines_acc ++ hunk_text, meta_acc ++ hunk_meta, hunk_acc}
+  @spec append_row(display_acc(), String.t(), line_meta()) :: display_acc()
+  defp append_row(acc, text, meta) do
+    %{
+      acc
+      | reversed_text: [text | acc.reversed_text],
+        reversed_metadata: [meta | acc.reversed_metadata],
+        next_row: acc.next_row + 1
+    }
   end
 
-  @spec add_context_side_by_side(
-          [String.t()],
-          [line_meta()],
-          [non_neg_integer()],
-          [String.t()],
-          non_neg_integer(),
-          pos_integer()
-        ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
-  defp add_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width) do
-    count = Enum.count(ctx_lines)
+  @spec record_hunk_end(display_acc()) :: display_acc()
+  defp record_hunk_end(acc) do
+    # Even an empty hunk ends at the previous display row.
+    %{acc | reversed_hunk_ends: [acc.next_row - 1 | acc.reversed_hunk_ends]}
+  end
+
+  @spec finish_display(display_acc()) :: diff_view_result()
+  defp finish_display(acc) do
+    %{
+      text: acc.reversed_text |> Enum.reverse() |> Enum.join("\n"),
+      line_metadata: Enum.reverse(acc.reversed_metadata),
+      hunk_lines: Enum.reverse(acc.reversed_hunk_ends)
+    }
+  end
+
+  @spec add_hunk_side_by_side(display_acc(), Diff.hunk(), [String.t()], pos_integer()) ::
+          display_acc()
+  defp add_hunk_side_by_side(acc, hunk, current_lines, pane_width) do
+    hunk
+    |> build_hunk_side_by_side(current_lines)
+    |> Enum.reduce(acc, &append_side_by_side_row(&2, &1, pane_width))
+    |> record_hunk_end()
+  end
+
+  @spec add_context_side_by_side(display_acc(), [String.t()], non_neg_integer(), pos_integer()) ::
+          display_acc()
+  defp add_context_side_by_side(acc, ctx_lines, start_orig, pane_width) do
+    count = length(ctx_lines)
 
     if count > @fold_threshold do
-      add_folded_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width)
+      tail_offset = count - @context_lines
+      fold_count = tail_offset - @context_lines
+
+      acc
+      |> add_context_rows_side_by_side(
+        Enum.take(ctx_lines, @context_lines),
+        start_orig,
+        pane_width
+      )
+      |> append_side_by_side_row(fold_side_by_side_line(fold_count), pane_width)
+      |> add_context_rows_side_by_side(
+        Enum.drop(ctx_lines, tail_offset),
+        start_orig + tail_offset,
+        pane_width
+      )
     else
-      side_lines = context_side_by_side_lines(ctx_lines, start_orig)
-      {text, text_meta} = encode_side_by_side_lines(side_lines, pane_width)
-      {lines ++ text, meta ++ text_meta, hunks}
+      add_context_rows_side_by_side(acc, ctx_lines, start_orig, pane_width)
     end
   end
 
-  @spec add_folded_context_side_by_side(
-          [String.t()],
-          [line_meta()],
-          [non_neg_integer()],
+  @spec add_context_rows_side_by_side(
+          display_acc(),
           [String.t()],
           non_neg_integer(),
           pos_integer()
-        ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
-  defp add_folded_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width) do
-    count = Enum.count(ctx_lines)
-    head = Enum.take(ctx_lines, @context_lines)
-    tail = Enum.take(ctx_lines, -@context_lines)
-    fold_count = count - @context_lines * 2
-    tail_start = start_orig + count - @context_lines
+        ) ::
+          display_acc()
+  defp add_context_rows_side_by_side(acc, [], _original_line, _pane_width), do: acc
 
-    side_lines =
-      context_side_by_side_lines(head, start_orig) ++
-        [fold_side_by_side_line(fold_count)] ++ context_side_by_side_lines(tail, tail_start)
+  defp add_context_rows_side_by_side(acc, [line | rest], original_line, pane_width) do
+    row = %{
+      left: line,
+      right: line,
+      left_type: :context,
+      right_type: :context,
+      original_line: original_line,
+      fold_count: nil,
+      left_word_changes: nil,
+      right_word_changes: nil
+    }
 
-    {text, text_meta} = encode_side_by_side_lines(side_lines, pane_width)
-    {lines ++ text, meta ++ text_meta, hunks}
-  end
-
-  @spec context_side_by_side_lines([String.t()], non_neg_integer()) :: [side_by_side_line()]
-  defp context_side_by_side_lines(ctx_lines, start_orig) do
-    ctx_lines
-    |> Enum.with_index(start_orig)
-    |> Enum.map(fn {line, idx} ->
-      %{
-        left: line,
-        right: line,
-        left_type: :context,
-        right_type: :context,
-        original_line: idx,
-        fold_count: nil,
-        left_word_changes: nil,
-        right_word_changes: nil
-      }
-    end)
+    acc
+    |> append_side_by_side_row(row, pane_width)
+    |> add_context_rows_side_by_side(rest, original_line + 1, pane_width)
   end
 
   @spec fold_side_by_side_line(non_neg_integer()) :: side_by_side_line()
@@ -380,12 +364,11 @@ defmodule Minga.Core.DiffView do
     }
   end
 
-  @spec encode_side_by_side_lines([side_by_side_line()], pos_integer()) ::
-          {[String.t()], [line_meta()]}
-  defp encode_side_by_side_lines(side_lines, pane_width) do
-    side_lines
-    |> Enum.map(&format_side_by_side_line(&1, pane_width))
-    |> Enum.unzip()
+  @spec append_side_by_side_row(display_acc(), side_by_side_line(), pos_integer()) ::
+          display_acc()
+  defp append_side_by_side_row(acc, row, pane_width) do
+    {text, meta} = format_side_by_side_line(row, pane_width)
+    append_row(acc, text, meta)
   end
 
   @spec format_side_by_side_line(side_by_side_line(), pos_integer()) :: {String.t(), line_meta()}
@@ -444,30 +427,20 @@ defmodule Minga.Core.DiffView do
   defp combined_side_by_side_type(_left_type, :added), do: :added
   defp combined_side_by_side_type(_left_type, _right_type), do: :context
 
-  @spec add_hunk_lines(
-          [String.t()],
-          [line_meta()],
-          [non_neg_integer()],
-          list(),
-          non_neg_integer()
-        ) ::
-          {[String.t()], [line_meta()], [non_neg_integer()]}
-  defp add_hunk_lines(lines_acc, meta_acc, hunk_acc, hunk_lines_list, display_line_idx) do
-    hunk_acc = [display_line_idx + Enum.count(hunk_lines_list) - 1 | hunk_acc]
+  @spec add_hunk_lines(display_acc(), [unified_hunk_row()]) :: display_acc()
+  defp add_hunk_lines(acc, hunk_rows) do
+    hunk_rows
+    |> Enum.reduce(acc, fn {text, type, orig_line, word_changes}, acc ->
+      meta = %{
+        type: type,
+        original_line: orig_line,
+        fold_count: nil,
+        word_changes: word_changes
+      }
 
-    {hunk_text, hunk_meta} =
-      Enum.map_reduce(hunk_lines_list, [], fn {text, type, orig_line, word_changes}, meta_acc ->
-        meta = %{
-          type: type,
-          original_line: orig_line,
-          fold_count: nil,
-          word_changes: word_changes
-        }
-
-        {text, [meta | meta_acc]}
-      end)
-
-    {lines_acc ++ hunk_text, meta_acc ++ Enum.reverse(hunk_meta), hunk_acc}
+      append_row(acc, text, meta)
+    end)
+    |> record_hunk_end()
   end
 
   @spec build_regions([String.t()], [String.t()], [Diff.hunk()]) :: [term()]
@@ -523,10 +496,7 @@ defmodule Minga.Core.DiffView do
     end
   end
 
-  @spec build_hunk_display(Diff.hunk(), [String.t()], [String.t()]) :: [
-          {String.t(), :added | :removed | :context, non_neg_integer() | nil,
-           [Diff.char_range()] | nil}
-        ]
+  @spec build_hunk_display(Diff.hunk(), [String.t()], [String.t()]) :: [unified_hunk_row()]
   defp build_hunk_display(%{type: :added} = hunk, _base_lines, current_lines) do
     current_lines
     |> Enum.slice(hunk.start_line..(hunk.start_line + hunk.count - 1))
@@ -675,51 +645,31 @@ defmodule Minga.Core.DiffView do
     2.0 * equal_len / (old_len + new_len)
   end
 
-  @spec add_context_with_folding(
-          [String.t()],
-          [line_meta()],
-          [non_neg_integer()],
-          [String.t()],
-          non_neg_integer()
-        ) ::
-          {[String.t()], [line_meta()], [non_neg_integer()]}
-  defp add_context_with_folding(lines, meta, hunks, ctx_lines, start_orig) do
-    count = Enum.count(ctx_lines)
+  @spec add_context_with_folding(display_acc(), [String.t()], non_neg_integer()) :: display_acc()
+  defp add_context_with_folding(acc, ctx_lines, start_orig) do
+    count = length(ctx_lines)
 
     if count > @fold_threshold do
-      # Show first @context_lines, fold, show last @context_lines
-      head = Enum.take(ctx_lines, @context_lines)
-      tail = Enum.take(ctx_lines, -@context_lines)
-      fold_count = count - @context_lines * 2
-
-      head_meta =
-        Enum.with_index(head, start_orig)
-        |> Enum.map(fn {_line, idx} ->
-          %{type: :context, original_line: idx, fold_count: nil, word_changes: nil}
-        end)
-
-      fold_meta = [%{type: :fold, original_line: nil, fold_count: fold_count, word_changes: nil}]
-
-      tail_start = start_orig + count - @context_lines
-
-      tail_meta =
-        Enum.with_index(tail, tail_start)
-        |> Enum.map(fn {_line, idx} ->
-          %{type: :context, original_line: idx, fold_count: nil, word_changes: nil}
-        end)
-
+      tail_offset = count - @context_lines
+      fold_count = tail_offset - @context_lines
       fold_text = "  #{fold_count} unchanged lines"
+      fold_meta = %{type: :fold, original_line: nil, fold_count: fold_count, word_changes: nil}
 
-      {lines ++ head ++ [fold_text] ++ tail, meta ++ head_meta ++ fold_meta ++ tail_meta, hunks}
+      acc
+      |> add_context_rows(Enum.take(ctx_lines, @context_lines), start_orig)
+      |> append_row(fold_text, fold_meta)
+      |> add_context_rows(Enum.drop(ctx_lines, tail_offset), start_orig + tail_offset)
     else
-      ctx_meta =
-        Enum.with_index(ctx_lines, start_orig)
-        |> Enum.map(fn {_line, idx} ->
-          %{type: :context, original_line: idx, fold_count: nil, word_changes: nil}
-        end)
-
-      {lines ++ ctx_lines, meta ++ ctx_meta, hunks}
+      add_context_rows(acc, ctx_lines, start_orig)
     end
+  end
+
+  @spec add_context_rows(display_acc(), [String.t()], non_neg_integer()) :: display_acc()
+  defp add_context_rows(acc, [], _original_line), do: acc
+
+  defp add_context_rows(acc, [line | rest], original_line) do
+    meta = %{type: :context, original_line: original_line, fold_count: nil, word_changes: nil}
+    acc |> append_row(line, meta) |> add_context_rows(rest, original_line + 1)
   end
 
   @spec split_lines(String.t()) :: [String.t()]

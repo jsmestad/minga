@@ -155,6 +155,30 @@ defmodule Minga.Core.DecorationsTest do
              |> Enum.map(& &1.group)
              |> Enum.uniq() == [:new]
     end
+
+    test "grouped highlights accumulate in batch order with one version bump" do
+      style = Face.new(bg: 0x3E4452)
+      decs = Decorations.highlight_group(Decorations.new(), :search, {0, 0}, {0, 1}, style: style)
+      assert decs.version == 1
+
+      updated =
+        Decorations.batch(decs, fn d ->
+          d
+          |> Decorations.highlight_group(:search, {1, 0}, {1, 1}, style: style)
+          |> Decorations.remove_group(:search)
+          |> Decorations.highlight_group(:search, {2, 0}, {2, 1}, style: style)
+          |> Decorations.highlight_group(:search, {3, 0}, {3, 1}, style: style, priority: 5)
+        end)
+
+      assert updated.version == decs.version + 1
+
+      assert [
+               %{start: {2, 0}, group: :search, id: first},
+               %{start: {3, 0}, group: :search, id: second}
+             ] = Decorations.highlights_for_lines(updated, 0, 3)
+
+      assert is_reference(first) and is_reference(second) and first != second
+    end
   end
 
   describe "highlight queries" do

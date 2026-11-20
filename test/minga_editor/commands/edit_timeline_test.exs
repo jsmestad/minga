@@ -5,6 +5,7 @@ defmodule MingaEditor.Commands.EditTimelineTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.FileEventWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -47,9 +48,27 @@ defmodule MingaEditor.Commands.EditTimelineTest do
 
     timeline =
       EditTimeline.new()
-      |> EditTimeline.record_edit(a, "tc1", "edit", "a0", "a1")
-      |> EditTimeline.record_edit(b, "tc2", "edit", "b0", "b1")
-      |> EditTimeline.record_edit(a, "tc3", "edit", "a1", "a2")
+      |> EditTimeline.record_edit(%FileChange{
+        path: a,
+        before_content: "a0",
+        after_content: "a1",
+        tool_call_id: "tc1",
+        tool_name: "edit"
+      })
+      |> EditTimeline.record_edit(%FileChange{
+        path: b,
+        before_content: "b0",
+        after_content: "b1",
+        tool_call_id: "tc2",
+        tool_name: "edit"
+      })
+      |> EditTimeline.record_edit(%FileChange{
+        path: a,
+        before_content: "a1",
+        after_content: "a2",
+        tool_call_id: "tc3",
+        tool_name: "edit"
+      })
 
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
@@ -154,7 +173,15 @@ defmodule MingaEditor.Commands.EditTimelineTest do
   test "a write while a review is loading retires the acquired revision", %{state: state, a: a} do
     pending = EditTimelineCommands.review_file(state, a)
     outcome = receive_candidate(pending)
-    changed = FileEventWorkflow.changed(pending, a, "a2", "a3", "tc4", "edit")
+
+    changed =
+      FileEventWorkflow.changed(pending, %FileChange{
+        path: a,
+        before_content: "a2",
+        after_content: "a3",
+        tool_call_id: "tc4",
+        tool_name: "edit"
+      })
 
     assert {^changed, %Outcome{value: {:stale, :review_context_changed}} = stale} =
              AgentReview.apply(changed, outcome)

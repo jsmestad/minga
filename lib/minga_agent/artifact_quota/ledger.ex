@@ -160,14 +160,7 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
     SQLite.transaction(
       db,
       fn ->
-        with :ok <- SQLite.execute(db, sql, [namespace, bytes, items, artifacts]),
-             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-             true <- changes == 1 do
-          {:ok, :released}
-        else
-          false -> {:error, :invalid_quota_release}
-          {:error, _reason} = error -> error
-        end
+        mutation(db, sql, [namespace, bytes, items, artifacts], :released, :invalid_quota_release)
       end,
       opts
     )
@@ -190,16 +183,7 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
 
     SQLite.transaction(
       db,
-      fn ->
-        with :ok <- SQLite.execute(db, sql, [namespace]),
-             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-             true <- changes == 1 do
-          {:ok, :finished}
-        else
-          false -> {:error, :invalid_open_capture_release}
-          {:error, _reason} = error -> error
-        end
-      end,
+      fn -> mutation(db, sql, [namespace], :finished, :invalid_open_capture_release) end,
       opts
     )
   end
@@ -228,16 +212,7 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
 
     SQLite.transaction(
       db,
-      fn ->
-        with :ok <- SQLite.execute(db, sql, [namespace, bytes, items]),
-             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-             true <- changes == 1 do
-          {:ok, :canceled}
-        else
-          false -> {:error, :invalid_quota_release}
-          {:error, _reason} = error -> error
-        end
-      end,
+      fn -> mutation(db, sql, [namespace, bytes, items], :canceled, :invalid_quota_release) end,
       opts
     )
   end
@@ -286,29 +261,20 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
 
     SQLite.transaction(
       db,
-      fn ->
-        with :ok <- SQLite.execute(db, sql, [namespace]),
-             {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
-             true <- changes == 1 do
-          {:ok, :deleted}
-        else
-          false -> {:error, :namespace_not_empty}
-          {:error, _reason} = error -> error
-        end
-      end,
+      fn -> mutation(db, sql, [namespace], :deleted, :namespace_not_empty) end,
       opts
     )
   end
 
-  @spec mutation(db(), String.t(), [term()], value) :: {:ok, value} | {:error, term()}
+  @spec mutation(db(), String.t(), [term()], value, atom()) :: {:ok, value} | {:error, term()}
         when value: term()
-  defp mutation(db, sql, params, value) do
+  defp mutation(db, sql, params, value, rejection \\ :quota_row_not_found) do
     with :ok <- SQLite.execute(db, sql, params),
          {:ok, [[changes]]} <- SQLite.query(db, "SELECT changes()"),
          true <- changes == 1 do
       {:ok, value}
     else
-      false -> {:error, :quota_row_not_found}
+      false -> {:error, rejection}
       {:error, _reason} = error -> error
     end
   end

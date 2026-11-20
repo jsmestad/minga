@@ -164,7 +164,7 @@ defmodule MingaEditor.EffectScheduler.LaneTest do
            ]
   end
 
-  test "coalescing full queue replaces only the tail and marks the older tail stale" do
+  test "coalescing a full queue replaces only the tail regardless of scheduler capacity" do
     policy = Policy.coalescing(1)
     running = request(:running, :resource, policy)
     older = request(:older, :resource, policy)
@@ -172,16 +172,18 @@ defmodule MingaEditor.EffectScheduler.LaneTest do
     {{:ok, _, :running}, lane, _actions} = Lane.admit(nil, running, true)
     {{:ok, _, :queued}, lane, _actions} = Lane.admit(lane, older, true)
 
-    assert {{:ok, newer_id, :queued}, lane,
-            [{:terminal, ^older, {:stale, :coalesced}}, {:queue, positions}]} =
-             Lane.admit(lane, newer, true)
+    for capacity? <- [true, false] do
+      assert {{:ok, newer_id, :queued}, updated,
+              [{:terminal, ^older, {:stale, :coalesced}}, {:queue, positions}]} =
+               Lane.admit(lane, newer, capacity?)
 
-    assert newer_id == newer.id
-    assert lane.running == running
-    assert [%Request{id: id, effect: effect}] = :queue.to_list(lane.queue)
-    assert id == newer.id
-    assert effect.payloads == [:older, :newer]
-    assert queue_positions({:queue, positions}) == [{:newer, 1, 1}]
+      assert newer_id == newer.id
+      assert updated.running == running
+      assert [%Request{id: id, effect: effect}] = :queue.to_list(updated.queue)
+      assert id == newer.id
+      assert effect.payloads == [:older, :newer]
+      assert queue_positions({:queue, positions}) == [{:newer, 1, 1}]
+    end
   end
 
   test "finish_current deletes empty lanes or promotes the head while preserving queue storage" do

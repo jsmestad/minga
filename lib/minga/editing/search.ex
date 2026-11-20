@@ -133,13 +133,13 @@ defmodule Minga.Editing.Search do
   def find_next(content, pattern, cursor, :forward, opts) do
     lines = :binary.split(content, "\n", [:global])
     matcher = compile_matcher(pattern, opts)
-    find_forward(lines, matcher, cursor, Enum.count(lines))
+    find_forward(lines, matcher, cursor)
   end
 
   def find_next(content, pattern, cursor, :backward, opts) do
     lines = :binary.split(content, "\n", [:global])
     matcher = compile_matcher(pattern, opts)
-    find_backward(lines, matcher, cursor, Enum.count(lines))
+    find_backward(lines, matcher, cursor)
   end
 
   @doc "Returns the exact match at `position`, including its byte length, or nil."
@@ -395,6 +395,7 @@ defmodule Minga.Editing.Search do
         prev_end: 0,
         count: 0,
         output: [],
+        output_size: 0,
         spans: []
       }
 
@@ -418,6 +419,7 @@ defmodule Minga.Editing.Search do
            prev_end: non_neg_integer(),
            count: non_neg_integer(),
            output: iolist(),
+           output_size: non_neg_integer(),
            spans: [replacement_span()]
          }
 
@@ -429,8 +431,9 @@ defmodule Minga.Editing.Search do
   end
 
   defp do_sub_spans_all(line, [{pos, len} | rest], acc) do
-    before = binary_part(line, acc.prev_end, pos - acc.prev_end)
-    new_output_pos = output_byte_size(acc.output) + byte_size(before)
+    prefix_size = pos - acc.prev_end
+    before = binary_part(line, acc.prev_end, prefix_size)
+    new_output_pos = acc.output_size + prefix_size
     new_span = {new_output_pos, acc.rep_len}
 
     new_acc = %{
@@ -438,89 +441,92 @@ defmodule Minga.Editing.Search do
       | prev_end: pos + len,
         count: acc.count + 1,
         output: [acc.rep, before | acc.output],
+        output_size: new_output_pos + acc.rep_len,
         spans: [new_span | acc.spans]
     }
 
     do_sub_spans_all(line, rest, new_acc)
   end
 
-  @spec output_byte_size(iolist()) :: non_neg_integer()
-  defp output_byte_size(acc), do: :erlang.iolist_size(Enum.reverse(acc))
-
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  @spec find_forward([String.t()], matcher(), position(), non_neg_integer()) ::
-          position() | nil
-  defp find_forward(lines, matcher, {cur_line, cur_col}, total) do
-    case search_from(lines, matcher, cur_line, cur_col + 1, total) do
-      nil -> search_from(lines, matcher, 0, 0, min(cur_line + 1, total))
+  @spec find_forward([String.t()], matcher(), position()) :: position() | nil
+  defp find_forward(lines, matcher, {cur_line, cur_col}) do
+    case search_forward(Enum.drop(lines, cur_line), matcher, cur_line, max(cur_col + 1, 0), :end) do
+      nil -> search_forward(lines, matcher, 0, 0, cur_line + 1)
       pos -> pos
     end
   end
 
-  @spec find_backward([String.t()], matcher(), position(), non_neg_integer()) ::
-          position() | nil
-  defp find_backward(lines, matcher, {cur_line, cur_col}, total) do
-    case search_backward_from(lines, matcher, cur_line, cur_col - 1) do
-      nil -> search_backward_from(lines, matcher, total - 1, :end)
-      pos -> pos
-    end
-  end
-
-  @spec search_from(
+  @spec search_forward(
           [String.t()],
           matcher(),
           non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: position() | nil
-  defp search_from(_lines, _matcher, line, _col, total) when line >= total, do: nil
-
-  defp search_from(lines, matcher, line, col, total) do
-    line_text = Enum.at(lines, line)
-    start_byte = max(col, 0)
-
-    if start_byte >= byte_size(line_text) do
-      search_from(lines, matcher, line + 1, 0, total)
-    else
-      searchable = binary_part(line_text, start_byte, byte_size(line_text) - start_byte)
-
-      case match_in(searchable, matcher) do
-        {pos, _len} -> {line, start_byte + pos}
-        nil -> search_from(lines, matcher, line + 1, 0, total)
-      end
-    end
-  end
-
-  @spec search_backward_from(
-          [String.t()],
-          matcher(),
           non_neg_integer(),
           non_neg_integer() | :end
         ) :: position() | nil
-  defp search_backward_from(_lines, _matcher, line, _col) when line < 0, do: nil
+  defp search_forward([], _matcher, _line, _col, _stop_line), do: nil
+  defp search_forward(_lines, _matcher, line, _col, line), do: nil
 
-  defp search_backward_from(lines, matcher, line, max_col) do
-    line_text = Enum.at(lines, line)
+  defp search_forward([line_text | rest], matcher, line, col, stop_line)
+       when col >= byte_size(line_text) do
+    search_forward(rest, matcher, line + 1, 0, stop_line)
+  end
 
-    all_matches = matches_in(line_text, matcher)
+  defp search_forward([line_text | rest], matcher, line, col, stop_line) do
+    searchable = binary_part(line_text, col, byte_size(line_text) - col)
 
-    upper =
-      case max_col do
-        :end -> byte_size(line_text)
-        n -> n
-      end
-
-    valid = Enum.filter(all_matches, fn {pos, _len} -> pos < upper end)
-
-    case valid do
-      [] ->
-        search_backward_from(lines, matcher, line - 1, :end)
-
-      matches ->
-        {last_pos, _len} = Enum.at(matches, -1)
-        {line, last_pos}
+    case match_in(searchable, matcher) do
+      {pos, _len} -> {line, col + pos}
+      nil -> search_forward(rest, matcher, line + 1, 0, stop_line)
     end
+  end
+
+  @spec find_backward([String.t()], matcher(), position()) :: position() | nil
+  defp find_backward(lines, matcher, {cur_line, cur_col}) do
+    # A match on the cursor line needs no reversed lines.
+    line_text = Enum.at(lines, cur_line)
+
+    case last_match_before(matches_in(line_text, matcher), cur_col - 1, nil) do
+      nil ->
+        search_backward(reverse_prefix(lines, cur_line, []), matcher, cur_line - 1) ||
+          search_backward(Enum.reverse(lines), matcher, length(lines) - 1)
+
+      col ->
+        {cur_line, col}
+    end
+  end
+
+  @spec reverse_prefix([String.t()], non_neg_integer(), [String.t()]) :: [String.t()]
+  defp reverse_prefix(_lines, 0, acc), do: acc
+
+  defp reverse_prefix([line | rest], count, acc) do
+    reverse_prefix(rest, count - 1, [line | acc])
+  end
+
+  @spec search_backward([String.t()], matcher(), integer()) :: position() | nil
+  defp search_backward([], _matcher, _line), do: nil
+
+  defp search_backward([line_text | rest], matcher, line) do
+    case last_match_before(matches_in(line_text, matcher), byte_size(line_text), nil) do
+      nil -> search_backward(rest, matcher, line - 1)
+      col -> {line, col}
+    end
+  end
+
+  @spec last_match_before(
+          [{non_neg_integer(), non_neg_integer()}],
+          integer(),
+          non_neg_integer() | nil
+        ) :: non_neg_integer() | nil
+  defp last_match_before([], _upper, last), do: last
+
+  defp last_match_before([{pos, _len} | rest], upper, _last) when pos < upper do
+    last_match_before(rest, upper, pos)
+  end
+
+  defp last_match_before([_match | rest], upper, last) do
+    last_match_before(rest, upper, last)
   end
 
   # ── Private — word helpers ────────────────────────────────────────────────

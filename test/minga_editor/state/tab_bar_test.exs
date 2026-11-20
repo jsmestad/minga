@@ -612,6 +612,37 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.get(tb, agent.id).payload.agent_status == :idle
     end
 
+    test "ending a session reprojects owned groups and clears only matching orphan tabs" do
+      session = self()
+      other_session = spawn(fn -> :ok end)
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, workspace} = TabBar.add_workspace(tb, "Owned", session)
+      {tb, grouped} = TabBar.insert(tb, :agent, "Stale projection")
+      {tb, orphan} = TabBar.insert(tb, :agent, "Matching orphan")
+      {tb, other} = TabBar.insert(tb, :agent, "Unrelated orphan")
+
+      tb = TabBar.move_tab_to_workspace(tb, grouped.id, workspace.id)
+      grouped = TabBar.get(tb, grouped.id)
+      stale_workspace = Workspace.set_session(workspace, other_session)
+      grouped = Tab.project_agent_lifecycle(grouped, stale_workspace)
+      orphan = Tab.project_agent_lifecycle(orphan, workspace)
+      other = Tab.project_agent_lifecycle(other, stale_workspace)
+
+      updated =
+        tb
+        |> TabBar.accept_tab(grouped)
+        |> TabBar.accept_tab(orphan)
+        |> TabBar.accept_tab(other)
+        |> TabBar.session_ended(session, :error)
+
+      assert %{session: nil, agent_status: :error} =
+               TabBar.get_workspace(updated, workspace.id).payload
+
+      assert %{session: nil, agent_status: :error} = TabBar.get(updated, grouped.id).payload
+      assert %{session: nil, agent_status: :error} = TabBar.get(updated, orphan.id).payload
+      assert TabBar.get(updated, other.id) == other
+    end
+
     test "accept_workspace projects only the stored workspace identity" do
       session = self()
       tb = TabBar.new(file_tab(1, "a.ex"))

@@ -306,14 +306,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         {Face.new(bg: colors.highlight_bg, fg: colors.highlight_fg), -10}
       end
 
-    {_id, decs} =
-      Decorations.add_highlight(decs, {line, col}, {line, col + len},
-        style: style,
-        priority: priority,
-        group: :search
-      )
-
-    decs
+    Decorations.highlight_group(decs, :search, {line, col}, {line, col + len},
+      style: style,
+      priority: priority
+    )
   end
 
   # ── Document highlight decorations ──────────────────────────────────────────
@@ -356,14 +352,14 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         bg = document_highlight_bg(hl.kind, theme)
         style = Face.new(bg: bg)
 
-        {_id, acc} =
-          Decorations.add_highlight(acc, {hl.start_line, hl.start_col}, {hl.end_line, hl.end_col},
-            style: style,
-            priority: -15,
-            group: :document_highlight
-          )
-
-        acc
+        Decorations.highlight_group(
+          acc,
+          :document_highlight,
+          {hl.start_line, hl.start_col},
+          {hl.end_line, hl.end_col},
+          style: style,
+          priority: -15
+        )
       end)
     end)
   end
@@ -432,14 +428,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       d = Decorations.remove_group(d, :cmd_hover_link)
       style = Face.new(fg: cmd_hover_link_color(theme), underline: true)
 
-      {_id, d} =
-        Decorations.add_highlight(d, start_pos, end_pos,
-          style: style,
-          priority: -8,
-          group: :cmd_hover_link
-        )
-
-      d
+      Decorations.highlight_group(d, :cmd_hover_link, start_pos, end_pos,
+        style: style,
+        priority: -8
+      )
     end)
   end
 

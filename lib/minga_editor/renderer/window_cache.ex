@@ -73,6 +73,8 @@ defmodule MingaEditor.Renderer.WindowCache do
   alias Minga.RenderModel.Window.RowDelta
   alias MingaEditor.RenderModel.Window.ReviewLayout
   alias MingaEditor.RenderModel.Window.ReviewProjection
+  alias MingaEditor.RenderModel.Window.ResidentBuild
+  alias MingaEditor.RenderModel.Window.ResidentSemanticState
 
   @type t :: %__MODULE__{
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
@@ -741,25 +743,21 @@ defmodule MingaEditor.Renderer.WindowCache do
   @spec changed_snapshot(t()) :: RenderSnapshot.t() | nil
   def changed_snapshot(%__MODULE__{changed_snapshot: snapshot}), do: snapshot
 
-  @doc "Replaces the persistent residence build state captured by the last frame."
-  @spec put_resident_build(t(), MingaEditor.RenderModel.Window.ResidentBuild.t() | nil) :: t()
-  def put_resident_build(%__MODULE__{} = cache, state) do
+  @doc "Records the resident build and semantic state, consuming inputs even for a windowed build."
+  @spec complete_resident_build(t(), ResidentBuild.t(), ResidentSemanticState.t()) :: t()
+  @spec complete_resident_build(t(), nil, nil) :: t()
+  def complete_resident_build(%__MODULE__{} = cache, build, semantics)
+      when (is_struct(build, ResidentBuild) and is_struct(semantics, ResidentSemanticState)) or
+             (is_nil(build) and is_nil(semantics)) do
     %{
       cache
-      | resident_build: state,
+      | resident_build: build,
+        resident_semantic_state: semantics,
         pending_edit_deltas: [],
         changed_snapshot: nil,
         hydration_reason: nil
     }
   end
-
-  @doc "Stores the persistent resident semantic state from the last build."
-  @spec put_resident_semantic_state(
-          t(),
-          MingaEditor.RenderModel.Window.ResidentSemanticState.t() | nil
-        ) :: t()
-  def put_resident_semantic_state(%__MODULE__{} = cache, state),
-    do: %{cache | resident_semantic_state: state}
 
   @doc "Returns the immutable text presentation produced by the current cache state."
   @spec text_presentation(t()) :: TextPresentation.t() | nil

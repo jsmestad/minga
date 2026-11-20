@@ -128,6 +128,22 @@ defmodule MingaAgent.SessionStoreTest do
              {"Review", JSON.decode!(before)}
   end
 
+  test "rename rejects malformed, unknown, and duplicate artifact options after ID and title validation",
+       %{tmp_dir: dir} do
+    duplicates = [fault_injector: nil, fault_injector: nil]
+
+    for opts <- [[:not_a_keyword], [unknown: nil], duplicates] do
+      assert {:error, :invalid_artifact_options} =
+               SessionStore.rename_conversation("valid-id", "Review", dir, opts)
+    end
+
+    assert {:error, :invalid_session_id} =
+             SessionStore.rename_conversation("..", "", dir, duplicates)
+
+    assert {:error, :invalid_session_title} =
+             SessionStore.rename_conversation("valid-id", "", dir, duplicates)
+  end
+
   describe "draft snapshots" do
     test "selection capture rejects stale writes and keeps exact bytes after interrupted publication",
          %{tmp_dir: dir} do

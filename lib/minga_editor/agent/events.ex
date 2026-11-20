@@ -6,6 +6,7 @@ defmodule MingaEditor.Agent.Events do
   """
 
   alias MingaAgent.ModelSelection
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.FileEventWorkflow
   alias MingaEditor.Agent.SessionEventWorkflow
   alias MingaEditor.Agent.StatusEventWorkflow
@@ -56,14 +57,13 @@ defmodule MingaEditor.Agent.Events do
         _session_pid,
         {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
       ) do
-    FileEventWorkflow.changed(
-      state,
-      path,
-      before_content,
-      after_content,
-      tool_call_id,
-      tool_name
-    )
+    FileEventWorkflow.changed(state, %FileChange{
+      path: path,
+      before_content: before_content,
+      after_content: after_content,
+      tool_call_id: tool_call_id,
+      tool_name: tool_name
+    })
   end
 
   def dispatch(%EditorState{} = state, session_pid, {:approval_pending, approval}),

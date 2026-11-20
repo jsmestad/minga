@@ -5,6 +5,7 @@ defmodule MingaEditor.Layout.GUITest do
   alias MingaEditor.Layout.GUI, as: LayoutGUI
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Frontend.Capabilities
@@ -145,14 +146,13 @@ defmodule MingaEditor.Layout.GUITest do
 
     timeline =
       Enum.reduce(1..count//1, EditTimeline.new(), fn index, timeline ->
-        EditTimeline.record_edit(
-          timeline,
-          "file-#{index}.ex",
-          "call-#{index}",
-          "edit_file",
-          "before",
-          "after"
-        )
+        EditTimeline.record_edit(timeline, %FileChange{
+          path: "file-#{index}.ex",
+          before_content: "before",
+          after_content: "after",
+          tool_call_id: "call-#{index}",
+          tool_name: "edit_file"
+        })
       end)
 
     ui = UIState.replace_edit_timeline(UIState.new(), timeline)

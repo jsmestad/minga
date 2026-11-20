@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
   alias MingaEditor.RenderModel.UI.EditTimelineBuilder
   alias Minga.RenderModel.UI.EditTimeline
   alias MingaEditor.Agent.EditTimeline, as: EditTimelineState
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -23,8 +24,8 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
     test "builds aggregate file entries for multi-file turns without an active buffer path" do
       timeline =
         EditTimelineState.new()
-        |> EditTimelineState.record_edit("lib/a.ex", "tc1", "edit_file", "old\n", "new\n")
-        |> EditTimelineState.record_edit("lib/b.ex", "tc2", "edit_file", "one\n", "one\ntwo\n")
+        |> EditTimelineState.record_edit(file_change("lib/a.ex", "tc1", "old\n", "new\n"))
+        |> EditTimelineState.record_edit(file_change("lib/b.ex", "tc2", "one\n", "one\ntwo\n"))
 
       ctx = context(timeline)
 
@@ -69,8 +70,8 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
 
       timeline =
         EditTimelineState.new()
-        |> EditTimelineState.record_edit(first_path, "shared-call", "edit_file", "old", "first")
-        |> EditTimelineState.record_edit(second_path, "shared-call", "edit_file", "old", "second")
+        |> EditTimelineState.record_edit(file_change(first_path, "shared-call", "old", "first"))
+        |> EditTimelineState.record_edit(file_change(second_path, "shared-call", "old", "second"))
 
       first_model = EditTimelineBuilder.build(context(timeline, first_buffer))
       second_model = EditTimelineBuilder.build(context(timeline, second_buffer))
@@ -91,6 +92,16 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
       assert viewed_model.entries == first_model.entries
       assert viewed_model.generation == first_model.generation
     end
+  end
+
+  defp file_change(path, tool_call_id, before_content, after_content) do
+    %FileChange{
+      path: path,
+      tool_call_id: tool_call_id,
+      tool_name: "edit_file",
+      before_content: before_content,
+      after_content: after_content
+    }
   end
 
   defp context(timeline, buffer \\ nil) do

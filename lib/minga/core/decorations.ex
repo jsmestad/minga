@@ -162,25 +162,45 @@ defmodule Minga.Core.Decorations do
   @spec add_highlight(t(), IntervalTree.position(), IntervalTree.position(), keyword()) ::
           {reference(), t()}
   def add_highlight(%__MODULE__{} = decs, start_pos, end_pos, opts) do
-    id = make_ref()
+    range = new_highlight(start_pos, end_pos, opts, Keyword.get(opts, :group))
+    {range.id, insert_highlight(decs, range)}
+  end
 
-    range = %HighlightRange{
-      id: id,
+  @doc """
+  Adds a highlight to `group` and returns the updated decorations.
+
+  Existing highlights in the group are kept. Accepts the same `:style` and
+  `:priority` options as `add_highlight/4`.
+  """
+  @spec highlight_group(t(), atom(), IntervalTree.position(), IntervalTree.position(), keyword()) ::
+          t()
+  def highlight_group(%__MODULE__{} = decs, group, start_pos, end_pos, opts) do
+    insert_highlight(decs, new_highlight(start_pos, end_pos, opts, group))
+  end
+
+  @spec new_highlight(IntervalTree.position(), IntervalTree.position(), keyword(), atom()) ::
+          HighlightRange.t()
+  defp new_highlight(start_pos, end_pos, opts, group) do
+    %HighlightRange{
+      id: make_ref(),
       start: start_pos,
       end_: end_pos,
       style: Keyword.fetch!(opts, :style),
       priority: Keyword.get(opts, :priority, 0),
-      group: Keyword.get(opts, :group)
+      group: group
     }
+  end
 
+  @spec insert_highlight(t(), HighlightRange.t()) :: t()
+  defp insert_highlight(decs, range) do
     case decs.pending do
       nil ->
         interval = range_to_interval(range)
         new_highlights = IntervalTree.insert(decs.highlights, interval)
-        {id, %{decs | highlights: new_highlights, version: decs.version + 1}}
+        %{decs | highlights: new_highlights, version: decs.version + 1}
 
       pending ->
-        {id, %{decs | pending: [{:add, range} | pending]}}
+        %{decs | pending: [{:add, range} | pending]}
     end
   end
 

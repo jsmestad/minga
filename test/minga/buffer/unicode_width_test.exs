@@ -128,6 +128,17 @@ defmodule Minga.Core.UnicodeWidthTest do
     end
   end
 
+  test "display-column splits round up and keep raw zero-width graphemes" do
+    text = "\t界\u200Be\u0301\t"
+
+    assert Unicode.split_at_display_col(text, 0) == {"", text}
+    assert Unicode.split_at_display_col(text, 1) == {"\t界", "\u200Be\u0301\t"}
+    assert Unicode.split_at_display_col(text, 2) == {"\t界", "\u200Be\u0301\t"}
+    assert Unicode.split_at_display_col(text, 3) == {"\t界\u200Be\u0301", "\t"}
+    assert Unicode.split_at_display_col(text, 4) == {text, ""}
+    assert Unicode.split_at_display_col("", 4) == {"", ""}
+  end
+
   describe "property: width is non-negative and bounded" do
     property "display_width is always non-negative" do
       check all(text <- StreamData.string(:printable, min_length: 0, max_length: 50)) do

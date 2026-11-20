@@ -4,6 +4,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   alias Minga.Git
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Agent.View.Preview
@@ -427,7 +428,13 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
     test "reset_edit_timeline clears entries and hunk projections" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "old", "new")
+        |> EditTimeline.record_edit(%FileChange{
+          path: "lib/foo.ex",
+          before_content: "old",
+          after_content: "new",
+          tool_call_id: "tc1",
+          tool_name: "edit_file"
+        })
         |> EditTimeline.set_viewing("lib/foo.ex", 0)
 
       ui =

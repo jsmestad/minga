@@ -4,7 +4,6 @@ defmodule MingaEditor.Session.AgentPresentationTest do
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Agent.DiffReview
-  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Agent.View.Preview
@@ -72,7 +71,7 @@ defmodule MingaEditor.Session.AgentPresentationTest do
     assert reviewing.windows.tree == tree
     assert %{reviewing | agent_ui: workspace.agent_ui, windows: workspace.windows} == workspace
 
-    stale = Preview.refresh_after_write(preview, "selected.ex", "newer", EditTimeline.new())
+    stale = Preview.refresh_after_write(preview, "selected.ex")
     {:ok, observed} = Preview.observe_review(stale, Preview.review_source(stale), 100, 8)
     stale_ui = UIState.replace_preview(reviewing.agent_ui, observed)
     refreshed = State.set_agent_ui(reviewing, UIState.toggle_help(stale_ui))
@@ -130,7 +129,7 @@ defmodule MingaEditor.Session.AgentPresentationTest do
 
   test "restoring a saved Agent UI keeps its review focus and normalizes incoming pane content" do
     preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
-    stale = Preview.refresh_after_write(preview, "selected.ex", "newer", EditTimeline.new())
+    stale = Preview.refresh_after_write(preview, "selected.ex")
 
     saved =
       UIState.new()

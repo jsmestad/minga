@@ -45,38 +45,29 @@ defmodule MingaEditor.Input.Interrupt do
   @doc "Resets transient editor state to a known-good baseline."
   @spec interrupt(EditorState.t()) :: EditorState.t()
   def interrupt(state) do
-    {new_state, resets} = reset_to_known_good(state)
-    log_resets(new_state, resets)
+    {state, []}
+    |> maybe_dismiss_modal()
+    |> maybe_clear_whichkey()
+    |> maybe_reset_focus_owners()
+    |> maybe_reset_mode()
+    |> maybe_derive_scope()
+    |> maybe_clear_agent_prefix()
+    |> maybe_clear_status()
+    |> log_resets()
   end
 
-  # ── Reset logic ──────────────────────────────────────────────────────────
-
-  defp reset_to_known_good(state) do
-    {state, resets} = {state, []}
-
-    {state, resets} = maybe_dismiss_modal(state, resets)
-    {state, resets} = maybe_clear_whichkey(state, resets)
-    {state, resets} = maybe_reset_focus_owners(state, resets)
-    {state, resets} = maybe_reset_mode(state, resets)
-    {state, resets} = maybe_derive_scope(state, resets)
-    {state, resets} = maybe_clear_agent_prefix(state, resets)
-    {state, resets} = maybe_clear_status(state, resets)
-
-    {state, resets}
-  end
-
-  defp maybe_derive_scope(%{workspace: %{keymap_scope: current_scope}} = state, resets) do
+  defp maybe_derive_scope({%{workspace: %{keymap_scope: current_scope}} = state, resets} = reset) do
     scope = SessionState.scope_for_active_window(state.workspace)
 
     if current_scope == scope do
-      {state, resets}
+      reset
     else
       {%{state | workspace: SessionState.set_keymap_scope(state.workspace, scope)},
        ["scope #{current_scope} → #{scope}" | resets]}
     end
   end
 
-  defp maybe_reset_focus_owners(state, resets) do
+  defp maybe_reset_focus_owners({state, resets} = reset) do
     new_state =
       state
       |> maybe_cancel_space_leader()
@@ -85,7 +76,7 @@ defmodule MingaEditor.Input.Interrupt do
       |> maybe_unfocus_file_tree()
       |> maybe_clear_sidebar_focus()
 
-    if new_state == state, do: {state, resets}, else: {new_state, ["focus owners reset" | resets]}
+    if new_state == state, do: reset, else: {new_state, ["focus owners reset" | resets]}
   end
 
   defp maybe_cancel_space_leader(
@@ -138,13 +129,13 @@ defmodule MingaEditor.Input.Interrupt do
       else: state
   end
 
-  defp maybe_reset_mode(%{workspace: %{editing: %{mode: mode}}} = state, resets)
+  defp maybe_reset_mode({%{workspace: %{editing: %{mode: mode}}} = state, resets})
        when mode != :normal do
     {%{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)},
      ["mode #{mode} → :normal" | resets]}
   end
 
-  defp maybe_reset_mode(%{workspace: %{editing: vim}} = state, resets) do
+  defp maybe_reset_mode({%{workspace: %{editing: vim}} = state, resets} = reset) do
     fresh_state = Mode.initial_state()
 
     if mode_state_dirty?(vim.mode_state, fresh_state) do
@@ -153,7 +144,7 @@ defmodule MingaEditor.Input.Interrupt do
       {%{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, new_vim)},
        ["mode state reset (pending sequence cleared)" | resets]}
     else
-      {state, resets}
+      reset
     end
   end
 
@@ -170,28 +161,28 @@ defmodule MingaEditor.Input.Interrupt do
 
   defp mode_state_dirty?(_current, _fresh), do: true
 
-  defp maybe_dismiss_modal(state, resets) do
+  defp maybe_dismiss_modal({state, resets} = reset) do
     if ModalOverlay.active?(state.shell_runtime.state.modal) do
       {ModalWorkflow.dismiss(state), ["modal dismissed" | resets]}
     else
-      {state, resets}
+      reset
     end
   end
 
   defp maybe_clear_whichkey(
-         %{shell_runtime: %{state: %{whichkey: %WhichKey{node: nil, show: false}}}} = state,
-         resets
+         {%{shell_runtime: %{state: %{whichkey: %WhichKey{node: nil, show: false}}}}, _resets} =
+           reset
        ),
-       do: {state, resets}
+       do: reset
 
-  defp maybe_clear_whichkey(state, resets) do
+  defp maybe_clear_whichkey({state, resets}) do
     {WhichKeyWorkflow.dismiss(state), ["which-key dismissed" | resets]}
   end
 
-  defp maybe_clear_agent_prefix(state, resets) do
+  defp maybe_clear_agent_prefix({state, resets} = reset) do
     case state.workspace.agent_ui.view |> UIState.View.pending_prefix() do
       nil ->
-        {state, resets}
+        reset
 
       _prefix ->
         new_state =
@@ -205,25 +196,26 @@ defmodule MingaEditor.Input.Interrupt do
   end
 
   defp maybe_clear_status(
-         %{
-           shell_runtime: %{state: %{notice: %MingaEditor.Shell.Traditional.Notice{message: nil}}}
-         } = state,
-         resets
+         {%{
+            shell_runtime: %{
+              state: %{notice: %MingaEditor.Shell.Traditional.Notice{message: nil}}
+            }
+          }, _resets} = reset
        ),
-       do: {state, resets}
+       do: reset
 
-  defp maybe_clear_status(state, resets) do
+  defp maybe_clear_status({state, resets}) do
     {NoticeWorkflow.dismiss(state), ["notice dismissed" | resets]}
   end
 
   # ── Logging ──────────────────────────────────────────────────────────────
 
-  defp log_resets(state, []) do
+  defp log_resets({state, []}) do
     Minga.Log.info(:editor, "C-g: already in clean state")
     state
   end
 
-  defp log_resets(state, resets) do
+  defp log_resets({state, resets}) do
     detail = resets |> Enum.reverse() |> Enum.join(", ")
     Minga.Log.info(:editor, "C-g: #{detail}")
     state
