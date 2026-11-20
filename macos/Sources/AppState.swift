@@ -71,7 +71,7 @@ struct ProfileEditorWindowFrame {
         do {
             try window.frameDescriptor.write(to: url, atomically: true, encoding: .utf8)
         } catch {
-            PortLogger.warn("Could not save editor window frame: \(error.localizedDescription)")
+            PortLogger.warn("Could not save editor window frame", privateDetail: error.localizedDescription)
         }
     }
 }

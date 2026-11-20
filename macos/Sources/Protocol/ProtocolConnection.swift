@@ -1,6 +1,10 @@
 import Darwin
 import Foundation
 import MingaProtocol
+import MingaUI
+import os
+
+let protocolLogger = Logger(subsystem: PortLogger.subsystem, category: "Protocol")
 
 /// Owns one protocol handle pair and every resource whose lifetime is tied to it.
 ///
@@ -21,6 +25,7 @@ final class ProtocolConnection {
     private let handoff: ProtocolEventHandoff
     private var started = false
     private var stopped = false
+    private var loggingStarted = false
 
     init(
         connectionID: UInt64,
@@ -70,6 +75,7 @@ final class ProtocolConnection {
                 handoff.deliver(failure)
             },
             onDisconnect: {
+                PortLogger.clearEncoder(encoder)
                 MainRunLoopAction {
                     onReaderDisconnect(encoder, connectionID)
                 }.enqueue()
@@ -129,10 +135,18 @@ final class ProtocolConnection {
         reader.start()
     }
 
+    /// Installs logging only once this connection has applied a frame from a running editor.
+    func startLogging() {
+        guard !loggingStarted, !stopped else { return }
+        loggingStarted = true
+        PortLogger.setup(encoder: encoder)
+    }
+
     /// Retires admission, ordered delivery, outbound writes, and future reads. Idempotent and nonblocking.
     func stop() {
         guard !stopped else { return }
         stopped = true
+        PortLogger.clearEncoder(encoder)
         handoff.cancel()
         reader.stop()
         let readHandle = readHandle
@@ -142,7 +156,7 @@ final class ProtocolConnection {
                 do {
                     try handle.close()
                 } catch {
-                    NSLog("ProtocolConnection: failed to close retired pipe: \(error)")
+                    PortLogger.report(.warning, "Failed to close retired protocol pipe", to: protocolLogger, privateDetail: error.localizedDescription)
                 }
             }
         }

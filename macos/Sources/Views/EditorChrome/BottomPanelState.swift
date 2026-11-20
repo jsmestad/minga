@@ -67,7 +67,7 @@ public final class BottomPanelState {
             do {
                 try String(Double(userHeight)).write(to: url, atomically: true, encoding: .utf8)
             } catch {
-                PortLogger.warn("Could not save bottom panel height: \(error.localizedDescription)")
+                PortLogger.warn("Could not save bottom panel height", privateDetail: error.localizedDescription)
             }
         }
     }

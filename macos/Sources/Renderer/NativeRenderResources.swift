@@ -1,8 +1,11 @@
 import Foundation
 import Metal
 import MingaProtocol
+import MingaUI
 import QuartzCore
 import os
+
+private let nativePresentationLog = OSLog(subsystem: PortLogger.subsystem, category: "NativePresentation")
 
 /// Metal does not expose a per-device 2D edge property. macOS 15's documented
 /// feature tables guarantee and cap 2D textures at 16,384 for every supported
@@ -371,7 +374,8 @@ struct NativeRenderFactories {
         },
         present: { $0.present() },
         reportFailure: { failure in
-            os_log(.error, log: OSLog(subsystem: "com.minga.editor", category: "NativePresentation"),
+            // Rendering can fail on consecutive frames. Keep this trace off the input pipe.
+            os_log(.error, log: nativePresentationLog,
                    "Native presentation failed phase=%{public}@ dimension=%{public}@ reason=%{public}@ seq=%{public}u",
                    failure.phase.rawValue, failure.dimension.rawValue,
                    failure.reason.rawValue, failure.frameSequence)

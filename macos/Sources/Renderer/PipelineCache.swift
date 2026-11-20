@@ -11,8 +11,9 @@ import Metal
 import CryptoKit
 import os.log
 import Foundation
+import MingaUI
 
-private let pipelineLog = OSLog(subsystem: "com.minga.editor", category: "PipelineCache")
+private let pipelineLog = Logger(subsystem: PortLogger.subsystem, category: "PipelineCache")
 
 /// Manages loading and saving of Metal binary archives for pipeline state caching.
 struct PipelineCache {
@@ -93,7 +94,7 @@ struct PipelineCache {
         let url = cacheURL(hash: hash, in: directory)
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            os_log(.info, log: pipelineLog, "No pipeline cache found, will compile from shaders")
+            PortLogger.report(.info, "No pipeline cache found, will compile from shaders", to: pipelineLog)
             return nil
         }
 
@@ -110,11 +111,10 @@ struct PipelineCache {
             let bgPipeline = try device.makeRenderPipelineState(descriptor: bgDescriptor)
             let linePipeline = try device.makeRenderPipelineState(descriptor: lineDescriptor)
 
-            os_log(.info, log: pipelineLog, "Loaded pipeline states from cache")
+            PortLogger.report(.info, "Loaded pipeline states from cache", to: pipelineLog)
             return (bgPipeline, linePipeline)
         } catch {
-            os_log(.error, log: pipelineLog, "Failed to load pipeline cache (will recompile): %{public}@",
-                   error.localizedDescription)
+            PortLogger.report(.warning, "Failed to load pipeline cache (will recompile)", to: pipelineLog, privateDetail: error.localizedDescription)
             // Clear stale archive references so the caller's descriptors are
             // clean for runtime compilation fallback.
             bgDescriptor.binaryArchives = nil
@@ -157,10 +157,9 @@ struct PipelineCache {
             try archive.addRenderPipelineFunctions(descriptor: lineDescriptor)
             try archive.serialize(to: url)
 
-            os_log(.info, log: pipelineLog, "Saved pipeline cache to %{public}@", url.lastPathComponent)
+            PortLogger.report(.info, "Saved pipeline cache to \(url.lastPathComponent)", to: pipelineLog)
         } catch {
-            os_log(.error, log: pipelineLog, "Failed to save pipeline cache: %{public}@",
-                   error.localizedDescription)
+            PortLogger.report(.error, "Failed to save pipeline cache", to: pipelineLog, privateDetail: error.localizedDescription)
         }
     }
 
@@ -179,7 +178,7 @@ struct PipelineCache {
             && file.lastPathComponent.hasSuffix(".metalarchive")
             && file.lastPathComponent != currentFilename {
             try? FileManager.default.removeItem(at: file)
-            os_log(.info, log: pipelineLog, "Cleaned stale cache: %{public}@", file.lastPathComponent)
+            PortLogger.report(.info, "Cleaned stale pipeline cache", to: pipelineLog, privateDetail: file.lastPathComponent)
         }
     }
 }

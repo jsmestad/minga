@@ -21,7 +21,7 @@ import os.log
 import os.signpost
 import MingaProtocol
 
-private let rendererLog = OSLog(subsystem: "com.minga.editor", category: "Renderer")
+private let rendererLog = Logger(subsystem: PortLogger.subsystem, category: "Renderer")
 
 /// GPU quad instance for background fills and cursor (must match QuadInstance in CoreTextShaders.metal).
 struct QuadGPU {
@@ -359,7 +359,7 @@ final class CoreTextMetalRenderer {
         // Load the compiled Metal shader library through the renderer-owned
         // resource seam. Production preserves the app/executable lookup.
         guard let library = factories.makeLibrary(device) else {
-            NSLog("Failed to load Metal library")
+            PortLogger.report(.error, "Failed to load Metal library", to: rendererLog)
             return nil
         }
 
@@ -396,13 +396,13 @@ final class CoreTextMetalRenderer {
             self.bgPipeline = cached.bg
             self.linePipeline = cached.line
             let elapsed = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000
-            os_log(.info, log: rendererLog, "Metal pipelines loaded from cache in %.1fms", elapsed)
+            PortLogger.report(.info, "Metal pipelines loaded from cache in \(String(format: "%.1f", elapsed))ms", to: rendererLog)
         } else {
             do {
                 self.bgPipeline = try device.makeRenderPipelineState(descriptor: bgDesc)
                 self.linePipeline = try device.makeRenderPipelineState(descriptor: lineDesc)
                 let elapsed = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000
-                os_log(.info, log: rendererLog, "Metal pipelines compiled from shaders in %.1fms", elapsed)
+                PortLogger.report(.info, "Metal pipelines compiled from shaders in \(String(format: "%.1f", elapsed))ms", to: rendererLog)
 
                 // Cache the compiled pipelines for next launch.
                 PipelineCache.savePipelineCache(
@@ -410,8 +410,7 @@ final class CoreTextMetalRenderer {
                     bgDescriptor: bgDesc, lineDescriptor: lineDesc
                 )
             } catch {
-                os_log(.error, log: rendererLog, "Failed to create CoreText Metal pipeline: %{public}@",
-                       error.localizedDescription)
+                PortLogger.report(.error, "Failed to create CoreText Metal pipeline", to: rendererLog, privateDetail: error.localizedDescription)
                 return nil
             }
         }

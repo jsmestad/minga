@@ -39,7 +39,7 @@ defmodule Minga.Events do
   | `:lsp_status_changed` | `LspStatusEvent` | `name: atom(), status: atom(), uri: String.t() \| nil` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
   | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
-  | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :info \| :warning \| :error` |
+  | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :debug \| :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:agent_tools_changed` | `AgentToolsChangedEvent` | `source: term()` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
@@ -216,7 +216,7 @@ defmodule Minga.Events do
     @enforce_keys [:text, :level]
     defstruct [:text, :level]
 
-    @type level :: :info | :warning | :error
+    @type level :: :debug | :info | :warning | :error
     @type t :: %__MODULE__{text: String.t(), level: level()}
   end
 

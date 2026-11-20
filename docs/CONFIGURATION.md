@@ -483,6 +483,8 @@ set :log_level_lsp, :debug
 
 The subsystem options default to `:default`, which means "inherit from `:log_level`." You can also set a subsystem to `:none` to silence it completely, even for warnings and errors.
 
+On macOS, frontend diagnostics appear under **GUI** in the Messages pane. To see debug entries, set `:log_level_port` to `:debug`, then turn on the Debug filter in the pane. If the editor core cannot connect, use Console or `log stream --level debug --predicate 'subsystem == "com.minga.editor"'`. Console separates native diagnostics by category, such as `Startup` and `BEAMProcess`.
+
 ### Subsystems
 
 | Subsystem | Option | What it covers |
@@ -491,6 +493,7 @@ The subsystem options default to `:default`, which means "inherit from `:log_lev
 | lsp | `:log_level_lsp` | LSP server communication, requests, and errors |
 | agent | `:log_level_agent` | AI agent providers, sessions, and tool execution |
 | editor | `:log_level_editor` | General editor operations, commands, and file I/O |
+| port / GUI | `:log_level_port` | Frontend and parser port diagnostics, including native macOS startup and recovery |
 
 ### Example: debugging a rendering issue
 
