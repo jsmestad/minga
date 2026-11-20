@@ -852,6 +852,36 @@ defmodule MingaEditor.Commands.Agent do
       )
   end
 
+  @doc "Queues a displayed composer into exactly the rendered saved-session turn."
+  @spec queue_displayed_prompt(state(), :steering | :follow_up, Session.queue_target()) :: state()
+  def queue_displayed_prompt(state, kind, target) do
+    panel = state.workspace.agent_ui.panel
+    text = PromptBuffer.prompt_text(panel)
+
+    with false <- PromptBuffer.input_empty?(panel),
+         false <-
+           SlashCommand.slash_command?(text) or SlashCommand.indented_credential_command?(text),
+         :ready <- prompt_submit_status(state, panel),
+         {:ok, resolved} <- resolve_prompt_for_session(state, text, panel.model_name),
+         {:saved, updated} <- DraftWorkflow.queue(state, kind, resolved, target) do
+      updated
+    else
+      true ->
+        NoticeWorkflow.publish(state, "Type a message to queue. Use Send for slash commands.")
+
+      :ordinary ->
+        NoticeWorkflow.publish(state, "That Agent turn is no longer active. Your draft was kept.")
+
+      {:blocked, message} ->
+        NoticeWorkflow.publish(state, message)
+
+      {:error, message} ->
+        NoticeWorkflow.publish(state, message)
+    end
+  catch
+    :exit, _ -> NoticeWorkflow.publish(state, "Agent session unavailable. Your draft was kept.")
+  end
+
   @spec resolve_and_deliver_follow_up(state(), String.t(), String.t()) :: state()
   defp resolve_and_deliver_follow_up(state, text, model) do
     case resolve_prompt_for_session(state, text, model) do

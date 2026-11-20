@@ -45,6 +45,28 @@ defmodule MingaEditor.Agent.PromptInput do
   @spec submit_displayed(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
           state()
   def submit_displayed(state, generation, offer, dispatch) do
+    if AgentState.busy?(TraditionalState.agent(state.shell_runtime.state)) do
+      stale_submission(state)
+    else
+      with_displayed_draft(state, generation, offer, fn state ->
+        next =
+          dispatch.(%{state | frontend: Frontend.composer_input(state.frontend, offer, true)})
+
+        %{next | frontend: Frontend.composer_input(next.frontend, nil)}
+      end)
+    end
+  end
+
+  @doc "Admits a queue control only with the prompt and attachment offer rendered with it."
+  @spec queue_displayed(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
+          state()
+  def queue_displayed(state, generation, offer, dispatch) do
+    with_displayed_draft(state, generation, offer, &with_offer(&1, offer, dispatch))
+  end
+
+  @spec with_displayed_draft(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
+          state()
+  defp with_displayed_draft(state, generation, offer, dispatch) do
     with reader when reader != nil <- state.render.text_interaction_reader,
          {:ok, {buffer, version, owner}} <-
            Reader.prompt_source(reader, 65_534, generation),
@@ -53,10 +75,8 @@ defmodule MingaEditor.Agent.PromptInput do
            submission_owner(Runtime.review_scope(state.shell_runtime), state.workspace.agent_ui),
          %{content: {:agent_chat, :semantic}} <- Windows.active_struct(state.workspace.windows),
          ^offer <- DraftSave.attachment_offer(state.workspace.agent_ui.draft_save),
-         false <- AgentState.busy?(TraditionalState.agent(state.shell_runtime.state)),
          {:ok, ^version} <- prompt_version(buffer) do
-      next = dispatch.(%{state | frontend: Frontend.composer_input(state.frontend, offer, true)})
-      %{next | frontend: Frontend.composer_input(next.frontend, nil)}
+      dispatch.(state)
     else
       _stale -> stale_submission(state)
     end

@@ -1471,6 +1471,13 @@ value = 0x6C
 name = "agent_stop_turn"
 value = 0x6D
 
+# Committed prompt presentation (u64) + attachment offer (u64, 0 if absent) +
+# queued input kind (u8, 0 steering or 1 follow-up) + Session record ID (string16) +
+# active request ID (string16) + queue sequence (u64, positive), all from the same view.
+[[gui_actions]]
+name = "agent_composer_queue"
+value = 0x6E
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -2493,6 +2500,16 @@ opcode = "gui_agent_chat"
 id = 0x0D
 name = "prompt_presentation"
 fields = [{ name = "generation", type = "u64" }]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x0E
+name = "queue_target"
+fields = [
+  { name = "session_id", type = "string16" },
+  { name = "request_id", type = "string16" },
+  { name = "sequence", type = "u64" },
+]
 
 # gui_picker_preview (0x7D) sections
 

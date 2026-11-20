@@ -281,7 +281,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       agent_read_retained_output: 0x6A,
       agent_composer_submit: 0x6B,
       agent_open_question: 0x6C,
-      agent_stop_turn: 0x6D
+      agent_stop_turn: 0x6D,
+      agent_composer_queue: 0x6E
     )
   end
 

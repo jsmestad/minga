@@ -24,6 +24,7 @@ public struct AgentChatView: View {
         case agentToolToggle(messageID: UInt32)
         case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
         case composerSubmit(generation: UInt64, offer: UInt64)
+        case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
         case chatScrolledAwayFromBottom
@@ -153,6 +154,7 @@ public struct AgentChatView: View {
             AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { [generation = state.promptPresentation, offer = state.draftAttachmentOffer] action in
                 switch action {
                 case .submit: .composerSubmit(generation: generation, offer: offer)
+                case .queue(let followUp, let target): .composerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
                 case .abort(let target): .stopTurn(target)
                 case .attachments: .executeCommand(name: "agent_draft_attachments")
                 }

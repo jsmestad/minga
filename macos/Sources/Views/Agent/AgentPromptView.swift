@@ -33,6 +33,7 @@ struct AgentPromptApertureKey: PreferenceKey {
 public struct AgentPromptView: View {
     public enum Action: Equatable, Sendable {
         case submit
+        case queue(followUp: Bool, target: AgentQueueTarget)
         case abort(AgentStopTarget)
         case attachments
     }
@@ -98,26 +99,29 @@ public struct AgentPromptView: View {
 
     @ViewBuilder
     private var promptArea: some View {
-        HStack(spacing: Spacing.md) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             promptCapsule
-            Button {
-                sendAction?(.attachments)
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "paperclip")
-                    if state.draftAttachmentCount > 0 {
-                        Text(state.draftAttachmentCount, format: .number)
-                            .font(.caption.monospacedDigit())
+            HStack(spacing: Spacing.md) {
+                AgentPromptActionButtons(state: state, sendAction: sendAction)
+                Spacer(minLength: 0)
+                Button {
+                    sendAction?(.attachments)
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "paperclip")
+                        if state.draftAttachmentCount > 0 {
+                            Text(state.draftAttachmentCount, format: .number)
+                                .font(.caption.monospacedDigit())
+                        }
                     }
+                    .frame(minWidth: 24, minHeight: 24)
                 }
-                .frame(minWidth: 24, minHeight: 24)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.agentInputBorder)
+                .help("Draft attachments")
+                .accessibilityLabel("Draft attachments")
+                .accessibilityValue("\(state.draftAttachmentCount)")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(theme.agentInputBorder)
-            .help("Draft attachments")
-            .accessibilityLabel("Draft attachments")
-            .accessibilityValue("\(state.draftAttachmentCount)")
-            AgentPromptActionButton(state: state, sendAction: sendAction)
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
@@ -227,45 +231,39 @@ public struct AgentPromptView: View {
     }
 }
 
-/// Mode-independent controls do not read the mounted native text aperture or key focus.
-struct AgentPromptActionButton: View {
+/// The same controls occupy the same positions as a turn starts and settles.
+struct AgentPromptActionButtons: View {
     let state: AgentChatState
     let sendAction: ViewActionHandler<AgentPromptView.Action>?
     @Environment(\.themeColors) private var theme
 
-    private var hasActiveTurn: Bool { state.status.hasActiveTurn }
-
-    /// A nonempty draft can be submitted independently of Vim mode or native key focus.
-    private var canSend: Bool { state.promptPresentation != 0 && !state.prompt.isEmpty && !hasActiveTurn }
-
-    /// The SF Symbol name for the action button, morphing between send and stop.
-    private var actionButtonIcon: String {
-        hasActiveTurn ? "stop.circle.fill" : "arrow.up.circle.fill"
-    }
-
-    /// The action button's foreground color based on state.
-    private var actionButtonColor: Color {
-        if hasActiveTurn { return state.stopTarget == nil ? theme.agentTextFg.opacity(0.2) : .red }
-        if canSend { return theme.agentInputBorder }
-        return theme.agentTextFg.opacity(0.2)
-    }
-
     var body: some View {
-        let action: AgentPromptView.Action? = hasActiveTurn ? state.stopTarget.map(AgentPromptView.Action.abort) : canSend ? .submit : nil
+        let active = state.status.hasActiveTurn
+        let hasDraft = state.promptPresentation != 0 && !state.prompt.isEmpty
+        let queue = active && hasDraft ? state.queueTarget : nil
+        let stop = active ? state.stopTarget : nil
+
+        HStack(spacing: Spacing.md) {
+            button("Send", icon: "arrow.up.circle.fill", action: hasDraft && !active ? .submit : nil)
+            button("Steer", icon: "arrow.turn.up.right", action: queue.map { .queue(followUp: false, target: $0) })
+            button("Queue Next", icon: "text.badge.plus", action: queue.map { .queue(followUp: true, target: $0) })
+            button("Stop", icon: "stop.circle.fill", action: stop.map(AgentPromptView.Action.abort))
+        }
+    }
+
+    private func button(_ label: String, icon: String, action: AgentPromptView.Action?) -> some View {
         Button {
             if let action { sendAction?(action) }
         } label: {
-            Image(systemName: actionButtonIcon)
-                .font(Typography.font(.action))
-                .foregroundStyle(actionButtonColor)
-                .contentTransition(.symbolEffect(.replace))
+            Label(label, systemImage: icon)
+                .font(Typography.font(.small))
+                .foregroundStyle(action == nil ? theme.agentTextFg.opacity(0.4) : theme.agentInputBorder)
+                .frame(minHeight: 24)
         }
         .buttonStyle(.plain)
         .disabled(action == nil)
-        .frame(width: Typography.Step.action.rawValue)
-        .accessibilityLabel(hasActiveTurn ? "Stop generating" : "Send message")
-        .accessibilityHint(hasActiveTurn ? "Aborts the current response" : "Sends the current prompt")
-        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(label)
+        .help(label)
     }
 }
 

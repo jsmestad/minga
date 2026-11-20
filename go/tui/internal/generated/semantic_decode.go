@@ -899,6 +899,28 @@ func DecodeGuiAgentChatPromptPresentation(data []byte, offset int, windowEnd int
 	}, pos, nil
 }
 
+func DecodeGuiAgentChatQueueTarget(data []byte, offset int, windowEnd int) (GuiAgentChatQueueTarget, int, error) {
+	pos := offset
+	sessionID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatQueueTarget{}, offset, err
+	}
+	requestID, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatQueueTarget{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+8, "sequence"); err != nil {
+		return GuiAgentChatQueueTarget{}, offset, err
+	}
+	sequence := decodeU64(data, pos)
+	pos += 8
+	return GuiAgentChatQueueTarget{
+		SessionID: sessionID,
+		RequestID: requestID,
+		Sequence:  sequence,
+	}, pos, nil
+}
+
 // Section decoders for gui_gutter
 
 func DecodeGuiGutterWindow(data []byte, offset int, windowEnd int) (GuiGutterWindow, int, error) {
