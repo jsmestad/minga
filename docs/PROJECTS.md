@@ -25,9 +25,9 @@ Once detected, the project root is stored for the current session and used to sc
 
 ## Known projects
 
-Every project root Minga detects gets added to a known-projects list, persisted at `~/.config/minga/known-projects`. This list survives editor restarts, so `SPC p p` (switch project) shows all projects you've ever visited.
+When you switch to a project, Minga remembers its root so you can return to it with `SPC p p`. The list survives restarts in `$XDG_CONFIG_HOME/minga/known-projects`, or `~/.config/minga/known-projects` if `XDG_CONFIG_HOME` is not set. Development builds use `known-projects-dev` in the same directory, so source launches don't change the installed editor's list.
 
-The file is plain text, one absolute path per line. You can edit it manually if you want to clean it up. Minga filters out directories that no longer exist when it loads the list.
+The file is plain text, one absolute path per line. Quit Minga before editing the list by hand so a running editor can't write its old list back. Minga skips directories that no longer exist when it loads the list.
 
 ## Keybindings
 

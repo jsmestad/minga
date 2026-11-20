@@ -724,8 +724,14 @@ defmodule Minga.Project do
 
   @spec known_projects_path() :: String.t()
   defp known_projects_path do
-    config_dir = Path.expand("~/.config/minga")
-    Path.join(config_dir, @known_projects_file)
+    config_home =
+      case System.get_env("XDG_CONFIG_HOME") do
+        dir when dir in [nil, ""] -> Path.expand("~/.config")
+        dir -> dir
+      end
+
+    filename = Application.get_env(:minga, :known_projects_filename, @known_projects_file)
+    Path.join([config_home, "minga", filename])
   end
 
   @spec load_known_projects() :: [String.t()]

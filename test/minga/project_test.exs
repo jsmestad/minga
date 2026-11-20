@@ -9,6 +9,8 @@ defmodule Minga.ProjectTest do
   alias Minga.Project.WorkspaceSnapshot
 
   @moduletag :tmp_dir
+  @moduletag timeout: 30_000
+
   setup_all do
     Options.set(:persist_known_projects, false)
     Options.set(:persist_recent_files, false)
@@ -412,6 +414,50 @@ defmodule Minga.ProjectTest do
       flush(name)
 
       refute project in Project.known_projects(name)
+    end
+
+    test "loads and updates only the XDG project history when it is set", %{tmp_dir: tmp} do
+      home = Path.join(tmp, "home")
+      config_home = Path.join(tmp, "xdg")
+      home_history = Path.join(home, ".config/minga/known-projects")
+      xdg_history = Path.join(config_home, "minga/known-projects")
+
+      [home_project, xdg_project, added] =
+        Enum.map(~w(home-project xdg-project added), &Path.join(tmp, &1))
+
+      Enum.each([home_project, xdg_project, added], &File.mkdir_p!/1)
+      File.mkdir_p!(Path.dirname(home_history))
+      File.mkdir_p!(Path.dirname(xdg_history))
+
+      File.write!(home_history, home_project <> "\n")
+      File.write!(xdg_history, xdg_project <> "\n")
+
+      code = """
+      [home, xdg_project, added] = System.argv()
+      System.put_env("HOME", home)
+      {:ok, _} = Minga.Config.Options.start_link()
+      opts = [subscribe: false, command_frecency: %{}]
+      {:ok, server} = Minga.Project.start_link(opts)
+      [^xdg_project] = Minga.Project.known_projects(server)
+      Minga.Project.add(server, added)
+      Minga.Project.remove(server, xdg_project)
+      [^added] = Minga.Project.known_projects(server)
+      GenServer.stop(server)
+      {:ok, restarted} = Minga.Project.start_link(opts)
+      [^added] = Minga.Project.known_projects(restarted)
+      """
+
+      ebin = :code.which(Project) |> List.to_string() |> Path.dirname()
+
+      {output, status} =
+        System.cmd("elixir", ["-pa", ebin, "-e", code, "--", home, xdg_project, added],
+          env: [{"XDG_CONFIG_HOME", config_home}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+      assert File.read!(home_history) == home_project <> "\n"
+      assert File.read!(xdg_history) == added <> "\n"
     end
 
     test "add ignores non-existent directories", %{tmp_dir: tmp} do

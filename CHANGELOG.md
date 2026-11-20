@@ -83,6 +83,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Development builds keep a separate project switcher history. The history now respects `XDG_CONFIG_HOME`, so isolated test launches no longer write to the installed editor's list.
+
 - macOS TUI release builds pass the optimization flags required by Erlang/OTP. The macOS app preserves the bundled icon font directory, and macOS and Linux packages no longer ship the Windows-only file watcher.
 - macOS release signing uses the runner’s native keychain settings and explicitly selects the temporary Developer ID keychain. Builds and package smoke tests still use an isolated home directory.
 - macOS release CI grants `codesign` access to the imported Developer ID key. It checks key access before signing the package and logs which file it is signing if the step stalls.
