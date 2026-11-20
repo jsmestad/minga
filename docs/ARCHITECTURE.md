@@ -981,10 +981,9 @@ Tool recovery is a separate effect protocol, not a second conversation log. Pers
 Managed restart is a generation boundary for admitted native effects. `SessionManager` monitors each attached provider and its admitted tool workers, and does not start a replacement Session until both the provider and all registered workers exit. Native providers also drain and await their workers before an orderly exit, so a recovered Session cannot classify an effect as interrupted while the old effect is still running.
 See [Session Recovery](SESSION-RECOVERY.md) for the save, restart, interruption, and explicit legacy-import behavior.
 
-Retained shell output uses a separate byte transport, not a second command executor.
-`MingaAgent.Tools.Shell.OutputReader` grants one bounded read to the native `minga-shell-output-reader` companion only after the previous bytes reach `ArtifactStore`.
-The companion reads a private FIFO and never starts, waits for, or signals the command; the original shell Port and `OutputLimit.close_port/1` retain producer lifetime ownership.
-This backpressure bounds incoming memory independently of output volume, while complete capture requires both FIFO EOF and the producer's exit status.
+Ordinary and retained Agent shell output use the same demand-driven byte transport. `MingaAgent.Tools.Shell.OutputReader` grants one bounded read from a private FIFO at a time. Retained output waits for `ArtifactStore` to admit the previous bytes before requesting more.
+The FIFO reader never starts or signals the command. The operation's linked Port owns a native helper that keeps the process-group leader's identity until the FIFO reader confirms EOF and the shell has exited.
+Timeout or loss of the controlling Port stops the process group with TERM followed by KILL. This does not contain descendants that deliberately leave the group.
 Quota, storage, reader and deadline failures retain only the durably admitted prefix and report an incomplete capture.
 See [Remote Agents](REMOTE_AGENTS.md#recover-complete-shell-output) for paged retrieval after compaction and session reload.
 

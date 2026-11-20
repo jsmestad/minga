@@ -28,7 +28,7 @@ defmodule MingaAgent.Tools.Shell do
 
   @type result :: {:ok, String.t() | Output.t()} | {:error, term()}
   @typep capture :: {GenServer.server(), Capture.t()} | nil
-  @typep transport :: port() | OutputReader.t()
+  @typep transport :: OutputReader.t()
 
   @debounce_ms 200
   @running_indicator_ms 3_000
@@ -102,34 +102,15 @@ defmodule MingaAgent.Tools.Shell do
           integer(),
           execute_opts()
         ) :: {:ok, transport()} | {:error, term()}
-  defp open_output(command, cwd, env, nil, _deadline, _opts), do: open_port(command, cwd, env)
-
   defp open_output(command, cwd, env, _capture, deadline, opts) do
     OutputReader.open(command, cwd, safe_env_charlist(env), deadline, opts)
   rescue
     error -> {:error, Exception.message(error)}
   end
 
-  @spec open_port(String.t(), String.t(), [{String.t(), String.t()}]) ::
-          {:ok, port()} | {:error, String.t()}
-  defp open_port(command, cwd, env) do
-    {:ok,
-     Port.open(
-       {:spawn_executable, "/bin/sh"},
-       [
-         :binary,
-         :exit_status,
-         :stderr_to_stdout,
-         args: ["-c", command],
-         cd: cwd,
-         env: safe_env_charlist(env)
-       ]
-     )}
-  rescue
-    e -> {:error, "command failed: #{Exception.message(e)}"}
-  end
-
   @spec failed_start(collect_state(), term()) :: result()
+  defp failed_start(%{capture: nil}, :timeout), do: {:error, {:incomplete, :timeout, ""}}
+
   defp failed_start(state, :timeout),
     do: finish_capture(state, {:incomplete, :timeout}, "\n[command timed out]")
 
@@ -160,18 +141,6 @@ defmodule MingaAgent.Tools.Shell do
          }
 
   @spec collect_output(transport(), collect_state()) :: result()
-  defp collect_output(port, state) when is_port(port) do
-    remaining = max(state.deadline - System.monotonic_time(:millisecond), 0)
-    wait_ms = min(remaining, @debounce_ms)
-
-    receive do
-      {^port, {:data, data}} -> handle_port_data(port, data, state)
-      {^port, {:exit_status, exit_code}} -> handle_port_exit(port, exit_code, state)
-    after
-      wait_ms -> handle_port_wait(port, state)
-    end
-  end
-
   defp collect_output(reader, state) do
     remaining = max(state.deadline - System.monotonic_time(:millisecond), 0)
 
@@ -188,6 +157,12 @@ defmodule MingaAgent.Tools.Shell do
   end
 
   @spec transport_failure(OutputReader.t(), term(), collect_state()) :: result()
+  defp transport_failure(reader, reason, %{capture: nil} = state) do
+    close_output(reader)
+    flush_if_needed(state)
+    {:error, reason}
+  end
+
   defp transport_failure(reader, reason, state) do
     close_output(reader)
     flush_if_needed(state)
@@ -200,7 +175,6 @@ defmodule MingaAgent.Tools.Shell do
   end
 
   @spec close_output(transport()) :: :ok
-  defp close_output(port) when is_port(port), do: OutputLimit.close_port(port)
   defp close_output(reader), do: OutputReader.close(reader)
 
   @spec handle_port_data(transport(), binary(), collect_state()) :: result()
