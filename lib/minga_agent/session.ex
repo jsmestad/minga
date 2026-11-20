@@ -140,8 +140,13 @@ defmodule MingaAgent.Session do
           idle_gc_timeout_ms: non_neg_integer(),
           persistence: Persistence.t(),
           model_selection: ModelSelection.t() | nil,
-          codex_discovery: {:atomics.atomics_ref(), CodexModels.result()} | nil,
-          codex_discovery_request: reference() | nil,
+          model_discovery:
+            {:atomics.atomics_ref(), CodexModels.result(),
+             ModelResolver.apple_availability() | nil}
+            | nil,
+          model_discovery_request: reference() | nil,
+          apple_selection_probe:
+            {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
           selection_error: String.t() | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
           pending_thinking_level: String.t() | nil,
@@ -740,20 +745,26 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :get_available_models, 10_000)
   end
 
-  @doc "Refreshes the Codex account catalog in the calling worker and lists available routes."
+  @doc "Refreshes model availability in the calling worker and lists available routes."
   @spec discover_available_models(GenServer.server()) ::
           {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
           | {:error, term()}
   def discover_available_models(session) do
     case GenServer.call(session, :begin_model_discovery) do
-      {:codex, ref, credential, opts} ->
-        result = CodexModels.fetch(credential, opts)
-        GenServer.call(session, {:finish_model_discovery, ref, credential, result})
+      {:native, ref, credential, credential_opts, resolver_opts} ->
+        apple = ModelResolver.apple_availability(resolver_opts)
+        codex = fetch_codex_models(credential, credential_opts)
+        GenServer.call(session, {:finish_model_discovery, ref, credential, codex, apple})
 
       :local ->
         with {:ok, candidates} <- get_available_models(session), do: {:ok, candidates, nil, nil}
     end
   end
+
+  @spec fetch_codex_models(ModelSelection.Credential.OAuth.t() | nil, keyword()) ::
+          CodexModels.result()
+  defp fetch_codex_models(nil, _opts), do: {:error, :not_loaded}
+  defp fetch_codex_models(credential, opts), do: CodexModels.fetch(credential, opts)
 
   @doc "Checks discovery publication without calling the Session process."
   @spec model_discovery_current?(pid(), :atomics.atomics_ref()) :: boolean()
@@ -788,14 +799,14 @@ defmodule MingaAgent.Session do
   @doc """
   Sets the model without resetting conversation context.
 
-  Setting a model can start the provider synchronously (see `start_provider/1`),
-  so callers may pass a larger `timeout` when a slow provider startup should not
-  surface as a call timeout.
+  Apple availability runs in the calling process on the Session host. Use a
+  worker if the caller must remain responsive. Pass a larger `timeout` when
+  slow provider startup should not surface as a call timeout.
   """
   @spec set_model(GenServer.server(), ModelResolver.intent(), timeout()) ::
           :ok | {:error, term()}
   def set_model(session, model, timeout \\ 5_000) do
-    GenServer.call(session, {:set_model, model}, timeout)
+    request_model_change(session, {:set_model, model}, timeout)
   end
 
   @doc "Changes a model only while its captured conversation and selection epoch remain current."
@@ -807,7 +818,30 @@ defmodule MingaAgent.Session do
         ) ::
           :ok | {:error, term()}
   def set_model_for_target(session, target, intent, timeout \\ 5_000) do
-    GenServer.call(session, {:set_model_for_target, target, intent}, timeout)
+    request_model_change(session, {:set_model_for_target, target, intent}, timeout)
+  end
+
+  @spec request_model_change(GenServer.server(), tuple(), timeout()) :: :ok | {:error, term()}
+  defp request_model_change(session, request, timeout) do
+    case GenServer.call(session, request, timeout) do
+      {:check_apple, ref, host, opts} ->
+        readiness = probe_apple_for_selection(host, opts, timeout)
+        GenServer.call(session, {:finish_apple_model_selection, ref, readiness}, timeout)
+
+      result ->
+        result
+    end
+  end
+
+  @spec probe_apple_for_selection(node(), keyword(), timeout()) ::
+          ModelResolver.apple_availability()
+  defp probe_apple_for_selection(host, opts, _timeout) when host == node(),
+    do: ModelResolver.apple_availability(opts)
+
+  defp probe_apple_for_selection(host, opts, timeout) do
+    :erpc.call(host, ModelResolver, :apple_availability, [opts], timeout)
+  catch
+    :error, {:erpc, _reason} -> {:error, :probe_failed}
   end
 
   @doc "Toggles the collapsed state of a tool or thinking message by stable transcript ID."
@@ -1134,8 +1168,9 @@ defmodule MingaAgent.Session do
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
       model_selection: model_selection,
-      codex_discovery: nil,
-      codex_discovery_request: nil,
+      model_discovery: nil,
+      model_discovery_request: nil,
+      apple_selection_probe: nil,
       selection_error: selection_error,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
@@ -1715,24 +1750,21 @@ defmodule MingaAgent.Session do
 
   def handle_call(:begin_model_discovery, _from, state)
       when state.provider.module == MingaAgent.Providers.Native do
-    case state.credentials_snapshot_fn.().oauth_ref do
-      %ModelSelection.Credential.OAuth{} = credential ->
-        ref = make_ref()
-        opts = Keyword.get(state.provider.opts, :credential_opts, [])
+    credential = state.credentials_snapshot_fn.().oauth_ref
+    ref = make_ref()
+    credential_opts = Keyword.get(state.provider.opts, :credential_opts, [])
+    resolver_opts = Keyword.get(state.provider.opts, :model_resolver_opts, [])
 
-        {:reply, {:codex, ref, credential, opts}, %{state | codex_discovery_request: ref}}
-
-      nil ->
-        {:reply, :local, invalidate_model_discovery(state)}
-    end
+    {:reply, {:native, ref, credential, credential_opts, resolver_opts},
+     %{state | model_discovery_request: ref}}
   end
 
   def handle_call(:begin_model_discovery, _from, state), do: {:reply, :local, state}
 
   def handle_call(
-        {:finish_model_discovery, ref, credential, result},
+        {:finish_model_discovery, ref, credential, codex, apple},
         _from,
-        %{codex_discovery_request: ref} = state
+        %{model_discovery_request: ref} = state
       )
       when is_reference(ref) do
     snapshot = state.credentials_snapshot_fn.()
@@ -1741,21 +1773,17 @@ defmodule MingaAgent.Session do
       state = invalidate_model_discovery(state)
       validity = :atomics.new(1, [])
       :atomics.put(validity, 1, 1)
-      state = %{state | codex_discovery: {validity, result}}
+      state = %{state | model_discovery: {validity, codex, apple}}
 
-      notice =
-        case result do
-          {:ok, _inventory} -> nil
-          {:error, reason} -> CodexModels.message(reason)
-        end
-
-      {:reply, {:ok, discovered_model_candidates(state, snapshot), notice, validity}, state}
+      notice = model_discovery_notice(credential, codex, apple, state.model_selection)
+      candidates = discovered_model_candidates(state, snapshot)
+      {:reply, {:ok, candidates, notice, validity}, state}
     else
       {:reply, local_model_discovery(state, snapshot), invalidate_model_discovery(state)}
     end
   end
 
-  def handle_call({:finish_model_discovery, _ref, _credential, _result}, _from, state) do
+  def handle_call({:finish_model_discovery, _ref, _credential, _codex, _apple}, _from, state) do
     {:reply, local_model_discovery(state, state.credentials_snapshot_fn.()), state}
   end
 
@@ -1798,7 +1826,7 @@ defmodule MingaAgent.Session do
         %{model_selection: %ModelSelection{}} = state
       ) do
     with {:ok, selection} <- ModelSelection.with_reasoning(state.model_selection, level),
-         {:ok, updated} <- do_apply_resolved_model_selection(state, selection) do
+         {:ok, updated} <- apply_resolved_model_selection(state, selection) do
       {:reply, :ok, updated}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -1831,7 +1859,7 @@ defmodule MingaAgent.Session do
     level = Enum.at(options, rem(current + 1, length(options)))
 
     with {:ok, selection} <- ModelSelection.with_reasoning(state.model_selection, level),
-         {:ok, updated} <- do_apply_resolved_model_selection(state, selection) do
+         {:ok, updated} <- apply_resolved_model_selection(state, selection) do
       {:reply, {:ok, %{"level" => level}}, updated}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -1862,15 +1890,11 @@ defmodule MingaAgent.Session do
         %{provider: %{module: MingaAgent.Providers.Native}} = state
       ) do
     snapshot = state.credentials_snapshot_fn.()
-    candidates = discovered_model_candidates(state, snapshot)
+    candidates = discovered_model_candidates(state, snapshot, false)
 
     case next_model_candidate(candidates, state.model_selection) do
       %ModelCandidate{selection: selection} ->
-        case apply_resolved_model_selection(
-               state,
-               selection,
-               snapshot
-             ) do
+        case apply_resolved_model_selection(state, selection) do
           {:ok, state} ->
             reply = %{
               "model" => selection.route.display_name,
@@ -1907,13 +1931,32 @@ defmodule MingaAgent.Session do
     {:reply, result, state}
   end
 
-  def handle_call({:set_model, intent}, _from, state) do
-    set_model_workflow(state, intent)
+  def handle_call({:set_model, intent}, {caller, _tag}, state) do
+    set_model_workflow(state, intent, caller)
   end
 
-  def handle_call({:set_model_for_target, target, intent}, _from, state) do
-    set_model_for_target_workflow(state, target, intent)
+  def handle_call({:set_model_for_target, target, intent}, {caller, _tag}, state) do
+    case validate_connection_target(state, target) do
+      :ok -> set_model_workflow(state, intent, caller)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
+
+  def handle_call(
+        {:finish_apple_model_selection, ref, readiness},
+        {caller, _tag},
+        %{apple_selection_probe: {ref, caller, target, intent}} = state
+      ) do
+    state = %{state | apple_selection_probe: nil}
+
+    case validate_connection_target(state, target) do
+      :ok -> finish_apple_model_selection(state, intent, readiness)
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:finish_apple_model_selection, _ref, _readiness}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
 
   def handle_call({:toggle_tool_collapse, message_id}, _from, state) do
     transcript = Transcript.toggle_message_collapse(state.transcript, message_id)
@@ -5570,36 +5613,27 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec set_model_for_target_workflow(state(), ConnectionTarget.t(), ModelResolver.intent()) ::
-          {:reply, term(), state()}
-  defp set_model_for_target_workflow(state, target, intent) do
-    case validate_connection_target(state, target) do
-      :ok -> set_model_workflow(state, intent)
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
-  end
-
-  @spec set_model_workflow(state(), ModelResolver.intent()) :: {:reply, term(), state()}
-  defp set_model_workflow(%{provider: %{module: MingaAgent.Providers.Native}} = state, intent) do
-    opts = model_resolution_opts(state)
+  @spec set_model_workflow(state(), ModelResolver.intent(), pid()) :: {:reply, term(), state()}
+  defp set_model_workflow(
+         %{provider: %{module: MingaAgent.Providers.Native}} = state,
+         intent,
+         caller
+       ) do
+    opts = model_resolution_opts(state, require_apple_ready: false)
 
     case ModelResolver.resolve(intent, opts) do
+      {:ok, %ModelSelection{route: %{request_provider: :apple}}} ->
+        stage_apple_model_selection(state, intent, caller, opts)
+
       {:ok, selection} ->
-        case apply_resolved_model_selection(
-               state,
-               selection,
-               Keyword.fetch!(opts, :credential_snapshot)
-             ) do
-          {:ok, state} -> {:reply, :ok, state}
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
+        apply_model_choice(state, selection)
 
       {:error, reason} ->
         {:reply, {:error, ModelResolver.message(reason)}, state}
     end
   end
 
-  defp set_model_workflow(state, model) when is_binary(model) do
+  defp set_model_workflow(state, model, _caller) when is_binary(model) do
     {candidate, result} =
       state
       |> update_model_configuration(model)
@@ -5615,6 +5649,62 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec stage_apple_model_selection(state(), ModelResolver.intent(), pid(), keyword()) ::
+          {:reply, term(), state()}
+  defp stage_apple_model_selection(state, intent, caller, opts) do
+    case model_change_allowed(state) do
+      :ok ->
+        ref = make_ref()
+        probe_opts = Keyword.take(opts, [:apple_availability_fn])
+        pending = {ref, caller, connection_target(state), intent}
+
+        {:reply, {:check_apple, ref, node(), probe_opts},
+         %{state | apple_selection_probe: pending}}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  @spec finish_apple_model_selection(
+          state(),
+          ModelResolver.intent(),
+          ModelResolver.apple_availability()
+        ) ::
+          {:reply, term(), state()}
+  defp finish_apple_model_selection(state, _intent, {:error, reason}) do
+    {:reply, {:error, ModelResolver.apple_unavailable_message(reason)},
+     invalidate_apple_model_discovery(state)}
+  end
+
+  defp finish_apple_model_selection(state, intent, {:ok, limit})
+       when is_integer(limit) and limit > 0 do
+    opts =
+      model_resolution_opts(state,
+        require_apple_ready: true,
+        apple_selection_readiness: {:ok, limit}
+      )
+
+    with :ok <- model_change_allowed(state),
+         {:ok, %ModelSelection{route: %{request_provider: :apple}} = selection} <-
+           ModelResolver.resolve(intent, opts) do
+      apply_model_choice(state, selection)
+    else
+      {:error, reason} when is_atom(reason) -> {:reply, {:error, reason}, state}
+      {:error, reason} -> {:reply, {:error, ModelResolver.message(reason)}, state}
+      {:ok, _other} -> {:reply, {:error, :stale_target}, state}
+    end
+  end
+
+  @spec apply_model_choice(state(), ModelSelection.t()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp apply_model_choice(state, selection) do
+    case apply_resolved_model_selection(state, selection) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
   @spec invalidate_connection(state(), :conversation | :selection) :: state()
   defp invalidate_connection(state, reason) do
     retire_connection_dependencies(state.connection, :cancel)
@@ -5625,7 +5715,7 @@ defmodule MingaAgent.Session do
         :selection -> Connection.selection_changed(state.connection)
       end
 
-    %{state | connection: connection}
+    %{state | connection: connection, apple_selection_probe: nil}
   end
 
   @spec commit_connection_selection(state(), state()) :: state()
@@ -6145,6 +6235,13 @@ defmodule MingaAgent.Session do
   @spec compact_request_continuation(state()) :: {:ok, state()} | {:error, term()}
   defp compact_request_continuation(%{continuation: %Continuation{tool_checkpoint: %{}}} = state),
     do: {:ok, state}
+
+  # Apple checks the complete request against the actual native token budget.
+  # Do not start inference to compact history on the synchronous submission path.
+  defp compact_request_continuation(
+         %{model_selection: %{route: %{request_provider: :apple}}} = state
+       ),
+       do: {:ok, state}
 
   defp compact_request_continuation(state) do
     if function_exported?(state.provider.module, :compact, 3) do
@@ -6683,34 +6780,85 @@ defmodule MingaAgent.Session do
 
   @spec invalidate_model_discovery(state()) :: state()
   defp invalidate_model_discovery(state) do
-    case state.codex_discovery do
-      {validity, _result} -> :atomics.put(validity, 1, 0)
+    case state.model_discovery do
+      {validity, _codex, _apple} -> :atomics.put(validity, 1, 0)
       nil -> :ok
     end
 
-    %{state | codex_discovery: nil, codex_discovery_request: nil}
+    %{state | model_discovery: nil, model_discovery_request: nil}
+  end
+
+  @spec invalidate_apple_model_discovery(state()) :: state()
+  defp invalidate_apple_model_discovery(state) do
+    case state.model_discovery do
+      {validity, codex, _apple} ->
+        :atomics.put(validity, 1, 0)
+        %{state | model_discovery: {validity, codex, nil}, model_discovery_request: nil}
+
+      nil ->
+        %{state | model_discovery_request: nil}
+    end
   end
 
   @spec local_model_discovery(state(), CredentialSnapshot.t()) ::
           {:ok, [ModelCandidate.t()], :superseded, nil}
   defp local_model_discovery(state, snapshot) do
-    candidates = discovered_model_candidates(%{state | codex_discovery: nil}, snapshot)
+    candidates = discovered_model_candidates(%{state | model_discovery: nil}, snapshot)
     {:ok, candidates, :superseded, nil}
   end
 
-  @spec discovered_model_candidates(state(), CredentialSnapshot.t()) :: [ModelCandidate.t()]
-  defp discovered_model_candidates(state, snapshot) do
-    inventory =
-      case state.codex_discovery do
-        {_ref, result} -> result
-        nil -> {:error, :not_loaded}
+  @spec model_discovery_notice(
+          ModelSelection.Credential.OAuth.t() | nil,
+          CodexModels.result(),
+          ModelResolver.apple_availability(),
+          ModelSelection.t() | nil
+        ) :: String.t() | nil
+  defp model_discovery_notice(credential, codex, apple, selection) do
+    codex_notice =
+      case {credential, codex} do
+        {%ModelSelection.Credential.OAuth{}, {:error, reason}} -> CodexModels.message(reason)
+        _available_or_unconfigured -> nil
+      end
+
+    apple_notice = apple_discovery_notice(apple, selection)
+
+    case Enum.reject([codex_notice, apple_notice], &is_nil/1) do
+      [] -> nil
+      notices -> Enum.join(notices, " ")
+    end
+  end
+
+  @spec apple_discovery_notice(ModelResolver.apple_availability(), ModelSelection.t() | nil) ::
+          String.t() | nil
+  defp apple_discovery_notice({:ok, _context}, _selection), do: nil
+
+  defp apple_discovery_notice({:error, reason}, %ModelSelection{
+         route: %{request_provider: :apple}
+       }),
+       do: ModelResolver.apple_unavailable_message(reason)
+
+  defp apple_discovery_notice({:error, reason}, _selection)
+       when reason in [:unsupported, :helper_missing],
+       do: nil
+
+  defp apple_discovery_notice({:error, reason}, _selection),
+    do: ModelResolver.apple_unavailable_message(reason)
+
+  @spec discovered_model_candidates(state(), CredentialSnapshot.t(), boolean()) ::
+          [ModelCandidate.t()]
+  defp discovered_model_candidates(state, snapshot, include_apple? \\ true) do
+    {codex, apple} =
+      case state.model_discovery do
+        {_ref, codex, apple} -> {codex, apple}
+        nil -> {{:error, :not_loaded}, nil}
       end
 
     ModelResolver.candidates(
       model_resolution_opts(state,
         current: state.model_selection,
         credential_snapshot: snapshot,
-        codex_models: inventory
+        apple_discovery: if(include_apple?, do: apple),
+        codex_models: codex
       )
     )
   end
@@ -6726,23 +6874,24 @@ defmodule MingaAgent.Session do
     |> Keyword.put_new_lazy(:credential_snapshot, state.credentials_snapshot_fn)
   end
 
-  @spec apply_resolved_model_selection(state(), ModelSelection.t(), CredentialSnapshot.t()) ::
-          {:ok, state()} | {:error, term()}
-  defp apply_resolved_model_selection(state, selection, _snapshot),
-    do: do_apply_resolved_model_selection(state, selection)
+  @spec model_change_allowed(state()) :: :ok | {:error, atom()}
+  defp model_change_allowed(%{continuation: %{active_request: %Request{}}}),
+    do: {:error, :request_active}
 
-  @spec do_apply_resolved_model_selection(state(), ModelSelection.t()) ::
-          {:ok, state()} | {:error, term()}
-  defp do_apply_resolved_model_selection(
-         %{continuation: %{active_request: %Request{}}},
-         _selection
-       ),
-       do: {:error, :request_active}
-
-  defp do_apply_resolved_model_selection(%{continuation: %{tool_checkpoint: %{}}}, _selection),
+  defp model_change_allowed(%{continuation: %{tool_checkpoint: %{}}}),
     do: {:error, :effect_reconciliation_required}
 
-  defp do_apply_resolved_model_selection(%{provider: provider} = state, selection)
+  defp model_change_allowed(_state), do: :ok
+
+  @spec apply_resolved_model_selection(state(), ModelSelection.t()) ::
+          {:ok, state()} | {:error, term()}
+  defp apply_resolved_model_selection(state, selection) do
+    with :ok <- model_change_allowed(state), do: apply_allowed_model_selection(state, selection)
+  end
+
+  @spec apply_allowed_model_selection(state(), ModelSelection.t()) ::
+          {:ok, state()} | {:error, term()}
+  defp apply_allowed_model_selection(%{provider: provider} = state, selection)
        when ProviderLifecycle.is_detached(provider) do
     prepared =
       state |> install_model_selection(selection) |> install_credential_readiness(:configured)
@@ -6763,7 +6912,7 @@ defmodule MingaAgent.Session do
     end
   end
 
-  defp do_apply_resolved_model_selection(state, selection) do
+  defp apply_allowed_model_selection(state, selection) do
     commit_model_selection(state, state, selection)
   end
 
@@ -7231,6 +7380,8 @@ defmodule MingaAgent.Session do
 
   defp humanize_error_kind(:context_transition_required, _message, _provider),
     do: Event.Error.context_transition_message()
+
+  defp humanize_error_kind(:provider_error, message, "apple"), do: message
 
   defp humanize_error_kind(:provider_error, _message, _provider) do
     "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."

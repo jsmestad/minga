@@ -93,7 +93,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   def async_fetch(_context),
     do: {:error, "The original connection is unavailable. Reopen the agent workspace."}
 
-  @doc "Drops superseded Codex rows and their notice without removing connection actions."
+  @doc "Drops superseded runtime-gated rows and their notice without removing connection actions."
   @spec for_publication(
           {:ok, [Item.t()], [Candidate.t()], Source.fetch_meta()},
           pid() | nil
@@ -105,8 +105,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
     if owner == session and Session.model_discovery_current?(owner, validity) do
       result
     else
-      {:ok, Enum.reject(items, &codex_item?/1), Enum.reject(candidates, &codex_item?(&1.item)),
-       %{}}
+      {:ok, Enum.reject(items, &discovered_item?/1),
+       Enum.reject(candidates, &discovered_item?(&1.item)), %{}}
     end
   end
 
@@ -146,13 +146,13 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp discovery_meta(session, notice, validity, connection),
     do: %{status: notice || connection_label(connection), model_discovery: {session, validity}}
 
-  @spec codex_item?(Item.t()) :: boolean()
-  defp codex_item?(%Item{
-         meta: %{intent: {:model, %ModelSelection{route: %{request_provider: :openai_codex}}}}
+  @spec discovered_item?(Item.t()) :: boolean()
+  defp discovered_item?(%Item{
+         meta: %{intent: {:model, %ModelSelection{route: %{request_provider: provider}}}}
        }),
-       do: true
+       do: provider in [:apple, :openai_codex]
 
-  defp codex_item?(%Item{}), do: false
+  defp discovered_item?(%Item{}), do: false
 
   @spec fetch_models(pid()) ::
           {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
@@ -305,7 +305,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
         "#{route.model_provider} via #{route.execution.wire_protocol}",
         endpoint,
         credential,
-        "unverified catalog route",
+        evidence_label(route.request_provider),
         context,
         thinking,
         capabilities,
@@ -338,6 +338,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp format_cost(_cost), do: ""
 
   @spec format_capabilities(ModelSelection.t()) :: String.t()
+  defp format_capabilities(%ModelSelection{route: %{request_provider: :apple}}),
+    do: "Compact file tools · no images"
+
   defp format_capabilities(%ModelSelection{policy: %{capabilities: capabilities}}) do
     tools = capability_label(capabilities.tools)
     images = capability_label(capabilities.images)
@@ -359,7 +362,13 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp format_context(_), do: ""
 
-  @spec endpoint_label(String.t(), String.t()) :: String.t()
+  @spec evidence_label(ModelSelection.Route.request_provider()) :: String.t()
+  defp evidence_label(:apple), do: "Ready on this device"
+  defp evidence_label(_provider), do: "unverified catalog route"
+
+  @spec endpoint_label(String.t() | nil, String.t() | nil) :: String.t()
+  defp endpoint_label(nil, nil), do: "On device"
+
   defp endpoint_label(endpoint, path) do
     case URI.parse(endpoint) do
       %URI{scheme: scheme, host: host, userinfo: nil, query: nil, fragment: nil} = uri
@@ -374,6 +383,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   end
 
   @spec format_thinking(ModelSelection.t()) :: String.t()
+  defp format_thinking(%ModelSelection{route: %{request_provider: :apple}}),
+    do: "No thinking controls"
+
   defp format_thinking(%ModelSelection{policy: %{reasoning: %{options: [_only]}}}),
     do: "thinking fixed"
 

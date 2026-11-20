@@ -596,6 +596,54 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
     assert Session.cancel_connection(session, original, ref) == {:error, :stale_target}
   end
 
+  test "public Apple model changes need readiness and cannot commit to a replacement conversation",
+       context do
+    owner = self()
+
+    probe = fn ->
+      send(owner, {:apple_selection_probe, self()})
+
+      receive do
+        {:finish_apple_probe, result} -> result
+      end
+    end
+
+    session =
+      start_session(context,
+        provider: MingaAgent.Providers.Native,
+        provider_opts: [
+          credential_opts: context.credential_opts,
+          model_resolver_opts: Keyword.put(resolver_opts(), :apple_availability_fn, probe)
+        ]
+      )
+
+    original = target(session)
+    direct = Task.async(fn -> Session.set_model(session, "apple:system") end)
+    assert_receive {:apple_selection_probe, caller}
+    assert caller == direct.pid
+    assert Session.model_selection(session) == nil
+    send(caller, {:finish_apple_probe, {:error, :helper_missing}})
+    assert {:error, message} = Task.await(direct)
+    assert message =~ "does not include the Apple Intelligence helper"
+    assert target(session) == original
+
+    targeted =
+      Task.async(fn -> Session.set_model_for_target(session, original, "apple:system") end)
+
+    assert_receive {:apple_selection_probe, caller}
+    assert caller == targeted.pid
+    assert :ok = Session.new_session(session)
+    assert target(session) != original
+    send(caller, {:finish_apple_probe, {:ok, 4_096}})
+    assert {:error, :stale_target} = Task.await(targeted)
+    assert Session.model_selection(session) == nil
+
+    assert {:error, :stale_target} =
+             Session.set_model_for_target(session, original, "apple:system")
+
+    refute_received {:apple_selection_probe, _}
+  end
+
   test "structured provider auth failure differs from ordinary tool failure", context do
     session = start_session(context)
 

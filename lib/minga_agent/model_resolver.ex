@@ -16,10 +16,12 @@ defmodule MingaAgent.ModelResolver do
   alias MingaAgent.ModelSelection.{Evidence, Policy, Route, Stored, TextExecution}
   alias MingaAgent.Provider.Spec
   alias MingaAgent.ProviderRegistry
+  alias MingaAgent.Providers.Apple
 
   @request_providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
   @request_provider_names Enum.map(@request_providers, &Atom.to_string/1)
   @reasoning_efforts ~w(off none minimal low medium high xhigh max)
+  @apple_request_output 512
 
   @type intent :: String.t() | map() | ModelSelection.t() | Stored.t() | nil
   @type context :: %{
@@ -28,6 +30,8 @@ defmodule MingaAgent.ModelResolver do
           snapshot: Snapshot.t(),
           opts: keyword()
         }
+  @type apple_availability :: {:ok, pos_integer()} | {:error, atom()}
+
   @type resolution_error ::
           :no_available_model
           | {:invalid_model_selection, String.t()}
@@ -73,7 +77,7 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @doc "Lists exact credential-backed executable routes suitable for the picker."
+  @doc "Lists exact executable routes, including Apple only when supplied a fresh discovery result."
   @spec candidates(keyword()) :: [ModelCandidate.t()]
   def candidates(opts \\ []) do
     config = Keyword.get(opts, :config, %Config{})
@@ -103,6 +107,34 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
+  @doc "Checks the Apple system model without generating text."
+  @spec apple_availability(keyword()) :: apple_availability()
+  def apple_availability(opts \\ []) do
+    probe = Keyword.get(opts, :apple_availability_fn, &Apple.availability/0)
+    probe.()
+  end
+
+  @doc "Formats a local availability failure without exposing transport details."
+  @spec apple_unavailable_message(atom()) :: String.t()
+  def apple_unavailable_message(:unsupported),
+    do: "Apple Intelligence requires a supported Mac with macOS 27 or later."
+
+  def apple_unavailable_message(:helper_missing),
+    do:
+      "This Minga build does not include the Apple Intelligence helper. Use a build that includes it."
+
+  def apple_unavailable_message(:disabled),
+    do: "Apple Intelligence is disabled. Enable it in System Settings, then reopen /model."
+
+  def apple_unavailable_message(:model_not_ready),
+    do: "The Apple Intelligence model is not ready. Wait for it, then reopen /model."
+
+  def apple_unavailable_message(:unsupported_locale),
+    do: "Apple Intelligence is unavailable for the current language or region."
+
+  def apple_unavailable_message(_reason),
+    do: "Could not check the on-device Apple Intelligence model. Reopen /model to retry."
+
   @spec candidate_catalog_options(Config.t(), Snapshot.t(), keyword()) :: keyword()
   defp candidate_catalog_options(_config, snapshot, opts) do
     if catalog_discovery_available?(snapshot) or explicit_route_id?(Keyword.get(opts, :current)) do
@@ -122,6 +154,8 @@ defmodule MingaAgent.ModelResolver do
   end
 
   @spec explicit_route_id?(term()) :: boolean()
+  defp explicit_route_id?(%ModelSelection{route: %{request_provider: :apple}}), do: false
+
   defp explicit_route_id?(%ModelSelection{} = selection),
     do: explicit_route_id?(ModelSelection.id(selection))
 
@@ -187,7 +221,7 @@ defmodule MingaAgent.ModelResolver do
 
   def message(:no_available_model),
     do:
-      "No credential-backed executable model route is available. Configure a credential, then choose a model."
+      "No executable model route is available. Open /model to choose an on-device model or connect a provider."
 
   def message(other), do: "Model selection failed: #{inspect(other)}"
 
@@ -234,6 +268,17 @@ defmodule MingaAgent.ModelResolver do
   @spec resolve_stable_id(String.t(), context()) ::
           {:ok, ModelSelection.t()} | {:error, resolution_error()}
   defp resolve_stable_id(id, context) do
+    with {:ok, route} <- apple_route(apple_source()),
+         true <- id == ModelSelection.id(context.spec.id, route, :none) do
+      resolve_apple(%{}, context)
+    else
+      _hosted -> resolve_hosted_stable_id(id, context)
+    end
+  end
+
+  @spec resolve_hosted_stable_id(String.t(), context()) ::
+          {:ok, ModelSelection.t()} | {:error, resolution_error()}
+  defp resolve_hosted_stable_id(id, context) do
     candidate_opts =
       context.opts
       |> Keyword.put(:backend_spec, context.spec)
@@ -310,6 +355,28 @@ defmodule MingaAgent.ModelResolver do
 
   @spec validate_stored_source(Stored.t(), Snapshot.t(), Spec.t(), keyword()) ::
           :ok | {:error, resolution_error()}
+  defp validate_stored_source(%Stored{credential: :none} = stored, _snapshot, spec, opts) do
+    saved_limit = stored.policy.limits.context
+
+    with :ok <- apple_backend(spec),
+         {:ok, limit} <- apple_context_limit(opts, saved_limit),
+         true <- is_nil(saved_limit) or limit == saved_limit,
+         source = apple_source(saved_limit),
+         {:ok, expected} <- apple_route(source),
+         true <- expected == stored.route,
+         true <- stored_policy_matches?(stored.policy, source),
+         true <- stored.policy.limits.request_output <= @apple_request_output,
+         true <- stored.policy.cost == %{} do
+      :ok
+    else
+      {:error, {:route_unavailable, _message}} = error ->
+        error
+
+      _changed ->
+        correction("The saved Apple route or its limits changed. Choose it again in /model.")
+    end
+  end
+
   defp validate_stored_source(stored, snapshot, spec, opts) do
     {:catalog, provider, model_id} = stored.route.origin
     context = %{config: %Config{}, snapshot: snapshot, spec: spec, opts: opts}
@@ -373,6 +440,7 @@ defmodule MingaAgent.ModelResolver do
       |> Keyword.put(:backend_spec, context.spec)
       |> Keyword.put(:config, context.config)
       |> Keyword.put(:credential_snapshot, context.snapshot)
+      |> Keyword.delete(:apple_discovery)
       |> Keyword.put_new(:codex_models, {:error, :not_loaded})
 
     case candidates(candidate_opts) do
@@ -404,6 +472,16 @@ defmodule MingaAgent.ModelResolver do
   defp do_resolve_raw_intent(requested_model, intent, context) do
     exact_model = apply_legacy_provider_hint(requested_model, Map.get(intent, "provider"))
 
+    case split_model_spec(exact_model) do
+      {:ok, "apple", "system"} -> resolve_apple(intent, context)
+      {:ok, "apple", _other} -> route_error("The only on-device Apple route is apple:system.")
+      _hosted -> resolve_hosted(exact_model, intent, context)
+    end
+  end
+
+  @spec resolve_hosted(String.t(), map(), context()) ::
+          {:ok, ModelSelection.t()} | {:error, resolution_error()}
+  defp resolve_hosted(exact_model, intent, context) do
     with {:ok, requested_provider, model_id} <-
            exact_model_identity(exact_model, models(context.opts)),
          source_provider = catalog_provider(requested_provider),
@@ -418,7 +496,7 @@ defmodule MingaAgent.ModelResolver do
            credential: credential
          },
          {:ok, route} <- build_route(route_input, context),
-         {:ok, policy} <- build_policy(source, intent, context.config),
+         {:ok, policy} <- build_policy(source, intent, context.config.max_tokens),
          evidence = Evidence.new(),
          {:ok, selection} <-
            ModelSelection.build(context.spec, route, credential, policy, evidence),
@@ -435,7 +513,93 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @type source :: {:catalog, map()}
+  @type source :: {:catalog | :apple, map()}
+
+  @spec resolve_apple(map(), context()) ::
+          {:ok, ModelSelection.t()} | {:error, resolution_error()}
+  defp resolve_apple(intent, context) do
+    with :ok <- apple_backend(context.spec),
+         {:ok, :none} <- choose_from_profiles([:none], intent, "apple"),
+         {:ok, limit} <- apple_context_limit(context.opts, nil) do
+      build_apple_selection(intent, context, limit)
+    end
+  end
+
+  @spec build_apple_selection(map(), context(), pos_integer() | nil) ::
+          {:ok, ModelSelection.t()} | {:error, resolution_error()}
+  defp build_apple_selection(intent, context, limit) do
+    source = apple_source(limit)
+    max_tokens = min(context.config.max_tokens, @apple_request_output)
+
+    with :ok <- apple_backend(context.spec),
+         {:ok, route} <- apple_route(source),
+         {:ok, policy} <- build_policy(source, intent, max_tokens) do
+      ModelSelection.build(context.spec, route, :none, policy, Evidence.new())
+    end
+  end
+
+  @spec apple_backend(Spec.t()) :: :ok | {:error, resolution_error()}
+  defp apple_backend(%Spec{id: "native", module: MingaAgent.Providers.Native}), do: :ok
+
+  defp apple_backend(_spec),
+    do: route_error("Apple Intelligence requires the Native agent backend.")
+
+  # Config and restore validate exact route identity without starting a helper.
+  # Interactive selection rechecks readiness on the connection effect worker.
+  @spec apple_context_limit(keyword(), pos_integer() | nil) ::
+          {:ok, pos_integer() | nil} | {:error, resolution_error()}
+  defp apple_context_limit(opts, saved_limit) do
+    if Keyword.get(opts, :require_apple_ready, false) do
+      checked_apple_context_limit(opts)
+    else
+      {:ok, saved_limit}
+    end
+  end
+
+  @spec checked_apple_context_limit(keyword()) ::
+          {:ok, pos_integer()} | {:error, resolution_error()}
+  defp checked_apple_context_limit(opts) do
+    readiness =
+      Keyword.get_lazy(opts, :apple_selection_readiness, fn -> apple_availability(opts) end)
+
+    case readiness do
+      {:ok, limit} when is_integer(limit) and limit > 0 -> {:ok, limit}
+      {:error, reason} -> route_error(apple_unavailable_message(reason))
+    end
+  end
+
+  @spec apple_source(pos_integer() | nil) :: source()
+  defp apple_source(limit \\ nil) do
+    {:apple,
+     %{
+       limits: %{context: limit},
+       modalities: %{input: [:text], output: [:text]},
+       capabilities: %{tools: %{enabled: true}, streaming: %{text: true}}
+     }}
+  end
+
+  @spec apple_route(source()) :: {:ok, Route.t()} | {:error, term()}
+  defp apple_route(source) do
+    with {:ok, execution} <-
+           TextExecution.new(%{
+             supported: true,
+             family: "apple_foundation_models",
+             wire_protocol: "apple_foundation_models",
+             transport: "in_process",
+             provider_model_id: "system"
+           }) do
+      Route.new(%{
+        origin: {:local, "apple", "system"},
+        request_provider: :apple,
+        id: "apple/system",
+        model_provider: "apple",
+        model_id: "system",
+        display_name: "Apple Intelligence (On Device)",
+        execution: execution,
+        metadata: source_metadata(source)
+      })
+    end
+  end
 
   @spec model_source(String.t(), String.t(), keyword()) ::
           {:ok, source()} | {:error, resolution_error()}
@@ -537,6 +701,8 @@ defmodule MingaAgent.ModelResolver do
 
   defp credential_available(%OAuth{} = credential, snapshot, opts),
     do: validate_current_oauth(credential, Snapshot.oauth_ref(snapshot), opts)
+
+  defp credential_available(:none, _snapshot, _opts), do: :ok
 
   @spec validate_current_oauth(OAuth.t(), OAuth.t() | nil, keyword()) ::
           :ok | {:error, resolution_error()}
@@ -690,9 +856,9 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @spec build_policy(source(), map(), Config.t()) ::
+  @spec build_policy(source(), map(), pos_integer()) ::
           {:ok, Policy.t()} | {:error, resolution_error()}
-  defp build_policy(source, intent, config) do
+  defp build_policy(source, intent, max_tokens) do
     options = reasoning_options(source)
 
     requested =
@@ -708,7 +874,7 @@ defmodule MingaAgent.ModelResolver do
           context: limits.context,
           input: limits.input,
           output: limits.output,
-          request_output: request_output_limit(config.max_tokens, limits.output)
+          request_output: request_output_limit(max_tokens, limits.output)
         },
         capabilities: capabilities,
         cost: cost(source)
@@ -768,7 +934,7 @@ defmodule MingaAgent.ModelResolver do
     intents = Enum.flat_map(catalog, &catalog_candidate_intents(&1, context.snapshot))
 
     intents
-    |> Enum.reduce([], fn intent, selections ->
+    |> Enum.reduce(apple_candidates(resolution_context), fn intent, selections ->
       with {:ok, selection} <- resolve_raw_intent(intent, resolution_context),
            true <- candidate_available?(selection, inventory) do
         [selection | selections]
@@ -779,6 +945,17 @@ defmodule MingaAgent.ModelResolver do
     |> Enum.uniq_by(&ModelSelection.id/1)
     |> Enum.map(&ModelCandidate.new(&1, context.favorites, context.current_id))
     |> Enum.sort_by(&candidate_sort_key/1)
+  end
+
+  @spec apple_candidates(context()) :: [ModelSelection.t()]
+  defp apple_candidates(context) do
+    with {:ok, limit} when is_integer(limit) and limit > 0 <-
+           Keyword.get(context.opts, :apple_discovery),
+         {:ok, selection} <- build_apple_selection(%{}, context, limit) do
+      [selection]
+    else
+      _unavailable -> []
+    end
   end
 
   @spec catalog_candidate_intents(map(), Snapshot.t()) :: [map()]
@@ -827,6 +1004,8 @@ defmodule MingaAgent.ModelResolver do
   defp text_output?(_modalities), do: false
 
   @spec reasoning_options(source()) :: [String.t()]
+  defp reasoning_options({:apple, _model}), do: ["off"]
+
   defp reasoning_options({:catalog, model}) do
     reasoning = model |> value("capabilities") |> value("reasoning")
     effort = value(reasoning, "effort")
@@ -884,7 +1063,7 @@ defmodule MingaAgent.ModelResolver do
           tool_result_images: ModelSelection.capability(),
           streaming: ModelSelection.capability()
         }
-  defp capabilities({:catalog, model}) do
+  defp capabilities({_source, model}) do
     caps = value(model, "capabilities")
     modalities = value(model, "modalities")
     images = image_capability(value(modalities, "input"))
@@ -1114,14 +1293,16 @@ defmodule MingaAgent.ModelResolver do
   @spec route_id(Route.request_provider(), String.t()) :: String.t()
   defp route_id(request_provider, model_id), do: "#{request_provider}/#{model_id}"
 
-  @spec credential_auth_mode(ModelSelection.credential_ref()) :: :api_key | :oauth
+  @spec credential_auth_mode(ModelSelection.credential_ref()) :: :api_key | :oauth | :none
   defp credential_auth_mode(%ApiKey{}), do: :api_key
   defp credential_auth_mode(%OAuth{}), do: :oauth
+  defp credential_auth_mode(:none), do: :none
 
-  @spec normalize_auth_mode(term()) :: :api_key | :oauth | :invalid | nil
+  @spec normalize_auth_mode(term()) :: :api_key | :oauth | :none | :invalid | nil
   defp normalize_auth_mode(nil), do: nil
   defp normalize_auth_mode(value) when value in [:api_key, "api_key"], do: :api_key
   defp normalize_auth_mode(value) when value in [:oauth, "oauth"], do: :oauth
+  defp normalize_auth_mode(value) when value in [:none, "none"], do: :none
   defp normalize_auth_mode(_value), do: :invalid
 
   @spec backend_spec(keyword()) :: {:ok, Spec.t()} | {:error, resolution_error()}

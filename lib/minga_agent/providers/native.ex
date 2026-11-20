@@ -839,8 +839,8 @@ defmodule MingaAgent.Providers.Native do
          {:ok, candidate} <-
            PrefixStore.candidate(
              current.prefix_candidate,
-             build_system_prompt(current.project_root, active_skills),
-             question_schemas(schemas, questions?),
+             build_system_prompt(current.project_root, active_skills, selection),
+             schemas |> model_schemas(selection) |> question_schemas(questions?),
              identity,
              Enum.map(active_skills, & &1.name)
            ) do
@@ -992,7 +992,7 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:get_state, _from, state) do
-    system_prompt = build_system_prompt(state.project_root, state.active_skills)
+    system_prompt = build_system_prompt(state.project_root, state.active_skills, state.selection)
     selection = state.selection
 
     session_state = %{
@@ -1053,6 +1053,17 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:ok, candidates}, state}
   end
 
+  def handle_call(
+        {:compact, _messages},
+        _from,
+        %{selection: %{route: %{request_provider: :apple}}} = state
+      ) do
+    {:reply,
+     {:error,
+      "Apple Intelligence does not compact history. Start a new conversation to clear its context."},
+     state}
+  end
+
   def handle_call({:compact, _messages}, _from, %{streaming: true} = state) do
     {:reply, {:error, "Cannot compact while streaming"}, state}
   end
@@ -1084,6 +1095,17 @@ defmodule MingaAgent.Providers.Native do
       {:error, _result} ->
         {:reply, {:error, "compaction blocked by hook"}, state}
     end
+  end
+
+  def handle_call(
+        {:compact, _messages, _opts},
+        _from,
+        %{selection: %{route: %{request_provider: :apple}}} = state
+      ) do
+    {:reply,
+     {:error,
+      "Apple Intelligence does not compact history. Start a new conversation to clear its context."},
+     state}
   end
 
   def handle_call({:compact, _messages, _opts}, _from, %{streaming: true} = state) do
@@ -3205,6 +3227,17 @@ defmodule MingaAgent.Providers.Native do
     {schemas, %{state | schema_cache: {state.tools, schemas}}}
   end
 
+  # Apple's named-argument schemas share its small context window with conversation history.
+  # Restrict the authoritative prefix, not just the transported declarations.
+  @spec model_schemas([map()], ModelSelection.t()) :: [map()]
+  defp model_schemas(schemas, %ModelSelection{route: %{request_provider: :apple}}) do
+    Enum.filter(schemas, fn schema ->
+      schema.name in ~w(read_file find grep edit_file write_file)
+    end)
+  end
+
+  defp model_schemas(schemas, %ModelSelection{}), do: schemas
+
   @spec question_schemas([map()], boolean()) :: [map()]
   defp question_schemas(schemas, true), do: schemas
   defp question_schemas(schemas, false), do: Enum.reject(schemas, &(&1.name == "ask_user"))
@@ -3339,20 +3372,27 @@ defmodule MingaAgent.Providers.Native do
   defp local_spec(%Tool{provider_options: %{minga_tool_spec: %ToolSpec{} = spec}}), do: spec
   defp local_spec(%Tool{} = tool), do: ToolRegistry.from_req_tool(tool)
 
-  @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
-  defp build_system_prompt(project_root, active_skills) do
+  @spec build_system_prompt(String.t(), [Skills.skill()], ModelSelection.t()) :: String.t()
+  defp build_system_prompt(project_root, active_skills, selection) do
     base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
     skills_section = Skills.format_for_prompt(active_skills)
     append = read_config_string(:agent_append_system_prompt)
 
     parts =
-      [base, instructions, skills_section, append]
+      [base, provider_tool_guidance(selection), instructions, skills_section, append]
       |> Enum.reject(&(is_nil(&1) or &1 == ""))
       |> Enum.join("\n\n")
 
     parts
   end
+
+  @spec provider_tool_guidance(ModelSelection.t()) :: String.t() | nil
+  defp provider_tool_guidance(%ModelSelection{route: %{request_provider: :apple}}) do
+    "Answer directly when the request does not require project files. Use a tool only when needed to fulfill the request. If a tool result already answers the request, use it in your answer instead of calling another tool."
+  end
+
+  defp provider_tool_guidance(%ModelSelection{}), do: nil
 
   @default_system_prompt_template """
   You are an AI coding assistant inside Minga, a modal text editor.
@@ -3514,6 +3554,48 @@ defmodule MingaAgent.Providers.Native do
     }
   end
 
+  defp error_event(_message, {:apple_unavailable, reason}, %ModelSelection{
+         route: %{request_provider: :apple}
+       }) do
+    %Event.Error{
+      message: ModelResolver.apple_unavailable_message(reason),
+      kind: :provider_error,
+      provider: "apple"
+    }
+  end
+
+  defp error_event(
+         message,
+         %ReqLLM.Error.API.Stream{cause: {:apple_inference, _reason} = cause},
+         %ModelSelection{route: %{request_provider: :apple}} = selection
+       ),
+       do: error_event(message, cause, selection)
+
+  defp error_event(
+         message,
+         {:apple_inference, "Apple inference failed: " <> _details},
+         %ModelSelection{
+           route: %{request_provider: :apple}
+         } = selection
+       ),
+       do: error_event(message, :unexpected_apple_inference_failure, selection)
+
+  defp error_event(_message, {:apple_inference, reason}, %ModelSelection{
+         route: %{request_provider: :apple}
+       })
+       when is_binary(reason) do
+    %Event.Error{message: reason, kind: :provider_error, provider: "apple"}
+  end
+
+  defp error_event(_message, _reason, %ModelSelection{route: %{request_provider: :apple}}) do
+    %Event.Error{
+      message:
+        "Apple Intelligence could not complete this request. Reopen /model to check availability or open Messages for details.",
+      kind: :provider_error,
+      provider: "apple"
+    }
+  end
+
   defp error_event(message, reason, %ModelSelection{} = selection) do
     kind = classify_error_reason(reason)
     provider = Atom.to_string(selection.route.request_provider)
@@ -3667,6 +3749,8 @@ defmodule MingaAgent.Providers.Native do
   defp classify_legacy_error_checks([]), do: :provider_error
 
   @spec normalize_usage(map() | nil, ModelSelection.t()) :: Event.token_usage() | nil
+  defp normalize_usage(_usage, %ModelSelection{route: %{request_provider: :apple}}), do: nil
+
   defp normalize_usage(nil, _selection), do: nil
 
   defp normalize_usage(usage, %ModelSelection{} = selection) when is_map(usage) do

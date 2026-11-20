@@ -51,6 +51,7 @@ defmodule MingaAgent.Session.ContinuationCodec do
                     :source_id,
                     :api_key,
                     :oauth,
+                    :none,
                     :unknown,
                     :provider_owned,
                     :provider,

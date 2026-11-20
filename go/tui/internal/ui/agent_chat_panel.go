@@ -404,9 +404,9 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 	if chat.Pending != "" {
 		lines = append(lines, m.renderAgentDetailRow("Approval", "waiting", width))
 	}
-	if lastAgentError(messages) != "" {
+	if message := lastAgentError(messages); message != "" {
 		lines = append(lines, m.renderAgentDetailsSection("Needs attention", width))
-		lines = append(lines, m.renderAgentDetailRow("Auth", "run /auth or check API key", width))
+		lines = append(lines, m.renderAgentDetailRow("Error", message, width))
 	}
 	if usage, ok := lastAgentUsage(messages); ok {
 		lines = append(lines,

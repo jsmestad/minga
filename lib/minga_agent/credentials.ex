@@ -100,6 +100,8 @@ defmodule MingaAgent.Credentials do
   """
   @spec request_options(ModelSelection.credential_ref(), keyword()) ::
           {:ok, keyword()} | {:error, {:credential_unavailable, String.t()}}
+  def request_options(:none, _opts), do: {:ok, []}
+
   def request_options(%ApiKey{provider: provider, source: source} = credential, opts) do
     case resolve_exact_api_key(provider, source, opts) do
       {:ok, key} -> {:ok, [auth_mode: :api_key, api_key: key]}
@@ -128,6 +130,8 @@ defmodule MingaAgent.Credentials do
   @doc "Acquires dispatch material and its secret-free replay binding in one resolution."
   @spec bind_request(ModelSelection.credential_ref(), Binding.t() | nil, keyword()) ::
           {:ok, Binding.t()} | {:error, term()}
+  def bind_request(:none, _previous, _opts), do: {:ok, Binding.none()}
+
   def bind_request(%ApiKey{} = credential, previous, opts) do
     with {:ok, material} <- request_options(credential, opts),
          do: {:ok, Binding.api_key(material, previous)}

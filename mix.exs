@@ -8,7 +8,8 @@ defmodule Minga.MixProject do
   @rolling_version_pattern ~r/\A#{Regex.escape(@version)}-dev\.[1-9][0-9]*\z/
   @generated_elixir_path "generated/elixir"
   @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
-  @release_priv_entries @native_release_artifacts ++ ~w(extensions queries tree_sitter tutor.txt)
+  @release_priv_entries @native_release_artifacts ++
+                          ~w(extensions queries tree_sitter tutor.txt minga-apple-inference)
   @tui_release_files ~w(mix/release_erts.ex mix/tasks/release.tui.ex)
 
   def project do
@@ -25,7 +26,15 @@ defmodule Minga.MixProject do
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
-        plt_add_apps: [:llm_db, :mix, :plug, :plug_crypto, :thousand_island, :websock],
+        plt_add_apps: [
+          :llm_db,
+          :mix,
+          :nimble_options,
+          :plug,
+          :plug_crypto,
+          :thousand_island,
+          :websock
+        ],
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
       consolidate_protocols: Mix.env() != :prod,
@@ -414,6 +423,7 @@ defmodule Minga.MixProject do
     zig = ~w(mix/compilers/minga_zig.ex)
     go = ~w(mix/compilers/minga_go_tui.ex)
     native = ~w(mix/tasks/native_build/result.ex)
+    apple = ~w(mix/tasks/native_build_apple.ex)
     dialyzer = ~w(mix/tasks/dialyzer.incremental.runner.ex mix/tasks/dialyzer.incremental.ex)
 
     [
@@ -432,10 +442,11 @@ defmodule Minga.MixProject do
         ),
       "compile.minga_zig": build_task(Mix.Tasks.Compile.MingaZig, zig),
       "compile.minga_go_tui": build_task(Mix.Tasks.Compile.MingaGoTui, go),
+      "native.build.apple": build_task(Mix.Tasks.Native.Build.Apple, apple),
       "native.build.support":
         build_task(
           Mix.Tasks.Native.Build.Support,
-          native ++ zig ++ ~w(mix/tasks/native_build_support.ex)
+          native ++ zig ++ apple ++ ~w(mix/tasks/native_build_support.ex)
         ),
       "native.build.go_tui":
         build_task(
@@ -445,7 +456,7 @@ defmodule Minga.MixProject do
       "native.build.tui":
         build_task(
           Mix.Tasks.Native.Build.Tui,
-          native ++ zig ++ go ++ ~w(mix/tasks/native_build_tui.ex)
+          native ++ zig ++ go ++ apple ++ ~w(mix/tasks/native_build_tui.ex)
         ),
       "release.tui": build_task(Mix.Tasks.Release.Tui, @tui_release_files),
       "dialyzer.incremental": [

@@ -1,6 +1,6 @@
 # Agent model selection
 
-Minga resolves every agent model choice to one exact hosted route before it becomes active. The route records the backend, catalog model identity, request provider, wire protocol, provider endpoint, provider-facing model ID, credential profile, reasoning controls, limits, and capabilities. Prompt transport consumes that resolved route directly.
+Minga resolves every agent model choice to one exact route before it becomes active. The route records the backend, model identity, request provider, execution protocol, provider-facing model ID, reasoning controls, limits, and capabilities. Hosted routes also record the endpoint and credential profile. Prompt transport consumes that resolved route directly.
 
 Minga supports these named hosted providers:
 
@@ -15,9 +15,21 @@ Minga supports these named hosted providers:
 | Mistral | API key from the environment or credential file |
 | DeepSeek | API key from the environment or credential file |
 
-Local inference servers, anonymous routes, custom endpoints, and provider endpoint overrides are not supported.
+Custom inference servers, custom endpoints, and hosted provider endpoint overrides are not supported.
 
 ## Configure a model
+
+On an Apple Intelligence-capable Mac running macOS 27 or later, open `/model` and choose **Apple Intelligence (On Device)**. This route uses the system model on the Mac running the Minga agent. It needs no API key or network endpoint. Minga checks availability when you open the picker but does not start inference or download a model. If the model is not ready, enable Apple Intelligence in System Settings as needed and reopen `/model`.
+
+Apple Intelligence is currently available only in qualifying source builds. Official DMG and Homebrew builds do not include the helper. The normal native build includes it on Apple Silicon when the macOS 27 SDK is available. To build it explicitly, run `mix native.build.apple --require`.
+
+To make it your configured model, set:
+
+```elixir
+set :agent_model, "apple:system"
+```
+
+An explicit configuration or a restored session keeps the exact Apple route. Minga checks readiness again before inference and does not switch to a hosted model if Apple Intelligence is unavailable. The route supports text and a compact file tool set: read, find, grep, edit, and write. Normal approvals still apply. It does not support image attachments, thinking controls, or history compaction. If instructions, tool schemas, and history do not fit the model's context window, Minga reports the limit rather than trimming them. Shorten the prompt or start a new conversation.
 
 Set a hosted provider and catalog model:
 
@@ -46,9 +58,9 @@ A choice becomes active only after the current session validates the exact catal
 
 ## Saved selections
 
-Credential values are never stored in the selection. API-key selections store only the provider and source (`env` or `file`). OpenAI Codex selections store the OAuth account identity and a hash of the source identity; the OAuth filesystem path remains request-local.
+Credential values are never stored in the selection. API-key selections store only the provider and source (`env` or `file`). OpenAI Codex selections store the OAuth account identity and a hash of the source identity; the OAuth filesystem path remains request-local. The Apple system route explicitly records that it has no credentials.
 
-Saved sessions persist the complete secret-free route snapshot. Restore validates the recorded backend, catalog route, credential owner and source, execution contract, and capabilities against the current hosted catalog. A valid selection is not permission to replay retained native context with different inputs.
+Saved sessions persist the complete secret-free route snapshot. Restore validates the recorded backend, route, authentication, execution contract, and capabilities without substituting another route. A valid selection is not permission to replay retained native context with different inputs.
 
 Favorites should use the opaque ID shown by completion or the picker. These IDs hash the executable route identity. Do not derive them from display labels.
 

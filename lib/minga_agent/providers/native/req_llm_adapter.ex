@@ -6,6 +6,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   """
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Providers.Apple
   alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.OAuth
@@ -215,6 +216,16 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @doc "Runs one ReqLLM streaming request attempt. Retry ownership stays in Native."
   @spec stream(llm_client(), LLMDB.Model.t(), [ReqLLM.Message.t()], keyword()) ::
           {:ok, StreamResponse.t()} | {:error, term()}
+  def stream(_llm_client, %LLMDB.Model{provider: :apple, id: "system"} = model, messages, opts) do
+    case Apple.availability() do
+      {:ok, _context} -> Apple.stream_text(model, messages, opts)
+      {:error, reason} -> {:error, {:apple_unavailable, reason}}
+    end
+  end
+
+  def stream(_llm_client, %LLMDB.Model{provider: :apple}, _messages, _opts),
+    do: {:error, :invalid_apple_route}
+
   def stream(llm_client, %LLMDB.Model{} = model, messages, opts)
       when is_function(llm_client, 3) do
     llm_client.(model, messages, opts)
