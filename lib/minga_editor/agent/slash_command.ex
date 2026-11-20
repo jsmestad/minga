@@ -24,7 +24,6 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias Minga.Config
   alias Minga.Log
   alias MingaEditor.Commands.Agent, as: AgentCommands
-  alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
 
@@ -773,12 +772,12 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp do_resume(state, config_dir) do
     context = %{persisted_only: true}
     context = if config_dir, do: Map.put(context, :session_store_dir, config_dir), else: context
-    PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource, context)
+    MingaEditor.UI.Picker.AgentSessionSource.open(state, context)
   end
 
   @spec do_sessions(state()) :: state()
   defp do_sessions(state) do
-    PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource)
+    MingaEditor.UI.Picker.AgentSessionSource.open(state)
   end
 
   # ── Auth command ─────────────────────────────────────────────────────────────

@@ -1597,6 +1597,36 @@ defmodule MingaAgent.SessionStoreTest do
     end
   end
 
+  test "archive commits only organization, preserving record and draft on failure and unarchive",
+       %{
+         tmp_dir: dir
+       } do
+    data = sample_data("archive-record")
+    draft = draft_snapshot("Keep the archive draft")
+    assert :ok = SessionStore.save(data, dir)
+    assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+    path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+    before = File.read!(path)
+    refused = [fault_injector: %{before_session_snapshot_rename: {:error, :disk_full}}]
+
+    assert {:error, :disk_full} = SessionStore.set_archived(data.id, true, dir, refused)
+    assert File.read!(path) == before
+
+    interrupted = [fault_injector: %{after_session_snapshot_rename: {:error, :interrupted}}]
+    assert :ok = SessionStore.set_archived(data.id, true, dir, interrupted)
+
+    assert {true, restored} =
+             path |> File.read!() |> JSON.decode!() |> pop_in(["conversation", "archived"])
+
+    assert restored == JSON.decode!(before)
+    assert [%{archived?: true}] = SessionStore.list(dir)
+    assert {:ok, 1, ^draft} = SessionStore.read_presentation(data.id, dir)
+
+    assert :ok = SessionStore.set_archived(data.id, false, dir, [])
+    assert [%{archived?: false}] = SessionStore.list(dir)
+    assert JSON.decode!(File.read!(path)) == JSON.decode!(before)
+  end
+
   # ── List ────────────────────────────────────────────────────────────────────
 
   describe "list/1" do

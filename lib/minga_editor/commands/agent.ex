@@ -1846,7 +1846,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Opens the session switcher picker."
   @spec scope_session_switcher(state()) :: state()
   def scope_session_switcher(state) do
-    PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource)
+    MingaEditor.UI.Picker.AgentSessionSource.open(state)
   end
 
   # ── Help ───────────────────────────────────────────────────────────────────
@@ -2550,7 +2550,7 @@ defmodule MingaEditor.Commands.Agent do
         description: "Resume agent session",
         requires_buffer: false,
         execute: fn state ->
-          PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource, %{persisted_only: true})
+          MingaEditor.UI.Picker.AgentSessionSource.open(state, %{persisted_only: true})
         end
       }
     ]

@@ -62,6 +62,7 @@ defmodule MingaAgent.SessionStore do
           message_count: non_neg_integer(),
           turn_count: non_neg_integer(),
           cost: float(),
+          archived?: boolean(),
           continuation_kind: :lossless | :legacy_reconstructed | :legacy_import_required
         }
 
@@ -81,6 +82,7 @@ defmodule MingaAgent.SessionStore do
           optional(:last_message_at) => String.t(),
           optional(:title) => String.t(),
           optional(:custom_title) => String.t() | nil,
+          optional(:archived?) => boolean(),
           optional(:provider_name) => String.t(),
           optional(:branches) => [MingaAgent.Branch.t()],
           optional(:message_ids) => [pos_integer()],
@@ -96,6 +98,7 @@ defmodule MingaAgent.SessionStore do
            required(:last_message_at) => String.t(),
            required(:title) => String.t(),
            optional(:custom_title) => String.t() | nil,
+           required(:archived?) => boolean(),
            required(:model_name) => String.t(),
            required(:provider_name) => String.t(),
            optional(:model_selection) => ModelSelection.Stored.t() | nil,
@@ -154,12 +157,31 @@ defmodule MingaAgent.SessionStore do
   def rename_conversation(id, title, config_dir, opts) when is_binary(id) and is_binary(title) do
     with :ok <- validate_presentation_id(id),
          {:ok, title} <- normalize_title(title),
+         :ok <- validate_artifact_opts(opts),
+         path = session_record_path(id, config_dir),
+         :ok <-
+           with_record_workflow(path, fn ->
+             update_conversation_metadata(path, id, {:rename, title}, opts)
+           end) do
+      {:ok, title}
+    end
+  end
+
+  @doc "Archives or restores an existing saved conversation without modifying its work."
+  @spec set_archived(String.t(), boolean(), String.t() | nil, keyword()) :: :ok | {:error, term()}
+  def set_archived(id, archived?, config_dir, opts)
+      when is_binary(id) and is_boolean(archived?) do
+    with :ok <- validate_presentation_id(id),
          :ok <- validate_artifact_opts(opts) do
       path = session_record_path(id, config_dir)
 
-      with_record_workflow(path, fn -> rename_record(path, id, title, opts) end)
+      with_record_workflow(path, fn ->
+        update_conversation_metadata(path, id, {:archive, archived?}, opts)
+      end)
     end
   end
+
+  @typep metadata_change :: {:rename, String.t()} | {:archive, boolean()}
 
   @spec normalize_title(String.t()) :: {:ok, String.t()} | {:error, :invalid_session_title}
   defp normalize_title(title) do
@@ -174,21 +196,38 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec rename_record(String.t(), String.t(), String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
-  defp rename_record(path, id, title, opts) do
+  @spec update_conversation_metadata(String.t(), String.t(), metadata_change(), keyword()) ::
+          :ok | {:error, term()}
+  defp update_conversation_metadata(path, id, change, opts) do
     with {:ok, previous, _facts} <- read_record_for_write(path, id, opts),
          %{"version" => version} = conversation when version in [2, 3, 4, 5, @version] <-
-           record_conversation(previous),
-         renamed = Map.put(conversation, "custom_title", title),
-         candidate = replace_record_conversation(previous, renamed),
-         :ok <- write_renamed_record(path, candidate, opts) do
-      {:ok, title}
+           record_conversation(previous) do
+      candidate =
+        replace_record_conversation(previous, apply_metadata_change(conversation, change))
+
+      commit_metadata_change(path, previous, candidate, change, opts)
     else
       {:error, _reason} = error -> error
       _unsupported -> {:error, :no_saved_conversation}
     end
   end
+
+  @spec apply_metadata_change(map(), metadata_change()) :: map()
+  defp apply_metadata_change(conversation, {:rename, title}),
+    do: Map.put(conversation, "custom_title", title)
+
+  defp apply_metadata_change(conversation, {:archive, true}),
+    do: Map.put(conversation, "archived", true)
+
+  defp apply_metadata_change(conversation, {:archive, false}),
+    do: Map.delete(conversation, "archived")
+
+  @spec commit_metadata_change(String.t(), map(), map(), metadata_change(), keyword()) ::
+          :ok | {:error, term()}
+  defp commit_metadata_change(_path, record, record, _change, _opts), do: :ok
+
+  defp commit_metadata_change(path, _previous, candidate, {action, _value}, opts),
+    do: write_metadata_record(path, candidate, action, opts)
 
   @spec replace_record_conversation(map(), map()) :: map()
   defp replace_record_conversation(%{"version" => @envelope_version} = record, conversation),
@@ -196,23 +235,34 @@ defmodule MingaAgent.SessionStore do
 
   defp replace_record_conversation(_record, conversation), do: conversation
 
-  # Only the title changes, so the validated artifact generation and pins stay the same.
-  @spec write_renamed_record(String.t(), map(), keyword()) :: :ok | {:error, term()}
-  defp write_renamed_record(path, record, opts) do
+  # Metadata-only changes leave the artifact generation and pins unchanged.
+  @spec write_metadata_record(String.t(), map(), :rename | :archive, keyword()) ::
+          :ok | {:error, term()}
+  defp write_metadata_record(path, record, action, opts) do
     case atomic_write_private_result(path, JSON.encode!(record), fault_injector(opts)) do
-      {:ok, :durable} -> :ok
-      {:error, reason, :before_rename} -> {:error, reason}
-      {:error, reason, :after_rename} -> confirm_rename_commit(Path.dirname(path), reason)
+      {:ok, :durable} ->
+        :ok
+
+      {:error, reason, :before_rename} ->
+        {:error, reason}
+
+      {:error, reason, :after_rename} ->
+        confirm_metadata_commit(Path.dirname(path), action, reason)
     end
   end
 
-  @spec confirm_rename_commit(String.t(), term()) :: :ok | {:error, term()}
-  defp confirm_rename_commit(directory, reason) do
+  @spec confirm_metadata_commit(String.t(), :rename | :archive, term()) :: :ok | {:error, term()}
+  defp confirm_metadata_commit(directory, action, reason) do
     case sync_directory(directory) do
       :ok -> :ok
-      {:error, sync_reason} -> {:error, {:session_rename_uncertain, reason, sync_reason}}
+      {:error, sync_reason} -> {:error, {uncertain_metadata_change(action), reason, sync_reason}}
     end
   end
+
+  @spec uncertain_metadata_change(:rename | :archive) ::
+          :session_rename_uncertain | :session_archive_uncertain
+  defp uncertain_metadata_change(:rename), do: :session_rename_uncertain
+  defp uncertain_metadata_change(:archive), do: :session_archive_uncertain
 
   @doc "Commits the admitted request and consumes the exact draft revision in the same record."
   @spec save_submitted_draft(session_data(), draft_revision(), String.t() | nil, keyword()) ::
@@ -671,7 +721,7 @@ defmodule MingaAgent.SessionStore do
   @spec encode_snapshot(session_data(), {map() | nil, presentation()}, map()) ::
           {:ok, {String.t(), [Reference.t()], String.t()}} | {:error, term()}
   defp encode_snapshot(data, {encoded_presentation, presentation}, previous) do
-    conversation = carry_custom_title(serialize(data), record_conversation(previous))
+    conversation = carry_user_metadata(serialize(data), record_conversation(previous))
     references = conversation_references(conversation)
 
     record =
@@ -689,6 +739,19 @@ defmodule MingaAgent.SessionStore do
   rescue
     error -> {:error, {:snapshot_encode_failed, Exception.message(error)}}
   end
+
+  @spec carry_user_metadata(map(), map() | nil) :: map()
+  defp carry_user_metadata(conversation, previous) do
+    conversation
+    |> carry_custom_title(previous)
+    |> carry_archive_flag(previous)
+  end
+
+  @spec carry_archive_flag(map(), map() | nil) :: map()
+  defp carry_archive_flag(conversation, %{"archived" => true}),
+    do: Map.put(conversation, "archived", true)
+
+  defp carry_archive_flag(conversation, _previous), do: conversation
 
   @spec carry_custom_title(map(), map() | nil) :: map()
   defp carry_custom_title(conversation, %{"custom_title" => title}) when is_binary(title),
@@ -1991,6 +2054,7 @@ defmodule MingaAgent.SessionStore do
       last_message_at: string_or_default(data["last_message_at"], timestamp),
       title: string_or_default(custom_title || data["title"], title_from_messages(messages)),
       custom_title: custom_title,
+      archived?: data["archived"] == true,
       model_name: string_or_default(data["model_name"], "unknown"),
       provider_name: string_or_default(data["provider_name"], "unknown"),
       messages: messages,
@@ -2224,6 +2288,7 @@ defmodule MingaAgent.SessionStore do
         timestamp: timestamp,
         last_message_at: last_message_at,
         title: stored_custom_title(data) || data["title"] || preview,
+        archived?: data["archived"] == true,
         model_name: data["model_name"] || "unknown",
         provider_name: data["provider_name"] || "unknown",
         preview: preview,

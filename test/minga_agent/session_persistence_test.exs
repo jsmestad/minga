@@ -184,6 +184,56 @@ defmodule MingaAgent.SessionPersistenceTest do
     end
 
     @tag :tmp_dir
+    test "archive follows only its saved conversation through later saves and replacement", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      original = %{
+        id: "archive-target",
+        timestamp: "2026-11-01T00:00:00Z",
+        model_name: "test-model",
+        messages: [{:user, "Original task"}],
+        usage: MingaAgent.TurnUsage.new(),
+        continuation: Continuation.new()
+      }
+
+      assert :ok = SessionStore.save(original, dir)
+      assert :ok = Session.load_session(session, original.id)
+      displayed = Session.editor_snapshot(session).connection.target
+      assert :ok = Session.set_archived(displayed, true)
+      assert %{archived?: true, status: :idle} = Session.metadata(session)
+
+      assert :ok =
+               SessionStore.save(
+                 %{original | messages: original.messages ++ [{:assistant, "Later reply"}]},
+                 dir
+               )
+
+      assert :ok = Session.new_session(session)
+      refute Session.metadata(session).archived?
+      assert {:error, :stale_target} = Session.set_archived(displayed, false)
+
+      assert {:ok,
+              %{
+                archived?: true,
+                messages: [{:user, "Original task"}, {:assistant, "Later reply"}]
+              }} =
+               SessionStore.load(original.id, dir)
+
+      assert :ok = Session.load_session(session, original.id)
+      assert Session.metadata(session).archived?
+      refute Session.editor_snapshot(session).connection.target == displayed
+      assert :ok = Session.set_archived(Session.editor_snapshot(session).connection.target, false)
+      refute Session.metadata(session).archived?
+    end
+
+    @tag :tmp_dir
     test "targeted restore rejects the old conversation after an in-process reset", %{
       tmp_dir: dir
     } do
@@ -2131,6 +2181,30 @@ defmodule MingaAgent.SessionPersistenceTest do
 
     assert resumed_request.messages ==
              Enum.concat(messages, [ReqLLM.Context.user("Follow-up")])
+  end
+
+  @tag :tmp_dir
+  test "archive and unarchive leave a live approval attached to the same tool call", %{
+    tmp_dir: dir
+  } do
+    %{session: session, target: approval_target, waiter: waiter} = start_live_expiry(dir)
+
+    %{
+      connection: %{target: displayed},
+      pending_approval: %Public{target: ^approval_target} = approval
+    } =
+      Session.editor_snapshot(session)
+
+    for archived? <- [true, false] do
+      assert :ok = Session.set_archived(displayed, archived?)
+      assert Session.metadata(session).archived? == archived?
+
+      assert %{pending_approval: ^approval, display_status: :approval_waiting} =
+               Session.editor_snapshot(session)
+    end
+
+    send(waiter.pid, :expire)
+    assert :ok = Task.await(waiter, @event_timeout)
   end
 
   defp start_live_expiry(dir) do
