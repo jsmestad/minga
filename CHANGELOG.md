@@ -78,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Attach the current file selection to a local Agent draft. Both frontends show saved snapshots before sending and let you inspect or remove them. Restart restores the snapshot with its original draft.
 - Attach the current editor buffer to a local Agent draft, including unsaved edits. The draft keeps those exact bytes after the source changes or Minga restarts.
 - Rename a local saved Agent session from the shared command palette or with `SPC a R`. Its name stays searchable in Sessions after restart without changing the transcript or draft.
+- Archive or unarchive a local saved Agent session from **Sessions**. **Browse archived sessions** recovers it with its original draft, and archiving does not stop open work.
 
 ### Fixed
 

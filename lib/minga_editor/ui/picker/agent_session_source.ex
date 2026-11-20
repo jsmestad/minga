@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @moduledoc """
   Picker source for agent sessions.
 
-  Lists all live sessions (active + archived) plus persisted sessions from disk. Selecting a live session switches tabs; selecting a persisted session resumes it into the active agent session. Entries include title, last message time, turn count, model, and recent message text for filtering.
+  Select a live session to switch tabs or reopen a saved conversation. Archived saved sessions have a separate view. Open tabs remain visible so archiving cannot hide active work.
   """
 
   @behaviour MingaEditor.UI.Picker.Source
@@ -14,7 +14,11 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaAgent.Session.ConnectionTarget
+  alias MingaEditor.Agent.SessionOrganization
+  alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.State
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.TabBar
@@ -24,23 +28,42 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @typep saved_kind :: :disk | :draft_only | :legacy_import
   @typep saved_origin :: {non_neg_integer(), pid(), String.t()}
 
+  @doc "Opens Sessions with the exact displayed conversation for organization actions."
+  @spec open(State.t(), map()) :: State.t()
+  def open(state, context \\ %{}) do
+    context = Map.put(context, :organization_origin, SessionOrganization.origin(state))
+    PickerUI.open(state, __MODULE__, context)
+  end
+
   @impl true
   @spec title() :: String.t()
   def title, do: "Sessions"
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(%Context{tab_bar: %TabBar{} = tb} = ctx) do
-    disk = disk_candidates(ctx)
+  def candidates(%Context{tab_bar: %TabBar{} = tabs} = ctx) do
+    {archived, recent} =
+      ctx
+      |> session_store_dir()
+      |> SessionStore.list_recoverable()
+      |> Enum.split_with(&archived_recovery?/1)
 
-    if persisted_only?(ctx) do
-      disk
+    origin = saved_origin(ctx)
+
+    if archive_view?(ctx) do
+      disk = Enum.map(archived, &recovery_candidate(&1, origin))
+
+      [
+        archive_navigation(ctx, :recent)
+        | merge_candidates(local_candidates(ctx, tabs, :archived), disk)
+      ]
     else
-      live = tab_candidates(tb) ++ remote_candidates()
-      live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)
+      disk = Enum.map(recent, &recovery_candidate(&1, origin))
 
-      live ++
-        Enum.reject(disk, fn %Item{id: {id, _}} -> MapSet.member?(live_ids, id) end)
+      local_candidates(ctx, tabs, :recent)
+      |> merge_candidates(disk)
+      |> maybe_add_archive_navigation(archived, ctx)
+      |> maybe_add_archive_action(ctx, recent, archived)
     end
   end
 
@@ -48,6 +71,18 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {:archive_navigation, context}}, state) do
+    open(state, context)
+  end
+
+  def on_select(%Item{id: {:archive_session, displayed, next}}, state) do
+    if SessionOrganization.origin(state) == displayed do
+      SessionOrganization.start(state, displayed, {:archive, next})
+    else
+      NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
+    end
+  end
+
   def on_select(
         %Item{id: {id, {:tab, tab_id, session}}},
         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
@@ -146,28 +181,34 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp legacy_import_failure_message(_reason),
     do: "Could not import legacy agent history. The original record remains unchanged."
 
-  @spec tab_candidates(TabBar.t()) :: [Item.t()]
-  defp tab_candidates(tb) do
-    tb
+  @spec tab_candidates(TabBar.t(), :recent | :archived) :: [Item.t()]
+  defp tab_candidates(tabs, view) do
+    tabs
     |> TabBar.filter_by_kind(:agent)
-    |> Enum.map(&tab_to_candidate(&1, &1.id == tb.active_id))
+    |> Enum.flat_map(&tab_candidate(&1, &1.id == tabs.active_id, view))
   end
 
-  @spec tab_to_candidate(Tab.agent(), boolean()) :: Item.t()
-  defp tab_to_candidate(%Tab{kind: :agent, payload: %TabAgent{session: session}} = tab, is_active) do
+  @spec tab_candidate(Tab.agent(), boolean(), :recent | :archived) :: [Item.t()]
+  defp tab_candidate(%Tab{payload: %TabAgent{session: session}} = tab, active?, view) do
     case session_metadata(session) do
-      {:ok, meta} ->
-        %Item{
-          id: {meta.id, {:tab, tab.id, session}},
-          label: format_label(meta, is_active),
-          description: format_desc(meta),
-          search_text: meta.first_prompt || ""
-        }
+      {:ok, meta} when view == :recent or meta.archived? ->
+        [
+          %Item{
+            id: {meta.id, {:tab, tab.id, session}},
+            label: format_label(meta, active?),
+            description: format_desc(meta),
+            search_text: meta.first_prompt || "",
+            annotation: archive_annotation(meta)
+          }
+        ]
 
-      :error ->
-        label = if is_active, do: "\u{2022} #{tab.label}", else: tab.label
+      :error when view == :recent ->
+        label = if active?, do: "\u{2022} #{tab.label}", else: tab.label
         description = if is_nil(session), do: "No session", else: "Session identity unavailable"
-        %Item{id: {tab.id, {:tab, tab.id, session}}, label: label, description: description}
+        [%Item{id: {tab.id, {:tab, tab.id, session}}, label: label, description: description}]
+
+      _outside_view ->
+        []
     end
   end
 
@@ -175,7 +216,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp session_metadata(nil), do: :error
 
   defp session_metadata(pid) do
-    {:ok, Session.metadata(pid)}
+    # An attached daemon can predate the archive field in SessionMetadata.
+    {:ok, Map.put_new(Session.metadata(pid), :archived?, false)}
   catch
     :exit, _ -> :error
   end
@@ -253,14 +295,94 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp unavailable_reason_text(:unreachable), do: "session unreachable"
   defp unavailable_reason_text(:invalid_details), do: "invalid details"
 
-  @spec disk_candidates(Context.t()) :: [Item.t()]
-  defp disk_candidates(ctx) do
-    origin = saved_origin(ctx)
+  @spec archived_recovery?(SessionStore.recovery_entry()) :: boolean()
+  defp archived_recovery?({:conversation, %{archived?: true}}), do: true
+  defp archived_recovery?(_entry), do: false
 
-    ctx
-    |> session_store_dir()
-    |> SessionStore.list_recoverable()
-    |> Enum.map(&recovery_candidate(&1, origin))
+  @spec archive_view?(Context.t()) :: boolean()
+  defp archive_view?(%Context{picker_ui: %{context: %{archive_view: true}}}), do: true
+  defp archive_view?(_ctx), do: false
+
+  @spec archive_navigation(Context.t(), :recent | :archived) :: Item.t()
+  defp archive_navigation(ctx, destination) do
+    context = %{
+      archive_view: destination == :archived,
+      persisted_only: persisted_only?(ctx),
+      session_store_dir: session_store_dir(ctx)
+    }
+
+    label =
+      if destination == :archived, do: "Browse archived sessions", else: "Back to recent sessions"
+
+    %Item{id: {:archive_navigation, context}, label: label}
+  end
+
+  @spec maybe_add_archive_navigation([Item.t()], [SessionStore.recovery_entry()], Context.t()) ::
+          [Item.t()]
+  defp maybe_add_archive_navigation(items, [], _ctx), do: items
+
+  defp maybe_add_archive_navigation(items, _archived, ctx),
+    do: insert_control(items, archive_navigation(ctx, :archived))
+
+  @spec maybe_add_archive_action(
+          [Item.t()],
+          Context.t(),
+          [SessionStore.recovery_entry()],
+          [SessionStore.recovery_entry()]
+        ) :: [Item.t()]
+  defp maybe_add_archive_action(
+         items,
+         %Context{
+           picker_ui: %{
+             context: %{
+               organization_origin: %{target: %ConnectionTarget{session_id: id}} = displayed
+             }
+           }
+         } = ctx,
+         recent,
+         archived
+       ) do
+    with nil <- session_store_dir(ctx),
+         %{archived?: archived?} <-
+           find_saved_conversation(recent, id) || find_saved_conversation(archived, id) do
+      label = if archived?, do: "Unarchive Agent session", else: "Archive Agent session"
+      action = %Item{id: {:archive_session, displayed, not archived?}, label: label}
+      insert_control(items, action)
+    else
+      _not_saved -> items
+    end
+  end
+
+  defp maybe_add_archive_action(items, _ctx, _recent, _archived), do: items
+
+  @spec find_saved_conversation([SessionStore.recovery_entry()], String.t()) ::
+          SessionStore.session_meta() | nil
+  defp find_saved_conversation(entries, id) do
+    Enum.find_value(entries, fn
+      {:conversation, %{id: ^id} = meta} -> meta
+      _entry -> nil
+    end)
+  end
+
+  @spec insert_control([Item.t()], Item.t()) :: [Item.t()]
+  defp insert_control([], control), do: [control]
+  defp insert_control([first | rest], control), do: [first, control | rest]
+
+  @spec local_candidates(Context.t(), TabBar.t(), :recent | :archived) :: [Item.t()]
+  defp local_candidates(ctx, tabs, view) do
+    if persisted_only?(ctx), do: [], else: live_candidates(tabs, view)
+  end
+
+  @spec live_candidates(TabBar.t(), :recent | :archived) :: [Item.t()]
+  defp live_candidates(tabs, :recent), do: tab_candidates(tabs, :recent) ++ remote_candidates()
+  defp live_candidates(tabs, :archived), do: tab_candidates(tabs, :archived)
+
+  @spec merge_candidates([Item.t()], [Item.t()]) :: [Item.t()]
+  defp merge_candidates([], disk), do: disk
+
+  defp merge_candidates(live, disk) do
+    live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)
+    live ++ Enum.reject(disk, fn %Item{id: {id, _}} -> MapSet.member?(live_ids, id) end)
   end
 
   @spec saved_origin(Context.t()) :: saved_origin() | nil
@@ -277,7 +399,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp recovery_candidate({:conversation, meta}, origin) do
     %Item{
       id: {meta.id, {disk_candidate_kind(meta.continuation_kind), origin}},
-      label: disk_label(meta),
+      label: archive_label(meta.archived?, disk_label(meta)),
       description: disk_description(meta),
       annotation: format_turn_count(meta.turn_count),
       search_text: "#{meta.preview} #{meta.recent_messages}"
@@ -337,14 +459,18 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   end
 
   @spec format_label(Session.metadata(), boolean()) :: String.t()
-  defp format_label(meta, true) do
-    prompt = truncate_prompt(meta.title || meta.first_prompt)
-    "\u{2022} #{prompt}"
+  defp format_label(meta, active?) do
+    label = archive_label(meta.archived?, truncate_prompt(meta.title || meta.first_prompt))
+    if active?, do: "\u{2022} #{label}", else: label
   end
 
-  defp format_label(meta, false) do
-    truncate_prompt(meta.title || meta.first_prompt)
-  end
+  @spec archive_label(boolean(), String.t()) :: String.t()
+  defp archive_label(true, label), do: "[Archived] #{label}"
+  defp archive_label(false, label), do: label
+
+  @spec archive_annotation(Session.metadata()) :: String.t() | nil
+  defp archive_annotation(%{archived?: true, status: status}), do: Atom.to_string(status)
+  defp archive_annotation(_meta), do: nil
 
   @spec format_desc(Session.metadata()) :: String.t()
   defp format_desc(meta) do

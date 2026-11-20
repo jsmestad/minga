@@ -11,6 +11,7 @@ defmodule MingaAgent.SessionMetadata do
   @type t :: %__MODULE__{
           id: String.t(),
           title: String.t() | nil,
+          archived?: boolean(),
           model_name: String.t(),
           provider_name: String.t(),
           created_at: DateTime.t(),
@@ -26,6 +27,7 @@ defmodule MingaAgent.SessionMetadata do
   @enforce_keys [:id, :model_name, :created_at, :last_message_at]
   defstruct id: nil,
             title: nil,
+            archived?: false,
             model_name: nil,
             provider_name: "unknown",
             created_at: nil,
