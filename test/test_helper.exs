@@ -21,15 +21,7 @@ System.put_env("GIT_CONFIG_VALUE_0", "main")
 
 # Keep direct test invocations hermetic if config/test.exs was not loaded first.
 unless System.get_env("XDG_CONFIG_HOME") do
-  test_config_home =
-    Path.join(
-      System.tmp_dir!(),
-      "minga-test-config-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-    )
-
-  File.mkdir!(test_config_home)
-  File.mkdir!(Path.join(test_config_home, "minga"))
-  System.put_env("XDG_CONFIG_HOME", test_config_home)
+  Config.Reader.read!(Path.expand("../config/test.exs", __DIR__))
 end
 
 # Swift protocol coverage runs through the dedicated `mix swift.harness` job.
@@ -85,8 +77,7 @@ Minga.Config.Options.set(:lsp_auto_start, false)
 # notification subprocesses from ordinary session tests.
 Minga.Config.Options.set(:agent_notifications, false)
 
-# Disable persisting known projects and recent files during tests to avoid
-# polluting ~/.config/minga/known-projects with test fixture directories.
+# Keep test fixture paths out of persisted project history.
 Minga.Config.Options.set(:persist_known_projects, false)
 Minga.Config.Options.set(:persist_recent_files, false)
 

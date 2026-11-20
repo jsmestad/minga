@@ -1446,35 +1446,47 @@ struct EditorNSViewResizeTests {
     }
 }
 
-@Suite("PortLogger")
+@Suite("PortLogger", .serialized)
 struct PortLoggerTests {
-    @Test("log calls are forwarded to the encoder")
-    func logForwarding() {
+    @Test("startup diagnostics survive disconnected admission without leaking private details or replaying")
+    func startupDiagnostics() {
         let spy = SpyEncoder()
+        let replacement = SpyEncoder()
+        let logger = Logger(subsystem: PortLogger.subsystem, category: "Startup")
+        let message = "startup-diagnostic-\(UUID())"
+        PortLogger.clearEncoder()
+        defer { PortLogger.clearEncoder() }
+
+        PortLogger.report(.warning, message, to: logger, privateDetail: "/private/diagnostic-path")
+        let disconnected = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
+        PortLogger.setup(encoder: disconnected)
         PortLogger.setup(encoder: spy)
+        PortLogger.clearEncoder(disconnected)
+        let liveMessage = "\(message)-still-connected"
+        PortLogger.info(liveMessage)
+        PortLogger.clearEncoder(spy)
+        PortLogger.setup(encoder: replacement)
 
-        PortLogger.info("hello from test")
-
-        #expect(spy.logCalls.count == 1)
-        #expect(spy.logCalls[0].level == LOG_LEVEL_INFO)
-        #expect(spy.logCalls[0].message == "hello from test")
+        let entries = spy.logCalls.filter { $0.message.contains(message) }
+        #expect(entries.map(\.message) == [message, liveMessage])
+        #expect(entries.map(\.level) == [LOG_LEVEL_WARN, LOG_LEVEL_INFO])
+        #expect(!replacement.logCalls.contains { $0.message.contains(message) })
     }
 
     @Test("all log levels are sent with the correct level byte")
     func logLevels() {
         let spy = SpyEncoder()
         PortLogger.setup(encoder: spy)
+        defer { PortLogger.clearEncoder() }
+        let tag = "log-level-\(UUID())"
 
-        PortLogger.error("e")
-        PortLogger.warn("w")
-        PortLogger.info("i")
-        PortLogger.debug("d")
+        PortLogger.error("\(tag)-error")
+        PortLogger.warn("\(tag)-warning")
+        PortLogger.info("\(tag)-info")
+        PortLogger.debug("\(tag)-debug")
 
-        #expect(spy.logCalls.count == 4)
-        #expect(spy.logCalls[0].level == LOG_LEVEL_ERR)
-        #expect(spy.logCalls[1].level == LOG_LEVEL_WARN)
-        #expect(spy.logCalls[2].level == LOG_LEVEL_INFO)
-        #expect(spy.logCalls[3].level == LOG_LEVEL_DEBUG)
+        let entries = spy.logCalls.filter { $0.message.hasPrefix(tag) }
+        #expect(entries.map(\.level) == [LOG_LEVEL_ERR, LOG_LEVEL_WARN, LOG_LEVEL_INFO, LOG_LEVEL_DEBUG])
     }
 
     @Test("sendLog binary layout matches Zig encodeLogMessage")

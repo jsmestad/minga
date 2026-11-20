@@ -4,11 +4,12 @@
 import os
 import Foundation
 import Darwin
+import MingaUI
 
-let startupLog = OSLog(subsystem: "com.minga.app", category: "Startup")
-let renderLog = OSLog(subsystem: "com.minga.app", category: "Render")
-let protocolLog = OSLog(subsystem: "com.minga.app", category: "Protocol")
-let inputLog = OSLog(subsystem: "com.minga.app", category: "Input")
+let startupLog = OSLog(subsystem: PortLogger.subsystem, category: "Startup")
+let renderLog = OSLog(subsystem: PortLogger.subsystem, category: "Render")
+let protocolLog = OSLog(subsystem: PortLogger.subsystem, category: "Protocol")
+let inputLog = OSLog(subsystem: PortLogger.subsystem, category: "Input")
 
 /// Emits opt-in startup probe timestamps to stderr, which is separate from the protocol transport.
 func recordStartupPhase(_ phase: String, frameSequence: UInt32 = 0, presentedTime: Double = 0) {

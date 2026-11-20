@@ -95,6 +95,15 @@ struct BEAMLaunchConfigurationTests {
         #expect(environment["HOME"] == "/Users/alice")
     }
 
+    @Test("passes the native IPC namespace instead of inheriting a caller's selection")
+    func resolvesIPCNamespace() {
+        let development = makeConfiguration(usesDevelopmentIPC: true)
+        let release = makeConfiguration(inheritedEnvironment: ["MINGA_IPC_DEVELOPMENT": "1"])
+
+        #expect(development.environment["MINGA_IPC_DEVELOPMENT"] == "1")
+        #expect(release.environment["MINGA_IPC_DEVELOPMENT"] == nil)
+    }
+
     @Test("uses the confstr Darwin per-user temporary directory for native IPC")
     @MainActor func usesDarwinTemporaryDirectoryForIPC() throws {
         let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
@@ -189,6 +198,7 @@ struct BEAMLaunchConfigurationTests {
         appArguments: [String] = ["Minga"],
         inheritedEnvironment: [String: String] = ["HOME": "/Users/alice"],
         currentDirectoryURL: URL = URL(fileURLWithPath: "/Users/alice/code/minga"),
+        usesDevelopmentIPC: Bool = false,
         validHomeDirectoryURL: URL? = URL(fileURLWithPath: "/Users/alice"),
         launchNonce: String? = nil,
         releaseCookie: String = "cookie-1"
@@ -201,6 +211,7 @@ struct BEAMLaunchConfigurationTests {
             bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
             validHomeDirectoryURL: validHomeDirectoryURL,
             ipcRuntimeParentURL: URL(fileURLWithPath: "/private/tmp/user"),
+            usesDevelopmentIPC: usesDevelopmentIPC,
             appPID: 1234,
             appEUID: 501,
             appInstanceID: "instance-123",

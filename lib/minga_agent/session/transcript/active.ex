@@ -154,6 +154,16 @@ defmodule MingaAgent.Session.Transcript.Active do
     :array.foldr(fn _ordinal, entry, acc -> [entry.message | acc] end, [], entries)
   end
 
+  @doc "Materializes ordered messages and their aligned stable IDs in one traversal."
+  @spec messages_and_ids(t()) :: {[message()], [pos_integer()]}
+  def messages_and_ids(%__MODULE__{entries: entries}) do
+    :array.foldr(
+      fn _ordinal, entry, {messages, ids} -> {[entry.message | messages], [entry.id | ids]} end,
+      {[], []},
+      entries
+    )
+  end
+
   @doc "Materializes identified messages directly at the explicit list boundary."
   @spec messages_with_ids(t()) :: [{pos_integer(), message()}]
   def messages_with_ids(%__MODULE__{entries: entries}) do

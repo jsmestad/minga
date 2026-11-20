@@ -65,6 +65,7 @@ macos/Tests/Snapshots/
 
 # Minga project-local state
 .minga/workspaces/
+/.minga-dev/
 
 # Agent / experiment scratch files
 .expert/

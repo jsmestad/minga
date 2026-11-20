@@ -16,6 +16,10 @@ import AppKit
 import Darwin
 import os
 
+private let appStartupLogger = Logger(subsystem: PortLogger.subsystem, category: "Startup")
+private let fontRegistrationLogger = Logger(subsystem: PortLogger.subsystem, category: "Fonts")
+private let appProbeLogger = Logger(subsystem: PortLogger.subsystem, category: "Probes")
+
 /// Default font settings.
 private let defaultFontName = "Menlo"
 private let defaultFontSize: CGFloat = 13.0
@@ -65,7 +69,7 @@ struct MingaApp: App {
                 // first responder from the EditorNSView.
                 .focusable(false)
                 .focusEffectDisabled()
-                .background(EditorWindowIdentifierSetter())
+                .background(EditorWindowIdentifierSetter(onAttach: appDelegate.configureEditorWindow))
                 .overlay {
                     if let startup = appDelegate.appState.startup {
                         StartupOverlay(
@@ -88,6 +92,7 @@ struct MingaApp: App {
                 )
         }
         .windowStyle(.hiddenTitleBar)
+        .restorationBehavior(appDelegate.appState.usesDevelopmentProfile ? .disabled : .automatic)
         .defaultSize(width: defaultWindowWidth, height: defaultWindowHeight)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
@@ -99,6 +104,7 @@ struct MingaApp: App {
                 sendAction: FrontendActionComposition.settingsHandler(encoder: appDelegate.appState.encoder)
             )
         }
+        .restorationBehavior(appDelegate.appState.usesDevelopmentProfile ? .disabled : .automatic)
     }
 }
 
@@ -184,6 +190,8 @@ private struct StartupOverlay: View {
 
 /// Identifies the editor window for lifecycle checks without changing its scene identity.
 private struct EditorWindowIdentifierSetter: NSViewRepresentable {
+    let onAttach: @MainActor (NSWindow) -> Void
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         identifyWindow(containing: view)
@@ -196,7 +204,9 @@ private struct EditorWindowIdentifierSetter: NSViewRepresentable {
 
     private func identifyWindow(containing view: NSView) {
         DispatchQueue.main.async {
-            view.window?.identifier = EditorScene.windowIdentifier
+            guard let window = view.window else { return }
+            window.identifier = EditorScene.windowIdentifier
+            onAttach(window)
         }
     }
 }
@@ -322,7 +332,7 @@ private struct SingletonEditorWindowProbe: View {
             let data = try JSONEncoder().encode(snapshot)
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
         } catch {
-            NSLog("Singleton editor window probe failed: %@", String(describing: error))
+            PortLogger.report(.error, "Singleton editor window probe failed", to: appProbeLogger, privateDetail: error.localizedDescription)
         }
     }
 
@@ -494,6 +504,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
+    // Retain the profiled singleton until app termination, including when its window closed first.
+    private var profileEditorWindow: NSWindow?
     private var outboundConnectionState = OutboundConnectionState()
     private var coreLifecycle: EditorCoreLifecycle?
     fileprivate private(set) var pendingFileURLs: [URL] = []
@@ -501,9 +513,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let frameResourcePolicy = FrameResourcePolicy.default
 
     override init() {
-        let appState = AppState()
+        let environment = ProcessInfo.processInfo.environment
+        let appState = AppState(applicationEnvironment: environment)
 #if DEBUG
-        if ProcessInfo.processInfo.environment[MenuSnapshotProbe.connectedEnvironmentKey] == "1" {
+        if environment[MenuSnapshotProbe.connectedEnvironmentKey] == "1" {
             appState.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
         }
 #endif
@@ -551,8 +564,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.beamManager = manager
 
             manager.onTermination = { [weak self] _ in
-                self?.coreConnectionIsLive = false
-                return self?.coreLifecycle?.coreDidExit() ?? false
+                guard let self else { return false }
+                if let encoder = self.encoder { PortLogger.clearEncoder(encoder) }
+                self.coreConnectionIsLive = false
+                return self.coreLifecycle?.coreDidExit() ?? false
             }
             manager.onCrash = { [weak self] in
                 self?.presentEditorCoreStoppedRecovery()
@@ -687,6 +702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the editor view.
         let nsView = EditorNSView(encoder: ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
+        nsView.savesFrameInApplicationPreferences = !appState.usesDevelopmentProfile
         nsView.editorInput = appState.gui.editorInput
         ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
@@ -720,6 +736,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onTransactionResult = { [weak self] result in
             guard let self, let encoder = self.encoder else { return }
             encoder.send(result.outboundAction)
+            if case .applied = result, self.coreConnectionIsLive {
+                self.protocolConnection?.startLogging()
+            }
             if !self.appState.hasReceivedFirstFrame,
                case .rejected(_, _, _, .resourcePolicy) = result {
                 self.presentStartupFailure("The editor’s first frame exceeds the macOS frontend’s resource limits.", canRetry: false)
@@ -840,7 +859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 coreConnectionIsLive = false
                 NSApp.terminate(nil)
             } catch {
-                NSLog("Minga menu snapshot probe failed: %@", String(describing: error))
+                PortLogger.report(.error, "Minga menu snapshot probe failed", to: appProbeLogger, privateDetail: error.localizedDescription)
                 window.orderOut(nil)
                 coreConnectionIsLive = false
                 NSApp.terminate(nil)
@@ -1021,7 +1040,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func configureEditorWindow(_ window: NSWindow) {
+        guard appState.usesDevelopmentProfile, profileEditorWindow !== window else { return }
+        profileEditorWindow = window
+        window.isRestorable = false
+        _ = window.setFrameAutosaveName("")
+        appState.editorWindowFrame?.restore(window)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        if let window = profileEditorWindow {
+            appState.editorWindowFrame?.save(window)
+        }
         cancelWorkspaceLifecycleNotifications()
         beamManager?.beginAppShutdown()
         coreLifecycle?.stop()
@@ -1078,7 +1108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         PortLogger.info("Volume will unmount with no resolvable path; ignoring")
                         continue
                     }
-                    PortLogger.info("Volume will unmount: \(volumePath)")
+                    PortLogger.info("Volume will unmount", privateDetail: volumePath)
                     self.encoder?.send(.systemWillUnmount(volumePath: volumePath))
                 }
             },
@@ -1240,7 +1270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if FileManager.default.fileExists(atPath: url.path) {
                 var errorRef: Unmanaged<CFError>?
                 if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &errorRef) {
-                    NSLog("Registered bundled font: \(fontName)")
+                    PortLogger.report(.info, "Registered bundled font: \(fontName)", to: fontRegistrationLogger)
                     return
                 } else if let error = errorRef?.takeRetainedValue() {
                     // Font might already be registered (e.g., user has it installed)
@@ -1248,7 +1278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if desc.contains("already registered") {
                         return
                     }
-                    NSLog("Failed to register font \(fontName): \(desc)")
+                    PortLogger.report(.warning, "Failed to register bundled font \(fontName)", to: fontRegistrationLogger, privateDetail: desc)
                 }
             }
         }
@@ -1259,7 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        NSLog("Warning: Nerd Font not found. Devicons will show as missing glyphs.")
+        PortLogger.report(.warning, "Nerd Font not found. Devicons will show as missing glyphs.", to: fontRegistrationLogger)
     }
 
     // MARK: - Protocol handling
@@ -1285,7 +1315,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.appState.gui.settingsState.sendAction = nil
                 self.coreLifecycle?.replaceConnection()
                 self.coreConnectionIsLive = false
-                PortLogger.clearEncoder()
             },
             isCurrent: { [weak self] candidate in
                 self?.outboundConnectionState.isCurrent(candidate) == true
@@ -1321,7 +1350,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.encoder = connection.encoder
         appState.gui.settingsState.sendAction = FrontendActionComposition.settingsStateHandler(encoder: connection.encoder)
         editorNSView?.installConnectionEncoder(connection.encoder)
-        PortLogger.setup(encoder: connection.encoder)
         return connection
     }
 
@@ -1376,6 +1404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connectionID: UInt64
     ) {
         guard outboundConnectionState.isCurrent(connectionID) else { return }
+        if let encoder { PortLogger.clearEncoder(encoder) }
         coreConnectionIsLive = false
         coreLifecycle?.transportDidFail(message: report.userFacingMessage)
     }
@@ -1431,6 +1460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch failure {
         case .missingRelease:
             presentStartupFailure("The bundled editor core is missing. Reinstall Minga and launch it again.", canRetry: false)
+        case .missingDevelopmentProfile:
+            presentStartupFailure("A Debug app cannot start its bundled editor core without an isolated development profile. Quit and use bin/minga-mac from the source checkout.", canRetry: false)
         case .launch(let reason):
             presentStartupFailure("Minga could not launch the editor core. \(reason)", canRetry: true)
         case .previousCoreStopTimedOut:
@@ -1439,13 +1470,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentStartupFailure(_ message: String, canRetry: Bool) {
-        NSLog("Minga startup failed: %@", message)
+        PortLogger.report(.error, "Minga startup failed", to: appStartupLogger, privateDetail: message)
         appState.startup = .failed(message: message, canRetry: canRetry)
     }
 
     private func presentStartupTimeout() {
         guard case .waiting = appState.startup else { return }
-        NSLog("Minga startup is waiting for its first frame")
+        PortLogger.report(.warning, "Minga startup is waiting for its first frame", to: appStartupLogger)
         appState.startup = .slow(canRetry: beamManager != nil)
     }
 

@@ -91,6 +91,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     private enum DeliveryPolicy: Equatable, Sendable {
         case durable
+        case diagnostic
         case coalescing(CoalescingClass)
     }
 
@@ -165,6 +166,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
                 }.enqueue()
             }
             if case .invalidPayload(let message) = rejection {
+                protocolLogger.warning("\(message, privacy: .public)")
                 encodeLog(level: LOG_LEVEL_WARN, message: message)
             }
             return .rejected(rejection)
@@ -791,16 +793,16 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     /// Send a log message to the BEAM for display in *Messages*.
     /// Layout: opcode(1) + level(1) + msg_len(2, big-endian) + msg(msg_len).
     private func encodeLog(level: UInt8, message: String) {
-        let utf8 = Array(message.utf8)
+        let utf8 = message.utf8
         let msgLen = utf8.count
         var buf = Data(count: 4 + msgLen)
         buf[0] = OP_LOG_MESSAGE
         buf[1] = level
         writeU16(&buf, 2, UInt16(msgLen))
         if msgLen > 0 {
-            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
+            buf.replaceSubrange(4..<(4 + msgLen), with: utf8)
         }
-        writeFrame(buf)
+        writeFrame(buf, deliveryPolicy: .diagnostic)
     }
 
     // MARK: - GUI Actions
@@ -1616,7 +1618,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
     private func admit(payload: Data, deliveryPolicy: DeliveryPolicy) -> OutboundActionRejection? {
         guard connected else { return .disconnected }
         guard payload.count <= maximumPayloadSize else {
-            failTransport(.frameTooLarge(limit: maximumPayloadSize, payloadBytes: payload.count))
+            if deliveryPolicy != .diagnostic {
+                failTransport(.frameTooLarge(limit: maximumPayloadSize, payloadBytes: payload.count))
+            }
             return .payloadTooLarge(limitBytes: maximumPayloadSize, attemptedBytes: payload.count)
         }
 
@@ -1627,7 +1631,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
         guard frame.bytes.count <= maxBufferSize,
               bufferSize <= maxBufferSize - frame.bytes.count else {
-            failTransport(.capacityExhausted(limit: maxBufferSize, attemptedFrameBytes: frame.bytes.count))
+            if deliveryPolicy != .diagnostic {
+                failTransport(.capacityExhausted(limit: maxBufferSize, attemptedFrameBytes: frame.bytes.count))
+            }
             return .capacityExhausted(limitBytes: maxBufferSize, attemptedBytes: frame.bytes.count)
         }
 

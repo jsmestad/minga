@@ -189,31 +189,6 @@ defmodule MingaAgent.Tools.LspBridge do
   def parse_all_locations(_), do: []
 
   @doc """
-  Extracts markdown text from LSP hover contents.
-
-  Handles MarkupContent, plain strings, MarkedString, and arrays thereof.
-  """
-  @spec extract_hover_markdown(term()) :: String.t()
-  def extract_hover_markdown(%{"kind" => _, "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(text) when is_binary(text), do: String.trim(text)
-
-  def extract_hover_markdown(items) when is_list(items) do
-    items
-    |> Enum.map(&extract_hover_markdown/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
-  end
-
-  def extract_hover_markdown(%{"language" => lang, "value" => value}) when is_binary(value) do
-    "```#{lang}\n#{String.trim(value)}\n```"
-  end
-
-  def extract_hover_markdown(_), do: ""
-
-  @doc """
   Flattens hierarchical document symbols into a flat list with indentation.
 
   Returns `[{path_or_empty, line, col, label}]` tuples. The label includes

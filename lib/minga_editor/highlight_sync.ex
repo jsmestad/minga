@@ -178,13 +178,21 @@ defmodule MingaEditor.HighlightSync do
 
   @spec buffer_config(String.t()) :: BufferConfig.t()
   defp buffer_config(language) do
+    case Grammar.user_query_dir(language) do
+      nil -> %BufferConfig{language: language}
+      dir -> buffer_config(language, dir)
+    end
+  end
+
+  @spec buffer_config(String.t(), String.t()) :: BufferConfig.t()
+  defp buffer_config(language, query_dir) do
     %BufferConfig{
       language: language,
-      highlight_query: user_query_text(language, &user_query_path/1),
-      injection_query: user_query_text(language, &user_injection_query_path/1),
-      fold_query: user_query_text(language, &user_fold_query_path/1),
-      textobject_query: user_query_text(language, &user_textobject_query_path/1),
-      tags_query: user_query_text(language, &user_tags_query_path/1)
+      highlight_query: read_query_text(query_dir, "highlights.scm"),
+      injection_query: read_query_text(query_dir, "injections.scm"),
+      fold_query: read_query_text(query_dir, "folds.scm"),
+      textobject_query: read_query_text(query_dir, "textobjects.scm"),
+      tags_query: read_query_text(query_dir, "tags.scm")
     }
   end
 
@@ -238,59 +246,11 @@ defmodule MingaEditor.HighlightSync do
     %{state | parser: MingaEditor.State.Parser.retire_buffer(state.parser, buffer_pid)}
   end
 
-  @spec user_query_text(String.t(), (String.t() -> String.t() | nil)) :: String.t() | nil
-  defp user_query_text(language, path_fn) do
-    case path_fn.(language) do
-      nil -> nil
-      path -> read_query_text(path)
-    end
-  end
-
-  @spec read_query_text(String.t()) :: String.t() | nil
-  defp read_query_text(path) do
-    case File.read(path) do
+  @spec read_query_text(String.t(), String.t()) :: String.t() | nil
+  defp read_query_text(dir, filename) do
+    case File.read(Path.join(dir, filename)) do
       {:ok, query_text} -> query_text
       {:error, _reason} -> nil
-    end
-  end
-
-  @spec user_query_path(String.t()) :: String.t() | nil
-  defp user_query_path(language) do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "highlights.scm"])
-    end
-  end
-
-  @spec user_injection_query_path(String.t()) :: String.t() | nil
-  defp user_injection_query_path(language) do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "injections.scm"])
-    end
-  end
-
-  @spec user_fold_query_path(String.t()) :: String.t() | nil
-  defp user_fold_query_path(language) do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "folds.scm"])
-    end
-  end
-
-  @spec user_textobject_query_path(String.t()) :: String.t() | nil
-  defp user_textobject_query_path(language) do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "textobjects.scm"])
-    end
-  end
-
-  @spec user_tags_query_path(String.t()) :: String.t() | nil
-  defp user_tags_query_path(language) do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "tags.scm"])
     end
   end
 

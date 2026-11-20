@@ -2,7 +2,8 @@ defmodule Minga.Distribution.Config do
   @moduledoc """
   Loads configured remote Minga servers for Erlang distribution.
 
-  The config file is an Elixir term stored at `~/.config/minga/servers.exs`:
+  The config file is an Elixir term stored at `$XDG_CONFIG_HOME/minga/servers.exs`
+  (default: `~/.config/minga/servers.exs`):
 
       [
         %{name: "home-server", node: :"minga_server@nas.tailnet.ts.net", cookie: :"replace-with-32-plus-random-characters"}
@@ -103,7 +104,7 @@ defmodule Minga.Distribution.Config do
   defp redact_cookie(entry), do: entry
 
   @spec default_path() :: String.t()
-  defp default_path, do: Path.expand("~/.config/minga/servers.exs")
+  defp default_path, do: Path.join(Minga.UserPaths.config_dir!(), "servers.exs")
 
   @spec warn_malformed(String.t(), String.t()) :: :ok
   defp warn_malformed(path, reason) do

@@ -184,6 +184,63 @@ defmodule MingaAgent.SessionPersistenceTest do
     end
 
     @tag :tmp_dir
+    test "saving keeps the rename separate from the derived title and preserves message IDs", %{
+      tmp_dir: dir
+    } do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          persist?: true,
+          session_store_dir: dir
+        )
+
+      prompt = "Original task: " <> String.duplicate("x", 81)
+
+      messages = [
+        {:user, prompt, []},
+        {:assistant, ""},
+        {:assistant, " \nSecond line"},
+        {:user, "Follow-up"},
+        {:assistant, "Later reply"}
+      ]
+
+      ids = [40, 90, 20, 75, 100]
+
+      original = %{
+        id: "titled-record",
+        timestamp: "2026-11-01T00:00:00Z",
+        title: "Previous derived title",
+        model_name: "test-model",
+        messages: messages,
+        message_ids: ids,
+        usage: MingaAgent.TurnUsage.new(),
+        continuation: Continuation.new()
+      }
+
+      assert :ok = SessionStore.save(original, dir)
+      assert :ok = Session.load_session(session, original.id)
+
+      assert %{title: ^prompt, first_prompt: ^prompt, message_count: 5, turn_count: 2} =
+               Session.metadata(session)
+
+      target = Session.editor_snapshot(session).connection.target
+      assert {:ok, "Release review"} = Session.rename_conversation(target, "Release review")
+      assert Session.metadata(session).title == "Release review"
+
+      replacement = %{original | id: "replacement-record"}
+      assert :ok = SessionStore.save(replacement, dir)
+      assert :ok = Session.load_session(session, replacement.id)
+
+      assert {:ok, %{messages: ^messages, message_ids: ^ids}} =
+               SessionStore.load(original.id, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{original.id}.json")
+
+      assert %{"title" => ^prompt, "custom_title" => "Release review"} =
+               path |> File.read!() |> JSON.decode!()
+    end
+
+    @tag :tmp_dir
     test "archive follows only its saved conversation through later saves and replacement", %{
       tmp_dir: dir
     } do

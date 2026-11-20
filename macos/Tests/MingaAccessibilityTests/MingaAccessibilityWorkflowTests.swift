@@ -374,6 +374,9 @@ private extension MingaAccessibilityWorkflowTests {
             "XDG_CONFIG_HOME": inputs.xdgConfigHome.path,
             "XDG_DATA_HOME": inputs.xdgDataHome.path,
             "XDG_CACHE_HOME": inputs.xdgCacheHome.path,
+            "XDG_STATE_HOME": inputs.xdgStateHome.path,
+            "TMPDIR": inputs.temporaryDirectory.path,
+            "MINGA_DEV_PROFILE": inputs.home.deletingLastPathComponent().path,
             "MINGA_AX_ISOLATED_RUN": "1",
             "MINGA_AX_FOCUS_LOG": inputs.debugLog
                 .deletingLastPathComponent()

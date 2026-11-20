@@ -448,7 +448,7 @@ defmodule MingaEditor.StatusBar.Data do
   @doc """
   Returns true when the tracked repo's cached status is degraded for `path`.
 
-  Reads the repo's cache-only snapshot (no git shell-out). Degraded means the
+  Reads the repo's cached degradation flag (no git shell-out). Degraded means the
   last `git status` was trimmed (e.g. timed out on a huge full checkout), so the
   modeline shows a visible indicator rather than implying the status is complete.
   """
@@ -456,8 +456,8 @@ defmodule MingaEditor.StatusBar.Data do
   def git_degraded?(nil), do: false
 
   def git_degraded?(path) when is_binary(path) do
-    case GitRepo.cached_status_for_path(path) do
-      {:ok, %{degraded?: degraded?}} -> degraded?
+    case GitRepo.cached_degraded_for_path(path) do
+      {:ok, {degraded?, _reason}} -> degraded?
       :not_tracked -> false
     end
   end

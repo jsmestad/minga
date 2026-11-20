@@ -136,9 +136,9 @@ jobs:
           test "$(uname -m)" = '${{ matrix.uname }}'
           if [ "$TARGET_OS" = macos ]; then test "$(uname -s)" = Darwin; else test "$(uname -s)" = Linux; fi
           root="$RUNNER_TEMP/candidate-$PAYLOAD"
-          mkdir -p "$root"/{home,config,data,cache,tmp,mix,hex,rebar,zig,go-build,go-mod,out}
+          mkdir -p "$root"/{home,config,data,cache,state,tmp,mix,hex,rebar,zig,go-build,go-mod,out}
           printf 'CANDIDATE_RUNNER_HOME=%s\n' "$HOME" >> "$GITHUB_ENV"
-          for entry in "HOME=home" "XDG_CONFIG_HOME=config" "XDG_DATA_HOME=data" "XDG_CACHE_HOME=cache" "TMPDIR=tmp" "MIX_HOME=mix" "HEX_HOME=hex" "REBAR_CACHE_DIR=rebar" "ZIG_GLOBAL_CACHE_DIR=zig" "GOCACHE=go-build" "GOMODCACHE=go-mod"; do
+          for entry in "HOME=home" "XDG_CONFIG_HOME=config" "XDG_DATA_HOME=data" "XDG_CACHE_HOME=cache" "XDG_STATE_HOME=state" "TMPDIR=tmp" "MIX_HOME=mix" "HEX_HOME=hex" "REBAR_CACHE_DIR=rebar" "ZIG_GLOBAL_CACHE_DIR=zig" "GOCACHE=go-build" "GOMODCACHE=go-mod"; do
             printf '%s=%s/%s\n' "${entry%%=*}" "$root" "${entry#*=}" >> "$GITHUB_ENV"
           done
           printf 'CANDIDATE_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
@@ -246,12 +246,15 @@ jobs:
           package="$unpacked/minga"
           "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --runtime-receipt "$MINGA_RELEASE_ERTS_RECEIPT"
           cd "$CANDIDATE_ROOT"
-          env -i HOME="$HOME" PATH=/usr/bin:/bin "$package/launchers/minga" --version > version.txt
+          smoke_env=(env -i HOME="$HOME" PATH=/usr/bin:/bin TMPDIR="$TMPDIR"
+            XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_DATA_HOME="$XDG_DATA_HOME"
+            XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_STATE_HOME="$XDG_STATE_HOME")
+          "${smoke_env[@]}" "$package/launchers/minga" --version > version.txt
           grep -Fx "minga $(jq -r .version context.json)" version.txt
           if [[ "$TARGET_OS" == linux ]]; then
             parser=$(find "$package/lib" -type f -path '*/priv/minga-parser' -print)
             test -x "$parser"
-            env -i HOME="$HOME" PATH=/usr/bin:/bin "$parser" < /dev/null > /dev/null
+            "${smoke_env[@]}" "$parser" < /dev/null > /dev/null
           fi
           export RELEASE_DISTRIBUTION=none
           RELEASE_COOKIE=$(openssl rand -hex 32)
@@ -359,7 +362,14 @@ jobs:
           export RELEASE_DISTRIBUTION=none
           mount="$CANDIDATE_ROOT/mounted"
           mkdir "$mount"
-          trap 'hdiutil detach "$mount"' EXIT
+          ipc_parent=""
+          cleanup() {
+            local status=$?
+            if [[ -n "$ipc_parent" ]]; then rmdir "$ipc_parent" || status=1; fi
+            hdiutil detach "$mount" || status=1
+            return "$status"
+          }
+          trap cleanup EXIT
           hdiutil attach "$CANDIDATE_ROOT/out/Minga.dmg" -mountpoint "$mount" -nobrowse -readonly
           app="$mount/Minga.app"
           codesign --verify --deep --strict "$app"
@@ -369,13 +379,26 @@ jobs:
           "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" "${version_args[@]}"
           helper="$app/Contents/Resources/bin/minga-ipc"
           codesign --verify --strict "$helper"
+          ipc_parent=$(mktemp -d /private/tmp/minga-ipc.XXXXXXXX)
           "$helper" nonce | grep -E '^[0-9a-f-]{36}$'
-          mkdir -m 700 "$CANDIDATE_ROOT/empty-ipc"
-          set +e
-          TMPDIR="$CANDIDATE_ROOT/empty-ipc/" "$helper" probe
-          probe_status=$?
-          set -e
-          test "$probe_status" = 3
+          # Historic helpers reject the flag before inspecting any endpoint.
+          # Current helpers distinguish a bad override (4) from an empty private parent (3).
+          capability_status=0
+          "$helper" probe --runtime-parent "$ipc_parent/absent" || capability_status=$?
+          case "$capability_status" in
+            4)
+              probe_status=0
+              "$helper" probe --runtime-parent "$ipc_parent" || probe_status=$?
+              test "$probe_status" = 3
+              ;;
+            1)
+              echo 'Packaged helper does not support private IPC probing; checked nonce and argument rejection only.'
+              ;;
+            *)
+              echo "Unexpected isolated IPC capability response: $capability_status" >&2
+              exit 1
+              ;;
+          esac
           MINGA_APP_PATH="$app" RELEASE_TMP="$CANDIDATE_ROOT/release-smoke" "$app/Contents/Resources/bin/minga-tui" --version > "$CANDIDATE_ROOT/version.txt"
           grep -Fx "minga $(jq -r .version "$CANDIDATE_ROOT/context.json")" "$CANDIDATE_ROOT/version.txt"
           MINGA_APP_PATH="$app" "$app/Contents/Resources/bin/minga" --version > "$CANDIDATE_ROOT/gui-version.txt"

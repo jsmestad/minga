@@ -47,4 +47,21 @@ defmodule MingaEditor.Input.PromptTest do
       assert {:passthrough, ^state} = InputPrompt.handle_key(state, ?a, 0)
     end
   end
+
+  describe "handle_paste/2" do
+    test "advances by the pasted grapheme count even when the paste joins both neighbors" do
+      state = PromptUI.open(base_state(), TestHandler, default: "e👩")
+      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+
+      assert {:handled, pasted} = InputPrompt.handle_paste(state, "\u0301👩\u200D")
+      assert {"Input: ", "e\u0301👩\u200D👩", 3} = PromptUI.render_data(pasted)
+    end
+
+    test "consumes empty paste without changing the active prompt" do
+      state = PromptUI.open(base_state(), TestHandler, default: "ab")
+      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+
+      assert {:handled, ^state} = InputPrompt.handle_paste(state, "")
+    end
+  end
 end
