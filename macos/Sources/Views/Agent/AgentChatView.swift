@@ -8,12 +8,21 @@
 import SwiftUI
 import MingaProtocol
 
-/// Measures the ScrollView's visible viewport height so the content
-/// can be bottom-anchored when there are fewer messages than screen space.
-private struct ScrollViewHeightKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+/// Test hook that records each evaluation of the conversation list body.
+/// Production leaves it nil; tests install it to prove which state changes
+/// re-evaluate the conversation.
+struct AgentConversationListEvaluationProbe: Sendable {
+    let record: @MainActor @Sendable () -> Void
+}
+
+private struct AgentConversationListEvaluationProbeKey: EnvironmentKey {
+    static let defaultValue: AgentConversationListEvaluationProbe? = nil
+}
+
+extension EnvironmentValues {
+    var agentConversationListEvaluationProbe: AgentConversationListEvaluationProbe? {
+        get { self[AgentConversationListEvaluationProbeKey.self] }
+        set { self[AgentConversationListEvaluationProbeKey.self] = newValue }
     }
 }
 
@@ -42,15 +51,8 @@ public struct AgentChatView: View {
     public let isInsertMode: Bool
     public let sendAction: ViewActionHandler<Action>?
 
-    @State private var scrollViewHeight: CGFloat = 0
-    /// Tracks whether the user has scrolled away from the bottom.
     @State private var availableHeight: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
-    /// When true, auto-scroll is paused to let the user read earlier content.
-    @State private var userHasScrolledUp: Bool = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Whether auto-scroll should follow streaming output.
-    private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -60,81 +62,10 @@ public struct AgentChatView: View {
                 case .executeCommand(let name): .executeCommand(name: name)
                 }
             })
-
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
-            // Messages: bottom-anchored so few messages cluster near the
-            // prompt input rather than leaving a void below them.
-            ScrollViewReader { proxy in
-                ZStack {
-                    ScrollView(.vertical) {
-                        LazyVStack(spacing: Spacing.lg) {
-                            if state.transcriptTruncated {
-                                olderMessagesOmittedIndicator
-                            }
 
-                            ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
-                                messageViewWithDivider(msg, index: index)
-                            }
-
-                        }
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.top, Spacing.lg)
-                        .padding(.bottom, Spacing.xl)
-                        .frame(minHeight: scrollViewHeight, alignment: .bottom)
-                    }
-                    .defaultScrollAnchor(.bottom)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ScrollViewHeightKey.self,
-                                value: geo.size.height
-                            )
-                        }
-                    )
-                    .onPreferenceChange(ScrollViewHeightKey.self) { height in
-                        scrollViewHeight = height
-                    }
-                    .onScrollGeometryChange(for: Bool.self) { geometry in
-                        // User is "at bottom" if within 50pt of the bottom edge
-                        let atBottom = geometry.contentOffset.y + geometry.visibleRect.height >= geometry.contentSize.height - 50
-                        return atBottom
-                    } action: { _, isAtBottom in
-                        setScrolledUp(!isAtBottom)
-                    }
-                    .onChange(of: state.messages.count) { _, _ in
-                        if shouldAutoScroll {
-                            scrollToBottom(proxy: proxy)
-                        }
-                    }
-                    .onChange(of: state.promptVersion) { _, _ in
-                        // Triggers on every BEAM frame update (streaming content growth)
-                        if shouldAutoScroll && state.hasActiveTurn {
-                            scrollToBottom(proxy: proxy)
-                        }
-                    }
-                    // Keep the latest-output action available after generation finishes.
-                    if userHasScrolledUp {
-                        VStack {
-                            Spacer()
-                            Button {
-                                setScrolledUp(false)
-                                scrollToBottom(proxy: proxy)
-                            } label: {
-                                followOutputPillLabel
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Follow output")
-                            .accessibilityHint("Scrolls to latest content and resumes auto-scroll")
-                            .padding(.bottom, Spacing.md)
-                        }
-                        .transition(.opacity)
-                        .animation(
-                            reduceMotion ? nil : .easeOut(duration: 0.2),
-                            value: userHasScrolledUp
-                        )
-                    }
-                }
-            }
+            // Messages: a separate view so composer frames do not re-evaluate it.
+            AgentConversationList(state: state, sendAction: sendAction)
 
             if let question = state.question {
                 HStack(spacing: Spacing.md) {
@@ -172,6 +103,95 @@ public struct AgentChatView: View {
         }
         .coordinateSpace(name: "agentChat")
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
+    }
+
+    private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {
+        guard let sendAction else { return nil }
+        return { action in sendAction(translate(action)) }
+    }
+}
+
+/// The conversation transcript, the follow-output gating, and the Follow
+/// output pill. Its body reads only transcript state, so chrome and composer
+/// frames do not re-evaluate it.
+struct AgentConversationList: View {
+    let state: AgentChatState
+    let sendAction: ViewActionHandler<AgentChatView.Action>?
+
+    @Environment(\.themeColors) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.agentConversationListEvaluationProbe) private var evaluationProbe
+    /// When true, auto-scroll is paused to let the user read earlier content.
+    @State private var userHasScrolledUp: Bool = false
+    @State private var position = ScrollPosition()
+    /// Whether auto-scroll should follow streaming output.
+    private var shouldAutoScroll: Bool { !userHasScrolledUp }
+
+    var body: some View {
+        let _ = evaluationProbe?.record()
+        ZStack {
+            ScrollView(.vertical) {
+                LazyVStack(spacing: Spacing.lg) {
+                    if state.transcriptTruncated {
+                        olderMessagesOmittedIndicator
+                    }
+
+                    ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
+                        messageViewWithDivider(msg, index: index)
+                    }
+
+                }
+                .padding(.horizontal, Spacing.xl)
+                .padding(.top, Spacing.lg)
+                .padding(.bottom, Spacing.xl)
+            }
+            .scrollPosition($position)
+            // Open at the newest message, and sit a conversation shorter
+            // than the pane directly above the composer.
+            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .alignment)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                // User is "at bottom" if within 50pt of the bottom edge
+                let atBottom = geometry.contentOffset.y + geometry.visibleRect.height >= geometry.contentSize.height - 50
+                return atBottom
+            } action: { _, isAtBottom in
+                setScrolledUp(!isAtBottom)
+            }
+            .onChange(of: state.messages.count) { _, _ in
+                if shouldAutoScroll {
+                    scrollToBottom()
+                }
+            }
+            .onChange(of: state.transcriptRevision) { _, _ in
+                // A streaming frame can grow the last message without changing
+                // the count, so follow every transcript revision during a turn.
+                // Chrome and composer frames never advance the revision.
+                if shouldAutoScroll && state.hasActiveTurn {
+                    scrollToBottom()
+                }
+            }
+            // Keep the latest-output action available after generation finishes.
+            if userHasScrolledUp {
+                VStack {
+                    Spacer()
+                    Button {
+                        setScrolledUp(false)
+                        scrollToBottom()
+                    } label: {
+                        followOutputPillLabel
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Follow output")
+                    .accessibilityHint("Scrolls to latest content and resumes auto-scroll")
+                    .padding(.bottom, Spacing.md)
+                }
+                .transition(.opacity)
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.2),
+                    value: userHasScrolledUp
+                )
+            }
+        }
     }
 
     // MARK: - Messages
@@ -223,13 +243,9 @@ public struct AgentChatView: View {
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
         case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result, _, let previewLines, let offer):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
-                AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
-            })
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction)
         case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, _, let previewLines, let offer):
-            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction, styledLineView: { runs, fontSize, mono in
-                AnyView(styledLineView(runs, baseFontSize: fontSize, monospaced: mono))
-            })
+            AgentToolCallCard(messageID: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines, previewLines: previewLines, retainedOutputOffer: offer, sendAction: toolCallAction)
         case .approvalToolCall(_, let name, let summary, let toolCallId, let sessionId, let requestId, let previewKind, let previewLines):
             AgentApprovalCard(name: name, summary: summary, toolCallId: toolCallId, sessionId: sessionId, requestId: requestId, previewKind: previewKind, previewLines: previewLines, sendAction: childAction { .toolApproval($0) })
         case .system(_, let text, let isError):
@@ -403,88 +419,8 @@ public struct AgentChatView: View {
         return "Code block, \(language), \(block.lines.count) lines, \(state)"
     }
 
-    private func buildAttributedString(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat = 13, monospaced: Bool = false) -> AttributedString {
-        var result = AttributedString()
-        for run in runs {
-            var attr = AttributedString(run.text)
-            let fg = Color(
-                red: Double(run.fgR) / 255.0,
-                green: Double(run.fgG) / 255.0,
-                blue: Double(run.fgB) / 255.0
-            )
-            // Only apply foreground if not all zeros (default/unstyled)
-            if run.fgR != 0 || run.fgG != 0 || run.fgB != 0 {
-                attr.foregroundColor = fg
-            } else {
-                attr.foregroundColor = theme.agentTextFg
-            }
-            // Apply background if non-zero
-            if run.bgR != 0 || run.bgG != 0 || run.bgB != 0 {
-                attr.backgroundColor = Color(
-                    red: Double(run.bgR) / 255.0,
-                    green: Double(run.bgG) / 255.0,
-                    blue: Double(run.bgB) / 255.0
-                )
-            }
-            let runMonospaced = monospaced || run.code
-            let design: Font.Design = runMonospaced ? .monospaced : .default
-            if run.bold && run.italic {
-                attr.font = Typography.relative(to: baseFontSize, weight: .bold, design: design).italic()
-            } else if run.bold {
-                attr.font = Typography.relative(to: baseFontSize, weight: .bold, design: design)
-            } else if run.italic {
-                attr.font = Typography.relative(to: baseFontSize, design: design).italic()
-            } else if runMonospaced {
-                attr.font = Typography.relative(to: baseFontSize, design: .monospaced)
-            }
-            if run.underline {
-                attr.underlineStyle = .single
-            }
-            if let url = safeLinkURL(run.linkURL) {
-                attr.link = url
-            }
-            result += attr
-        }
-        return result
-    }
-
-    @ViewBuilder
-    private func styledLineView(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat, monospaced: Bool, allowHorizontalScroll: Bool = true) -> some View {
-        if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
-            Text(" ")
-                .font(Typography.relative(to: baseFontSize, design: monospaced ? .monospaced : .default))
-                .foregroundStyle(.clear)
-        } else if allowHorizontalScroll && shouldScrollHorizontally(runs) {
-            ScrollView(.horizontal) {
-                Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
-                    .font(Typography.relative(to: baseFontSize, design: monospaced ? .monospaced : .default))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-        } else {
-            Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
-                .font(Typography.relative(to: baseFontSize, design: monospaced ? .monospaced : .default))
-                .textSelection(.enabled)
-        }
-    }
-
-    private func shouldScrollHorizontally(_ runs: [Wire.StyledTextRun]) -> Bool {
-        let textRuns = runs.filter { !$0.text.isEmpty }
-        return !textRuns.isEmpty && textRuns.allSatisfy(\.code)
-    }
-
-    private func safeLinkURL(_ value: String?) -> URL? {
-        guard let value, let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return nil }
-        switch scheme {
-        case "http", "https":
-            guard let host = url.host, !host.isEmpty else { return nil }
-            return url
-        case "mailto":
-            guard !url.path.isEmpty else { return nil }
-            return url
-        default:
-            return nil
-        }
+    private func styledLineView(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat, monospaced: Bool, allowHorizontalScroll: Bool = true) -> AgentStyledLine {
+        AgentStyledLine(runs: runs, baseFontSize: baseFontSize, monospaced: monospaced, allowHorizontalScroll: allowHorizontalScroll)
     }
 
     @ViewBuilder
@@ -598,17 +534,16 @@ public struct AgentChatView: View {
         }
     }
 
-    private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {
+    private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> AgentChatView.Action) -> ViewActionHandler<ChildAction>? {
         guard let sendAction else { return nil }
         return { action in sendAction(translate(action)) }
     }
 
-    /// Scrolls to the last message with smooth animation.
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        guard let lastId = state.messages.last?.id else { return }
+    /// Scrolls to the bottom edge with a short ease-out, or none under Reduce Motion.
+    private func scrollToBottom() {
         let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.15)
         withAnimation(animation) {
-            proxy.scrollTo(lastId, anchor: .bottom)
+            position.scrollTo(edge: .bottom)
         }
     }
 
