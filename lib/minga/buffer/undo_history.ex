@@ -42,9 +42,30 @@ defmodule Minga.Buffer.UndoHistory do
 
   @doc "Records an undo patch at monotonic time `at`, coalescing rapid same-source edits into one history entry."
   @spec record_edit(t(), version(), UndoPatch.t(), edit_source(), at()) :: t()
+  def record_edit(
+        %__MODULE__{
+          undo_entries: [{entry_version, patches, source} | rest],
+          last_recorded_at: last
+        } =
+          history,
+        _version,
+        patch,
+        source,
+        at
+      )
+      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) and
+             last != 0 and at - last < @coalesce_ms do
+    %{
+      history
+      | undo_entries: [{entry_version, [patch | patches], source} | rest],
+        redo_entries: [],
+        last_recorded_at: at
+    }
+  end
+
   def record_edit(%__MODULE__{} = history, version, patch, source, at)
       when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
-    do_record_edit(history, version, patch, source, at, at - history.last_recorded_at)
+    record_edit_batch(history, version, [patch], source, at)
   end
 
   @doc "Records one undo entry containing all patches in the batch, stamped at monotonic time `at`."
@@ -164,46 +185,6 @@ defmodule Minga.Buffer.UndoHistory do
 
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{} = history), do: length(history.redo_entries)
-
-  @spec do_record_edit(t(), version(), UndoPatch.t(), edit_source(), integer(), integer()) :: t()
-  defp do_record_edit(%__MODULE__{} = history, version, patch, source, now, elapsed)
-       when history.last_recorded_at == 0 or elapsed >= @coalesce_ms do
-    entry = {version, [patch], source}
-
-    %{
-      history
-      | undo_entries: cap_entries([entry | history.undo_entries]),
-        redo_entries: [],
-        last_recorded_at: now
-    }
-  end
-
-  defp do_record_edit(
-         %__MODULE__{undo_entries: [{entry_version, patches, source} | rest]} = history,
-         _version,
-         patch,
-         source,
-         now,
-         _elapsed
-       ) do
-    %{
-      history
-      | undo_entries: [{entry_version, [patch | patches], source} | rest],
-        redo_entries: [],
-        last_recorded_at: now
-    }
-  end
-
-  defp do_record_edit(%__MODULE__{} = history, version, patch, source, now, _elapsed) do
-    entry = {version, [patch], source}
-
-    %{
-      history
-      | undo_entries: cap_entries([entry | history.undo_entries]),
-        redo_entries: [],
-        last_recorded_at: now
-    }
-  end
 
   @spec apply_patches(Document.t(), patches()) :: {Document.t(), patches()}
   defp apply_patches(%Document{} = document, patches) do

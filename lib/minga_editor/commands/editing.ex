@@ -22,6 +22,9 @@ defmodule MingaEditor.Commands.Editing do
 
   @type state :: EditorState.t()
 
+  @typep line_range :: {non_neg_integer(), non_neg_integer()}
+  @typep line_target :: {state(), pid(), line_range() | nil}
+
   @command_specs [
     {:delete_before, "Delete character before cursor (backspace)", true},
     {:delete_at, "Delete character at cursor (delete)", true},
@@ -377,41 +380,19 @@ defmodule MingaEditor.Commands.Editing do
   # ── Indent / dedent (multiple lines via count or motion) ─────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:indent_lines, n}) do
-    {cursor_line, _} = Buffer.cursor(buf)
-    total = Buffer.line_count(buf)
-    end_line = min(cursor_line + n - 1, total - 1)
-    do_indent_lines(buf, cursor_line, end_line)
-    state
+    state |> counted_line_target(buf, n) |> indent_range()
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:dedent_lines, n}) do
-    {cursor_line, _} = Buffer.cursor(buf)
-    total = Buffer.line_count(buf)
-    end_line = min(cursor_line + n - 1, total - 1)
-    do_dedent_lines(buf, cursor_line, end_line)
-    state
+    state |> counted_line_target(buf, n) |> dedent_range()
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:indent_motion, motion}) do
-    {state, range} = motion_line_range(state, buf, motion)
-
-    case range do
-      nil -> :ok
-      {start_line, end_line} -> do_indent_lines(buf, start_line, end_line)
-    end
-
-    state
+    state |> motion_line_target(buf, motion) |> indent_range()
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:dedent_motion, motion}) do
-    {state, range} = motion_line_range(state, buf, motion)
-
-    case range do
-      nil -> :ok
-      {start_line, end_line} -> do_dedent_lines(buf, start_line, end_line)
-    end
-
-    state
+    state |> motion_line_target(buf, motion) |> dedent_range()
   end
 
   def execute(
@@ -419,14 +400,7 @@ defmodule MingaEditor.Commands.Editing do
           state,
         :indent_visual_selection
       ) do
-    anchor = ms.visual_anchor
-    cursor = Buffer.cursor(buf)
-    {anchor_line, _} = anchor
-    {cursor_line, _} = cursor
-    start_line = min(anchor_line, cursor_line)
-    end_line = max(anchor_line, cursor_line)
-    do_indent_lines(buf, start_line, end_line)
-    state
+    state |> visual_line_target(buf, ms) |> indent_range()
   end
 
   def execute(
@@ -434,35 +408,17 @@ defmodule MingaEditor.Commands.Editing do
           state,
         :dedent_visual_selection
       ) do
-    anchor = ms.visual_anchor
-    cursor = Buffer.cursor(buf)
-    {anchor_line, _} = anchor
-    {cursor_line, _} = cursor
-    start_line = min(anchor_line, cursor_line)
-    end_line = max(anchor_line, cursor_line)
-    do_dedent_lines(buf, start_line, end_line)
-    state
+    state |> visual_line_target(buf, ms) |> dedent_range()
   end
 
   # ── Reindent (= operator) ──────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:reindent_lines, n}) do
-    {cursor_line, _} = Buffer.cursor(buf)
-    total = Buffer.line_count(buf)
-    end_line = min(cursor_line + n - 1, total - 1)
-    do_reindent_lines(state, buf, cursor_line, end_line)
-    state
+    state |> counted_line_target(buf, n) |> reindent_range()
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:reindent_motion, motion}) do
-    {state, range} = motion_line_range(state, buf, motion)
-
-    case range do
-      nil -> :ok
-      {start_line, end_line} -> do_reindent_lines(state, buf, start_line, end_line)
-    end
-
-    state
+    state |> motion_line_target(buf, motion) |> reindent_range()
   end
 
   def execute(
@@ -470,14 +426,7 @@ defmodule MingaEditor.Commands.Editing do
           state,
         :reindent_visual_selection
       ) do
-    anchor = ms.visual_anchor
-    cursor = Buffer.cursor(buf)
-    {anchor_line, _} = anchor
-    {cursor_line, _} = cursor
-    start_line = min(anchor_line, cursor_line)
-    end_line = max(anchor_line, cursor_line)
-    do_reindent_lines(state, buf, start_line, end_line)
-    state
+    state |> visual_line_target(buf, ms) |> reindent_range()
   end
 
   def execute(
@@ -503,8 +452,7 @@ defmodule MingaEditor.Commands.Editing do
         state
 
       {{start_line, _}, {end_line, _}} ->
-        do_reindent_lines(state, buf, start_line, end_line)
-        state
+        reindent_range({state, buf, {start_line, end_line}})
     end
   end
 
@@ -512,20 +460,12 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :comment_line) when is_pid(buf) do
     {line, _col} = Buffer.cursor(buf)
-    toggle_comment(buf, line, line, state)
-    state
+    toggle_comment_range({state, buf, {line, line}})
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:comment_motion, motion})
       when is_pid(buf) do
-    {state, range} = motion_line_range(state, buf, motion)
-
-    case range do
-      nil -> :ok
-      {start_line, end_line} -> toggle_comment(buf, start_line, end_line, state)
-    end
-
-    state
+    state |> motion_line_target(buf, motion) |> toggle_comment_range()
   end
 
   def execute(
@@ -533,14 +473,7 @@ defmodule MingaEditor.Commands.Editing do
           state,
         :comment_visual_selection
       ) do
-    anchor = ms.visual_anchor
-    cursor = Buffer.cursor(buf)
-    {anchor_line, _} = anchor
-    {cursor_line, _} = cursor
-    start_line = min(anchor_line, cursor_line)
-    end_line = max(anchor_line, cursor_line)
-    toggle_comment(buf, start_line, end_line, state)
-    state
+    state |> visual_line_target(buf, ms) |> toggle_comment_range()
   end
 
   # ── Menu bar copy/cut (Cmd+C / Cmd+X) ─────────────────────────────────────
@@ -605,8 +538,10 @@ defmodule MingaEditor.Commands.Editing do
 
   # ── Private comment helpers ──────────────────────────────────────────────
 
-  @spec toggle_comment(pid(), non_neg_integer(), non_neg_integer(), state()) :: :ok
-  defp toggle_comment(buf, start_line, end_line, state) do
+  @spec toggle_comment_range(line_target()) :: state()
+  defp toggle_comment_range({state, _buf, nil}), do: state
+
+  defp toggle_comment_range({state, buf, {start_line, end_line}}) do
     filetype = Buffer.filetype(buf)
     injection_ranges = Map.get(state.parser.injection_ranges, buf, [])
 
@@ -618,7 +553,7 @@ defmodule MingaEditor.Commands.Editing do
 
     Enum.each(edits, fn edit -> apply_comment_edit(buf, edit) end)
 
-    :ok
+    state
   end
 
   @spec resolve_comment_prefix(pid(), non_neg_integer(), atom(), [map()]) :: String.t()
@@ -894,27 +829,36 @@ defmodule MingaEditor.Commands.Editing do
     :ok
   end
 
-  # ── Private motion range helpers ─────────────────────────────────────────
+  # ── Private line target helpers ──────────────────────────────────────────
 
-  @spec motion_line_range(state(), pid(), atom()) ::
-          {state(), {non_neg_integer(), non_neg_integer()} | nil}
-  defp motion_line_range(state, buf, motion) do
+  @spec counted_line_target(state(), pid(), pos_integer()) :: line_target()
+  defp counted_line_target(state, buf, count) do
+    {cursor_line, _} = Buffer.cursor(buf)
+    total = Buffer.line_count(buf)
+    end_line = min(cursor_line + count - 1, total - 1)
+    {state, buf, {cursor_line, end_line}}
+  end
+
+  @spec motion_line_target(state(), pid(), atom()) :: line_target()
+  defp motion_line_target(state, buf, motion) do
     state = Helpers.setup_for_motion(state, motion)
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
-    range =
-      case Helpers.resolve_motion_target(gb, cursor, motion, buf, state.parser.parser_manager) do
-        nil ->
-          nil
+    case Helpers.resolve_motion_target(gb, cursor, motion, buf, state.parser.parser_manager) do
+      nil -> {state, buf, nil}
+      target -> {state, buf, ordered_line_range(cursor, target)}
+    end
+  end
 
-        target ->
-          {cursor_line, _} = cursor
-          {target_line, _} = target
-          {min(cursor_line, target_line), max(cursor_line, target_line)}
-      end
+  @spec visual_line_target(state(), pid(), VisualState.t()) :: line_target()
+  defp visual_line_target(state, buf, %VisualState{visual_anchor: anchor}) do
+    {state, buf, ordered_line_range(anchor, Buffer.cursor(buf))}
+  end
 
-    {state, range}
+  @spec ordered_line_range(Document.position(), Document.position()) :: line_range()
+  defp ordered_line_range({line_a, _}, {line_b, _}) do
+    {min(line_a, line_b), max(line_a, line_b)}
   end
 
   # ── Private reindent helpers ──────────────────────────────────────────────
@@ -949,8 +893,10 @@ defmodule MingaEditor.Commands.Editing do
   defp insert_indent(_buf, ""), do: :ok
   defp insert_indent(buf, indent), do: Buffer.insert_text(buf, indent)
 
-  @spec do_reindent_lines(state(), pid(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp do_reindent_lines(state, buf, start_line, end_line) do
+  @spec reindent_range(line_target()) :: state()
+  defp reindent_range({state, _buf, nil}), do: state
+
+  defp reindent_range({state, buf, {start_line, end_line}}) do
     {cursor_line, _} = Buffer.cursor(buf)
     opts = indent_opts(state, buf)
 
@@ -968,7 +914,7 @@ defmodule MingaEditor.Commands.Editing do
         Buffer.move_to(buf, {cursor_line, 0})
     end
 
-    :ok
+    state
   end
 
   @spec reindent_single_line(pid(), non_neg_integer(), [Indent.compute_opt()]) :: :ok
@@ -1004,8 +950,10 @@ defmodule MingaEditor.Commands.Editing do
 
   # ── Private indent helpers ────────────────────────────────────────────────
 
-  @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp do_indent_lines(buf, start_line, end_line) do
+  @spec indent_range(line_target()) :: state()
+  defp indent_range({state, _buf, nil}), do: state
+
+  defp indent_range({state, buf, {start_line, end_line}}) do
     {indent, indent_bytes} = indent_string(buf)
     {cursor_line, cursor_col} = Buffer.cursor(buf)
 
@@ -1020,11 +968,13 @@ defmodule MingaEditor.Commands.Editing do
         else: cursor_col
 
     Buffer.move_to(buf, {cursor_line, new_col})
-    :ok
+    state
   end
 
-  @spec do_dedent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp do_dedent_lines(buf, start_line, end_line) do
+  @spec dedent_range(line_target()) :: state()
+  defp dedent_range({state, _buf, nil}), do: state
+
+  defp dedent_range({state, buf, {start_line, end_line}}) do
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     cursor_removed = cursor_line_chars_to_remove(buf, cursor_line, start_line, end_line)
 
@@ -1034,7 +984,7 @@ defmodule MingaEditor.Commands.Editing do
 
     new_col = max(0, cursor_col - cursor_removed)
     Buffer.move_to(buf, {cursor_line, new_col})
-    :ok
+    state
   end
 
   @spec cursor_line_chars_to_remove(

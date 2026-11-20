@@ -13,8 +13,7 @@ defmodule Minga.Parser.BufferRegistrationTest do
 
     awaiting = BufferRegistration.await_snapshot(registration, token)
     refute BufferRegistration.pumpable?(awaiting)
-    assert BufferRegistration.awaiting?(awaiting, token)
-    refute BufferRegistration.awaiting?(awaiting, make_ref())
+    assert %BufferRegistration{phase: {:awaiting_snapshot, ^token}} = awaiting
 
     parsing = BufferRegistration.begin_parse(awaiting, 1, 3, true)
     dirty = BufferRegistration.mark_dirty(parsing, 5)

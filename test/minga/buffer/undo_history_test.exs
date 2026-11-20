@@ -28,15 +28,20 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert UndoHistory.last_undo_source(history) == :agent
     end
 
-    test "coalesces same-source edits inside the window into one undo entry" do
-      history =
-        UndoHistory.new()
-        |> UndoHistory.record_edit(0, patch("", "a"), :user, @t0)
-        |> UndoHistory.record_edit(1, patch("a", "ab"), :user, @t0 + @window - 1)
+    test "coalesces same-source edits inside the window at signed monotonic times" do
+      for {first, second} <- [{@t0, @t0 + @window - 1}, {-@t0, -@t0}] do
+        history =
+          UndoHistory.new()
+          |> UndoHistory.record_edit(0, patch("", "a"), :user, first)
+          |> UndoHistory.record_edit(1, patch("a", "ab"), :user, second)
 
-      assert UndoHistory.undo_count(history) == 1
-      assert {:ok, restore, _history} = UndoHistory.undo(history, 2, doc("ab"))
-      assert Document.content(restore.document) == ""
+        assert UndoHistory.undo_count(history) == 1
+
+        assert {:ok, %{version: 0, document: document}, _history} =
+                 UndoHistory.undo(history, 2, doc("ab"))
+
+        assert Document.content(document) == ""
+      end
     end
 
     test "an edit at or after the window boundary starts a new undo entry" do

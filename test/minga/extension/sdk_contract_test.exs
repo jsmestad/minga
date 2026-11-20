@@ -1,38 +1,16 @@
 defmodule Minga.Extension.SdkContractTest do
   use ExUnit.Case, async: true
 
-  @dsl_pairs [
-    {"lib/minga/extension.ex", "sdk/lib/minga/extension.ex"},
-    {"lib/minga/extension/editor.ex", "sdk/lib/minga/extension/editor.ex"},
-    {"lib/minga/extension/agent.ex", "sdk/lib/minga/extension/agent.ex"},
-    {"lib/minga/extension/macros.ex", "sdk/lib/minga/extension/macros.ex"}
-  ]
-
-  test "runtime and SDK declaration DSLs have the same source contract" do
-    Enum.each(@dsl_pairs, fn {runtime, sdk} ->
-      assert normalized_ast(runtime) == normalized_ast(sdk),
-             "#{sdk} must mirror the declaration contract in #{runtime}"
-    end)
-  end
-
   test "runtime and SDK callback families cannot drift" do
-    runtime_extension = "lib/minga/extension.ex"
+    declaration = "sdk/lib/declarations/minga/extension.ex"
     runtime_handler = "lib/minga_editor/extension/event_handler.ex"
     sdk_handler = "sdk/lib/minga_editor/extension/event_handler.ex"
 
-    expected_families = named_union_literals(runtime_extension, :editor_event_family)
+    expected_families = named_union_literals(declaration, :editor_event_family)
 
     assert named_union_literals(runtime_handler, :event_kind) == expected_families
     assert named_union_literals(sdk_handler, :event_kind) == expected_families
     assert callback_signatures(runtime_handler) == callback_signatures(sdk_handler)
-  end
-
-  @spec normalized_ast(String.t()) :: String.t()
-  defp normalized_ast(path) do
-    path
-    |> File.read!()
-    |> Code.string_to_quoted!(file: path)
-    |> Macro.to_string()
   end
 
   @spec callback_signatures(String.t()) :: [{atom(), non_neg_integer()}]

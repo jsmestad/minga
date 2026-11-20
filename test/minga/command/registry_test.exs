@@ -359,8 +359,10 @@ defmodule Minga.Command.RegistryTest do
   end
 
   describe "unregister_source/2" do
-    test "removes only commands owned by the source", %{registry: r} do
-      ext_source = {:extension, :demo}
+    test "treats match-pattern atoms in a source as literals when removing commands", %{
+      registry: r
+    } do
+      ext_source = {:extension, :_}
       other_source = {:extension, :other}
 
       ext_cmd = %Command{name: :ext_cmd, description: "Extension", execute: fn s -> s end}

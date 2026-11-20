@@ -51,7 +51,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     |> Writer.finish()
   end
 
-  @spec encode_sections(StatusBar.t()) :: [binary()]
+  @spec encode_sections(StatusBar.t()) :: [iodata()]
   defp encode_sections(%StatusBar{
          content_kind: content_kind,
          data: %Data{} = data,
@@ -126,11 +126,11 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       )
     ]
 
-    sections = sections ++ modeline_segment_sections(data.modeline_segments)
-    sections = sections ++ pending_keys_sections(data.pending_keys)
-
-    sections =
-      Enum.concat(sections, [
+    Enum.concat([
+      sections,
+      modeline_segment_sections(data.modeline_segments),
+      pending_keys_sections(data.pending_keys),
+      [
         section(
           @section_selection,
           Writer.new(@command)
@@ -138,10 +138,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
           |> Writer.uint32(:selection_size, selection_size)
           |> Writer.finish()
         )
-      ])
-
-    Enum.concat([
-      sections,
+      ],
       workspace_sections(workspace),
       operation_sections(operation),
       review_sections(review),
@@ -160,10 +157,12 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   end
 
   @spec section(non_neg_integer(), iodata()) :: binary()
-  defp section(section_id, payload) do
+  defp section(section_id, payload), do: section_writer(section_id, payload) |> Writer.finish()
+
+  @spec section_writer(non_neg_integer(), iodata()) :: Writer.t()
+  defp section_writer(section_id, payload) do
     Writer.new(@command)
     |> Writer.section16(:section_payload, section_id, payload)
-    |> Writer.finish()
   end
 
   @spec content_kind_byte(StatusBar.content_kind()) :: 0 | 1
@@ -307,13 +306,17 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       )
     ]
 
-  @spec modeline_segment_sections(Data.modeline_segments()) :: [binary()]
+  @spec modeline_segment_sections(Data.modeline_segments()) :: [iolist()]
   defp modeline_segment_sections(nil), do: []
 
-  defp modeline_segment_sections(modeline_segments),
-    do: [section(@section_modeline_segments, encode_modeline_segments(modeline_segments))]
+  defp modeline_segment_sections(modeline_segments) do
+    writer =
+      section_writer(@section_modeline_segments, encode_modeline_segments(modeline_segments))
 
-  @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]}) :: binary()
+    [Writer.to_iodata(writer)]
+  end
+
+  @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]}) :: iolist()
   defp encode_modeline_segments(%{left: left, right: right}) do
     Writer.new(@command)
     |> Writer.uint8(:modeline_version, 2)
@@ -321,10 +324,10 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     |> Writer.uint16(:modeline_right_count, Enum.count(right))
     |> Writer.append(Enum.map(left, &encode_modeline_segment/1))
     |> Writer.append(Enum.map(right, &encode_modeline_segment/1))
-    |> Writer.finish()
+    |> Writer.to_iodata()
   end
 
-  @spec encode_modeline_segment(tuple()) :: binary()
+  @spec encode_modeline_segment(tuple()) :: iolist()
   defp encode_modeline_segment({name, text, fg, bg, opts, target}) do
     Writer.new(@command)
     |> Writer.string8(:modeline_segment_name, to_string(name))
@@ -333,7 +336,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     |> Writer.uint8(:modeline_segment_attrs, encode_modeline_attrs(opts))
     |> Writer.string16(:modeline_segment_text, text)
     |> Writer.string16(:modeline_segment_target, encode_modeline_target(target))
-    |> Writer.finish()
+    |> Writer.to_iodata()
   end
 
   defp encode_modeline_segment({text, fg, bg, opts, target}),

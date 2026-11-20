@@ -3,7 +3,7 @@ defmodule Minga.Extension.CoreDecouplingGuardrailTest do
 
   use ExUnit.Case, async: true
 
-  @core_files Path.wildcard("lib/**/*.ex")
+  @core_files Path.wildcard("lib/**/*.ex") ++ Path.wildcard("sdk/lib/declarations/**/*.ex")
   @registry_key_allowlist [
     "lib/minga/config/loader.ex",
     "lib/minga/extension/bundled_applications.ex"
