@@ -48,6 +48,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Policy.RequestCapacity
   alias MingaAgent.ModelSelection.Stored
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
@@ -60,6 +61,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.Dispatch
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Prefix
   alias MingaAgent.Session.PrefixStore
@@ -1043,13 +1045,6 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:change_queued_input, record_id, identity, operation}, 30_000)
   end
 
-  @doc "Commits steering to the original request's completed tool checkpoint before dispatch."
-  @spec steering_dispatch_source(GenServer.server(), String.t(), String.t()) ::
-          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
-  def steering_dispatch_source(session, request_id, checkpoint_id) do
-    GenServer.call(session, {:steering_dispatch_source, request_id, checkpoint_id}, 30_000)
-  end
-
   @doc """
   Sets an edit boundary for the agent on the given file path.
 
@@ -1521,13 +1516,6 @@ defmodule MingaAgent.Session do
 
   def handle_call({:send_follow_up, content}, _from, state) do
     handle_prompt(content, :follow_up, state)
-  end
-
-  def handle_call({:steering_dispatch_source, request_id, checkpoint_id}, {worker, _tag}, state)
-      when node(worker) == node() and is_binary(request_id) and is_binary(checkpoint_id) do
-    if Continuation.accepts?(state.continuation, request_id),
-      do: admit_steering_dispatch_source(state, checkpoint_id),
-      else: {:reply, {:error, :stale_request}, state}
   end
 
   def handle_call(:recall_queues, _from, state) do
@@ -2306,6 +2294,18 @@ defmodule MingaAgent.Session do
       {_branch, {:error, reason}} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call({:begin_native_dispatch, request_id, source}, {worker, _}, state) do
+    begin_native_dispatch(state, worker, request_id, source)
+  end
+
+  def handle_call(
+        {:assess_native_dispatch, %Dispatch{} = attempt, digest, %RequestCapacity{} = assessment},
+        _from,
+        state
+      ) do
+    assess_native_dispatch(state, attempt, digest, assessment)
   end
 
   def handle_call({:checkpoint_tool_group, request_id, messages, calls}, _from, state)
@@ -4606,37 +4606,6 @@ defmodule MingaAgent.Session do
   @spec encode_output(Output.t() | nil) :: map() | nil
   defp encode_output(nil), do: nil
   defp encode_output(%Output{} = output), do: OutputCodec.encode(output)
-
-  @spec admit_steering_dispatch_source(state(), String.t()) ::
-          {:reply, {:ok, [ReqLLM.Message.t()]} | {:error, term()}, state()}
-  defp admit_steering_dispatch_source(
-         %{continuation: %{tool_checkpoint: %{checkpoint_id: checkpoint_id, version: 2}}} = state,
-         checkpoint_id
-       ) do
-    case Continuation.freeze_dispatch_source(state.continuation, checkpoint_id, []) do
-      {:ok, messages, _frozen} -> {:reply, {:ok, messages}, state}
-      {:error, _reason} = error -> {:reply, error, state}
-    end
-  end
-
-  defp admit_steering_dispatch_source(state, checkpoint_id) do
-    {inputs, execution} = TurnExecution.dequeue_steering(state.turn_execution)
-    {provider_input, display_input} = steering_inputs(inputs)
-
-    with {:ok, messages, continuation} <-
-           Continuation.freeze_dispatch_source(state.continuation, checkpoint_id, provider_input),
-         candidate =
-           append_msgs(
-             %{state | continuation: continuation, turn_execution: execution},
-             display_input
-           ),
-         {:ok, committed} <- commit_effect_snapshot(state, candidate) do
-      Enum.each(display_input, &record_user_message_event(committed, &1))
-      {:reply, {:ok, messages}, notify_messages_changed(committed)}
-    else
-      {:error, _reason} = error -> {:reply, error, state}
-    end
-  end
 
   @spec steering_inputs([TurnExecution.content()]) :: {[ReqLLM.Message.t()], [Message.t()]}
   defp steering_inputs([]), do: {[], []}
@@ -8043,6 +8012,7 @@ defmodule MingaAgent.Session do
     do: Event.Error.context_transition_message()
 
   defp humanize_error_kind(:provider_error, message, "apple"), do: message
+  defp humanize_error_kind(:request_admission_refused, message, _provider), do: message
 
   defp humanize_error_kind(:provider_error, _message, _provider) do
     "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
@@ -8592,7 +8562,82 @@ defmodule MingaAgent.Session do
 
   defp snapshot_write_mode(_previous, _candidate, mode), do: mode
 
+  @spec begin_native_dispatch(state(), pid(), String.t(), Dispatch.source()) ::
+          {:reply, {:ok, Dispatch.t(), [ReqLLM.Message.t()]} | {:error, term()}, state()}
+  defp begin_native_dispatch(state, worker, request_id, source) do
+    {steering, execution} = dispatch_steering(state, source)
+
+    {canonical, display} = steering_inputs(steering)
+
+    with {:ok, dispatch, messages, continuation} <-
+           Continuation.begin_dispatch(state.continuation, request_id, source, canonical, worker),
+         candidate =
+           install_dispatch_source(state, continuation, execution, display),
+         {:ok, committed} <- persist_dispatch_source(state, candidate) do
+      {:reply, {:ok, dispatch, messages}, publish_dispatched_steering(committed, display)}
+    else
+      {:error, reason} -> {:reply, {:error, {:request_admission_failed, reason}}, state}
+    end
+  end
+
+  @spec install_dispatch_source(state(), Continuation.t(), TurnExecution.t(), [Message.t()]) ::
+          state()
+  defp install_dispatch_source(state, continuation, execution, []),
+    do: %{state | continuation: continuation, turn_execution: execution}
+
+  defp install_dispatch_source(state, continuation, execution, display) do
+    %{state | continuation: continuation, turn_execution: execution}
+    |> append_msgs(display)
+    |> Map.update!(:transcript, &Transcript.touch(&1, DateTime.utc_now()))
+  end
+
+  # The initial request and a retry's frozen source are already committed. Only new steering alters storage.
+  @spec persist_dispatch_source(state(), state()) :: {:ok, state()} | {:error, term()}
+  defp persist_dispatch_source(
+         %{continuation: %Continuation{tool_checkpoint: %{version: 1}}} = state,
+         %{continuation: %Continuation{tool_checkpoint: %{version: 2}}} = candidate
+       ),
+       do: commit_effect_snapshot(state, candidate)
+
+  defp persist_dispatch_source(_state, candidate), do: {:ok, candidate}
+
+  @spec dispatch_steering(state(), Dispatch.source()) ::
+          {[TurnExecution.content()], TurnExecution.t()}
+  defp dispatch_steering(
+         %{continuation: %Continuation{tool_checkpoint: %{checkpoint_id: id, version: 1}}} = state,
+         {:checkpoint, id}
+       ),
+       do: TurnExecution.dequeue_steering(state.turn_execution)
+
+  defp dispatch_steering(state, _source), do: {[], state.turn_execution}
+
+  @spec publish_dispatched_steering(state(), [Message.t()]) :: state()
+  defp publish_dispatched_steering(state, []), do: state
+
+  defp publish_dispatched_steering(state, messages) do
+    Enum.each(messages, &record_user_message_event(state, &1))
+    notify_messages_changed(state)
+  end
+
+  @spec assess_native_dispatch(
+          state(),
+          Dispatch.t(),
+          binary(),
+          RequestCapacity.t()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp assess_native_dispatch(state, attempt, digest, %RequestCapacity{limits: limits} = evidence) do
+    with %ModelSelection{policy: %{limits: ^limits}} = selection <- state.model_selection,
+         true <- ModelSelection.id(selection) == attempt.selection_id,
+         {:ok, continuation} <-
+           Continuation.assess_dispatch(state.continuation, attempt, digest, evidence) do
+      {:reply, evidence.decision, %{state | continuation: continuation}}
+    else
+      _stale -> {:reply, {:error, :stale_dispatch}, state}
+    end
+  end
+
   @spec save_to_disk(state(), snapshot_write_mode()) :: :ok | {:error, term()}
+
   defp save_to_disk(state, draft_revision \\ :preserve) do
     if Persistence.enabled?(state.persistence) do
       now = DateTime.to_iso8601(DateTime.utc_now())

@@ -89,12 +89,13 @@ private enum Availability: String, Encodable {
 
 private enum Frame: Encodable {
     case availability(Availability, context: Int? = nil)
+    case preflight(inputTokens: Int, outputCap: Int, context: Int)
     case delta(String)
     case stop
     case calls([Call])
     case error(String)
 
-    private enum CodingKeys: String, CodingKey { case status, context, delta, finish, calls, error }
+    private enum CodingKeys: String, CodingKey { case status, context, inputTokens, outputCap, delta, finish, calls, error }
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -102,6 +103,10 @@ private enum Frame: Encodable {
         case let .availability(status, context):
             try container.encode(status, forKey: .status)
             try container.encodeIfPresent(context, forKey: .context)
+        case let .preflight(inputTokens, outputCap, context):
+            try container.encode(inputTokens, forKey: .inputTokens)
+            try container.encode(outputCap, forKey: .outputCap)
+            try container.encode(context, forKey: .context)
         case .delta(let delta): try container.encode(delta, forKey: .delta)
         case .stop: try container.encode("stop", forKey: .finish)
         case .calls(let calls): try container.encode(calls, forKey: .calls)
@@ -654,6 +659,7 @@ private actor Attempt {
 private struct OneInferenceModel: LanguageModel {
     let actual: SystemLanguageModel
     let attempt: Attempt
+    let admission: AsyncStream<Void>
     var capabilities: LanguageModelCapabilities { actual.capabilities }
     var executorConfiguration: Executor.Configuration { .init() }
 
@@ -670,6 +676,9 @@ private struct OneInferenceModel: LanguageModel {
             let limit = model.actual.contextSize
             let tokens = try await model.actual.tokenCount(for: request.transcript)
             guard tokens > 0, limit > 0 else { throw BridgeError.tokenCountUnavailable }
+            Frame.preflight(inputTokens: tokens, outputCap: reserve, context: limit).emit()
+            var authorization = model.admission.makeAsyncIterator()
+            guard case .some = await authorization.next() else { throw CancellationError() }
             guard reserve <= limit, tokens <= limit - reserve else {
                 throw BridgeError.contextBudget(input: tokens, reserved: reserve, limit: limit)
             }
@@ -734,10 +743,16 @@ private enum PortInput {
 private struct AppleInference {
     static func main() async {
         guard let input = PortInput.firstFrame() else { return }
-        // Stdin is the Port owner's lifeline. A separate blocking queue can retire
-        // the process even while Foundation Models or a stdout pipe write is blocked.
+        let (admission, gate) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        // Stdin is the Port owner's lifeline. Only one explicit admission frame can
+        // release the held request. EOF or any later control input retires the helper.
         DispatchQueue.global(qos: .userInitiated).async {
-            PortInput.exitWhenCancelled()
+            if PortInput.firstFrame() == Data("admit".utf8) {
+                gate.yield(())
+                gate.finish()
+                PortInput.exitWhenCancelled()
+            }
+            Darwin._exit(130)
         }
         do {
             let operation = try JSONDecoder().decode(Operation.self, from: input)
@@ -756,7 +771,7 @@ private struct AppleInference {
             case .infer:
                 guard status == .ready else { throw BridgeError.unavailable(status) }
                 let request = try JSONDecoder().decode(Inference.self, from: input)
-                try await infer(request, with: model).emit()
+                try await infer(request, with: model, admission: admission).emit()
             }
         } catch let error as BridgeError {
             Frame.error(error.message).emit()
@@ -783,7 +798,7 @@ private struct AppleInference {
     }
 
     @available(macOS 27.0, *)
-    private static func infer(_ inference: Inference, with model: SystemLanguageModel) async throws -> Frame {
+    private static func infer(_ inference: Inference, with model: SystemLanguageModel, admission: AsyncStream<Void>) async throws -> Frame {
         let marker = "MINGA_TOOL_CAPTURE_\(UUID().uuidString)"
         var names: Set<String> = []
         let tools = try inference.tools.enumerated().map { index, declaration in
@@ -796,7 +811,7 @@ private struct AppleInference {
         let projection = try Projection(inference, tools: tools)
         let attempt = Attempt(projection: projection, tools: tools, marker: marker)
         let session = LanguageModelSession(
-            model: OneInferenceModel(actual: model, attempt: attempt), tools: tools,
+            model: OneInferenceModel(actual: model, attempt: attempt, admission: admission), tools: tools,
             transcript: Transcript(entries: projection.history)
         )
         let options = GenerationOptions(maximumResponseTokens: inference.maxOutputTokens)
