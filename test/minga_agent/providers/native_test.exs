@@ -254,8 +254,10 @@ defmodule MingaAgent.Providers.NativeTest do
         GenServer.reply(from, {:ok, :ready})
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from, {:checkpoint_tool_group, request_id, _messages, _calls}} ->
-        GenServer.reply(from, {:ok, "checkpoint-" <> request_id})
+      {:"$gen_call", from, {:checkpoint_tool_group, request_id, messages, _calls}} ->
+        checkpoint_id = "checkpoint-" <> request_id
+        Process.put({request_id, checkpoint_id}, Enum.reverse(messages))
+        GenServer.reply(from, {:ok, checkpoint_id})
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:start_tool_invocation, invocation}} ->
@@ -268,7 +270,9 @@ defmodule MingaAgent.Providers.NativeTest do
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
-       {:complete_tool_effect, _request_id, _checkpoint_id, _tool_call_id, _result_message}} ->
+       {:complete_tool_effect, request_id, checkpoint_id, _tool_call_id, result_message}} ->
+        key = {request_id, checkpoint_id}
+        Process.put(key, [result_message | Process.get(key)])
         GenServer.reply(from, :ok)
         provider_subscriber_loop(owner, owner_ref, store)
 
@@ -277,8 +281,8 @@ defmodule MingaAgent.Providers.NativeTest do
         GenServer.reply(from, {:ok, store})
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from, :dequeue_steering_messages} ->
-        GenServer.reply(from, [])
+      {:"$gen_call", from, {:steering_dispatch_source, request_id, checkpoint_id}} ->
+        GenServer.reply(from, {:ok, Enum.reverse(Process.get({request_id, checkpoint_id}))})
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
@@ -428,6 +432,12 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, messages, calls}} ->
         send(owner, {:checkpoint_attempt, request_id, messages, calls})
+
+        case checkpoint_reply do
+          {:ok, checkpoint_id} -> Process.put({request_id, checkpoint_id}, Enum.reverse(messages))
+          {:error, _reason} -> :ok
+        end
+
         GenServer.reply(from, checkpoint_reply)
 
         effect_barrier_subscriber_loop(
@@ -469,6 +479,12 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
         [terminal_reply | remaining_replies] = terminal_replies
+
+        if terminal_reply == :ok do
+          key = {request_id, checkpoint_id}
+          Process.put(key, [result_message | Process.get(key)])
+        end
+
         GenServer.reply(from, terminal_reply)
 
         effect_barrier_subscriber_loop(
@@ -479,8 +495,8 @@ defmodule MingaAgent.Providers.NativeTest do
           if(remaining_replies == [], do: [:ok], else: remaining_replies)
         )
 
-      {:"$gen_call", from, :dequeue_steering_messages} ->
-        GenServer.reply(from, [])
+      {:"$gen_call", from, {:steering_dispatch_source, request_id, checkpoint_id}} ->
+        GenServer.reply(from, {:ok, Enum.reverse(Process.get({request_id, checkpoint_id}))})
 
         effect_barrier_subscriber_loop(
           owner,

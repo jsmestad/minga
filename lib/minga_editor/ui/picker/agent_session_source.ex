@@ -89,7 +89,9 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
       ) do
     with %Tab{kind: :agent, payload: %TabAgent{session: ^session}} <- TabBar.get(tab_bar, tab_id),
          true <- current_tab_session?(id, tab_id, session) do
-      MingaEditor.TabWorkflow.switch(state, tab_id)
+      state
+      |> MingaEditor.TabWorkflow.switch(tab_id)
+      |> DraftWorkflow.recover_recall_conflict(session, id)
     else
       _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
     end

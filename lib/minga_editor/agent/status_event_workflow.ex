@@ -14,6 +14,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -38,6 +39,21 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     state
     |> apply_spinner_status(status)
     |> MingaEditor.schedule_render(16)
+  end
+
+  @doc "Updates the exact queue submission fence for the attached foreground Session."
+  @spec queue_target_changed(EditorState.t(), pid(), MingaAgent.Session.queue_target() | nil) ::
+          EditorState.t()
+  def queue_target_changed(%EditorState{} = state, session, target) do
+    with ^session <- Runtime.active_session(state.shell_runtime),
+         agent = TraditionalState.agent(state.shell_runtime.state),
+         updated when updated != agent <- AgentState.project_queue_target(agent, session, target) do
+      state
+      |> TraditionalWorkflow.install_agent_state(updated)
+      |> MingaEditor.schedule_render(16)
+    else
+      _stale_or_unchanged -> state
+    end
   end
 
   @doc "Projects replayed raw status using the current live approval attachment."

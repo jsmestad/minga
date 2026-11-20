@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   alias MingaAgent.DraftAttachment
   alias MingaAgent.DraftSnapshot
   alias MingaAgent.Session
+  alias MingaAgent.Session.TurnExecution
   alias MingaEditor.Agent.{DraftSave, PromptBuffer, UIState}
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.{NoticeWorkflow, Workflow}
@@ -18,6 +19,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
            {:ok, DraftSave.revision(), DraftSnapshot.t() | nil}
            | {:ok, DraftSave.revision(), DraftSnapshot.attachment()}
            | {:ok, DraftSave.revision()}
+           | {:ok, TurnExecution.queue_receipt()}
            | {:error, term()}
 
   @doc "Requests the initial saved revision for an attached local composer."
@@ -200,7 +202,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
         session,
         incoming
       ),
-      do: state
+      do: recover_recall_conflict(state, session, incoming)
 
   def after_reopen(
         %State{workspace: %{agent_ui: %UIState{draft_save: nil}}} = state,
@@ -226,6 +228,39 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     |> Workflow.install_agent_ui(fresh)
     |> MingaEditor.AgentLifecycle.rebuild_agent_from_session(session)
   end
+
+  @doc "Reloads a recalled draft only in the selected original session."
+  @spec recover_recall_conflict(State.t(), pid() | nil, String.t() | integer()) :: State.t()
+  def recover_recall_conflict(
+        %State{
+          workspace: %{
+            agent_ui:
+              %UIState{
+                draft_save:
+                  %DraftSave{target: {session, id}, request: :recall_conflicted, buffer: buffer} =
+                    save
+              } = ui
+          }
+        } = state,
+        session,
+        id
+      ) do
+    with true <- PromptBuffer.input_empty?(ui),
+         %TabBar{} = tabs <- tab_bar(state),
+         ^session <- Runtime.active_session(state.shell_runtime) do
+      ref = make_ref()
+      owner = TabBar.active_workspace_id(tabs)
+      pending = DraftSave.reload_recall(save, ref, Buffer.inspection_marker(buffer))
+      :ok = Session.request_composer_draft(session, id, {owner, ref}, :read)
+      Workflow.install_agent_ui(state, UIState.project_draft_save(ui, pending))
+    else
+      _blocked -> report(state, :recall_conflict)
+    end
+  catch
+    :exit, _reason -> report(state, :failed)
+  end
+
+  def recover_recall_conflict(state, _session, _id), do: state
 
   @spec pending_notice(State.t(), pid()) :: State.t()
   defp pending_notice(state, buffer), do: state |> edited(buffer) |> reopen_notice()
@@ -391,6 +426,167 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   defp owns_draft_buffer?(_workspace, _buffer), do: false
 
+  @doc "Uses the projected active-turn target to submit the original local saved composer."
+  @spec queue(State.t(), TurnExecution.prompt_kind(), TurnExecution.content()) ::
+          {:saved, State.t()} | :ordinary
+  def queue(%State{} = state, kind, content) do
+    agent = TraditionalState.agent(state.shell_runtime.state)
+
+    with {session, {record, _, _} = target} when node(session) == node() <- agent.queue_target,
+         ^session <- Runtime.active_session(state.shell_runtime),
+         %TabBar{} = tabs <- tab_bar(state) do
+      owner = TabBar.active_workspace_id(tabs)
+      update = &capture_queue(&1, owner, {session, record}, target, kind, content)
+      {:saved, update_origin(state, owner, update)}
+    else
+      _no_local_active_target -> :ordinary
+    end
+  end
+
+  @spec capture_queue(
+          UIState.t(),
+          non_neg_integer(),
+          DraftSave.target(),
+          Session.queue_target(),
+          TurnExecution.prompt_kind(),
+          TurnExecution.content()
+        ) :: {term(), UIState.t()}
+  defp capture_queue(
+         %UIState{
+           draft_save: %DraftSave{target: destination, buffer: buffer} = save,
+           panel: %{prompt_buffer: buffer}
+         } = ui,
+         owner,
+         {session, record} = destination,
+         {record, _, sequence} = target,
+         kind,
+         content
+       ) do
+    ref = make_ref()
+    token = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+    marker = Buffer.inspection_marker(buffer)
+    shown = Enum.map(save.attachments, &DraftAttachment.identity/1)
+
+    with false <- nil in shown,
+         {:ok, revision, pending} <-
+           DraftSave.begin_queue(save, ref, marker, {sequence, token, kind}) do
+      op = {:queue, target, kind, {revision, token, shown, PromptBuffer.prompt_text(ui)}, content}
+      :ok = Session.request_composer_draft(session, record, {owner, ref}, op)
+      {:unchanged, UIState.project_draft_save(ui, pending)}
+    else
+      _unavailable -> {:queue_not_ready, ui}
+    end
+  catch
+    :exit, _reason -> {:queue_not_ready, ui}
+  end
+
+  defp capture_queue(ui, _owner, _destination, _target, _kind, _content),
+    do: {:queue_not_ready, ui}
+
+  @doc "Checks a pending local admission against the recovered owner without submitting it again."
+  @spec reconcile_restarted_queue(State.t(), String.t(), pid(), pid()) :: State.t()
+  def reconcile_restarted_queue(state, record, previous, replacement)
+      when node(previous) == node() and node(replacement) == node() do
+    with %TabBar{} = tabs <- tab_bar(state),
+         %Workspace{id: owner} <- TabBar.find_workspace_by_session(tabs, replacement) do
+      update_origin(
+        state,
+        owner,
+        &request_queue_receipt(&1, owner, {previous, record}, replacement)
+      )
+    else
+      _unowned -> state
+    end
+  end
+
+  def reconcile_restarted_queue(state, _record, _previous, _replacement), do: state
+
+  @spec request_queue_receipt(UIState.t(), non_neg_integer(), DraftSave.target(), pid()) ::
+          {term(), UIState.t()}
+  defp request_queue_receipt(
+         %UIState{draft_save: %DraftSave{buffer: buffer} = save, panel: %{prompt_buffer: buffer}} =
+           ui,
+         owner,
+         {_previous, record} = origin,
+         replacement
+       ) do
+    case DraftSave.rebind_queue(save, origin, replacement) do
+      {:ok, ref, previous, {sequence, token, _kind}, rebound} ->
+        :ok =
+          Session.request_composer_draft(
+            replacement,
+            record,
+            {owner, ref},
+            {:reconcile_queue, sequence, token, previous}
+          )
+
+        {:unchanged, UIState.project_draft_save(ui, rebound)}
+
+      :stale ->
+        {:unchanged, ui}
+    end
+  end
+
+  defp request_queue_receipt(ui, _owner, _origin, _replacement), do: {:unchanged, ui}
+
+  @doc "Recalls saved input into the original workspace without blocking the Editor process."
+  @spec recall(State.t(), pid()) :: {:saved, State.t()} | :volatile
+  def recall(
+        %State{workspace: %{agent_ui: %UIState{draft_save: %DraftSave{target: {session, _}}}}} =
+          state,
+        session
+      ) do
+    case tab_bar(state) do
+      %TabBar{} = tabs ->
+        owner = TabBar.active_workspace_id(tabs)
+        {:saved, update_origin(state, owner, &capture_recall(&1, owner))}
+
+      nil ->
+        {:saved, report(state, :recall_not_ready)}
+    end
+  end
+
+  def recall(
+        %State{
+          workspace: %{
+            agent_ui: %UIState{
+              connection: %{persistent_drafts?: true, target: %{session: session}}
+            }
+          }
+        } = state,
+        session
+      ),
+      do: {:saved, report(state, :recall_not_ready)}
+
+  def recall(_state, _session), do: :volatile
+
+  @spec capture_recall(UIState.t(), non_neg_integer()) :: {term(), UIState.t()}
+  defp capture_recall(
+         %UIState{
+           draft_save: %DraftSave{target: {session, id}, buffer: buffer} = save,
+           panel: %{prompt_buffer: buffer}
+         } = ui,
+         owner
+       )
+       when node(session) == node() do
+    ref = make_ref()
+    marker = Buffer.inspection_marker(buffer)
+
+    with {:ok, revision, pending} <- DraftSave.begin_recall(save, ref, marker),
+         {:ok, snapshot} <- PromptBuffer.draft_snapshot(ui, save.attachments) do
+      :ok =
+        Session.request_composer_draft(session, id, {owner, ref}, {:recall, revision, snapshot})
+
+      {:unchanged, UIState.project_draft_save(ui, pending)}
+    else
+      _not_ready -> {:recall_not_ready, ui}
+    end
+  catch
+    :exit, _reason -> {:recall_not_ready, ui}
+  end
+
+  defp capture_recall(ui, _owner), do: {:recall_not_ready, ui}
+
   @doc "Commits the newest prompt snapshot for the workspace that armed the timer."
   @spec due(State.t(), non_neg_integer(), reference()) :: State.t()
   def due(state, owner, token), do: update_origin(state, owner, &save_due(&1, owner, token))
@@ -462,11 +658,12 @@ defmodule MingaEditor.Agent.DraftWorkflow do
           {term(), UIState.t()}
   defp apply_result(
          ui,
-         %DraftSave{request: {:loading, ref, initial}} = save,
+         %DraftSave{request: {phase, ref, initial}} = save,
          owner,
          ref,
          {:ok, revision, draft}
-       ) do
+       )
+       when phase in [:loading, :reloading_recall] do
     case restore_loaded(ui, save, initial, draft) do
       {:ok, restored, restored_save, marker} ->
         installed =
@@ -477,12 +674,122 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
         {:restored, arm(installed, owner)}
 
+      :edited when phase == :reloading_recall ->
+        fail_result(ui, save, ref, :blocked)
+
       :edited when is_struct(draft, DraftSnapshot) and draft.attachments != [] ->
         {:failed, UIState.project_draft_save(ui, DraftSave.conflicted(save, draft))}
 
       :edited ->
         fail_result(ui, save, ref, :blocked)
     end
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{
+           request: {:queueing, ref, previous, _, initial, {sequence, token, kind}},
+           buffer: buffer,
+           target: {session, id}
+         } = save,
+         owner,
+         ref,
+         {:ok, {sequence, token, kind, revision} = receipt}
+       )
+       when revision == previous + 1 do
+    if Buffer.inspection_marker(buffer) == initial do
+      cleared = ui |> PromptBuffer.clear_input_and_scroll() |> UIState.reset_edit_timeline()
+      updated = DraftSave.queue_saved(save, ref, revision, Buffer.inspection_marker(buffer))
+      :ok = Session.confirm_queue_receipt(session, id, receipt)
+      {{:queued, kind}, UIState.project_draft_save(cleared, updated)}
+    else
+      updated = DraftSave.queue_saved(save, ref, revision, nil)
+      :ok = Session.confirm_queue_receipt(session, id, receipt)
+      {:queued_older_draft, arm(UIState.project_draft_save(ui, updated), owner)}
+    end
+  catch
+    :exit, _reason ->
+      {:queued_older_draft,
+       UIState.project_draft_save(ui, DraftSave.queue_saved(save, ref, revision, nil))}
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:queueing, ref, _, _, _, _}} = save,
+         owner,
+         ref,
+         result
+       ) do
+    disposition =
+      case result do
+        {:error, {:stale_draft_revision, _}} -> :blocked
+        {:error, :stale_target} -> :blocked
+        {:error, :queue_receipt_unconfirmed} -> :blocked
+        {:ok, _other_receipt} -> :blocked
+        _refused -> :retryable
+      end
+
+    updated = DraftSave.queue_refused(save, ref, disposition)
+
+    notice =
+      case result do
+        {:error, :queue_receipts_full} -> :queue_receipts_full
+        {:error, :queue_receipt_unconfirmed} -> :queue_receipt_unconfirmed
+        _other -> :queue_refused
+      end
+
+    {notice, arm(UIState.project_draft_save(ui, updated), owner)}
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:recalling, ref, _, _, initial}} = save,
+         owner,
+         ref,
+         {:ok, revision, %DraftSnapshot{} = draft}
+       ) do
+    case install_snapshot(ui, save, initial, draft) do
+      {:ok, restored, restored_save, marker} ->
+        updated =
+          DraftSave.recall_result(restored_save, ref, {:installed, revision, marker, draft})
+
+        {:recalled, arm(UIState.project_draft_save(restored, updated), owner)}
+
+      :edited ->
+        {:recall_conflict,
+         UIState.project_draft_save(ui, DraftSave.recall_result(save, ref, :conflict))}
+    end
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:recalling, ref, _, _, _}} = save,
+         owner,
+         ref,
+         {:error, :no_pending_inputs}
+       ) do
+    {:ok, ready} = DraftSave.failed(save, ref, :retryable)
+    {:unchanged, arm(UIState.project_draft_save(ui, ready), owner)}
+  end
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:recalling, ref, _, _, _}} = save,
+         _owner,
+         ref,
+         {:error, {:stale_draft_revision, _}}
+       ),
+       do: fail_result(ui, save, ref, :blocked)
+
+  defp apply_result(
+         ui,
+         %DraftSave{request: {:recalling, ref, _, _, _}} = save,
+         owner,
+         ref,
+         {:error, _reason}
+       ) do
+    {:ok, ready} = DraftSave.failed(save, ref, :retryable)
+    {:recall_refused, arm(UIState.project_draft_save(ui, ready), owner)}
   end
 
   defp apply_result(
@@ -552,9 +859,16 @@ defmodule MingaEditor.Agent.DraftWorkflow do
     :exit, _reason -> :edited
   end
 
-  defp restore_loaded(ui, %DraftSave{buffer: buffer} = save, initial, %DraftSnapshot{} = draft) do
+  defp restore_loaded(ui, save, initial, %DraftSnapshot{} = draft) do
+    if PromptBuffer.input_empty?(ui),
+      do: install_snapshot(ui, save, initial, draft),
+      else: :edited
+  end
+
+  @spec install_snapshot(UIState.t(), DraftSave.t(), DraftSave.marker(), DraftSnapshot.t()) ::
+          {:ok, UIState.t(), DraftSave.t(), DraftSave.marker()} | :edited
+  defp install_snapshot(ui, %DraftSave{buffer: buffer} = save, initial, %DraftSnapshot{} = draft) do
     with ^initial <- Buffer.inspection_marker(buffer),
-         true <- PromptBuffer.input_empty?(ui),
          {:ok, restored} <- PromptBuffer.restore_draft(UIState.detach_prompt_buffer(ui), draft) do
       restored_buffer = restored.panel.prompt_buffer
       GenServer.stop(buffer, :normal)
@@ -636,6 +950,14 @@ defmodule MingaEditor.Agent.DraftWorkflow do
        when outcome in [:private_attachment, :attachment_not_ready],
        do: report(state, outcome)
 
+  defp report_inactive(state, outcome, _label)
+       when outcome in [:recall_refused, :recall_conflict],
+       do: report(state, outcome)
+
+  defp report_inactive(state, outcome, _label)
+       when outcome in [:queue_refused, :queue_receipt_unconfirmed],
+       do: report(state, outcome)
+
   defp report_inactive(state, _outcome, _label), do: state
 
   @spec report(State.t(), term()) :: State.t()
@@ -676,6 +998,71 @@ defmodule MingaEditor.Agent.DraftWorkflow do
       NoticeWorkflow.publish(
         state,
         "Attachment not saved. Select a ready Agent composer and try again."
+      )
+
+  defp report(state, :recalled),
+    do:
+      state
+      |> NoticeWorkflow.publish("Queued input recalled to the composer.")
+      |> MingaEditor.schedule_render(16)
+
+  defp report(state, :recall_not_ready),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Wait for the composer draft to finish saving. Queued input was kept."
+      )
+
+  defp report(state, :recall_refused),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Queued input could not be recalled. The queue and current draft were kept."
+      )
+
+  defp report(state, :recall_conflict),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Queued input was saved separately. Copy and clear your current edits, then select this session again in Sessions."
+      )
+
+  defp report(state, {:queued, kind}) do
+    message =
+      if kind == :steering, do: "Steering saved in the queue.", else: "Queued for the next turn."
+
+    state |> NoticeWorkflow.publish(message) |> MingaEditor.schedule_render(16)
+  end
+
+  defp report(state, :queued_older_draft),
+    do: NoticeWorkflow.publish(state, "The submitted input was queued. Newer edits were kept.")
+
+  defp report(state, :queue_not_ready),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Wait for the saved composer to be ready. The draft was kept."
+      )
+
+  defp report(state, :queue_refused),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "The queue did not accept this draft. Current input was kept."
+      )
+
+  defp report(state, :queue_receipt_unconfirmed),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "Could not verify the queue submission. Current input was kept. Check the saved session before sending again."
+      )
+
+  defp report(state, :queue_receipts_full),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "This session has too many unconfirmed queue replies. Your draft was kept. Use another session to queue new input."
       )
 
   defp report(state, :unchanged), do: state

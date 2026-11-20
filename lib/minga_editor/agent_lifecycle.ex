@@ -74,6 +74,7 @@ defmodule MingaEditor.AgentLifecycle do
         Map.get(snapshot, :active_tool_name)
       )
       |> AgentState.project_question(session_pid, Map.get(snapshot, :pending_question))
+      |> AgentState.project_queue_target(session_pid, Map.get(snapshot, :queue_target))
 
     ui = state.workspace.agent_ui
 

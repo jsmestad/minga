@@ -43,14 +43,16 @@ defmodule MingaEditor.State.Agent do
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
           pending_approval: approval() | nil,
-          pending_question: PendingQuestion.t() | nil
+          pending_question: PendingQuestion.t() | nil,
+          queue_target: {pid(), MingaAgent.Session.queue_target()} | nil
         }
 
   defstruct runtime: %RuntimeState{},
             error: nil,
             spinner_timer: nil,
             pending_approval: nil,
-            pending_question: nil
+            pending_question: nil,
+            queue_target: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -134,7 +136,8 @@ defmodule MingaEditor.State.Agent do
       | runtime: runtime,
         error: nil,
         pending_approval: nil,
-        pending_question: nil
+        pending_question: nil,
+        queue_target: nil
     }
   end
 
@@ -151,6 +154,14 @@ defmodule MingaEditor.State.Agent do
   def clear_pending_approval(%__MODULE__{} = agent) do
     %{agent | pending_approval: nil}
   end
+
+  @doc "Projects a saved queue action target only for the Session attached to the workspace."
+  @spec project_queue_target(t(), pid(), MingaAgent.Session.queue_target() | nil) :: t()
+  def project_queue_target(%__MODULE__{} = agent, _session, nil),
+    do: %{agent | queue_target: nil}
+
+  def project_queue_target(%__MODULE__{} = agent, session, {_, _, _} = target),
+    do: %{agent | queue_target: {session, target}}
 
   @doc "Replaces the question projection for the attached Session."
   @spec project_question(t(), pid(), {QuestionTarget.t(), Question.t()} | nil) :: t()
