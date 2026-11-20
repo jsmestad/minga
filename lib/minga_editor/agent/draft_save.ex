@@ -20,6 +20,10 @@ defmodule MingaEditor.Agent.DraftSave do
           | {:attaching, reference(), revision(), marker() | nil, marker()}
           | {:removing, reference(), revision(), marker() | nil, marker(),
              [DraftSnapshot.attachment()]}
+          | {:submitting, reference(), revision(), marker() | nil, marker(), String.t()}
+          | {:submission_unconfirmed, revision(), String.t(), marker()}
+          | {:checking_submission, reference(), revision(), String.t(), marker()}
+          | {:load_failed, marker()}
           | :blocked
           | :attachment_review_required
           | {:reviewing_attachments, reference()}
@@ -29,11 +33,22 @@ defmodule MingaEditor.Agent.DraftSave do
           request: request(),
           timer: reference() | nil,
           offer: pos_integer() | nil,
+          retirement: {reference(), TurnExecution.queue_receipt()} | nil,
+          rearm_on_save_failure: boolean(),
           attachments: [DraftSnapshot.attachment()]
         }
 
   @enforce_keys [:target, :buffer, :request]
-  defstruct [:target, :buffer, :request, :timer, :offer, attachments: []]
+  defstruct [
+    :target,
+    :buffer,
+    :request,
+    :timer,
+    :offer,
+    :retirement,
+    attachments: [],
+    rearm_on_save_failure: false
+  ]
 
   @doc "Tracks an in-flight read for the original composer marker."
   @spec loading(target(), pid(), reference(), marker()) :: t()
@@ -81,6 +96,42 @@ defmodule MingaEditor.Agent.DraftSave do
 
   def schedule(%__MODULE__{}, _token), do: :pending
 
+  @doc "Remembers that a new driver is available if the old driver's autosave fails."
+  @spec renew_saving_driver(t()) :: t()
+  def renew_saving_driver(%__MODULE__{request: {:saving, _, _, _, _}} = save),
+    do: %{save | rearm_on_save_failure: true}
+
+  @doc "Moves autosave to the authenticated replacement of the same saved record."
+  @spec rebind_writer(t(), pid()) :: t()
+  def rebind_writer(%__MODULE__{target: {session, _}} = save, session), do: save
+
+  def rebind_writer(%__MODULE__{target: {_, record}, request: {:ready, _, _}} = save, session),
+    do: %{save | target: {session, record}, timer: nil}
+
+  def rebind_writer(
+        %__MODULE__{target: {_, record}, request: {:saving, _, revision, previous, _}} = save,
+        session
+      ),
+      do: %{
+        save
+        | target: {session, record},
+          request: {:ready, revision, previous},
+          timer: nil,
+          rearm_on_save_failure: false
+      }
+
+  @doc "Correlates receipt retirement separately from ongoing draft edits and saves."
+  @spec retire_queue_receipt(t(), reference(), TurnExecution.queue_receipt()) :: t()
+  def retire_queue_receipt(%__MODULE__{} = save, ref, receipt),
+    do: %{save | retirement: {ref, receipt}}
+
+  @doc "Forgets a receipt only after the original daemon confirms its retirement."
+  @spec queue_receipt_retired(t(), reference()) :: t()
+  def queue_receipt_retired(%__MODULE__{retirement: {ref, _}} = save, ref),
+    do: %{save | retirement: nil}
+
+  def queue_receipt_retired(%__MODULE__{} = save, _ref), do: save
+
   @doc "Consumes only the due timer for this composer."
   @spec due(t(), reference()) :: {:ok, t()} | :stale
   def due(%__MODULE__{timer: token} = save, token), do: {:ok, %{save | timer: nil}}
@@ -111,7 +162,12 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Binds a queue submission identity to the original live composer marker and revision."
   @spec begin_queue(t(), reference(), marker(), queue_admission()) ::
           {:ok, revision(), t()} | :pending
-  def begin_queue(%__MODULE__{request: {:ready, revision, previous}} = save, ref, marker, attempt) do
+  def begin_queue(
+        %__MODULE__{request: {:ready, revision, previous}, retirement: nil} = save,
+        ref,
+        marker,
+        attempt
+      ) do
     {:ok, revision,
      %{save | request: {:queueing, ref, revision, previous, marker, attempt}, timer: nil}}
   end
@@ -124,12 +180,15 @@ defmodule MingaEditor.Agent.DraftSave do
   def rebind_queue(
         %__MODULE__{
           target: {_, record} = origin,
-          request: {:queueing, ref, revision, _, _, attempt}
+          request: {:queueing, _, revision, previous, marker, attempt}
         } = save,
         origin,
         replacement
-      ),
-      do: {:ok, ref, revision, attempt, %{save | target: {replacement, record}}}
+      ) do
+    ref = make_ref()
+    pending = {:queueing, ref, revision, previous, marker, attempt}
+    {:ok, ref, revision, attempt, %{save | target: {replacement, record}, request: pending}}
+  end
 
   def rebind_queue(%__MODULE__{}, _origin, _replacement), do: :stale
 
@@ -210,7 +269,7 @@ defmodule MingaEditor.Agent.DraftSave do
   @doc "Acknowledges only the write captured by this request."
   @spec saved(t(), reference(), revision()) :: {:ok, t()} | :stale
   def saved(%__MODULE__{request: {:saving, ref, _, _, marker}} = save, ref, revision),
-    do: {:ok, %{save | request: {:ready, revision, marker}}}
+    do: {:ok, %{save | request: {:ready, revision, marker}, rearm_on_save_failure: false}}
 
   def saved(
         %__MODULE__{request: {:removing, ref, _, _, marker, remaining}} = save,
@@ -252,6 +311,66 @@ defmodule MingaEditor.Agent.DraftSave do
   def sent(%__MODULE__{request: {:ready, _, _}} = save, revision, marker),
     do: %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}
 
+  @doc "Holds one remote submission outstanding without losing any newer composer edit."
+  @spec begin_submission(t(), reference(), marker(), String.t()) :: {:ok, t()} | :pending
+  def begin_submission(
+        %__MODULE__{request: {:ready, revision, previous}} = save,
+        ref,
+        marker,
+        id
+      ),
+      do: {:ok, %{save | request: {:submitting, ref, revision, previous, marker, id}, timer: nil}}
+
+  def begin_submission(%__MODULE__{}, _ref, _marker, _id), do: :pending
+
+  @doc "Queries the exact previous admission without retrying the prompt."
+  @spec check_submission(t(), target(), reference()) :: t()
+  def check_submission(
+        %__MODULE__{
+          target: {previous, id},
+          request: {:submission_unconfirmed, revision, submission_id, marker}
+        } = save,
+        {session, id} = target,
+        ref
+      )
+      when node(previous) == node(session),
+      do: %{
+        save
+        | target: target,
+          request: {:checking_submission, ref, revision, submission_id, marker}
+      }
+
+  @doc "Retires the sent attachment set while keeping a later live draft dirty."
+  @spec submitted(t(), reference(), revision(), marker() | nil) :: {:ok, t()} | :stale
+  def submitted(
+        %__MODULE__{request: {:submitting, ref, _, _, _, _}} = save,
+        ref,
+        revision,
+        marker
+      ),
+      do:
+        {:ok, %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}}
+
+  def submitted(
+        %__MODULE__{request: {:checking_submission, ref, _, _, _}} = save,
+        ref,
+        revision,
+        marker
+      ),
+      do:
+        {:ok, %{save | request: {:ready, revision, marker}, attachments: [], offer: next_offer()}}
+
+  def submitted(%__MODULE__{}, _ref, _revision, _marker), do: :stale
+
+  @doc "Makes an exactly reconciled refusal retryable while retaining all live composer input."
+  @spec submission_refused(t(), reference(), revision()) :: t()
+  def submission_refused(
+        %__MODULE__{request: {:checking_submission, ref, _, _, _}} = save,
+        ref,
+        revision
+      ),
+      do: %{save | request: {:ready, revision, nil}}
+
   @doc "Validates the offer echoed by the frontend against this composer and its displayed attachment set."
   @spec submission(t() | nil, pos_integer() | nil) ::
           :ordinary | {:attached, target(), [DraftAttachment.identity()]} | {:error, String.t()}
@@ -286,11 +405,23 @@ defmodule MingaEditor.Agent.DraftSave do
   def submission(%__MODULE__{request: {:reloading_recall, _, _}}),
     do: {:error, "Wait for the recalled draft to reload."}
 
+  def submission(%__MODULE__{request: {:load_failed, _}}),
+    do: {:error, "Reconnect to the original Agent conversation to reload its saved draft."}
+
   def submission(%__MODULE__{request: {:attaching, _, _, _, _}}),
     do: {:error, "Wait for the selection snapshot to finish saving."}
 
   def submission(%__MODULE__{request: {:removing, _, _, _, _, _}}),
     do: {:error, "Wait for the attachment removal to finish saving."}
+
+  def submission(%__MODULE__{request: {:submitting, _, _, _, _, _}}),
+    do: {:error, "Wait for the original Agent conversation to confirm the send."}
+
+  def submission(%__MODULE__{request: {:submission_unconfirmed, _, _, _}}),
+    do: {:error, "Open Draft attachments to check whether the last send was accepted."}
+
+  def submission(%__MODULE__{request: {:checking_submission, _, _, _, _}}),
+    do: {:error, "Wait for the original conversation to check the last send."}
 
   def submission(%__MODULE__{request: {:saving, _, _, _, _}, attachments: [_ | _]}),
     do: {:error, "Wait for the composer draft to finish saving."}
@@ -317,17 +448,43 @@ defmodule MingaEditor.Agent.DraftSave do
   def submission(_save), do: :ordinary
 
   @doc "Blocks a stale target or makes a refused write retryable on a later edit."
-  @spec failed(t(), reference(), :retryable | :blocked) :: {:ok, t()} | :stale
+  @spec failed(t(), reference(), :retryable | :blocked | :unconfirmed) :: {:ok, t()} | :stale
   def failed(%__MODULE__{request: {phase, ref, revision, previous, _}} = save, ref, :retryable)
       when phase in [:saving, :attaching, :recalling],
-      do: {:ok, %{save | request: {:ready, revision, previous}, timer: nil}}
+      do:
+        {:ok,
+         %{save | request: {:ready, revision, previous}, timer: nil, rearm_on_save_failure: false}}
 
   def failed(%__MODULE__{request: {:attaching, ref, _, _, _}} = save, ref, :blocked),
     do: {:ok, %{save | request: :attachment_review_required, timer: nil}}
 
   def failed(%__MODULE__{request: {phase, ref, _, _, _}} = save, ref, :blocked)
       when phase in [:saving, :recalling],
-      do: {:ok, %{save | request: :blocked, timer: nil}}
+      do: {:ok, %{save | request: :blocked, timer: nil, rearm_on_save_failure: false}}
+
+  def failed(
+        %__MODULE__{request: {:submitting, ref, revision, previous, _, _}} = save,
+        ref,
+        :retryable
+      ),
+      do: {:ok, %{save | request: {:ready, revision, previous}, timer: nil}}
+
+  def failed(
+        %__MODULE__{request: {:submitting, ref, revision, _, marker, id}} = save,
+        ref,
+        :unconfirmed
+      ),
+      do: {:ok, %{save | request: {:submission_unconfirmed, revision, id, marker}, timer: nil}}
+
+  def failed(
+        %__MODULE__{request: {:checking_submission, ref, revision, id, marker}} = save,
+        ref,
+        _reason
+      ),
+      do: {:ok, %{save | request: {:submission_unconfirmed, revision, id, marker}, timer: nil}}
+
+  def failed(%__MODULE__{request: {:submitting, ref, _, _, _, _}} = save, ref, :blocked),
+    do: {:ok, %{save | request: :attachment_review_required, timer: nil}}
 
   def failed(
         %__MODULE__{request: {:removing, ref, revision, previous, _, _}} = save,
@@ -338,6 +495,14 @@ defmodule MingaEditor.Agent.DraftSave do
 
   def failed(%__MODULE__{request: {:removing, ref, _, _, _, _}} = save, ref, :blocked),
     do: {:ok, %{save | request: :attachment_review_required, timer: nil}}
+
+  def failed(
+        %__MODULE__{request: {:loading, ref, marker}, target: {session, _}} = save,
+        ref,
+        _reason
+      )
+      when node(session) != node(),
+      do: {:ok, %{save | request: {:load_failed, marker}, timer: nil}}
 
   def failed(%__MODULE__{request: {:loading, ref, _}} = save, ref, _reason),
     do: {:ok, %{save | request: :blocked, timer: nil}}

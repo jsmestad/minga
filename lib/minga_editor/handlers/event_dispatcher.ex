@@ -13,6 +13,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias Minga.Events
   alias Minga.FileWatcher.ReadyEvent
   alias Minga.Mode.ExtensionConfirmState
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.FileWatcherHelpers
@@ -634,6 +636,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
             tb
             |> set_workspace_remote_state(workspace, pid, :connected, committable_cursor)
             |> TabBar.set_workspace_pending_catchup_events(workspace_id, events)
+            |> project_inactive_connection(workspace, pid, snapshot)
 
           install_tab_bar(state, tb)
         end
@@ -646,6 +649,27 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   defp restore_remote_workspace(state, %Workspace{}, _remote_node, _pid), do: state
+
+  @spec project_inactive_connection(TabBar.t(), Workspace.t(), pid(), map()) :: TabBar.t()
+  defp project_inactive_connection(
+         tabs,
+         %Workspace{
+           id: owner,
+           payload: %WorkspaceAgent{
+             agent_ui: %UIState{} = ui,
+             remote_session: %RemoteSession{session_id: record}
+           }
+         },
+         session,
+         %{
+           connection:
+             %ConnectionSnapshot{target: %{session: session, session_id: record}} = connection
+         }
+       ) do
+    TabBar.set_workspace_agent_ui(tabs, owner, UIState.project_connection(ui, connection))
+  end
+
+  defp project_inactive_connection(tabs, _workspace, _session, _snapshot), do: tabs
 
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
   defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do

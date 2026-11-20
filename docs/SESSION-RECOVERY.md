@@ -71,7 +71,7 @@ Managed Session restart also waits for the prior provider and every registered e
 
 ## Keep source snapshots with an unsent draft
 
-Open a local Agent workspace, then select text in a file. In Vim Visual mode, press `A` and choose the destination Agent workspace. On macOS, you can also choose **Attach Selection to Agent Draft** from the editor context menu.
+Open the destination Agent workspace, then select text in a file in your local editor. In Vim Visual mode, press `A` and choose the destination Agent workspace. On macOS, you can also choose **Attach Selection to Agent Draft** from the editor context menu. For a remote destination, check the server and session ID before confirming. The snapshot will be stored on that daemon.
 
 To capture the whole current buffer, including changes you have not saved, press `SPC a b` from the editor or choose **Attach Current Buffer to Agent Draft** in the macOS editor context menu. Choose the destination Agent workspace. The attachment is labeled **Buffer snapshot** and does not read the file from disk. The limit is 32 KiB per snapshot.
 
@@ -81,7 +81,7 @@ To attach the diagnostics already published for the current file, press `SPC a D
 
 In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a j` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
 
-An unsent snapshot stays with its original local conversation after restart. Sending an attached prompt from an idle conversation saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale or the route cannot accept it, Minga keeps the draft.
+An unsent snapshot stays with its original conversation after restart. Sending an attached prompt from an idle conversation saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale or the route cannot accept it, Minga keeps the draft.
 
 ## Keep follow-up input across a restart
 
@@ -162,5 +162,7 @@ In a locally saved Agent session, Minga autosaves your composer text, caret, and
 After restart, open the **Sessions** picker from the Agent workspace. Choose the original conversation, or choose **Unsent Agent draft** if you never sent a prompt in that session. The picker does not display the unsent text. Credential commands that may carry secrets are not autosaved; enter credentials through the masked setup controls instead.
 
 If you close the workspace or quit before autosave finishes, Minga cancels the close and keeps your text. After a temporary storage failure, the next edit or close attempt can retry the save. If the record changed elsewhere, Minga does not overwrite it. Copy any changes you need to keep before a force quit. Restart restores the last confirmed draft.
+
+For a remote session, reattach to the original active conversation on the same daemon. When the daemon supports remote drafts, the current driver recovers the last confirmed composer and snapshots. If Minga cannot confirm an attached send, check the conversation first, then open **Draft attachments** to reload the saved context before sending again.
 
 For architecture ownership, see [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery). For the provider request contract, see [For AI Coders](FOR-AI-CODERS.md#provider-turns-keep-their-durable-continuation).

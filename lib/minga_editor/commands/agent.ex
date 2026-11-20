@@ -870,10 +870,7 @@ defmodule MingaEditor.Commands.Agent do
         ) ::
           state()
   defp deliver_composer(state, resolved, kind) do
-    case DraftSave.submission(
-           state.workspace.agent_ui.draft_save,
-           state.frontend.composer_input_offer
-         ) do
+    case DraftWorkflow.submission(state) do
       {:error, message} ->
         NoticeWorkflow.publish(state, message)
 
@@ -889,7 +886,9 @@ defmodule MingaEditor.Commands.Agent do
           state(),
           :steering | :follow_up,
           String.t() | [ReqLLM.Message.ContentPart.t()],
-          :ordinary | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
+          :ordinary
+          | {:remote, DraftSave.target()}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
         ) :: state()
   defp deliver_unqueued_composer(
          %{
@@ -930,6 +929,10 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
+  defp deliver_unqueued_composer(state, _, content, {:remote, target}) do
+    DraftWorkflow.submit_remote(state, target, [], content)
+  end
+
   defp deliver_unqueued_composer(state, :steering, content, :ordinary),
     do: deliver_prompt(state, content)
 
@@ -945,6 +948,10 @@ defmodule MingaEditor.Commands.Agent do
           [MingaAgent.DraftAttachment.identity()],
           String.t() | [ReqLLM.Message.ContentPart.t()]
         ) :: state()
+  defp deliver_attached_composer(state, {session, _record} = target, shown, content)
+       when node(session) != node(),
+       do: DraftWorkflow.submit_remote(state, target, shown, content)
+
   defp deliver_attached_composer(state, {session, record}, shown, content) do
     if Runtime.active_session(state.shell_runtime) == session do
       case Session.send_attached_prompt(session, record, shown, content) do

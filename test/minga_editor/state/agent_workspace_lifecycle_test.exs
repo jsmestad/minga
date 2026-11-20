@@ -468,6 +468,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     old_ref = Process.monitor(old_session)
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(old_session)
 
+    state = %{
+      state
+      | agent_connection: MingaEditor.State.AgentConnection.new(Minga.Test.StubProvider)
+    }
+
     state = AgentSession.restart_session(state, "Restarting agent")
     new_session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     on_exit(fn -> stop_session(new_session) end)
@@ -492,6 +497,12 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     on_exit(fn -> stop_session(old_session) end)
     old_ref = Process.monitor(old_session)
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(old_session)
+
+    state = %{
+      state
+      | agent_connection: MingaEditor.State.AgentConnection.new(Minga.Test.StubProvider)
+    }
+
     agent_tab_id = TabBar.active(state.shell_runtime.state.tab_bar).id
 
     state = MingaEditor.TabWorkflow.switch(state, 1)
