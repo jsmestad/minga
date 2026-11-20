@@ -92,7 +92,7 @@ defmodule Minga.LoggerHandler do
   """
   @spec install() :: String.t()
   def install do
-    log_dir = Path.join(System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"), "minga")
+    log_dir = Minga.UserPaths.data_dir()
     log_path = Path.join(log_dir, @log_file)
     File.mkdir_p!(log_dir)
     ensure_buffer_table()

@@ -10,8 +10,6 @@ defmodule Minga.Extension.Storage do
   `~/.local/share/minga/extensions/<name>/`.
   """
 
-  @default_base Path.expand("~/.local/share/minga/extensions")
-
   @doc """
   Returns the extension's private data directory, creating it if needed.
   """
@@ -75,10 +73,16 @@ defmodule Minga.Extension.Storage do
     end
   end
 
-  # The data root is overridable via application env so tests don't touch
-  # the real home directory.
   @spec base() :: String.t()
-  defp base, do: Application.get_env(:minga, :extension_data_dir, @default_base)
+  defp base do
+    case Application.fetch_env(:minga, :extension_data_dir) do
+      {:ok, dir} ->
+        dir
+
+      :error ->
+        Path.join(Minga.UserPaths.data_dir(), "extensions")
+    end
+  end
 
   @spec safe_path(atom(), Path.t()) :: {:ok, String.t()} | {:error, File.posix() | :invalid_path}
   defp safe_path(name, rel) do

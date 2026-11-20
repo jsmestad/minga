@@ -371,21 +371,24 @@ defmodule Minga.MixProject do
 
   defp aliases do
     [
-      # NOTE: Prefer `bin/minga` which captures the tty device path for the
-      # Zig renderer.  `mix minga` works if MINGA_TTY is set manually.
+      # Source launchers establish the isolated runtime environment before starting Mix.
       minga: [
         "run --no-halt --no-start -e '
-          {gui, argv} = case System.argv() do
-            [\"+gui\" | rest] -> {true, rest}
-            other -> {false, other}
+          profile = System.get_env(\"MINGA_DEV_PROFILE\")
+          unless profile && System.get_env(\"XDG_CONFIG_HOME\") == Path.join(profile, \"config\") && System.get_env(\"HOME\") == Path.join(profile, \"home\"), do: Mix.raise(\"Launch the source editor with bin/minga\")
+          argv = System.argv()
+          case Minga.CLI.info_flag_output(argv) do
+            {:ok, output} ->
+              IO.puts(output)
+              System.halt(0)
+            :none ->
+              Minga.SafeMode.put(Minga.CLI.safe_args?(argv))
+              unless Minga.CLI.terminal_command_args?(argv), do: Application.put_env(:minga, :start_editor, true)
+              if System.get_env(\"MINGA_GUI_RENDERER\"), do: Application.put_env(:minga, :backend, :gui)
+              if System.get_env(\"MINGA_PORT_MODE\") == \"connected\", do: Minga.LoggerHandler.install()
+              Application.ensure_all_started(:minga)
+              Minga.CLI.main(argv)
           end
-          terminal_command = Minga.CLI.terminal_command_args?(argv)
-          if gui and not terminal_command, do: Application.put_env(:minga, :backend, :gui)
-          Minga.SafeMode.put(Minga.CLI.safe_args?(argv))
-          if not terminal_command, do: Application.put_env(:minga, :start_editor, true)
-          if System.get_env(\"MINGA_PORT_MODE\") == \"connected\", do: Minga.LoggerHandler.install()
-          Application.ensure_all_started(:minga)
-          Minga.CLI.main(argv)
         '"
       ],
       test: ["test --warnings-as-errors --exclude conformance"],

@@ -65,7 +65,7 @@ struct MingaApp: App {
                 // first responder from the EditorNSView.
                 .focusable(false)
                 .focusEffectDisabled()
-                .background(EditorWindowIdentifierSetter())
+                .background(EditorWindowIdentifierSetter(onAttach: appDelegate.configureEditorWindow))
                 .overlay {
                     if let startup = appDelegate.appState.startup {
                         StartupOverlay(
@@ -88,6 +88,7 @@ struct MingaApp: App {
                 )
         }
         .windowStyle(.hiddenTitleBar)
+        .restorationBehavior(appDelegate.appState.usesDevelopmentProfile ? .disabled : .automatic)
         .defaultSize(width: defaultWindowWidth, height: defaultWindowHeight)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
@@ -99,6 +100,7 @@ struct MingaApp: App {
                 sendAction: FrontendActionComposition.settingsHandler(encoder: appDelegate.appState.encoder)
             )
         }
+        .restorationBehavior(appDelegate.appState.usesDevelopmentProfile ? .disabled : .automatic)
     }
 }
 
@@ -184,6 +186,8 @@ private struct StartupOverlay: View {
 
 /// Identifies the editor window for lifecycle checks without changing its scene identity.
 private struct EditorWindowIdentifierSetter: NSViewRepresentable {
+    let onAttach: @MainActor (NSWindow) -> Void
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         identifyWindow(containing: view)
@@ -196,7 +200,9 @@ private struct EditorWindowIdentifierSetter: NSViewRepresentable {
 
     private func identifyWindow(containing view: NSView) {
         DispatchQueue.main.async {
-            view.window?.identifier = EditorScene.windowIdentifier
+            guard let window = view.window else { return }
+            window.identifier = EditorScene.windowIdentifier
+            onAttach(window)
         }
     }
 }
@@ -494,6 +500,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
+    // Retain the profiled singleton until app termination, including when its window closed first.
+    private var profileEditorWindow: NSWindow?
     private var outboundConnectionState = OutboundConnectionState()
     private var coreLifecycle: EditorCoreLifecycle?
     fileprivate private(set) var pendingFileURLs: [URL] = []
@@ -501,9 +509,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let frameResourcePolicy = FrameResourcePolicy.default
 
     override init() {
-        let appState = AppState()
+        let environment = ProcessInfo.processInfo.environment
+        let appState = AppState(applicationEnvironment: environment)
 #if DEBUG
-        if ProcessInfo.processInfo.environment[MenuSnapshotProbe.connectedEnvironmentKey] == "1" {
+        if environment[MenuSnapshotProbe.connectedEnvironmentKey] == "1" {
             appState.encoder = ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }
         }
 #endif
@@ -687,6 +696,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the editor view.
         let nsView = EditorNSView(encoder: ClosureOutboundActionEncoder { _ in .rejected(.disconnected) }, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
+        nsView.savesFrameInApplicationPreferences = !appState.usesDevelopmentProfile
         nsView.editorInput = appState.gui.editorInput
         ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
@@ -1021,7 +1031,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func configureEditorWindow(_ window: NSWindow) {
+        guard appState.usesDevelopmentProfile, profileEditorWindow !== window else { return }
+        profileEditorWindow = window
+        window.isRestorable = false
+        _ = window.setFrameAutosaveName("")
+        appState.editorWindowFrame?.restore(window)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        if let window = profileEditorWindow {
+            appState.editorWindowFrame?.save(window)
+        }
         cancelWorkspaceLifecycleNotifications()
         beamManager?.beginAppShutdown()
         coreLifecycle?.stop()
@@ -1431,6 +1452,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch failure {
         case .missingRelease:
             presentStartupFailure("The bundled editor core is missing. Reinstall Minga and launch it again.", canRetry: false)
+        case .missingDevelopmentProfile:
+            presentStartupFailure("A Debug app cannot start its bundled editor core without an isolated development profile. Quit and use bin/minga-mac from the source checkout.", canRetry: false)
         case .launch(let reason):
             presentStartupFailure("Minga could not launch the editor core. \(reason)", canRetry: true)
         case .previousCoreStopTimedOut:

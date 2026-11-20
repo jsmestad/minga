@@ -83,7 +83,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- Development builds keep a separate project switcher history. The history now respects `XDG_CONFIG_HOME`, so isolated test launches no longer write to the installed editor's list.
+- Source launchers keep Minga configuration and runtime data separate from the installed editor. Run `make clean` after quitting the source editor to reset the current worktree's profile without deleting build artifacts.
 
 - macOS TUI release builds pass the optimization flags required by Erlang/OTP. The macOS app preserves the bundled icon font directory, and macOS and Linux packages no longer ship the Windows-only file watcher.
 - macOS release signing uses the runner’s native keychain settings and explicitly selects the temporary Developer ID keychain. Builds and package smoke tests still use an isolated home directory.

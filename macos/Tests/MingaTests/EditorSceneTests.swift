@@ -19,9 +19,10 @@ struct EditorSceneTests {
     @MainActor func windowAndFileOpenRequestsReuseWindow() async throws {
         let applicationPath = try #require(ProcessInfo.processInfo.environment["MINGA_TEST_PRODUCTION_APP_PATH"])
         let applicationURL = URL(fileURLWithPath: applicationPath, isDirectory: true)
-        try #require(applicationURL.lastPathComponent == "Minga.app", "Probe requires the separately built production app")
+        try #require(applicationURL.lastPathComponent == "Minga.app", "Probe requires the separately built Minga app")
         let bundle = try #require(Bundle(url: applicationURL))
         let executable = try #require(bundle.executableURL)
+        try #require(bundle.bundleIdentifier == "com.minga.editor.dev", "Debug app must not use installed Minga preferences")
         try #require(executable.lastPathComponent == "Minga" && FileManager.default.isExecutableFile(atPath: executable.path))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("minga-editor-window-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

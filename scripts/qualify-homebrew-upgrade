@@ -36,7 +36,7 @@ fi
 archive=minga_macos_aarch64.tar.gz
 
 sandbox=$(mktemp -d)
-export HOMEBREW_CACHE="$sandbox/cache" XDG_CONFIG_HOME="$sandbox/config"
+export HOMEBREW_CACHE="$sandbox/cache"
 cleanup() {
   local result=$1 tidy=0 installed
   trap - EXIT
@@ -57,6 +57,12 @@ cleanup() {
   return "$result"
 }
 trap 'cleanup "$?"' EXIT
+
+mkdir "$sandbox"/{home,config,data,xdg-cache,state,tmp}
+smoke_env=(
+  "XDG_CONFIG_HOME=$sandbox/config" "XDG_DATA_HOME=$sandbox/data"
+  "XDG_CACHE_HOME=$sandbox/xdg-cache" "XDG_STATE_HOME=$sandbox/state" "TMPDIR=$sandbox/tmp"
+)
 
 stage_verified_inputs() {
   local source=$1 candidate=$2 receipt version name expected actual generated
@@ -117,13 +123,14 @@ stage() {
 check_installed() {
   local candidate=$1 version actual app
   version=$(jq -er .context.version "$candidate/verification-receipt.json")
-  actual=$("$(brew --prefix)/bin/minga" --version)
+  actual=$(env "${smoke_env[@]}" HOME="$sandbox/home" "$(brew --prefix)/bin/minga" --version)
   [[ $actual == "minga $version" ]]
-  brew test "$formula"
+  env "${smoke_env[@]}" brew test "$formula"
   app="$sandbox/apps/Minga.app"
   codesign --verify --deep --strict "$app"
   spctl --assess --type execute "$app"
-  actual=$(MINGA_APP_PATH="$app" "$app/Contents/Resources/bin/minga-tui" --version)
+  actual=$(env "${smoke_env[@]}" HOME="$sandbox/home" MINGA_APP_PATH="$app" \
+    "$app/Contents/Resources/bin/minga-tui" --version)
   [[ $actual == "minga $version" ]]
 }
 
