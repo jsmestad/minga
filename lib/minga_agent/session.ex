@@ -48,6 +48,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Policy.RequestCapacity
   alias MingaAgent.ModelSelection.Stored
   alias MingaAgent.ProviderRegistry
   alias MingaAgent.ProviderResolver
@@ -60,6 +61,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.Dispatch
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Prefix
   alias MingaAgent.Session.PrefixStore
@@ -69,6 +71,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.SubscriberAttachment
   alias MingaAgent.Session.SubscriberLifecycle
   alias MingaAgent.Session.Transcript
+  alias MingaAgent.Session.QueuedInputSummary
   alias MingaAgent.Session.TurnExecution
   require ProviderLifecycle
   alias MingaAgent.SessionManager
@@ -408,6 +411,10 @@ defmodule MingaAgent.Session do
              String.t() | [ReqLLM.Message.ContentPart.t()]}
           | {:reconcile_submission, SessionStore.draft_revision(), String.t()}
           | {:confirm_queue_receipt, TurnExecution.queue_receipt()}
+          | :read_queue
+          | {:withdraw_queued_input, QueuedInputSummary.identity()}
+          | {:read_queued_input_text, QueuedInputSummary.identity()}
+          | {:edit_queued_input, QueuedInputSummary.identity(), String.t()}
 
   @type composer_result ::
           {:ok, SessionStore.draft_revision(),
@@ -415,6 +422,8 @@ defmodule MingaAgent.Session do
           | {:ok, SessionStore.draft_revision()}
           | {:ok, DraftSnapshot.attachment(), String.t()}
           | {:ok, TurnExecution.queue_receipt()}
+          | {:ok, [QueuedInputSummary.t()]}
+          | {:ok, String.t()}
           | :ok
           | {:accepted, SessionStore.draft_revision(), term()}
           | {:admitted, SessionStore.draft_revision()}
@@ -1011,6 +1020,20 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:submit_queued_draft, target, kind, draft, content}, 30_000)
   end
 
+  @doc "Returns bounded previews of pending input for the original local saved conversation."
+  @spec queued_input_summaries(GenServer.server(), String.t()) ::
+          {:ok, [QueuedInputSummary.t()]} | {:error, term()}
+  def queued_input_summaries(session, record_id) do
+    GenServer.call(session, {:queued_input_summaries, record_id})
+  end
+
+  @doc "Reads the editable text of one exact pending revision in the local saved Session."
+  @spec queued_input_text(GenServer.server(), String.t(), QueuedInputSummary.identity()) ::
+          {:ok, String.t()} | {:error, term()}
+  def queued_input_text(session, record_id, identity) do
+    GenServer.call(session, {:queued_input_text, record_id, identity})
+  end
+
   @doc "Edits or removes only the displayed pending entry in the original saved Session."
   @spec change_queued_input(
           GenServer.server(),
@@ -1020,13 +1043,6 @@ defmodule MingaAgent.Session do
         ) :: :ok | {:error, term()}
   def change_queued_input(session, record_id, identity, operation) do
     GenServer.call(session, {:change_queued_input, record_id, identity, operation}, 30_000)
-  end
-
-  @doc "Commits steering to the original request's completed tool checkpoint before dispatch."
-  @spec steering_dispatch_source(GenServer.server(), String.t(), String.t()) ::
-          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
-  def steering_dispatch_source(session, request_id, checkpoint_id) do
-    GenServer.call(session, {:steering_dispatch_source, request_id, checkpoint_id}, 30_000)
   end
 
   @doc """
@@ -1348,15 +1364,17 @@ defmodule MingaAgent.Session do
     handle_prompt(content, :steering, state)
   end
 
-  def handle_call({:send_idle_composer, record_id, content}, {caller, _tag}, state)
+  def handle_call(
+        {:send_idle_composer, record_id, content},
+        {caller, _tag},
+        %{session_id: record_id} = state
+      )
       when node(caller) == node() and is_binary(record_id) and
              (is_binary(content) or is_list(content)) do
-    with :ok <- validate_composer_record(state, record_id),
-         false <- TurnExecution.active?(state.turn_execution) do
-      handle_prompt(content, :steering, state)
+    if TurnExecution.active?(state.turn_execution) do
+      {:reply, {:error, :queue_target_unavailable}, state}
     else
-      true -> {:reply, {:error, :queue_target_unavailable}, state}
-      {:error, _reason} = error -> {:reply, error, state}
+      handle_prompt(content, :steering, state)
     end
   end
 
@@ -1400,6 +1418,25 @@ defmodule MingaAgent.Session do
     do: {:reply, queue_target_for_record(state, record_id), state}
 
   def handle_call({:queue_target, _record_id}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call({:queued_input_summaries, record_id}, {caller, _tag}, state)
+      when node(caller) == node() and is_binary(record_id) do
+    case validate_composer_record(state, record_id) do
+      :ok -> {:reply, {:ok, pending_input_summaries(state.turn_execution)}, state}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:queued_input_summaries, _record_id}, _from, state),
+    do: {:reply, {:error, :stale_target}, state}
+
+  def handle_call({:queued_input_text, record_id, identity}, {caller, _tag}, state)
+      when node(caller) == node() and is_binary(record_id) do
+    {:reply, queued_input_text_result(state, record_id, identity), state}
+  end
+
+  def handle_call({:queued_input_text, _record_id, _identity}, _from, state),
     do: {:reply, {:error, :stale_target}, state}
 
   def handle_call(
@@ -1479,13 +1516,6 @@ defmodule MingaAgent.Session do
 
   def handle_call({:send_follow_up, content}, _from, state) do
     handle_prompt(content, :follow_up, state)
-  end
-
-  def handle_call({:steering_dispatch_source, request_id, checkpoint_id}, {worker, _tag}, state)
-      when node(worker) == node() and is_binary(request_id) and is_binary(checkpoint_id) do
-    if Continuation.accepts?(state.continuation, request_id),
-      do: admit_steering_dispatch_source(state, checkpoint_id),
-      else: {:reply, {:error, :stale_request}, state}
   end
 
   def handle_call(:recall_queues, _from, state) do
@@ -2264,6 +2294,18 @@ defmodule MingaAgent.Session do
       {_branch, {:error, reason}} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call({:begin_native_dispatch, request_id, source}, {worker, _}, state) do
+    begin_native_dispatch(state, worker, request_id, source)
+  end
+
+  def handle_call(
+        {:assess_native_dispatch, %Dispatch{} = attempt, digest, %RequestCapacity{} = assessment},
+        _from,
+        state
+      ) do
+    assess_native_dispatch(state, attempt, digest, assessment)
   end
 
   def handle_call({:checkpoint_tool_group, request_id, messages, calls}, _from, state)
@@ -4565,37 +4607,6 @@ defmodule MingaAgent.Session do
   defp encode_output(nil), do: nil
   defp encode_output(%Output{} = output), do: OutputCodec.encode(output)
 
-  @spec admit_steering_dispatch_source(state(), String.t()) ::
-          {:reply, {:ok, [ReqLLM.Message.t()]} | {:error, term()}, state()}
-  defp admit_steering_dispatch_source(
-         %{continuation: %{tool_checkpoint: %{checkpoint_id: checkpoint_id, version: 2}}} = state,
-         checkpoint_id
-       ) do
-    case Continuation.freeze_dispatch_source(state.continuation, checkpoint_id, []) do
-      {:ok, messages, _frozen} -> {:reply, {:ok, messages}, state}
-      {:error, _reason} = error -> {:reply, error, state}
-    end
-  end
-
-  defp admit_steering_dispatch_source(state, checkpoint_id) do
-    {inputs, execution} = TurnExecution.dequeue_steering(state.turn_execution)
-    {provider_input, display_input} = steering_inputs(inputs)
-
-    with {:ok, messages, continuation} <-
-           Continuation.freeze_dispatch_source(state.continuation, checkpoint_id, provider_input),
-         candidate =
-           append_msgs(
-             %{state | continuation: continuation, turn_execution: execution},
-             display_input
-           ),
-         {:ok, committed} <- commit_effect_snapshot(state, candidate) do
-      Enum.each(display_input, &record_user_message_event(committed, &1))
-      {:reply, {:ok, messages}, notify_messages_changed(committed)}
-    else
-      {:error, _reason} = error -> {:reply, error, state}
-    end
-  end
-
   @spec steering_inputs([TurnExecution.content()]) :: {[ReqLLM.Message.t()], [Message.t()]}
   defp steering_inputs([]), do: {[], []}
 
@@ -5000,12 +5011,33 @@ defmodule MingaAgent.Session do
   defp queued_draft_content(content, retained, selection),
     do: DraftAttachment.append_to_prompt(content, retained, selection)
 
+  @spec pending_input_summaries(TurnExecution.t()) :: [QueuedInputSummary.t()]
+  defp pending_input_summaries(execution) do
+    {_next, steering, follow_up, _receipts} = TurnExecution.pending_inputs(execution)
+
+    Enum.map(steering, &QueuedInputSummary.new(&1, :steering)) ++
+      Enum.map(follow_up, &QueuedInputSummary.new(&1, :follow_up))
+  end
+
+  @spec queued_input_text_result(state(), String.t(), term()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp queued_input_text_result(state, record, {id, revision})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0 do
+    with :ok <- validate_composer_record(state, record),
+         do: TurnExecution.queued_editable_text(state.turn_execution, id, revision)
+  end
+
+  defp queued_input_text_result(_state, _record, _identity), do: {:error, :invalid_queue_edit}
+
   @spec change_queued_input_reply(state(), String.t(), pos_integer(), pos_integer(), term()) ::
           {:reply, :ok | {:error, term()}, state()}
   defp change_queued_input_reply(state, record_id, id, revision, operation)
        when operation == :remove or
               (is_tuple(operation) and tuple_size(operation) == 2 and
-                 elem(operation, 0) == :replace_text and is_binary(elem(operation, 1))) do
+                 elem(operation, 0) == :replace_text and is_binary(elem(operation, 1))) or
+              (is_tuple(operation) and tuple_size(operation) == 3 and
+                 elem(operation, 0) == :replace_prompt and is_binary(elem(operation, 1)) and
+                 (is_binary(elem(operation, 2)) or is_list(elem(operation, 2)))) do
     with :ok <- validate_composer_record(state, record_id),
          {:ok, execution} <-
            TurnExecution.change_queued_input(state.turn_execution, id, revision, operation),
@@ -7980,6 +8012,7 @@ defmodule MingaAgent.Session do
     do: Event.Error.context_transition_message()
 
   defp humanize_error_kind(:provider_error, message, "apple"), do: message
+  defp humanize_error_kind(:request_admission_refused, message, _provider), do: message
 
   defp humanize_error_kind(:provider_error, _message, _provider) do
     "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."
@@ -8529,7 +8562,82 @@ defmodule MingaAgent.Session do
 
   defp snapshot_write_mode(_previous, _candidate, mode), do: mode
 
+  @spec begin_native_dispatch(state(), pid(), String.t(), Dispatch.source()) ::
+          {:reply, {:ok, Dispatch.t(), [ReqLLM.Message.t()]} | {:error, term()}, state()}
+  defp begin_native_dispatch(state, worker, request_id, source) do
+    {steering, execution} = dispatch_steering(state, source)
+
+    {canonical, display} = steering_inputs(steering)
+
+    with {:ok, dispatch, messages, continuation} <-
+           Continuation.begin_dispatch(state.continuation, request_id, source, canonical, worker),
+         candidate =
+           install_dispatch_source(state, continuation, execution, display),
+         {:ok, committed} <- persist_dispatch_source(state, candidate) do
+      {:reply, {:ok, dispatch, messages}, publish_dispatched_steering(committed, display)}
+    else
+      {:error, reason} -> {:reply, {:error, {:request_admission_failed, reason}}, state}
+    end
+  end
+
+  @spec install_dispatch_source(state(), Continuation.t(), TurnExecution.t(), [Message.t()]) ::
+          state()
+  defp install_dispatch_source(state, continuation, execution, []),
+    do: %{state | continuation: continuation, turn_execution: execution}
+
+  defp install_dispatch_source(state, continuation, execution, display) do
+    %{state | continuation: continuation, turn_execution: execution}
+    |> append_msgs(display)
+    |> Map.update!(:transcript, &Transcript.touch(&1, DateTime.utc_now()))
+  end
+
+  # The initial request and a retry's frozen source are already committed. Only new steering alters storage.
+  @spec persist_dispatch_source(state(), state()) :: {:ok, state()} | {:error, term()}
+  defp persist_dispatch_source(
+         %{continuation: %Continuation{tool_checkpoint: %{version: 1}}} = state,
+         %{continuation: %Continuation{tool_checkpoint: %{version: 2}}} = candidate
+       ),
+       do: commit_effect_snapshot(state, candidate)
+
+  defp persist_dispatch_source(_state, candidate), do: {:ok, candidate}
+
+  @spec dispatch_steering(state(), Dispatch.source()) ::
+          {[TurnExecution.content()], TurnExecution.t()}
+  defp dispatch_steering(
+         %{continuation: %Continuation{tool_checkpoint: %{checkpoint_id: id, version: 1}}} = state,
+         {:checkpoint, id}
+       ),
+       do: TurnExecution.dequeue_steering(state.turn_execution)
+
+  defp dispatch_steering(state, _source), do: {[], state.turn_execution}
+
+  @spec publish_dispatched_steering(state(), [Message.t()]) :: state()
+  defp publish_dispatched_steering(state, []), do: state
+
+  defp publish_dispatched_steering(state, messages) do
+    Enum.each(messages, &record_user_message_event(state, &1))
+    notify_messages_changed(state)
+  end
+
+  @spec assess_native_dispatch(
+          state(),
+          Dispatch.t(),
+          binary(),
+          RequestCapacity.t()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp assess_native_dispatch(state, attempt, digest, %RequestCapacity{limits: limits} = evidence) do
+    with %ModelSelection{policy: %{limits: ^limits}} = selection <- state.model_selection,
+         true <- ModelSelection.id(selection) == attempt.selection_id,
+         {:ok, continuation} <-
+           Continuation.assess_dispatch(state.continuation, attempt, digest, evidence) do
+      {:reply, evidence.decision, %{state | continuation: continuation}}
+    else
+      _stale -> {:reply, {:error, :stale_dispatch}, state}
+    end
+  end
+
   @spec save_to_disk(state(), snapshot_write_mode()) :: :ok | {:error, term()}
+
   defp save_to_disk(state, draft_revision \\ :preserve) do
     if Persistence.enabled?(state.persistence) do
       now = DateTime.to_iso8601(DateTime.utc_now())
@@ -8716,6 +8824,22 @@ defmodule MingaAgent.Session do
        )
        when is_binary(token) and is_binary(revision),
        do: {:reply, inspect_composer_attachment(state, record_id, identity), state}
+
+  defp handle_remote_composer(state, _record_id, :read_queue),
+    do: {:reply, {:ok, pending_input_summaries(state.turn_execution)}, state}
+
+  defp handle_remote_composer(state, record_id, {:withdraw_queued_input, {id, revision}})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0,
+       do: change_queued_input_reply(state, record_id, id, revision, :remove)
+
+  defp handle_remote_composer(state, record_id, {:read_queued_input_text, identity}),
+    do: {:reply, queued_input_text_result(state, record_id, identity), state}
+
+  defp handle_remote_composer(state, record_id, {:edit_queued_input, {id, revision}, text})
+       when is_integer(id) and id > 0 and is_integer(revision) and revision > 0 and
+              is_binary(text),
+       do:
+         change_queued_input_reply(state, record_id, id, revision, {:replace_prompt, text, text})
 
   defp handle_remote_composer(state, record_id, operation),
     do: {:reply, composer_draft(state, record_id, operation), state}

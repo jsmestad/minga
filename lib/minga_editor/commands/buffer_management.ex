@@ -225,9 +225,15 @@ defmodule MingaEditor.Commands.BufferManagement do
       do: state
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save) do
-    case Buffer.file_path(buf) do
-      nil -> save_unnamed_buffer(state, buf)
-      _path -> save_named_buffer(state)
+    case MingaEditor.Agent.QueuedInputEdit.save_if_active(state) do
+      {:handled, state} ->
+        state
+
+      :not_editing_queued_input ->
+        case Buffer.file_path(buf) do
+          nil -> save_unnamed_buffer(state, buf)
+          _path -> save_named_buffer(state)
+        end
     end
   end
 
@@ -1353,6 +1359,17 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec close_targeted_file_tab(state(), TabBar.t(), Tab.file()) :: state()
   defp close_targeted_file_tab(state, tab_bar, %Tab{id: id, group_id: workspace_id} = tab) do
+    buffer = TabContext.active_buffer_pid(tab.context)
+
+    case MingaEditor.Agent.QueuedInputEdit.close_refusal(state, buffer) do
+      nil -> close_allowed_file_tab(state, tab_bar, tab, id, workspace_id)
+      message -> NoticeWorkflow.publish(state, message)
+    end
+  end
+
+  @spec close_allowed_file_tab(state(), TabBar.t(), Tab.file(), Tab.id(), non_neg_integer()) ::
+          state()
+  defp close_allowed_file_tab(state, tab_bar, tab, id, workspace_id) do
     replacement_id = inactive_replacement_id(tab_bar, id)
 
     if last_visible_file_tab?(tab_bar, workspace_id) do
@@ -2922,6 +2939,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp close_file_tab(state, preferred_replacement_id) do
     tb = state.shell_runtime.state.tab_bar
+    closed_buffer = state.workspace.buffers.active
     active_tab = MingaEditor.Shell.Runtime.active_tab(state.shell_runtime)
     label = if active_tab, do: active_tab.label, else: "tab"
 
@@ -2935,6 +2953,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
     |> remove_current_tab(replacement_id)
     |> restore_after_tab_close(preferred_replacement_id)
+    |> MingaEditor.Agent.QueuedInputEdit.retire_closed_buffer(closed_buffer)
   end
 
   @spec has_neighbor_tab?(state()) :: boolean()

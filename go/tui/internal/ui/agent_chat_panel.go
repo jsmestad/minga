@@ -340,6 +340,11 @@ func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 		tasks := m.zones.Mark(zoneIDAgentChecklist, muted.Render(tasksLabel))
 		help = tasks + " " + help
 	}
+	const queueLabel = "[Queue]"
+	if width >= 44 && lipgloss.Width(prefix+identity+right+help)+len(queueLabel)+3 <= width {
+		queue := m.zones.Mark(zoneIDAgentQueue, muted.Render(queueLabel))
+		help += " " + queue
+	}
 	helpWidth := lipgloss.Width(help)
 	if width <= helpWidth {
 		return base.Render(help)

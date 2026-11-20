@@ -113,11 +113,16 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		}
 		lines = append(lines, base.Render(fitStyled(inner, width)))
 	}
-	control, question, attachments := agentComposerControls(chat, placement.innerWidth)
-	label := control
-	if agentHasActiveTurn(chat.Status) && chat.StopTarget.SessionID == "" {
-		label = lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(control)
+	_, question, attachments := agentComposerControls(chat, placement.innerWidth)
+	controls := agentTurnControls(chat, placement.innerWidth)
+	var labels [4]string
+	for i, control := range controls {
+		labels[i] = control.label
+		if !control.enabled {
+			labels[i] = lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(control.label)
+		}
 	}
+	label := strings.Join(labels[:], agentTurnControlSeparator(placement.innerWidth))
 	for _, part := range []string{question, attachments} {
 		if part != "" {
 			label += " · " + part
@@ -127,7 +132,7 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		const fullHint = " · Enter send · Shift+Enter newline"
 		if lipgloss.Width(label)+len(fullHint) <= placement.innerWidth {
 			label += fullHint
-		} else {
+		} else if lipgloss.Width(label)+len(" · Shift+Enter newline") <= placement.innerWidth {
 			label += " · Shift+Enter newline"
 		}
 		if lipgloss.Width(label)+len(" · Esc normal") <= placement.innerWidth {
@@ -146,15 +151,22 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 }
 
 func agentComposerControls(chat protocol.AgentChat, width int) (control, question, attachments string) {
-	control = agentComposerControlLabel(chat, width)
+	controls := agentTurnControls(chat, width)
+	control = strings.Join([]string{controls[0].label, controls[1].label, controls[2].label, controls[3].label}, agentTurnControlSeparator(width))
 	used := lipgloss.Width(control)
 	if chat.QuestionOffer != 0 {
+		remaining := width - used
+		// Reserve the smallest visible attachment action whenever both can fit.
+		attachmentWidth := 3 + len(shortAgentAttachmentLabel(chat.DraftAttachmentCount))
+		if remaining >= attachmentWidth+4 {
+			remaining -= attachmentWidth
+		}
 		switch {
-		case width-used >= len(" · Answer question"):
+		case remaining >= 3+len("Answer question"):
 			question = "Answer question"
-		case width-used >= len(" · Question"):
+		case remaining >= 3+len("Question"):
 			question = "Question"
-		case width-used >= len(" · ?"):
+		case remaining >= 4:
 			question = "?"
 		}
 		if question != "" {
@@ -174,26 +186,58 @@ func agentComposerAttachmentLabel(width, actionWidth int, count byte) string {
 	if available >= len(full) {
 		return full
 	}
-	if count > 0 {
-		short := "+" + strconv.Itoa(int(count))
-		if available >= len(short) {
-			return short
-		}
+	short := shortAgentAttachmentLabel(count)
+	if available >= len(short) {
+		return short
 	}
 	return ""
 }
 
-func agentComposerControlLabel(chat protocol.AgentChat, width int) string {
-	if agentHasActiveTurn(chat.Status) {
-		if width < 4 {
-			return "■"
-		}
-		return "Stop"
+func shortAgentAttachmentLabel(count byte) string {
+	if count == 0 {
+		return "A"
 	}
-	if width < 4 {
-		return "↑"
+	return "+" + strconv.Itoa(int(count))
+}
+
+const agentFullTurnLabelsWidth = 48
+
+type agentTurnControl struct {
+	label   string
+	enabled bool
+}
+
+func agentTurnControlSeparator(width int) string {
+	if width >= agentFullTurnLabelsWidth {
+		return " · "
 	}
-	return "Send"
+	if width >= 7 {
+		return " "
+	}
+	return ""
+}
+
+func agentTurnControls(chat protocol.AgentChat, width int) [4]agentTurnControl {
+	active := agentHasActiveTurn(chat.Status)
+	labels := [4]string{"Send", "Steer", "Queue Next", "Stop"}
+	switch {
+	case width == 1 && active:
+		labels = [4]string{"", "", "", "■"}
+	case width == 1:
+		labels = [4]string{"↑", "", "", ""}
+	case width < 4:
+		labels = [4]string{"↑", "", "", "■"}
+	case width < agentFullTurnLabelsWidth:
+		labels = [4]string{"↑", "↪", "+", "■"}
+	}
+	draft := chat.PromptPresentation != 0 && chat.Prompt != ""
+	queue := active && draft && chat.QueueTarget.Sequence != 0
+	return [4]agentTurnControl{
+		{labels[0], draft && !active},
+		{labels[1], queue},
+		{labels[2], queue},
+		{labels[3], active && chat.StopTarget.SessionID != ""},
+	}
 }
 
 func (m *Model) reportAgentPromptFit() {
@@ -250,34 +294,43 @@ func (m *Model) sendAgentPromptScroll(msg tea.MouseMsg, delta int) bool {
 	return true
 }
 
-type presentedStopClick struct {
-	target        protocol.AgentStopTarget
+type presentedComposerClick struct {
+	packet        []byte
 	claimed       bool
 	epoch         *atomic.Uint64
 	observedEpoch uint64
 }
 
-func (c *presentedStopClick) take() (protocol.AgentStopTarget, bool, bool) {
+func (c *presentedComposerClick) take() ([]byte, bool, bool) {
 	if c == nil {
-		return protocol.AgentStopTarget{}, false, false
+		return nil, false, false
 	}
 	hit := *c
-	*c = presentedStopClick{}
+	*c = presentedComposerClick{}
 	changed := hit.epoch != nil && hit.epoch.Load() != hit.observedEpoch
-	return hit.target, hit.claimed, changed
+	return hit.packet, hit.claimed, changed
 }
 
 // Bubble Tea invokes OnMouse from the last flushed View, synchronously before
 // Update receives that input. Capture only the displayed hit cells and target.
-func (m Model) presentedStopHandler() func(tea.MouseMsg) tea.Cmd {
+func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
 	chat, _ := m.agentChat()
 	p, ok := m.agentPromptPlacement()
-	if !ok || m.stopClick == nil || !agentHasActiveTurn(chat.Status) {
+	if !ok || m.composerClick == nil {
 		return nil
 	}
 	start, y := m.layout.body.X+p.col-p.prefix, m.layout.body.Y+p.controlsRow
-	width := lipgloss.Width(agentComposerControlLabel(chat, p.innerWidth))
-	var cells uint8
+	controls := agentTurnControls(chat, p.innerWidth)
+	var startCells, endCells [4]int
+	separator := lipgloss.Width(agentTurnControlSeparator(p.innerWidth))
+	width := 0
+	for i, control := range controls {
+		startCells[i] = width
+		endCells[i] = width + lipgloss.Width(control.label)
+		width = endCells[i] + separator
+	}
+	width = min(endCells[3], p.innerWidth)
+	var cells uint32
 	for cell := range width {
 		x := start + cell
 		if m.layout.body.Contains(x, y) && !m.editorTextOccluded(x, y) {
@@ -287,15 +340,29 @@ func (m Model) presentedStopHandler() func(tea.MouseMsg) tea.Cmd {
 	if cells == 0 {
 		return nil
 	}
-	target := chat.StopTarget
-	claim := m.stopClick
+	generation, offer := chat.PromptPresentation, chat.DraftAttachmentOffer
+	stopTarget, queueTarget := chat.StopTarget, chat.QueueTarget
+	claim := m.composerClick
 	return func(msg tea.MouseMsg) tea.Cmd {
 		click, ok := msg.(tea.MouseClickMsg)
 		if ok && click.Button == tea.MouseLeft && click.Y == y {
 			cell := click.X - start
 			if cell >= 0 && cell < width && cells&(1<<cell) != 0 {
-				claim.target = target
 				claim.claimed = true
+				for i, control := range controls {
+					if !control.enabled || cell < startCells[i] || cell >= endCells[i] {
+						continue
+					}
+					switch i {
+					case 0:
+						claim.packet = protocol.EncodeGUIAgentComposerSubmit(generation, offer)
+					case 1, 2:
+						claim.packet = protocol.EncodeGUIAgentComposerQueue(generation, offer, i == 2, queueTarget)
+					case 3:
+						claim.packet = protocol.EncodeGUIAgentStopTurn(stopTarget)
+					}
+					break
+				}
 			}
 		}
 		return nil
@@ -329,13 +396,7 @@ func (m Model) agentComposerControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 	if x >= start+controlWidth {
 		return nil, false
 	}
-	if agentHasActiveTurn(chat.Status) {
-		return nil, true // Stop uses the last flushed View, never this model's newer target.
-	}
-	if chat.DraftAttachmentOffer != 0 {
-		return protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer), true
-	}
-	return protocol.EncodeGUIExecuteCommand("agent_submit_or_newline"), true
+	return nil, true // Turn controls use the last flushed View, never the newer model.
 }
 
 func (m Model) agentPromptTextTargetAt(screenX, screenY int, captured bool) (editorTextTarget, bool) {

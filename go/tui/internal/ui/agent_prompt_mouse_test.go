@@ -69,13 +69,13 @@ func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
 				updated, _ = model.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
 				model = updated.(Model)
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 7, 5, 0, 0, protocol.Selection{}), 822)
-				label, want := "Send", protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
+				label, want := "Send", protocol.EncodeGUIAgentComposerSubmit(822, 0)
 				if status == 2 || status == 5 {
 					label, want = "Stop", protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 				}
 				x, y := renderedComposerControl(t, model, label)
-				if x != 2 || y != 21 {
-					t.Fatalf("rendered control at %d,%d, want live capture position 2,21", x, y)
+				if y != 21 {
+					t.Fatalf("rendered control at %d,%d, want live capture row 21", x, y)
 				}
 				drainOutboundPackets(out)
 				for _, fragmented := range []bool{false, true} {

@@ -91,14 +91,15 @@ defmodule MingaAgent.Hooks.CommandRunnerTest do
   end
 
   @tag timeout: 2_000
-  test "timeout kills the hook shell and its child process group" do
+  test "timeout kills the hook group even when a grandchild ignores TERM" do
     shell_pid_path = temp_path("shell-pid")
     child_pid_path = temp_path("child-pid")
     grandchild_pid_path = temp_path("grandchild-pid")
 
     command =
-      "echo $$ > #{shell_quote(shell_pid_path)}; " <>
-        "((while :; do :; done) & echo $! > #{shell_quote(grandchild_pid_path)}; wait) & " <>
+      "trap 'exit 0' TERM; echo $$ > #{shell_quote(shell_pid_path)}; " <>
+        "((trap '' TERM HUP; sleep 1) 2>/dev/null & echo $! > #{shell_quote(grandchild_pid_path)}; " <>
+        "i=0; while [ \"$i\" -lt 80 ]; do printf x >&2; sleep 0.01; i=$((i + 1)); done) & " <>
         "echo $! > #{shell_quote(child_pid_path)}; " <>
         "while [ ! -s #{shell_quote(grandchild_pid_path)} ]; do :; done; wait"
 

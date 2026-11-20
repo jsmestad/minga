@@ -43,6 +43,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_draft_attachment_count 0x0A
   @section_chat_question 0x0B
   @section_chat_stop_target 0x0C
+  @section_chat_queue_target 0x0E
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
@@ -118,12 +119,42 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       sections
       |> add_question_section(model.pending_question)
       |> add_stop_target_section(model.stop_target)
+      |> add_queue_target_section(model.queue_target)
+
+    sections =
+      case model.prompt_presentation do
+        nil ->
+          sections
+
+        generation ->
+          payload =
+            Writer.new(@command)
+            |> Writer.uint64(:prompt_presentation, generation)
+            |> Writer.finish()
+
+          [encode_section(0x0D, payload) | sections]
+      end
 
     Writer.new(@command)
     |> Writer.uint8(:opcode, @op_gui_agent_chat)
     |> Writer.uint8(:section_count, Enum.count(sections))
     |> Writer.append(sections)
     |> Writer.finish()
+  end
+
+  @spec add_queue_target_section([binary()], {String.t(), String.t(), pos_integer()} | nil) ::
+          [binary()]
+  defp add_queue_target_section(sections, nil), do: sections
+
+  defp add_queue_target_section(sections, {record, request, sequence}) do
+    payload =
+      Writer.new(@command)
+      |> Writer.string16(:queue_record, record)
+      |> Writer.string16(:queue_request, request)
+      |> Writer.uint64(:queue_sequence, sequence)
+      |> Writer.finish()
+
+    [encode_section(@section_chat_queue_target, payload) | sections]
   end
 
   @spec add_question_section([binary()], {pos_integer(), String.t()} | nil) :: [binary()]

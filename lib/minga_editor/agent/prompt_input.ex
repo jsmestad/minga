@@ -1,6 +1,8 @@
 defmodule MingaEditor.Agent.PromptInput do
   @moduledoc "Admits prompt geometry and pointer input against the exact retained prompt source."
 
+  alias Minga.Buffer
+  alias MingaEditor.Agent.DraftSave
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.PromptProjection
@@ -8,19 +10,88 @@ defmodule MingaEditor.Agent.PromptInput do
   alias MingaEditor.Mouse.Target.Text
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Frontend
+  alias MingaEditor.State.Windows
   alias MingaEditor.WindowFocus
 
   @type state :: State.t()
+  @type submission_owner :: {non_neg_integer(), pid(), String.t()}
 
-  @doc "Supplies one input's displayed composer offer to the existing command path."
-  @spec with_offer(state(), pos_integer(), (state() -> state())) :: state()
+  @doc "Names the workspace and conversation that own a displayed or live composer."
+  @spec submission_owner({non_neg_integer(), pid()} | nil, UIState.t()) ::
+          submission_owner() | nil
+  def submission_owner({workspace, session}, %UIState{
+        connection: %{target: %{session: session, session_id: record}}
+      })
+      when is_pid(session) and is_binary(record),
+      do: {workspace, session, record}
+
+  def submission_owner(_scope, _ui), do: nil
+
+  @doc "Supplies one input's displayed attachment offer to the existing command path."
+  @spec with_offer(state(), pos_integer() | nil, (state() -> state())) :: state()
   def with_offer(state, offer, dispatch) do
     next = dispatch.(%{state | frontend: Frontend.composer_input(state.frontend, offer)})
     %{next | frontend: Frontend.composer_input(next.frontend, nil)}
   end
+
+  @doc "Admits pointer Send only against the active composer's displayed content and attachment offer."
+  @spec submit_displayed(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
+          state()
+  def submit_displayed(state, generation, offer, dispatch) do
+    if AgentState.busy?(TraditionalState.agent(state.shell_runtime.state)) do
+      stale_submission(state)
+    else
+      with_displayed_draft(state, generation, offer, fn state ->
+        next =
+          dispatch.(%{state | frontend: Frontend.composer_input(state.frontend, offer, true)})
+
+        %{next | frontend: Frontend.composer_input(next.frontend, nil)}
+      end)
+    end
+  end
+
+  @doc "Admits a queue control only with the prompt and attachment offer rendered with it."
+  @spec queue_displayed(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
+          state()
+  def queue_displayed(state, generation, offer, dispatch) do
+    with_displayed_draft(state, generation, offer, &with_offer(&1, offer, dispatch))
+  end
+
+  @spec with_displayed_draft(state(), pos_integer(), pos_integer() | nil, (state() -> state())) ::
+          state()
+  defp with_displayed_draft(state, generation, offer, dispatch) do
+    with reader when reader != nil <- state.render.text_interaction_reader,
+         {:ok, {buffer, version, owner}} <-
+           Reader.prompt_source(reader, 65_534, generation),
+         ^buffer <- state.workspace.agent_ui.panel.prompt_buffer,
+         ^owner <-
+           submission_owner(Runtime.review_scope(state.shell_runtime), state.workspace.agent_ui),
+         %{content: {:agent_chat, :semantic}} <- Windows.active_struct(state.workspace.windows),
+         ^offer <- DraftSave.attachment_offer(state.workspace.agent_ui.draft_save),
+         {:ok, ^version} <- prompt_version(buffer) do
+      dispatch.(state)
+    else
+      _stale -> stale_submission(state)
+    end
+  end
+
+  @spec prompt_version(pid()) :: {:ok, non_neg_integer()} | :unavailable
+  defp prompt_version(buffer) do
+    {:ok, Buffer.version(buffer)}
+  catch
+    :exit, _reason -> :unavailable
+  end
+
+  @spec stale_submission(state()) :: state()
+  defp stale_submission(state),
+    do: NoticeWorkflow.publish(state, "The draft changed. Review it and send again.")
 
   @spec fit(state(), pos_integer(), pos_integer(), pos_integer(), pos_integer()) :: state()
   def fit(state, window_id, generation, columns, rows)

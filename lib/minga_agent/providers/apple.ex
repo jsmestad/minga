@@ -5,6 +5,7 @@ defmodule MingaAgent.Providers.Apple do
 
   alias ReqLLM.{Context, StreamChunk, StreamResponse, Tool, ToolCall}
   alias ReqLLM.Provider.InProcessStream
+  alias MingaAgent.Providers.Apple.Admission
 
   @helper "minga-apple-inference"
   @probe_timeout 2_000
@@ -26,6 +27,9 @@ defmodule MingaAgent.Providers.Apple do
           | :unsupported_locale
           | :probe_failed
   @type stream_state :: reference() | :done
+  @type admission :: (binary(), pos_integer(), pos_integer(), pos_integer() ->
+                        :ok | {:error, term()})
+  @typep port_admission :: (pos_integer(), pos_integer(), pos_integer() -> :ok | {:error, term()})
 
   @doc "Probes the bundled helper without generating text or reading any credentials."
   @spec availability() :: {:ok, pos_integer()} | {:error, unavailable()}
@@ -64,9 +68,16 @@ defmodule MingaAgent.Providers.Apple do
     with {:ok, path} <- helper_path(),
          {:ok, messages} <- project_messages(messages, []),
          {:ok, tools} <- project_tools(Keyword.get(opts, :tools, []), []),
-         {:ok, payload} <- encode_request(messages, tools, Keyword.get(opts, :max_tokens, 512)) do
+         {:ok, payload} <- encode_request(messages, tools, Keyword.get(opts, :max_tokens, 512)),
+         authorize when is_function(authorize, 4) <- Keyword.get(opts, :apple_admission) do
       owner = self()
-      worker = spawn(fn -> await_consumer(owner, path, payload) end)
+      digest = :crypto.hash(:sha256, payload)
+
+      admission = fn tokens, output_cap, context ->
+        authorize.(digest, tokens, output_cap, context)
+      end
+
+      worker = spawn(fn -> await_consumer(owner, path, payload, admission) end)
 
       stream =
         Stream.resource(
@@ -80,6 +91,9 @@ defmodule MingaAgent.Providers.Apple do
         )
 
       {:ok, InProcessStream.new(stream, cancel: fn -> send(worker, :cancel) end)}
+    else
+      nil -> {:error, {:request_admission_refused, :missing_apple_admission}}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -213,14 +227,14 @@ defmodule MingaAgent.Providers.Apple do
     ArgumentError -> :ok
   end
 
-  @spec await_consumer(pid(), String.t(), iodata()) :: :ok
-  defp await_consumer(owner, path, payload) do
+  @spec await_consumer(pid(), String.t(), iodata(), port_admission()) :: :ok
+  defp await_consumer(owner, path, payload, admission) do
     owner_ref = Process.monitor(owner)
 
     receive do
       {:consume, consumer} ->
         consumer_ref = Process.monitor(consumer)
-        run_helper(path, payload, consumer, owner_ref, consumer_ref)
+        run_helper(path, payload, consumer, owner_ref, consumer_ref, admission)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
         :ok
@@ -232,14 +246,14 @@ defmodule MingaAgent.Providers.Apple do
     end
   end
 
-  @spec run_helper(String.t(), iodata(), pid(), reference(), reference()) :: :ok
-  defp run_helper(path, payload, consumer, owner_ref, consumer_ref) do
+  @spec run_helper(String.t(), iodata(), pid(), reference(), reference(), port_admission()) :: :ok
+  defp run_helper(path, payload, consumer, owner_ref, consumer_ref, admission) do
     case open_helper(path) do
       {:ok, port} ->
         try do
           if Port.command(port, payload) do
             deadline = System.monotonic_time(:millisecond) + @inference_timeout
-            forward_frames(port, consumer, owner_ref, consumer_ref, deadline)
+            forward_frames(port, consumer, owner_ref, consumer_ref, deadline, admission)
           else
             publish(consumer, [{:error, :apple_helper_unavailable}])
           end
@@ -252,17 +266,50 @@ defmodule MingaAgent.Providers.Apple do
     end
   end
 
-  @spec forward_frames(port(), pid(), reference(), reference(), integer()) :: :ok
-  defp forward_frames(port, consumer, owner_ref, consumer_ref, deadline) do
+  @spec forward_frames(
+          port(),
+          pid(),
+          reference(),
+          reference(),
+          integer(),
+          port_admission() | :admitted
+        ) :: :ok
+  defp forward_frames(port, consumer, owner_ref, consumer_ref, deadline, admission) do
     receive do
       {^port, {:data, {:eol, line}}} ->
         case chunks(line) do
-          {:delta, chunk} ->
-            send(consumer, {self(), :delta, chunk})
-            forward_frames(port, consumer, owner_ref, consumer_ref, deadline)
+          {:preflight, tokens, cap, context} when is_function(admission, 3) ->
+            authorize = fn -> admission.(tokens, cap, context) end
 
-          {:terminal, chunks} ->
+            case Admission.release(port, authorize, owner_ref, consumer_ref, deadline) do
+              :ok ->
+                forward_frames(port, consumer, owner_ref, consumer_ref, deadline, :admitted)
+
+              {:error, :apple_helper_unavailable} ->
+                publish(consumer, [{:error, :apple_helper_unavailable}])
+
+              {:error, reason} ->
+                publish(consumer, [{:error, {:request_admission_refused, reason}}])
+
+              :canceled ->
+                :ok
+
+              :timed_out ->
+                publish(consumer, [{:error, :apple_inference_timeout}])
+            end
+
+          {:delta, chunk} when admission == :admitted ->
+            send(consumer, {self(), :delta, chunk})
+            forward_frames(port, consumer, owner_ref, consumer_ref, deadline, admission)
+
+          {:terminal, [{:error, _reason}] = chunks} ->
             publish(consumer, chunks)
+
+          {:terminal, chunks} when admission == :admitted ->
+            publish(consumer, chunks)
+
+          _unexpected ->
+            publish(consumer, [{:error, :invalid_apple_frame}])
         end
 
       {^port, {:data, {:noeol, _line}}} ->
@@ -286,9 +333,16 @@ defmodule MingaAgent.Providers.Apple do
   end
 
   @spec chunks(binary()) ::
-          {:delta, StreamChunk.t()} | {:terminal, [StreamChunk.t() | {:error, term()}]}
+          {:preflight, pos_integer(), pos_integer(), pos_integer()}
+          | {:delta, StreamChunk.t()}
+          | {:terminal, [StreamChunk.t() | {:error, term()}]}
   defp chunks(line) do
     case decode_frame(line) do
+      {:ok, %{"inputTokens" => tokens, "outputCap" => cap, "context" => context}}
+      when is_integer(tokens) and tokens > 0 and is_integer(cap) and cap > 0 and
+             is_integer(context) and context > 0 ->
+        {:preflight, tokens, cap, context}
+
       {:ok, %{"delta" => delta}} when is_binary(delta) ->
         {:delta, StreamChunk.text(delta)}
 
@@ -352,10 +406,6 @@ defmodule MingaAgent.Providers.Apple do
 
       {:DOWN, ^ref, :process, ^worker, reason} ->
         {[{:error, {:apple_helper_down, reason}}], :done}
-    after
-      @inference_timeout ->
-        close_stream(worker, ref)
-        {[{:error, :apple_inference_timeout}], :done}
     end
   end
 

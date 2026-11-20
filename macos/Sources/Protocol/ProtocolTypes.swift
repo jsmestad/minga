@@ -37,6 +37,17 @@ public struct AgentStopTarget: Sendable, Equatable {
     }
 }
 
+/// Queue insertion position of an exact displayed Agent turn.
+public struct AgentQueueTarget: Sendable, Equatable {
+    public let turn: AgentStopTarget
+    public let sequence: UInt64
+
+    public init(turn: AgentStopTarget, sequence: UInt64) {
+        self.turn = turn
+        self.sequence = sequence
+    }
+}
+
 /// Config setting value encoded in GUI config actions and state pushes.
 public enum SettingValue: Sendable, Equatable {
     case bool(Bool)

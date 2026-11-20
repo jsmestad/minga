@@ -155,6 +155,33 @@ defmodule MingaAgent.RemoteAPITest do
 
     assert {:error, :queue_receipt_unconfirmed} =
              RemoteAPI.composer(id, token, session, latest, reconcile)
+
+    withdraw = {:withdraw_queued_input, {sequence, 1}}
+    assert {:error, :not_driver} = RemoteAPI.composer(id, token, session, first, :read_queue)
+    assert {:error, :not_driver} = RemoteAPI.composer(id, token, session, first, withdraw)
+
+    assert {:ok, [%{identity: {^sequence, 1}, preview: ^text}]} =
+             RemoteAPI.composer(id, token, session, latest, :read_queue)
+
+    newer = %{draft | text: "Keep the new draft"}
+    assert {:ok, 3} = RemoteAPI.composer(id, token, session, latest, {:save, 2, newer})
+    read = {:read_queued_input_text, {sequence, 1}}
+    replacement = "Corrected first line\nWith another line"
+    edit = {:edit_queued_input, {sequence, 1}, replacement}
+    assert {:error, :not_driver} = RemoteAPI.composer(id, token, session, first, edit)
+    assert {:ok, ^text} = RemoteAPI.composer(id, token, session, latest, read)
+    assert :ok = RemoteAPI.composer(id, token, session, latest, edit)
+    assert {:error, :stale_queue_revision} = RemoteAPI.composer(id, token, session, latest, read)
+    assert {[], [^replacement]} = Session.get_queued_messages(session)
+
+    assert {:error, :stale_queue_revision} =
+             RemoteAPI.composer(id, token, session, latest, withdraw)
+
+    withdraw = {:withdraw_queued_input, {sequence, 2}}
+    assert :ok = RemoteAPI.composer(id, token, session, latest, withdraw)
+    assert {:ok, []} = RemoteAPI.composer(id, token, session, latest, :read_queue)
+    assert {:error, :already_consumed} = RemoteAPI.composer(id, token, session, latest, withdraw)
+    assert {:ok, 3, ^newer} = SessionStore.read_presentation(id, dir)
   end
 
   test "ordinary remote send clears its saved draft before acknowledging and can be reconciled after reattach",

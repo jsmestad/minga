@@ -1,9 +1,8 @@
 defmodule Minga.Parser.ParseSync do
   @moduledoc """
-  Parser synchronization and global parse-admission transitions.
-
-  Functions accept only the relevant aggregate values and return typed results.
-  The manager installs those aggregates and owns Port recovery after write failure.
+  Editor-buffer synchronization work: registrations, global admission, and
+  sequence-fenced requests. Workflows run in the manager process; the port
+  stays explicit and the manager owns recovery after write failure.
   """
 
   alias Minga.Buffer
@@ -19,186 +18,155 @@ defmodule Minga.Parser.ParseSync do
 
   @parse_admission_timeout_ms 10_000
 
-  @type ok_result :: {:ok, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()}
-  @type result ::
-          ok_result()
-          | {:port_write_failed, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()}
-  @type completion_result ::
-          {:ok, BufferRegistry.t(), ParseScheduler.t(), RequestState.t(), BufferRegistration.t()}
-          | :stale
-  @type timeout_result ::
-          :ok | {:drop_buffer, RequestState.t()} | :restart_port
+  defstruct buffers: BufferRegistry.new(),
+            scheduler: ParseScheduler.new(),
+            requests: RequestState.new()
+
+  @type t :: %__MODULE__{
+          buffers: BufferRegistry.t(),
+          scheduler: ParseScheduler.t(),
+          requests: RequestState.t()
+        }
+  @type snapshot_result :: t() | {:port_write_failed, t()}
+  @type completion_result :: {:ok, t(), BufferRegistration.t()} | :stale
+  @type timeout_result :: :ok | :drop_buffer | :restart_port
+
+  @doc "Installs the registry returned by a buffer lifecycle operation."
+  @spec put_buffers(t(), BufferRegistry.t()) :: t()
+  def put_buffers(work, buffers), do: %{work | buffers: buffers}
+
+  @doc "Installs the request state returned by a request operation."
+  @spec put_requests(t(), RequestState.t()) :: t()
+  def put_requests(work, requests), do: %{work | requests: requests}
+
+  @doc "Releases admission for a buffer whose registration was removed or reset."
+  @spec release_buffer(t(), pid()) :: t()
+  def release_buffer(work, buffer_pid) do
+    %{work | scheduler: ParseScheduler.release(work.scheduler, buffer_pid)}
+  end
 
   @doc "Forces a full parse for a registered buffer."
-  @spec force_parse(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid()
-        ) :: ok_result()
-  def force_parse(port, buffers, scheduler, requests, buffer_pid) do
-    case BufferRegistry.fetch(buffers, buffer_pid) do
+  @spec force_parse(t(), port() | nil, pid()) :: t()
+  def force_parse(work, port, buffer_pid) do
+    case BufferRegistry.fetch(work.buffers, buffer_pid) do
       {:ok, registration} ->
-        buffers =
-          BufferRegistry.put(buffers, buffer_pid, BufferRegistration.restart(registration))
-
-        scheduler = ParseScheduler.release(scheduler, buffer_pid)
-        pump(port, buffers, scheduler, requests, buffer_pid)
+        work
+        |> put_registration(buffer_pid, BufferRegistration.restart(registration))
+        |> release_buffer(buffer_pid)
+        |> pump(port, buffer_pid)
 
       :error ->
-        ok(buffers, scheduler, requests)
+        work
     end
   end
 
   @doc "Marks a registered buffer dirty and pumps synchronization."
-  @spec mark_dirty(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid(),
-          non_neg_integer()
-        ) :: ok_result()
-  def mark_dirty(port, buffers, scheduler, requests, buffer_pid, sequence) do
-    case BufferRegistry.fetch(buffers, buffer_pid) do
+  @spec mark_dirty(t(), port() | nil, pid(), non_neg_integer()) :: t()
+  def mark_dirty(work, port, buffer_pid, sequence) do
+    case BufferRegistry.fetch(work.buffers, buffer_pid) do
       {:ok, registration} ->
         buffers =
-          buffers
+          work.buffers
           |> BufferRegistry.put(buffer_pid, BufferRegistration.mark_dirty(registration, sequence))
           |> BufferRegistry.touch(buffer_pid, monotonic_ms())
 
-        pump(port, buffers, scheduler, requests, buffer_pid)
+        pump(%{work | buffers: buffers}, port, buffer_pid)
 
       :error ->
-        ok(buffers, scheduler, requests)
+        work
     end
   end
 
   @doc "Queues a pumpable buffer and dispatches parser admission."
-  @spec pump(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid()
-        ) :: ok_result()
-  def pump(nil, buffers, scheduler, requests, _buffer_pid), do: ok(buffers, scheduler, requests)
+  @spec pump(t(), port() | nil, pid()) :: t()
+  def pump(work, nil, _buffer_pid), do: work
 
-  def pump(port, buffers, scheduler, requests, buffer_pid) do
-    case BufferRegistry.fetch(buffers, buffer_pid) do
-      {:ok, registration} ->
-        enqueue_pumpable(port, buffers, scheduler, requests, buffer_pid, registration)
+  def pump(work, port, buffer_pid) do
+    case pumpable_registration(work, buffer_pid) do
+      %BufferRegistration{} ->
+        scheduler = ParseScheduler.enqueue(work.scheduler, buffer_pid)
+        dispatch_next(%{work | scheduler: scheduler}, port)
 
-      :error ->
-        ok(buffers, scheduler, requests)
+      nil ->
+        work
     end
   end
 
   @doc "Activates the next queued parse synchronization operation."
-  @spec dispatch_next(port() | nil, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()) ::
-          ok_result()
-  def dispatch_next(nil, buffers, scheduler, requests), do: ok(buffers, scheduler, requests)
+  @spec dispatch_next(t(), port() | nil) :: t()
+  def dispatch_next(work, nil), do: work
 
-  def dispatch_next(port, buffers, scheduler, requests) do
-    case ParseScheduler.activate_next(scheduler) do
+  def dispatch_next(work, port) do
+    case ParseScheduler.activate_next(work.scheduler) do
       {:ok, buffer_pid, scheduler} ->
-        dispatch_activated(port, buffers, scheduler, requests, buffer_pid)
+        dispatch_activated(%{work | scheduler: scheduler}, port, buffer_pid)
 
       :busy ->
-        ok(buffers, scheduler, requests)
+        work
 
       :empty ->
-        ok(buffers, scheduler, requests)
+        work
     end
   end
 
   @doc "Consumes an editor buffer synchronization snapshot."
-  @spec handle_snapshot(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          SyncSnapshot.t()
-        ) :: result()
-  def handle_snapshot(
-        port,
-        buffers,
-        scheduler,
-        requests,
-        %SyncSnapshot{
-          buffer: buffer_pid,
-          token: token
-        } = snapshot
-      ) do
-    case BufferRegistry.fetch(buffers, buffer_pid) do
-      {:ok, registration} ->
-        if BufferRegistration.awaiting?(registration, token) do
-          apply_snapshot(port, buffers, scheduler, requests, buffer_pid, registration, snapshot)
-        else
-          ok(buffers, scheduler, requests)
-        end
+  @spec handle_snapshot(t(), port() | nil, SyncSnapshot.t()) :: snapshot_result()
+  def handle_snapshot(work, port, %SyncSnapshot{} = snapshot) do
+    case RequestHandler.handle_snapshot(work.requests, work.buffers, snapshot) do
+      {:handled, requests, buffers, buffer_pid} ->
+        %{work | requests: requests, buffers: buffers}
+        |> pump(port, buffer_pid)
+        |> flush_buffer(port, buffer_pid)
 
-      :error ->
-        ok(buffers, scheduler, requests)
+      :unhandled ->
+        handle_admitted_snapshot(work, port, snapshot)
+    end
+  end
+
+  @spec handle_admitted_snapshot(t(), port() | nil, SyncSnapshot.t()) :: snapshot_result()
+  defp handle_admitted_snapshot(
+         work,
+         port,
+         %SyncSnapshot{buffer: buffer_pid, token: token} = snapshot
+       ) do
+    case BufferRegistry.fetch(work.buffers, buffer_pid) do
+      {:ok, %BufferRegistration{phase: {:awaiting_snapshot, ^token}} = registration} ->
+        apply_snapshot(work, port, buffer_pid, registration, snapshot)
+
+      _stale_or_missing ->
+        work
     end
   end
 
   @doc "Completes a matching parser version, flushes requests, and continues pumping."
-  @spec complete_parse(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid(),
-          pos_integer()
-        ) :: completion_result()
-  def complete_parse(port, buffers, scheduler, requests, buffer_pid, version) do
-    with {:ok, registration} <- BufferRegistry.fetch(buffers, buffer_pid),
+  @spec complete_parse(t(), port() | nil, pid(), pos_integer()) :: completion_result()
+  def complete_parse(work, port, buffer_pid, version) do
+    with {:ok, registration} <- BufferRegistry.fetch(work.buffers, buffer_pid),
          {:ok, completed} <- BufferRegistration.complete_parse(registration, version) do
-      buffers = BufferRegistry.put(buffers, buffer_pid, completed)
-      {scheduler, requests} = release_and_flush(port, scheduler, requests, buffers, buffer_pid)
-
-      continue_completed_parse(port, buffers, scheduler, requests, buffer_pid, completed)
+      work = finish_admission(work, port, buffer_pid, completed)
+      {:ok, work, completed}
     else
       _stale_or_missing -> :stale
     end
   end
 
-  @spec continue_completed_parse(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid(),
-          BufferRegistration.t()
-        ) :: completion_result()
-  defp continue_completed_parse(port, buffers, scheduler, requests, buffer_pid, completed) do
-    with {:ok, buffers, scheduler, requests} <-
-           pump(port, buffers, scheduler, requests, buffer_pid),
-         {:ok, buffers, scheduler, requests} <-
-           dispatch_next(port, buffers, scheduler, requests) do
-      {:ok, buffers, scheduler, requests, completed}
-    end
-  end
-
   @doc "Classifies an admission timeout without conflating snapshot and parser failures."
-  @spec handle_timeout(ParseScheduler.t(), RequestState.t(), pid(), term()) :: timeout_result()
-  def handle_timeout(scheduler, requests, buffer_pid, {:snapshot, _ref} = token) do
-    if ParseScheduler.timeout?(scheduler, buffer_pid, token) do
+  @spec handle_timeout(t(), pid(), term()) :: timeout_result()
+  def handle_timeout(work, buffer_pid, {:snapshot, _ref} = token) do
+    if ParseScheduler.timeout?(work.scheduler, buffer_pid, token) do
       Minga.Log.warning(
         :port,
         "Parser: snapshot timed out for #{inspect(buffer_pid)}; dropping buffer"
       )
 
-      {:drop_buffer, RequestHandler.fail_buffer(requests, buffer_pid)}
+      :drop_buffer
     else
       :ok
     end
   end
 
-  def handle_timeout(scheduler, _requests, buffer_pid, {:parse, _ref} = token) do
-    if ParseScheduler.timeout?(scheduler, buffer_pid, token) do
+  def handle_timeout(work, buffer_pid, {:parse, _ref} = token) do
+    if ParseScheduler.timeout?(work.scheduler, buffer_pid, token) do
       Minga.Log.error(:port, "Parser: parse timed out for #{inspect(buffer_pid)}; restarting")
       :restart_port
     else
@@ -207,35 +175,28 @@ defmodule Minga.Parser.ParseSync do
   end
 
   @doc "Cancels active admission and clears all queued parse work."
-  @spec reset_admission(ParseScheduler.t()) :: ParseScheduler.t()
-  def reset_admission(scheduler) do
-    cancel_admission_timer(scheduler)
-    ParseScheduler.reset(scheduler)
+  @spec reset_admission(t()) :: t()
+  def reset_admission(work) do
+    cancel_admission_timer(work.scheduler)
+    %{work | scheduler: ParseScheduler.reset(work.scheduler)}
   end
 
   @doc "Marks every registration for a fresh full snapshot and restarts pumps."
-  @spec restart_pumps(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t()
-        ) :: ok_result()
-  def restart_pumps(port, buffers, scheduler, requests) do
-    buffer_count = BufferRegistry.count(buffers)
+  @spec restart_pumps(t(), port() | nil) :: t()
+  def restart_pumps(work, port) do
+    buffer_count = BufferRegistry.count(work.buffers)
 
     if buffer_count > 0 do
       Minga.Log.info(:port, "Parser: re-syncing #{buffer_count} buffer(s)")
     end
 
-    buffers = BufferRegistry.restart_all(buffers)
-    scheduler = reset_admission(scheduler)
+    buffers = BufferRegistry.restart_all(work.buffers)
+    work = reset_admission(%{work | buffers: buffers})
 
     buffers
     |> BufferRegistry.entries()
     |> Map.keys()
-    |> Enum.reduce(ok(buffers, scheduler, requests), fn buffer_pid, {:ok, b, s, r} ->
-      pump(port, b, s, r, buffer_pid)
-    end)
+    |> Enum.reduce(work, fn buffer_pid, work -> pump(work, port, buffer_pid) end)
   end
 
   @doc "Builds parser setup commands for a registered buffer configuration."
@@ -249,139 +210,96 @@ defmodule Minga.Parser.ParseSync do
     |> append_query(config.tags_query, &Protocol.encode_set_tags_query(buffer_id, &1))
   end
 
-  @spec enqueue_pumpable(
-          port(),
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid(),
-          BufferRegistration.t()
-        ) :: ok_result()
-  defp enqueue_pumpable(port, buffers, scheduler, requests, buffer_pid, registration) do
-    if BufferRegistration.pumpable?(registration) do
-      dispatch_next(port, buffers, ParseScheduler.enqueue(scheduler, buffer_pid), requests)
-    else
-      ok(buffers, scheduler, requests)
+  @spec pumpable_registration(t(), pid()) :: BufferRegistration.t() | nil
+  defp pumpable_registration(work, buffer_pid) do
+    case BufferRegistry.fetch(work.buffers, buffer_pid) do
+      {:ok, registration} -> if BufferRegistration.pumpable?(registration), do: registration
+      :error -> nil
     end
   end
 
-  @spec dispatch_activated(
-          port(),
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid()
-        ) :: ok_result()
-  defp dispatch_activated(port, buffers, scheduler, requests, buffer_pid) do
-    case BufferRegistry.fetch(buffers, buffer_pid) do
-      {:ok, registration} ->
-        if BufferRegistration.pumpable?(registration) do
-          request_snapshot(buffers, scheduler, requests, buffer_pid, registration)
-        else
-          continue_dispatch(port, buffers, scheduler, requests, buffer_pid)
-        end
+  @spec dispatch_activated(t(), port(), pid()) :: t()
+  defp dispatch_activated(work, port, buffer_pid) do
+    case pumpable_registration(work, buffer_pid) do
+      %BufferRegistration{} = registration ->
+        request_snapshot(work, buffer_pid, registration)
 
-      :error ->
-        continue_dispatch(port, buffers, scheduler, requests, buffer_pid)
+      nil ->
+        work
+        |> release_admission(buffer_pid)
+        |> dispatch_next(port)
     end
   end
 
-  @spec continue_dispatch(
-          port(),
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid()
-        ) :: ok_result()
-  defp continue_dispatch(port, buffers, scheduler, requests, buffer_pid) do
-    scheduler = release_admission(scheduler, buffer_pid)
-    dispatch_next(port, buffers, scheduler, requests)
-  end
-
-  @spec request_snapshot(
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid(),
-          BufferRegistration.t()
-        ) :: ok_result()
-  defp request_snapshot(buffers, scheduler, requests, buffer_pid, registration) do
+  @spec request_snapshot(t(), pid(), BufferRegistration.t()) :: t()
+  defp request_snapshot(work, buffer_pid, registration) do
     token = make_ref()
     cursor = BufferRegistration.snapshot_cursor(registration)
-
-    buffers =
-      BufferRegistry.put(
-        buffers,
-        buffer_pid,
-        BufferRegistration.await_snapshot(registration, token)
-      )
+    awaiting = BufferRegistration.await_snapshot(registration, token)
+    work = put_registration(work, buffer_pid, awaiting)
 
     :ok = Buffer.request_sync_snapshot(buffer_pid, cursor, self(), token)
-    scheduler = arm_admission_timeout(scheduler, buffer_pid, {:snapshot, token})
-    ok(buffers, scheduler, requests)
+    arm_admission_timeout(work, buffer_pid, {:snapshot, token})
   end
 
-  @spec apply_snapshot(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          pid(),
-          BufferRegistration.t(),
-          SyncSnapshot.t()
-        ) :: result()
-  defp apply_snapshot(port, buffers, scheduler, requests, buffer_pid, registration, %SyncSnapshot{
+  @spec apply_snapshot(t(), port() | nil, pid(), BufferRegistration.t(), SyncSnapshot.t()) ::
+          snapshot_result()
+  defp apply_snapshot(work, port, buffer_pid, registration, %SyncSnapshot{
          changes: :unchanged,
          sequence: sequence
        }) do
-    buffers =
-      BufferRegistry.put(
-        buffers,
-        buffer_pid,
-        BufferRegistration.complete_unchanged(registration, sequence)
-      )
-
-    {scheduler, requests} = release_and_flush(port, scheduler, requests, buffers, buffer_pid)
-
-    with {:ok, buffers, scheduler, requests} <-
-           pump(port, buffers, scheduler, requests, buffer_pid) do
-      dispatch_next(port, buffers, scheduler, requests)
-    end
+    completed = BufferRegistration.complete_unchanged(registration, sequence)
+    finish_admission(work, port, buffer_pid, completed)
   end
 
-  defp apply_snapshot(nil, buffers, scheduler, requests, buffer_pid, registration, _snapshot) do
-    buffers = BufferRegistry.put(buffers, buffer_pid, BufferRegistration.restart(registration))
-    ok(buffers, release_admission(scheduler, buffer_pid), requests)
+  defp apply_snapshot(work, nil, buffer_pid, registration, _snapshot) do
+    work
+    |> put_registration(buffer_pid, BufferRegistration.restart(registration))
+    |> release_admission(buffer_pid)
   end
 
-  defp apply_snapshot(port, buffers, scheduler, requests, buffer_pid, registration, snapshot) do
-    {version, buffers} = BufferRegistry.next_parse_version(buffers)
+  defp apply_snapshot(work, port, buffer_pid, registration, snapshot) do
+    {version, buffers} = BufferRegistry.next_parse_version(work.buffers)
+    work = %{work | buffers: buffers}
     commands = snapshot_commands(registration, version, snapshot.changes)
     full? = match?({:full, _content}, snapshot.changes)
 
     if PortLifecycle.send_batch(port, commands) do
       parsing = BufferRegistration.begin_parse(registration, version, snapshot.sequence, full?)
-      buffers = BufferRegistry.put(buffers, buffer_pid, parsing)
-      scheduler = arm_admission_timeout(scheduler, buffer_pid, {:parse, make_ref()})
-      ok(buffers, scheduler, requests)
+
+      work
+      |> put_registration(buffer_pid, parsing)
+      |> arm_admission_timeout(buffer_pid, {:parse, make_ref()})
     else
       Minga.Log.warning(:port, "Parser: parse write failed; scheduling restart")
-      buffers = BufferRegistry.put(buffers, buffer_pid, BufferRegistration.restart(registration))
-      {:port_write_failed, buffers, reset_admission(scheduler), requests}
+
+      work =
+        work
+        |> put_registration(buffer_pid, BufferRegistration.restart(registration))
+        |> reset_admission()
+
+      {:port_write_failed, work}
     end
   end
 
-  @spec release_and_flush(
-          port() | nil,
-          ParseScheduler.t(),
-          RequestState.t(),
-          BufferRegistry.t(),
-          pid()
-        ) :: {ParseScheduler.t(), RequestState.t()}
-  defp release_and_flush(port, scheduler, requests, buffers, buffer_pid) do
-    scheduler = release_admission(scheduler, buffer_pid)
-    requests = RequestHandler.flush_buffer(port, requests, buffers, buffer_pid)
-    {scheduler, requests}
+  @spec finish_admission(t(), port() | nil, pid(), BufferRegistration.t()) :: t()
+  defp finish_admission(work, port, buffer_pid, completed) do
+    work
+    |> put_registration(buffer_pid, completed)
+    |> release_admission(buffer_pid)
+    |> flush_buffer(port, buffer_pid)
+    |> pump(port, buffer_pid)
+    |> dispatch_next(port)
+  end
+
+  @spec flush_buffer(t(), port() | nil, pid()) :: t()
+  defp flush_buffer(work, port, buffer_pid) do
+    put_requests(work, RequestHandler.flush_buffer(port, work.requests, work.buffers, buffer_pid))
+  end
+
+  @spec put_registration(t(), pid(), BufferRegistration.t()) :: t()
+  defp put_registration(work, buffer_pid, registration) do
+    put_buffers(work, BufferRegistry.put(work.buffers, buffer_pid, registration))
   end
 
   @spec snapshot_commands(BufferRegistration.t(), pos_integer(), SyncSnapshot.changes()) :: [
@@ -406,9 +324,9 @@ defmodule Minga.Parser.ParseSync do
   defp append_query(commands, nil, _encoder), do: commands
   defp append_query(commands, query, encoder), do: List.insert_at(commands, -1, encoder.(query))
 
-  @spec arm_admission_timeout(ParseScheduler.t(), pid(), term()) :: ParseScheduler.t()
-  defp arm_admission_timeout(scheduler, buffer_pid, token) do
-    cancel_admission_timer(scheduler)
+  @spec arm_admission_timeout(t(), pid(), term()) :: t()
+  defp arm_admission_timeout(work, buffer_pid, token) do
+    cancel_admission_timer(work.scheduler)
 
     timer_ref =
       Process.send_after(
@@ -417,16 +335,16 @@ defmodule Minga.Parser.ParseSync do
         @parse_admission_timeout_ms
       )
 
-    ParseScheduler.arm_timeout(scheduler, token, timer_ref)
+    %{work | scheduler: ParseScheduler.arm_timeout(work.scheduler, token, timer_ref)}
   end
 
-  @spec release_admission(ParseScheduler.t(), pid()) :: ParseScheduler.t()
-  defp release_admission(scheduler, buffer_pid) do
-    if ParseScheduler.active?(scheduler, buffer_pid) do
-      cancel_admission_timer(scheduler)
-      ParseScheduler.release(scheduler, buffer_pid)
+  @spec release_admission(t(), pid()) :: t()
+  defp release_admission(work, buffer_pid) do
+    if ParseScheduler.active?(work.scheduler, buffer_pid) do
+      cancel_admission_timer(work.scheduler)
+      release_buffer(work, buffer_pid)
     else
-      scheduler
+      work
     end
   end
 
@@ -441,9 +359,6 @@ defmodule Minga.Parser.ParseSync do
         :ok
     end
   end
-
-  @spec ok(BufferRegistry.t(), ParseScheduler.t(), RequestState.t()) :: ok_result()
-  defp ok(buffers, scheduler, requests), do: {:ok, buffers, scheduler, requests}
 
   @spec monotonic_ms() :: integer()
   defp monotonic_ms, do: System.monotonic_time(:millisecond)

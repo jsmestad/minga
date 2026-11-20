@@ -31,7 +31,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     end
   end
 
-  test "a result list opens the picker and finishes successfully" do
+  test "the picker keeps reference order and duplicates while skipping unknown entries" do
     path =
       Path.join(System.tmp_dir!(), "references-feedback-#{System.unique_integer([:positive])}.ex")
 
@@ -39,25 +39,28 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     on_exit(fn -> File.rm(path) end)
     {state, operation} = start_operation(Path.dirname(path))
 
-    locations = [location(path, 0), location(path, 1)]
+    locations = [location(path, 1), %{}, location(path, 0), location(path, 1)]
     state = LspActions.handle_references_response(state, {:ok, locations}, operation.id)
 
     assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
 
     assert OperationFeedback.selected(state.feedback.operation_feedback).message ==
-             "Found 2 references"
+             "Found 3 references"
 
     assert state.shell_runtime.state.notice.message == nil
 
     assert {:picker, %{picker_ui: %{source: LocationSource, picker: picker}}} =
              state.shell_runtime.state.modal
 
-    assert Enum.map(picker.items, & &1.id) == [{path, 0, 0}, {path, 1, 0}]
+    assert Enum.map(picker.items, & &1.id) == [{path, 1, 0}, {path, 0, 0}, {path, 1, 0}]
 
     assert Enum.map(picker.items, & &1.label) == [
+             "#{Path.basename(path)}:2:1",
              "#{Path.basename(path)}:1:1",
              "#{Path.basename(path)}:2:1"
            ]
+
+    assert Enum.map(picker.items, & &1.description) == ["second", "first", "second"]
   end
 
   test "a response for a replaced identity cannot mutate feedback or perform picker effects" do

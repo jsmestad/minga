@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.Agent.ViewContext
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Agent.View.PromptProjection
+  alias MingaEditor.Agent.PromptInput
   alias Minga.Core.Decorations
   alias Minga.Core.WidthOracle.Monospace
   alias Minga.Config
@@ -510,9 +511,18 @@ defmodule MingaEditor.RenderPipeline.Content do
         do: state.frame_seq + 1,
         else: System.unique_integer([:positive, :monotonic])
 
+    frame = state.intent.frame
+
+    owner =
+      PromptInput.submission_owner(
+        Runtime.review_scope(frame.shell, frame.shell_state),
+        ctx.ui_state
+      )
+
     {prompt_window, lease} =
       PromptRenderWindow.build_presented(ctx, projection.columns, prompt_rect,
         projection: projection,
+        submission_owner: owner,
         presentation_id: presentation_id,
         previous_presentation: state.caches.prompt_presentation,
         cursor_eligible:

@@ -80,6 +80,48 @@ defmodule Minga.FileWatcherTest do
     refute_receive {:file_changed_on_disk, ^path}, 50
   end
 
+  test "releasing subtree coverage drops only uncovered pending events with unchanged native dirs",
+       %{tmp_dir: dir} do
+    watcher = start_watcher(subscriber: self(), debounce_ms: 60_000)
+    root = Path.join(dir, "project")
+    explicit = Path.join(root, "open.txt")
+    descendant = Path.join(root, "lib/new.ex")
+    neighbor = root <> "-neighbor/file.ex"
+
+    FileWatcher.watch_path(watcher, explicit)
+    FileWatcher.watch_directory(watcher, root)
+
+    for path <- [root, descendant, neighbor] do
+      send(watcher, {:file_event, nil, {path, [:modified]}})
+      send(watcher, {:debounce_fire, path})
+    end
+
+    sync_watcher(watcher)
+    assert_received {:file_changed_on_disk, ^root}
+    assert_received {:file_changed_on_disk, ^descendant}
+    refute_received {:file_changed_on_disk, ^neighbor}
+
+    for path <- [explicit, descendant] do
+      send(watcher, {:file_event, nil, {path, [:modified]}})
+    end
+
+    assert %{pending: %{^explicit => explicit_timer, ^descendant => descendant_timer}} =
+             :sys.get_state(watcher)
+
+    FileWatcher.unwatch_directory_tree(watcher, root)
+
+    assert %{pending: %{^explicit => ^explicit_timer}} = :sys.get_state(watcher)
+    assert is_integer(Process.read_timer(explicit_timer))
+    assert Process.read_timer(descendant_timer) == false
+
+    send(watcher, {:debounce_fire, explicit})
+    send(watcher, {:debounce_fire, descendant})
+    sync_watcher(watcher)
+
+    assert_received {:file_changed_on_disk, ^explicit}
+    refute_received {:file_changed_on_disk, ^descendant}
+  end
+
   test "repeated file registration is idempotent and one release removes its watch", %{
     tmp_dir: dir
   } do
@@ -93,7 +135,7 @@ defmodule Minga.FileWatcherTest do
     FileWatcher.unwatch_path(watcher, first)
 
     state = :sys.get_state(watcher, @sync_timeout)
-    assert state.watched_files == MapSet.new([second])
+    assert state.intent.files == MapSet.new([second])
     assert state.watched_dirs == MapSet.new([dir])
 
     send(watcher, {:file_event, nil, {second, [:modified]}})
@@ -105,7 +147,7 @@ defmodule Minga.FileWatcherTest do
     FileWatcher.unwatch_path(watcher, second)
 
     state = :sys.get_state(watcher, @sync_timeout)
-    assert state.watched_files == MapSet.new()
+    assert state.intent.files == MapSet.new()
     assert state.watched_dirs == MapSet.new()
     assert state.watcher == nil
     assert state.pending == %{}
@@ -128,8 +170,8 @@ defmodule Minga.FileWatcherTest do
 
     assert state.subscriber == self()
     assert is_reference(state.subscriber_monitor)
-    assert state.watched_files == MapSet.new([file])
-    assert state.watched_project_dirs == MapSet.new([project])
+    assert state.intent.files == MapSet.new([file])
+    assert state.intent.project_dirs == MapSet.new([project])
     assert watcher in elem(Process.info(self(), :monitored_by), 1)
     refute_receive {:file_changed_on_disk, ^file}, 50
 

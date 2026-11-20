@@ -188,6 +188,49 @@ defmodule MingaAgent.Session.ContinuationTest do
              )
   end
 
+  test "a retried round and a restored checkpoint retain one exact frozen steering suffix" do
+    {:ok, request, continuation} =
+      Continuation.begin_request(Continuation.new(), "steered-request", 1, "inspect")
+
+    assistant = Context.assistant("", tool_calls: [ToolCall.new("call", "shell", "{}")])
+    source = request.messages ++ [assistant]
+    steering = Context.user("Keep the existing output")
+    later = Context.user("A later instruction")
+    saved = Context.tool_result_message("shell", "call", "saved")
+
+    assert {:ok, checkpoint_id, pending} =
+             Continuation.checkpoint_tool_group(continuation, request.request_id, source, [
+               %{tool_call_id: "call", name: "shell", arguments: %{}}
+             ])
+
+    assert {:error, :unresolved_tool_checkpoint} =
+             Continuation.freeze_dispatch_source(pending, checkpoint_id, [steering])
+
+    assert {:ok, completed} =
+             Continuation.complete_tool_effect(
+               pending,
+               request.request_id,
+               checkpoint_id,
+               "call",
+               saved
+             )
+
+    exact = source ++ [saved, steering]
+
+    assert {:ok, ^exact, frozen} =
+             Continuation.freeze_dispatch_source(completed, checkpoint_id, [steering])
+
+    assert {:error, :invalid_steering} =
+             Continuation.freeze_dispatch_source(frozen, checkpoint_id, [later])
+
+    assert {:ok, ^exact, _same_source} =
+             Continuation.freeze_dispatch_source(frozen, checkpoint_id, [])
+
+    assert {:ok, restored} = frozen |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+    assert {reconciled, _} = Continuation.reconcile_interrupted(restored, 2)
+    assert reconciled.messages == exact
+  end
+
   test "codec preserves attachments, provider-native blocks, tool groups, and reasoning signatures" do
     reasoning = %ReasoningDetails{
       text: "private reasoning",

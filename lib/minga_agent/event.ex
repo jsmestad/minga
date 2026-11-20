@@ -244,6 +244,7 @@ defmodule MingaAgent.Event do
             | :unreachable
             | :invalid_model
             | :context_transition_required
+            | :request_admission_refused
             | :provider_error
             | :tool_error
             | :internal_error

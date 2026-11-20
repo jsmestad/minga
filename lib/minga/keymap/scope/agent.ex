@@ -231,6 +231,7 @@ defmodule Minga.Keymap.Scope.Agent do
          {"SPC a s", "Abort agent turn"},
          {"SPC a S", "Stop agent session"},
          {"SPC a q", "Dequeue to editor"},
+         {"SPC a J", "Inspect queued inputs"},
          {"SPC a f", "Queue follow-up from input"},
          {"SPC a m", "Pick agent model"},
          {"SPC a k / /tasks", "Inspect the conversation checklist"},

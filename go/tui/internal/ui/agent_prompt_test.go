@@ -103,6 +103,7 @@ func decodedPromptCommand(t *testing.T, rows []protocol.WindowRow, cursorRow, cu
 
 func commitPrompt(t *testing.T, model Model, chat protocol.AgentChat, command protocol.Command, presentation uint64) Model {
 	t.Helper()
+	chat.PromptPresentation = presentation
 	seq := model.lastCommittedSeq + 1
 	decode := func(packet []byte) protocol.Command {
 		command, err := protocol.DecodeCommand(packet)
@@ -217,7 +218,7 @@ func TestComposerGrowthReservesControlsAndReportsMaximumCapacity(t *testing.T) {
 						t.Fatalf("controls clipped: %+v", p)
 					}
 					label := "Send"
-					if p.innerWidth < 4 {
+					if p.innerWidth < 48 {
 						label = "↑"
 					}
 					if !strings.Contains(body[p.controlsRow], label) {
@@ -356,6 +357,33 @@ func TestStopUsesLastPublishedViewWhileReplacementIsPending(t *testing.T) {
 	assertPacketCount(t, packets, stopB, 1)
 }
 
+func TestPublishedSendCannotBecomeStopAfterTurnStarts(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(80, 24, out)
+	chat := protocol.AgentChat{Visible: true, Prompt: "draft", PromptVisibleRows: 1, DraftAttachmentOffer: 62}
+	prompt := decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{})
+	model = commitPrompt(t, model, chat, prompt, 800)
+	shown := model.View()
+	x, y := renderedComposerControl(t, model, "Send")
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y})
+
+	chat.Status = 1
+	chat.StopTarget = composerTestStopTarget()
+	model = commitPrompt(t, model, chat, prompt, 801)
+	drainOutboundPackets(out)
+	next, _ := updateFromPublishedView(model, shown, click)
+	packets := drainOutboundPackets(out)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentComposerSubmit(800, 62), 1)
+	assertPacketCount(t, packets, protocol.EncodeGUIAgentStopTurn(chat.StopTarget), 0)
+
+	model = next.(Model)
+	_, _ = updateFromPublishedView(model, model.View(), click)
+	assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIAgentStopTurn(chat.StopTarget), 0)
+	x, y = renderedComposerControl(t, model, "Stop")
+	_, _ = updateFromPublishedView(model, model.View(), tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
+	assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIAgentStopTurn(chat.StopTarget), 1)
+}
+
 type heldTerminalWrite struct {
 	started chan struct{}
 	release chan struct{}
@@ -424,12 +452,16 @@ func TestPromptControlsUseCommandsAndNewlineRemainsKeyInput(t *testing.T) {
 		model := New(12, 6, out)
 		chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "raw", PromptVisibleRows: 8, InputFocused: true, StopTarget: composerTestStopTarget()}
 		model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("one", "two", "three"), 0, 0, 0, 0, protocol.Selection{}), 700)
-		p, _ := model.agentPromptPlacement()
+		label := "↑"
+		if status != 0 {
+			label = "■"
+		}
+		x, y := renderedComposerControl(t, model, label)
 		drainOutboundPackets(out)
-		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: model.layout.body.X + p.col - p.prefix, Y: model.layout.body.Y + p.controlsRow})
+		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y})
 		afterClick, _ := updateFromPublishedView(model, model.View(), click)
 		model = afterClick.(Model)
-		want := protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
+		want := protocol.EncodeGUIAgentComposerSubmit(700, 0)
 		if status != 0 {
 			want = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 		}
@@ -591,49 +623,72 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 				out := make(chan []byte, 64)
 				model := New(width, 16, out)
 				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1, InputFocused: true, DraftAttachmentCount: 2, DraftAttachmentOffer: 0x1122334455667788, StopTarget: composerTestStopTarget()}
+				chat.QueueTarget = protocol.AgentQueueTarget{AgentStopTarget: chat.StopTarget, Sequence: 3}
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 818)
 				p, _ := model.agentPromptPlacement()
-				label := "Send"
-				wantAction := protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer)
-				if status == 1 || status == 2 || status == 5 {
-					label = "Stop"
-					wantAction = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
-				}
-				if p.innerWidth < 4 {
-					if label == "Send" {
-						label = "↑"
-					} else {
-						label = "■"
-					}
-				}
-				labelWidth := displayWidth(label)
 				controlStart := model.layout.body.X + p.col - p.prefix
 				controlY := model.layout.body.Y + p.controlsRow
 				body := strings.Split(ansi.Strip(model.content()), "\n")
-				if !strings.Contains(body[p.controlsRow], label) {
-					t.Fatalf("control label not visible: %q", body[p.controlsRow])
+				line := body[p.controlsRow]
+				labels := [4]string{"Send", "Steer", "Queue Next", "Stop"}
+				switch {
+				case p.innerWidth == 1 && (status == 1 || status == 2 || status == 5):
+					labels = [4]string{"", "", "", "■"}
+				case p.innerWidth == 1:
+					labels = [4]string{"↑", "", "", ""}
+				case p.innerWidth < 4:
+					labels = [4]string{"↑", "", "", "■"}
+				case p.innerWidth < 48:
+					labels = [4]string{"↑", "↪", "+", "■"}
 				}
-				if p.innerWidth >= 48 && !strings.Contains(body[p.controlsRow], "Shift+Enter newline") {
-					t.Fatalf("missing newline help: %q", body[p.controlsRow])
+				var packets [4][]byte
+				if status == 1 || status == 2 || status == 5 {
+					packets[1] = protocol.EncodeGUIAgentComposerQueue(818, chat.DraftAttachmentOffer, false, chat.QueueTarget)
+					packets[2] = protocol.EncodeGUIAgentComposerQueue(818, chat.DraftAttachmentOffer, true, chat.QueueTarget)
+					packets[3] = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
+				} else {
+					packets[0] = protocol.EncodeGUIAgentComposerSubmit(818, chat.DraftAttachmentOffer)
+				}
+				wantAt := make(map[int][]byte)
+				cursor := controlStart
+				for i, label := range labels {
+					if i > 0 && p.innerWidth >= 7 {
+						cursor++
+						if p.innerWidth >= 48 {
+							cursor += 2
+						}
+					}
+					width := displayWidth(label)
+					if width > 0 {
+						if cursor+width > controlStart+p.innerWidth {
+							t.Fatalf("control %q clipped at width %d", label, p.innerWidth)
+						}
+						from := strings.Index(line, label)
+						if from < 0 || displayWidth(line[:from]) != cursor {
+							t.Fatalf("%q not visible at %d: %q", label, cursor, line)
+						}
+						for x := cursor; x < cursor+width; x++ {
+							wantAt[x-controlStart] = packets[i]
+						}
+					}
+					cursor += width
 				}
 				attachmentLabel := "Attachments (2)"
-				if p.innerWidth < labelWidth+3+len(attachmentLabel) {
+				attachmentStart := strings.Index(line, attachmentLabel)
+				if attachmentStart < 0 {
 					attachmentLabel = "+2"
-				}
-				attachmentStart := strings.Index(body[p.controlsRow], attachmentLabel)
-				if p.innerWidth >= labelWidth+3+len(attachmentLabel) && attachmentStart < 0 {
-					t.Fatalf("attached draft count not visible: %q", body[p.controlsRow])
+					attachmentStart = strings.Index(line, attachmentLabel)
 				}
 				if attachmentStart >= 0 {
-					attachmentStart = displayWidth(body[p.controlsRow][:attachmentStart]) - controlStart
+					attachmentStart = displayWidth(line[:attachmentStart]) - controlStart
 				}
 				wantAttachments := protocol.EncodeGUIExecuteCommand("agent_draft_attachments")
 				drainOutboundPackets(out)
 				for cell := range p.innerWidth {
 					var want []byte
 					switch {
-					case cell < labelWidth:
-						want = wantAction
+					case wantAt[cell] != nil:
+						want = wantAt[cell]
 					case attachmentStart >= 0 && cell >= attachmentStart && cell < attachmentStart+len(attachmentLabel):
 						want = wantAttachments
 					}
@@ -645,7 +700,7 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 						if len(outbound) != 0 && outbound[0] == generated.OPKeyPress {
 							t.Fatalf("control/help cell %d entered mode-dependent key dispatch: %x", cell, outbound)
 						}
-						if len(outbound) > 1 && outbound[0] == generated.OPGuiAction && (outbound[1] == generated.GUIActionExecuteCommand || outbound[1] == generated.GUIActionAgentComposerSubmit || outbound[1] == generated.GUIActionAgentStopTurn) {
+						if len(outbound) > 1 && outbound[0] == generated.OPGuiAction && (outbound[1] == generated.GUIActionExecuteCommand || outbound[1] == generated.GUIActionAgentComposerSubmit || outbound[1] == generated.GUIActionAgentComposerQueue || outbound[1] == generated.GUIActionAgentStopTurn) {
 							actionPackets++
 							if want == nil || !bytes.Equal(outbound, want) {
 								t.Fatalf("help/padding cell %d submitted/stopped draft: %x", cell, outbound)
@@ -658,6 +713,44 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestComposerQuestionAndAttachmentsStayClickableAcrossWidthChanges(t *testing.T) {
+	for _, tc := range []struct {
+		width             uint16
+		question, context string
+	}{
+		{35, "Answer question", "+2"},
+		{36, "Answer question", "+2"},
+		{51, "Answer question", "Attachments (2)"},
+		{52, "Question", "+2"},
+	} {
+		t.Run(fmt.Sprint(tc.width), func(t *testing.T) {
+			out := make(chan []byte, 64)
+			model := New(tc.width, 20, out)
+			chat := protocol.AgentChat{Visible: true, Status: 2, Prompt: "draft", PromptVisibleRows: 1, QuestionOffer: 257, QuestionPrompt: "A question", DraftAttachmentCount: 2}
+			model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 818)
+			for _, action := range []struct {
+				label  string
+				packet []byte
+			}{
+				{tc.question, protocol.EncodeGUIAgentOpenQuestion(257)},
+				{tc.context, protocol.EncodeGUIExecuteCommand("agent_draft_attachments")},
+			} {
+				p, _ := model.agentPromptPlacement()
+				y := model.layout.body.Y + p.controlsRow
+				line := strings.Split(ansi.Strip(model.View().Content), "\n")[y]
+				off := strings.Index(line, action.label)
+				if off < 0 {
+					t.Fatalf("%q not visible in %q", action.label, line)
+				}
+				x := displayWidth(line[:off])
+				drainOutboundPackets(out)
+				_, _ = updateFromPublishedView(model, model.View(), tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
+				assertPacketCount(t, drainOutboundPackets(out), action.packet, 1)
+			}
+		})
 	}
 }
 
@@ -685,9 +778,11 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 					if model.lastCommittedSeq != 2 || component != "agent" {
 						t.Fatalf("agent focus frame not admitted: seq=%d component=%q", model.lastCommittedSeq, component)
 					}
-					p, _ := model.agentPromptPlacement()
-					x := model.layout.body.X + p.col - p.prefix
-					y := model.layout.body.Y + p.controlsRow
+					label := "Send"
+					if status != 0 {
+						label = "Stop"
+					}
+					x, y := renderedComposerControl(t, model, label)
 					view := model.View()
 					before := view.Content
 					buffer := cellbuf.NewBuffer(model.width, model.height)
@@ -699,7 +794,7 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 					drainOutboundPackets(out)
 					updated, _ = updateFromPublishedView(model, view, tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
 					model = updated.(Model)
-					want := protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
+					want := protocol.EncodeGUIAgentComposerSubmit(819, 0)
 					if status == 1 || status == 2 {
 						want = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 					}

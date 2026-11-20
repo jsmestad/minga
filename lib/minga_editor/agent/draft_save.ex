@@ -371,6 +371,11 @@ defmodule MingaEditor.Agent.DraftSave do
       ),
       do: %{save | request: {:ready, revision, nil}}
 
+  @doc "Returns the attachment offer projected in the composer, if any."
+  @spec attachment_offer(t() | nil) :: pos_integer() | nil
+  def attachment_offer(%__MODULE__{offer: offer}), do: offer
+  def attachment_offer(nil), do: nil
+
   @doc "Validates the offer echoed by the frontend against this composer and its displayed attachment set."
   @spec submission(t() | nil, pos_integer() | nil) ::
           :ordinary | {:attached, target(), [DraftAttachment.identity()]} | {:error, String.t()}

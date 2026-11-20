@@ -9,7 +9,8 @@ defmodule Minga.Parser.Manager do
 
   This is the parsing counterpart to the frontend manager (which handles rendering). Separating parsing from rendering means every frontend gets syntax highlighting for free, and a parser crash does not kill the renderer.
 
-  The manager is the single process owner for editor-buffer parser identity, parse sequencing, activity, eviction, and crash-resync metadata. `Minga.Parser.BufferRegistry` owns the pure value transitions within this process.
+  The manager owns editor-buffer parser identity, parse admission, and
+  sequence-fenced requests in one `Minga.Parser.ParseSync` value.
 
   ## Crash Recovery
 
@@ -43,7 +44,6 @@ defmodule Minga.Parser.Manager do
   alias Minga.Parser.BufferLifecycle
   alias Minga.Parser.EventCorrelation
   alias Minga.Parser.EventRouter
-  alias Minga.Parser.ParseScheduler
   alias Minga.Parser.ParseSync
   alias Minga.Parser.PortLifecycle
   alias Minga.Parser.PortState
@@ -79,19 +79,15 @@ defmodule Minga.Parser.Manager do
   @type structural_nav_result :: StructuralNavResult.t()
 
   defstruct port: nil,
-            requests: RequestState.new(),
+            work: %ParseSync{},
             snippets: SnippetState.new(),
-            buffers: BufferRegistry.new(),
-            parse_scheduler: ParseScheduler.new(),
             subscribers: %{},
             events_registry: Events.default_registry()
 
   @type t :: %__MODULE__{
           port: PortState.t(),
-          requests: RequestState.t(),
+          work: ParseSync.t(),
           snippets: SnippetState.t(),
-          buffers: BufferRegistry.t(),
-          parse_scheduler: ParseScheduler.t(),
           subscribers: %{pid() => reference()},
           events_registry: Events.registry()
         }
@@ -454,41 +450,36 @@ defmodule Minga.Parser.Manager do
     do: {:reply, state.port.handle != nil and state.port.ready?, state}
 
   def handle_call({:register_buffer, buffer, config}, _from, state) do
-    {buffer_id, state} = register_buffer_state(state, buffer, config)
-    {:reply, buffer_id, pump(state, buffer)}
+    {buffer_id, work} = BufferLifecycle.register(state.work, state.port.handle, buffer, config)
+    work = ParseSync.pump(work, state.port.handle, buffer)
+    {:reply, buffer_id, %{state | work: work}}
   end
 
   def handle_call({:register_buffer_correlated, buffer, config}, _from, state) do
-    {_buffer_id, state} = register_buffer_state(state, buffer, config)
-    {:ok, registration} = BufferRegistry.fetch(state.buffers, buffer)
+    {_buffer_id, work} = BufferLifecycle.register(state.work, state.port.handle, buffer, config)
+    {:ok, registration} = BufferRegistry.fetch(work.buffers, buffer)
 
     correlation =
       EventCorrelation.new(registration.generation, registration.last_completed_version)
 
-    {:reply, correlation, pump(state, buffer)}
+    work = ParseSync.pump(work, state.port.handle, buffer)
+    {:reply, correlation, %{state | work: work}}
   end
 
   def handle_call({:buffer_id, buffer}, _from, state),
-    do: {:reply, BufferRegistry.buffer_id(state.buffers, buffer), state}
+    do: {:reply, BufferRegistry.buffer_id(state.work.buffers, buffer), state}
 
   def handle_call({:resolve_buffer, buffer_id}, _from, state),
-    do: {:reply, BufferRegistry.resolve(state.buffers, buffer_id), state}
+    do: {:reply, BufferRegistry.resolve(state.work.buffers, buffer_id), state}
 
   def handle_call({:unregister_buffer, buffer}, _from, state),
     do: {:reply, :ok, unregister_buffer_state(state, buffer)}
 
   def handle_call({:evict_inactive, protected, ttl_ms}, _from, state) do
-    {evicted, result} =
-      BufferLifecycle.evict_inactive(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        protected,
-        ttl_ms
-      )
+    {evicted, work} =
+      BufferLifecycle.evict_inactive(state.work, state.port.handle, protected, ttl_ms)
 
-    {:reply, evicted, install_sync_result(state, result)}
+    {:reply, evicted, %{state | work: work}}
   end
 
   @impl true
@@ -504,11 +495,15 @@ defmodule Minga.Parser.Manager do
     end
   end
 
-  def handle_cast({:request_parse, buffer}, state),
-    do: {:noreply, force_parse(state, buffer)}
+  def handle_cast({:request_parse, buffer}, state) do
+    work = ParseSync.force_parse(state.work, state.port.handle, buffer)
+    {:noreply, %{state | work: work}}
+  end
 
-  def handle_cast({:touch_buffer, buffer}, state),
-    do: {:noreply, %{state | buffers: BufferLifecycle.touch(state.buffers, buffer)}}
+  def handle_cast({:touch_buffer, buffer}, state) do
+    buffers = BufferLifecycle.touch(state.work.buffers, buffer)
+    {:noreply, %{state | work: ParseSync.put_buffers(state.work, buffers)}}
+  end
 
   @impl true
   def handle_info(
@@ -516,57 +511,25 @@ defmodule Minga.Parser.Manager do
          %Events.BufferChangedEvent{buffer: buffer, sequence: sequence}},
         state
       ) do
-    result =
-      ParseSync.mark_dirty(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        buffer,
-        sequence
-      )
-
-    {:noreply, install_sync_result(state, result)}
+    work = ParseSync.mark_dirty(state.work, state.port.handle, buffer, sequence)
+    {:noreply, %{state | work: work}}
   end
 
   def handle_info({:buffer_sync_snapshot, %SyncSnapshot{} = snapshot}, state) do
-    case RequestHandler.handle_snapshot(state.requests, state.buffers, snapshot) do
-      {:handled, requests, buffers, buffer} ->
-        state = %{state | requests: requests, buffers: buffers}
-        state = pump(state, buffer)
+    case ParseSync.handle_snapshot(state.work, state.port.handle, snapshot) do
+      {:port_write_failed, work} ->
+        {:noreply, recover_write_failure(%{state | work: work})}
 
-        requests =
-          RequestHandler.flush_buffer(state.port.handle, state.requests, state.buffers, buffer)
-
-        {:noreply, %{state | requests: requests}}
-
-      :unhandled ->
-        result =
-          ParseSync.handle_snapshot(
-            state.port.handle,
-            state.buffers,
-            state.parse_scheduler,
-            state.requests,
-            snapshot
-          )
-
-        {:noreply, install_sync_result(state, result)}
+      %ParseSync{} = work ->
+        {:noreply, %{state | work: work}}
     end
   end
 
   def handle_info({port, {:data, data}}, %{port: %{handle: port}} = state) do
-    result =
-      EventRouter.route(
-        data,
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        state.snippets,
-        state.subscribers
-      )
+    {work, snippets} =
+      EventRouter.route(data, port, state.work, state.snippets, state.subscribers)
 
-    {:noreply, install_route_result(state, result)}
+    {:noreply, %{state | work: work, snippets: snippets}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: %{handle: port}} = state),
@@ -582,17 +545,19 @@ defmodule Minga.Parser.Manager do
   end
 
   def handle_info({:request_timeout, request_id}, state) do
-    {:noreply, requests} = RequestHandler.reply(state.requests, request_id, nil)
-    {:noreply, %{state | requests: requests}}
+    {:noreply, requests} = RequestHandler.reply(state.work.requests, request_id, nil)
+    {:noreply, %{state | work: ParseSync.put_requests(state.work, requests)}}
   end
 
-  def handle_info({:buffer_request_timeout, token}, state),
-    do: {:noreply, %{state | requests: RequestHandler.timeout(state.requests, token)}}
+  def handle_info({:buffer_request_timeout, token}, state) do
+    requests = RequestHandler.timeout(state.work.requests, token)
+    {:noreply, %{state | work: ParseSync.put_requests(state.work, requests)}}
+  end
 
   def handle_info({:parse_admission_timeout, buffer, token}, state),
     do:
       handle_parse_timeout(
-        ParseSync.handle_timeout(state.parse_scheduler, state.requests, buffer, token),
+        ParseSync.handle_timeout(state.work, buffer, token),
         buffer,
         state
       )
@@ -619,108 +584,34 @@ defmodule Minga.Parser.Manager do
   defp enqueue_request(state, buffer, from, timeout, builder) do
     case RequestHandler.enqueue(
            state.port.handle,
-           state.buffers,
-           state.requests,
+           state.work.buffers,
+           state.work.requests,
            buffer,
            from,
            timeout,
            builder
          ) do
-      {:noreply, requests} -> {:noreply, %{state | requests: requests}}
-      {:reply, nil, requests} -> {:reply, nil, %{state | requests: requests}}
+      {:noreply, requests} ->
+        {:noreply, %{state | work: ParseSync.put_requests(state.work, requests)}}
+
+      {:reply, nil, requests} ->
+        {:reply, nil, %{state | work: ParseSync.put_requests(state.work, requests)}}
     end
-  end
-
-  @spec register_buffer_state(t(), pid(), BufferConfig.t()) :: {pos_integer(), t()}
-  defp register_buffer_state(state, buffer, config) do
-    {buffer_id, {buffers, scheduler, requests}} =
-      BufferLifecycle.register(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        buffer,
-        config
-      )
-
-    {buffer_id, %{state | buffers: buffers, parse_scheduler: scheduler, requests: requests}}
   end
 
   @spec unregister_buffer_state(t(), pid()) :: t()
   defp unregister_buffer_state(state, buffer) do
-    result =
-      BufferLifecycle.unregister(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        buffer
-      )
-
-    install_sync_result(state, result)
+    work = BufferLifecycle.unregister(state.work, state.port.handle, buffer)
+    %{state | work: work}
   end
 
   @spec handle_buffer_down(t(), pid(), reference()) :: t()
   defp handle_buffer_down(state, pid, ref) do
-    case BufferLifecycle.handle_down(
-           state.port.handle,
-           state.buffers,
-           state.parse_scheduler,
-           state.requests,
-           pid,
-           ref
-         ) do
+    case BufferLifecycle.handle_down(state.work, state.port.handle, pid, ref) do
       :ignored -> state
-      result -> install_sync_result(state, result)
+      work -> %{state | work: work}
     end
   end
-
-  @spec pump(t(), pid()) :: t()
-  defp pump(state, buffer) do
-    result =
-      ParseSync.pump(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        buffer
-      )
-
-    install_sync_result(state, result)
-  end
-
-  @spec force_parse(t(), pid()) :: t()
-  defp force_parse(state, buffer) do
-    result =
-      ParseSync.force_parse(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests,
-        buffer
-      )
-
-    install_sync_result(state, result)
-  end
-
-  @spec install_sync_result(t(), ParseSync.result()) :: t()
-  defp install_sync_result(state, {:ok, buffers, scheduler, requests}),
-    do: %{state | buffers: buffers, parse_scheduler: scheduler, requests: requests}
-
-  defp install_sync_result(state, {:port_write_failed, buffers, scheduler, requests}) do
-    state = %{state | buffers: buffers, parse_scheduler: scheduler, requests: requests}
-    recover_write_failure(state)
-  end
-
-  @spec install_route_result(t(), EventRouter.route_result()) :: t()
-  defp install_route_result(state, {:noreply, buffers, scheduler, requests, snippets}),
-    do: %{
-      state
-      | buffers: buffers,
-        parse_scheduler: scheduler,
-        requests: requests,
-        snippets: snippets
-    }
 
   @spec handle_manual_restart(t()) :: {:reply, :ok | {:error, :binary_not_found}, t()}
   defp handle_manual_restart(state) do
@@ -761,22 +652,14 @@ defmodule Minga.Parser.Manager do
 
   @spec restart_pumps(t()) :: t()
   defp restart_pumps(state) do
-    result =
-      ParseSync.restart_pumps(
-        state.port.handle,
-        state.buffers,
-        state.parse_scheduler,
-        state.requests
-      )
-
-    install_sync_result(state, result)
+    %{state | work: ParseSync.restart_pumps(state.work, state.port.handle)}
   end
 
   @spec handle_port_exit(non_neg_integer(), t()) :: {:noreply, t()}
   defp handle_port_exit(status, state) do
     log_port_exit(status)
     state = fail_pending(state)
-    state = %{state | parse_scheduler: ParseSync.reset_admission(state.parse_scheduler)}
+    state = %{state | work: ParseSync.reset_admission(state.work)}
     :ok = PortLifecycle.close(state.port.handle)
     state = %{state | port: PortState.closed(state.port)}
 
@@ -790,7 +673,7 @@ defmodule Minga.Parser.Manager do
   @spec recover_write_failure(t()) :: t()
   defp recover_write_failure(state) do
     state = fail_pending(state)
-    state = %{state | parse_scheduler: ParseSync.reset_admission(state.parse_scheduler)}
+    state = %{state | work: ParseSync.reset_admission(state.work)}
     :ok = PortLifecycle.close(state.port.handle)
     state = %{state | port: PortState.closed(state.port)}
     schedule_restart(state)
@@ -798,8 +681,8 @@ defmodule Minga.Parser.Manager do
 
   @spec fail_pending(t()) :: t()
   defp fail_pending(state) do
-    {requests, snippets} = PortLifecycle.fail_pending(state.requests, state.snippets)
-    %{state | requests: requests, snippets: snippets}
+    {requests, snippets} = PortLifecycle.fail_pending(state.work.requests, state.snippets)
+    %{state | work: ParseSync.put_requests(state.work, requests), snippets: snippets}
   end
 
   @spec schedule_restart(t()) :: t()
@@ -833,8 +716,7 @@ defmodule Minga.Parser.Manager do
   @spec handle_parse_timeout(ParseSync.timeout_result(), pid(), t()) :: {:noreply, t()}
   defp handle_parse_timeout(:ok, _buffer, state), do: {:noreply, state}
 
-  defp handle_parse_timeout({:drop_buffer, requests}, buffer, state) do
-    state = %{state | requests: requests}
+  defp handle_parse_timeout(:drop_buffer, buffer, state) do
     {:noreply, unregister_buffer_state(state, buffer)}
   end
 

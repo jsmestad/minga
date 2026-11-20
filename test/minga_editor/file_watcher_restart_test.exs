@@ -35,7 +35,7 @@ defmodule MingaEditor.FileWatcherRestartTest do
     ctx = start_editor("open", file_path: file, events_registry: registry)
     initial_state = :sys.get_state(watcher)
     assert initial_state.subscriber == ctx.editor
-    assert initial_state.watched_files == MapSet.new([file])
+    assert initial_state.intent.files == MapSet.new([file])
 
     ref = Process.monitor(watcher)
     Process.exit(watcher, :kill)
@@ -46,7 +46,7 @@ defmodule MingaEditor.FileWatcherRestartTest do
     replacement_state = await_authority(replacement, ctx.editor, file)
     assert replacement_state.subscriber == ctx.editor
     assert is_reference(replacement_state.subscriber_monitor)
-    assert replacement_state.watched_files == MapSet.new([file])
+    assert replacement_state.intent.files == MapSet.new([file])
     assert ctx.buffer == editor_state(ctx).workspace.buffers.active
   end
 
@@ -137,7 +137,7 @@ defmodule MingaEditor.FileWatcherRestartTest do
 
     send(stale_worker, {:release_restart_race_watcher, :stale})
     replacement_state = :sys.get_state(replacement)
-    assert replacement_state.watched_project_dirs == MapSet.new([new_root])
+    assert replacement_state.intent.project_dirs == MapSet.new([new_root])
     assert replacement_state.watched_dirs == MapSet.new([new_root])
     assert EffectScheduler.stats(scheduler).running == 0
     refute EffectScheduler.active?(scheduler, WatcherSync)
@@ -174,7 +174,7 @@ defmodule MingaEditor.FileWatcherRestartTest do
   defp await_authority(watcher, editor, file, attempts) when attempts > 0 do
     state = :sys.get_state(watcher)
 
-    if state.subscriber == editor and state.watched_files == MapSet.new([file]) do
+    if state.subscriber == editor and state.intent.files == MapSet.new([file]) do
       state
     else
       receive do
@@ -191,7 +191,7 @@ defmodule MingaEditor.FileWatcherRestartTest do
   defp await_watched_files(watcher, expected, attempts) when attempts > 0 do
     state = :sys.get_state(watcher)
 
-    if state.watched_files == expected do
+    if state.intent.files == expected do
       state
     else
       receive do

@@ -87,7 +87,7 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @doc false
+  @doc "Identifies the current Agent tab and conversation before the model catalog loads."
   @spec catalog_destination(state()) :: CatalogStartup.destination()
   def catalog_destination(state) do
     case find_agent_tab(state) do
@@ -99,7 +99,7 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @doc false
+  @doc "Runs an Agent workspace action after catalog startup validates its destination."
   @spec resume_catalog_action(state(), CatalogStartup.workspace_action()) :: state()
   def resume_catalog_action(state, {:toggle, _destination}) do
     state = ensure_agent_state(state)
@@ -852,6 +852,36 @@ defmodule MingaEditor.Commands.Agent do
       )
   end
 
+  @doc "Queues a displayed composer into exactly the rendered saved-session turn."
+  @spec queue_displayed_prompt(state(), :steering | :follow_up, Session.queue_target()) :: state()
+  def queue_displayed_prompt(state, kind, target) do
+    panel = state.workspace.agent_ui.panel
+    text = PromptBuffer.prompt_text(panel)
+
+    with false <- PromptBuffer.input_empty?(panel),
+         false <-
+           SlashCommand.slash_command?(text) or SlashCommand.indented_credential_command?(text),
+         :ready <- prompt_submit_status(state, panel),
+         {:ok, resolved} <- resolve_prompt_for_session(state, text, panel.model_name),
+         {:saved, updated} <- DraftWorkflow.queue(state, kind, resolved, target) do
+      updated
+    else
+      true ->
+        NoticeWorkflow.publish(state, "Type a message to queue. Use Send for slash commands.")
+
+      :ordinary ->
+        NoticeWorkflow.publish(state, "That Agent turn is no longer active. Your draft was kept.")
+
+      {:blocked, message} ->
+        NoticeWorkflow.publish(state, message)
+
+      {:error, message} ->
+        NoticeWorkflow.publish(state, message)
+    end
+  catch
+    :exit, _ -> NoticeWorkflow.publish(state, "Agent session unavailable. Your draft was kept.")
+  end
+
   @spec resolve_and_deliver_follow_up(state(), String.t(), String.t()) :: state()
   defp resolve_and_deliver_follow_up(state, text, model) do
     case resolve_prompt_for_session(state, text, model) do
@@ -875,14 +905,11 @@ defmodule MingaEditor.Commands.Agent do
         NoticeWorkflow.publish(state, message)
 
       submission ->
-        case DraftWorkflow.queue(state, kind, resolved) do
-          {:saved, updated} -> updated
-          :ordinary -> deliver_unqueued_composer(state, kind, resolved, submission)
-        end
+        deliver_composer_input(state, kind, resolved, submission)
     end
   end
 
-  @spec deliver_unqueued_composer(
+  @spec deliver_composer_input(
           state(),
           :steering | :follow_up,
           String.t() | [ReqLLM.Message.ContentPart.t()],
@@ -890,6 +917,49 @@ defmodule MingaEditor.Commands.Agent do
           | {:remote, DraftSave.target()}
           | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
         ) :: state()
+  defp deliver_composer_input(
+         %{frontend: %{composer_send_now?: true}} = state,
+         _kind,
+         content,
+         submission
+       ),
+       do: deliver_unqueued_composer(state, :send_now, content, submission)
+
+  defp deliver_composer_input(state, kind, content, submission) do
+    case DraftWorkflow.queue(state, kind, content) do
+      {:saved, updated} -> updated
+      :ordinary -> deliver_unqueued_composer(state, kind, content, submission)
+    end
+  end
+
+  @spec deliver_unqueued_composer(
+          state(),
+          :send_now | :steering | :follow_up,
+          String.t() | [ReqLLM.Message.ContentPart.t()],
+          :ordinary
+          | {:remote, DraftSave.target()}
+          | {:attached, DraftSave.target(), [MingaAgent.DraftAttachment.identity()]}
+        ) :: state()
+  defp deliver_unqueued_composer(
+         %{
+           workspace: %{
+             agent_ui: %UIState{connection: %{target: %{session: session, session_id: record}}}
+           }
+         } = state,
+         :send_now,
+         content,
+         :ordinary
+       )
+       when node(session) == node(),
+       do: show_prompt_delivery(state, Session.send_idle_composer(session, record, content))
+
+  defp deliver_unqueued_composer(state, :send_now, _content, :ordinary),
+    do:
+      NoticeWorkflow.publish(
+        state,
+        "This Agent daemon does not support exact Send. Use Enter or reconnect to an updated daemon."
+      )
+
   defp deliver_unqueued_composer(
          %{
            workspace: %{
@@ -2659,6 +2729,12 @@ defmodule MingaEditor.Commands.Agent do
         description: "Inspect Agent draft attachments",
         requires_buffer: false,
         execute: &MingaEditor.UI.Picker.AgentDraftAttachmentSource.open/1
+      },
+      %Minga.Command{
+        name: :agent_queued_inputs,
+        description: "Inspect queued Agent inputs",
+        requires_buffer: false,
+        execute: &MingaEditor.UI.Picker.AgentQueuedInputSource.open/1
       },
       %Minga.Command{
         name: :agent_answer_question,

@@ -87,9 +87,10 @@ func TestApprovalWaitingStatusIsStaticAndStoppable(t *testing.T) {
 			t.Fatalf("status %d active-turn mismatch", status)
 		}
 	}
-	chat := protocol.AgentChat{Visible: true, Status: 5, Prompt: "unfinished draft"}
-	if agentComposerControlLabel(chat, 80) != "Stop" || agentComposerControlLabel(chat, 3) != "■" {
-		t.Fatal("approval waiting replaced Stop with Send")
+	chat := protocol.AgentChat{Visible: true, Status: 5, Prompt: "unfinished draft", StopTarget: composerTestStopTarget()}
+	controls := agentTurnControls(chat, 80)
+	if controls[0].enabled || !controls[3].enabled {
+		t.Fatal("approval waiting must disable Send and allow Stop")
 	}
 	if agentComposerTitle(chat) != "Awaiting approval" {
 		t.Fatal("approval waiting still claims execution")

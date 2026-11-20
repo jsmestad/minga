@@ -67,6 +67,20 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
     end
   end
 
+  @doc "Resolves the owner and revision of the exact active composer presentation."
+  @spec prompt_source(t(), pos_integer(), pos_integer()) ::
+          {:ok, {pid(), non_neg_integer(), {non_neg_integer(), pid(), String.t()}}}
+          | {:error, :inactive | :unavailable}
+  def prompt_source(%__MODULE__{table: table} = reader, window_id, presentation_id) do
+    with {:ok, owner} <- read(table, {:prompt_owner, window_id, presentation_id}),
+         {:ok, {buffer, version}} <- source(reader, window_id, presentation_id) do
+      {:ok, {buffer, version, owner}}
+    else
+      :error -> {:error, :inactive}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @doc "Resolves a published retained source for physical observations, without admitting text input."
   @spec retained_source(t(), pos_integer(), pos_integer()) ::
           {:ok, {pid(), non_neg_integer()}} | {:error, :unknown | :unavailable}
