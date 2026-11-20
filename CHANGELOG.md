@@ -88,6 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- CI can save a refreshed Dialyzer cache when `mix.exs` changes which applications the PLT includes, instead of repeating that repair on every run.
 - Adversarial diagnostics ignore replies from superseded or invalidated analyses, so an old reply cannot restore findings after an edit, close, or clear.
 - Repeated config reloads keep using the config home selected at startup.
 - Source launchers keep Minga configuration and runtime data, including project switcher history, separate from the installed editor. Run `make clean` after quitting the source editor to reset the current worktree's profile without deleting build artifacts.
