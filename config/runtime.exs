@@ -34,7 +34,7 @@ standalone_release? = System.get_env("MINGA_STANDALONE_TUI") == "1"
 standalone_tui? = standalone_release? and System.get_env("MINGA_STANDALONE_EDITOR") == "1"
 
 if port_mode == :connected or standalone_tui? do
-  log_dir = Path.expand("~/.local/share/minga")
+  log_dir = Minga.UserPaths.data_dir()
   File.mkdir_p!(log_dir)
   log_path = Path.join(log_dir, "minga.log")
   config :logger, :default_handler, config: [type: {:file, String.to_charlist(log_path)}]

@@ -50,11 +50,9 @@ The last command must report one passing test and one failure, `test_blank_name`
 
 ## Start an isolated frontend
 
-In a second terminal, set `checkout` to the absolute path of the built checkout, `project` to the disposable repository path printed above, and `frontend` to `gui` on macOS or `tui` for Go. Put the pinned tool binaries on `PATH`. In the same terminal, repeat only the `launch_workspace` call when testing restart or reconnect. Create a fresh profile for a new run.
+Use a disposable worktree with the build you want to test, and put the pinned tool binaries on `PATH`. Set `checkout` to that worktree, `project` to the disposable repository printed above, and `frontend` to `gui` on macOS or `tui` for Go. Run `make clean` in the disposable worktree once before the first launch. Repeat only `launch_workspace` when testing restart or reconnect.
 
 ```sh
-profile=$(mktemp -d "${TMPDIR:-/tmp}/minga-working-profile.XXXXXX") || exit 1
-mkdir -p "$profile"/home "$profile"/config "$profile"/data "$profile"/cache "$profile"/state || exit 1
 launch_workspace() (
   case "$frontend" in
     gui) set -- +gui ;;
@@ -62,11 +60,7 @@ launch_workspace() (
     *) printf 'Set frontend to gui or tui\n' >&2; exit 1 ;;
   esac
   cd "$checkout" || exit 1
-  env -i PATH="$PATH" TERM="${TERM:-xterm-256color}" LANG="${LANG:-C.UTF-8}" \
-    HOME="$profile/home" XDG_CONFIG_HOME="$profile/config" XDG_DATA_HOME="$profile/data" \
-    XDG_CACHE_HOME="$profile/cache" XDG_STATE_HOME="$profile/state" \
-    MIX_ARCHIVES="${MIX_ARCHIVES:-$HOME/.mix/archives}" MINGA_SKIP_NATIVE_LAUNCH_BUILD=1 \
-    bin/minga "$@" "$project/greeting.py"
+  bin/minga "$@" "$project/greeting.py"
 )
 launch_workspace
 ```

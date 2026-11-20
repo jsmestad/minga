@@ -5,7 +5,7 @@
 /// The cache is invalidated automatically when the Metal shader library changes
 /// (detected via SHA-256 hash of the metallib binary).
 ///
-/// Cache location: `~/Library/Caches/com.minga.editor/pipelines-<hash>.metalarchive`
+/// The cache is namespaced by the app bundle ID; Debug builds also honor XDG_CACHE_HOME.
 
 import Metal
 import CryptoKit
@@ -19,9 +19,26 @@ struct PipelineCache {
 
     /// Directory where pipeline caches are stored.
     /// Tests can override by passing a custom directory to load/save/clean methods.
-    static var cacheDirectory: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        return caches.appendingPathComponent("com.minga.editor", isDirectory: true)
+    static let cacheDirectory: URL = {
+        let bundle = Bundle.main
+        let bundleIdentifier = (bundle.bundleURL.pathExtension == "app" ? bundle.bundleIdentifier : nil)
+            ?? "com.minga.editor.dev"
+#if DEBUG
+        let xdgCacheHome = ProcessInfo.processInfo.environment["XDG_CACHE_HOME"]
+#else
+        let xdgCacheHome: String? = nil
+#endif
+        return cacheDirectory(base: .cachesDirectory, bundleIdentifier: bundleIdentifier, xdgCacheHome: xdgCacheHome)
+    }()
+
+    static func cacheDirectory(base: @autoclosure () -> URL, bundleIdentifier: String, xdgCacheHome: String?) -> URL {
+        let root: URL
+        if let xdgCacheHome, xdgCacheHome.hasPrefix("/") {
+            root = URL(fileURLWithPath: xdgCacheHome, isDirectory: true)
+        } else {
+            root = base()
+        }
+        return root.appendingPathComponent(bundleIdentifier, isDirectory: true)
     }
 
     /// Computes a SHA-256 hash of the Metal library's function names and device name

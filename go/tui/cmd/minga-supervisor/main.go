@@ -79,14 +79,15 @@ func run() error {
 	var shutdownOnce sync.Once
 	requestShutdown := func() { shutdownOnce.Do(func() { close(shutdown) }) }
 
-	beamDone := make(chan struct{})
+	beamDone := make(chan error, 1)
 	go func() {
-		if err := beamCmd.Wait(); err != nil {
+		err := beamCmd.Wait()
+		if err != nil {
 			logger.Printf("BEAM exited: %v", err)
 		} else {
 			logger.Printf("BEAM exited cleanly")
 		}
-		close(beamDone)
+		beamDone <- err
 		requestShutdown()
 	}()
 
@@ -108,12 +109,14 @@ func run() error {
 
 	_ = beamIn.Close()
 	select {
-	case <-beamDone:
+	case err := <-beamDone:
+		return err
 	case <-time.After(beamStopTimeout):
 		logger.Printf("BEAM did not exit in time; killing")
 		_ = beamCmd.Process.Kill()
+		<-beamDone
+		return errors.New("BEAM did not exit in time")
 	}
-	return nil
 }
 
 type supervisor struct {
@@ -322,7 +325,9 @@ func (s *supervisor) rendererMtime() int64 {
 }
 
 func launchBeam(root string, args []string, stderr io.Writer, logger *log.Logger) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
-	mixArgs := append([]string{"minga"}, args...)
+	mixArgs := make([]string, 2+len(args))
+	mixArgs[0], mixArgs[1] = "minga", "--"
+	copy(mixArgs[2:], args)
 	cmd := exec.Command("mix", mixArgs...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),

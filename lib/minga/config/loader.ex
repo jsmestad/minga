@@ -693,7 +693,7 @@ defmodule Minga.Config.Loader do
 
   @spec user_plugins_dir(String.t() | nil) :: String.t()
   defp user_plugins_dir(config_home) do
-    Path.join([config_base_dir(config_home), "minga", "plugins"])
+    Path.join(config_dir(config_home), "plugins")
   end
 
   @spec project_plugins_dir() :: String.t()
@@ -1017,23 +1017,12 @@ defmodule Minga.Config.Loader do
 
   @spec default_config_path(String.t() | nil) :: String.t()
   defp default_config_path(config_home) do
-    Path.join([config_base_dir(config_home), "minga", "config.exs"])
+    Path.join(config_dir(config_home), "config.exs")
   end
 
-  @spec config_base_dir(String.t() | nil) :: String.t()
-  defp config_base_dir(config_home) do
-    case config_home do
-      dir when is_binary(dir) ->
-        dir
-
-      _ ->
-        case System.get_env("XDG_CONFIG_HOME") do
-          nil -> Path.expand("~/.config")
-          "" -> Path.expand("~/.config")
-          dir -> dir
-        end
-    end
-  end
+  @spec config_dir(String.t() | nil) :: String.t()
+  defp config_dir(config_home) when is_binary(config_home), do: Path.join(config_home, "minga")
+  defp config_dir(nil), do: Minga.UserPaths.config_dir!()
 
   @spec load_project_mcp_json() :: String.t() | nil
   defp load_project_mcp_json do

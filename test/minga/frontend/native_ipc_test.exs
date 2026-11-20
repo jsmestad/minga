@@ -144,6 +144,31 @@ defmodule Minga.Frontend.NativeIPCTest do
     assert byte_size(Base.url_decode64!(ctx.descriptor["token"], padding: false)) == 32
   end
 
+  test "development and production publish independent endpoints under one runtime parent", ctx do
+    suffix = System.unique_integer([:positive])
+    production_descriptor = Path.join(ctx.runtime_dir, "current.json")
+
+    {IPCSupervisor,
+     name: nil,
+     server_name: nil,
+     task_supervisor_name: Module.concat(__MODULE__, "DevelopmentTasks#{suffix}"),
+     runtime_parent: ctx.runtime_parent,
+     development: true,
+     app_instance_id: "development-instance-123456",
+     app_pid: ctx.app_pid,
+     euid: File.stat!(ctx.runtime_parent).uid,
+     kill_checker: fn _pid -> true end}
+    |> Supervisor.child_spec(id: :development_ipc)
+    |> start_supervised!()
+
+    development_dir = Path.join(ctx.runtime_parent, "com.minga.dev")
+    development = development_dir |> Path.join("current.json") |> File.read!() |> JSON.decode!()
+
+    assert Path.dirname(development["socket_path"]) == development_dir
+    assert development["app_instance_id"] != ctx.descriptor["app_instance_id"]
+    assert production_descriptor |> File.read!() |> JSON.decode!() == ctx.descriptor
+  end
+
   test "refuses a symlinked runtime directory", ctx do
     suffix = System.unique_integer([:positive])
     rejected_parent = Path.join(System.tmp_dir!(), "minga-native-ipc-rejected-#{suffix}")

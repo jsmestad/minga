@@ -40,6 +40,9 @@ jobs:
       - name: Check real-session evidence integrity
         run: python3 -m unittest discover -s test/scripts -p collect_rejection_sessions_test.py
 
+      - name: Check development profile isolation
+        run: python3 -m unittest discover -s test/scripts -p dev_profile_test.py
+
       - run: mix deps.get
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors

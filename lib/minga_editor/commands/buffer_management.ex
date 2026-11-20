@@ -724,7 +724,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       try do
         Config.config_path()
       catch
-        :exit, _ -> Path.expand("~/.config/minga/config.exs")
+        :exit, _ -> Path.join(Minga.UserPaths.config_dir!(), "config.exs")
       end
 
     config_dir = Path.dirname(config_path)

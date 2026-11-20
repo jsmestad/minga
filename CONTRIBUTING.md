@@ -40,6 +40,12 @@ bin/minga              # Empty buffer
 bin/minga path/to/file # Open a file
 ```
 
+Source launchers require Python 3 and keep Minga runtime state in `.minga-dev/profile` in the current worktree. This includes Minga config, extensions, history, sessions, and credentials. They do not import the installed app's profile or provider environment variables.
+
+Quit the source editor and run `make clean` to delete that profile. The next launch starts with defaults. This command does not remove build outputs, dependencies, project files, or the installed app's profile. It refuses while a source editor is using the profile.
+
+For a one-off source smoke run that should not use the worktree profile, run `python3 scripts/dev_profile.py fresh minga path/to/file`. The launcher removes that temporary profile when the editor exits. For restart testing, use the persistent profile in a disposable worktree instead.
+
 ## Running Tests
 
 ```bash

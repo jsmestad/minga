@@ -7,6 +7,9 @@ config :logger, level: :warning
 # Development checkouts load bundled extensions directly from the source tree when priv copies are not present yet.
 config :minga, allow_source_extension_fallback: true
 
+# Source launches must not write to the installed editor's project switcher.
+config :minga, known_projects_filename: "known-projects-dev"
+
 # Always compile extensions during development process startup. The compile cache
 # keys on extension source + toolchain + minga version, so editing Minga modules
 # that extensions compile against could otherwise serve stale boot artifacts.

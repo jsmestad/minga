@@ -81,6 +81,7 @@ public struct BottomPanelView: View {
                             }
                             .onEnded { _ in
                                 dragStartHeight = 0
+                                state.persistUserHeight()
                                 // Send final height to BEAM as a percentage of window height.
                                 guard windowHeight > 0 else { return }
                                 let percent = Int((state.userHeight / windowHeight) * 100)

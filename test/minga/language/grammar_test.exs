@@ -44,6 +44,21 @@ defmodule Minga.Language.GrammarTest do
     test "returns nil for nonexistent language" do
       assert Grammar.query_path("nonexistent_lang_xyz") == nil
     end
+
+    test "prefers user queries under XDG config" do
+      language = "profile_test"
+      dir = Path.join([System.fetch_env!("XDG_CONFIG_HOME"), "minga", "queries", language])
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      highlights = Path.join(dir, "highlights.scm")
+      injections = Path.join(dir, "injections.scm")
+      File.write!(highlights, "(identifier) @variable")
+      File.write!(injections, "(comment) @injection.content")
+
+      assert Grammar.query_path(language) == highlights
+      assert Grammar.injection_query_path(language) == injections
+    end
   end
 
   describe "read_query/1" do
@@ -92,10 +107,12 @@ defmodule Minga.Language.GrammarTest do
   end
 
   describe "dynamic_grammar_path/1" do
-    test "returns path with correct extension" do
-      path = Grammar.dynamic_grammar_path("custom")
-      assert String.contains?(path, ".config/minga/grammars/custom.")
-      assert String.ends_with?(path, ".dylib") or String.ends_with?(path, ".so")
+    test "returns the XDG config path with the platform extension" do
+      config_home = System.fetch_env!("XDG_CONFIG_HOME")
+      extension = if :os.type() == {:unix, :darwin}, do: "dylib", else: "so"
+
+      assert Grammar.dynamic_grammar_path("custom") ==
+               Path.join([config_home, "minga", "grammars", "custom.#{extension}"])
     end
   end
 end

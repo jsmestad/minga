@@ -1,4 +1,4 @@
-.PHONY: help done lint lint.full lint.format lint.credo lint.credo.changed lint.compile lint.dialyzer lint.dialyzer.incremental lint.ex-dna lint.reach lint.fix test test.llm \
+.PHONY: help clean done lint lint.full lint.format lint.credo lint.credo.changed lint.compile lint.dialyzer lint.dialyzer.incremental lint.ex-dna lint.reach lint.fix test test.llm \
        native.support native.tui native.go-tui xcodegen-install xcodegen-generate \
        release release-tui release-mac install install-tui install-mac uninstall
 
@@ -11,6 +11,7 @@ help:
 	@printf "\033[1;36mRun the editor\033[0m\n"
 	@printf "  \033[1mbin/minga\033[0m          Launch the Go/Bubble Tea TUI\n"
 	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
+	@printf "  \033[1mmake clean\033[0m         Reset this worktree's Minga development profile\n\n"
 	@printf "\033[1;36mQuality checks\033[0m\n"
 	@printf "  \033[1mmake done\033[0m          Pre-review gate: lint + ExUnit + changed macOS build/tests (~4m warm on Apple silicon, ~2m without macOS changes)\n"
 	@printf "  \033[1mmake lint\033[0m          Fast local gate: format, changed Credo, ExDNA, compile, incremental Dialyzer, Reach arch policy (parallel, ~25s warm)\n"
@@ -31,6 +32,9 @@ help:
 	@printf "  \033[1mmake install\033[0m       Install available local artifacts\n"
 	@printf "  \033[1mmake uninstall\033[0m     Remove installed local artifacts\n\n"
 	@printf "\033[2mTip: pass a file to a launcher, for example \033[0m\033[1mbin/minga-go README.md\033[0m\n\n"
+
+clean:
+	@python3 scripts/dev_profile.py clean
 
 # ── Platform detection ──────────────────────────────────────────────────
 OS       := $(shell uname -s)

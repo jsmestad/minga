@@ -8,6 +8,13 @@ private let endpointTransientExit: Int32 = 3
 private let endpointInsecureExit: Int32 = 4
 private let preAcceptanceEndpointLossExit: Int32 = 5
 
+// Keep the leaf names in sync with MingaEditor.NativeIPC.Server.
+#if DEBUG
+private let runtimeDirectoryName = "com.minga.dev"
+#else
+private let runtimeDirectoryName = "com.minga.editor"
+#endif
+
 private struct Descriptor: Decodable {
     let version: Int
     let appInstanceID: String
@@ -92,22 +99,52 @@ private func fail(_ message: String, status: Int32 = 1) -> Never {
 
 private func permissions(_ mode: mode_t) -> mode_t { mode & 0o777 }
 
-private func runtimeParentDirectory() -> String {
-    let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
-    guard length > 1 else { fail("cannot discover Darwin's per-user temporary directory") }
+private enum Invocation {
+    static let parsed: (arguments: [String], explicitParent: String?) = {
+        var arguments = Array(CommandLine.arguments.dropFirst())
+        guard arguments.indices.contains(1), arguments[1] == "--runtime-parent" else {
+            return (arguments, nil)
+        }
+        guard arguments.indices.contains(2) else { fail("--runtime-parent requires a directory") }
+        let parent = arguments[2]
+        arguments.removeSubrange(1...2)
+        return (arguments, parent)
+    }()
 
-    var buffer = [CChar](repeating: 0, count: length)
-    guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) == length else {
-        fail("cannot read Darwin's per-user temporary directory")
-    }
+    static let runtimeParent: String = {
+        if let path = parsed.explicitParent {
+            guard path.hasPrefix("/") else {
+                fail("--runtime-parent must be an absolute path", status: endpointInsecureExit)
+            }
+            let parent = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+            do {
+                try validateDirectory(parent, exactMode: nil)
+            } catch {
+                fail("--runtime-parent must be an existing private directory owned by the current user", status: endpointInsecureExit)
+            }
+            return parent
+        }
 
-    let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-    return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+        let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
+        guard length > 1 else { fail("cannot discover Darwin's per-user temporary directory") }
+
+        var buffer = [CChar](repeating: 0, count: length)
+        guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) == length else {
+            fail("cannot read Darwin's per-user temporary directory")
+        }
+
+        let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+    }()
 }
 
+private func runtimeParentDirectory() -> String { Invocation.runtimeParent }
+
 private func runtimeDirectory() -> String {
-    URL(fileURLWithPath: runtimeParentDirectory(), isDirectory: true)
-        .appendingPathComponent("com.minga.editor", isDirectory: true).path
+    // Explicit parents use their own scoped endpoint, including Debug test apps.
+    let directoryName = Invocation.parsed.explicitParent == nil ? runtimeDirectoryName : "com.minga.editor"
+    return URL(fileURLWithPath: runtimeParentDirectory(), isDirectory: true)
+        .appendingPathComponent(directoryName, isDirectory: true).path
 }
 
 private func descriptorPath() -> String { runtimeDirectory() + "/current.json" }
@@ -128,12 +165,6 @@ private func validateDirectory(_ path: String, exactMode: mode_t?) throws {
 private func validateRuntimeDirectory() throws {
     try validateDirectory(runtimeParentDirectory(), exactMode: nil)
     try validateDirectory(runtimeDirectory(), exactMode: 0o700)
-
-    let expected = URL(fileURLWithPath: runtimeParentDirectory(), isDirectory: true)
-        .appendingPathComponent("com.minga.editor", isDirectory: true).standardizedFileURL.path
-    guard URL(fileURLWithPath: runtimeDirectory()).standardizedFileURL.path == expected else {
-        throw IPCError.insecure("IPC runtime directory escapes Darwin's per-user temporary directory")
-    }
 }
 
 private func decodeBase64URL(_ value: String) -> Data? {
@@ -231,7 +262,7 @@ private final class VnodeWatcher {
     }
 
     private func add(path: String) throws {
-        let descriptor = open(path, O_EVTONLY | O_CLOEXEC)
+        let descriptor = open(path, O_EVTONLY | O_CLOEXEC | O_NOFOLLOW)
         guard descriptor >= 0 else { throw IPCError.operational("cannot watch for Minga.app startup") }
         descriptors.append(descriptor)
 
@@ -1093,7 +1124,7 @@ private func parseRequestArguments(
 }
 
 private func main() -> Int32 {
-    let args = Array(CommandLine.arguments.dropFirst())
+    let args = Invocation.parsed.arguments
     guard let command = args.first else { fail("minga-ipc requires a command") }
 
     do {

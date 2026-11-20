@@ -1,28 +1,5 @@
 #!/bin/sh
-# Development launcher for Minga (native macOS GUI mode).
-#
-# Builds the Swift/Metal renderer via Xcode, then starts the editor with
-# the Metal-rendered native window instead of the terminal UI.
-#
-# Usage:
-#   bin/minga-gui README.md
-#   bin/minga-gui              # empty buffer
-
-set -e
-
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-XCODEPROJ="$PROJECT_DIR/macos/Minga.xcodeproj"
-
-(cd "$PROJECT_DIR" && mix native.build.support)
-
-# Build the macOS renderer if needed.
-ARCH=$(uname -m)
-echo "Building Minga.app..."
-xcodebuild -project "$XCODEPROJ" -scheme Minga -configuration Debug \
-  -destination "platform=macOS,arch=$ARCH" build -quiet 2>&1 \
-  | grep -vE "^$|^note:|^Run script build phase" || true
-echo "Build complete."
-
-exec elixir -S mix run --no-halt --no-start \
-  -e 'safe_mode = Minga.CLI.safe_args?(System.argv()); Minga.SafeMode.put(safe_mode); Application.put_env(:minga, :start_editor, true); Application.put_env(:minga, :backend, :gui); Application.ensure_all_started(:minga); Minga.CLI.main(System.argv())' \
-  -- "$@"
+# Launch the worktree macOS GUI.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+exec python3 "$root/scripts/dev_profile.py" launch minga-mac "$@"

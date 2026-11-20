@@ -95,11 +95,22 @@ struct PipelineCacheURLTests {
         #expect(url.deletingLastPathComponent().path == "/tmp/test-cache")
     }
 
-    @Test("Default directory points to ~/Library/Caches/com.minga.editor")
-    func defaultDirectory() {
-        let dir = PipelineCache.cacheDirectory
-        #expect(dir.lastPathComponent == "com.minga.editor")
-        #expect(dir.pathComponents.contains("Caches"))
+    @Test("Release, Debug, and the source profile do not share pipeline caches")
+    func profileDirectories() {
+        let caches = URL(fileURLWithPath: "/home/alice/Library/Caches", isDirectory: true)
+        let release = PipelineCache.cacheDirectory(
+            base: caches, bundleIdentifier: "com.minga.editor", xdgCacheHome: nil
+        )
+        let debug = PipelineCache.cacheDirectory(
+            base: caches, bundleIdentifier: "com.minga.editor.dev", xdgCacheHome: "relative/path"
+        )
+        let profile = PipelineCache.cacheDirectory(
+            base: caches, bundleIdentifier: "com.minga.editor.dev", xdgCacheHome: "/worktree/.minga-dev/cache"
+        )
+
+        #expect(release.path == "/home/alice/Library/Caches/com.minga.editor")
+        #expect(debug.path == "/home/alice/Library/Caches/com.minga.editor.dev")
+        #expect(profile.path == "/worktree/.minga-dev/cache/com.minga.editor.dev")
     }
 }
 
