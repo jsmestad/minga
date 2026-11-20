@@ -8,7 +8,7 @@ defmodule MingaAgent.Tools.Shell.OutputReader do
   producer is backpressured by the finite FIFO rather than the BEAM mailbox.
   """
 
-  alias MingaAgent.Tools.OutputLimit
+  alias MingaAgent.Tools.Shell.Operation
 
   @helper_name "minga-shell-output-reader"
   @bootstrap ~S(exec 3>&1; exec >"$1" 2>&1 || exit 125; printf '\001' >&3; exec 3>&-; exec "$2" -c "$3")
@@ -76,7 +76,7 @@ defmodule MingaAgent.Tools.Shell.OutputReader do
     end
   end
 
-  @doc "Closes finished Ports without signalling exited PIDs; live producer cleanup keeps its existing authority."
+  @doc "Cancels an unfinished producer before closing the FIFO reader."
   @spec close(t()) :: :ok
   def close(%__MODULE__{producer: producer, helper: helper, exit_status: status}) do
     close_producer(producer, status)
@@ -84,7 +84,7 @@ defmodule MingaAgent.Tools.Shell.OutputReader do
   end
 
   @spec close_producer(port(), non_neg_integer() | nil) :: :ok
-  defp close_producer(producer, nil), do: OutputLimit.close_port(producer)
+  defp close_producer(producer, nil), do: Operation.cancel(producer)
   defp close_producer(producer, status) when is_integer(status), do: close_port(producer)
 
   @spec open_helper(String.t()) :: {:ok, port()} | {:error, term()}
@@ -144,18 +144,12 @@ defmodule MingaAgent.Tools.Shell.OutputReader do
   @spec producer_port(String.t(), String.t(), String.t(), env()) ::
           {:ok, port()} | {:error, term()}
   defp producer_port(fifo, command, cwd, env) do
-    {:ok,
-     Port.open({:spawn_executable, "/bin/sh"}, [
-       :binary,
-       :exit_status,
-       :stderr_to_stdout,
-       :eof,
-       args: ["-c", @bootstrap, "minga-shell-output", fifo, "/bin/sh", command],
-       cd: cwd,
-       env: env
-     ])}
-  rescue
-    error -> {:error, {:producer_start_failed, Exception.message(error)}}
+    args = [@bootstrap, "minga-shell-output", fifo, "/bin/sh", command]
+
+    case Operation.open(args, cwd, env, [:eof]) do
+      {:ok, _port} = result -> result
+      {:error, message} -> {:error, {:producer_start_failed, message}}
+    end
   end
 
   @spec bootstrap(t(), integer()) :: :ok | {:error, term(), t()}
@@ -256,8 +250,11 @@ defmodule MingaAgent.Tools.Shell.OutputReader do
     {:data, bytes, %{reader | outstanding?: false}}
   end
 
-  defp frame(%__MODULE__{outstanding?: true} = reader, <<3>>, deadline) do
+  defp frame(%__MODULE__{outstanding?: true, producer: producer} = reader, <<3>>, deadline) do
+    Port.command(producer, <<2>>)
     receive_next(%{reader | outstanding?: false, eof?: true}, deadline)
+  rescue
+    ArgumentError -> {:error, :producer_closed_before_output_eof, reader}
   end
 
   defp frame(reader, <<4, reason::binary>>, _deadline) do

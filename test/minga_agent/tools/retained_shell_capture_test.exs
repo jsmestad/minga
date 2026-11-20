@@ -126,14 +126,33 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
              binary_part(bytes, 0, output.reference.bytes)
   end
 
+  test "retained output includes a background writer after the shell exits", %{tmp_dir: root} do
+    store = start_store(root)
+    ctx = context(root, store, "background")
+
+    assert {:ok, %Output{capture: :complete} = output} =
+             Shell.capture("printf head; (sleep 0.1; printf tail) & exit 0", root, 5,
+               artifact_store: store,
+               capture_key: ctx.capture_key
+             )
+
+    assert fetch_all(ctx, output.reference, :ok) == "headtail"
+  end
+
   test "timeout returns exact retained prefix without storing the timeout notice", %{
     tmp_dir: root
   } do
     store = start_store(root)
     ctx = context(root, store, "timeout")
 
+    command = """
+    printf 'before timeout \\t\\n'
+    (trap '' TERM; printf ready > retained-child-ready; sleep 2; printf late > retained-late-effect) &
+    wait
+    """
+
     assert {:error, %Output{capture: {:incomplete, :timeout}} = output} =
-             Shell.capture("printf 'before timeout \\t\\n'; while :; do :; done", root, 1,
+             Shell.capture(command, root, 1,
                artifact_store: store,
                capture_key: ctx.capture_key
              )
@@ -141,6 +160,11 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
     assert output.view == "before timeout \t\n\n[command timed out]"
     assert output.selection.kind == :captured_prefix
     assert fetch_all(ctx, output.reference, :error) == "before timeout \t\n"
+    assert File.read!(Path.join(root, "retained-child-ready")) == "ready"
+
+    # The external child would write after the timeout reply if cleanup missed it.
+    Process.sleep(2_000)
+    refute File.exists?(Path.join(root, "retained-late-effect"))
   end
 
   test "an append crossing the deadline cannot accept a queued successful exit", %{tmp_dir: root} do

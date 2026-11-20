@@ -123,6 +123,10 @@ pub fn main(init: std.process.Init) !void {
     const alloc = init.gpa;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
+    if (args.len >= 3 and std.mem.eql(u8, args[1], "--shell")) {
+        std.process.exit(try runOwnedShell(args[2..]));
+    }
+
     if (args.len != 4) {
         try writeHelperError("usage: minga-hook-runner <timeout_ms> <payload_len> <command>");
         std.process.exit(2);
@@ -155,6 +159,71 @@ pub fn main(init: std.process.Init) !void {
     defer alloc.free(result.stderr);
 
     try writeResult(result);
+}
+
+extern "c" fn waitid(kind: c_int, id: c_uint, info: *c.siginfo_t, options: c_int) c_int;
+
+fn runOwnedShell(args: []const [:0]const u8) !u8 {
+    if (args.len > 6) return error.InvalidShellArguments;
+    const devnull = try posix.openatZ(posix.AT.FDCWD, "/dev/null", .{}, 0);
+    defer closeFd(devnull);
+
+    var argv: [9:null]?[*:0]const u8 = @splat(null);
+    argv[0] = "/bin/sh";
+    argv[1] = "-c";
+    for (args, 2..) |arg, i| argv[i] = arg.ptr;
+
+    const pid = try forkPid();
+    if (pid == 0) {
+        if (c.setpgid(0, 0) != 0) c._exit(127);
+        dup2Fd(devnull, posix.STDIN_FILENO) catch c._exit(127);
+        closeFd(devnull);
+        _ = c.execve("/bin/sh", &argv, @ptrCast(c.environ));
+        c._exit(127);
+    }
+    // Establish the group before cancellation. If exec wins the race, the child has already established it.
+    _ = c.setpgid(pid, pid);
+    errdefer {
+        killProcessGroup(pid, posix.SIG.KILL);
+        _ = c.waitpid(pid, null, 0);
+    }
+
+    var control = [_]posix.pollfd{.{ .fd = posix.STDIN_FILENO, .events = posix.POLL.IN, .revents = 0 }};
+    var output_drained = args.len == 1;
+    while (true) {
+        _ = try posix.poll(&control, 10);
+        if (control[0].revents != 0) {
+            var request: [1]u8 = undefined;
+            const count = try posix.read(posix.STDIN_FILENO, &request);
+            if (count == 1 and request[0] == 2) {
+                output_drained = true;
+            } else {
+                killProcessGroup(pid, posix.SIG.TERM);
+                try std.Io.sleep(g_io, .fromMilliseconds(kill_grace_ms), .awake);
+                killProcessGroup(pid, posix.SIG.KILL);
+                break;
+            }
+        }
+
+        var info: c.siginfo_t = std.mem.zeroes(c.siginfo_t);
+        // P_PID is 1 on Darwin and Linux. Keep the leader waitable until cleanup so its group ID cannot be recycled.
+        const wait_options = switch (@import("builtin").os.tag) {
+            .macos => 0x04 | 0x20 | posix.W.NOHANG, // WEXITED | WNOWAIT | WNOHANG
+            else => posix.W.EXITED | posix.W.NOWAIT | posix.W.NOHANG,
+        };
+        if (waitid(1, @intCast(pid), &info, wait_options) != 0) {
+            return error.ShellWaitFailed;
+        }
+        if (output_drained and @intFromEnum(info.signo) != 0) break;
+    }
+
+    var status: c_int = 0;
+    while (c.waitpid(pid, &status, 0) < 0) {
+        if (posix.errno(-1) != .INTR) return error.ShellWaitFailed;
+    }
+    const raw: u32 = @bitCast(status);
+    if (posix.W.IFEXITED(raw)) return posix.W.EXITSTATUS(raw);
+    return 128 + @as(u8, @intCast(@intFromEnum(posix.W.TERMSIG(raw))));
 }
 
 fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, timeout_ms: u64) !RunResult {
