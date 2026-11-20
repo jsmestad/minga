@@ -111,17 +111,19 @@ jobs:
     name: Test (Extension SDK)
     runs-on: ubuntu-latest
     steps:
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: "27"
-          elixir-version: "1.17.3"
-
+      # Keep the workspace root free of mix.exs while setup-beam installs Hex.
       - uses: actions/checkout@v4
         with:
+          path: sdk-checkout
           sparse-checkout: sdk
 
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: sdk-checkout/.tool-versions
+          version-type: strict
+
       - name: Compile and test the standalone SDK
-        working-directory: sdk
+        working-directory: sdk-checkout/sdk
         run: |
           mix compile --warnings-as-errors
           mix test --warnings-as-errors
