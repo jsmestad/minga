@@ -879,20 +879,30 @@ defmodule MingaEditor.AgentLifecycle do
     nil
   end
 
-  # Computes the byte offset of each message's start line within the full buffer text.
+  # The transcript emits message starts in row order, so each preceding line is counted once.
   @spec message_byte_offsets(
           [Transcript.line_offset()],
           [String.t()]
         ) :: %{non_neg_integer() => non_neg_integer()}
   defp message_byte_offsets(line_offsets, full_lines) do
-    Map.new(line_offsets, fn {msg_idx, start_line, _count} ->
-      byte_offset =
-        full_lines
-        |> Enum.take(start_line)
-        |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+    message_byte_offsets(line_offsets, full_lines, 0, 0, %{})
+  end
 
-      {msg_idx, byte_offset}
-    end)
+  @spec message_byte_offsets(
+          [Transcript.line_offset()],
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          %{non_neg_integer() => non_neg_integer()}
+        ) :: %{non_neg_integer() => non_neg_integer()}
+  defp message_byte_offsets([], _lines, _row, _byte, offsets), do: offsets
+
+  defp message_byte_offsets([{message_index, row, _count} | messages], lines, row, byte, offsets) do
+    message_byte_offsets(messages, lines, row, byte, Map.put(offsets, message_index, byte))
+  end
+
+  defp message_byte_offsets(messages, [line | lines], row, byte, offsets) do
+    message_byte_offsets(messages, lines, row + 1, byte + byte_size(line) + 1, offsets)
   end
 
   @spec add_session_display_opts(keyword(), pid() | nil) :: keyword()
