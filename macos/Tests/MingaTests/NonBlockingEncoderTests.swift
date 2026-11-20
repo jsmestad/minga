@@ -411,6 +411,26 @@ struct NonBlockingEncoderTests {
         #expect(frames.map(\.first) == [OP_APPLICATION_QUIT_REQUEST, OP_APPLICATION_QUIT_DECISION])
     }
 
+    @Test("diagnostics under pressure do not disconnect the transport or discard admitted input")
+    func diagnosticPressurePreservesInput() throws {
+        let writer = ControlledWriter()
+        let encoder = makeControlledEncoder(writer: writer, maxBufferSize: 14, maximumPayloadSize: 20)
+
+        #expect(encoder.send(.keyPress(codepoint: 0x61, modifiers: 0, sequence: 0)) == .accepted)
+        #expect(encoder.send(.log(level: LOG_LEVEL_WARN, message: "warn")) == .rejected(.capacityExhausted(limitBytes: 14, attemptedBytes: 12)))
+        #expect(encoder.send(.log(level: LOG_LEVEL_INFO, message: String(repeating: "a", count: 20))) == .rejected(.payloadTooLarge(limitBytes: 20, attemptedBytes: 24)))
+
+        writer.allowAllWrites()
+        #expect(encoder.waitForPendingWritesForTesting())
+        #expect(encoder.send(.keyPress(codepoint: 0x62, modifiers: 0, sequence: 0)) == .accepted)
+        #expect(encoder.waitForPendingWritesForTesting())
+        let frames = try #require(parseFrames(writer.writtenData()))
+        #expect(frames.map { $0.prefix(5) } == [
+            Data([OP_KEY_PRESS, 0, 0, 0, 0x61]),
+            Data([OP_KEY_PRESS, 0, 0, 0, 0x62])
+        ])
+    }
+
     @Test("capacity exhaustion reports exactly one terminal failure")
     @MainActor
     func capacityExhaustionFailsOnce() async {

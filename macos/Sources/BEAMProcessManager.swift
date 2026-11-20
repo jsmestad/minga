@@ -17,6 +17,10 @@
 
 import Foundation
 import Darwin
+import MingaUI
+import os
+
+private let beamLog = Logger(subsystem: PortLogger.subsystem, category: "BEAMProcess")
 
 @MainActor
 final class BEAMProcessManager {
@@ -109,12 +113,12 @@ final class BEAMProcessManager {
         guard exitIntent != .appShutdown, process == nil else { return }
         let environment = ProcessInfo.processInfo.environment
         guard let configuration = launchConfiguration(environment: environment) else {
-            NSLog("BEAMProcessManager: no embedded BEAM release found")
+            PortLogger.report(.error, "No embedded BEAM release found", to: beamLog)
             onStartupFailure?(.missingRelease)
             return
         }
         guard EmbeddedCoreProfile.permitsLaunch(environment) else {
-            NSLog("BEAMProcessManager: Debug embedded core requires a private development profile")
+            PortLogger.report(.error, "Debug embedded core requires a private development profile", to: beamLog)
             onStartupFailure?(.missingDevelopmentProfile)
             return
         }
@@ -159,7 +163,7 @@ final class BEAMProcessManager {
         do {
             try proc.run()
         } catch {
-            NSLog("BEAMProcessManager: failed to start BEAM: \(error)")
+            PortLogger.report(.error, "Failed to start BEAM", to: beamLog, privateDetail: error.localizedDescription)
             for handle in [stdinPipe.fileHandleForReading, stdinPipe.fileHandleForWriting,
                            stdoutPipe.fileHandleForReading, stdoutPipe.fileHandleForWriting] {
                 closeLaunchHandle(handle)
@@ -177,7 +181,7 @@ final class BEAMProcessManager {
         self.readHandle = stdoutPipe.fileHandleForReading
         self.writeHandle = stdinPipe.fileHandleForWriting
 
-        NSLog("BEAMProcessManager: BEAM started (pid \(proc.processIdentifier))")
+        PortLogger.report(.info, "BEAM started (pid \(proc.processIdentifier))", to: beamLog)
 
         onBEAMReady?(stdoutPipe.fileHandleForReading, stdinPipe.fileHandleForWriting)
     }
@@ -281,7 +285,7 @@ final class BEAMProcessManager {
         do {
             try handle.close()
         } catch {
-            NSLog("BEAMProcessManager: failed to close launch pipe: \(error)")
+            PortLogger.report(.warning, "Failed to close BEAM launch pipe", to: beamLog, privateDetail: error.localizedDescription)
         }
     }
 
@@ -385,13 +389,15 @@ final class BEAMProcessManager {
     /// Handles BEAM exit. Kept non-`private` so the termination path can be
     /// exercised directly in tests that assert the main actor is not blocked.
     func handleTermination(status: Int32, reason: Process.TerminationReason) {
-        NSLog("BEAMProcessManager: BEAM exited (status \(status), reason \(reason.rawValue))")
-
         self.process = nil
         closeLaunchPipes()
         endBackgroundActivity()
 
+        let message = "BEAM exited (status \(status), reason \(reason.rawValue))"
+        let level: PortLogger.Level = status == 0 ? .info : .warning
+
         if let retry = pendingStartupRetry {
+            PortLogger.report(level, message, to: beamLog)
             pendingStartupRetry = nil
             if DispatchTime.now() < retry.deadline {
                 start(onStartupFailure: retry.onFailure)
@@ -401,7 +407,9 @@ final class BEAMProcessManager {
             return
         }
 
-        if onTermination?(status) == true { return }
+        let terminationHandled = onTermination?(status) == true
+        PortLogger.report(level, message, to: beamLog)
+        if terminationHandled { return }
         if exitIntent == .startupFailed { return }
 
         // Prune old timestamps outside the restart window.
@@ -424,14 +432,14 @@ final class BEAMProcessManager {
 
         case .giveUp:
             exitIntent = .running
-            NSLog("BEAMProcessManager: too many crashes (\(maxRestarts) in \(windowSeconds)s), giving up")
+            PortLogger.report(.error, "Too many BEAM crashes (\(maxRestarts) in \(windowSeconds)s), giving up", to: beamLog)
             // Recovery is presented by onCrash; it must not block the main actor.
             onCrash?()
 
         case let .restart(delay):
             restartTimestamps.append(now)
             exitIntent = .restartScheduled
-            NSLog("BEAMProcessManager: restarting in \(delay)s")
+            PortLogger.report(.warning, "Restarting BEAM in \(delay)s", to: beamLog)
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) { [weak self] in
                 MainRunLoopAction {
                     guard let self, self.exitIntent == .restartScheduled else { return }

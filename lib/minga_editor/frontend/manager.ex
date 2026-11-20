@@ -276,7 +276,8 @@ defmodule MingaEditor.Frontend.Manager do
         {:noreply, OutputHandler.frame_applied(state, event, generation, frame_seq)}
 
       {:ok, {:log_message, level, text}} ->
-        log_renderer_message(level, text)
+        subsystem = if state.capabilities.frontend_type == :native_gui, do: :gui, else: :port
+        log_renderer_message(level, subsystem, text)
         {:noreply, state}
 
       {:ok, event} ->
@@ -410,10 +411,11 @@ defmodule MingaEditor.Frontend.Manager do
     trimmed == "" or trimmed == String.duplicate("?", String.length(trimmed))
   end
 
-  @spec log_renderer_message(String.t(), String.t()) :: :ok
-  defp log_renderer_message("ERR", text), do: Minga.Log.error(:port, text)
-  defp log_renderer_message("WARN", text), do: Minga.Log.warning(:port, text)
-  defp log_renderer_message(_level, text), do: Minga.Log.info(:port, text)
+  @spec log_renderer_message(String.t(), Minga.Log.subsystem(), String.t()) :: :ok
+  defp log_renderer_message("ERR", subsystem, text), do: Minga.Log.error(subsystem, text)
+  defp log_renderer_message("WARN", subsystem, text), do: Minga.Log.warning(subsystem, text)
+  defp log_renderer_message("DEBUG", subsystem, text), do: Minga.Log.debug(subsystem, text)
+  defp log_renderer_message(_level, subsystem, text), do: Minga.Log.info(subsystem, text)
 
   # Handle a `ready` handshake that carries the frontend's compiled-in
   # protocol_version. Only an exact match proceeds: a mismatch (including 0, a

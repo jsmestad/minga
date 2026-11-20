@@ -383,15 +383,15 @@ blinkTask = Task { @MainActor [weak self] in
 
 ## Logging
 
-Use `PortLogger` from anywhere in the Swift codebase. Messages appear in the `*Messages*` buffer prefixed with `[GUI/{level}]`:
+Use `PortLogger` for frontend diagnostics. It writes to the `com.minga.editor` unified logging subsystem and sends severity-tagged entries to the GUI subsystem in the Messages pane:
 
 ```swift
 PortLogger.info("Window resized: \(cols)x\(rows) cells")
 PortLogger.warn("Glyph atlas full, rebuilding")
-PortLogger.error("Metal pipeline creation failed: \(error)")
+PortLogger.report(.error, "Metal pipeline creation failed", to: rendererLogger, privateDetail: error.localizedDescription)
 ```
 
-`PortLogger` is thread-safe and silently drops messages before `setup(encoder:)` is called during startup. Use `NSLog` only for errors that happen before the encoder is ready (Metal device init failure, etc.).
+`PortLogger` keeps a bounded backlog while the core is unavailable and submits it after the first frame commits. Delivery to the pane is best effort; use Console if the core cannot receive logs. Use a category-specific `Logger` for diagnostics that need their own Console category. Pass sensitive details separately as `privateDetail`: unified logging redacts them, and the BEAM does not receive them. Keep signposts in unified logging only.
 
 **What to log:** startup info (font, cell dims, scale), resize events, errors/warnings, resource lifecycle (atlas rebuilds, pipeline creation).
 

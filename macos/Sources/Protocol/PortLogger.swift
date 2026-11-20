@@ -1,38 +1,31 @@
-/// Routes log messages to the BEAM via the port protocol.
-///
-/// Call `PortLogger.setup(encoder:)` once at startup with the real
-/// ProtocolEncoder. After that, use the module-level functions to log
-/// at each level. Messages appear in the editor's `*Messages*` buffer
-/// prefixed with `[GUI/{level}]`.
-///
-/// Before setup (or if encoder is nil), messages are silently dropped.
-/// This avoids crashes during early init when stdout isn't ready yet.
-
 import Foundation
 import os
 
-// Log levels (must match Zig protocol.zig and Elixir protocol.ex). Kept
-// file-local so MingaUI's PortLogger has no dependency on the app-target
-// ProtocolConstants. These are stable wire constants.
-private let LOG_LEVEL_ERR: UInt8 = 0
-private let LOG_LEVEL_WARN: UInt8 = 1
-private let LOG_LEVEL_INFO: UInt8 = 2
-private let LOG_LEVEL_DEBUG: UInt8 = 3
-
-/// Thread-safe log router. Uses OSAllocatedUnfairLock to protect the
-/// encoder reference so PortLogger can be called from any thread.
-///
-/// All messages are dual-written: to the BEAM (for `*Messages*` buffer)
-/// and to macOS unified logging (`os_log`) for Console.app visibility.
-/// os_log is always active, even before `setup(encoder:)` is called,
-/// so early-init messages are captured in Console.app.
+/// Writes macOS diagnostics to unified logging and forwards them to the editor's Messages pane.
 public final class PortLogger: Sendable {
     /// Singleton accessed via static methods below.
     private static let shared = PortLogger()
 
-    /// macOS unified logging (Console.app). Always available, even before
-    /// the BEAM port is connected.
-    private static let osLog = os.Logger(subsystem: "com.minga.gui", category: "runtime")
+    /// The unified logging subsystem used by the app, including development builds.
+    public static let subsystem = "com.minga.editor"
+    private static let osLog = Logger(subsystem: subsystem, category: "runtime")
+
+    /// Log severity. Raw values match the frontend protocol.
+    public enum Level: UInt8, Sendable {
+        case error = 0
+        case warning = 1
+        case info = 2
+        case debug = 3
+
+        fileprivate var osLogType: OSLogType {
+            switch self {
+            case .error: .error
+            case .warning: .default
+            case .info: .info
+            case .debug: .debug
+            }
+        }
+    }
 
     /// Set `MINGA_DISABLE_OSLOG=1` to suppress os_log output (e.g., in CI
     /// or automated builds where Console.app output is unwanted).
@@ -40,43 +33,92 @@ public final class PortLogger: Sendable {
         ProcessInfo.processInfo.environment["MINGA_DISABLE_OSLOG"] == nil
     }()
 
-    /// OSAllocatedUnfairLock wraps the mutable state and is Sendable,
-    /// so the compiler can verify thread safety without @unchecked.
-    private let state = OSAllocatedUnfairLock<(any OutboundActionEncoding)?>(initialState: nil)
+    private struct Entry {
+        let level: Level
+        let message: String
+    }
 
-    /// Set the encoder used for all subsequent log calls.
-    /// Call once during app startup after the ProtocolEncoder is created.
+    private struct Connection {
+        var encoder: (any OutboundActionEncoding)?
+        var pending: [Entry] = []
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: Connection())
+
+    /// Installs a ready encoder and forwards recent diagnostics recorded without a core.
     public static func setup(encoder: any OutboundActionEncoding) {
-        shared.state.withLock { $0 = encoder }
+        let pending = shared.state.withLock {
+            $0.encoder = encoder
+            let pending = $0.pending
+            $0.pending = []
+            return pending
+        }
+        for entry in pending {
+            send(entry)
+        }
     }
 
-    /// Removes a disconnected protocol encoder before replacement construction begins.
-    public static func clearEncoder() {
-        shared.state.withLock { $0 = nil }
+    /// Clears the route only if it still uses the retiring encoder.
+    public static func clearEncoder(_ encoder: (any OutboundActionEncoding)? = nil) {
+        shared.state.withLock { connection in
+            if encoder == nil || connection.encoder === encoder {
+                connection.encoder = nil
+            }
+        }
     }
 
-    private static func send(level: UInt8, message: String) {
-        let encoder: (any OutboundActionEncoding)? = shared.state.withLock { $0 }
-        encoder?.send(.log(level: level, message: message))
+    private static func send(_ entry: Entry) {
+        let action = OutboundAction.log(level: entry.level.rawValue, message: entry.message)
+        while let encoder = shared.state.withLock({ connection in
+            if connection.encoder == nil, entry.message.utf8.count <= 1024 {
+                // Bound both retained memory and the burst sent on reconnection.
+                if connection.pending.count == 32 { connection.pending.removeFirst() }
+                connection.pending.append(entry)
+            }
+            return connection.encoder
+        }) {
+            // Admission is best effort. A known disconnect must not consume the record.
+            guard encoder.send(action) == .rejected(.disconnected) else { return }
+            clearEncoder(encoder)
+        }
+    }
+
+    /// Reports a categorized diagnostic and forwards the public summary to the core on a best-effort basis.
+    /// Private details stay in unified logging and are not copied into Messages or the BEAM log file.
+    public static func report(_ level: Level, _ message: String, to logger: Logger, privateDetail: String? = nil) {
+        if osLogEnabled {
+            if let privateDetail {
+                logger.log(level: level.osLogType, "\(message, privacy: .public): \(privateDetail, privacy: .private)")
+            } else {
+                logger.log(level: level.osLogType, "\(message, privacy: .public)")
+            }
+        }
+        send(Entry(level: level, message: message))
     }
 
     public static func error(_ message: String) {
-        send(level: LOG_LEVEL_ERR, message: message)
-        if osLogEnabled { osLog.error("\(message, privacy: .public)") }
+        report(.error, message, to: osLog)
     }
 
     public static func warn(_ message: String) {
-        send(level: LOG_LEVEL_WARN, message: message)
-        if osLogEnabled { osLog.warning("\(message, privacy: .public)") }
+        report(.warning, message, to: osLog)
+    }
+
+    /// Reports a runtime warning with details kept out of the Messages pane and BEAM log.
+    public static func warn(_ message: String, privateDetail: String) {
+        report(.warning, message, to: osLog, privateDetail: privateDetail)
     }
 
     public static func info(_ message: String) {
-        send(level: LOG_LEVEL_INFO, message: message)
-        if osLogEnabled { osLog.info("\(message, privacy: .public)") }
+        report(.info, message, to: osLog)
+    }
+
+    /// Reports a runtime message with details kept out of the Messages pane and BEAM log.
+    public static func info(_ message: String, privateDetail: String) {
+        report(.info, message, to: osLog, privateDetail: privateDetail)
     }
 
     public static func debug(_ message: String) {
-        send(level: LOG_LEVEL_DEBUG, message: message)
-        if osLogEnabled { osLog.debug("\(message, privacy: .public)") }
+        report(.debug, message, to: osLog)
     }
 }
