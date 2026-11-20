@@ -21,18 +21,30 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
   # Boots real peer nodes and uses epmd, both global OS/distribution resources.
   use Minga.Test.DistributedCase, async: false
 
+  alias Minga.Buffer
+  alias Minga.Distribution.Events.NodeConnectedEvent
+  alias MingaAgent.DraftSnapshot
   alias MingaAgent.RemoteAPI
   alias MingaAgent.Session
   alias MingaAgent.SessionListing
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionMetadata
+  alias MingaEditor.Agent.DraftSave
+  alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.PromptBuffer
+  alias MingaEditor.Agent.QuestionResponse
   alias MingaEditor.Agent.SlashCommand
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
 
   @moduletag :distributed
 
@@ -222,6 +234,234 @@ defmodule Minga.Distribution.RemoteSessionE2ETest do
              Session.messages(remote_pid),
              &match?({:system, "message after reconnect", _}, &1)
            )
+  end
+
+  for restart? <- [false, true] do
+    @tag restart_session: restart?
+    test "inactive queue recovery and retirement after reconnect, restart=#{restart?}", %{
+      server: server,
+      restart_session: restart?
+    } do
+      assert {:ok, %{session_id: record, pid: session, token: token}} =
+               SessionClient.start_session(server, provider: Minga.Test.SessionSlowMockProvider)
+
+      first = attach_driver(server, record, session, token)
+      assert :ok = Session.send_prompt(session, "Hold the active turn")
+
+      assert {:ok, {^record, _, sequence} = target} =
+               :erpc.call(server, Session, :queue_target, [session, record])
+
+      text = "Retain one queued instruction"
+      submission = String.duplicate("q", 24)
+      draft = %DraftSnapshot{text: text, cursor: {0, 0}, attachments: [], paste_blocks: []}
+      assert {:ok, 1} = SessionClient.composer({session, record}, first, {:save, 0, draft})
+
+      assert {:ok, receipt} =
+               SessionClient.composer(
+                 {session, record},
+                 first,
+                 {:queue, target, :follow_up, {1, submission, [], text}, text}
+               )
+
+      %{connection: connection} = Session.editor_snapshot(session)
+      assert {:ok, ui} = PromptBuffer.restore_draft(%UIState{}, draft)
+      buffer = ui.panel.prompt_buffer
+      marker = Buffer.inspection_marker(buffer)
+      original = make_ref()
+
+      save =
+        DraftSave.loaded(
+          DraftSave.loading({session, record}, buffer, make_ref(), marker),
+          1,
+          marker,
+          draft
+        )
+
+      assert {:ok, 1, pending} =
+               DraftSave.begin_queue(save, original, marker, {sequence, submission, :follow_up})
+
+      ui = ui |> UIState.project_connection(connection) |> UIState.project_draft_save(pending)
+
+      {tabs, workspace} =
+        TabBar.add_workspace(TabBar.new(Tab.new_file(1, "Other")), "Remote", session)
+
+      owner = workspace.id
+
+      tabs =
+        tabs
+        |> TabBar.accept_workspace(
+          Workspace.put_remote_session(workspace, "fixture", record, :connected, 0)
+        )
+        |> TabBar.set_workspace_agent_ui(owner, ui)
+
+      refute TabBar.active_workspace_id(tabs) == owner
+      tasks = start_supervised!(Task.Supervisor)
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: tasks})
+      shell = TraditionalState.install_tab_bar(%TraditionalState{}, tabs)
+
+      state = %EditorState{
+        workspace: %MingaEditor.Session.State{},
+        shell_runtime: Runtime.new(Runtime.default_entry(), shell),
+        effect_scheduler: scheduler
+      }
+
+      state =
+        DraftWorkflow.handle_result(
+          state,
+          session,
+          record,
+          owner,
+          original,
+          {:error, {:remote_unavailable, :queue_receipt_unconfirmed}}
+        )
+
+      assert :ok = :erpc.call(server, RemoteAPI, :detach, [record, token, first])
+
+      {state, session, token, second} =
+        reconnect_draft_owner(state, server, record, session, token, restart?)
+
+      assert_receive {:composer_draft_result, ^session, ^record, {^owner, lookup},
+                      {:ok, ^receipt}},
+                     2_000
+
+      assert lookup != original
+      assert :ok = :erpc.call(server, RemoteAPI, :detach, [record, token, second])
+      state = DraftWorkflow.handle_result(state, session, record, owner, lookup, {:ok, receipt})
+
+      assert_receive {:composer_draft_result, ^session, ^record, {^owner, lost},
+                      {:error, :not_driver}},
+                     2_000
+
+      state =
+        DraftWorkflow.handle_result(state, session, record, owner, lost, {:error, :not_driver})
+
+      {state, session, token, third} =
+        reconnect_draft_owner(state, server, record, session, token, restart?)
+
+      assert_receive {:composer_draft_result, ^session, ^record, {^owner, retired}, :ok}, 2_000
+      assert retired != lost
+      state = DraftWorkflow.handle_result(state, session, record, owner, retired, :ok)
+      assert {:ok, _state} = DraftWorkflow.before_close(state, owner)
+      assert {[], [^text]} = Session.get_queued_messages(session)
+
+      assert {:error, :queue_receipt_unconfirmed} =
+               SessionClient.composer(
+                 {session, record},
+                 third,
+                 {:reconcile_queue, sequence, submission, 1}
+               )
+
+      # Renew the driver before the in-flight autosave's failure reaches the Editor.
+      assert :ok = :erpc.call(server, RemoteAPI, :detach, [record, token, third])
+      newer = "Keep new inactive draft text"
+      Buffer.insert_text(buffer, newer)
+      state = DraftWorkflow.edited(state, buffer)
+      assert_receive {:composer_draft_due, ^owner, timer}, 1_000
+      state = DraftWorkflow.due(state, owner, timer)
+
+      assert_receive {:composer_draft_result, ^session, ^record, {^owner, write},
+                      {:error, :not_driver}},
+                     2_000
+
+      {_, renewed} = fourth = attach_driver(server, record, session, token)
+
+      state =
+        state
+        |> QuestionResponse.bind_remote_attachment(session, renewed)
+        |> DraftWorkflow.driver_reattached(session)
+
+      state =
+        DraftWorkflow.handle_result(state, session, record, owner, write, {:error, :not_driver})
+
+      assert_receive {:composer_draft_due, ^owner, retry}, 1_000
+      state = DraftWorkflow.due(state, owner, retry)
+      assert_receive {:composer_draft_result, ^session, ^record, {^owner, saved}, {:ok, 3}}, 2_000
+      _state = DraftWorkflow.handle_result(state, session, record, owner, saved, {:ok, 3})
+
+      assert {:ok, 3, %DraftSnapshot{text: ^newer}} =
+               SessionClient.composer({session, record}, fourth, :read)
+
+      assert {[], [^text]} = Session.get_queued_messages(session)
+    end
+  end
+
+  defp reconnect_draft_owner(state, server, record, previous, token, restart?) do
+    {session, token} =
+      if restart? do
+        assert :ok = :erpc.call(server, SessionManager, :stop_session, [record])
+
+        assert {:ok, %{session_id: ^record, token: token, pid: replacement}} =
+                 SessionClient.start_session(server,
+                   session_id: record,
+                   provider: Minga.Test.SessionSlowMockProvider
+                 )
+
+        refute replacement == previous
+        assert :ok = :erpc.call(server, Session, :load_session, [replacement, record])
+        {replacement, token}
+      else
+        {previous, token}
+      end
+
+    event = %NodeConnectedEvent{
+      server_name: "fixture",
+      node: server,
+      connected_at: DateTime.utc_now()
+    }
+
+    state = EventDispatcher.dispatch(state, :node_connected, event, nil)
+    assert_receive {:agent_question_attachment, ^session, receipt}, 2_000
+
+    state =
+      state
+      |> QuestionResponse.bind_remote_attachment(session, receipt)
+      |> DraftWorkflow.driver_reattached(session)
+
+    {state, session, token, {self(), receipt}}
+  end
+
+  test "a peer without saved-composer support still accepts active-turn Send", %{server: server} do
+    assert {:ok, %{session_id: record, pid: session, token: token}} =
+             SessionClient.start_session(server, provider: Minga.Test.SessionSlowMockProvider)
+
+    _authority = attach_driver(server, record, session, token)
+    assert :ok = Session.send_prompt(session, "Hold the active turn")
+    assert {:ok, target} = :erpc.call(server, Session, :queue_target, [session, record])
+    %{connection: connection} = Session.editor_snapshot(session)
+    text = "Send through the compatible broker path"
+    draft = %DraftSnapshot{text: text, cursor: {0, 0}, attachments: [], paste_blocks: []}
+    assert {:ok, ui} = PromptBuffer.restore_draft(%UIState{}, draft)
+    ui = UIState.project_connection(ui, %{connection | remote_composer_drafts?: false})
+
+    tab = Tab.new_agent(1, "Remote")
+    {tabs, workspace} = TabBar.add_workspace(TabBar.new(tab), "Remote", session)
+
+    shell =
+      TraditionalState.install_tab_bar(
+        %TraditionalState{},
+        TabBar.move_tab_to_workspace(tabs, tab.id, workspace.id)
+      )
+
+    shell =
+      TraditionalState.replace_agent(
+        shell,
+        AgentState.project_queue_target(TraditionalState.agent(shell), session, target)
+      )
+
+    state = %EditorState{
+      workspace: MingaEditor.Session.State.set_agent_ui(%MingaEditor.Session.State{}, ui),
+      shell_runtime: Runtime.new(Runtime.default_entry(), shell)
+    }
+
+    assert :ordinary = DraftWorkflow.queue(state, :steering, text)
+    assert {:queued, :steering} = SessionClient.send_prompt(session, text)
+    assert {[^text], []} = Session.get_queued_messages(session)
+  end
+
+  defp attach_driver(server, record, session, token) do
+    assert {:ok, %{role: :driver}} = SessionClient.attach_driver(server, record, token, 0, self())
+    assert_receive {:agent_question_attachment, ^session, receipt}, 2_000
+    {self(), receipt}
   end
 
   test "remote OAuth callback failure does not expose the pasted description", %{server: server} do

@@ -22,7 +22,12 @@ defmodule Minga.Test.StubProvider do
   end
 
   @impl MingaAgent.Provider
-  def send_prompt(pid, text), do: GenServer.call(pid, {:send_prompt, text})
+  def send_prompt(pid, request) do
+    case GenServer.call(pid, {:send_prompt, request}) do
+      :raise_on_send -> raise "Test provider dispatch failed for #{inspect(request)}"
+      result -> result
+    end
+  end
 
   @impl MingaAgent.Provider
   def abort(_pid), do: :ok

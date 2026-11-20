@@ -1,5 +1,5 @@
 defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
-  @moduledoc "Chooses the exact local Agent draft that receives an explicitly captured selection."
+  @moduledoc "Chooses the exact saved Agent draft that receives an explicitly captured selection."
 
   @behaviour MingaEditor.UI.Picker.Source
 
@@ -10,7 +10,7 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
   alias MingaEditor.State
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
-  alias MingaEditor.State.Workspace.Agent
+  alias MingaEditor.State.Workspace.{Agent, RemoteSession}
   alias MingaEditor.UI.Picker.{Context, Item}
 
   @doc "Captures the selected bytes before the user starts choosing a destination."
@@ -35,7 +35,7 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
           [] ->
             NoticeWorkflow.publish(
               state,
-              "Open a local Agent composer before attaching a snapshot."
+              "Open a saved Agent composer before attaching a snapshot."
             )
 
           [_ | _] ->
@@ -70,9 +70,12 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
           id: id,
           label: label,
           payload: %Agent{
+            remote_session: remote,
             agent_ui: %UIState{draft_save: %DraftSave{target: target, request: {:ready, _, _}}}
           }
-        } <- workspaces do
+        } <- workspaces,
+        label = destination_label(label, remote, target),
+        is_binary(label) do
       %Item{
         id: {id, target},
         label: label,
@@ -83,6 +86,19 @@ defmodule MingaEditor.UI.Picker.SelectionAttachmentTargetSource do
   end
 
   def candidates(_context), do: []
+
+  @spec destination_label(String.t(), RemoteSession.t() | nil, DraftSave.target()) ::
+          String.t() | nil
+  defp destination_label(label, nil, {session, _record}) when node(session) == node(), do: label
+
+  defp destination_label(
+         _label,
+         %RemoteSession{server_name: server, session_id: record, connection_status: :connected},
+         {_session, record}
+       ),
+       do: "[#{server}] #{record}"
+
+  defp destination_label(_label, _remote, _target), do: nil
 
   @impl true
   @spec on_select(Item.t(), State.t()) :: State.t()

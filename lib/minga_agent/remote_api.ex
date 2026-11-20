@@ -222,6 +222,26 @@ defmodule MingaAgent.RemoteAPI do
   def respond_to_question(_session_id, _token, _without_receipt, _target, _response),
     do: {:error, :not_driver}
 
+  @doc "Executes a saved-composer operation only for the authenticated original Session."
+  @spec composer(
+          String.t(),
+          String.t(),
+          pid(),
+          {pid(), binary()},
+          Session.remote_composer_operation()
+        ) :: Session.composer_result()
+  def composer(session_id, token, session, {driver, receipt} = authority, operation)
+      when is_binary(session_id) and is_binary(token) and is_pid(session) and
+             is_pid(driver) and is_binary(receipt) do
+    with :ok <- authorize(session_id, token),
+         {:ok, ^session} <- SessionManager.get_session(session_id) do
+      Session.remote_composer(session, session_id, authority, operation)
+    else
+      {:ok, _replacement} -> {:error, :stale_target}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @doc "Stops a session through the broker."
   @spec stop_session(String.t(), String.t()) :: :ok | {:error, term()}
   def stop_session(session_id, token) when is_binary(session_id) and is_binary(token) do

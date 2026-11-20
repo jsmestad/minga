@@ -70,4 +70,39 @@ defmodule MingaEditor.Agent.DraftSaveTest do
 
     assert :ordinary = DraftSave.submission(recovered, recovered.offer)
   end
+
+  test "a remote acknowledgement retires sent attachments without saving a newer draft at the old revision" do
+    initial = {4, {0, 5}}
+    newer = {5, {0, 8}}
+    target = {self(), "original-draft"}
+
+    original =
+      target
+      |> DraftSave.loading(self(), make_ref(), initial)
+      |> DraftSave.loaded(1, initial, nil)
+
+    attach_ref = make_ref()
+    {:ok, token} = Reference.token("original-draft", String.duplicate("b", 32))
+    revision = Reference.digest("context")
+    artifact = %Reference{token: token, media_type: "text/plain", bytes: 7, sha256: revision}
+    attachment = {:selection, "one.txt", "one.txt", revision, {:snapshot, artifact}}
+    assert {:ok, 1, attaching} = DraftSave.begin_attachment(original, attach_ref, initial)
+    assert {:ok, ready} = DraftSave.attached(attaching, attach_ref, 2, attachment)
+
+    send_ref = make_ref()
+    assert {:ok, pending} = DraftSave.begin_submission(ready, send_ref, initial, "submission-id")
+    assert :pending = DraftSave.begin_save(pending, make_ref(), newer)
+    assert {:error, "Wait" <> _} = DraftSave.submission(pending)
+    assert :stale = DraftSave.submitted(pending, make_ref(), 3, nil)
+    assert {:ok, uncertain} = DraftSave.failed(pending, send_ref, :unconfirmed)
+    assert {:error, "Open Draft attachments" <> _} = DraftSave.submission(uncertain)
+    assert :pending = DraftSave.begin_save(uncertain, make_ref(), newer)
+    check_ref = make_ref()
+    checking = DraftSave.check_submission(uncertain, target, check_ref)
+    assert :stale = DraftSave.submitted(checking, send_ref, 3, nil)
+
+    assert {:ok, accepted} = DraftSave.submitted(checking, check_ref, 3, nil)
+    assert :ordinary = DraftSave.submission(accepted)
+    assert {:ok, 3, _pending_save} = DraftSave.begin_save(accepted, make_ref(), newer)
+  end
 end
