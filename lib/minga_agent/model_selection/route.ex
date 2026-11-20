@@ -3,7 +3,7 @@ defmodule MingaAgent.ModelSelection.Route do
 
   alias MingaAgent.ModelSelection.TextExecution
 
-  @providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
+  @providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek apple)a
 
   @enforce_keys [
     :origin,
@@ -17,7 +17,7 @@ defmodule MingaAgent.ModelSelection.Route do
   ]
   defstruct @enforce_keys
 
-  @type origin :: {:catalog, String.t(), String.t()}
+  @type origin :: {:catalog, String.t(), String.t()} | {:local, String.t(), String.t()}
   @type request_provider ::
           :anthropic
           | :openai
@@ -27,6 +27,7 @@ defmodule MingaAgent.ModelSelection.Route do
           | :groq
           | :mistral
           | :deepseek
+          | :apple
   @type t :: %__MODULE__{
           origin: origin(),
           request_provider: request_provider(),
@@ -52,6 +53,7 @@ defmodule MingaAgent.ModelSelection.Route do
          display_name when is_binary(display_name) and display_name != "" <-
            Map.get(attrs, :display_name),
          %TextExecution{} = execution <- Map.get(attrs, :execution),
+         true <- valid_route_identity?(provider, origin, id),
          true <- compatible?(provider, execution),
          metadata when is_map(metadata) <- Map.get(attrs, :metadata, %{}) do
       {:ok,
@@ -75,6 +77,12 @@ defmodule MingaAgent.ModelSelection.Route do
   @spec origin_matches_model?(origin(), String.t(), String.t()) :: boolean()
   defp origin_matches_model?({_kind, provider, id}, provider, id), do: true
   defp origin_matches_model?(_origin, _provider, _id), do: false
+
+  @spec valid_route_identity?(request_provider(), origin(), String.t()) :: boolean()
+  defp valid_route_identity?(:apple, {:local, "apple", "system"}, "apple/system"), do: true
+  defp valid_route_identity?(:apple, _origin, _id), do: false
+  defp valid_route_identity?(_provider, {:catalog, _owner, _model}, _id), do: true
+  defp valid_route_identity?(_provider, _origin, _id), do: false
 
   @doc "Materializes the route once into the exact inline model ReqLLM executes."
   @spec materialize(t()) :: {:ok, LLMDB.Model.t()} | {:error, term()}
@@ -151,6 +159,17 @@ defmodule MingaAgent.ModelSelection.Route do
   def providers, do: @providers
 
   @spec compatible?(request_provider(), TextExecution.t()) :: boolean()
+  defp compatible?(:apple, %TextExecution{
+         supported: true,
+         family: "apple_foundation_models",
+         wire_protocol: "apple_foundation_models",
+         transport: "in_process",
+         provider_model_id: "system",
+         base_url: nil,
+         path: nil
+       }),
+       do: true
+
   defp compatible?(:anthropic, %TextExecution{
          family: "anthropic_messages",
          wire_protocol: "anthropic_messages",
@@ -200,6 +219,8 @@ defmodule MingaAgent.ModelSelection.Route do
   defp valid_origin?({:catalog, owner, model_id})
        when is_binary(owner) and owner != "" and is_binary(model_id) and model_id != "",
        do: true
+
+  defp valid_origin?({:local, "apple", "system"}), do: true
 
   defp valid_origin?(_origin), do: false
 
@@ -272,6 +293,9 @@ defmodule MingaAgent.ModelSelection.Route do
   defp decode_origin(%{"kind" => "catalog", "owner" => owner, "model_id" => model_id})
        when is_binary(owner) and owner != "" and is_binary(model_id) and model_id != "",
        do: {:ok, {:catalog, owner, model_id}}
+
+  defp decode_origin(%{"kind" => "local", "owner" => "apple", "model_id" => "system"}),
+    do: {:ok, {:local, "apple", "system"}}
 
   defp decode_origin(_origin), do: {:error, :invalid_route}
 

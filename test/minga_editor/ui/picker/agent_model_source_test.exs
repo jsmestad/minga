@@ -16,6 +16,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.{Policy, Request}
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -82,6 +83,147 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert item.description =~ "tools yes, images yes, streaming yes"
   end
 
+  test "/model discovers Apple off the editor path and only activates it while ready" do
+    readiness = :atomics.new(1, [])
+    :atomics.put(readiness, 1, 1)
+    owner = self()
+
+    session =
+      start_supervised!(
+        {Session,
+         provider: Native,
+         persist?: false,
+         hooks_enabled?: false,
+         credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
+         provider_opts: [
+           mcp_enabled?: false,
+           model_resolver_opts: [
+             models: [],
+             apple_availability_fn: fn ->
+               status = :atomics.get(readiness, 1)
+               send(owner, {:apple_probe, self()})
+
+               case status do
+                 1 ->
+                   {:ok, 4_096}
+
+                 0 ->
+                   {:error, :disabled}
+
+                 2 ->
+                   receive do
+                     {:finish_apple_probe, result} -> result
+                   end
+               end
+             end
+           ]
+         ]}
+      )
+
+    %{connection: connection} = Session.editor_snapshot(session)
+    assert ConnectionSnapshot.status(connection) == :unconfigured
+    refute_received {:apple_probe, _}
+
+    task_supervisor = start_supervised!({Task.Supervisor, []})
+    scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+    :ok = EffectScheduler.attach(scheduler, self())
+    {state, workspace_id} = editor_state(connection, "unknown", scheduler)
+    assert {:ok, opened} = SlashCommand.execute(state, "/model")
+    assert_receive {:apple_probe, worker}, 1_000
+    assert worker != self() and worker != session
+
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{value: {:completed, {:ok, items, candidates, meta}}} = fetched},
+                   1_000
+
+    assert [apple] = Enum.filter(items, &model_choice?/1)
+    assert apple.label == "Apple Intelligence (On Device)"
+    assert apple.description =~ "No credentials"
+    assert apple.description =~ "Ready on this device"
+    assert apple.description =~ "Compact file tools"
+
+    assert [completion] = SlashCommand.completion_candidates(state, "model apple")
+    assert completion.insert == "model #{apple.id}"
+    assert completion.description =~ "On device"
+    assert completion.description =~ "No credentials"
+    refute_received {:apple_probe, _}
+
+    assert {:noreply, opened} =
+             MingaEditor.handle_info({:effect_result, scheduler, fetched}, opened)
+
+    :atomics.put(readiness, 1, 2)
+    opened = AgentModelSource.on_select(apple, opened)
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: reject_id, resource: {:agent_connection, ^session}},
+                      value: :running
+                    }},
+                   1_000
+
+    assert_receive {:apple_probe, rejection_worker}, 1_000
+    assert rejection_worker not in [owner, session]
+    assert [^completion] = SlashCommand.completion_candidates(opened, "model apple")
+    refute_received {:apple_probe, _}
+
+    :atomics.put(readiness, 1, 0)
+    send(rejection_worker, {:finish_apple_probe, {:error, :disabled}})
+
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{request: %Request{id: ^reject_id}, value: {:failed, message}} =
+                      rejected},
+                   1_000
+
+    assert message =~ "Enable it in System Settings"
+    assert Session.model_selection(session) == nil
+    assert SlashCommand.completion_candidates(opened, "model apple") == []
+    refute_received {:apple_probe, _}
+
+    assert {:noreply, opened} =
+             MingaEditor.handle_info({:effect_result, scheduler, rejected}, opened)
+
+    ctx = context(connection, workspace_id)
+    assert {:ok, unavailable, %{status: unavailable_message}} = AgentModelSource.async_fetch(ctx)
+    assert_received {:apple_probe, ^owner}
+    assert unavailable_message =~ "Enable it in System Settings"
+    refute Enum.any?(unavailable, &model_choice?/1)
+
+    assert {:ok, superseded, _candidates, %{}} =
+             AgentModelSource.for_publication({:ok, items, candidates, meta}, session)
+
+    refute Enum.any?(superseded, &model_choice?/1)
+
+    :atomics.put(readiness, 1, 1)
+    assert [apple] = model_items(ctx)
+    assert_received {:apple_probe, ^owner}
+    opened = AgentModelSource.on_select(apple, opened)
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: apply_id, resource: {:agent_connection, ^session}},
+                      value: :running
+                    }},
+                   1_000
+
+    assert_receive {:apple_probe, activation_worker}, 1_000
+    assert activation_worker not in [owner, session]
+
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{request: %Request{id: ^apply_id}, value: {:completed, :applied}} =
+                      applied},
+                   1_000
+
+    refute_received {:apple_probe, _}
+
+    assert {:noreply, _opened} =
+             MingaEditor.handle_info({:effect_result, scheduler, applied}, opened)
+
+    assert %ModelSelection{credential: :none, route: %{request_provider: :apple}} =
+             Session.model_selection(session)
+
+    assert Session.status(session) == :idle
+  end
+
   defp start_codex_session(plug, path \\ "/tmp/model-picker-oauth.json") do
     credential = OAuth.new("picker-account", path)
     snapshot = Snapshot.new(%{"openai" => :env}, credential)
@@ -103,7 +245,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
        model: "openai:no-such-model",
        persist?: false,
        provider_opts: [
-         model_resolver_opts: ModelSelectionFixture.resolver_opts(),
+         model_resolver_opts:
+           Keyword.put(ModelSelectionFixture.resolver_opts(), :apple_availability_fn, fn ->
+             {:error, :unsupported}
+           end),
          credential_opts: [
            oauth_path: path,
            oauth_resolver: oauth,

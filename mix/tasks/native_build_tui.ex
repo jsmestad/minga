@@ -25,5 +25,7 @@ defmodule Mix.Tasks.Native.Build.Tui do
       Mix.Tasks.Compile.MingaGoTui.run([]),
       "Go TUI build failed"
     )
+
+    Mix.Task.run("native.build.apple")
   end
 end

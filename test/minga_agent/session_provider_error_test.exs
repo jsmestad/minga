@@ -205,6 +205,12 @@ defmodule MingaAgent.SessionProviderErrorTest do
          "The model provider is rate limiting requests. Wait a moment, then try again."},
         {%Event.Error{kind: :unreachable, provider: "anthropic", message: "nxdomain"},
          "Couldn't reach the model provider. Check your network connection, then try again."},
+        {%Event.Error{
+           kind: :provider_error,
+           provider: "apple",
+           message:
+             "Apple context limit is 4096 tokens; input uses 4110 with 512 reserved for output"
+         }, "Apple context limit is 4096 tokens; input uses 4110 with 512 reserved for output"},
         {%Event.Error{kind: :provider_error, provider: "anthropic", message: "boom"},
          "The model provider returned an unexpected error. Open Messages for details, or pick another configured model with /model."}
       ]

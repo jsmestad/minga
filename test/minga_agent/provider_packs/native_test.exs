@@ -31,6 +31,7 @@ defmodule MingaAgent.ProviderPacks.NativeTest do
              "openrouter:",
              "groq:",
              "mistral:",
+             "apple:",
              "deepseek:"
            ]
 

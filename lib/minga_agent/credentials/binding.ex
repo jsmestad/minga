@@ -7,6 +7,10 @@ defmodule MingaAgent.Credentials.Binding do
 
   @type t :: %__MODULE__{identity: map(), material: keyword()}
 
+  @doc "Represents the absence of authentication material on the local route."
+  @spec none() :: t()
+  def none, do: %__MODULE__{identity: %{kind: :none}, material: []}
+
   @doc "Binds API-key continuity to the actual material in this runtime only."
   @spec api_key(keyword(), t() | nil) :: t()
   def api_key(material, %__MODULE__{material: material} = binding), do: binding

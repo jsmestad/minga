@@ -9,7 +9,7 @@ defmodule MingaAgent.ProviderPacks.Native do
 
   alias MingaAgent.Provider.Spec
   alias MingaAgent.ProviderRegistry
-  alias MingaAgent.Providers.Native
+  alias MingaAgent.Providers.{Apple, Native}
 
   @typedoc "Bundled native provider source."
   @type source :: {:bundle, :native_provider}
@@ -40,8 +40,10 @@ defmodule MingaAgent.ProviderPacks.Native do
   def init(opts) do
     registry = Keyword.get(opts, :registry, ProviderRegistry)
 
-    case register(registry) do
-      :ok -> {:ok, registry}
+    with {:ok, :apple} <- ReqLLM.Providers.register(Apple),
+         :ok <- register(registry) do
+      {:ok, registry}
+    else
       {:error, reason} -> {:stop, reason}
     end
   end
@@ -62,6 +64,7 @@ defmodule MingaAgent.ProviderPacks.Native do
         "openrouter:",
         "groq:",
         "mistral:",
+        "apple:",
         "deepseek:"
       ],
       capabilities: [:streaming, :tools, :images, :mcp, :thinking, :model_switching],
