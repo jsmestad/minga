@@ -61,6 +61,8 @@ The input model activates the final committed text presentation for each Bubble 
 
 The Agent composer keeps Send, Steer, Queue Next, and Stop in fixed positions while a turn runs. Enter sends when idle and steers during an active turn. Ctrl+Enter queues a follow-up during an active turn. The buttons take their hit cells and targets from the last view Bubble Tea flushed, not from an editor frame the terminal has not displayed. If a terminal write is active at pointer admission or begins before the click's target is selected, the TUI drops that left press instead of guessing which view it hit. Keyboard input, wheel input, and mouse releases are unaffected.
 
+Use **Queue** in the Agent header or `SPC a J` to inspect the current conversation's pending inputs. Select a row to review it, then choose **Withdraw queued input** to remove that entry. The composer and other entries do not change. If the turn consumed the entry before confirmation, open the queue again to see what is still pending.
+
 A finite wheel burst must finish without another input event. The input filter forwards each normalized wheel event to `Model.Update` with its coordinates and modifiers intact; the model reads the signed delta from that event, not shared filter state. The filter never holds wheel input for a later event. Pointer motion remains rate-limited.
 
 ## Capture actual terminal output
