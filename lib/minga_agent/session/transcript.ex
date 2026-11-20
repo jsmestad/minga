@@ -240,6 +240,11 @@ defmodule MingaAgent.Session.Transcript do
   def messages(%__MODULE__{} = transcript),
     do: Active.messages(transcript.active)
 
+  @doc "Returns ordered active messages and their aligned stable IDs for saving."
+  @spec messages_and_ids(t()) :: {[Message.t()], [pos_integer()]}
+  def messages_and_ids(%__MODULE__{} = transcript),
+    do: Active.messages_and_ids(transcript.active)
+
   @doc "Returns the active tail message, or nil for an empty transcript."
   @spec last_message(t()) :: Message.t() | nil
   def last_message(%__MODULE__{} = transcript) do

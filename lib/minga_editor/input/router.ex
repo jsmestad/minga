@@ -29,7 +29,6 @@ defmodule MingaEditor.Input.Router do
   @typedoc "Pre-action snapshot for housekeeping comparisons."
   @type snapshot :: %{
           old_buffer: pid() | nil,
-          buf_version: non_neg_integer(),
           old_mode: atom(),
           old_cursor: {non_neg_integer(), non_neg_integer()} | nil
         }
@@ -53,7 +52,6 @@ defmodule MingaEditor.Input.Router do
   def capture_snapshot(state) do
     %{
       old_buffer: state.workspace.buffers.active,
-      buf_version: buffer_version(state),
       old_mode: Editing.mode(state),
       old_cursor: safe_cursor(state.workspace.buffers.active)
     }
@@ -256,6 +254,8 @@ defmodule MingaEditor.Input.Router do
 
   Runs selection range cleanup, document highlight scheduling, inlay hint
   scheduling, and render. Call after any action that mutates editor state.
+
+  Render even when buffer text is unchanged. A mode transition can change what the user sees.
   """
   @spec post_action_housekeeping(EditorState.t(), snapshot()) :: EditorState.t()
   def post_action_housekeeping(state, snapshot) do
@@ -263,7 +263,7 @@ defmodule MingaEditor.Input.Router do
     |> maybe_clear_selection_ranges(snapshot.old_mode)
     |> maybe_schedule_document_highlight(snapshot.old_buffer, snapshot.old_cursor)
     |> LspActions.schedule_inlay_hints_on_scroll()
-    |> maybe_render(snapshot.buf_version)
+    |> MingaEditor.do_render()
   end
 
   @spec maybe_handle_completion(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
@@ -352,13 +352,6 @@ defmodule MingaEditor.Input.Router do
   catch
     :exit, _ -> nil
   end
-
-  # Every action produces a normal render intent. In production, including for
-  # operator-pending transitions with no buffer mutation, Renderer.Server owns
-  # emission so its single credit, recovery generation, and acknowledged delta
-  # base remain authoritative (#2739).
-  @spec maybe_render(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  defp maybe_render(state, _buf_version_before), do: MingaEditor.do_render(state)
 
   @doc """
   Dispatches a mouse event through the focus tree.
@@ -614,14 +607,5 @@ defmodule MingaEditor.Input.Router do
       | interaction:
           MingaEditor.State.Interaction.accept_keystroke_history(state.interaction, history)
     }
-  end
-
-  @spec buffer_version(EditorState.t()) :: non_neg_integer()
-  defp buffer_version(%{workspace: %{buffers: %{active: nil}}}), do: 0
-
-  defp buffer_version(%{workspace: %{buffers: %{active: buf}}}) do
-    Buffer.version(buf)
-  catch
-    :exit, _ -> 0
   end
 end

@@ -391,17 +391,12 @@ defmodule MingaEditor.CompletionHandling do
   def install_completion_tracking(state, []), do: state
 
   def install_completion_tracking(state, facts) do
-    state = %{state | lsp: LSPState.drop_completion_requests(state.lsp)}
+    lsp =
+      Enum.reduce(facts, LSPState.drop_completion_requests(state.lsp), fn fact, lsp ->
+        LSPState.track_completion_result_request(lsp, fact)
+      end)
 
-    Enum.reduce(facts, state, fn
-      {_ref, _role, _provider_id, _client, _buffer, _version, _session_id, _gen, _pos} =
-          fact,
-      state ->
-        %{
-          state
-          | lsp: LSPState.track_completion_result_request(state.lsp, fact)
-        }
-    end)
+    %{state | lsp: lsp}
   end
 
   @spec track_completion_resolve_request(EditorState.t(), LSPState.resolve_tracking_fact()) ::
@@ -797,15 +792,13 @@ defmodule MingaEditor.CompletionHandling do
   def handle_completion_result(
         state,
         {_request_ref, role, _provider_id, _client, buffer, version, _session_id, _gen,
-         trigger_pos} = fact,
+         _trigger_pos} = fact,
         result
       ) do
-    with %CursorContext{version: ^version} = context <-
-           buffer_value(buffer, &Buffer.cursor_context/1),
-         true <- completion_result_current?(state, fact),
-         {:ok, prefix} <- completion_prefix_from_trigger(context, trigger_pos) do
+    with ^version <- buffer_value(buffer, &Buffer.version/1),
+         true <- completion_result_current?(state, fact) do
       mode = if role == :primary, do: :primary, else: :merge
-      start_completion_task(self(), mode, result, prefix, fact)
+      start_completion_task(self(), mode, result, fact)
     end
 
     state
@@ -902,15 +895,14 @@ defmodule MingaEditor.CompletionHandling do
           pid(),
           :primary | :merge,
           term(),
-          String.t(),
           CompletionTrigger.tracking_fact()
         ) :: :ok
-  defp start_completion_task(editor, mode, result, prefix, fact) do
+  defp start_completion_task(editor, mode, result, fact) do
     {_request_ref, _role, _provider_id, _client, _buffer, _version, _session_id, gen,
      _trigger_pos} = fact
 
     case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-           run_completion_task(editor, mode, result, prefix, fact)
+           run_completion_task(editor, mode, result, fact)
          end) do
       {:ok, _pid} ->
         :ok
@@ -932,10 +924,9 @@ defmodule MingaEditor.CompletionHandling do
           pid(),
           :primary | :merge,
           term(),
-          String.t(),
           CompletionTrigger.tracking_fact()
         ) :: :ok
-  defp run_completion_task(editor, mode, result, _prefix, fact) do
+  defp run_completion_task(editor, mode, result, fact) do
     {request_ref, _role, provider_id, client, _buffer, _version, session_id, gen, _trigger_pos} =
       fact
 

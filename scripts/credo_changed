@@ -64,7 +64,7 @@ for path in "${changed_paths[@]}"; do
   esac
 
   case "$path" in
-    lib/*.ex|lib/*.exs|mix/*.ex|mix/*.exs|test/*.ex|test/*.exs|sdk/lib/declarations/*.ex)
+    lib/*.ex|lib/*.exs|mix/*.ex|mix/*.exs|test/*.ex|test/*.exs|sdk/lib/declarations/*.ex|sdk/lib/declarations/*.exs)
       if [[ -f "$path" ]]; then
         append_source "$path"
       fi

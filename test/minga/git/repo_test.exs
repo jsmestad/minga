@@ -408,17 +408,16 @@ defmodule Minga.Git.RepoTest do
                Repo.cached_status_for_path(Path.join(dir, "lib/foo.ex"))
     end
 
-    test "cached_status_for_path returns the most specific tracked repo", %{tmp_dir: dir} do
+    test "cached reads use the most specific tracked repo for the expanded path", %{tmp_dir: dir} do
       events_registry = start_events_registry()
       parent = Path.join(dir, "parent")
       child = Path.join(parent, "apps/child")
       File.mkdir_p!(child)
 
-      parent_entry = %StatusEntry{path: "root.ex", status: :modified, staged: false}
       child_entry = %StatusEntry{path: "lib/child.ex", status: :added, staged: true}
       GitStub.set_root(parent, parent)
       GitStub.set_root(child, child)
-      GitStub.set_status(parent, [parent_entry])
+      GitStub.set_status_error(parent, "git status failed: git command timed out after 4000ms")
       GitStub.set_status(child, [child_entry])
       on_exit(fn -> GitStub.clear(parent) end)
       on_exit(fn -> GitStub.clear(child) end)
@@ -426,12 +425,45 @@ defmodule Minga.Git.RepoTest do
       start_repo(parent, events_registry: events_registry) |> Repo.await_refresh()
       start_repo(child, events_registry: events_registry) |> Repo.await_refresh()
 
+      path = parent <> "/apps/../apps/child/lib/child.ex"
+
       assert {:ok, %StatusSnapshot{git_root: ^child, entries: [^child_entry]}} =
-               Repo.cached_status_for_path(Path.join(child, "lib/child.ex"))
+               Repo.cached_status_for_path(path)
+
+      assert Repo.cached_degraded_for_path(parent) == {:ok, {true, :status_timeout}}
+      assert Repo.cached_degraded_for_path(path) == {:ok, {false, nil}}
     end
 
-    test "cached_status_for_path does not start or query an untracked repo", %{tmp_dir: dir} do
-      assert Repo.cached_status_for_path(Path.join(dir, "missing.ex")) == :not_tracked
+    test "cached reads do not start an untracked repo", %{tmp_dir: dir} do
+      GitStub.set_root(dir, dir)
+      on_exit(fn -> GitStub.clear(dir) end)
+      path = Path.join(dir, "missing.ex")
+
+      assert Repo.cached_status_for_path(path) == :not_tracked
+      assert Repo.cached_degraded_for_path(path) == :not_tracked
+      assert Repo.lookup(dir) == nil
+    end
+
+    test "cached degradation requests only the flag and reason and handles a repo exit", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+
+      repo =
+        Task.async(fn ->
+          {:ok, _} = Registry.register(Minga.Git.Repo.Registry, dir, nil)
+          send(test_pid, {:registered, self()})
+
+          # Exit after receiving the call, without replying.
+          receive do
+            {:"$gen_call", _from, request} -> request
+          end
+        end)
+
+      repo_pid = repo.pid
+      assert_receive {:registered, ^repo_pid}
+      assert Repo.cached_degraded_for_path(dir) == :not_tracked
+      assert Task.await(repo) == :degraded
     end
   end
 
@@ -464,6 +496,9 @@ defmodule Minga.Git.RepoTest do
 
       assert {:ok, %StatusSnapshot{degraded?: true, degraded_reason: :status_timeout}} =
                Repo.cached_status_for_path(Path.join(dir, "lib/foo.ex"))
+
+      assert Repo.cached_degraded_for_path(Path.join(dir, "lib/foo.ex")) ==
+               {:ok, {true, :status_timeout}}
     end
 
     test "clears the degraded flag once status succeeds again", %{tmp_dir: dir} do

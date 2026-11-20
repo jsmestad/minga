@@ -7,14 +7,10 @@ defmodule MingaAdversarial.Watcher do
   or `:paranoid`, on save. Each analysis runs the model off-process and
   publishes findings through `Minga.Extension.Diagnostics`.
 
-  Two correctness guards matter:
-
-    * **Stale-reply drop.** Each path carries a monotonic generation. An edit
-      or a newer analysis bumps it; a model reply tagged with an older
-      generation is discarded, so rapid saves never race conflicting findings
-      into the gutter.
-    * **Clear on edit/close.** Findings on a line you are editing are worse
-      than none, so a user edit clears that file's findings immediately.
+  Only the latest admitted analysis for a path can publish. Its reply
+  consumes that request's ref, so late or duplicate replies are ignored.
+  A user edit, explicit clear, or buffer close discards both the pending
+  request and any published findings.
 
   Model and dispatch are injectable so the analysis path is testable without a
   network call.
@@ -43,7 +39,7 @@ defmodule MingaAdversarial.Watcher do
           skepticism_override: skepticism() | nil,
           ai_fun: (list(), pos_integer() -> {:ok, String.t()} | {:error, term()}),
           dispatch: ((-> any()) -> any()),
-          generation: %{String.t() => non_neg_integer()},
+          pending: %{String.t() => reference()},
           published: MapSet.t(String.t())
         }
 
@@ -66,7 +62,7 @@ defmodule MingaAdversarial.Watcher do
     GenServer.call(server, {:analyze, path, content})
   end
 
-  @doc "Clears this extension's findings for `path`."
+  @doc "Clears this extension's findings and invalidates pending analysis for `path`."
   @spec clear(GenServer.server(), String.t()) :: :ok
   def clear(server \\ __MODULE__, path) do
     GenServer.cast(server, {:clear, path})
@@ -91,7 +87,7 @@ defmodule MingaAdversarial.Watcher do
        skepticism_override: Keyword.get(opts, :skepticism),
        ai_fun: Keyword.get(opts, :ai_fun, &default_complete/2),
        dispatch: Keyword.get(opts, :dispatch, &default_dispatch/1),
-       generation: %{},
+       pending: %{},
        published: MapSet.new()
      }}
   end
@@ -111,7 +107,7 @@ defmodule MingaAdversarial.Watcher do
 
   @impl true
   def handle_cast({:clear, path}, state) do
-    {:noreply, clear_path(bump(state, path), path)}
+    {:noreply, invalidate(state, path)}
   end
 
   @impl true
@@ -130,23 +126,23 @@ defmodule MingaAdversarial.Watcher do
       ) do
     case safe_file_path(buffer) do
       nil -> {:noreply, state}
-      path -> {:noreply, clear_path(bump(state, path), path)}
+      path -> {:noreply, invalidate(state, path)}
     end
   end
 
   def handle_info({:minga_event, :buffer_closed, %BufferClosedEvent{path: path}}, state)
       when is_binary(path) do
-    # bump so an in-flight reply that lands after close is dropped, not
-    # republished onto a buffer that is no longer open.
-    {:noreply, clear_path(bump(state, path), path)}
+    {:noreply, invalidate(state, path)}
   end
 
-  # Model reply, tagged with the path+generation it was requested for.
-  def handle_info({:ai_result, path, gen, result}, state) do
-    if Map.get(state.generation, path) == gen do
-      {:noreply, deliver(state, path, result)}
-    else
-      {:noreply, state}
+  def handle_info({:ai_result, path, ref, result}, state) do
+    case state.pending do
+      %{^path => ^ref} ->
+        state = %{state | pending: Map.delete(state.pending, path)}
+        {:noreply, deliver(state, path, result)}
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -162,21 +158,21 @@ defmodule MingaAdversarial.Watcher do
 
   @spec request(state(), String.t(), String.t() | nil, skepticism()) :: state()
   defp request(state, path, given_content, skep) do
-    with {:ok, content} <- read_source(given_content, path),
-         true <- byte_size(content) <= @max_bytes do
-      state = bump(state, path)
-      gen = Map.fetch!(state.generation, path)
-      messages = Prompt.messages(path, content, skep)
-      me = self()
-      ai_fun = state.ai_fun
+    case read_source(given_content, path) do
+      {:ok, content} when byte_size(content) <= @max_bytes ->
+        ref = make_ref()
+        messages = Prompt.messages(path, content, skep)
+        me = self()
+        ai_fun = state.ai_fun
 
-      state.dispatch.(fn ->
-        send(me, {:ai_result, path, gen, ai_fun.(messages, @max_tokens)})
-      end)
+        state.dispatch.(fn ->
+          send(me, {:ai_result, path, ref, ai_fun.(messages, @max_tokens)})
+        end)
 
-      state
-    else
-      _ -> state
+        %{state | pending: Map.put(state.pending, path, ref)}
+
+      _ ->
+        state
     end
   end
 
@@ -212,9 +208,10 @@ defmodule MingaAdversarial.Watcher do
     end
   end
 
-  @spec bump(state(), String.t()) :: state()
-  defp bump(state, path) do
-    %{state | generation: Map.update(state.generation, path, 1, &(&1 + 1))}
+  @spec invalidate(state(), String.t()) :: state()
+  defp invalidate(state, path) do
+    state = %{state | pending: Map.delete(state.pending, path)}
+    clear_path(state, path)
   end
 
   # ── Skepticism dial ──────────────────────────────────────────────────────
