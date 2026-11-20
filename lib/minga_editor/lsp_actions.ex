@@ -42,6 +42,7 @@ defmodule MingaEditor.LspActions do
   alias Minga.LSP.BufferEdit
   alias Minga.LSP.Client
   alias Minga.LSP.DocumentContext
+  alias Minga.LSP.HoverContent
   alias Minga.LSP.Location
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.DocumentHighlight
@@ -843,7 +844,7 @@ defmodule MingaEditor.LspActions do
   end
 
   def handle_hover_response(state, {:ok, %{"contents" => contents}}) do
-    markdown = extract_hover_markdown(contents)
+    markdown = HoverContent.markdown(contents)
 
     case markdown do
       "" ->
@@ -922,7 +923,7 @@ defmodule MingaEditor.LspActions do
   defp handle_current_hover_mouse_response(state, {:ok, nil}, _row, _col), do: state
 
   defp handle_current_hover_mouse_response(state, {:ok, %{"contents" => contents}}, row, col) do
-    markdown = extract_hover_markdown(contents)
+    markdown = HoverContent.markdown(contents)
 
     case markdown do
       "" ->
@@ -2385,42 +2386,6 @@ defmodule MingaEditor.LspActions do
   end
 
   defp set_jump_mark(state), do: state
-
-  @doc """
-  Extracts raw markdown text from LSP hover contents.
-
-  Preserves markdown formatting for floating window rendering.
-  Handles MarkupContent, plain strings, and MarkedString arrays.
-  """
-  @spec extract_hover_markdown(term()) :: String.t()
-  def extract_hover_markdown(%{"kind" => "markdown", "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(%{"kind" => "plaintext", "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(%{"kind" => _, "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(text) when is_binary(text) do
-    String.trim(text)
-  end
-
-  def extract_hover_markdown(items) when is_list(items) do
-    items
-    |> Enum.map(&extract_hover_markdown/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
-  end
-
-  def extract_hover_markdown(%{"language" => lang, "value" => value}) when is_binary(value) do
-    "```#{lang}\n#{String.trim(value)}\n```"
-  end
-
-  def extract_hover_markdown(_), do: ""
 
   # Computes the cursor's screen position for anchoring the hover popup.
   # Uses the last rendered cursor position from the compose stage.

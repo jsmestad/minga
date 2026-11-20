@@ -1,9 +1,8 @@
 defmodule MingaEditor.State.Prompt do
   @moduledoc """
-  Groups prompt-related fields from EditorState.
+  Owns the prompt's input text, grapheme cursor, and display data.
 
-  Tracks the current prompt handler, input text, cursor position,
-  and label. Used by `MingaEditor.PromptUI` for text input prompts.
+  `MingaEditor.PromptUI` handles the modal lifecycle and invokes callbacks.
   """
 
   @type t :: %__MODULE__{
@@ -33,6 +32,67 @@ defmodule MingaEditor.State.Prompt do
   @doc "Returns whether input must be excluded from presentation and key history."
   @spec sensitive?(t()) :: boolean()
   def sensitive?(%__MODULE__{sensitive: sensitive}), do: sensitive
+
+  @doc "Inserts text at the cursor, advancing it by the inserted text's own grapheme count."
+  @spec insert_text(t(), String.t()) :: t()
+  def insert_text(%__MODULE__{} = prompt, ""), do: prompt
+
+  def insert_text(%__MODULE__{text: text, cursor: cursor} = prompt, inserted) do
+    {before, suffix} = String.split_at(text, cursor)
+
+    # Preserve the cursor arithmetic even when concatenation joins graphemes.
+    %{prompt | text: before <> inserted <> suffix, cursor: cursor + String.length(inserted)}
+  end
+
+  @doc "Moves the cursor one position left, stopping at zero."
+  @spec move_left(t()) :: t()
+  def move_left(%__MODULE__{cursor: cursor} = prompt),
+    do: %{prompt | cursor: max(0, cursor - 1)}
+
+  @doc "Moves the cursor one position right, capped at the current text length."
+  @spec move_right(t()) :: t()
+  def move_right(%__MODULE__{text: text, cursor: cursor} = prompt),
+    do: %{prompt | cursor: min(String.length(text), cursor + 1)}
+
+  @doc "Deletes the grapheme before the cursor and moves one position left."
+  @spec backspace(t()) :: t()
+  def backspace(%__MODULE__{cursor: 0} = prompt), do: prompt
+
+  def backspace(%__MODULE__{text: text, cursor: cursor} = prompt) do
+    new_cursor = cursor - 1
+    {before, remaining} = String.split_at(text, new_cursor)
+
+    new_text =
+      case String.next_grapheme_size(remaining) do
+        {_size, suffix} ->
+          before <> suffix
+
+        nil ->
+          # A boundary join can leave the cursor past the end. Still remove the last grapheme.
+          {prefix, _last} = String.split_at(text, -1)
+          prefix
+      end
+
+    %{prompt | text: new_text, cursor: new_cursor}
+  end
+
+  @doc "Deletes the grapheme at the cursor without moving it."
+  @spec delete_forward(t()) :: t()
+  def delete_forward(%__MODULE__{text: text, cursor: cursor} = prompt) do
+    {before, remaining} = String.split_at(text, cursor)
+
+    case String.next_grapheme_size(remaining) do
+      {_size, suffix} -> %{prompt | text: before <> suffix}
+      nil -> prompt
+    end
+  end
+
+  @doc "Replaces changed text and moves the cursor to the end; identical text is a no-op."
+  @spec replace_text(t(), String.t()) :: t()
+  def replace_text(%__MODULE__{text: text} = prompt, text), do: prompt
+
+  def replace_text(%__MODULE__{} = prompt, text),
+    do: %{prompt | text: text, cursor: String.length(text)}
 
   @doc "Returns display text and its grapheme cursor without exposing sensitive input."
   @spec render_data(t()) :: {String.t(), String.t(), non_neg_integer()}

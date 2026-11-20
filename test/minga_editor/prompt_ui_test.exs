@@ -95,10 +95,27 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
+  defmodule TabHandler do
+    @behaviour MingaEditor.UI.Prompt.Handler
+
+    @impl true
+    def label, do: "Complete: "
+
+    @impl true
+    def on_submit(_text, state), do: state
+
+    @impl true
+    def on_tab("query"), do: "a\u0301界"
+    def on_tab(text), do: text
+  end
+
   @escape 27
   @enter 13
   @backspace 127
+  @tab 9
   @delete 57_348
+  @arrow_left 57_350
+  @arrow_right 57_351
 
   defp base_state do
     %EditorState{
@@ -114,9 +131,11 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
-  defp set_cursor(state, cursor) do
-    pui = %{prompt_state(state) | cursor: cursor}
-    PromptUI.update_prompt(state, fn _ -> pui end)
+  defp move_left(state, count) do
+    Enum.reduce(1..count//1, state, fn _, state ->
+      {state, nil} = PromptUI.handle_key(state, @arrow_left, 0)
+      state
+    end)
   end
 
   describe "open/3" do
@@ -195,7 +214,7 @@ defmodule MingaEditor.PromptUITest do
     test "inserts at cursor position" do
       state = base_state() |> PromptUI.open(TestHandler, default: "ac")
       # Move cursor left once (between a and c)
-      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+      {state, nil} = PromptUI.handle_key(state, @arrow_left, 0)
       # Insert 'b' at position 1
       {state, nil} = PromptUI.handle_key(state, ?b, 0)
 
@@ -211,6 +230,30 @@ defmodule MingaEditor.PromptUITest do
       pui = prompt_state(state)
       assert pui.text == "😀"
       assert pui.cursor == 1
+    end
+
+    test "typing a combining mark advances the cursor even when it joins the preceding grapheme" do
+      state = PromptUI.open(base_state(), TestHandler, default: "e")
+      {joined, nil} = PromptUI.handle_key(state, 0x0301, 0)
+
+      assert {"Test prompt: ", "e\u0301", 2} = PromptUI.render_data(joined)
+      assert {^joined, nil} = PromptUI.handle_key(joined, @delete, 0)
+
+      {moved, nil} = PromptUI.handle_key(joined, @arrow_right, 0)
+      assert {"Test prompt: ", "e\u0301", 1} = PromptUI.render_data(moved)
+
+      # An overshot cursor still appends, and backspace still removes the last grapheme.
+      {appended, nil} = PromptUI.handle_key(joined, ?x, 0)
+      assert {"Test prompt: ", "e\u0301x", 3} = PromptUI.render_data(appended)
+
+      {joined_again, nil} = PromptUI.handle_key(appended, @backspace, 0)
+      assert {"Test prompt: ", "e\u0301", 2} = PromptUI.render_data(joined_again)
+
+      {empty, nil} = PromptUI.handle_key(joined_again, @backspace, 0)
+      assert {"Test prompt: ", "", 1} = PromptUI.render_data(empty)
+
+      {reset, nil} = PromptUI.handle_key(empty, @backspace, 0)
+      assert {"Test prompt: ", "", 0} = PromptUI.render_data(reset)
     end
   end
 
@@ -228,7 +271,7 @@ defmodule MingaEditor.PromptUITest do
       state =
         base_state()
         |> PromptUI.open(TestHandler, default: "abc")
-        |> set_cursor(0)
+        |> move_left(3)
 
       {state, nil} = PromptUI.handle_key(state, @backspace, 0)
 
@@ -243,7 +286,7 @@ defmodule MingaEditor.PromptUITest do
       state = base_state() |> PromptUI.open(TestHandler, default: "abc")
       assert prompt_state(state).cursor == 3
 
-      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+      {state, nil} = PromptUI.handle_key(state, @arrow_left, 0)
       assert prompt_state(state).cursor == 2
     end
 
@@ -251,9 +294,9 @@ defmodule MingaEditor.PromptUITest do
       state =
         base_state()
         |> PromptUI.open(TestHandler, default: "a")
-        |> set_cursor(0)
+        |> move_left(1)
 
-      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+      {state, nil} = PromptUI.handle_key(state, @arrow_left, 0)
       assert prompt_state(state).cursor == 0
     end
 
@@ -261,15 +304,15 @@ defmodule MingaEditor.PromptUITest do
       state =
         base_state()
         |> PromptUI.open(TestHandler, default: "abc")
-        |> set_cursor(1)
+        |> move_left(2)
 
-      {state, nil} = PromptUI.handle_key(state, 57_351, 0)
+      {state, nil} = PromptUI.handle_key(state, @arrow_right, 0)
       assert prompt_state(state).cursor == 2
     end
 
     test "arrow right stops at end of text" do
       state = base_state() |> PromptUI.open(TestHandler, default: "abc")
-      {state, nil} = PromptUI.handle_key(state, 57_351, 0)
+      {state, nil} = PromptUI.handle_key(state, @arrow_right, 0)
       assert prompt_state(state).cursor == 3
     end
   end
@@ -351,6 +394,32 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
+  describe "handle_key/3 — tab completion" do
+    test "Tab installs the replacement at its grapheme end without reopening the prompt" do
+      state =
+        base_state()
+        |> PromptUI.open(TabHandler, default: "query")
+        |> move_left(4)
+
+      generation = prompt_state(state).generation
+      {completed, nil} = PromptUI.handle_key(state, @tab, 0)
+
+      assert {"Complete: ", "a\u0301界", 2} = PromptUI.render_data(completed)
+      assert prompt_state(completed).generation == generation
+    end
+
+    test "Tab is a no-op with no callback or an unchanged result" do
+      for handler <- [TestHandler, TabHandler] do
+        state =
+          base_state()
+          |> PromptUI.open(handler, default: "same")
+          |> move_left(2)
+
+        assert {^state, nil} = PromptUI.handle_key(state, @tab, 0)
+      end
+    end
+  end
+
   describe "render_data/1" do
     test "returns label, text, and cursor position" do
       state = base_state() |> PromptUI.open(TestHandler, default: "hello")
@@ -400,7 +469,7 @@ defmodule MingaEditor.PromptUITest do
         |> PromptUI.open(TestHandler, sensitive: true, default: "á界")
 
       assert {"Test prompt: ", "••", 2} = PromptUI.render_data(state)
-      {state, nil} = PromptUI.handle_key(state, 57_350, 0)
+      {state, nil} = PromptUI.handle_key(state, @arrow_left, 0)
       state = PromptUI.insert_text(state, "x")
       assert {"Test prompt: ", "•••", 2} = PromptUI.render_data(state)
 
@@ -462,7 +531,7 @@ defmodule MingaEditor.PromptUITest do
       state =
         base_state()
         |> PromptUI.open(TestHandler, default: "abc")
-        |> set_cursor(0)
+        |> move_left(3)
 
       {state, nil} = PromptUI.handle_key(state, @delete, 0)
 
@@ -485,7 +554,7 @@ defmodule MingaEditor.PromptUITest do
       state =
         base_state()
         |> PromptUI.open(TestHandler, default: "abc")
-        |> set_cursor(1)
+        |> move_left(2)
 
       {state, nil} = PromptUI.handle_key(state, @delete, 0)
 
@@ -496,26 +565,27 @@ defmodule MingaEditor.PromptUITest do
   end
 
   describe "handle_key/3 — edge cases" do
-    test "control characters are ignored" do
-      state = base_state() |> PromptUI.open(TestHandler)
-      {state, nil} = PromptUI.handle_key(state, 0x01, 0)
+    test "control keys and non-scalar codepoints outside the special keys are ignored" do
+      state = PromptUI.open(base_state(), TestHandler)
 
-      assert prompt_state(state).text == ""
+      for key <- [0x01, 0xD800, 0xDFFF, 0x110000] do
+        assert {^state, nil} = PromptUI.handle_key(state, key, 0)
+      end
     end
 
-    test "surrogate codepoints are ignored" do
-      state = base_state() |> PromptUI.open(TestHandler)
-      {state, nil} = PromptUI.handle_key(state, 0xD800, 0)
+    test "accepts both ends of the printable scalar range" do
+      state = PromptUI.open(base_state(), TestHandler)
+      {state, nil} = PromptUI.handle_key(state, 32, 0)
+      {state, nil} = PromptUI.handle_key(state, 0x10FFFF, 0)
 
-      assert prompt_state(state).text == ""
+      assert {"Test prompt: ", <<32, 0x10FFFF::utf8>>, 2} = PromptUI.render_data(state)
     end
 
     test "backspace on multi-byte unicode deletes one grapheme" do
       state =
         base_state()
-        |> PromptUI.open(TestHandler, default: "a😀b")
-        # cursor at 3 (end), move back once to position 2 (after 😀)
-        |> set_cursor(2)
+        |> PromptUI.open(TestHandler, default: "a👩\u200D👩b")
+        |> move_left(1)
 
       {state, nil} = PromptUI.handle_key(state, @backspace, 0)
 
@@ -528,7 +598,7 @@ defmodule MingaEditor.PromptUITest do
       state =
         base_state()
         |> PromptUI.open(TestHandler, default: "bc")
-        |> set_cursor(0)
+        |> move_left(2)
 
       {state, nil} = PromptUI.handle_key(state, ?a, 0)
 

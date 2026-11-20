@@ -4,7 +4,7 @@ defmodule MingaEditor.PromptUI do
 
   Manages a single-line text input prompt in the minibuffer area. Extensions
   use this for collecting free-form text input (capture titles, rename targets,
-  search queries). All functions are pure `state -> state` transformations.
+  search queries). `MingaEditor.State.Prompt` owns text and cursor edits.
 
   Prompts and pickers are mutually exclusive: opening a prompt closes any
   active picker. The replacement is handled automatically by
@@ -122,34 +122,34 @@ defmodule MingaEditor.PromptUI do
   def handle_key(state, key, _mods) do
     {:prompt, %{prompt_ui: prompt}} = state.shell_runtime.state.modal
 
-    case key do
-      @escape ->
-        {do_cancel(state, prompt), nil}
+    next_state =
+      case key do
+        @escape ->
+          do_cancel(state, prompt)
 
-      @enter ->
-        {do_submit(state, prompt), nil}
+        @enter ->
+          do_submit(state, prompt)
 
-      @tab ->
-        {do_tab(state, prompt), nil}
+        @tab ->
+          do_tab(state, prompt)
 
-      @backspace ->
-        {do_backspace(state, prompt), nil}
+        @backspace ->
+          install_changed_prompt(state, prompt, PromptState.backspace(prompt))
 
-      @delete ->
-        {do_delete(state, prompt), nil}
+        @delete ->
+          install_changed_prompt(state, prompt, PromptState.delete_forward(prompt))
 
-      @arrow_left ->
-        new_cursor = max(0, prompt.cursor - 1)
-        {update_prompt(state, &%{&1 | cursor: new_cursor}), nil}
+        @arrow_left ->
+          install_prompt(state, PromptState.move_left(prompt))
 
-      @arrow_right ->
-        max_pos = String.length(prompt.text)
-        new_cursor = min(max_pos, prompt.cursor + 1)
-        {update_prompt(state, &%{&1 | cursor: new_cursor}), nil}
+        @arrow_right ->
+          install_prompt(state, PromptState.move_right(prompt))
 
-      _ ->
-        {do_insert(state, prompt, key), nil}
-    end
+        _ ->
+          do_insert(state, prompt, key)
+      end
+
+    {next_state, nil}
   end
 
   @doc """
@@ -167,24 +167,7 @@ defmodule MingaEditor.PromptUI do
 
   def insert_text(state, text) do
     prompt = current_prompt(state)
-    graphemes = String.graphemes(prompt.text)
-    {before, after_} = Enum.split(graphemes, prompt.cursor)
-    new_text = Enum.join(before) <> text <> Enum.join(after_)
-    new_cursor = prompt.cursor + String.length(text)
-    update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
-  end
-
-  @doc """
-  Applies `fun` to the current PromptState inside the modal and writes
-  back via `MingaEditor.Shell.Traditional.ModalWorkflow.transition`, keeping the modal sum type and
-  consistency check in sync.
-  """
-  @spec update_prompt(state(), (PromptState.t() -> PromptState.t())) :: state()
-  def update_prompt(state, fun) do
-    {:prompt, payload} = state.shell_runtime.state.modal
-    new_pui = fun.(payload.prompt_ui)
-
-    ModalWorkflow.transition(state, {:prompt, PromptPayload.put_prompt_ui(payload, new_pui)})
+    install_prompt(state, PromptState.insert_text(prompt, text))
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -195,6 +178,17 @@ defmodule MingaEditor.PromptUI do
       {:prompt, %{prompt_ui: prompt}} -> prompt
       _ -> %PromptState{}
     end
+  end
+
+  @spec install_changed_prompt(state(), PromptState.t(), PromptState.t()) :: state()
+  defp install_changed_prompt(state, prompt, prompt), do: state
+
+  defp install_changed_prompt(state, _prompt, next_prompt), do: install_prompt(state, next_prompt)
+
+  @spec install_prompt(state(), PromptState.t()) :: state()
+  defp install_prompt(state, prompt) do
+    {:prompt, payload} = state.shell_runtime.state.modal
+    ModalWorkflow.transition(state, {:prompt, PromptPayload.put_prompt_ui(payload, prompt)})
   end
 
   @spec do_submit(state(), PromptState.t()) :: state()
@@ -210,69 +204,29 @@ defmodule MingaEditor.PromptUI do
   defp do_cancel(state, %{handler: handler, context: context}) do
     state = ModalWorkflow.dismiss(state)
 
-    {function_exported?(handler, :on_cancel, 2), function_exported?(handler, :on_cancel, 1)}
-    |> call_cancel(handler, state, context)
+    cond do
+      function_exported?(handler, :on_cancel, 2) -> handler.on_cancel(state, context)
+      function_exported?(handler, :on_cancel, 1) -> handler.on_cancel(state)
+      true -> state
+    end
   end
-
-  defp call_cancel({true, _}, handler, state, context), do: handler.on_cancel(state, context)
-  defp call_cancel({false, true}, handler, state, _context), do: handler.on_cancel(state)
-  defp call_cancel({false, false}, _handler, state, _context), do: state
 
   @spec do_tab(state(), PromptState.t()) :: state()
   defp do_tab(state, prompt) do
     handler = prompt.handler
 
     if function_exported?(handler, :on_tab, 1) do
-      new_text = handler.on_tab(prompt.text)
-
-      if new_text == prompt.text do
-        state
-      else
-        new_cursor = String.length(new_text)
-        update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
-      end
+      next_prompt = PromptState.replace_text(prompt, handler.on_tab(prompt.text))
+      install_changed_prompt(state, prompt, next_prompt)
     else
       state
-    end
-  end
-
-  @spec do_backspace(state(), PromptState.t()) :: state()
-  defp do_backspace(state, %{cursor: 0} = _prompt), do: state
-
-  defp do_backspace(state, prompt) do
-    graphemes = String.graphemes(prompt.text)
-    {before, after_} = Enum.split(graphemes, prompt.cursor)
-    new_text = Enum.join(Enum.drop(before, -1)) <> Enum.join(after_)
-    new_cursor = prompt.cursor - 1
-    update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
-  end
-
-  @spec do_delete(state(), PromptState.t()) :: state()
-  defp do_delete(state, prompt) do
-    graphemes = String.graphemes(prompt.text)
-    do_delete_grapheme(state, prompt, graphemes)
-  end
-
-  @spec do_delete_grapheme(state(), PromptState.t(), [String.t()]) :: state()
-  defp do_delete_grapheme(state, %{cursor: cursor}, graphemes) do
-    if cursor >= Enum.count(graphemes) do
-      state
-    else
-      {before, [_deleted | after_]} = Enum.split(graphemes, cursor)
-      new_text = Enum.join(before) <> Enum.join(after_)
-      update_prompt(state, &%{&1 | text: new_text})
     end
   end
 
   @spec do_insert(state(), PromptState.t(), non_neg_integer()) :: state()
   defp do_insert(state, prompt, key)
        when key >= 32 and key <= 0x10FFFF and not (key >= 0xD800 and key <= 0xDFFF) do
-    char = <<key::utf8>>
-    graphemes = String.graphemes(prompt.text)
-    {before, after_} = Enum.split(graphemes, prompt.cursor)
-    new_text = Enum.join(before) <> char <> Enum.join(after_)
-    new_cursor = prompt.cursor + 1
-    update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
+    install_prompt(state, PromptState.insert_text(prompt, <<key::utf8>>))
   end
 
   defp do_insert(state, _prompt, _key), do: state

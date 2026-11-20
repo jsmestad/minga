@@ -126,11 +126,11 @@ If you need to change a struct's field from outside its owning module, add a fun
 
 Editor state ownership is enforced by `EditorStateOwnershipCheck` (EX9012); state-machine gates are enforced by `NoDirectStateMachineWriteCheck` (EX9004).
 
-**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions.
+Split a growing aggregate along independently owned invariants. Field count is a reason to inspect the design, not a limit.
 
-### Rule 3: Extract, don't branch
+### Rule 3: Put shared decisions on their owner
 
-When you need different behavior based on a condition, don't add an `if` or `case` at the call site. Extract the varying behavior into a function on the module that owns the condition. The caller should not know *why* the behavior differs.
+Centralize a rule when callers must agree on its meaning. Keep different consequences with the callers that own them. Extract when the new operation removes knowledge from callers, not just because a predicate recurs.
 
 ```elixir
 # Bad: scattered conditional in 12 input handlers
@@ -143,8 +143,6 @@ end
 # Good: one dispatch point, callers don't know about editing models
 active_model.handle_key(key, model_state)
 ```
-
-The smell: if the same condition appears in 3+ files, it should be a function or behaviour dispatch in one place. Every new `if gui?` or `if vim?` or `if agent_active?` scattered across the codebase is a future maintenance burden.
 
 ### Rule 4: Module grouping (directories, not facades)
 
@@ -213,22 +211,21 @@ Shells should be as independent as possible. The ideal: a new shell can be built
 
 ### Elixir Types (mandatory)
 
-Elixir's set-theoretic type system catches real bugs at compile time. Help it by being explicit:
+Typespecs document contracts and support analysis. Patterns and guards also inform compiler inference.
 
 - **`@spec`** on every public function — no exceptions
 - **`@type` / `@typep`** for all custom types in every module
 - **`@enforce_keys`** on structs for required fields
 - **Guards** in function heads where they aid type inference
-- **Pattern matching** over `if/cond` — helps type narrowing across clauses
-- **No `cond` blocks** — use multi-clause functions with pattern matching and guards instead. `cond` defeats BEAM JIT optimizations and hides control flow that the type system and compiler can reason about. Extract a private helper with multiple `defp` clauses rather than inlining a `cond`.
+- **Choose control flow by what varies.** Use function clauses or `case` when alternatives are shapes of one value, `if` for one predicate, and `cond` for ordered predicates. Do not compute a tuple of booleans just to dispatch on it. Base performance claims on evidence for the actual code and supported runtime.
 - **List append strategy depends on context.** When credo (or your instincts) flags a `list ++ [item]`, don't reflexively reach for `Enum.reverse([item | Enum.reverse(list)])`. That double-reverse is *worse* than `++` for a single append (two O(n) traversals vs one). Evaluate each case:
   - **Small, genuinely bounded list, infrequent appends** (e.g., UI indicator lines capped by terminal height): `list ++ [item]` is fine. Retained chat transcripts are not bounded by human interaction speed: streaming appends and keyed revisions must use indexed source storage, not copy an unchanged list prefix. The `AppendSingleItem` Credo check is advisory (`exit_status: 0`), not disabled.
   - **Accumulating in a loop/reduce** (building a list item by item): prepend with `[item | acc]` inside the loop, then `Enum.reverse(acc)` once at the end. This is O(n) total vs O(n²) for repeated `++`. This is the one case where the pattern is correct.
   - **Frequent appends AND frequent ordered reads on a large list**: use `:queue` (Erlang's double-ended queue) for O(1) amortized operations on both ends.
   - **Never use `Enum.reverse([item | Enum.reverse(list)])`** as a substitute for `list ++ [item]`. It's strictly worse: same O(n) complexity, 2x the constant factor, and much harder to read.
 - **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Minga.Buffer.apply_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
-- **Structs over bare maps and tuples for data that crosses module boundaries.** Tuples and bare `%{}` maps are fine for small, fixed-shape data inside one module. When a data shape is used across 3+ modules (returned from a behaviour callback and consumed by a renderer, constructed in one GenServer and mutated in another), use a struct. Name the struct after the domain concept it represents (`MingaAgent.ToolCall`, not a generic tool-call map). Signals you need a struct: the same `%{key: ..., key: ...}` shape is constructed in multiple files, consumers do `%{tc | status: :error, result: "aborted"}` mutations in scattered places, or adding a field silently breaks pattern matches elsewhere. Put the struct in its own file under the domain it belongs to (`lib/minga_agent/tool_call.ex`).
-  - **Co-locate mutations on the struct module.** When a struct has domain transitions (e.g., a tool call completing, erroring, or being aborted), put those methods on the struct itself: `ToolCall.complete(tc, result)`, `ToolCall.abort(tc)`. This replaces scattered `%{tc | status: :error, result: "aborted", is_error: true}` updates with a single call that encodes the business rules. If 3+ files update the same struct directly, extract a method. `EditorStateOwnershipCheck` (EX9012) covers editor state owners, not every struct.
+- **Name a value when the name and fields help callers.** Use a struct when it owns construction, meaningful fields, or transitions that callers would otherwise reconstruct. Keep conventional tagged results, coordinates, small tuples, and local maps when their meaning is clear.
+  - **Co-locate transitions on the owner.** Use operations such as `ToolCall.complete(tool_call, result)` and `ToolCall.abort(tool_call)` instead of making callers maintain the relationship between status, result, and error fields.
   - **`@enforce_keys` should list genuinely required fields, or be omitted entirely.** Don't add `@enforce_keys []` as documentation; it's noise. If a struct has fields that must always be provided at construction time (e.g., `id`, `name`), enforce those. If every field has a meaningful default, skip `@enforce_keys`.
   - **`| nil` belongs on the field or spec, not the type alias.** Write `@type approval :: ToolApproval.t()` and then `pending_approval: approval() | nil` on the field that can be nil. Baking nullability into the type alias hides it from every consumer.
   - **`@derive JSON.Encoder`** on any struct that gets serialized to disk or over the wire. Without it, `JSON.encode!/1` raises at runtime.
@@ -249,79 +246,35 @@ Use tagged values to make valid lifecycle states and transitions explicit:
 - **Repeated unwrap-update-rewrap code is a representation smell.** Mutually exclusive facts belong in sum types; orthogonal facts belong together in one product. If several transitions extract nested tagged data and reconstruct it afterward, revise the tagged shape before adding helpers.
 - **Use keyed collection primitives for keyed data.** For lists of fixed tuples, prefer `List.keyfind/3`, `List.keymember?/3`, and `List.keytake/3` over a query followed by another `Enum` traversal.
 - **Keep lifecycle effects in operation-named workflows.** Pure transitions return the next owned value or a named domain outcome. The owning process performs external work in the corresponding workflow and installs the returned value afterward. Do not introduce generic effect lists or universal effect interpreters, and do not let effect helpers invoke transitions or choose the next owned value. Return fallible work as an explicit orchestration outcome so the caller can apply the appropriate success or failure transition.
-- **Pipe the complete workflow context.** When adjacent steps consume the same owned state plus the same operation data, make one fixed tuple or struct the pipe subject. Each step returns that context, with any owned-state update applied, until the last step that needs the extra data returns the plain owned state. For example, an approval workflow should thread `{state, approval, decision}` through response delivery and event recording, then return `state` after the final approval-specific transcript update so ordinary state transforms can continue.
-- **Prefer result-aware pipes for transformations of one subject.** Before drafting a multi-step operation, name what moves forward and what each step adds, checks, or consumes. If a step has nothing to do on failure, match `{:ok, value}` to do the work and forward `{:error, _} = error` unchanged in a separate clause. Function arguments are evaluated before clause matching, so keep success-only work inside the success clause. Use `with` when earlier bindings need to stay in scope or short-circuiting reads better. Branch explicitly for recovery, partial success, or mandatory cleanup. Do not widen a public API or invent a carrier just to keep a pipe. See [`reverse_restored_messages/1`](lib/minga_agent/session/continuation.ex) for a shared result-aware stage.
-- **Fix pipeline contracts instead of escaping the pipeline.** Do not use `Kernel.tap/2` or `Kernel.then/2` to force side effects or arbitrary expressions into a state workflow. Change the participating helpers to accept and return the workflow context they actually share. Do not replace the pipe with a one-off `apply_*`, `handle_*`, or `process_*` wrapper that merely hides the same procedural sequence.
+- **Pipe successive transformations of one subject.** Infallible stages return the value directly. A shared result-aware stage can transform `{:ok, value}` and forward `{:error, reason}` unchanged. Function arguments are eager, so keep success-only work inside the success clause. Do not add a carrier or widen an API just to keep a pipe.
+  See [`reverse_restored_messages/1`](lib/minga_agent/session/continuation.ex) for a shared result-aware stage.
+- **Use `with` for dependent success matches.** Keep earlier bindings available where they are needed. Return meaningful failure reasons from the step that knows them, rather than having `else` reconstruct their origin. Use `case` or explicit sequencing for recovery, partial success, and mandatory cleanup.
+- **Do not use `true <- predicate` in `with`.** Use a local `if` or `cond` for a boolean decision. When rejection needs a reason, return `:ok | {:error, reason}` and match `:ok <-`. Do not add a tagged result solely to satisfy lint. EX9016 rejects new literal `true <-` clauses in Credo's source scope. When removing a legacy clause, also remove the matching entry from `credo/checks/no_true_with_baseline.tsv`. Do not add entries.
 
-The intended workflow-context shape is:
+Use `with` to check the prerequisites and a pipe to build the result:
 
 ```elixir
-@typep approval_resolution :: {state(), ToolApproval.t(), approval_decision()}
-
-state =
-  {state, approval, decision}
-  |> send_approval_response()
-  |> record_approval_resolution()
-  |> maybe_append_approval_rejection()
-  |> notify_messages_changed()
-  |> broadcast({:approval_resolved, decision})
-
-{:reply, :ok, %{state | turn_execution: execution}}
-
-defp send_approval_response({_state, approval, decision} = resolution) do
-  send(approval.reply_to, {:tool_approval_response, approval.tool_call_id, decision})
-  resolution
+with {:ok, document} <- fetch_document(id),
+     :ok <- authorize_edit(actor, document) do
+  document
+  |> apply_edit(changes)
+  |> render_preview()
 end
-
-defp maybe_append_approval_rejection({state, approval, :reject}) do
-  append_system_message(state, "Denied #{approval.name}", :info)
-end
-
-defp maybe_append_approval_rejection({state, _approval, _decision}), do: state
 ```
 
-`send_approval_response/1` and `record_approval_resolution/1` return the complete tuple because later steps still need all three values. `maybe_append_approval_rejection/1` is the last approval-specific step, so it returns only `state`; the rest of the pipeline is an ordinary state workflow. Once that workflow has collapsed to plain state, install a separately calculated owned value explicitly at the orchestration boundary. Do not add a wrapper whose only purpose is to keep the update inside the pipe.
-- **Table-test transitions across every tag.** Every public transition should cover each valid source tag, including rejected states. A newly added tag must fail visibly in focused tests instead of inheriting a boolean fallback.
+Keep standalone effects visible. Do not return an unchanged context from a notification or send just to extend a pipe.
+
+**Table-test transitions across every tag.** Every public transition should cover each valid source tag, including rejected states. A newly added tag must fail visibly in focused tests instead of inheriting a boolean fallback.
 
 ### Module-Level Type Aliases
 
-Define `@type` aliases at the top of any module where a type appears in 3+ specs. This turns noisy specs into readable ones:
-
-```elixir
-# Before: repeating GenServer.server() and EditorState.t() in 80+ specs
-@spec open_file(GenServer.server(), String.t()) :: :ok | {:error, term()}
-@spec switch_buffer(GenServer.server(), non_neg_integer()) :: :ok
-
-# After: aliases at module top, specs read like English
-@type server :: GenServer.server()
-@type editor_state :: EditorState.t()
-
-@spec open_file(server(), String.t()) :: :ok | {:error, term()}
-@spec switch_buffer(server(), non_neg_integer()) :: :ok
-```
-
-Name the alias after the domain concept (`@type user :: User.t()`, not `@type u :: User.t()`). This is a readability choice, not a correctness choice; both compile identically.
+Name a type when it conveys domain meaning or makes a contract easier to read. Use `@typep` for local vocabulary and `@type` when callers need it. Repetition alone is not a reason to introduce or export an alias.
 
 ### Module Decomposition
 
-Entry-point modules (like `Minga.Buffer`, `Minga.Editing`) should be mostly `defdelegate`, `@spec`, and `@doc`, with short glue logic where needed. If removing all `defdelegate` lines and all typespecs leaves more than ~100 lines of actual logic, the module is doing too much. Extract to an internal module and delegate.
+Keep an entry point where it gives callers a stable API. Use `defdelegate` when a public boundary earns it, not to hit a line count.
 
-**GenServer modules specifically** should contain OTP callbacks (`init`, `handle_call`, `handle_cast`, `handle_info`, `terminate`) and route to handler modules for the actual logic. Each `handle_info` or `handle_call` clause should be 1-3 lines that extract data and call a handler function in a dedicated module. The GenServer is the process wrapper; the handler module is where the logic lives.
-
-```elixir
-# Good: GenServer clause routes to handler
-def handle_info({:buffer_saved, path}, state) do
-  {:noreply, SaveHandler.process(state, path)}
-end
-
-# Bad: GenServer clause contains 40 lines of business logic
-def handle_info({:buffer_saved, path}, state) do
-  # ... 40 lines of formatting, git refresh, LSP notify, etc.
-  {:noreply, new_state}
-end
-```
-
-Minga already follows this pattern in places (`Editor.KeyDispatch`, `Editor.CompletionHandling`, `Editor.Startup`). Apply it consistently: when a GenServer module exceeds ~500 lines, look for `handle_info` and `handle_call` clauses with inline logic and extract them to handler modules.
+In OTP callbacks, keep the message match, acceptance decision, process-owned effects, reply, and state installation together when their order explains the operation. Extract a deterministic rule to its value owner, or extract a complete workflow when its interface lets the reader skip the implementation. Moving blocking work into a helper does not move it off the mailbox.
 
 ### Protocols vs Behaviours
 
@@ -331,7 +284,7 @@ Use the right abstraction for the dispatch pattern. Getting this wrong creates b
 - **Behaviour** when you know the contract and want to swap the implementation module. The caller writes `impl_module.do_thing(args)` where `impl_module` is chosen at configuration time or stored in state. Examples: git backend (`System` vs `Stub`), rendering backend (`MingaEditor.Frontend.Adapter`), storage adapters.
 - **Neither** when there's only one implementation (just call the function directly) or when you're doing simple value validation (pattern match, don't wrap it in a protocol).
 
-The diagnostic: if the call site stores a module atom and calls it dynamically, that's a behaviour. If the call site receives a value and dispatches on its type, that's a protocol. If you find yourself using `function_exported?/3` to check for optional callbacks, you probably want a protocol with a fallback `Any` implementation instead.
+For a selected implementation module, declare optional behaviour callbacks and make sure the module is loaded before probing exports. Invoke only the first supported callback in the documented order, and evaluate a fallback only if selected. Use a protocol when dispatch is on the type of a value.
 
 ### Common Elixir Footguns
 
@@ -367,6 +320,7 @@ Minga has project-specific Credo checks in `credo/checks/`. These enforce archit
 | `NoEventBusBroadcastInTestCheck` | EX9013 | Do not broadcast on the global EventBus in tests. |
 | `NoLossyGuiEncoderCheck` | EX9014 | GUI encoders must not silently truncate out-of-range values. |
 | `ExplicitTargetCheck` | EX9015 | Targeted clauses cannot rediscover their subject from active state; GUI activations carry identity, not a list position. |
+| `NoTrueWithCheck` | EX9016 | Rejects new literal `true <-` clauses in `with` without flagging generators in `for`. |
 
 ### Feedback Loop and Pre-commit Checks (enforced by commit-gate extension)
 
