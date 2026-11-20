@@ -499,6 +499,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0B | PendingQuestion | `offer(8) + prompt(string16)`. The offer is nonzero and identifies this exact clarification. Absence clears the control. The UTF-8 prompt is at most 4,096 bytes. |
 | 0x0C | StopTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Absence clears the target and disables the displayed Stop control. |
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
+| 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
 
@@ -1289,6 +1290,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x6B | agent_composer_submit | prompt_generation(8) + attachment_offer(8) | Send the displayed draft now. Echo the committed prompt generation and attachment offer, or zero when no attachment offer was shown. A changed workspace, conversation, draft, attachment set or active turn refuses the action without clearing the draft or queuing it. |
 | 0x6C | agent_open_question | offer(8) | Open the shared answer picker for the displayed clarification. The BEAM rejects a stale offer without answering a newer question. |
 | 0x6D | agent_stop_turn | session_id(string16) + request_id(string16) | Stop only the active request identified by the committed Stop control. A stale or repeated action must not recall prompts from, or stop, a replacement turn. |
+| 0x6E | agent_composer_queue | `prompt_generation(8) + attachment_offer(8) + kind(1) + session_id(string16) + request_id(string16) + sequence(8)` | Queue the displayed draft for the exact active turn. Kind `0` steers; kind `1` queues a follow-up. Echo the committed prompt, attachment, and queue identities from the same frame. A stale action does not send, queue, or clear the draft. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

@@ -616,6 +616,12 @@ type GuiAgentChatPromptPresentation struct {
 	Generation uint64
 }
 
+type GuiAgentChatQueueTarget struct {
+	SessionID string
+	RequestID string
+	Sequence  uint64
+}
+
 type GuiPickerPreviewHeader struct {
 	Visible uint8
 	Kind    uint8

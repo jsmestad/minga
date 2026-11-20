@@ -138,6 +138,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         &AgentCommands.submit_prompt/1
       )
 
+  defp dispatch_action(state, {:agent_composer_queue, generation, offer, kind, target}),
+    do:
+      MingaEditor.Agent.PromptInput.queue_displayed(
+        state,
+        generation,
+        offer,
+        &AgentCommands.queue_displayed_prompt(&1, kind, target)
+      )
+
   defp dispatch_action(state, {:agent_open_question, offer}),
     do: MingaEditor.UI.Picker.AgentQuestionSource.open(state, offer)
 

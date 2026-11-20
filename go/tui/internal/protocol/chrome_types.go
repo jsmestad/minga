@@ -483,6 +483,12 @@ type AgentHelpBinding struct {
 	Description string
 }
 
+// AgentQueueTarget identifies both the active turn and its next queue entry.
+type AgentQueueTarget struct {
+	AgentStopTarget
+	Sequence uint64
+}
+
 // AgentStopTarget identifies the exact active turn shown by the composer.
 type AgentStopTarget struct {
 	SessionID string
@@ -506,6 +512,7 @@ type AgentChat struct {
 	InputFocused         bool
 	DraftAttachmentCount byte
 	DraftAttachmentOffer uint64
+	QueueTarget          AgentQueueTarget
 	PromptPresentation   uint64
 	QuestionOffer        uint64
 	QuestionPrompt       string

@@ -93,6 +93,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       draft_attachment_offer: DraftSave.attachment_offer(agent_ui.draft_save),
       pending_question: pending_question(shell_agent.pending_question, session),
       stop_target: stop_target(shell_agent.stop_target, session),
+      queue_target: queue_target(shell_agent.queue_target, agent_ui.draft_save, session),
       prompt_completion: build_prompt_completion(panel),
       input_focused:
         panel.input_focused and ctx.intent.frame.focus_owner.responder == :editor_view and
@@ -132,6 +133,20 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           {String.t(), String.t()} | nil
   defp stop_target({session, target}, session), do: target
   defp stop_target(_target, _session), do: nil
+
+  @spec queue_target(
+          {pid(), MingaAgent.Session.queue_target()} | nil,
+          DraftSave.t() | nil,
+          pid()
+        ) :: MingaAgent.Session.queue_target() | nil
+  defp queue_target(
+         {session, {record, _, _} = target},
+         %DraftSave{target: {session, record}},
+         session
+       ),
+       do: target
+
+  defp queue_target(_target, _save, _session), do: nil
 
   @spec retained_scope(term(), TraditionalState.t(), pid()) :: RetainedOutputTarget.scope() | nil
   defp retained_scope(%{target: %{session: session, epoch: epoch}}, shell_state, session) do

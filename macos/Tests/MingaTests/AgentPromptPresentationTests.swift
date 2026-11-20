@@ -652,31 +652,34 @@ struct AgentPromptPresentationTests {
         #expect(editor.agentPromptPlacement == nil)
     }
 
-    @Test("Send and Stop use explicit intents in insert, normal, visual and operator modes",
+    @Test("The four composer controls keep their identities and enablement across prompt modes",
           arguments: [PromptMode.insert, .normal, .visual, .visualLine, .operatorPending])
     func completeControls(mode: PromptMode) throws {
         let target = AgentStopTarget(sessionID: "displayed-session", requestID: "displayed-request")
         let state = AgentChatState(prompt: "a multiline\nprompt", promptMode: mode, promptVisibleRows: 2)
         var actions: [AgentPromptView.Action] = []
-        let control = AgentPromptActionButton(state: state, sendAction: { actions.append($0) })
+        let control = AgentPromptActionButtons(state: state, sendAction: { actions.append($0) })
             .environment(\.themeColors, ThemeColors())
-        #expect(try control.inspect().find(ViewType.Button.self).isDisabled())
+        #expect(try control.inspect().findAll(ViewType.Button.self)[0].isDisabled())
+        let queue = AgentQueueTarget(turn: target, sequence: 43)
         state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: state.promptLineCount, promptCursorLine: state.promptCursorLine, promptCursorCol: state.promptCursorCol, promptMode: mode, promptVisibleRows: 2, promptCompletion: nil, promptPresentation: 42)
-        try control.inspect().find(ViewType.Button.self).tap()
+        let idle = try control.inspect().findAll(ViewType.Button.self)
+        #expect(try idle.map { try $0.accessibilityLabel().string() } == ["Send", "Steer", "Queue Next", "Stop"])
+        #expect(try idle.map { try $0.isDisabled() } == [false, true, true, true])
+        try idle[0].tap()
         #expect(actions == [.submit])
-        state.status = .thinking
-        #expect(try control.inspect().find(ViewType.Button.self).isDisabled())
-        publishStopTarget(target, to: state)
-        try control.inspect().find(ViewType.Button.self).tap()
-        #expect(actions == [.submit, .abort(target)])
+        state.update(visible: true, status: .thinking, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: state.promptLineCount, promptCursorLine: state.promptCursorLine, promptCursorCol: state.promptCursorCol, promptMode: mode, promptVisibleRows: 2, promptCompletion: nil, stopTarget: target, promptPresentation: 42, queueTarget: queue)
+        let active = try control.inspect().findAll(ViewType.Button.self)
+        #expect(try active.map { try $0.isDisabled() } == [true, false, false, false])
+        try active[1].tap()
+        try active[2].tap()
+        try active[3].tap()
+        #expect(actions == [.submit, .queue(followUp: false, target: queue), .queue(followUp: true, target: queue), .abort(target)])
         state.prompt = ""
-        try control.inspect().find(ViewType.Button.self).tap()
-        #expect(actions == [.submit, .abort(target), .abort(target)])
+        let empty = try control.inspect().findAll(ViewType.Button.self)
+        #expect(try empty.map { try $0.isDisabled() } == [true, true, true, false])
         publishStopTarget(nil, to: state, status: .idle)
-        let idleButton = try control.inspect().find(ViewType.Button.self)
-        #expect(idleButton.isDisabled())
-        #expect(throws: InspectionError.self) { try idleButton.tap() }
-        #expect(actions == [.submit, .abort(target), .abort(target)])
+        #expect(try control.inspect().findAll(ViewType.Button.self).allSatisfy { try $0.isDisabled() })
     }
 
     @Test("Awaiting approval retains enabled Stop and draft in every prompt mode",
@@ -687,11 +690,11 @@ struct AgentPromptPresentationTests {
         let target = AgentStopTarget(sessionID: "waiting-session", requestID: "waiting-request")
         publishStopTarget(target, to: state, status: .approvalWaiting)
         var actions: [AgentPromptView.Action] = []
-        let control = AgentPromptActionButton(state: state, sendAction: { actions.append($0) })
+        let control = AgentPromptActionButtons(state: state, sendAction: { actions.append($0) })
             .environment(\.themeColors, ThemeColors())
-        let button = try control.inspect().find(ViewType.Button.self)
+        let button = try control.inspect().findAll(ViewType.Button.self)[3]
         #expect(!button.isDisabled())
-        #expect(try button.accessibilityLabel().string() == "Stop generating")
+        #expect(try button.accessibilityLabel().string() == "Stop")
         try button.tap()
         #expect(actions == [.abort(target)])
         #expect(state.prompt == draft)
@@ -700,8 +703,8 @@ struct AgentPromptPresentationTests {
         #expect(state.statusLabel == "Awaiting approval")
         #expect(state.hasActiveTurn && !state.isThinking)
         state.prompt = ""
-        #expect(try !control.inspect().find(ViewType.Button.self).isDisabled())
-        try control.inspect().find(ViewType.Button.self).tap()
+        #expect(try !control.inspect().findAll(ViewType.Button.self)[3].isDisabled())
+        try control.inspect().findAll(ViewType.Button.self)[3].tap()
         #expect(actions == [.abort(target), .abort(target)])
     }
 

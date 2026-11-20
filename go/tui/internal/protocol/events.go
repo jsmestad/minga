@@ -278,6 +278,25 @@ func EncodeGUIAgentComposerSubmit(generation, offer uint64) []byte {
 	return packet[:]
 }
 
+// EncodeGUIAgentComposerQueue binds a queued prompt to its displayed draft and turn.
+func EncodeGUIAgentComposerQueue(generation, offer uint64, followUp bool, target AgentQueueTarget) []byte {
+	if generation == 0 || target.Sequence == 0 ||
+		len(target.SessionID) == 0 || len(target.SessionID) > 65535 ||
+		len(target.RequestID) == 0 || len(target.RequestID) > 65535 {
+		return nil
+	}
+	packet := make([]byte, 19, 31+len(target.SessionID)+len(target.RequestID))
+	packet[0], packet[1] = generated.OPGuiAction, generated.GUIActionAgentComposerQueue
+	binary.BigEndian.PutUint64(packet[2:10], generation)
+	binary.BigEndian.PutUint64(packet[10:18], offer)
+	if followUp {
+		packet[18] = 1
+	}
+	packet = appendString16(packet, target.SessionID)
+	packet = appendString16(packet, target.RequestID)
+	return binary.BigEndian.AppendUint64(packet, target.Sequence)
+}
+
 // EncodeGUIAgentOpenQuestion opens the exact question shown in the committed chat.
 func EncodeGUIAgentOpenQuestion(offer uint64) []byte {
 	packet := [10]byte{generated.OPGuiAction, generated.GUIActionAgentOpenQuestion}

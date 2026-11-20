@@ -60,6 +60,25 @@ defmodule MingaEditor.Agent.PromptInputTest do
              Protocol.decode_event(<<0x07, 0x67, 1::16, 123::64, 1::signed-32>>)
   end
 
+  test "queue controls carry the exact displayed draft and active turn into the editor" do
+    for {code, kind, offer, expected} <- [{0, :steering, 0, nil}, {1, :follow_up, 76, 76}] do
+      packet = <<0x07, 0x6E, 201::64, offer::64, code, 6::16, "record", 7::16, "request", 39::64>>
+
+      assert Protocol.decode_event(packet) ==
+               {:ok,
+                {:gui_action,
+                 {:agent_composer_queue, 201, expected, kind, {"record", "request", 39}}}}
+    end
+
+    for {generation, kind, sequence} <- [{0, 0, 39}, {201, 2, 39}, {201, 0, 0}] do
+      packet =
+        <<0x07, 0x6E, generation::64, 0::64, kind, 6::16, "record", 7::16, "request",
+          sequence::64>>
+
+      assert Protocol.decode_event(packet) == {:error, :malformed}
+    end
+  end
+
   test "the encoded prompt source lease is registered without a fake WindowTree buffer" do
     {state, regular} = prompt_state("é界abcdef")
     {state, output, model, lease, registry} = present(state, 4, 101)

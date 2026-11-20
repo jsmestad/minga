@@ -210,6 +210,12 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return messageID == 0 || (offer.high == 0 && offer.low == 0) ? .invalidPayload("Retained output requires a tool message identity and displayed offer") : nil
         case .agentComposerSubmit(let generation, _):
             return generation == 0 ? .invalidPayload("Agent submit requires a displayed prompt presentation") : nil
+        case .agentComposerQueue(let generation, _, _, let target):
+            guard generation != 0, target.sequence != 0, !target.turn.sessionID.isEmpty, !target.turn.requestID.isEmpty else {
+                return .invalidPayload("Agent queue submission requires a displayed draft and active turn")
+            }
+            return oversizedString(target.turn.sessionID, limit: Int(UInt16.max))
+                ?? oversizedString(target.turn.requestID, limit: Int(UInt16.max))
         case .agentOpenQuestion(let offer):
             return offer == 0 ? .invalidPayload("Agent question requires a displayed offer") : nil
         case .agentStopTurn(let target):
@@ -392,6 +398,19 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             buf[1] = GUI_ACTION_AGENT_COMPOSER_SUBMIT
             writeU64(&buf, 2, generation)
             writeU64(&buf, 10, offer)
+            writeFrame(buf)
+        case .agentComposerQueue(let generation, let offer, let followUp, let target):
+            var buf = Data(count: 19)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_AGENT_COMPOSER_QUEUE
+            writeU64(&buf, 2, generation)
+            writeU64(&buf, 10, offer)
+            buf[18] = followUp ? 1 : 0
+            appendString16(&buf, target.turn.sessionID)
+            appendString16(&buf, target.turn.requestID)
+            let offset = buf.count
+            buf.append(Data(count: 8))
+            writeU64(&buf, offset, target.sequence)
             writeFrame(buf)
         case .agentOpenQuestion(let offer):
             var buf = Data(count: 10)

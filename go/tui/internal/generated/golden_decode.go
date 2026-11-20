@@ -19,6 +19,9 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 	case "GuiAgentChatPromptPresentation":
 		v, n, err := DecodeGuiAgentChatPromptPresentation(payload, 0, len(payload))
 		return v, n, err
+	case "GuiAgentChatQueueTarget":
+		v, n, err := DecodeGuiAgentChatQueueTarget(payload, 0, len(payload))
+		return v, n, err
 	case "GuiAgentContextFields":
 		v, n, err := DecodeGuiAgentContextFields(payload, 0, len(payload))
 		return v, n, err
