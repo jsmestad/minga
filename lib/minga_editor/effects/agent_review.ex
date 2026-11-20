@@ -45,7 +45,7 @@ defmodule MingaEditor.Effects.AgentReview do
     :hunks,
     :postimage_digest
   ]
-  defstruct @enforce_keys
+  defstruct [{:resolution, nil} | @enforce_keys]
 
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
@@ -61,7 +61,8 @@ defmodule MingaEditor.Effects.AgentReview do
           path: String.t(),
           source: source(),
           hunks: [Minga.Core.Diff.hunk()],
-          postimage_digest: EditTimeline.postimage_digest()
+          postimage_digest: EditTimeline.postimage_digest() | nil,
+          resolution: {Minga.Buffer.Fork.review_revision(), [DiffReview.resolution()]} | nil
         }
 
   @doc "Schedules the offered file in the current workspace without changing selection or focus."
@@ -86,6 +87,34 @@ defmodule MingaEditor.Effects.AgentReview do
       NoticeWorkflow.publish(state, "Could not load review #{path}: #{inspect(reason)}")
   end
 
+  @doc "Schedules publication of the exact conflict choices from the current review."
+  @spec resolve_fork(EditorState.t(), String.t(), Minga.Buffer.Fork.review_revision(), [
+          DiffReview.resolution()
+        ]) :: EditorState.t()
+  def resolve_fork(%EditorState{effect_scheduler: nil} = state, path, _revision, _decisions) do
+    NoticeWorkflow.publish(state, "Could not apply conflict choices: #{path}")
+  end
+
+  def resolve_fork(%EditorState{effect_scheduler: scheduler} = state, path, revision, decisions) do
+    with {:ok, effect} <- capture(state, path),
+         {:ok, _id, _phase} <-
+           EffectScheduler.schedule(
+             scheduler,
+             Request.new(
+               %{effect | resolution: {revision, decisions}},
+               {:agent_fork_resolution, effect.workspace_id},
+               Policy.fifo(0),
+               activity: :agent_review_loading
+             )
+           ) do
+      NoticeWorkflow.publish(state, "Applying conflict choices: #{path}")
+    else
+      _ -> NoticeWorkflow.publish(state, "Could not apply conflict choices: #{path}")
+    end
+  catch
+    :exit, _ -> NoticeWorkflow.publish(state, "Could not apply conflict choices: #{path}")
+  end
+
   @doc "Builds a latest-wins request bound to the captured workspace and presentation."
   @spec request(t()) :: Request.t()
   def request(%__MODULE__{} = effect) do
@@ -96,8 +125,40 @@ defmodule MingaEditor.Effects.AgentReview do
   end
 
   @impl true
-  @spec run(t()) :: {:ok, DiffReview.t() | :no_changes} | {:error, term()}
-  def run(%__MODULE__{path: path, source: source, hunks: hunks, postimage_digest: digest}) do
+  @spec run(t()) :: {:ok, DiffReview.t() | :no_changes | :fork_resolved} | {:error, term()}
+  def run(%__MODULE__{resolution: {revision, decisions}, source: {:project_view, view, path}}) do
+    case ProjectView.Overlay.resolve_fork_conflicts(view, path, revision, decisions) do
+      :ok -> {:ok, :fork_resolved}
+      {_failure, reason} -> {:error, reason}
+    end
+  end
+
+  def run(%__MODULE__{resolution: {_, _}}), do: {:error, :fork_unavailable}
+
+  def run(%__MODULE__{source: {:project_view, view, path}} = effect) do
+    case ProjectView.Overlay.fork_conflict_snapshot(view, path) do
+      {:ok, revision, regions} ->
+        case DiffReview.from_fork_snapshot(effect.path, revision, regions) do
+          nil -> run_cumulative(effect)
+          review -> {:ok, review}
+        end
+
+      {:error, _} ->
+        run_cumulative(effect)
+    end
+  end
+
+  def run(%__MODULE__{} = effect), do: run_cumulative(effect)
+
+  @spec run_cumulative(t()) :: {:ok, DiffReview.t() | :no_changes} | {:error, term()}
+  defp run_cumulative(%__MODULE__{hunks: []}), do: {:ok, :no_changes}
+
+  defp run_cumulative(%__MODULE__{
+         path: path,
+         source: source,
+         hunks: hunks,
+         postimage_digest: digest
+       }) do
     with {:ok, content} <- read_source(source),
          true <- :crypto.hash(:sha256, content) == digest do
       case DiffReview.from_hunks(path, content, hunks) do
@@ -117,7 +178,7 @@ defmodule MingaEditor.Effects.AgentReview do
         %Outcome{request: %Request{effect: %__MODULE__{} = effect}, value: {:completed, result}} =
           outcome
       ) do
-    if current?(state, effect) do
+    if completion_current?(state, effect) do
       case install_result(state, effect, result) do
         {:ok, updated} ->
           {updated, outcome}
@@ -136,7 +197,8 @@ defmodule MingaEditor.Effects.AgentReview do
         %Outcome{request: %Request{effect: %__MODULE__{} = effect}, value: {:failed, reason}} =
           outcome
       ) do
-    if current?(state, effect) do
+    if completion_current?(state, effect) do
+      state = freeze_stale_fork_review(state, effect, reason)
       {NoticeWorkflow.publish(state, failure_message(effect.path, reason)), outcome}
     else
       {state, Outcome.stale(outcome, :review_context_changed)}
@@ -163,8 +225,7 @@ defmodule MingaEditor.Effects.AgentReview do
          %Tab{id: tab_id} <- TabBar.active(tab_bar),
          %Window{} = window <- Windows.active_struct(state.workspace.windows),
          %Tab{id: review_tab_id} <- find_review_tab(tab_bar, workspace.id),
-         [_ | _] <- hunks,
-         digest when is_binary(digest) <- EditTimeline.postimage_digest(timeline, path),
+         digest = EditTimeline.postimage_digest(timeline, path),
          {:ok, source} <- capture_source(payload.project_view, workspace.project_root, path) do
       {:ok,
        %__MODULE__{
@@ -232,10 +293,38 @@ defmodule MingaEditor.Effects.AgentReview do
   @spec current?(EditorState.t(), t()) :: boolean()
   defp current?(state, effect) do
     case capture(state, effect.path) do
-      {:ok, current} -> current == effect
+      {:ok, current} -> current == %{effect | resolution: nil}
       {:error, _reason} -> false
     end
   end
+
+  @spec completion_current?(EditorState.t(), t()) :: boolean()
+  defp completion_current?(state, %{resolution: {revision, _}} = effect) do
+    tab_bar = Runtime.state(state.shell_runtime).tab_bar
+    preview = state.workspace.agent_ui.view.preview
+
+    with %TabBar{} <- tab_bar,
+         %Workspace{id: id, payload: %WorkspaceAgent{session: session}} <-
+           TabBar.active_workspace(tab_bar),
+         %DiffReview{path: path, fork_revision: ^revision} <- Preview.diff_review(preview) do
+      {id, session, path, preview.content_revision} ==
+        {effect.workspace_id, effect.session, effect.path, effect.preview_revision}
+    else
+      _ -> false
+    end
+  end
+
+  defp completion_current?(state, effect), do: current?(state, effect)
+
+  @spec freeze_stale_fork_review(EditorState.t(), t(), term()) :: EditorState.t()
+  defp freeze_stale_fork_review(state, %{resolution: {_, _}, path: path}, reason)
+       when reason in [:stale_parent, :stale_fork] do
+    ui = state.workspace.agent_ui
+    preview = Preview.refresh_after_write(ui.view.preview, path)
+    Workflow.install_agent_ui(state, UIState.replace_preview(ui, preview))
+  end
+
+  defp freeze_stale_fork_review(state, _effect, _reason), do: state
 
   @spec failure_message(String.t(), term()) :: String.t()
   defp failure_message(path, :review_source_changed),
@@ -244,12 +333,27 @@ defmodule MingaEditor.Effects.AgentReview do
   defp failure_message(path, :review_pane_unavailable),
     do: "Could not review #{path}: the Agent pane is unavailable. Reopen the Agent workspace."
 
+  defp failure_message(path, reason) when reason in [:stale_parent, :stale_fork],
+    do: "Conflict choices were not applied: #{path} changed. Open Review again."
+
+  defp failure_message(path, :publication_baseline_conflict),
+    do: "Conflict choices were not applied: the staging baseline for #{path} changed."
+
   defp failure_message(path, reason), do: "Could not review #{path}: #{inspect(reason)}"
 
-  @spec install_result(EditorState.t(), t(), DiffReview.t() | :no_changes) ::
+  @spec install_result(EditorState.t(), t(), DiffReview.t() | :no_changes | :fork_resolved) ::
           {:ok, EditorState.t()} | {:error, term()}
   defp install_result(state, effect, :no_changes) do
     {:ok, NoticeWorkflow.publish(state, "No changes to review: #{effect.path}")}
+  end
+
+  defp install_result(state, effect, :fork_resolved) do
+    ui = state.workspace.agent_ui
+    preview = Preview.clear(ui.view.preview)
+    ui = UIState.replace_preview(ui, preview)
+    ui = leave_resolved_review(ui, ui.view.presentation.focus)
+    state = Workflow.install_agent_ui(state, ui)
+    {:ok, NoticeWorkflow.publish(state, "Resolved fork conflicts: #{effect.path}")}
   end
 
   defp install_result(state, effect, %DiffReview{} = review) do
@@ -262,10 +366,15 @@ defmodule MingaEditor.Effects.AgentReview do
       preview = Preview.set_diff(ui.view.preview, review)
       ui = ui |> UIState.replace_preview(preview) |> UIState.set_focus(:file_viewer)
       focused = Workflow.install_agent_ui(focused, ui)
-      {:ok, NoticeWorkflow.publish(focused, "Read-only review: #{effect.path}")}
+      label = if review.fork_revision, do: "Resolve fork conflicts", else: "Read-only review"
+      {:ok, NoticeWorkflow.publish(focused, "#{label}: #{effect.path}")}
     else
       nil -> {:error, :review_pane_unavailable}
       {:error, _reason} = error -> error
     end
   end
+
+  @spec leave_resolved_review(UIState.t(), atom()) :: UIState.t()
+  defp leave_resolved_review(ui, :file_viewer), do: UIState.set_focus(ui, :chat)
+  defp leave_resolved_review(ui, _focus), do: ui
 end
