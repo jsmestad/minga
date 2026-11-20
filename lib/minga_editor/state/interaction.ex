@@ -15,7 +15,8 @@ defmodule MingaEditor.State.Interaction do
           options_server: Minga.Config.Options.server(),
           file_tree_duplicate_backend: MingaEditor.Commands.FileTree.DuplicateBackend.t(),
           file_tree_new_file_backend: MingaEditor.Commands.FileTree.NewFileBackend.t(),
-          keystroke_history: KeystrokeHistory.t()
+          keystroke_history: KeystrokeHistory.t(),
+          queued_input_edit: MingaEditor.Agent.QueuedInputEdit.edit() | nil
         }
 
   defstruct editing_model: :vim,
@@ -23,7 +24,8 @@ defmodule MingaEditor.State.Interaction do
             options_server: Minga.Config.Options,
             file_tree_duplicate_backend: MingaEditor.Commands.FileTree.SystemDuplicateBackend,
             file_tree_new_file_backend: MingaEditor.Commands.FileTree.SystemNewFileBackend,
-            keystroke_history: KeystrokeHistory.new()
+            keystroke_history: KeystrokeHistory.new(),
+            queued_input_edit: nil
 
   @doc "Creates interaction state from startup configuration."
   @spec new(keyword()) :: t()
@@ -51,4 +53,9 @@ defmodule MingaEditor.State.Interaction do
   @spec accept_keystroke_history(t(), KeystrokeHistory.t()) :: t()
   def accept_keystroke_history(%__MODULE__{} = interaction, %KeystrokeHistory{} = history),
     do: %{interaction | keystroke_history: history}
+
+  @doc "Installs the sole temporary queued-input editing buffer and its exact target."
+  @spec put_queued_input_edit(t(), MingaEditor.Agent.QueuedInputEdit.edit() | nil) :: t()
+  def put_queued_input_edit(%__MODULE__{} = interaction, edit),
+    do: %{interaction | queued_input_edit: edit}
 end

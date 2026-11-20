@@ -40,11 +40,44 @@ defmodule MingaSdkTest do
     end
   end
 
+  test "editor declarations and a callback compile against the standalone SDK" do
+    defmodule TestEditorExtension do
+      use Minga.Extension.Editor
+
+      @behaviour MingaEditor.Extension.EventHandler
+
+      option(:enabled, :boolean, default: true, description: "Enable")
+      editor_event_handler(__MODULE__, [:buffer_saved], priority: 30)
+
+      @impl Minga.Extension
+      def name, do: :test_editor_ext
+
+      @impl Minga.Extension
+      def description, do: "Test editor extension"
+
+      @impl Minga.Extension
+      def version, do: "0.1.0"
+
+      @impl Minga.Extension
+      def init(_config), do: {:ok, %{}}
+
+      @impl MingaEditor.Extension.EventHandler
+      def handle_editor_event(state, {:buffer_saved, _buffer}), do: {:handled, state}
+    end
+
+    assert TestEditorExtension.__option_schema__() == [{:enabled, :boolean, true, "Enable"}]
+
+    assert TestEditorExtension.__editor_event_handler_schema__() == [
+             {TestEditorExtension, [:buffer_saved], [priority: 30]}
+           ]
+  end
+
   describe "agent declaration contract" do
     test "agent UI declarations compile into the SDK schema" do
       defmodule TestAgentExtension do
         use Minga.Extension.Agent
 
+        option(:enabled, :boolean, default: false, description: "Enable")
         agent_ui(id: "status", surface: :panel, payload: %{text: "Ready"})
 
         @impl true
@@ -59,6 +92,8 @@ defmodule MingaSdkTest do
         @impl true
         def init(_config), do: {:ok, %{}}
       end
+
+      assert TestAgentExtension.__option_schema__() == [{:enabled, :boolean, false, "Enable"}]
 
       assert TestAgentExtension.__agent_ui_schema__() == [
                [id: "status", surface: :panel, payload: %{text: "Ready"}]

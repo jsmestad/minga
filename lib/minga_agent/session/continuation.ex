@@ -8,6 +8,8 @@ defmodule MingaAgent.Session.Continuation do
   """
 
   alias MingaAgent.Message, as: DisplayMessage
+  alias MingaAgent.ModelSelection.Policy.RequestCapacity
+  alias MingaAgent.Session.Dispatch
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.Prefix
@@ -71,6 +73,7 @@ defmodule MingaAgent.Session.Continuation do
           durable_revision: non_neg_integer(),
           active_request: Request.t() | nil,
           tool_checkpoint: tool_checkpoint() | nil,
+          dispatch: {pid(), Dispatch.t()} | nil,
           boundaries: [boundary()],
           branch_messages: %{String.t() => branch_snapshot()},
           provenance: provenance(),
@@ -87,7 +90,7 @@ defmodule MingaAgent.Session.Continuation do
     :branch_messages,
     :provenance
   ]
-  defstruct @enforce_keys ++ [prefixes: %PrefixStore{}]
+  defstruct @enforce_keys ++ [prefixes: %PrefixStore{}, dispatch: nil]
 
   @doc "Creates an empty lossless continuation before the first provider request."
   @spec new() :: t()
@@ -473,6 +476,7 @@ defmodule MingaAgent.Session.Continuation do
              revision: revision,
              active_request: nil,
              tool_checkpoint: nil,
+             dispatch: nil,
              boundaries: Enum.concat(continuation.boundaries, [boundary])
          }}
       end
@@ -483,7 +487,8 @@ defmodule MingaAgent.Session.Continuation do
 
   @doc "Cancels the active request identity without discarding a durable effect checkpoint."
   @spec cancel(t()) :: t()
-  def cancel(%__MODULE__{} = continuation), do: %{continuation | active_request: nil}
+  def cancel(%__MODULE__{} = continuation),
+    do: %{continuation | active_request: nil, dispatch: nil}
 
   @doc "Preserves the exact active request as the basis for a later continuation."
   @spec interrupt_request(t()) :: t()
@@ -505,6 +510,7 @@ defmodule MingaAgent.Session.Continuation do
       | messages: messages,
         revision: revision,
         active_request: nil,
+        dispatch: nil,
         boundaries: Enum.concat(continuation.boundaries, [boundary])
     }
   end
@@ -907,12 +913,76 @@ defmodule MingaAgent.Session.Continuation do
           end)
       }
 
-      {:ok, checkpoint_id, %{continuation | tool_checkpoint: checkpoint}}
+      {:ok, checkpoint_id, %{continuation | tool_checkpoint: checkpoint, dispatch: nil}}
     end
   end
 
   def checkpoint_tool_group(%__MODULE__{}, _request_id, _messages, _calls),
     do: {:error, :stale_request}
+
+  @doc "Starts a fresh assessment for the active request's current initial or completed-checkpoint source."
+  @spec begin_dispatch(t(), String.t(), Dispatch.source(), [Message.t()], pid()) ::
+          {:ok, Dispatch.t(), [Message.t()], t()} | {:error, term()}
+  def begin_dispatch(
+        %__MODULE__{dispatch: {_owner, %Dispatch{status: {:refused, _}}}},
+        _request_id,
+        _source,
+        _steering,
+        _owner_pid
+      ),
+      do: {:error, :assessment_refused}
+
+  def begin_dispatch(
+        %__MODULE__{
+          active_request: %Request{request_id: request_id, prefix: %Prefix{}} = request,
+          dispatch: current
+        } = continuation,
+        request_id,
+        source,
+        steering,
+        owner
+      )
+      when is_nil(current) or elem(current, 0) == owner do
+    with {:ok, messages, frozen} <- dispatch_source(continuation, source, steering) do
+      dispatch = Dispatch.begin(request, source)
+      {:ok, dispatch, messages, %{frozen | dispatch: {owner, dispatch}}}
+    end
+  end
+
+  def begin_dispatch(%__MODULE__{}, _request_id, _source, _steering, _owner),
+    do: {:error, :stale_dispatch}
+
+  @spec dispatch_source(t(), Dispatch.source(), [Message.t()]) ::
+          {:ok, [Message.t()], t()} | {:error, term()}
+  defp dispatch_source(
+         %__MODULE__{tool_checkpoint: nil, active_request: %Request{messages: messages}} =
+           continuation,
+         :initial,
+         []
+       ),
+       do: {:ok, messages, continuation}
+
+  defp dispatch_source(%__MODULE__{} = continuation, {:checkpoint, id}, steering),
+    do: freeze_dispatch_source(continuation, id, steering)
+
+  defp dispatch_source(%__MODULE__{}, _source, _steering), do: {:error, :stale_dispatch}
+
+  @doc "Consumes the private attempt handed to the SDK callback, which runs outside the Native worker."
+  @spec assess_dispatch(t(), Dispatch.t(), binary(), RequestCapacity.t()) ::
+          {:ok, t()} | {:error, :stale_dispatch}
+  def assess_dispatch(
+        %__MODULE__{dispatch: {owner, current}} = continuation,
+        %Dispatch{} = attempt,
+        digest,
+        assessment
+      ) do
+    with {:ok, assessed} <- Dispatch.assess(current, attempt, digest, assessment) do
+      {:ok, %{continuation | dispatch: {owner, assessed}}}
+    end
+  end
+
+  def assess_dispatch(%__MODULE__{}, %Dispatch{}, _digest, _assessment),
+    do: {:error, :stale_dispatch}
 
   @doc "Freezes steering for a completed checkpoint once and returns its canonical dispatch source."
   @spec freeze_dispatch_source(t(), String.t(), [Message.t()]) ::
@@ -1188,6 +1258,7 @@ defmodule MingaAgent.Session.Continuation do
         revision: revision,
         active_request: nil,
         tool_checkpoint: nil,
+        dispatch: nil,
         boundaries: Enum.concat(continuation.boundaries, [boundary])
     }
 
@@ -1427,22 +1498,20 @@ defmodule MingaAgent.Session.Continuation do
          messages,
          call_ids
        ) do
-    completed_results =
-      Enum.map(checkpoint.calls, fn
-        %{status: {:completed, result_message}} -> result_message
-        _unfinished -> nil
-      end)
+    case checkpoint_result_messages(checkpoint.calls) do
+      {:ok, results} ->
+        with {:ok, remaining} <-
+               consume_checkpoint_prefix(
+                 checkpoint.messages,
+                 messages,
+                 request_messages,
+                 call_ids
+               ) do
+          validate_message_prefix(remaining, results ++ Map.get(checkpoint, :steering, []))
+        end
 
-    if Enum.any?(completed_results, &is_nil/1) do
-      {:error, :previous_tool_group_unresolved}
-    else
-      with {:ok, remaining} <-
-             consume_checkpoint_prefix(checkpoint.messages, messages, request_messages, call_ids) do
-        validate_message_prefix(
-          remaining,
-          completed_results ++ Map.get(checkpoint, :steering, [])
-        )
-      end
+      {:error, :unresolved_tool_checkpoint} ->
+        {:error, :previous_tool_group_unresolved}
     end
   end
 
@@ -1506,19 +1575,12 @@ defmodule MingaAgent.Session.Continuation do
   defp validate_outcome_checkpoint(nil, _messages), do: :ok
 
   defp validate_outcome_checkpoint(checkpoint, messages) do
-    results =
-      Enum.map(checkpoint.calls, fn
-        %{status: {:completed, result_message}} -> result_message
-        _unfinished -> nil
-      end)
-
-    if Enum.any?(results, &is_nil/1),
-      do: {:error, :unresolved_tool_checkpoint},
-      else:
-        validate_message_prefix(
-          messages,
-          checkpoint.messages ++ results ++ Map.get(checkpoint, :steering, [])
-        )
+    with {:ok, results} <- checkpoint_result_messages(checkpoint.calls) do
+      validate_message_prefix(
+        messages,
+        checkpoint.messages ++ results ++ Map.get(checkpoint, :steering, [])
+      )
+    end
   end
 
   @spec checkpoint_id(String.t(), [Message.t()], [map()]) :: String.t()

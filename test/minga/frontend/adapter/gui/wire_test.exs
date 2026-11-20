@@ -86,6 +86,33 @@ defmodule Minga.Frontend.Adapter.GUI.WireTest do
              end)
   end
 
+  test "writer embeds ordered nested iodata and accepts a bare byte as one byte" do
+    nested =
+      :gui_test
+      |> Writer.new()
+      |> Writer.string16(:text, ["é" | "ß"])
+      |> Writer.append([0xFE, [0xFF]])
+      |> Writer.to_iodata()
+
+    assert <<7, 8::16, 4::16, "éß", 0xFE, 0xFF, 8, 1::16, 0x80>> ==
+             :gui_test
+             |> Writer.new()
+             |> Writer.section16(:payload, 7, nested)
+             |> Writer.section16(:payload, 8, 0x80)
+             |> Writer.finish()
+  end
+
+  test "writer rejects malformed iodata at the field after checking the section id" do
+    writer = Writer.new(:gui_test)
+
+    assert %{command: :gui_test, field: :section_id, actual: 256, min: 0, max: 255} =
+             assert_raise(EncodingError, fn ->
+               Writer.section16(writer, :payload, 256, [256])
+             end)
+
+    assert_raise ArgumentError, fn -> Writer.section16(writer, :payload, 7, [256]) end
+  end
+
   test "writer validation-only checks preserve the output" do
     assert "payload" ==
              :gui_test

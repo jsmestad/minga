@@ -69,11 +69,6 @@ defmodule Minga.Parser.BufferRegistration do
     %{registration | phase: {:awaiting_snapshot, token}}
   end
 
-  @doc "Returns whether a snapshot token belongs to the current request."
-  @spec awaiting?(t(), reference()) :: boolean()
-  def awaiting?(%__MODULE__{phase: {:awaiting_snapshot, token}}, token), do: true
-  def awaiting?(%__MODULE__{}, _token), do: false
-
   @doc "Marks a parser version and snapshot target as in flight."
   @spec begin_parse(t(), pos_integer(), ChangeLog.sequence(), boolean()) :: t()
   def begin_parse(%__MODULE__{} = registration, version, target_sequence, full?) do

@@ -1,7 +1,8 @@
 defmodule Minga.Extension.CompilerGuardrailTest do
   use ExUnit.Case, async: true
 
-  @extension_files Path.wildcard("lib/minga/extension/**/*.ex")
+  @extension_files Path.wildcard("lib/minga/extension/**/*.ex") ++
+                     Path.wildcard("sdk/lib/declarations/**/*.ex")
 
   test "path and Git flows have no host compiler or runtime module creation bypass" do
     forbidden = [

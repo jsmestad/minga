@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.
+- Agent chat keeps Send, Steer, Queue Next, and Stop in fixed positions on macOS and in the terminal. Steer and Queue Next act on the displayed saved conversation and appear disabled when that action is unavailable.
 - Successful rolling builds from `main` publish Apple Silicon packages to the Minga Homebrew tap. Use `brew upgrade minga` for the TUI or `brew upgrade --cask minga-mac` for the GUI.
 
 ### Changed
@@ -28,9 +29,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
+- A timed-out Agent hook escalates termination even if its shell exits before a descendant that ignores `TERM`.
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - Session storage can preserve a bounded draft separately from the model conversation, even before the first turn. Draft revisions reject stale saves and protect retained attachments. This does not enable composer autosave.
 - Agent History on macOS and in the terminal opens older retained messages without moving the live transcript or changing the draft. Use History or `SPC a H`, then select Earlier retained messages to page back. Select a message to copy its retained text.
+- Open **Queued Agent inputs** in the Agent header or with `SPC a J`. Edit a pending input in a multiline buffer and use the normal Save command to update it, or withdraw it from the queue. Neither action changes neighboring inputs or your current draft. If the selected revision has already changed or left the queue, Minga does not modify another item.
+- Apple Intelligence checks the prepared transcript and output cap with the current Agent session before generating. If the request does not fit, Minga explains how to proceed and retains the saved conversation. Hosted providers are unchanged.
 - The Go TUI preserves every step in a finite wheel burst, including direction changes and source-bound composer scrolling, without waiting for another input event. Pointer-motion throttling, modifiers and surface routing are unchanged.
 - Long styled Agent transcript text no longer drops the workspace frame. Both frontends receive the complete text and styling without changing retained message content.
 - Terminal Agent transcripts apply validated frame changes to paged resident storage without cloning or reindexing retained history. Stable message occurrences and reading anchors survive updates, and rejected frames preserve the last-good transcript.
@@ -83,8 +87,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- Source launchers keep Minga configuration and runtime data separate from the installed editor. Run `make clean` after quitting the source editor to reset the current worktree's profile without deleting build artifacts.
-
+- Repeated config reloads keep using the config home selected at startup.
+- Source launchers keep Minga configuration and runtime data, including project switcher history, separate from the installed editor. Run `make clean` after quitting the source editor to reset the current worktree's profile without deleting build artifacts.
 - macOS TUI release builds pass the optimization flags required by Erlang/OTP. The macOS app preserves the bundled icon font directory, and macOS and Linux packages no longer ship the Windows-only file watcher.
 - macOS release signing uses the runner’s native keychain settings and explicitly selects the temporary Developer ID keychain. Builds and package smoke tests still use an isolated home directory.
 - macOS release CI grants `codesign` access to the imported Developer ID key. It checks key access before signing the package and logs which file it is signing if the step stalls.
@@ -95,6 +99,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Local Agent composers autosave unsent input without adding it to conversation history. Reopen the original session or its **Unsent Agent draft** row after restart; a storage failure leaves the current input in place.
 - Agent workspaces show Awaiting approval without an execution animation while a tool waits for consent. Denied, Cancelled, Expired, and Error outcomes stay distinct in native and terminal conversations, including restored sessions. Approval waits do not inflate execution durations. Stopping an admitted effect preserves retained output and disclosure state without claiming that its effects were rolled back.
 - The Agent Stop button targets the displayed turn on macOS and in the terminal. An old or repeated button action does not recall pending prompts from or interrupt a replacement turn.
+- The Agent Send button targets the displayed draft on macOS and in the terminal. An old click cannot send another conversation's draft or queue text into a turn that has already started.
 - Sessions rejects a stale live row or a saved row opened from a different workspace or conversation. Reopen Sessions to choose the current target without losing the outgoing draft.
 - Entering plan mode, losing a provider, resetting a conversation, and restoring another conversation retire the original approval target before its identity changes. Known non-execution carries no execution duration, and plan mode does not increase the workspace's running-work count.
 - Saving or removing an agent API key replaces the credential file atomically. A failed write leaves existing keys intact, and malformed files report an error without including credential contents.

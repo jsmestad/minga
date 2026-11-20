@@ -6,7 +6,9 @@ defmodule Minga.Frontend.Adapter.GUI.Wire.Writer do
   @enforce_keys [:command]
   defstruct command: nil, chunks: []
 
-  @type t :: %__MODULE__{command: atom(), chunks: [iodata()]}
+  @type t :: %__MODULE__{command: atom(), chunks: [bytes()]}
+
+  @typep bytes :: iodata() | byte()
 
   @spec new(atom()) :: t()
   def new(command) when is_atom(command), do: %__MODULE__{command: command}
@@ -115,18 +117,23 @@ defmodule Minga.Frontend.Adapter.GUI.Wire.Writer do
     check_bytes(writer, field, value, Wire.max_u32())
   end
 
-  @spec section16(t(), atom(), term(), iodata()) :: t()
+  @spec section16(t(), atom(), term(), bytes()) :: t()
   def section16(%__MODULE__{} = writer, field, section_id, payload) do
     writer
     |> uint8(:section_id, section_id)
-    |> payload16(field, payload)
+    |> uint16(field, :erlang.iolist_size([payload]))
+    |> append(payload)
   end
 
-  @spec append(t(), iodata()) :: t()
+  @spec append(t(), bytes()) :: t()
   def append(%__MODULE__{} = writer, chunk), do: %{writer | chunks: [chunk | writer.chunks]}
 
+  @doc "Returns the ordered chunks for embedding in another writer without flattening."
+  @spec to_iodata(t()) :: iolist()
+  def to_iodata(%__MODULE__{} = writer), do: Enum.reverse(writer.chunks)
+
   @spec finish(t()) :: binary()
-  def finish(%__MODULE__{} = writer), do: writer.chunks |> Enum.reverse() |> IO.iodata_to_binary()
+  def finish(%__MODULE__{} = writer), do: writer |> to_iodata() |> IO.iodata_to_binary()
 
   @spec append_uint(t(), atom(), term(), non_neg_integer(), 8 | 16 | 24 | 32 | 64) :: t()
   defp append_uint(%__MODULE__{} = writer, field, value, max, 8) do

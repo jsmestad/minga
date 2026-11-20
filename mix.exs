@@ -6,7 +6,8 @@ defmodule Minga.MixProject do
 
   @version "0.1.0"
   @rolling_version_pattern ~r/\A#{Regex.escape(@version)}-dev\.[1-9][0-9]*\z/
-  @generated_elixir_path "generated/elixir"
+  # Compile the shared declarations, not the SDK-only stubs alongside them.
+  @elixirc_paths ["generated/elixir", "lib", "sdk/lib/declarations"]
   @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
   @release_priv_entries @native_release_artifacts ++
                           ~w(extensions queries tree_sitter tutor.txt minga-apple-inference)
@@ -214,15 +215,8 @@ defmodule Minga.MixProject do
 
   defp project_version(_env), do: @version
 
-  defp elixirc_paths(:test),
-    do: [
-      @generated_elixir_path,
-      "lib",
-      "test/support",
-      "test/perf"
-    ]
-
-  defp elixirc_paths(_), do: [@generated_elixir_path, "lib"]
+  defp elixirc_paths(:test), do: @elixirc_paths ++ ["test/support", "test/perf"]
+  defp elixirc_paths(_), do: @elixirc_paths
 
   defp test_paths(_), do: ["test"]
 

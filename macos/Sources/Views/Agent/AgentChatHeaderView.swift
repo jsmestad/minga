@@ -58,6 +58,17 @@ public struct AgentChatHeaderView: View {
             .accessibilityLabel("Agent checklist")
 
             Button {
+                sendAction?(.executeCommand(name: "agent_queued_inputs"))
+            } label: {
+                Image(systemName: "list.bullet.rectangle")
+                    .foregroundStyle(theme.agentMutedFg)
+                    .padding(Spacing.xs)
+            }
+            .buttonStyle(.plain)
+            .help("Inspect queued Agent inputs (SPC a J)")
+            .accessibilityLabel("Queued Agent inputs")
+
+            Button {
                 sendAction?(.executeCommand(name: "agent_retained_history"))
             } label: {
                 Image(systemName: "clock.arrow.circlepath")

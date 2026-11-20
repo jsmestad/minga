@@ -55,6 +55,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.MCP.ServerRegistry, as: MCPServerRegistry
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Policy.RequestCapacity
   alias MingaAgent.ProjectView
   alias MingaAgent.Providers.Native.LoopCtx
   alias MingaAgent.Providers.Native.OutputHydration
@@ -63,6 +64,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ToolRouter
   alias MingaAgent.Retry
   alias MingaAgent.Session
+  alias MingaAgent.Session.Dispatch
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.Prefix
@@ -764,9 +766,8 @@ defmodule MingaAgent.Providers.Native do
     else
       case validate_request_capabilities(state, request) do
         :ok ->
-          context = request_context(state, request)
           state = %{state | active_request: request, streaming: true, interrupted: false}
-          {:reply, :ok, start_agent_turn(state, request, context)}
+          {:reply, :ok, start_agent_turn(state, request)}
 
         {:error, message} ->
           {:reply, {:error, message}, state}
@@ -804,9 +805,8 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:continue, %Request{} = request}, _from, state) do
     case validate_request_capabilities(state, request) do
       :ok ->
-        context = request_context(state, request)
         state = %{state | active_request: request, streaming: true, interrupted: false}
-        {:reply, :ok, start_agent_turn(state, request, context)}
+        {:reply, :ok, start_agent_turn(state, request)}
 
       {:error, message} ->
         {:reply, {:error, message}, state}
@@ -1242,11 +1242,8 @@ defmodule MingaAgent.Providers.Native do
     {:reply, :ok, clear_stuck_streaming(state)}
   end
 
-  @spec request_context(state(), Request.t()) :: Context.t()
-  defp request_context(_state, %Request{} = request), do: Context.new(request.messages)
-
-  @spec start_agent_turn(state(), Request.t(), Context.t()) :: state()
-  defp start_agent_turn(state, request, context) do
+  @spec start_agent_turn(state(), Request.t()) :: state()
+  defp start_agent_turn(state, request) do
     notify(state.subscriber, request.request_id, %Event.AgentStart{})
 
     loop_context = %LoopCtx{
@@ -1270,7 +1267,7 @@ defmodule MingaAgent.Providers.Native do
       session_cost: state.session_cost
     }
 
-    task = Task.async(fn -> run_agent_loop(loop_context, context) end)
+    task = Task.async(fn -> run_agent_loop(loop_context, :initial) end)
     %{state | task: task}
   end
 
@@ -1858,11 +1855,11 @@ defmodule MingaAgent.Providers.Native do
 
   # ── Agent turn loop (runs in a Task) ────────────────────────────────────────
 
-  @spec run_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
-  defp run_agent_loop(lctx, context) do
+  @spec run_agent_loop(loop_ctx(), Dispatch.source()) :: :ok | {:error, term()}
+  defp run_agent_loop(lctx, source) do
     case check_safety_limits(lctx) do
       :ok ->
-        do_agent_loop(lctx, context)
+        do_agent_loop(lctx, source)
 
       {:turn_limit, message} ->
         emit(lctx, %Event.TextDelta{delta: "\n\n⚠️ #{message}"})
@@ -1891,17 +1888,17 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec do_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
-  defp do_agent_loop(lctx, context) do
+  @spec do_agent_loop(loop_ctx(), Dispatch.source()) :: :ok | {:error, term()}
+  defp do_agent_loop(lctx, source) do
     case ReqLLMAdapter.validate_selection(lctx.selection) do
-      :ok -> do_agent_loop_validated(lctx, context)
+      :ok -> do_agent_loop_validated(lctx, source)
       {:error, message, reason} -> reported_error(lctx, message, reason)
     end
   end
 
-  @spec do_agent_loop_validated(loop_ctx(), Context.t()) :: :ok | {:error, term()}
-  defp do_agent_loop_validated(lctx, context) do
-    execute_stream_request(lctx, context)
+  @spec do_agent_loop_validated(loop_ctx(), Dispatch.source()) :: :ok | {:error, term()}
+  defp do_agent_loop_validated(lctx, source) do
+    execute_stream_request(lctx, source)
   rescue
     e ->
       reported_error(lctx, Exception.message(e), e)
@@ -1910,10 +1907,8 @@ defmodule MingaAgent.Providers.Native do
       reported_error(lctx, inspect(reason), reason)
   end
 
-  @spec execute_stream_request(loop_ctx(), Context.t()) :: :ok | {:error, term()}
-  defp execute_stream_request(lctx, context) do
-    emit_context_usage(lctx, context)
-
+  @spec execute_stream_request(loop_ctx(), Dispatch.source()) :: :ok | {:error, term()}
+  defp execute_stream_request(lctx, source) do
     on_retry = fn attempt, delay_ms, reason ->
       delay_s = Float.round(delay_ms / 1000, 1)
 
@@ -1923,21 +1918,16 @@ defmodule MingaAgent.Providers.Native do
       })
     end
 
-    case outbound_messages(lctx, context.messages) do
-      {:ok, messages} ->
-        result =
-          Retry.with_retry(
-            fn ->
-              dispatch_stream(lctx, messages)
-            end,
-            max_retries: lctx.max_retries,
-            on_retry: on_retry
-          )
+    result =
+      Retry.with_retry(
+        fn -> dispatch_stream(lctx, source) end,
+        max_retries: lctx.max_retries,
+        on_retry: on_retry
+      )
 
-        case result do
-          {:ok, stream_response} -> process_and_continue(lctx, context, stream_response)
-          {:error, reason} -> reported_error(lctx, format_error(reason), reason)
-        end
+    case result do
+      {:ok, {context, stream_response}} ->
+        process_and_continue(lctx, context, stream_response)
 
       {:error, {:artifact_integrity_error, reason} = error} ->
         reported_error(
@@ -1946,19 +1936,24 @@ defmodule MingaAgent.Providers.Native do
           error
         )
 
-      {:error, reason} ->
+      {:error, {:outbound_history_invalid, reason} = error} ->
         reported_error(
           lctx,
           "Conversation history cannot be sent to this model: #{inspect(reason)}",
-          reason
+          error
         )
+
+      {:error, reason} ->
+        reported_error(lctx, format_error(reason), reason)
     end
   end
 
-  @spec dispatch_stream(loop_ctx(), [ReqLLM.Message.t()]) ::
-          {:ok, ReqLLM.StreamResponse.t()} | {:error, term()}
-  defp dispatch_stream(lctx, messages) do
-    with {:ok, auth_opts} <-
+  @spec dispatch_stream(loop_ctx(), Dispatch.source()) ::
+          {:ok, {Context.t(), ReqLLM.StreamResponse.t()}} | {:error, term()}
+  defp dispatch_stream(lctx, source) do
+    with {:ok, attempt, canonical_messages} <- begin_native_dispatch(lctx, source),
+         {:ok, messages} <- prepare_outbound_messages(lctx, canonical_messages),
+         {:ok, auth_opts} <-
            GenServer.call(
              lctx.provider_pid,
              {:dispatch_auth, lctx.request.prefix, lctx.turn_count > 0}
@@ -1969,9 +1964,69 @@ defmodule MingaAgent.Providers.Native do
              lctx.tools,
              lctx.config,
              auth_opts
+           ),
+         context = Context.new(canonical_messages),
+         :ok <- emit_context_usage(lctx, context),
+         stream_opts = prepared_stream_opts(lctx, attempt, stream_opts),
+         {:ok, stream_response} <-
+           ReqLLMAdapter.stream(
+             lctx.llm_client,
+             lctx.selection.request_model,
+             messages,
+             stream_opts
            ) do
-      ReqLLMAdapter.stream(lctx.llm_client, lctx.selection.request_model, messages, stream_opts)
+      {:ok, {context, stream_response}}
     end
+  end
+
+  @spec begin_native_dispatch(loop_ctx(), Dispatch.source()) ::
+          {:ok, Dispatch.t(), [ReqLLM.Message.t()]} | {:error, term()}
+  defp begin_native_dispatch(lctx, source) do
+    GenServer.call(
+      lctx.session_pid,
+      {:begin_native_dispatch, lctx.request.request_id, source},
+      30_000
+    )
+  catch
+    :exit, _reason -> {:error, {:request_admission_refused, :session_unavailable}}
+  end
+
+  @spec prepare_outbound_messages(loop_ctx(), [ReqLLM.Message.t()]) ::
+          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
+  defp prepare_outbound_messages(lctx, canonical_messages) do
+    case outbound_messages(lctx, canonical_messages) do
+      {:ok, messages} -> {:ok, messages}
+      {:error, {:artifact_integrity_error, _reason}} = error -> error
+      {:error, reason} -> {:error, {:outbound_history_invalid, reason}}
+    end
+  end
+
+  @spec prepared_stream_opts(loop_ctx(), Dispatch.t(), keyword()) :: keyword()
+  defp prepared_stream_opts(
+         %{selection: %{route: %{request_provider: :apple}}} = lctx,
+         attempt,
+         opts
+       ) do
+    limits = lctx.selection.policy.limits
+
+    admission = fn digest, tokens, cap, context ->
+      evidence =
+        RequestCapacity.assess(limits, {:provider_count, tokens}, {:encoded, cap}, context)
+
+      authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
+    end
+
+    opts |> Keyword.delete(:cache) |> Keyword.put(:apple_admission, admission)
+  end
+
+  defp prepared_stream_opts(_lctx, _attempt, opts), do: opts
+
+  @spec authorize_prepared_dispatch(pid(), Dispatch.t(), binary(), RequestCapacity.t()) ::
+          :ok | {:error, term()}
+  defp authorize_prepared_dispatch(session, attempt, digest, evidence) do
+    GenServer.call(session, {:assess_native_dispatch, attempt, digest, evidence}, 30_000)
+  catch
+    :exit, _reason -> {:error, :session_unavailable}
   end
 
   @spec outbound_messages(loop_ctx(), [ReqLLM.Message.t()]) ::
@@ -2088,6 +2143,13 @@ defmodule MingaAgent.Providers.Native do
     {:error, :stream_interrupted}
   end
 
+  defp handle_stream_error(
+         lctx,
+         partial_text,
+         %ReqLLM.Error.API.Stream{cause: {:request_admission_refused, _reason} = refusal}
+       ),
+       do: handle_stream_error(lctx, partial_text, refusal)
+
   defp handle_stream_error(lctx, partial_text, reason) do
     if partial_text != "" and String.length(partial_text) > 10 do
       emit(lctx, %Event.TextDelta{
@@ -2139,15 +2201,14 @@ defmodule MingaAgent.Providers.Native do
     with {:ok, checkpoint_id} <-
            checkpoint_tool_group(lctx, updated_context.messages, tool_calls),
          :ok <- emit_tool_starts(lctx, tool_calls),
-         {:ok, context} <- execute_tools(lctx, updated_context, checkpoint_id, tool_calls),
-         {:ok, messages} <- steering_dispatch_source(lctx, checkpoint_id) do
+         :ok <- execute_tools(lctx, checkpoint_id, tool_calls) do
       lctx = %{
         lctx
         | turn_count: lctx.turn_count + 1,
           session_cost: lctx.session_cost + turn_cost
       }
 
-      run_agent_loop(lctx, %{context | messages: messages})
+      run_agent_loop(lctx, {:checkpoint, checkpoint_id})
     else
       {:error, reason} ->
         reported_error(lctx, "Durable tool execution failed: #{inspect(reason)}", reason)
@@ -2191,22 +2252,13 @@ defmodule MingaAgent.Providers.Native do
   defp checkpoint_tool_group(_lctx, _messages, _tool_calls),
     do: {:error, :missing_session_checkpoint_owner}
 
-  @spec steering_dispatch_source(loop_ctx(), String.t()) ::
-          {:ok, [ReqLLM.Message.t()]} | {:error, term()}
-  defp steering_dispatch_source(lctx, checkpoint_id) do
-    Session.steering_dispatch_source(lctx.session_pid, lctx.request.request_id, checkpoint_id)
-  catch
-    :exit, _reason -> {:error, :steering_admission_unconfirmed}
-  end
-
   @spec execute_tools(
           loop_ctx(),
-          Context.t(),
           String.t(),
           [ReqLLMAdapter.ToolCall.t()]
         ) ::
-          {:ok, Context.t()} | {:error, term()}
-  defp execute_tools(lctx, context, checkpoint_id, tool_calls) do
+          :ok | {:error, term()}
+  defp execute_tools(lctx, checkpoint_id, tool_calls) do
     initial_mode = approval_mode(lctx.config)
     baselines = capture_tool_baselines(tool_calls, lctx)
 
@@ -2230,25 +2282,15 @@ defmodule MingaAgent.Providers.Native do
           (sequential_results ++ await_concurrent_tool_tasks(lctx, concurrent_tasks))
           |> Enum.sort_by(fn {index, _result} -> index end)
 
-        complete_tool_group(context, results)
+        case Enum.find(results, fn {_index, result} ->
+               Map.has_key?(result, :persistence_error)
+             end) do
+          nil -> :ok
+          {_index, result} -> {:error, result.persistence_error}
+        end
       end
     after
       cleanup_concurrent_tool_tasks(lctx.provider_pid, concurrent_tasks)
-    end
-  end
-
-  @spec complete_tool_group(Context.t(), [{non_neg_integer(), tool_execution_result()}]) ::
-          {:ok, Context.t()} | {:error, term()}
-  defp complete_tool_group(context, results) do
-    case Enum.find(results, fn {_index, result} -> Map.has_key?(result, :persistence_error) end) do
-      nil ->
-        {:ok,
-         Enum.reduce(results, context, fn {_index, result}, ctx ->
-           Context.append(ctx, tool_result_message(result))
-         end)}
-
-      {_index, result} ->
-        {:error, result.persistence_error}
     end
   end
 
@@ -3535,6 +3577,11 @@ defmodule MingaAgent.Providers.Native do
     }
   end
 
+  defp error_event(message, {kind, _reason}, _selection)
+       when kind in [:request_admission_refused, :request_admission_failed] do
+    %Event.Error{kind: :request_admission_refused, message: message}
+  end
+
   defp error_event(_message, {:apple_unavailable, reason}, %ModelSelection{
          route: %{request_provider: :apple}
        }) do
@@ -3780,6 +3827,30 @@ defmodule MingaAgent.Providers.Native do
   defp format_tool_result(result), do: inspect(result)
 
   @spec format_error(term()) :: String.t()
+  defp format_error({:request_admission_refused, reason})
+       when reason in [:input_limit_exceeded, :context_reservation_exceeded],
+       do:
+         "The request does not fit this model. Shorten the input or start a new conversation. The saved history was retained."
+
+  defp format_error({:request_admission_refused, reason})
+       when reason in [:missing_capacity, :missing_output_cap, :output_limit_exceeded],
+       do:
+         "This model route cannot reserve enough response capacity. Choose a model with a supported response limit."
+
+  defp format_error({:request_admission_refused, {:unknown_input_size, _reason}}),
+    do:
+      "This model route cannot verify the prepared input size. Use a route with supported token counting."
+
+  defp format_error({:request_admission_refused, {:count_acquisition_failed, _reason}}),
+    do: "The provider did not return a usable input token count. No generation request was sent."
+
+  defp format_error({:request_admission_refused, _reason}),
+    do: "The prepared request could not be authorized. No generation request was sent."
+
+  defp format_error({:request_admission_failed, _reason}),
+    do:
+      "Request preparation stopped before generation. Reload the saved conversation before retrying."
+
   defp format_error({:http_streaming_failed, reason}), do: format_error(reason)
   defp format_error({:provider_build_failed, reason}), do: format_error(reason)
   defp format_error({:exit, reason}), do: format_error(reason)

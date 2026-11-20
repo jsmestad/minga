@@ -44,24 +44,30 @@ defmodule Minga.Config.Loader do
   @type options_server :: Options.server()
   @typep user_module_mode :: :compile | {:reuse, [module()], [String.t()]}
 
-  @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
-  @type state :: %{
-          config_path: String.t(),
-          load_error: String.t() | nil,
-          loaded_modules: [module()],
-          modules_errors: [String.t()],
-          modules_fingerprint: binary(),
-          extension_declarations_fingerprint: binary(),
-          project_config_path: String.t() | nil,
-          project_config_error: String.t() | nil,
-          gui_settings_path: String.t(),
-          gui_settings_error: String.t() | nil,
-          after_error: String.t() | nil,
-          lsp_settings: %{atom() => map()},
-          keymap_server: keymap_server(),
-          options_server: options_server(),
-          cleanup_callbacks: %{atom() => ContributionCleanup.cleanup_fun()} | nil
-        }
+  @typep inputs :: %{
+           keymap_server: keymap_server(),
+           options_server: options_server(),
+           cleanup_callbacks: %{atom() => ContributionCleanup.cleanup_fun()} | nil,
+           config_home: String.t() | nil
+         }
+
+  @typep load_report :: %{
+           config_path: String.t(),
+           load_error: String.t() | nil,
+           loaded_modules: [module()],
+           modules_errors: [String.t()],
+           modules_fingerprint: binary(),
+           extension_declarations_fingerprint: binary(),
+           project_config_path: String.t() | nil,
+           project_config_error: String.t() | nil,
+           gui_settings_path: String.t(),
+           gui_settings_error: String.t() | nil,
+           after_error: String.t() | nil,
+           lsp_settings: %{atom() => map()}
+         }
+
+  @typedoc "Loader state: stable runtime inputs and the latest load report."
+  @type state :: %{inputs: inputs(), report: load_report()}
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -72,8 +78,8 @@ defmodule Minga.Config.Loader do
   process is the supervisor, so the `:minga_config_keymap` process-dict
   fallback below reads the supervisor's pdict (effectively unset) and
   resolves to `Keymap.default_server/0`. To target a non-default server at
-  boot, pass `:keymap_server` explicitly. The chosen server is persisted in
-  the loader's Agent state and re-read on `reload/1`.
+  boot, pass `:keymap_server` explicitly. The chosen keymap and options
+  servers, cleanup callbacks, and configured home are retained across reloads.
   """
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
@@ -94,21 +100,18 @@ defmodule Minga.Config.Loader do
       )
       |> Options.validate_server!()
 
-    cleanup_callbacks = Keyword.get(opts, :cleanup_callbacks)
-    config_home = Keyword.get(opts, :config_home)
+    inputs = %{
+      keymap_server: keymap_server,
+      options_server: options_server,
+      cleanup_callbacks: Keyword.get(opts, :cleanup_callbacks),
+      config_home: Keyword.get(opts, :config_home)
+    }
+
     artifact_admission = Keyword.get(opts, :artifact_admission, ArtifactAdmission)
 
     Agent.start_link(
       fn ->
-        state =
-          load_all(
-            keymap_server,
-            options_server,
-            Minga.SafeMode.active?(),
-            cleanup_callbacks,
-            config_home,
-            :compile
-          )
+        report = load_all(inputs, Minga.SafeMode.active?(), :compile)
 
         :ok =
           maybe_seal_artifact_generation(
@@ -116,7 +119,7 @@ defmodule Minga.Config.Loader do
             Application.get_env(:minga, :seal_extension_artifact_generation, true)
           )
 
-        if config_home, do: Map.put(state, :config_home, config_home), else: state
+        %{inputs: inputs, report: report}
       end,
       name: name
     )
@@ -137,7 +140,7 @@ defmodule Minga.Config.Loader do
   @spec config_path() :: String.t()
   @spec config_path(GenServer.server()) :: String.t()
   def config_path, do: config_path(__MODULE__)
-  def config_path(server), do: Agent.get(server, & &1.config_path)
+  def config_path(server), do: Agent.get(server, & &1.report.config_path)
 
   @doc """
   Returns the last global config load error, or `nil` if config loaded cleanly
@@ -146,25 +149,25 @@ defmodule Minga.Config.Loader do
   @spec load_error() :: String.t() | nil
   @spec load_error(GenServer.server()) :: String.t() | nil
   def load_error, do: load_error(__MODULE__)
-  def load_error(server), do: Agent.get(server, & &1.load_error)
+  def load_error(server), do: Agent.get(server, & &1.report.load_error)
 
   @doc "Returns the list of modules compiled from the user's modules directory."
   @spec loaded_modules() :: [module()]
   @spec loaded_modules(GenServer.server()) :: [module()]
   def loaded_modules, do: loaded_modules(__MODULE__)
-  def loaded_modules(server), do: Agent.get(server, & &1.loaded_modules)
+  def loaded_modules(server), do: Agent.get(server, & &1.report.loaded_modules)
 
   @doc "Returns compilation errors from user modules, or an empty list if all compiled cleanly."
   @spec modules_errors() :: [String.t()]
   @spec modules_errors(GenServer.server()) :: [String.t()]
   def modules_errors, do: modules_errors(__MODULE__)
-  def modules_errors(server), do: Agent.get(server, & &1.modules_errors)
+  def modules_errors(server), do: Agent.get(server, & &1.report.modules_errors)
 
   @doc "Returns the project-local config load error, or `nil` if clean (or no project config)."
   @spec project_config_error() :: String.t() | nil
   @spec project_config_error(GenServer.server()) :: String.t() | nil
   def project_config_error, do: project_config_error(__MODULE__)
-  def project_config_error(server), do: Agent.get(server, & &1.project_config_error)
+  def project_config_error(server), do: Agent.get(server, & &1.report.project_config_error)
 
   @doc "Returns the generated GUI settings overlay path."
   @spec gui_settings_path() :: String.t()
@@ -174,23 +177,23 @@ defmodule Minga.Config.Loader do
   def gui_settings_path(server) when is_atom(server) do
     case Process.whereis(server) do
       nil -> default_gui_settings_path()
-      _pid -> Agent.get(server, & &1.gui_settings_path)
+      _pid -> Agent.get(server, & &1.report.gui_settings_path)
     end
   end
 
-  def gui_settings_path(server), do: Agent.get(server, & &1.gui_settings_path)
+  def gui_settings_path(server), do: Agent.get(server, & &1.report.gui_settings_path)
 
   @doc "Returns the gui_settings.exs load error, or `nil` if clean (or no GUI overlay)."
   @spec gui_settings_error() :: String.t() | nil
   @spec gui_settings_error(GenServer.server()) :: String.t() | nil
   def gui_settings_error, do: gui_settings_error(__MODULE__)
-  def gui_settings_error(server), do: Agent.get(server, & &1.gui_settings_error)
+  def gui_settings_error(server), do: Agent.get(server, & &1.report.gui_settings_error)
 
   @doc "Returns the after.exs load error, or `nil` if clean (or no after.exs)."
   @spec after_error() :: String.t() | nil
   @spec after_error(GenServer.server()) :: String.t() | nil
   def after_error, do: after_error(__MODULE__)
-  def after_error(server), do: Agent.get(server, & &1.after_error)
+  def after_error(server), do: Agent.get(server, & &1.report.after_error)
 
   @doc "Returns LSP settings overrides loaded from user config."
   @spec lsp_settings() :: %{atom() => map()}
@@ -234,19 +237,22 @@ defmodule Minga.Config.Loader do
 
   @spec do_reload(GenServer.server()) :: :ok | {:error, String.t()}
   defp do_reload(server) do
-    with nil <- user_module_restart_required(server),
-         nil <- extension_declaration_restart_required(server) do
-      reload_current_extension_generation(server)
+    %{report: report} = state = Agent.get(server, & &1)
+
+    with nil <- user_module_restart_required(report),
+         nil <- extension_declaration_restart_required(report) do
+      reload_current_extension_generation(server, state)
     else
       message when is_binary(message) -> reject_reload(server, message)
     end
   end
 
-  @spec reload_current_extension_generation(GenServer.server()) :: :ok | {:error, String.t()}
-  defp reload_current_extension_generation(server) do
+  @spec reload_current_extension_generation(GenServer.server(), state()) ::
+          :ok | {:error, String.t()}
+  defp reload_current_extension_generation(server, state) do
     case ExtSupervisor.pending_artifact_restarts(Minga.Extension.Registry) do
       [] ->
-        do_reload_unchanged_generation(server)
+        do_reload_unchanged_generation(server, state)
 
       changed ->
         names = Enum.map_join(changed, ", ", &Atom.to_string/1)
@@ -254,11 +260,11 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec user_module_restart_required(GenServer.server()) :: String.t() | nil
-  defp user_module_restart_required(server) do
-    {config_path, admitted_fingerprint} =
-      Agent.get(server, fn state -> {state.config_path, state.modules_fingerprint} end)
-
+  @spec user_module_restart_required(load_report()) :: String.t() | nil
+  defp user_module_restart_required(%{
+         config_path: config_path,
+         modules_fingerprint: admitted_fingerprint
+       }) do
     current_fingerprint = user_modules_fingerprint(Path.dirname(config_path))
 
     if current_fingerprint == admitted_fingerprint do
@@ -268,17 +274,12 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec extension_declaration_restart_required(GenServer.server()) :: String.t() | nil
-  defp extension_declaration_restart_required(server) do
-    {config_path, gui_settings_path, admitted_fingerprint} =
-      Agent.get(server, fn state ->
-        {
-          state.config_path,
-          state.gui_settings_path,
-          state.extension_declarations_fingerprint
-        }
-      end)
-
+  @spec extension_declaration_restart_required(load_report()) :: String.t() | nil
+  defp extension_declaration_restart_required(%{
+         config_path: config_path,
+         gui_settings_path: gui_settings_path,
+         extension_declarations_fingerprint: admitted_fingerprint
+       }) do
     current_fingerprint =
       extension_declarations_fingerprint(
         config_path,
@@ -418,73 +419,56 @@ defmodule Minga.Config.Loader do
 
   @spec reject_reload(GenServer.server(), String.t()) :: {:error, String.t()}
   defp reject_reload(server, message) do
-    Agent.update(server, fn state -> %{state | load_error: message} end)
+    Agent.update(server, fn %{report: report} = state ->
+      %{state | report: %{report | load_error: message}}
+    end)
+
     {:error, message}
   end
 
-  @spec do_reload_unchanged_generation(GenServer.server()) :: :ok | {:error, String.t()}
-  defp do_reload_unchanged_generation(server) do
+  @spec do_reload_unchanged_generation(GenServer.server(), state()) :: :ok | {:error, String.t()}
+  defp do_reload_unchanged_generation(server, %{inputs: inputs, report: report}) do
     # Stop all running extensions first. If that fails, do not tear down
     # registries or start a new load, because the old extension tree is still
     # partially live and a reset would orphan it.
-    cleanup_callbacks = Agent.get(server, &Map.get(&1, :cleanup_callbacks))
-    stop_all_error = stop_all_extensions(cleanup_callbacks)
+    case stop_all_extensions(inputs.cleanup_callbacks) do
+      nil ->
+        # Reset all registries to defaults while preserving this VM's admitted user modules.
+        maybe_reset_options(inputs.options_server)
+        Hooks.reset()
+        Advice.reset()
+        Keymap.reset(inputs.keymap_server)
+        Command.reset_registry()
+        ExtRegistry.reset()
+        PopupRegistry.clear()
+        ModelineSegments.reset_warnings()
 
-    if stop_all_error do
-      Agent.update(server, fn state -> %{state | load_error: stop_all_error} end)
-      {:error, stop_all_error}
-    else
-      # Reset all registries to defaults while preserving this VM's admitted user modules.
-      {keymap_server, options_server, config_home, loaded_modules, modules_errors} =
-        Agent.get(server, fn %{
-                               keymap_server: keymap_server,
-                               options_server: options_server,
-                               loaded_modules: loaded_modules,
-                               modules_errors: modules_errors
-                             } = state ->
-          {keymap_server, options_server, Map.get(state, :config_home), loaded_modules,
-           modules_errors}
-        end)
+        # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
+        new_report =
+          load_all(inputs, false, {:reuse, report.loaded_modules, report.modules_errors})
 
-      maybe_reset_options(options_server)
-      Hooks.reset()
-      Advice.reset()
-      Keymap.reset(keymap_server)
-      Command.reset_registry()
-      ExtRegistry.reset()
-      PopupRegistry.clear()
-      ModelineSegments.reset_warnings()
+        Agent.update(server, &%{&1 | report: new_report})
+        reload_result(new_report)
 
-      # Re-run the full load sequence (includes starting extensions).
-      # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
-      new_state =
-        load_all(
-          keymap_server,
-          options_server,
-          false,
-          cleanup_callbacks,
-          config_home,
-          {:reuse, loaded_modules, modules_errors}
-        )
+      message ->
+        reject_reload(server, message)
+    end
+  end
 
-      Agent.update(server, fn _ -> new_state end)
+  @spec reload_result(load_report()) :: :ok | {:error, String.t()}
+  defp reload_result(report) do
+    errors =
+      [
+        report.load_error,
+        report.project_config_error,
+        report.gui_settings_error,
+        report.after_error
+      ]
+      |> Enum.reject(&is_nil/1)
 
-      # Return error if any stage had problems
-      errors =
-        [
-          new_state.load_error,
-          new_state.project_config_error,
-          new_state.gui_settings_error,
-          new_state.after_error
-        ]
-        |> Enum.reject(&is_nil/1)
-
-      all_errors = new_state.modules_errors ++ errors
-
-      case all_errors do
-        [] -> :ok
-        msgs -> {:error, Enum.join(msgs, "; ")}
-      end
+    case report.modules_errors ++ errors do
+      [] -> :ok
+      messages -> {:error, Enum.join(messages, "; ")}
     end
   end
 
@@ -496,39 +480,25 @@ defmodule Minga.Config.Loader do
   # callback) won't see this dict and will fall back to registered defaults.
   # Extensions are skipped in test mode, so this only affects long-lived runtime
   # callers.
-  @spec load_all(
-          keymap_server(),
-          options_server(),
-          boolean(),
-          %{atom() => ContributionCleanup.cleanup_fun()} | nil,
-          String.t() | nil,
-          user_module_mode()
-        ) :: state()
-  defp load_all(
-         keymap_server,
-         options_server,
-         safe_mode?,
-         cleanup_callbacks,
-         config_home,
-         user_module_mode
-       )
-       when is_boolean(safe_mode?) do
+  @spec load_all(inputs(), boolean(), user_module_mode()) :: load_report()
+  defp load_all(inputs, safe_mode?, user_module_mode) when is_boolean(safe_mode?) do
+    %{keymap_server: keymap_server, options_server: options_server} = inputs
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
 
     try do
       config_cleanup_error =
-        cleanup_source_owned_config_contributions(keymap_server, cleanup_callbacks)
+        cleanup_source_owned_config_contributions(keymap_server, inputs.cleanup_callbacks)
 
-      config_path = resolve_config_path(config_home)
+      config_path = resolve_config_path(inputs.config_home)
       config_dir = Path.dirname(config_path)
 
       # 0. Register default popup rules (before user config so overrides work)
       register_default_popup_rules()
 
       if safe_mode? do
-        safe_mode_state(config_path, config_dir, keymap_server, options_server, cleanup_callbacks)
+        safe_mode_report(config_path, config_dir)
       else
         alias Minga.Telemetry.StartupTimer
 
@@ -588,12 +558,12 @@ defmodule Minga.Config.Loader do
         # 8. Register bundled extensions, then discover plugins, then start extensions only after all
         # config sources have had a chance to declare them.
         register_bundled_extensions()
-        plugin_error = discover_and_register_plugins(config_home)
+        plugin_error = discover_and_register_plugins(inputs.config_home)
 
         start_all_error =
           if Process.whereis(Minga.Extension.RootSupervisor) != nil &&
                Application.get_env(:minga, :load_extensions, true) do
-            start_all_extensions(cleanup_callbacks)
+            start_all_extensions(inputs.cleanup_callbacks)
           end
 
         StartupTimer.mark(:config_extensions_started)
@@ -622,10 +592,7 @@ defmodule Minga.Config.Loader do
           gui_settings_path: gui_settings_path,
           gui_settings_error: gui_settings_error,
           after_error: after_error,
-          lsp_settings: lsp_settings,
-          keymap_server: keymap_server,
-          options_server: options_server,
-          cleanup_callbacks: cleanup_callbacks
+          lsp_settings: lsp_settings
         }
       end
     after
@@ -635,14 +602,10 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec safe_mode_state(
-          String.t(),
-          String.t(),
-          keymap_server(),
-          options_server(),
-          %{atom() => ContributionCleanup.cleanup_fun()} | nil
-        ) :: state()
-  defp safe_mode_state(config_path, config_dir, keymap_server, options_server, cleanup_callbacks) do
+  @spec safe_mode_report(String.t(), String.t()) :: load_report()
+  defp safe_mode_report(config_path, config_dir) do
+    gui_settings_path = Path.join(config_dir, "gui_settings.exs")
+
     %{
       config_path: config_path,
       load_error: nil,
@@ -650,20 +613,13 @@ defmodule Minga.Config.Loader do
       modules_errors: [],
       modules_fingerprint: user_modules_fingerprint(config_dir),
       extension_declarations_fingerprint:
-        extension_declarations_fingerprint(
-          config_path,
-          nil,
-          Path.join(config_dir, "gui_settings.exs")
-        ),
+        extension_declarations_fingerprint(config_path, nil, gui_settings_path),
       project_config_path: nil,
       project_config_error: nil,
-      gui_settings_path: Path.join(config_dir, "gui_settings.exs"),
+      gui_settings_path: gui_settings_path,
       gui_settings_error: nil,
       after_error: nil,
-      lsp_settings: %{},
-      keymap_server: keymap_server,
-      options_server: options_server,
-      cleanup_callbacks: cleanup_callbacks
+      lsp_settings: %{}
     }
   end
 
@@ -800,7 +756,7 @@ defmodule Minga.Config.Loader do
 
   @spec get_lsp_settings(GenServer.server()) :: %{atom() => map()}
   defp get_lsp_settings(server) do
-    Agent.get(server, fn state -> Map.get(state, :lsp_settings, %{}) end)
+    Agent.get(server, & &1.report.lsp_settings)
   end
 
   # Skips the reset if the persisted options_server is no longer alive (anonymous

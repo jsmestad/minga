@@ -9,6 +9,8 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   alias MingaAgent.MCP.ServerConfig
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.Dispatch
+  alias MingaAgent.Session.Request
   alias MingaAgent.Test.ModelSelectionFixture
   alias ReqLLM.StreamResponse.MetadataHandle
 
@@ -142,8 +144,20 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         GenServer.reply(from, :ok)
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from, {:steering_dispatch_source, request_id, checkpoint_id}} ->
-        GenServer.reply(from, {:ok, Enum.reverse(Process.get({request_id, checkpoint_id}))})
+      {:"$gen_call", from, {:register_test_request, %Request{request_id: id} = request}} ->
+        Process.put({:fixture_request, id}, request)
+        GenServer.reply(from, :ok)
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:begin_native_dispatch, id, :initial}} ->
+        request = Process.get({:fixture_request, id})
+        GenServer.reply(from, {:ok, Dispatch.begin(request, :initial), request.messages})
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:begin_native_dispatch, id, {:checkpoint, checkpoint_id} = source}} ->
+        request = Process.get({:fixture_request, id})
+        messages = Enum.reverse(Process.get({id, checkpoint_id}))
+        GenServer.reply(from, {:ok, Dispatch.begin(request, source), messages})
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
@@ -189,6 +203,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         text
       )
 
+    :ok = GenServer.call(subscriber, {:register_test_request, request})
     Native.send_prompt(provider, request)
   end
 

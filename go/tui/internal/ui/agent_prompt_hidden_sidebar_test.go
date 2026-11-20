@@ -43,7 +43,7 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 					}
 					updated, _ = model.Update(tea.WindowSizeMsg{Width: int(width), Height: 24})
 					model = updated.(Model)
-					label, want := "Send", protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
+					label, want := "Send", protocol.EncodeGUIAgentComposerSubmit(825, 0)
 					if status == 2 || status == 5 {
 						label, want = "Stop", protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 					}

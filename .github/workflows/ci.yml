@@ -110,6 +110,27 @@ jobs:
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
 
+  test-sdk:
+    name: Test (Extension SDK)
+    runs-on: ubuntu-latest
+    steps:
+      # Keep the workspace root free of mix.exs while setup-beam installs Hex.
+      - uses: actions/checkout@v4
+        with:
+          path: sdk-checkout
+          sparse-checkout: sdk
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: sdk-checkout/.tool-versions
+          version-type: strict
+
+      - name: Compile and test the standalone SDK
+        working-directory: sdk-checkout/sdk
+        run: |
+          mix compile --warnings-as-errors
+          mix test --warnings-as-errors
+
   keystroke-latency-baseline:
     name: Keystroke Latency Baseline
     runs-on: ubuntu-latest
@@ -586,6 +607,7 @@ jobs:
     needs:
       - lint
       - test
+      - test-sdk
       - keystroke-latency-baseline
       - conformance
       - test-zig

@@ -59,7 +59,7 @@ Runtime callbacks are declared with `editor_event_handler/3`. The supported fami
 
 Extension-owned slow work must use a typed `MingaEditor.Effect` request scheduled by Minga's effect scheduler. Source tagging lets disable cancel in-flight work before presentation cleanup. Custom worker messages to the Editor are not part of the SDK contract.
 
-The runtime and SDK declaration sources are checked for parity in the main Minga test suite. When a runtime DSL macro, generated schema, callback, or callback family changes, the matching SDK declaration must change in the same commit.
+The engine and the standalone SDK compile the same declaration modules from `sdk/lib/declarations`. The standalone SDK also compiles API stubs that the engine does not use. The engine and SDK keep separate editor event-handler behaviours; the engine test suite checks that their callback families and signatures agree.
 
 ## What's included
 

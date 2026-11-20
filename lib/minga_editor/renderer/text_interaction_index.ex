@@ -35,6 +35,8 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
       {{:lease, presentation.window_id, presentation.presentation_id}, lease(presentation, rows)}
     )
 
+    publish_prompt_owner(index.table, presentation)
+
     retain_rows(index.table, rows)
 
     index
@@ -79,6 +81,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
     case :ets.take(table, key) do
       [{^key, {_buffer, _source_version, rows, _scroll_request, _settled_scroll_seq}}] ->
         delete_active_if_exact(table, presentation.window_id, presentation.presentation_id)
+        discard_prompt_owner(table, presentation)
         release_rows(table, rows)
         index
 
@@ -170,6 +173,32 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
 
   defp lease(%TextPresentation{} = presentation, rows),
     do: {presentation.buffer, presentation.source_version, rows, nil, nil}
+
+  @spec publish_prompt_owner(:ets.tid(), TextPresentation.t()) :: :ok
+  defp publish_prompt_owner(
+         table,
+         %TextPresentation{identity: {:prompt, {_, _, _} = owner, _, _, _}} = presentation
+       ) do
+    :ets.insert(
+      table,
+      {{:prompt_owner, presentation.window_id, presentation.presentation_id}, owner}
+    )
+
+    :ok
+  end
+
+  defp publish_prompt_owner(_table, _presentation), do: :ok
+
+  @spec discard_prompt_owner(:ets.tid(), TextPresentation.t()) :: :ok
+  defp discard_prompt_owner(
+         table,
+         %TextPresentation{identity: {:prompt, {_, _, _}, _, _, _}} = presentation
+       ) do
+    :ets.delete(table, {:prompt_owner, presentation.window_id, presentation.presentation_id})
+    :ok
+  end
+
+  defp discard_prompt_owner(_table, _presentation), do: :ok
 
   defp publish_scroll_geometry(
          table,

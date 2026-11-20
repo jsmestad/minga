@@ -4,7 +4,7 @@
       name: "default",
       strict: true,
       files: %{
-        included: ["lib/", "mix/", "test/"],
+        included: ["lib/", "mix/", "test/", "sdk/lib/declarations/"],
         excluded: [~r"/_build/", ~r"/deps/", ~r"/test/support/"]
       },
       plugins: [{ExSlop, []}],

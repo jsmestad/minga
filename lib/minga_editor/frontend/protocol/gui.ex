@@ -144,6 +144,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_tool_toggle Opcodes.gui_action_agent_tool_toggle()
   @gui_action_agent_read_retained_output Opcodes.gui_action_agent_read_retained_output()
   @gui_action_agent_composer_submit Opcodes.gui_action_agent_composer_submit()
+  @gui_action_agent_composer_queue Opcodes.gui_action_agent_composer_queue()
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
@@ -267,7 +268,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :file_tree_refresh
           | {:agent_tool_toggle, message_id :: non_neg_integer()}
           | {:agent_read_retained_output, MingaEditor.Agent.RetainedOutputTarget.t()}
-          | {:agent_composer_submit, pos_integer()}
+          | {:agent_composer_submit, generation :: pos_integer(), offer :: pos_integer() | nil}
+          | {:agent_composer_queue, pos_integer(), pos_integer() | nil, :steering | :follow_up,
+             MingaAgent.Session.queue_target()}
           | {:agent_open_question, pos_integer()}
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
@@ -754,8 +757,22 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_agent_tool_toggle, <<message_id::32>>),
     do: {:ok, {:agent_tool_toggle, message_id}}
 
-  def decode_gui_action(@gui_action_agent_composer_submit, <<offer::64>>) when offer > 0,
-    do: {:ok, {:agent_composer_submit, offer}}
+  def decode_gui_action(@gui_action_agent_composer_submit, <<generation::64, offer::64>>)
+      when generation > 0,
+      do: {:ok, {:agent_composer_submit, generation, if(offer == 0, do: nil, else: offer)}}
+
+  def decode_gui_action(
+        @gui_action_agent_composer_queue,
+        <<generation::64, offer::64, kind::8, session_length::16,
+          session_id::binary-size(session_length), request_length::16,
+          request_id::binary-size(request_length), sequence::64>>
+      )
+      when generation > 0 and kind in [0, 1] and session_length > 0 and request_length > 0 and
+             sequence > 0 do
+    {:ok,
+     {:agent_composer_queue, generation, if(offer == 0, do: nil, else: offer),
+      if(kind == 0, do: :steering, else: :follow_up), {session_id, request_id, sequence}}}
+  end
 
   def decode_gui_action(@gui_action_agent_open_question, <<offer::64>>) when offer > 0,
     do: {:ok, {:agent_open_question, offer}}

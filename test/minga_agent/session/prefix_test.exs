@@ -2,6 +2,7 @@ defmodule MingaAgent.Session.PrefixTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Policy.{Limits, RequestCapacity}
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.Outcome
@@ -47,6 +48,39 @@ defmodule MingaAgent.Session.PrefixTest do
     outcome = Outcome.new(request, request.messages ++ [Context.assistant("answer")])
     {:ok, continuation} = Continuation.complete(active, outcome, 2)
     {request, continuation}
+  end
+
+  test "a superseded assessment cannot authorize a retry and refusal cannot retry unchanged" do
+    {:ok, :applied, initial} = Continuation.change_prefix(Continuation.new(), candidate())
+    {:ok, request, active} = Continuation.begin_request(initial, "request", 1, "question")
+
+    assert {:error, :stale_dispatch} =
+             Continuation.begin_dispatch(active, "other", :initial, [], self())
+
+    assert {:ok, first, messages, assessing} =
+             Continuation.begin_dispatch(active, "request", :initial, [], self())
+
+    assert messages == request.messages
+
+    assert {:ok, retry, ^messages, retrying} =
+             Continuation.begin_dispatch(assessing, "request", :initial, [], self())
+
+    {:ok, limits} = Limits.new(%{input: nil, context: nil, output: nil, request_output: 16})
+    fits = RequestCapacity.assess(limits, {:provider_count, 30}, {:encoded, 16}, 100)
+    digest = :crypto.hash(:sha256, "synthetic prepared body")
+
+    assert {:error, :stale_dispatch} = Continuation.assess_dispatch(retrying, first, digest, fits)
+    assert {:ok, admitted} = Continuation.assess_dispatch(retrying, retry, digest, fits)
+    assert {:error, :stale_dispatch} = Continuation.assess_dispatch(admitted, retry, digest, fits)
+
+    too_large = RequestCapacity.assess(limits, {:provider_count, 96}, {:encoded, 16}, 100)
+    assert {:ok, refused} = Continuation.assess_dispatch(retrying, retry, digest, too_large)
+
+    assert {:error, :assessment_refused} =
+             Continuation.begin_dispatch(refused, "request", :initial, [], self())
+
+    assert {:ok, reopened} = refused |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+    assert {:error, :stale_dispatch} = Continuation.assess_dispatch(reopened, retry, digest, fits)
   end
 
   test "declarations have deterministic names and object ordering without changing meaningful arrays" do

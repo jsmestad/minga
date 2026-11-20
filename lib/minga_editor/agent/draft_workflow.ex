@@ -650,9 +650,22 @@ defmodule MingaEditor.Agent.DraftWorkflow do
   @spec queue(State.t(), TurnExecution.prompt_kind(), TurnExecution.content()) ::
           {:saved, State.t()} | :ordinary
   def queue(%State{} = state, kind, content) do
+    queue(state, kind, content, :current)
+  end
+
+  @doc "Submits only to the saved queue target echoed from the displayed control."
+  @spec queue(
+          State.t(),
+          TurnExecution.prompt_kind(),
+          TurnExecution.content(),
+          Session.queue_target() | :current
+        ) ::
+          {:saved, State.t()} | :ordinary
+  def queue(%State{} = state, kind, content, expected) do
     agent = TraditionalState.agent(state.shell_runtime.state)
 
     with {session, {record, _, _} = target} <- agent.queue_target,
+         true <- expected in [:current, target],
          true <- supports_saved_queue?(state.workspace.agent_ui, session),
          ^session <- Runtime.active_session(state.shell_runtime),
          %TabBar{} = tabs <- tab_bar(state) do

@@ -29,6 +29,23 @@ defmodule Minga.Buffer.ProcessTest do
     assert {:error, :too_large} = Buffer.bounded_content_with_path(buffer, limit)
   end
 
+  test "scratch save confirmation clears only the confirmed revision and preserves undo" do
+    buffer = start_supervised!({BufferProcess, buffer_type: :nofile, read_only: false})
+    :ok = Buffer.insert_text(buffer, "first")
+    first = Buffer.version(buffer)
+    Buffer.break_undo_coalescing(buffer)
+    :ok = Buffer.insert_text(buffer, "\nsecond")
+
+    assert :stale = Buffer.confirm_scratch_save(buffer, first)
+    assert Buffer.dirty?(buffer)
+    assert :ok = Buffer.confirm_scratch_save(buffer, Buffer.version(buffer))
+    refute Buffer.dirty?(buffer)
+
+    Buffer.undo(buffer)
+    assert Buffer.dirty?(buffer)
+    assert Buffer.content(buffer) == "first"
+  end
+
   describe "request_sync_snapshot/4" do
     test "atomically returns full, edits, unchanged, and reset-required full snapshots" do
       {:ok, buffer} = BufferProcess.start_link(content: "one")

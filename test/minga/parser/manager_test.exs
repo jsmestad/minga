@@ -1,13 +1,18 @@
 defmodule Minga.Parser.ManagerTest do
-  # Spawns the real Zig parser Port, so this test must not run concurrently with other OS-process tests.
+  # Opens native parser and cat Ports; keep these tests serialized with other OS-process tests.
   use ExUnit.Case, async: false
 
   @moduletag :heavy
   @moduletag timeout: 20_000
 
+  alias Minga.Buffer.SyncSnapshot
   alias Minga.Parser.BufferConfig
+  alias Minga.Parser.EventCorrelation
   alias Minga.Parser.Manager
+  alias Minga.Parser.PortLifecycle
+  alias Minga.Parser.PortState
   alias Minga.Parser.Protocol
+  alias Minga.Protocol.Opcodes
 
   describe "document_symbols" do
     test "parser publishes symbols from built-in tags query after parse" do
@@ -128,21 +133,49 @@ defmodule Minga.Parser.ManagerTest do
   end
 
   describe "editor buffer recovery" do
-    test "global admission completes one registered buffer before starting the next" do
-      server = start_parser_manager()
+    test "only one buffer is admitted while waiting for a snapshot or parse completion" do
+      # cat accepts writes without completing a parse, so the test advances each phase.
+      server = start_parser_manager(parser_path: System.find_executable("cat"))
       :ok = Manager.subscribe(server)
-      first = setup_buffer(server, "defmodule First do\nend\n")
-      second = setup_buffer(server, "defmodule Second do\nend\n")
+      first = start_snapshot_provider()
+      second = self()
+      config = %BufferConfig{language: "elixir"}
 
-      assert_receive {:minga_highlight,
-                      {:buffer_event, ^first, _correlation, {:highlight_spans, _spans}}},
+      %EventCorrelation{generation: generation} =
+        Manager.register_buffer_correlated(first, config, server: server)
+
+      first_id = Manager.buffer_id(first, server)
+      assert_receive {:snapshot_requested, ^first, :full, manager, first_token}, 2_000
+
+      second_id = Manager.register_buffer(second, config, server: server)
+      refute_received {:request_sync_snapshot, _, ^manager, _}
+
+      send_snapshot(manager, first, first_token, "defmodule First do\nend\n")
+      %{port: %{handle: port}, work: %{scheduler: scheduler}} = :sys.get_state(server)
+      assert scheduler.active == first
+      assert {:parse, _ref} = scheduler.timeout_token
+      refute_received {:request_sync_snapshot, _, ^manager, _}
+
+      send_parse_completion(manager, port, first_id, 1)
+
+      # Both messages come from Manager to this test; match either to check their actual order.
+      assert_receive message when elem(message, 0) in [:request_sync_snapshot, :minga_highlight],
                      2_000
 
-      refute_received {:minga_highlight,
-                       {:buffer_event, ^second, _correlation, {:highlight_names, _names}}}
+      assert {:request_sync_snapshot, :full, ^manager, second_token} = message
 
       assert_receive {:minga_highlight,
-                      {:buffer_event, ^second, _correlation, {:highlight_spans, _spans}}},
+                      {:buffer_event, ^first,
+                       %EventCorrelation{generation: ^generation, version: 1},
+                       {:highlight_spans, []}}},
+                     2_000
+
+      send_snapshot(manager, second, second_token, "defmodule Second do\nend\n")
+      send_parse_completion(manager, port, second_id, 2)
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^second, %EventCorrelation{version: 2},
+                       {:highlight_spans, []}}},
                      2_000
     end
 
@@ -197,6 +230,42 @@ defmodule Minga.Parser.ManagerTest do
                      2_000
 
       refute_receive {:minga_highlight, {:request_reparse, ^buffer}}, 100
+    end
+
+    test "a failed snapshot write replies to pending callers and automatically resyncs" do
+      server = start_parser_manager()
+      :ok = Manager.subscribe(server)
+      buffer = self()
+      config = %BufferConfig{language: "elixir"}
+      content = "defmodule RecoveredAfterWriteFailure do\nend\n"
+
+      %EventCorrelation{generation: generation} =
+        Manager.register_buffer_correlated(buffer, config, server: server)
+
+      buffer_id = Manager.buffer_id(buffer, server)
+      assert_receive {:request_sync_snapshot, :full, manager, snapshot_token}, 2_000
+
+      request = :gen_server.send_request(server, {:request_indent, buffer, 1, 10_000})
+      assert_receive {:request_sync_snapshot, 0, ^manager, _request_token}, 2_000
+
+      replace_port_with_closed_handle(server)
+      send_snapshot(manager, buffer, snapshot_token, content)
+
+      assert :gen_server.wait_response(request, 2_000) == {:reply, nil}
+      assert_receive {:minga_highlight, :parser_restarted}, 2_000
+      assert_receive {:request_sync_snapshot, :full, ^manager, retry_token}
+      refute retry_token == snapshot_token
+      refute_received {:minga_highlight, :parser_crashed}
+
+      assert Manager.buffer_id(buffer, server) == buffer_id
+      assert Manager.resolve_buffer(buffer_id, server) == buffer
+      send_snapshot(manager, buffer, retry_token, content)
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer,
+                       %EventCorrelation{generation: ^generation, version: 1},
+                       {:highlight_spans, _spans}}},
+                     2_000
     end
 
     test "restart preserves parser identity and rebuilds registered buffers" do
@@ -263,7 +332,7 @@ defmodule Minga.Parser.ManagerTest do
         Manager.register_buffer(stalled, %BufferConfig{language: "elixir"}, server: server)
 
       healthy = setup_buffer(server, "defmodule HealthyAfterTimeout do\nend\n")
-      scheduler = :sys.get_state(server).parse_scheduler
+      scheduler = :sys.get_state(server).work.scheduler
       token = scheduler.timeout_token
       send(server, {:parse_admission_timeout, stalled, token})
 
@@ -413,6 +482,53 @@ defmodule Minga.Parser.ManagerTest do
       Manager.register_buffer(buffer, %BufferConfig{language: language}, server: server)
 
     buffer
+  end
+
+  defp start_snapshot_provider do
+    test = self()
+
+    start_supervised!({Task, fn -> relay_snapshot_requests(test) end})
+  end
+
+  defp relay_snapshot_requests(test) do
+    receive do
+      {:request_sync_snapshot, cursor, manager, token} ->
+        send(test, {:snapshot_requested, self(), cursor, manager, token})
+        relay_snapshot_requests(test)
+    end
+  end
+
+  defp send_snapshot(manager, buffer, token, content) do
+    send(
+      manager,
+      {:buffer_sync_snapshot,
+       %SyncSnapshot{
+         buffer: buffer,
+         token: token,
+         version: 1,
+         sequence: 1,
+         changes: {:full, content}
+       }}
+    )
+  end
+
+  defp send_parse_completion(manager, port, buffer_id, version) do
+    send(
+      manager,
+      {port, {:data, <<Opcodes.highlight_spans(), buffer_id::32, version::32, 0::32>>}}
+    )
+  end
+
+  defp replace_port_with_closed_handle(server) do
+    # The dead handle was owned by the test, so it cannot notify Manager of an exit.
+    # Any message from the former live Port no longer matches Manager's current handle.
+    port = Port.open({:spawn_executable, System.find_executable("cat")}, [:binary])
+    Port.close(port)
+
+    :sys.replace_state(server, fn state ->
+      :ok = PortLifecycle.close(state.port.handle)
+      %{state | port: PortState.opened(state.port, port)}
+    end)
   end
 
   defp stalled_snapshot_provider do

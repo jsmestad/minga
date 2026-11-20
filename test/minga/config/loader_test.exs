@@ -65,30 +65,6 @@ defmodule Minga.Config.LoaderTest do
     Process.get(:minga_config_options, Options.default_server())
   end
 
-  describe "config_path/1" do
-    test "returns the resolved config path" do
-      name = :"loader_path_#{System.unique_integer([:positive])}"
-
-      {:ok, pid} =
-        Agent.start_link(
-          fn ->
-            %{
-              config_path: "/tmp/test.exs",
-              load_error: nil,
-              loaded_modules: [],
-              modules_errors: [],
-              project_config_path: nil,
-              project_config_error: nil,
-              after_error: nil
-            }
-          end,
-          name: name
-        )
-
-      assert Loader.config_path(pid) == "/tmp/test.exs"
-    end
-  end
-
   describe "loading valid config" do
     test "applies set options from config file" do
       {_dir, config_home, cleanup} =
@@ -1047,22 +1023,42 @@ defmodule Minga.Config.LoaderTest do
 
       on_exit(cleanup)
 
+      fail_cleanup = :atomics.new(1, [])
+
       cleanup_callbacks = %{
         loader_reload_cleanup_failure: fn
-          :config -> raise "cleanup failure"
-          _source -> :ok
+          :config ->
+            case :atomics.get(fail_cleanup, 1) do
+              0 -> :ok
+              1 -> raise "cleanup failure"
+            end
+
+          _source ->
+            :ok
         end
       }
 
       name = :"loader_reload_cleanup_failure_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+
+      {:ok, pid} =
+        Loader.start_link(
+          name: name,
+          config_home: config_home,
+          cleanup_callbacks: cleanup_callbacks
+        )
+
       assert Loader.load_error(pid) == nil
-      Agent.update(pid, &Map.put(&1, :cleanup_callbacks, cleanup_callbacks))
+
+      :ok = :atomics.put(fail_cleanup, 1, 1)
 
       assert {:error, msg} = Loader.reload(pid)
       assert msg =~ "Config reload cleanup for :config failed"
       assert msg =~ "cleanup failure"
       assert Loader.load_error(pid) =~ "Config reload cleanup for :config failed"
+
+      :ok = :atomics.put(fail_cleanup, 1, 0)
+      assert :ok = Loader.reload(pid)
+      assert Loader.load_error(pid) == nil
     end
 
     @tag :heavy
@@ -1190,6 +1186,7 @@ defmodule Minga.Config.LoaderTest do
 
       assert {:error, message} = Loader.reload(loader)
       assert message == "Extension declarations changed; restart Minga before config reload"
+      assert Loader.load_error(loader) == message
       assert {:ok, %{module: Minga.Extensions.MCP}} = ExtRegistry.get(:minga_mcp)
     end
 
@@ -1394,7 +1391,7 @@ defmodule Minga.Config.LoaderTest do
       assert RuntimeSupervisor.local_child(runtime_supervisor) == {:ok, runtime_pid}
     end
 
-    test "reload picks up changed config values" do
+    test "reload keeps using the injected config home across consecutive edits" do
       {minga_dir, config_home, cleanup} =
         make_config_dir("""
         use Minga.Config
@@ -1403,18 +1400,35 @@ defmodule Minga.Config.LoaderTest do
 
       on_exit(cleanup)
 
-      name = :"loader_reload_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
-      assert Options.get(test_options_server(), :tab_width) == 3
+      config_path = Path.join(minga_dir, "config.exs")
+      gui_settings_path = Path.join(minga_dir, "gui_settings.exs")
 
-      # Change the config file
-      File.write!(Path.join(minga_dir, "config.exs"), """
+      File.write!(gui_settings_path, """
       use Minga.Config
-      set :tab_width, 7
+      set :line_numbers, :relative
       """)
 
-      assert :ok = Loader.reload(pid)
-      assert Options.get(test_options_server(), :tab_width) == 7
+      name = :"loader_reload_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+      options_server = test_options_server()
+
+      assert Options.get(options_server, :tab_width) == 3
+      assert Options.get(options_server, :line_numbers) == :relative
+      assert Loader.config_path(pid) == config_path
+      assert Loader.gui_settings_path(pid) == gui_settings_path
+
+      for tab_width <- [7, 5] do
+        File.write!(config_path, """
+        use Minga.Config
+        set :tab_width, #{tab_width}
+        """)
+
+        assert :ok = Loader.reload(pid)
+        assert Options.get(options_server, :tab_width) == tab_width
+        assert Options.get(options_server, :line_numbers) == :relative
+        assert Loader.config_path(pid) == config_path
+        assert Loader.gui_settings_path(pid) == gui_settings_path
+      end
     end
 
     test "reload rejects changed user modules and keeps admitted code resident" do
@@ -1422,11 +1436,15 @@ defmodule Minga.Config.LoaderTest do
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
 
-      File.write!(Path.join(modules_dir, "reloadable.ex"), """
+      module_path = Path.join(modules_dir, "reloadable.ex")
+
+      admitted_source = """
       defmodule Minga.UserModules.Reloadable do
         def version, do: 1
       end
-      """)
+      """
+
+      File.write!(module_path, admitted_source)
 
       on_exit(fn ->
         cleanup.()
@@ -1438,14 +1456,21 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
       assert apply(Minga.UserModules.Reloadable, :version, []) == 1
 
-      File.write!(Path.join(modules_dir, "reloadable.ex"), """
+      File.write!(module_path, """
       defmodule Minga.UserModules.Reloadable do
         def version, do: 2
       end
       """)
 
       assert {:error, "User module restart required before config reload"} = Loader.reload(pid)
+      assert Loader.load_error(pid) == "User module restart required before config reload"
+      assert Loader.loaded_modules(pid) == [Minga.UserModules.Reloadable]
       assert apply(Minga.UserModules.Reloadable, :version, []) == 1
+
+      File.write!(module_path, admitted_source)
+      assert :ok = Loader.reload(pid)
+      assert Loader.load_error(pid) == nil
+      assert Loader.loaded_modules(pid) == [Minga.UserModules.Reloadable]
     end
 
     test "reload clears stale user commands" do
@@ -1489,8 +1514,9 @@ defmodule Minga.Config.LoaderTest do
       this is broken %%%
       """)
 
-      assert {:error, msg} = Loader.reload(pid)
-      assert is_binary(msg)
+      message = "Extension declarations changed; restart Minga before config reload"
+      assert {:error, ^message} = Loader.reload(pid)
+      assert Loader.load_error(pid) == message
     end
   end
 
